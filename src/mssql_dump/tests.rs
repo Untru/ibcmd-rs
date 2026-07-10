@@ -6030,26 +6030,232 @@ fn resolves_document_standard_commands_only_for_their_structural_owner_kind() {
 }
 
 #[test]
-fn preserves_table_command_fallback_for_spreadsheet_document_owners() {
+fn resolves_remaining_spreadsheet_commands_only_for_proven_owner_kinds() {
+    let layout_fields = [
+        r#"{37,{101,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,6,"SheetRenamed"}"#,
+        r#"{37,{102,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,14,"SchemaRenamed"}"#,
+        r#"{37,{103,cccccccc-cccc-4ccc-cccc-cccccccccccc},0,0,0,17,"TextRenamed"}"#,
+        r#"{73,{104,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"RowsRenamed"}"#,
+    ];
+    let indexes = collect_form_child_item_indexes(&layout_fields, &[]);
+    let cases = [
+        ("02bdf755-7bc7-4e41-a199-f65cef10e6bc", "SplitCell"),
+        ("05183b65-aa1f-401c-ac34-d99a6ff4ff60", "BorderOutline"),
+        ("08872d94-c57a-470f-a050-0d4d81765df2", "ThickBorderOutline"),
+        ("0a2d962b-5178-4fce-983b-19068b919f41", "InsertColumnsRight"),
+        ("0cf34151-92d3-42fd-954f-5938433908a4", "Find"),
+        ("0e355e57-d603-4ac6-998b-c522c43d3668", "PrintImmediately"),
+        ("1177792e-7da2-4755-81a9-997f2d0e3dce", "BorderNone"),
+        ("17b9f6bb-74b3-439d-b719-eb236b2fe001", "RowHeight"),
+        ("1b680da5-a5ca-4ea7-8db9-df079de39b61", "Show"),
+        ("1d6dbce7-a813-437b-89b8-450319ed13bd", "InsertRowsBottom"),
+        ("202efa3a-32e6-482c-8bc9-1a596bdd57f4", "DeleteColumns"),
+        ("25d773e7-9961-49fc-a9c8-527079090143", "GoToCell"),
+        ("29fc1bfc-7bf8-4849-9b4b-3e42d12ebcbb", "FindNext"),
+        ("41c1bb40-1027-4fd1-a19e-17976100e64b", "PageSetup"),
+        ("468dca2b-17be-4657-bae8-64b94fcf6187", "InsertColumnsLeft"),
+        ("4a9ec98e-c814-47b6-911f-694effc10fc5", "ShowHeaders"),
+        ("4ecc8cf1-2a26-446f-9fb6-93db4ffee068", "InsertRowsTop"),
+        ("4efdcc95-9f24-4652-a5ed-febfaa51f135", "BorderAll"),
+        ("531b9a9b-e4b3-4fe2-9562-1ff678c6d73d", "DeleteComment"),
+        ("56ae90b6-588f-406e-919c-cc5cc7f86297", "AlignJustify"),
+        ("5c52ec51-6000-4190-b8c8-bd6201a271f5", "Edit"),
+        ("5ce7de77-4796-41a0-beb3-7dc420053639", "SetName"),
+        ("5ff37d88-ba18-428c-bf49-9ccde4c46268", "BorderBottom"),
+        ("635136cc-3a47-43d1-8893-d7d536bf37c4", "BorderLeft"),
+        ("65ee8b9b-8a0a-4de8-9a71-3a7a8c43c4ba", "ThickBorderBottom"),
+        ("7b63d2c2-5b6b-472e-8f6c-7438d952be73", "DeleteRows"),
+        ("80455469-5f1c-4817-a992-756dfee9138f", "Text"),
+        ("81be7ad1-a93f-4936-92d0-d59c10213f28", "BorderTop"),
+        ("852f0fba-4338-4c43-a2da-851fcffd07bb", "Rectangle"),
+        ("85bd789b-0047-46f9-9b2e-845907fc1b1d", "Underline"),
+        ("87ecfbdd-8e2b-4ba2-a315-0897020f382f", "AlignLeft"),
+        ("88a56d46-abff-4925-91a2-6592a4664912", "Ungroup"),
+        ("93d90e38-02a4-42f8-828a-2798f51c4500", "Ellipse"),
+        ("97407339-2c9f-400b-bd5b-3d97b6d00c21", "ColumnWidth"),
+        ("999b786e-0534-4fca-8b62-f706d5336798", "SaveAs"),
+        ("a01654df-d7f1-4ec5-8b03-258d953de2e7", "ThickBorderTop"),
+        ("a8631f01-318a-4da2-80a9-9075c7524463", "Italic"),
+        ("a97ea34e-7af2-412c-aa9d-b3393b1914ac", "Picture"),
+        ("ab0ebc39-68ee-4034-b2f4-43eee55bd651", "AlignCenter"),
+        ("adc3d2d0-4d84-4038-a453-ab5d693a60bd", "RemoveName"),
+        ("b34f83ab-1cd7-41b1-89bd-dd0804a47b26", "FixTable"),
+        ("b55ad06a-ee91-4435-a747-6f51884772d9", "ShowGroups"),
+        ("b573b54a-ce87-4078-bd21-4f06709157c6", "Hide"),
+        ("c4713141-07d1-411f-8804-172d4b8c4f01", "BorderInside"),
+        ("c9b9e671-7c9b-44b5-97e9-dd1ee51a1bfd", "Line"),
+        ("cca9b248-5f35-477f-a49d-95da3b7becad", "SelectAll"),
+        ("e05dddd1-40ad-44a2-8ae7-0a551f0b1809", "BorderRight"),
+        ("e406e2a0-f06b-4402-b8c3-9017c95df44c", "Group"),
+        ("e428af27-c4f7-4577-b80e-95a79f94322d", "AlignRight"),
+        ("e5c3a5a6-695d-41bf-9c88-4367fd2a2a6e", "InsertRows"),
+        ("f20eefc2-f819-4ab1-be67-87b3ca2e26e6", "Bold"),
+        ("f4df676f-eefb-48bd-9117-83ee6c207cb5", "Merge"),
+    ];
+
+    for (uuid, suffix) in cases {
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{101,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            Some(format!("Form.Item.SheetRenamed.StandardCommand.{suffix}"))
+        );
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{102,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            None,
+            "{uuid} resolved for GraphicalSchema"
+        );
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{104,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            None,
+            "{uuid} resolved for Table"
+        );
+
+        let formatted_expected = matches!(
+            uuid,
+            "56ae90b6-588f-406e-919c-cc5cc7f86297"
+                | "87ecfbdd-8e2b-4ba2-a315-0897020f382f"
+                | "ab0ebc39-68ee-4034-b2f4-43eee55bd651"
+                | "e428af27-c4f7-4577-b80e-95a79f94322d"
+        )
+        .then(|| format!("Form.Item.TextRenamed.StandardCommand.{suffix}"));
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{103,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            formatted_expected,
+            "{uuid} had an unexpected FormattedDocument result"
+        );
+    }
+}
+
+#[test]
+fn shares_only_observed_standard_commands_between_tables_and_spreadsheets() {
     let layout_fields = [
         r#"{37,{101,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,6,"SheetRenamed"}"#,
         r#"{73,{104,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"RowsRenamed"}"#,
     ];
     let indexes = collect_form_child_item_indexes(&layout_fields, &[]);
-    let uuid = "88078230-1f6b-415f-99e4-ad2ff73810cf";
 
-    for (owner_id, owner_name) in [("101", "SheetRenamed"), ("104", "RowsRenamed")] {
+    for (uuid, suffix) in [
+        ("12acffde-8389-4e5e-bd86-ff248262d84a", "ExpandAllGroups"),
+        ("5aa38159-2001-42ae-8451-f8cabe0762c3", "Preview"),
+        ("d673d512-f71a-48a6-ae5d-527a64ffd813", "Print"),
+        ("d8e20c4d-3519-49aa-80e5-d6d66fee741a", "Save"),
+        ("ff5c34f8-b172-4ef2-91d3-48283a66a725", "CollapseAllGroups"),
+    ] {
+        for (owner_id, owner_name) in [("101", "SheetRenamed"), ("104", "RowsRenamed")] {
+            assert_eq!(
+                parse_form_button_command_name(
+                    &format!("{{{owner_id},{uuid}}}"),
+                    &[],
+                    &BTreeMap::new(),
+                    &indexes.standard_command_owner_name_by_id,
+                ),
+                Some(format!("Form.Item.{owner_name}.StandardCommand.{suffix}"))
+            );
+        }
+    }
+
+    for (uuid, suffix) in [
+        ("88078230-1f6b-415f-99e4-ad2ff73810cf", "CopyToClipboard"),
+        ("59b4387d-f5be-4658-901f-bd3068217469", "Pickup"),
+    ] {
         assert_eq!(
             parse_form_button_command_name(
-                &format!("{{{owner_id},{uuid}}}"),
+                &format!("{{104,{uuid}}}"),
                 &[],
                 &BTreeMap::new(),
                 &indexes.standard_command_owner_name_by_id,
             ),
-            Some(format!(
-                "Form.Item.{owner_name}.StandardCommand.CopyToClipboard"
-            ))
+            Some(format!("Form.Item.RowsRenamed.StandardCommand.{suffix}"))
         );
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{101,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            ),
+            None,
+            "table-only command {uuid} resolved for SpreadsheetDocument"
+        );
+    }
+}
+
+#[test]
+fn resolves_report_form_standard_commands_only_for_kind_zero() {
+    let layout_fields = [
+        r#"{37,{101,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},0,0,0,6,"SheetRenamed"}"#,
+        r#"{73,{104,dddddddd-dddd-4ddd-dddd-dddddddddddd},0,0,0,"RowsRenamed"}"#,
+    ];
+    let indexes = collect_form_child_item_indexes(&layout_fields, &[]);
+    let cases = [
+        (
+            "8149a06a-dbf3-4d4d-a275-5385a4196fc7",
+            "Form.StandardCommand.CancelEdit",
+        ),
+        (
+            "b0c9afb6-320c-4e36-be21-8f6d48116415",
+            "Form.StandardCommand.LoadReportSettings",
+        ),
+        (
+            "03df6ee5-883c-4cc6-b319-d886d1a9b2c8",
+            "Form.StandardCommand.NewWindow",
+        ),
+        (
+            "a11fe36e-0b45-4c07-80b3-2346b660a51e",
+            "Form.StandardCommand.Print",
+        ),
+        (
+            "7910bb04-ddcc-4e5d-89f0-104c6ad0f187",
+            "Form.StandardCommand.SaveReportSettings",
+        ),
+        (
+            "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29",
+            "Form.StandardCommand.SaveVariant",
+        ),
+    ];
+
+    for (uuid, command_name) in cases {
+        assert_eq!(
+            parse_form_button_command_name(
+                &format!("{{0,{uuid}}}"),
+                &[],
+                &BTreeMap::new(),
+                &indexes.standard_command_owner_name_by_id,
+            )
+            .as_deref(),
+            Some(command_name)
+        );
+        for owner_id in ["101", "104"] {
+            assert_eq!(
+                parse_form_button_command_name(
+                    &format!("{{{owner_id},{uuid}}}"),
+                    &[],
+                    &BTreeMap::new(),
+                    &indexes.standard_command_owner_name_by_id,
+                ),
+                None,
+                "form command {uuid} resolved for owner {owner_id}"
+            );
+        }
     }
 }
 
