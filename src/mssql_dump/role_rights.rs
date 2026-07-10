@@ -77,11 +77,10 @@ pub(super) fn parse_role_rights_blob(
     objects.sort_by_key(|(sort_uuid, intra_uuid_order, serialized_index, _)| {
         (sort_uuid.clone(), *intra_uuid_order, *serialized_index)
     });
-    let mut normalized_objects = objects
+    let objects = objects
         .into_iter()
         .map(|(_, _, _, object)| object)
         .collect::<Vec<_>>();
-    normalize_chart_of_characteristic_type_tabular_attribute_role_refs(&mut normalized_objects);
 
     let restriction_templates = parse_role_restriction_templates(fields.get(2)?)?;
     let set_for_new_objects = parse_role_bool_field(fields.get(3)?)?;
@@ -91,74 +90,9 @@ pub(super) fn parse_role_rights_blob(
         set_for_new_objects,
         set_for_attributes_by_default,
         independent_rights_of_child_objects,
-        objects: normalized_objects,
+        objects,
         restriction_templates,
     })
-}
-
-pub(super) fn normalize_chart_of_characteristic_type_tabular_attribute_role_refs(
-    objects: &mut [RoleObjectRights],
-) {
-    let object_names = objects
-        .iter()
-        .map(|object| object.name.clone())
-        .collect::<BTreeSet<_>>();
-    let mut counts = HashMap::<String, usize>::new();
-    for object in objects.iter() {
-        *counts.entry(object.name.clone()).or_insert(0) += 1;
-    }
-    let mut seen = HashMap::<String, usize>::new();
-    for object in objects {
-        let Some((owner, attribute)) =
-            chart_of_characteristic_type_attribute_role_name_parts(&object.name)
-        else {
-            continue;
-        };
-        let Some((tabular_section, rename_singleton)) =
-            chart_of_characteristic_type_tabular_section_for_role_attribute(attribute)
-        else {
-            continue;
-        };
-        let tabular_section_name =
-            format!("ChartOfCharacteristicTypes.{owner}.TabularSection.{tabular_section}");
-        if !object_names.contains(&tabular_section_name) {
-            continue;
-        }
-        let entry = seen.entry(object.name.clone()).or_insert(0);
-        let occurrence = *entry;
-        *entry += 1;
-        let total = counts.get(&object.name).copied().unwrap_or(0);
-        if rename_singleton || (total > 1 && occurrence == 0) {
-            object.name = format!("{tabular_section_name}.Attribute.{attribute}");
-        }
-    }
-}
-
-pub(super) fn chart_of_characteristic_type_attribute_role_name_parts(
-    name: &str,
-) -> Option<(&str, &str)> {
-    let prefix = "ChartOfCharacteristicTypes.";
-    let rest = name.strip_prefix(prefix)?;
-    let (owner, remainder) = rest.split_once(".Attribute.")?;
-    (!owner.contains('.') && !remainder.contains('.')).then_some((owner, remainder))
-}
-
-pub(super) fn chart_of_characteristic_type_tabular_section_for_role_attribute(
-    attribute: &str,
-) -> Option<(&'static str, bool)> {
-    match attribute {
-        "Значение" | "Свойство" | "ТекстоваяСтрока" => {
-            Some(("ДополнительныеРеквизиты", true))
-        }
-        "ХозяйственнаяОперация" => {
-            Some(("ДоступныеХозяйственныеОперации", true))
-        }
-        "ПланСчетов" => Some(("НастройкиМеждународногоУчета", true)),
-        "СчетУчета" | "Субконто1" | "Субконто2" | "Субконто3" => {
-            Some(("НастройкиМеждународногоУчета", false))
-        }
-        _ => None,
-    }
 }
 
 pub(super) fn role_rights_object_intra_uuid_order(

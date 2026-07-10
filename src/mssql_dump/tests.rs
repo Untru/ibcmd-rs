@@ -19086,47 +19086,60 @@ fn role_rights_child_refs_follow_their_own_uuid_order() {
 }
 
 #[test]
-fn normalizes_chart_of_characteristic_types_tabular_attribute_role_refs() {
-    let mut objects = vec![
-        RoleObjectRights {
-            name: "ChartOfCharacteristicTypes.Properties.Attribute.Значение".to_string(),
-            rights: Vec::new(),
-        },
-        RoleObjectRights {
-            name: "ChartOfCharacteristicTypes.Properties.TabularSection.ДополнительныеРеквизиты"
-                .to_string(),
-            rights: Vec::new(),
-        },
-        RoleObjectRights {
-            name: "ChartOfCharacteristicTypes.Properties.Attribute.Субконто1".to_string(),
-            rights: Vec::new(),
-        },
-        RoleObjectRights {
-            name:
-                "ChartOfCharacteristicTypes.Properties.TabularSection.НастройкиМеждународногоУчета"
-                    .to_string(),
-            rights: Vec::new(),
-        },
-        RoleObjectRights {
-            name: "ChartOfCharacteristicTypes.Properties.Attribute.Субконто1".to_string(),
-            rights: Vec::new(),
-        },
-    ];
+fn role_rights_resolve_same_named_chart_attributes_from_metadata_structure() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let top_attribute_uuid = "22222222-2222-4222-8222-222222222222";
+    let tabular_uuid = "33333333-3333-4333-8333-333333333333";
+    let nested_attribute_uuid = "44444444-4444-4444-8444-444444444444";
+    let text = format!(
+        "{{27,{{2,{{3,{{1,0,{top_attribute_uuid}}},\"Shared\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}}}},\
+         {{11,{{0,{{3,{{1,0,{tabular_uuid}}},\"Lines\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}},0}},\
+         {{888744e1-b616-11d4-9436-004095e12fc7,1,{{8,{{27,{{2,{{3,{{1,0,{nested_attribute_uuid}}},\"Shared\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}}}}}}}}}}"
+    );
+    let rows = vec![MetadataTextRow {
+        file_name: owner_uuid.to_string(),
+        text,
+        object_code: Some(34),
+        header: Some(MetadataHeader {
+            uuid: owner_uuid.to_string(),
+            name: "Properties".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("ChartOfCharacteristicTypes".to_string()),
+        folder: Some("ChartsOfCharacteristicTypes"),
+    }];
+    let object_refs = build_metadata_object_reference_index_from_texts(&rows);
 
-    normalize_chart_of_characteristic_type_tabular_attribute_role_refs(&mut objects);
+    assert_eq!(
+        object_refs.get(top_attribute_uuid).map(String::as_str),
+        Some("ChartOfCharacteristicTypes.Properties.Attribute.Shared")
+    );
+    assert_eq!(
+        object_refs.get(nested_attribute_uuid).map(String::as_str),
+        Some("ChartOfCharacteristicTypes.Properties.TabularSection.Lines.Attribute.Shared")
+    );
 
-    let names = objects
+    let rights_text = format!(
+        "{{10,{{2,\
+         {{{{1,{nested_attribute_uuid},0,1}},{{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}}}},\
+         {{{{1,{top_attribute_uuid},0,1}},{{0,c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1,1}}}}\
+         }},{{0}},0,1,0,4294967295}}"
+    );
+    let rights_blob = deflate_for_test(rights_text.as_bytes());
+    let rights = parse_role_rights_blob(&rights_blob, &object_refs, &BTreeMap::new()).unwrap();
+    let names = rights
+        .objects
         .iter()
         .map(|object| object.name.as_str())
         .collect::<Vec<_>>();
+
     assert_eq!(
         names,
         vec![
-            "ChartOfCharacteristicTypes.Properties.TabularSection.ДополнительныеРеквизиты.Attribute.Значение",
-            "ChartOfCharacteristicTypes.Properties.TabularSection.ДополнительныеРеквизиты",
-            "ChartOfCharacteristicTypes.Properties.TabularSection.НастройкиМеждународногоУчета.Attribute.Субконто1",
-            "ChartOfCharacteristicTypes.Properties.TabularSection.НастройкиМеждународногоУчета",
-            "ChartOfCharacteristicTypes.Properties.Attribute.Субконто1",
+            "ChartOfCharacteristicTypes.Properties.Attribute.Shared",
+            "ChartOfCharacteristicTypes.Properties.TabularSection.Lines.Attribute.Shared",
         ]
     );
 }
