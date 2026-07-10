@@ -291,6 +291,7 @@ struct DumpRowContext<'a> {
     command_refs: &'a BTreeMap<String, String>,
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
+    dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
     predefined_item_refs: &'a BTreeMap<String, String>,
     role_rights_object_refs: &'a BTreeMap<String, String>,
@@ -415,10 +416,13 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
-    let type_index = if extract_metadata_xml || needs_source_layout_refs {
-        build_metadata_type_index_from_texts(&metadata_texts)
+    let MetadataTypeIndexes {
+        references: type_index,
+        dcs: dcs_type_index,
+    } = if extract_metadata_xml || needs_source_layout_refs {
+        build_metadata_type_indexes_from_texts(&metadata_texts)
     } else {
-        BTreeMap::new()
+        MetadataTypeIndexes::default()
     };
     let refs_for_standalone =
         extract_metadata_xml || needs_standalone_refs || needs_source_layout_refs;
@@ -547,6 +551,7 @@ fn dump_table_rows_with_options(
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
         type_index: &type_index,
+        dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
@@ -1092,12 +1097,15 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_metadata_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let type_index = if (extract_metadata_xml || needs_source_layout_refs)
+    let MetadataTypeIndexes {
+        references: type_index,
+        dcs: dcs_type_index,
+    } = if (extract_metadata_xml || needs_source_layout_refs)
         && (source_reference_needs.type_index || build_selected_local_refs)
     {
-        build_metadata_type_index_from_texts(&index_metadata_texts)
+        build_metadata_type_indexes_from_texts(&index_metadata_texts)
     } else {
-        BTreeMap::new()
+        MetadataTypeIndexes::default()
     };
     timings.prepare_type_index_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
@@ -1290,6 +1298,7 @@ fn dump_table_rows_streamed(
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
         type_index: &type_index,
+        dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
@@ -3781,17 +3790,89 @@ fn build_metadata_type_index(rows: &[ConfigRow]) -> BTreeMap<String, String> {
     build_metadata_type_index_from_texts(&metadata_texts)
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum GeneratedTypeDcsPolicy {
+    KeepId,
+    Type,
+    TypeSet,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct IndexedGeneratedType {
+    type_id: String,
+    reference: String,
+    dcs_policy: GeneratedTypeDcsPolicy,
+}
+
+#[derive(Default)]
+struct MetadataTypeIndexes {
+    references: BTreeMap<String, String>,
+    dcs: DcsTypeIndex,
+}
+
+// Platform reference-family TypeIds are protocol identifiers, not metadata UUIDs.
+const DCS_BUILTIN_REFERENCE_TYPE_SETS: &[(&str, &str)] = &[
+    (
+        "0a52f9de-73ea-4507-81e8-66217bead73a",
+        "cfg:ExchangePlanRef",
+    ),
+    (
+        "214fa4d8-6ba4-4748-a5e1-6332b5887780",
+        "cfg:BusinessProcessRef",
+    ),
+    ("38bfd075-3e63-4aaa-a93e-94521380d579", "cfg:DocumentRef"),
+    (
+        "593cd424-0877-470d-91f9-b90a982059b4",
+        "cfg:ChartOfCalculationTypesRef",
+    ),
+    ("6291e9b3-8df5-44e1-b6b2-d9fe008016c0", "cfg:TaskRef"),
+    (
+        "99892482-ed55-4fb5-a7f7-20888820a758",
+        "cfg:ChartOfCharacteristicTypesRef",
+    ),
+    (
+        "ac606d60-0209-4159-8e4c-794bc091ce38",
+        "cfg:ChartOfAccountsRef",
+    ),
+    ("e61ef7b8-f3e1-4f4b-8ac7-676e90524997", "cfg:CatalogRef"),
+];
+
 fn build_metadata_type_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<String, String> {
-    let mut index = BTreeMap::new();
+    build_metadata_type_indexes_from_texts(rows).references
+}
+
+fn build_metadata_type_indexes_from_texts(rows: &[MetadataTextRow]) -> MetadataTypeIndexes {
+    let mut indexes = MetadataTypeIndexes::default();
+    for (type_id, qname) in DCS_BUILTIN_REFERENCE_TYPE_SETS {
+        indexes.dcs.insert(
+            (*type_id).to_string(),
+            DcsTypeResolution::TypeSet {
+                qname: (*qname).to_string(),
+            },
+        );
+    }
     for row in rows {
-        let entries = parse_generated_type_entries_from_text(row)
-            .or_else(|| parse_generated_type_entries_from_source_xml_text(&row.text));
+        let entries = parse_indexed_generated_types_from_text(row)
+            .or_else(|| parse_indexed_generated_types_from_source_xml_text(&row.text));
         let Some(entries) = entries else { continue };
-        for (type_id, reference) in entries {
-            index.insert(type_id.to_ascii_lowercase(), reference);
+        for entry in entries {
+            let type_id = entry.type_id.to_ascii_lowercase();
+            indexes
+                .references
+                .insert(type_id.clone(), entry.reference.clone());
+            let resolution = match entry.dcs_policy {
+                GeneratedTypeDcsPolicy::KeepId => DcsTypeResolution::KeepId,
+                GeneratedTypeDcsPolicy::Type => DcsTypeResolution::Type {
+                    qname: entry.reference,
+                },
+                GeneratedTypeDcsPolicy::TypeSet => DcsTypeResolution::TypeSet {
+                    qname: entry.reference,
+                },
+            };
+            indexes.dcs.insert(type_id, resolution);
         }
     }
-    index
+    indexes
 }
 
 #[allow(dead_code)]
@@ -3814,6 +3895,17 @@ fn parse_generated_type_entries_from_blob(
 }
 
 fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(String, String)>> {
+    parse_indexed_generated_types_from_text(row).map(|entries| {
+        entries
+            .into_iter()
+            .map(|entry| (entry.type_id, entry.reference))
+            .collect()
+    })
+}
+
+fn parse_indexed_generated_types_from_text(
+    row: &MetadataTextRow,
+) -> Option<Vec<IndexedGeneratedType>> {
     let text = row.text.as_str();
     let object_code = row.object_code?;
     let header = row.header.as_ref()?;
@@ -3825,7 +3917,13 @@ fn parse_generated_type_entries_from_text(row: &MetadataTextRow) -> Option<Vec<(
 
     for schema in raw_generated_type_schemas() {
         if schema.matches(object_code, header_index, &fields) {
-            push_indexed_generated_type_slots(&mut entries, &fields, schema.slots, &header.name);
+            push_indexed_generated_type_slots(
+                &mut entries,
+                &fields,
+                schema.slots,
+                object_code,
+                &header.name,
+            );
         }
     }
 
@@ -4208,17 +4306,27 @@ fn raw_generated_type_schemas() -> &'static [RawGeneratedTypeSchema] {
 }
 
 fn push_indexed_generated_type_slots(
-    entries: &mut Vec<(String, String)>,
+    entries: &mut Vec<IndexedGeneratedType>,
     fields: &[&str],
     slots: &[RawGeneratedTypeSlot],
+    object_code: u32,
     name: &str,
 ) {
     for slot in slots {
-        push_indexed_generated_type(entries, fields, slot.field_index, slot.generated_type, name);
+        push_indexed_generated_type(
+            entries,
+            fields,
+            slot.field_index,
+            slot.generated_type,
+            name,
+            raw_generated_type_dcs_policy(object_code, slot.field_index),
+        );
     }
 }
 
-fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(String, String)>> {
+fn parse_indexed_generated_types_from_source_xml_text(
+    text: &str,
+) -> Option<Vec<IndexedGeneratedType>> {
     let text = text.trim_start_matches('\u{feff}').trim_start();
     if !text.starts_with('<') || !text.contains("GeneratedType") {
         return None;
@@ -4228,6 +4336,7 @@ fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(
     reader.config_mut().trim_text(true);
     let mut entries = Vec::new();
     let mut current_name = None::<String>;
+    let mut current_category = None::<String>;
     let mut in_generated_type = false;
     let mut in_type_id = false;
 
@@ -4238,6 +4347,7 @@ fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(
                 let local = local.as_ref();
                 if local == b"GeneratedType" {
                     current_name = xml_attribute_value_ns(&reader, &event, "name")?;
+                    current_category = xml_attribute_value_ns(&reader, &event, "category")?;
                     in_generated_type = current_name.is_some();
                 } else if in_generated_type && local == b"TypeId" {
                     in_type_id = true;
@@ -4247,6 +4357,7 @@ fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(
                 let (_, local) = reader.resolve_element(event.name());
                 if local.as_ref() == b"GeneratedType" {
                     current_name = None;
+                    current_category = None;
                     in_generated_type = false;
                     in_type_id = false;
                 }
@@ -4259,7 +4370,11 @@ fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(
                 {
                     let type_id = type_id.trim();
                     if is_uuid_text(type_id) {
-                        entries.push((type_id.to_string(), format!("cfg:{name}")));
+                        entries.push(IndexedGeneratedType {
+                            type_id: type_id.to_string(),
+                            reference: format!("cfg:{name}"),
+                            dcs_policy: generated_type_dcs_policy(current_category.as_deref()),
+                        });
                     }
                 }
             }
@@ -4270,6 +4385,7 @@ fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(
                     in_type_id = false;
                 } else if local == b"GeneratedType" {
                     current_name = None;
+                    current_category = None;
                     in_generated_type = false;
                     in_type_id = false;
                 }
@@ -4283,6 +4399,22 @@ fn parse_generated_type_entries_from_source_xml_text(text: &str) -> Option<Vec<(
         None
     } else {
         Some(entries)
+    }
+}
+
+fn generated_type_dcs_policy(category: Option<&str>) -> GeneratedTypeDcsPolicy {
+    match category {
+        Some("DefinedType") => GeneratedTypeDcsPolicy::KeepId,
+        Some("Characteristic") => GeneratedTypeDcsPolicy::TypeSet,
+        _ => GeneratedTypeDcsPolicy::Type,
+    }
+}
+
+fn raw_generated_type_dcs_policy(object_code: u32, field_index: usize) -> GeneratedTypeDcsPolicy {
+    match (object_code, field_index) {
+        (0, 1) => GeneratedTypeDcsPolicy::KeepId,
+        (34, 9) => GeneratedTypeDcsPolicy::TypeSet,
+        _ => GeneratedTypeDcsPolicy::Type,
     }
 }
 
@@ -4307,19 +4439,24 @@ fn xml_attribute_value_ns(
 }
 
 fn push_indexed_generated_type(
-    entries: &mut Vec<(String, String)>,
+    entries: &mut Vec<IndexedGeneratedType>,
     fields: &[&str],
     index: usize,
     generated_type: &str,
     name: &str,
+    dcs_policy: GeneratedTypeDcsPolicy,
 ) {
     if let Some(type_id) = fields.get(index).copied().and_then(parse_uuid_field) {
-        entries.push((type_id, format!("cfg:{generated_type}.{name}")));
+        entries.push(IndexedGeneratedType {
+            type_id,
+            reference: format!("cfg:{generated_type}.{name}"),
+            dcs_policy,
+        });
     }
 }
 
 fn push_indexed_register_generated_type_entries(
-    entries: &mut Vec<(String, String)>,
+    entries: &mut Vec<IndexedGeneratedType>,
     fields: &[&str],
     start_index: usize,
     type_prefix: &str,
@@ -4332,12 +4469,13 @@ fn push_indexed_register_generated_type_entries(
             start_index + offset,
             &format!("{type_prefix}{suffix}"),
             name,
+            GeneratedTypeDcsPolicy::Type,
         );
     }
 }
 
 fn push_indexed_accounting_register_generated_type_entries(
-    entries: &mut Vec<(String, String)>,
+    entries: &mut Vec<IndexedGeneratedType>,
     fields: &[&str],
     start_index: usize,
     name: &str,
@@ -4349,6 +4487,7 @@ fn push_indexed_accounting_register_generated_type_entries(
             start_index + offset,
             &format!("AccountingRegister{suffix}"),
             name,
+            GeneratedTypeDcsPolicy::Type,
         );
     }
 }

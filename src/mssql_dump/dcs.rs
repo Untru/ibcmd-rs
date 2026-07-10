@@ -19,9 +19,18 @@ const ENTERPRISE_URI: &str = "http://v8.1c.ru/8.1/data/enterprise";
 const CURRENT_CONFIG_URI: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
 const SETTINGS_ROOT_UI_NAMESPACES: &str = " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"";
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum DcsTypeResolution {
+    KeepId,
+    Type { qname: String },
+    TypeSet { qname: String },
+}
+
+pub(super) type DcsTypeIndex = BTreeMap<String, DcsTypeResolution>;
+
 pub(super) fn normalize_data_composition_schema_template_xml(
     inflated: &[u8],
-    type_index: &BTreeMap<String, String>,
+    type_index: &DcsTypeIndex,
 ) -> Option<Vec<u8>> {
     let xml_start = find_bytes(inflated, b"<?xml")?;
     let text = std::str::from_utf8(&inflated[xml_start..]).ok()?;
@@ -40,7 +49,7 @@ pub(super) fn normalize_data_composition_schema_template_xml(
     Some(xml.into_bytes())
 }
 
-fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<String, String>) {
+fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &DcsTypeIndex) {
     const OPEN: &str = "<v8:TypeId>";
     const CLOSE: &str = "</v8:TypeId>";
     const ANY_IB_REF_TYPE_ID: &str = "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63";
@@ -63,12 +72,22 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
         } else {
             type_index
                 .get(&type_id.to_ascii_lowercase())
-                .and_then(|reference| reference.strip_prefix(CFG_PREFIX))
-                .map(|reference| {
-                    format!(
-                        "<v8:Type xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:Type>",
-                        escape_xml_text(reference)
-                    )
+                .and_then(|resolution| match resolution {
+                    DcsTypeResolution::KeepId => None,
+                    DcsTypeResolution::Type { qname } => {
+                        let reference = qname.strip_prefix(CFG_PREFIX)?;
+                        Some(format!(
+                            "<v8:Type xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:Type>",
+                            escape_xml_text(reference)
+                        ))
+                    }
+                    DcsTypeResolution::TypeSet { qname } => {
+                        let reference = qname.strip_prefix(CFG_PREFIX)?;
+                        Some(format!(
+                            "<v8:TypeSet xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:TypeSet>",
+                            escape_xml_text(reference)
+                        ))
+                    }
                 })
         };
         if let Some(replacement) = replacement {

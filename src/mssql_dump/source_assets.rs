@@ -1138,7 +1138,7 @@ pub(super) fn write_source_asset(
                 )
             })?;
             let content =
-                normalize_data_composition_schema_template_xml(&inflated, context.type_index)
+                normalize_data_composition_schema_template_xml(&inflated, context.dcs_type_index)
                     .unwrap_or(inflated);
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {

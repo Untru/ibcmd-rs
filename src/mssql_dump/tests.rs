@@ -11583,7 +11583,9 @@ fn normalizes_data_composition_schema_template_body_container() {
 
     let type_index = BTreeMap::from([(
         "11111111-1111-4111-8111-111111111111".to_string(),
-        "cfg:CatalogRef.Products".to_string(),
+        DcsTypeResolution::Type {
+            qname: "cfg:CatalogRef.Products".to_string(),
+        },
     )]);
     let xml = String::from_utf8(
         normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
@@ -11924,7 +11926,7 @@ fn normalizes_dcs_type_id_using_source_xml_generated_type_index() {
         kind: Some("Catalog".to_string()),
         folder: Some("Catalogs"),
     };
-    let index = build_metadata_type_index_from_texts(&[row]);
+    let index = build_metadata_type_indexes_from_texts(&[row]).dcs;
     let raw = format!(
         "\0\0\0\0\0\0\0\0\
 \u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
@@ -11963,7 +11965,7 @@ fn normalizes_dcs_type_id_using_case_insensitive_generated_type_index() {
         kind: Some("Catalog".to_string()),
         folder: Some("Catalogs"),
     };
-    let index = build_metadata_type_index_from_texts(&[row]);
+    let index = build_metadata_type_indexes_from_texts(&[row]).dcs;
     let raw = format!(
         "\0\0\0\0\
 \u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
@@ -11992,7 +11994,9 @@ fn normalizes_dcs_parameter_type_id_with_parameter_current_config_prefix() {
     let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
     let type_index = BTreeMap::from([(
         type_id.to_string(),
-        "cfg:CatalogRef.СтруктураПредприятия".to_string(),
+        DcsTypeResolution::Type {
+            qname: "cfg:CatalogRef.СтруктураПредприятия".to_string(),
+        },
     )]);
     let raw = format!(
         "\0\0\0\0\
@@ -12023,7 +12027,9 @@ fn normalizes_dcs_dataset_object_type_id_with_nested_current_config_prefix() {
     let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
     let type_index = BTreeMap::from([(
         type_id.to_string(),
-        "cfg:CatalogRef.Номенклатура".to_string(),
+        DcsTypeResolution::Type {
+            qname: "cfg:CatalogRef.Номенклатура".to_string(),
+        },
     )]);
     let raw = format!(
         "\0\0\0\0\
@@ -12058,7 +12064,9 @@ fn normalizes_dcs_calculated_field_type_id_with_parameter_current_config_prefix(
     let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
     let type_index = BTreeMap::from([(
         type_id.to_string(),
-        "cfg:CatalogRef.Контрагенты".to_string(),
+        DcsTypeResolution::Type {
+            qname: "cfg:CatalogRef.Контрагенты".to_string(),
+        },
     )]);
     let raw = format!(
         "\0\0\0\0\
