@@ -12267,6 +12267,10 @@ fn resolves_dcs_area_side_table_color_with_dynamic_style_scope() {
 \t\t\t<parameter>BackgroundColor</parameter>\r\n\
 \t\t\t<value xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:{style_uuid}</value>\r\n\
 \t\t</item>\r\n\
+\t\t<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">\r\n\
+\t\t\t<parameter>Picture</parameter>\r\n\
+\t\t\t<value xmlns:sourceUi=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"sourceUi:Picture\" ref=\"sourceUi:AreaPicture\"/>\r\n\
+\t\t</item>\r\n\
 \t</appearance>\r\n\
 </SchemaFile>"
     );
@@ -12286,8 +12290,41 @@ fn resolves_dcs_area_side_table_color_with_dynamic_style_scope() {
     assert!(xml.contains(
         r#"<dcscor:value xmlns:d8p1="http://v8.1c.ru/8.1/data/ui/style" xsi:type="v8ui:Color">d8p1:AreaAccent</dcscor:value>"#
     ));
+    assert!(xml.contains(r#"<dcscor:value xsi:type="v8ui:Picture" ref="v8ui:AreaPicture"/>"#));
     assert!(!xml.contains("appIndex"));
     assert!(!xml.contains(&format!("0:{style_uuid}")));
+}
+
+#[test]
+fn canonicalizes_only_data_ui_picture_value_refs() {
+    let raw = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+        "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+        "\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:sourceUi=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"sourceUi:Picture\" ref=\"sourceUi:Canonicalized\"/>\r\n",
+        "\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:sourceUi=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"sourceUi:Picture\" ref=\"xs:string\"/>\r\n",
+        "\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:sourceUi=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"sourceUi:Picture\" ref=\"BarePicture\"/>\r\n",
+        "\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:sourceUi=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"sourceUi:Color\" ref=\"sourceUi:WrongType\"/>\r\n",
+        "\t\t<other xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:sourceUi=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"sourceUi:Picture\" ref=\"sourceUi:WrongElement\"/>\r\n",
+        "\t</dataCompositionSchema>\r\n",
+        "</SchemaFile>"
+    );
+
+    let xml = String::from_utf8(
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert!(xml.contains(r#"<dcscor:value xsi:type="v8ui:Picture" ref="v8ui:Canonicalized"/>"#));
+    assert!(xml.contains(r#"<dcscor:value xsi:type="v8ui:Picture" ref="xs:string"/>"#));
+    assert!(xml.contains(r#"<dcscor:value xsi:type="v8ui:Picture" ref="BarePicture"/>"#));
+    assert!(xml.contains(r#"<dcscor:value xsi:type="v8ui:Color" ref="sourceUi:WrongType"/>"#));
+    assert!(xml.contains(r#"<dcscor:other xsi:type="v8ui:Picture" ref="sourceUi:WrongElement"/>"#));
 }
 
 #[test]

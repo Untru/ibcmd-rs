@@ -1275,6 +1275,9 @@ impl<'a> DataCompositionXmlWriter<'a> {
         };
         let mut rendered_attributes = Vec::<(String, String)>::new();
         let mut dynamic_declarations = Vec::<(String, String)>::new();
+        let is_data_ui_picture_value = namespace == Some(DCS_CORE_NS)
+            && local == b"value"
+            && data_composition_xsi_type_is(reader, event, DATA_UI_NS, b"Picture")?;
         if namespace == Some(DATA_CORE_NS)
             && matches!(local, b"Type" | b"TypeSet")
             && event_declares_namespace(event, CURRENT_CONFIG_NS)
@@ -1299,6 +1302,11 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 .decode_and_unescape_value(reader.decoder())
                 .ok()?
                 .into_owned();
+            let value = if attr_name == "ref" && is_data_ui_picture_value {
+                canonical_data_composition_picture_ref(reader, &value).unwrap_or(value)
+            } else {
+                value
+            };
             let rendered = if attr_name == "xsi:type" {
                 self.render_xsi_type(reader, &value, namespace, local)
             } else {
@@ -1758,6 +1766,15 @@ fn canonical_data_composition_attr_value(
         }
         _ => value.to_string(),
     }
+}
+
+fn canonical_data_composition_picture_ref(reader: &NsReader<&[u8]>, value: &str) -> Option<String> {
+    if !value.contains(':') {
+        return None;
+    }
+    let expanded = resolve_data_composition_qname(reader, value)?;
+    (expanded.namespace.as_deref() == Some(DATA_UI_NS) && !expanded.local.is_empty())
+        .then(|| format!("v8ui:{}", expanded.local))
 }
 
 fn is_data_core_xsi_type(value: &str) -> bool {
