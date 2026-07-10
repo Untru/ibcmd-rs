@@ -49,6 +49,13 @@ use role_rights::*;
 use selected::*;
 use source_assets::*;
 
+pub(crate) fn resolve_form_item_picture_owner(
+    text: &str,
+    marker_start: usize,
+) -> Option<(String, &'static str)> {
+    form_body::form_item_picture_owner_at(text, marker_start)
+}
+
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
 #[cfg(test)]
 pub(crate) use moxel::{

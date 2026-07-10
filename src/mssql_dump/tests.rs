@@ -9978,6 +9978,76 @@ fn extracts_form_command_interface_without_command_group_as_auto_items() {
     );
 }
 
+fn form_item_asset_test_record(fields: Vec<String>) -> String {
+    format!("{{{}}}", fields.join(","))
+}
+
+fn form_item_asset_test_fields(wrapper: &str, id: usize, len: usize) -> Vec<String> {
+    let mut fields = vec!["0".to_string(); len];
+    fields[0] = wrapper.to_string();
+    fields[1] = format!("{{{id},0}}");
+    fields
+}
+
+fn form_item_asset_test_picture_value(payload: &str) -> String {
+    format!(r#"{{4,3,{{0}},"",-1,-1,0,{{{{#base64:{payload}}}}},0,""}}"#)
+}
+
+fn form_item_asset_test_body(items: &[String]) -> Vec<u8> {
+    deflate_for_test(format!(r#"{{4,{{0}},"",{{2,{}}}}}"#, items.join(",")).as_bytes())
+}
+
+fn form_item_asset_test_decoration(id: usize, name: &str, payload: &str) -> String {
+    let mut fields = form_item_asset_test_fields("12", id, 19);
+    fields[5] = "1".to_string();
+    fields[6] = format!(r#""{name}""#);
+    fields[18] = format!("{{4,{}}}", form_item_asset_test_picture_value(payload));
+    form_item_asset_test_record(fields)
+}
+
+fn form_item_asset_test_button(
+    wrapper: &str,
+    id: usize,
+    name: &str,
+    payload: &str,
+    offset: usize,
+) -> String {
+    let mut fields = form_item_asset_test_fields(wrapper, id, 26 + offset);
+    fields[5 + offset] = format!(r#""{name}""#);
+    fields[25 + offset] = form_item_asset_test_picture_value(payload);
+    form_item_asset_test_record(fields)
+}
+
+fn form_item_asset_test_table(wrapper: &str, id: usize, name: &str, payload: &str) -> String {
+    let mut fields = form_item_asset_test_fields(wrapper, id, 45);
+    fields[5] = format!(r#""{name}""#);
+    fields[43] = "{0}".to_string();
+    fields[44] = form_item_asset_test_picture_value(payload);
+    form_item_asset_test_record(fields)
+}
+
+fn form_item_asset_test_picture_field(
+    id: usize,
+    name: &str,
+    header_payload: Option<&str>,
+    values_payload: Option<&str>,
+    offset: usize,
+) -> String {
+    let mut fields = form_item_asset_test_fields("37", id, 40 + offset);
+    fields[5 + offset] = "4".to_string();
+    fields[6 + offset] = format!(r#""{name}""#);
+    if let Some(payload) = header_payload {
+        fields[29 + offset] = form_item_asset_test_picture_value(payload);
+    }
+    if let Some(payload) = values_payload {
+        fields[39 + offset] = format!(
+            "{{10,0,0,0,0,{}}}",
+            form_item_asset_test_picture_value(payload)
+        );
+    }
+    form_item_asset_test_record(fields)
+}
+
 #[test]
 fn writes_form_item_pictures_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
@@ -9999,9 +10069,10 @@ fn writes_form_item_pictures_to_source_layout() {
             )
             .as_bytes(),
         );
-    let form_body = deflate_for_test(
-            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBORw0KGgo=}},{31,{60,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваровАвторегистрация\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBORw0KGgo=}}}}".as_bytes(),
-        );
+    let form_body = form_item_asset_test_body(&[
+        form_item_asset_test_table("55", 59, "RenamedRows", "iVBORw0KGgo="),
+        form_item_asset_test_picture_field(60, "RenamedValues", None, Some("iVBORw0KGgo="), 0),
+    ]);
     let assets = extract_form_item_assets(&form_body);
     assert_eq!(
         assets
@@ -10009,8 +10080,8 @@ fn writes_form_item_pictures_to_source_layout() {
             .map(|asset| (asset.item_name.as_str(), asset.file_name.as_str()))
             .collect::<Vec<_>>(),
         vec![
-            ("ДеревоТоваров", "RowsPicture.png"),
-            ("ДеревоТоваровАвторегистрация", "ValuesPicture.png")
+            ("RenamedRows", "RowsPicture.png"),
+            ("RenamedValues", "ValuesPicture.png")
         ]
     );
     let rows = vec![
@@ -10038,14 +10109,97 @@ fn writes_form_item_pictures_to_source_layout() {
 
     assert_eq!(dumped.source_asset_rows, 1);
     assert!(
-        root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/ДеревоТоваров/RowsPicture.png")
+        root.join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/RenamedRows/RowsPicture.png")
             .exists()
     );
-    assert!(root
-            .join("Catalogs/Products/Forms/ListForm/Ext/Form/Items/ДеревоТоваровАвторегистрация/ValuesPicture.png")
-            .exists());
+    assert!(
+        root.join(
+            "Catalogs/Products/Forms/ListForm/Ext/Form/Items/RenamedValues/ValuesPicture.png"
+        )
+        .exists()
+    );
 
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn extracts_form_item_assets_from_structural_property_slots() {
+    let body = form_item_asset_test_body(&[
+        form_item_asset_test_decoration(1, "RenamedDecoration", "R0lGODlh"),
+        form_item_asset_test_button("31", 2, "RenamedButton31", "iVBORw0KGgo=", 0),
+        form_item_asset_test_button("34", 3, "RenamedButton34", "iVBORw0KGgo=", 1),
+        form_item_asset_test_table("55", 4, "RenamedTable", "iVBORw0KGgo="),
+        form_item_asset_test_picture_field(
+            5,
+            "RenamedPictureField",
+            Some("iVBORw0KGgo="),
+            Some("iVBORw0KGgo="),
+            1,
+        ),
+    ]);
+
+    let assets = extract_form_item_assets(&body)
+        .into_iter()
+        .map(|asset| (asset.item_name, asset.file_name))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        assets,
+        vec![
+            ("RenamedDecoration".to_string(), "Picture.gif".to_string()),
+            ("RenamedButton31".to_string(), "Picture.png".to_string()),
+            ("RenamedButton34".to_string(), "Picture.png".to_string()),
+            ("RenamedTable".to_string(), "RowsPicture.png".to_string()),
+            (
+                "RenamedPictureField".to_string(),
+                "HeaderPicture.png".to_string()
+            ),
+            (
+                "RenamedPictureField".to_string(),
+                "ValuesPicture.png".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn rejects_form_item_assets_from_nearby_or_unrecognized_slots() {
+    let picture = form_item_asset_test_picture_value("iVBORw0KGgo=");
+
+    let mut near_button = form_item_asset_test_fields("31", 1, 26);
+    near_button[5] = r#""NearButton""#.to_string();
+    near_button[24] = picture.clone();
+
+    let mut wrong_table_wrapper = form_item_asset_test_fields("73", 2, 45);
+    wrong_table_wrapper[5] = r#""WrongTableWrapper""#.to_string();
+    wrong_table_wrapper[43] = "{0}".to_string();
+    wrong_table_wrapper[44] = picture.clone();
+
+    let mut wrong_options = form_item_asset_test_fields("37", 3, 40);
+    wrong_options[5] = "4".to_string();
+    wrong_options[6] = r#""WrongOptions""#.to_string();
+    wrong_options[39] = format!("{{11,0,0,0,0,{picture}}}");
+
+    let mut reference_kind = form_item_asset_test_fields("37", 4, 40);
+    reference_kind[5] = "4".to_string();
+    reference_kind[6] = r#""ReferenceKind""#.to_string();
+    reference_kind[29] = r#"{4,1,{0},"",-1,-1,0,{{#base64:iVBORw0KGgo=}},0,""}"#.to_string();
+
+    let mut ambiguous_payload = form_item_asset_test_fields("55", 5, 45);
+    ambiguous_payload[5] = r#""AmbiguousPayload""#.to_string();
+    ambiguous_payload[43] = "{0}".to_string();
+    ambiguous_payload[44] =
+        r#"{4,3,{0},"",-1,-1,0,{{#base64:iVBORw0KGgo=},{#base64:iVBORw0KGgo=}},0,""}"#.to_string();
+
+    let body = form_item_asset_test_body(&[
+        form_item_asset_test_record(near_button),
+        form_item_asset_test_record(wrong_table_wrapper),
+        form_item_asset_test_record(wrong_options),
+        form_item_asset_test_record(reference_kind),
+        form_item_asset_test_record(ambiguous_payload),
+    ]);
+
+    assert!(extract_form_item_assets(&body).is_empty());
 }
 
 #[test]
@@ -10074,9 +10228,10 @@ fn extracts_picture_decoration_from_wrapper_12() {
     assert!(xml.contains("<xr:LoadTransparent>false</xr:LoadTransparent>"));
     assert!(!xml.contains("<ExtendedTooltip"));
 
-    let first_field = r#"{12,{164,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,"КартинкаОжидание",{1,0},{1,0},{#base64:R0lGODlh}}"#;
-    let form_body =
-        deflate_for_test(format!(r#"{{4,{{0}},"",{{2,{first_field},{field}}}}}"#).as_bytes());
+    let form_body = form_item_asset_test_body(&[
+        form_item_asset_test_decoration(164, "RenamedDecorationA", "R0lGODlh"),
+        form_item_asset_test_decoration(165, "RenamedDecorationB", "R0lGODlh"),
+    ]);
     let assets = extract_form_item_assets(&form_body);
     assert_eq!(
         assets
@@ -10084,8 +10239,8 @@ fn extracts_picture_decoration_from_wrapper_12() {
             .map(|asset| (asset.item_name.as_str(), asset.file_name.as_str()))
             .collect::<Vec<_>>(),
         vec![
-            ("КартинкаОжидание", "Picture.gif"),
-            ("СостояниеКартинка", "Picture.gif")
+            ("RenamedDecorationA", "Picture.gif"),
+            ("RenamedDecorationB", "Picture.gif")
         ]
     );
     assert!(assets.iter().all(|asset| asset.content == b"GIF89a"));

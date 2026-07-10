@@ -4644,7 +4644,6 @@ fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Res
     }
 
     let mut replacements = Vec::<(Range<usize>, String)>::new();
-    let mut occurrences_by_item = BTreeMap::<String, usize>::new();
     let mut offset = 0usize;
     let prefix = "{#base64:";
     while let Some(relative_start) = plain[offset..].find(prefix) {
@@ -4656,11 +4655,10 @@ fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Res
         let payload_end = payload_start + relative_end;
         if let Some(current_content) = decode_base64_mime(&plain[payload_start..payload_end])
             && is_form_item_picture_asset_content(&current_content)
-            && let Some(item_name) = nearest_form_item_asset_name(plain, marker_start)
+            && let Some((item_name, property_name)) =
+                crate::mssql_dump::resolve_form_item_picture_owner(plain, marker_start)
         {
-            let occurrence = occurrences_by_item.entry(item_name.clone()).or_insert(0);
-            let file_name = form_item_asset_file_name(&item_name, &current_content, *occurrence);
-            *occurrence += 1;
+            let file_name = form_item_asset_file_name(property_name, &current_content);
             if let Some(path) = resolve_form_item_asset_path(assets_root, &item_name, &file_name) {
                 let content = fs::read(&path).with_context(|| {
                     format!("failed to read Form item asset {}", path.display())
@@ -4727,73 +4725,7 @@ fn is_svg_content(bytes: &[u8]) -> bool {
     text.starts_with("<svg") || text.starts_with("<?xml") && text.contains("<svg")
 }
 
-fn nearest_form_item_asset_name(text: &str, marker_start: usize) -> Option<String> {
-    nearest_form_item_asset_name_in_window(text, marker_start, 4096)
-        .or_else(|| nearest_form_item_asset_name_in_window(text, marker_start, 12_288))
-}
-
-fn nearest_form_item_asset_name_in_window(
-    text: &str,
-    marker_start: usize,
-    window_size: usize,
-) -> Option<String> {
-    let mut window_start = marker_start.saturating_sub(window_size);
-    while window_start > 0 && !text.is_char_boundary(window_start) {
-        window_start -= 1;
-    }
-    let window = &text[window_start..marker_start];
-    let mut candidates = Vec::<String>::new();
-    let mut offset = 0usize;
-    while let Some(relative_quote) = window[offset..].find('"') {
-        let quote_start = offset + relative_quote;
-        let content_start = quote_start + 1;
-        let Some(relative_end) = window[content_start..].find('"') else {
-            break;
-        };
-        let quote_end = content_start + relative_end;
-        let value = &window[content_start..quote_end];
-        if is_probable_form_item_asset_name(value) {
-            candidates.push(value.to_string());
-        }
-        offset = quote_end + 1;
-    }
-    candidates.into_iter().rev().find(|value| {
-        value != "Picture"
-            && value != "RowsPicture"
-            && value != "ValuesPicture"
-            && value != "HeaderPicture"
-    })
-}
-
-fn is_probable_form_item_asset_name(value: &str) -> bool {
-    if value.is_empty() || value.len() > 160 || value.chars().any(char::is_whitespace) {
-        return false;
-    }
-    value.chars().all(|ch| {
-        ch == '_' || ch.is_alphanumeric() || ('А'..='я').contains(&ch) || ch == 'ё' || ch == 'Ё'
-    })
-}
-
-fn form_item_asset_file_name(item_name: &str, content: &[u8], occurrence: usize) -> String {
-    let property_name = if item_name.contains("ИндексКартинки") {
-        if occurrence == 0 {
-            "HeaderPicture"
-        } else {
-            "ValuesPicture"
-        }
-    } else if item_name.contains("Авторегистрация") || item_name.ends_with("Пиктограмма")
-    {
-        "ValuesPicture"
-    } else if (item_name.starts_with("Дерево") || item_name.starts_with("Список"))
-        && !item_name.contains("КонтекстноеМеню")
-        && !item_name.contains("Добавить")
-        && !item_name.contains("Удалить")
-        && !item_name.contains("Показать")
-    {
-        "RowsPicture"
-    } else {
-        "Picture"
-    };
+fn form_item_asset_file_name(property_name: &str, content: &[u8]) -> String {
     format!("{property_name}.{}", form_item_asset_extension(content))
 }
 
@@ -25854,6 +25786,141 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
+    fn form_item_asset_test_record(fields: Vec<String>) -> String {
+        format!("{{{}}}", fields.join(","))
+    }
+
+    fn form_item_asset_test_fields(wrapper: &str, id: usize, len: usize) -> Vec<String> {
+        let mut fields = vec!["0".to_string(); len];
+        fields[0] = wrapper.to_string();
+        fields[1] = format!("{{{id},0}}");
+        fields
+    }
+
+    fn form_item_asset_test_picture_value(payload: &str) -> String {
+        format!(r#"{{4,3,{{0}},"",-1,-1,0,{{{{#base64:{payload}}}}},0,""}}"#)
+    }
+
+    fn form_item_asset_test_body(items: &[String]) -> String {
+        format!(r#"{{4,{{0}},"",{{2,{}}}}}"#, items.join(","))
+    }
+
+    fn form_item_asset_test_decoration(id: usize, name: &str, payload: &str) -> String {
+        let mut fields = form_item_asset_test_fields("12", id, 19);
+        fields[5] = "1".to_string();
+        fields[6] = format!(r#""{name}""#);
+        fields[18] = format!("{{4,{}}}", form_item_asset_test_picture_value(payload));
+        form_item_asset_test_record(fields)
+    }
+
+    fn form_item_asset_test_button(
+        wrapper: &str,
+        id: usize,
+        name: &str,
+        payload: &str,
+        offset: usize,
+    ) -> String {
+        let mut fields = form_item_asset_test_fields(wrapper, id, 26 + offset);
+        fields[5 + offset] = format!(r#""{name}""#);
+        fields[25 + offset] = form_item_asset_test_picture_value(payload);
+        form_item_asset_test_record(fields)
+    }
+
+    fn form_item_asset_test_table(wrapper: &str, id: usize, name: &str, payload: &str) -> String {
+        let mut fields = form_item_asset_test_fields(wrapper, id, 45);
+        fields[5] = format!(r#""{name}""#);
+        fields[43] = "{0}".to_string();
+        fields[44] = form_item_asset_test_picture_value(payload);
+        form_item_asset_test_record(fields)
+    }
+
+    fn form_item_asset_test_picture_field(
+        id: usize,
+        name: &str,
+        header_payload: Option<&str>,
+        values_payload: Option<&str>,
+        offset: usize,
+    ) -> String {
+        let mut fields = form_item_asset_test_fields("37", id, 40 + offset);
+        fields[5 + offset] = "4".to_string();
+        fields[6 + offset] = format!(r#""{name}""#);
+        if let Some(payload) = header_payload {
+            fields[29 + offset] = form_item_asset_test_picture_value(payload);
+        }
+        if let Some(payload) = values_payload {
+            fields[39 + offset] = format!(
+                "{{10,0,0,0,0,{}}}",
+                form_item_asset_test_picture_value(payload)
+            );
+        }
+        form_item_asset_test_record(fields)
+    }
+
+    fn form_item_asset_test_owners(text: &str) -> Vec<(String, &'static str)> {
+        let mut owners = Vec::new();
+        let mut offset = 0usize;
+        let prefix = "{#base64:";
+        while let Some(relative_start) = text[offset..].find(prefix) {
+            let marker_start = offset + relative_start;
+            if let Some(owner) =
+                crate::mssql_dump::resolve_form_item_picture_owner(text, marker_start)
+            {
+                owners.push(owner);
+            }
+            offset = marker_start + prefix.len();
+        }
+        owners
+    }
+
+    #[test]
+    fn resolves_form_item_asset_structural_property_slots() {
+        let text = form_item_asset_test_body(&[
+            form_item_asset_test_decoration(1, "RenamedDecoration", "R0lGODlh"),
+            form_item_asset_test_button("31", 2, "RenamedButton31", "iVBORw0KGgo=", 0),
+            form_item_asset_test_button("34", 3, "RenamedButton34", "iVBORw0KGgo=", 1),
+            form_item_asset_test_table("55", 4, "RenamedTable", "iVBORw0KGgo="),
+            form_item_asset_test_picture_field(
+                5,
+                "RenamedPictureField",
+                Some("iVBORw0KGgo="),
+                Some("iVBORw0KGgo="),
+                1,
+            ),
+        ]);
+
+        assert_eq!(
+            form_item_asset_test_owners(&text),
+            vec![
+                ("RenamedDecoration".to_string(), "Picture"),
+                ("RenamedButton31".to_string(), "Picture"),
+                ("RenamedButton34".to_string(), "Picture"),
+                ("RenamedTable".to_string(), "RowsPicture"),
+                ("RenamedPictureField".to_string(), "HeaderPicture"),
+                ("RenamedPictureField".to_string(), "ValuesPicture"),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_form_item_asset_near_slots_and_wrapper_73() {
+        let picture = form_item_asset_test_picture_value("iVBORw0KGgo=");
+        let mut near_button = form_item_asset_test_fields("31", 1, 26);
+        near_button[5] = r#""NearButton""#.to_string();
+        near_button[24] = picture.clone();
+
+        let mut wrapper_73 = form_item_asset_test_fields("73", 2, 45);
+        wrapper_73[5] = r#""Wrapper73""#.to_string();
+        wrapper_73[43] = "{0}".to_string();
+        wrapper_73[44] = picture;
+
+        let text = form_item_asset_test_body(&[
+            form_item_asset_test_record(near_button),
+            form_item_asset_test_record(wrapper_73),
+        ]);
+
+        assert!(form_item_asset_test_owners(&text).is_empty());
+    }
+
     #[test]
     fn packs_form_body_item_picture_assets_from_source_layout() -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!(
@@ -25861,16 +25928,19 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             uuid::Uuid::new_v4().hyphenated()
         ));
         let assets_root = root.join("Items");
-        std::fs::create_dir_all(assets_root.join("ДеревоТоваров"))?;
+        std::fs::create_dir_all(assets_root.join("RenamedRows"))?;
         let new_png = b"\x89PNG\r\n\x1a\nnew";
         std::fs::write(
-            assets_root.join("ДеревоТоваров").join("RowsPicture.png"),
+            assets_root.join("RenamedRows").join("RowsPicture.png"),
             new_png,
         )?;
-        let base = super::deflate_raw(
-            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBORw0KGgo=}}}}"
-                .as_bytes(),
-        )?;
+        let base_text = form_item_asset_test_body(&[form_item_asset_test_table(
+            "55",
+            59,
+            "RenamedRows",
+            "iVBORw0KGgo=",
+        )]);
+        let base = super::deflate_raw(base_text.as_bytes())?;
 
         let packed = super::pack_form_body_blob_from_form_xml_with_source_and_assets(
             &base,
@@ -25896,16 +25966,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             uuid::Uuid::new_v4().hyphenated()
         ));
         let assets_root = root.join("Items");
-        std::fs::create_dir_all(assets_root.join("ДеревоТоваров"))?;
+        std::fs::create_dir_all(assets_root.join("RenamedRows"))?;
         let png = b"\x89PNG\r\n\x1a\n";
-        std::fs::write(
-            assets_root.join("ДеревоТоваров").join("RowsPicture.png"),
-            png,
-        )?;
-        let base = super::deflate_raw(
-            "{4,{0},\"\",{2,{31,{59,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,\"ДеревоТоваров\",{1,0},{0},\"\",-1,-1,0,{#base64:iVBOR\r\nw0KGgo=}}}}"
-                .as_bytes(),
-        )?;
+        std::fs::write(assets_root.join("RenamedRows").join("RowsPicture.png"), png)?;
+        let base_text = form_item_asset_test_body(&[form_item_asset_test_table(
+            "55",
+            59,
+            "RenamedRows",
+            "iVBOR\r\nw0KGgo=",
+        )]);
+        let base = super::deflate_raw(base_text.as_bytes())?;
 
         let packed = super::pack_form_body_blob_from_form_xml_with_source_and_assets(
             &base,

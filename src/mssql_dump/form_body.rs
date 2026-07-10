@@ -1406,7 +1406,6 @@ pub(super) fn extract_form_item_assets(bytes: &[u8]) -> Vec<FormItemAsset> {
 
 pub(super) fn extract_form_item_assets_from_text(text: &str) -> Vec<FormItemAsset> {
     let mut assets = Vec::new();
-    let mut occurrences_by_item = BTreeMap::<String, usize>::new();
     let mut offset = 0usize;
     let prefix = "{#base64:";
     while let Some(relative_start) = text[offset..].find(prefix) {
@@ -1418,14 +1417,11 @@ pub(super) fn extract_form_item_assets_from_text(text: &str) -> Vec<FormItemAsse
         let payload_end = payload_start + relative_end;
         if let Some(content) = decode_base64_mime(&text[payload_start..payload_end])
             && is_form_item_picture_content(&content)
-            && let Some(item_name) = nearest_form_item_name(text, marker_start)
+            && let Some((item_name, property_name)) = form_item_picture_owner_at(text, marker_start)
         {
-            let occurrence = occurrences_by_item.entry(item_name.clone()).or_insert(0);
-            let file_name = form_item_picture_file_name(&item_name, &content, *occurrence);
-            *occurrence += 1;
             assets.push(FormItemAsset {
                 item_name,
-                file_name,
+                file_name: form_item_picture_file_name(property_name, &content),
                 content,
             });
         }
@@ -1446,25 +1442,11 @@ pub(super) fn is_form_item_picture_content(bytes: &[u8]) -> bool {
         || is_svg_content(bytes)
 }
 
-pub(super) fn nearest_form_item_name(text: &str, marker_start: usize) -> Option<String> {
-    nearest_form_item_name_from_enclosing_item(text, marker_start)
-        .or_else(|| nearest_form_item_name_in_window(text, marker_start, 4096))
-        .or_else(|| nearest_form_item_name_in_window(text, marker_start, 12_288))
-}
-
-pub(super) fn nearest_form_item_name_from_enclosing_item(
+pub(super) fn form_item_picture_owner_at(
     text: &str,
     marker_start: usize,
-) -> Option<String> {
-    let mut search_end = marker_start;
-    let mut search_limit = marker_start.saturating_sub(32_768);
-    while search_limit < marker_start && !text.is_char_boundary(search_limit) {
-        search_limit += 1;
-    }
-    while search_end > search_limit {
-        let relative_start = text[search_limit..search_end].rfind('{')?;
-        let start = search_limit + relative_start;
-        search_end = start;
+) -> Option<(String, &'static str)> {
+    for (start, _) in text[..marker_start].match_indices('{').rev() {
         let Some(end) = scan_1c_braced_value(text, start) else {
             continue;
         };
@@ -1477,89 +1459,112 @@ pub(super) fn nearest_form_item_name_from_enclosing_item(
         let Some(wrapper) = fields.first().map(|field| field.trim()) else {
             continue;
         };
-        if wrapper != "12" || form_child_item_tag(wrapper, &fields) != Some("PictureDecoration") {
+        if form_child_item_id(&fields).is_none() {
             continue;
         }
-        if let Some(name) = parse_form_child_item_name(wrapper, &fields) {
-            return Some(name);
+        let Some(property_name) =
+            form_item_picture_property_at(text, marker_start, wrapper, &fields)
+        else {
+            continue;
+        };
+        if let Some(item_name) = parse_form_child_item_name(wrapper, &fields) {
+            return Some((item_name, property_name));
         }
     }
     None
 }
 
-pub(super) fn nearest_form_item_name_in_window(
+pub(super) fn form_item_picture_property_at(
     text: &str,
     marker_start: usize,
-    window_size: usize,
-) -> Option<String> {
-    let mut window_start = marker_start.saturating_sub(window_size);
-    while window_start > 0 && !text.is_char_boundary(window_start) {
-        window_start -= 1;
-    }
-    let window = &text[window_start..marker_start];
-    let mut candidates = Vec::<String>::new();
-    let mut offset = 0usize;
-    while let Some(relative_quote) = window[offset..].find('"') {
-        let quote_start = offset + relative_quote;
-        let content_start = quote_start + 1;
-        let Some(relative_end) = window[content_start..].find('"') else {
-            break;
-        };
-        let quote_end = content_start + relative_end;
-        let value = &window[content_start..quote_end];
-        let before = window[..quote_start].trim_end().chars().last();
-        let after = window[quote_end + 1..].trim_start().chars().next();
-        if before == Some(',') && after == Some(',') && is_probable_form_item_name(value) {
-            candidates.push(value.replace("\"\"", "\""));
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<&'static str> {
+    let tag = form_child_item_tag(wrapper, fields)?;
+    match (wrapper, tag) {
+        ("12", "PictureDecoration") => {
+            let options = fields
+                .get(18)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+            if options.first().map(|field| field.trim()) != Some("4") {
+                return None;
+            }
+            form_item_picture_value_matches_marker(text, marker_start, options.get(1)?)
+                .then_some("Picture")
         }
-        offset = quote_end + 1;
+        ("31" | "34", "Button") if form_button_layout_is_extended(fields) => {
+            let index = 25 + form_button_top_level_offset(fields);
+            form_item_picture_value_matches_marker(text, marker_start, fields.get(index)?)
+                .then_some("Picture")
+        }
+        ("55", "Table") => {
+            form_item_picture_value_matches_marker(text, marker_start, fields.get(44)?)
+                .then_some("RowsPicture")
+        }
+        ("37", "PictureField") => {
+            let input_offset = form_input_field_top_level_offset(fields);
+            if form_item_picture_value_matches_marker(
+                text,
+                marker_start,
+                fields.get(29 + input_offset)?,
+            ) {
+                return Some("HeaderPicture");
+            }
+            let options = fields
+                .get(39 + input_offset)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+            if options.first().map(|field| field.trim()) != Some("10") {
+                return None;
+            }
+            form_item_picture_value_matches_marker(text, marker_start, options.get(5)?)
+                .then_some("ValuesPicture")
+        }
+        _ => None,
     }
-    candidates.pop()
 }
 
-pub(super) fn is_probable_form_item_name(value: &str) -> bool {
-    if value.len() < 3
-        || matches!(
-            value,
-            "Pattern" | "DataParameters" | "Settings" | "Use" | "ru"
-        )
-        || value.chars().any(char::is_whitespace)
+pub(super) fn form_item_picture_value_matches_marker(
+    text: &str,
+    marker_start: usize,
+    value: &str,
+) -> bool {
+    let Some(fields) = split_1c_braced_fields(value.trim(), 0) else {
+        return false;
+    };
+    if fields.first().map(|field| field.trim()) != Some("4")
+        || fields.get(1).map(|field| field.trim()) != Some("3")
     {
         return false;
     }
-    value.chars().all(|ch| {
-        ch == '_' || ch.is_alphanumeric() || ('А'..='я').contains(&ch) || ch == 'ё' || ch == 'Ё'
-    })
+    let Some(payload_fields) = fields
+        .get(7)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return false;
+    };
+    let [marker] = payload_fields.as_slice() else {
+        return false;
+    };
+    let marker = marker.trim();
+    let Some(payload) = marker
+        .strip_prefix("{#base64:")
+        .and_then(|marker| marker.strip_suffix('}'))
+    else {
+        return false;
+    };
+    let Some(content) = decode_base64_mime(payload) else {
+        return false;
+    };
+    if !is_form_item_picture_content(&content) {
+        return false;
+    }
+    let Some(actual_start) = (marker.as_ptr() as usize).checked_sub(text.as_ptr() as usize) else {
+        return false;
+    };
+    actual_start == marker_start
 }
 
-pub(super) fn form_item_picture_file_name(
-    item_name: &str,
-    content: &[u8],
-    occurrence: usize,
-) -> String {
-    let property_name = if item_name.contains("ИндексКартинки") {
-        if occurrence == 0 {
-            "HeaderPicture"
-        } else {
-            "ValuesPicture"
-        }
-    } else if item_name.contains("Авторегистрация") || item_name.ends_with("Пиктограмма")
-    {
-        "ValuesPicture"
-    } else if item_name.contains("Присоединять") {
-        "ValuesPicture"
-    } else if item_name == "Нормативы" {
-        "RowsPicture"
-    } else if (item_name.starts_with("Дерево") || item_name.starts_with("Список"))
-        && !item_name.contains("КонтекстноеМеню")
-        && !item_name.contains("Добавить")
-        && !item_name.contains("Удалить")
-        && !item_name.contains("Показать")
-    {
-        "RowsPicture"
-    } else {
-        "Picture"
-    };
+pub(super) fn form_item_picture_file_name(property_name: &str, content: &[u8]) -> String {
     let extension = ext_picture_file_name(content)
         .rsplit_once('.')
         .map(|(_, extension)| extension)
