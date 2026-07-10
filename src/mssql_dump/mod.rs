@@ -2725,7 +2725,7 @@ fn nested_command_module_source_paths(
     }
 
     let mut paths = BTreeMap::new();
-    for command in nested_command_headers_from_text(text, owner_uuid) {
+    for command in nested_command_headers_for_owner_from_text(kind, text, owner_uuid) {
         let body_id = format!("{}.2", command.uuid);
         if !file_names.contains(body_id.as_str()) {
             continue;
@@ -2816,6 +2816,20 @@ fn metadata_kind_needs_form_template_reference_indexes(kind: &str) -> bool {
 
 fn nested_command_headers_from_text(text: &str, owner_uuid: &str) -> Vec<MetadataHeader> {
     nested_headers_from_text_inside_object_code(text, owner_uuid, 9)
+}
+
+fn nested_command_headers_for_owner_from_text(
+    owner_kind: &str,
+    text: &str,
+    owner_uuid: &str,
+) -> Vec<MetadataHeader> {
+    nested_headers_with_offsets_from_text(text, owner_uuid, |marker_start| {
+        is_offset_inside_metadata_object_code(text, marker_start, 9)
+            && register_child_object_tag(owner_kind, text, marker_start).is_none()
+    })
+    .into_iter()
+    .map(|(header, _)| header)
+    .collect()
 }
 
 fn nested_child_commands_from_text(
@@ -4559,7 +4573,7 @@ fn extract_metadata_source_xml_from_text_row(
     };
     let nested_commands =
         if metadata_kind_can_own_commands(kind) && !matches!(kind, "Report" | "DataProcessor") {
-            nested_command_headers_from_text(text, uuid)
+            nested_command_headers_for_owner_from_text(kind, text, uuid)
         } else {
             Vec::new()
         };
@@ -5172,7 +5186,7 @@ fn parse_register_properties_from_text(
         register_standard_attributes(kind, &header.name, register_type, &fields, uuid);
     let (list_presentation, extended_list_presentation, explanation) =
         parse_register_presentations(kind, &fields, uuid);
-    let child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
+    let mut child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
             let tag = register_child_object_tag(kind, text, marker_start)?;
@@ -5208,7 +5222,15 @@ fn parse_register_properties_from_text(
                 child_objects: Vec::new(),
             })
         })
-        .collect();
+        .collect::<Vec<_>>();
+    if kind == "InformationRegister" {
+        child_objects.sort_by_key(|child| match child.tag {
+            "Resource" => 0,
+            "Attribute" => 1,
+            "Dimension" => 2,
+            _ => 3,
+        });
+    }
     Some(RegisterProperties {
         generated_types,
         use_standard_commands,
@@ -5764,6 +5786,16 @@ fn register_generated_type_category(type_prefix: &str, suffix: &str) -> &'static
 fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Option<&'static str> {
     if !metadata_kind_uses_register_resources(kind) {
         return None;
+    }
+    if kind == "InformationRegister"
+        && is_offset_inside_metadata_object_code(text, marker_start, 27)
+    {
+        if is_offset_inside_metadata_object_code(text, marker_start, 9) {
+            return Some("Dimension");
+        }
+        if is_offset_inside_metadata_object_code(text, marker_start, 7) {
+            return Some("Resource");
+        }
     }
     if kind == "AccountingRegister"
         && is_offset_inside_register_dimension_list(text, marker_start)

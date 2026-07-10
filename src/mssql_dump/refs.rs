@@ -81,7 +81,7 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
                 }
             }
         }
-        for command in nested_command_headers_from_text(&row.text, &row.file_name) {
+        for command in nested_command_headers_for_owner_from_text(kind, &row.text, &row.file_name) {
             index.insert(
                 command.uuid,
                 format!("{}.{}.Command.{}", kind, header.name, command.name),
@@ -577,6 +577,11 @@ pub(super) fn standalone_child_reference(
         .and_then(template_source_reference_name)
     {
         return Some(reference);
+    }
+    if owner_kind == "InformationRegister"
+        && let Some(tag) = register_child_object_tag(owner_kind, text, marker_start)
+    {
+        return Some(format!("{owner_kind}.{owner_name}.{tag}.{}", child.name));
     }
     if is_offset_inside_metadata_object_code(text, marker_start, 9) {
         return Some(format!("{owner_kind}.{owner_name}.Command.{}", child.name));
@@ -1839,7 +1844,7 @@ pub(super) fn command_interface_reference_entries_from_text(
         ));
     }
     entries.extend(
-        nested_command_headers_from_text(&row.text, &row.file_name)
+        nested_command_headers_for_owner_from_text(kind, &row.text, &row.file_name)
             .into_iter()
             .map(|command| {
                 (

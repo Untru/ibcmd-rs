@@ -97,13 +97,23 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let auto_command_bar = extract_form_auto_command_bar(&form_fields, &commands, object_refs);
+    let child_item_indexes = collect_form_child_item_indexes(&form_fields, &attributes);
+    let child_item_indexes_cpu_ms = elapsed_ms(started);
+
+    let started = Instant::now();
+    let auto_command_bar = extract_form_auto_command_bar(
+        &form_fields,
+        &commands,
+        object_refs,
+        &child_item_indexes.table_name_by_id,
+        &child_item_indexes.standard_command_owner_name_by_id,
+        &child_item_indexes.command_source_owner_name_by_id,
+    );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_auto_command_bar_cpu_ms += elapsed_ms(started);
     }
 
     let started = Instant::now();
-    let child_item_indexes = collect_form_child_item_indexes(&form_fields, &attributes);
     apply_form_body_attribute_additional_columns(
         &mut attributes,
         &body.trailing,
@@ -124,7 +134,8 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &child_item_indexes,
     );
     if let Some(timings) = timings.as_deref_mut() {
-        timings.source_asset_form_child_items_cpu_ms += elapsed_ms(started);
+        timings.source_asset_form_child_items_cpu_ms +=
+            child_item_indexes_cpu_ms + elapsed_ms(started);
     }
 
     let started = Instant::now();
@@ -190,6 +201,8 @@ pub(super) struct FormBodyProperties {
 pub(super) const FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID: &str = "59ef2b80-c86b-11d5-a3c1-0050bae0a776";
 pub(super) const FORM_STANDARD_PERIOD_UUID: &str = "2fdc88ec-7c9b-43cd-8ba5-873f043bdd88";
 pub(super) const FORM_ITEM_TYPE_UUID: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
+pub(super) const FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID: &str =
+    "2ef6d6fa-847a-485e-8684-d37a3ab5efb8";
 pub(super) const FORM_AUTO_TIME_UUID: &str = "adeb08a0-415c-11d6-b9d1-0050bae0a95d";
 pub(super) const FORM_USE_POSTING_MODE_UUID: &str = "20d89b09-bd04-4304-a8c7-4d07fac6338a";
 pub(super) const FORM_CONVERSATIONS_REPRESENTATION_UUID: &str =
@@ -1049,14 +1062,27 @@ pub(super) fn extract_form_auto_command_bar(
     fields: &[&str],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
-    find_form_auto_command_bar(fields, commands, object_refs)
+    find_form_auto_command_bar(
+        fields,
+        commands,
+        object_refs,
+        table_name_by_id,
+        standard_command_owner_name_by_id,
+        command_source_owner_name_by_id,
+    )
 }
 
 pub(super) fn find_form_auto_command_bar(
     fields: &[&str],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
     for field in fields {
         let field = field.trim();
@@ -1066,12 +1092,24 @@ pub(super) fn find_form_auto_command_bar(
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
-        if let Some(command_bar) =
-            parse_form_auto_command_bar_fields(&nested, commands, object_refs)
-        {
+        if let Some(command_bar) = parse_form_auto_command_bar_fields(
+            &nested,
+            commands,
+            object_refs,
+            table_name_by_id,
+            standard_command_owner_name_by_id,
+            command_source_owner_name_by_id,
+        ) {
             return Some(command_bar);
         }
-        if let Some(command_bar) = find_form_auto_command_bar(&nested, commands, object_refs) {
+        if let Some(command_bar) = find_form_auto_command_bar(
+            &nested,
+            commands,
+            object_refs,
+            table_name_by_id,
+            standard_command_owner_name_by_id,
+            command_source_owner_name_by_id,
+        ) {
             return Some(command_bar);
         }
     }
@@ -1082,6 +1120,9 @@ pub(super) fn parse_form_auto_command_bar_fields(
     fields: &[&str],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
     if fields.first().map(|value| value.trim()) != Some("22") {
         return None;
@@ -1110,8 +1151,9 @@ pub(super) fn parse_form_auto_command_bar_fields(
             None,
             None,
             &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            table_name_by_id,
+            standard_command_owner_name_by_id,
+            command_source_owner_name_by_id,
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -3290,7 +3332,8 @@ pub(super) fn extract_form_child_items(
         None,
         &attribute_names_by_id,
         &indexes.table_name_by_id,
-        &indexes.item_name_by_id,
+        &indexes.standard_command_owner_name_by_id,
+        &indexes.command_source_owner_name_by_id,
         &indexes.table_column_names_by_id,
         &indexes.data_path_by_binding_key,
         &indexes.bound_table_path_by_binding_key,
@@ -3328,6 +3371,7 @@ pub(super) fn extend_form_attribute_special_columns(
 #[derive(Default)]
 pub(super) struct FormChildItemIndexes {
     pub(super) table_name_by_id: BTreeMap<String, String>,
+    pub(super) standard_command_owner_name_by_id: BTreeMap<String, String>,
     pub(super) table_column_names_by_id: BTreeMap<String, BTreeMap<String, String>>,
     pub(super) bound_table_path_by_binding_key: BTreeMap<String, String>,
     pub(super) table_column_names_by_binding_key: BTreeMap<String, BTreeMap<String, String>>,
@@ -3335,6 +3379,7 @@ pub(super) struct FormChildItemIndexes {
     pub(super) attribute_name_by_binding_key: BTreeMap<String, String>,
     pub(super) binding_names_by_key: BTreeMap<String, BTreeSet<String>>,
     pub(super) item_name_by_id: BTreeMap<String, String>,
+    pub(super) command_source_owner_name_by_id: BTreeMap<String, String>,
     pub(super) user_settings_group_id_by_table_id: BTreeMap<String, String>,
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
 }
@@ -3423,6 +3468,24 @@ pub(super) fn collect_form_child_item_indexes_from_field(
     };
     let wrapper = fields.first().map(|field| field.trim());
     if let Some(wrapper) = wrapper
+        && form_spreadsheet_document_field_layout(wrapper, &fields)
+        && let Some(id) = form_child_item_id(&fields)
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        indexes
+            .standard_command_owner_name_by_id
+            .insert(id.to_string(), name);
+    }
+    if let Some(wrapper) = wrapper
+        && (form_child_item_tag(wrapper, &fields).is_some() || matches!(wrapper, "37" | "48"))
+        && let Some(id) = form_child_item_id(&fields)
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        indexes
+            .command_source_owner_name_by_id
+            .insert(id.to_string(), name);
+    }
+    if let Some(wrapper) = wrapper
         && form_child_item_tag(wrapper, &fields).is_some()
         && let Some(id) = form_child_item_id(&fields)
         && let Some(name) = parse_form_child_item_name(wrapper, &fields)
@@ -3430,6 +3493,9 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         let tag = form_child_item_tag(wrapper, &fields).unwrap_or_default();
         indexes.item_name_by_id.insert(id.to_string(), name.clone());
         if tag == "Table" {
+            indexes
+                .standard_command_owner_name_by_id
+                .insert(id.to_string(), name.clone());
             indexes
                 .table_name_by_id
                 .insert(id.to_string(), name.clone());
@@ -3527,6 +3593,13 @@ pub(super) fn collect_form_child_item_indexes_from_field(
     }
 }
 
+pub(super) fn form_spreadsheet_document_field_layout(wrapper: &str, fields: &[&str]) -> bool {
+    matches!(wrapper, "37" | "48")
+        && fields
+            .get(5 + form_input_field_top_level_offset(fields))
+            .is_some_and(|value| value.trim() == "6")
+}
+
 pub(super) fn form_child_item_id<'a>(fields: &[&'a str]) -> Option<&'a str> {
     let identity = fields
         .get(1)
@@ -3542,6 +3615,7 @@ pub(super) fn parse_form_child_item_pairs(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -3578,6 +3652,7 @@ pub(super) fn parse_form_child_item_pairs(
                 parent_tag,
                 attribute_names_by_id,
                 table_name_by_id,
+                standard_command_owner_name_by_id,
                 item_name_by_id,
                 table_column_names_by_id,
                 data_path_by_binding_key,
@@ -3718,6 +3793,7 @@ pub(super) fn parse_form_child_item_with_attrs(
         attribute_names_by_id,
         table_name_by_id,
         table_name_by_id,
+        table_name_by_id,
         table_column_names_by_id,
         &BTreeMap::new(),
         bound_table_path_by_binding_key,
@@ -3734,6 +3810,7 @@ pub(super) fn parse_form_child_item_with_context(
     _parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -3751,6 +3828,9 @@ pub(super) fn parse_form_child_item_with_context(
     }
     let tag = form_child_item_tag(wrapper, &fields)?;
     let name = parse_form_child_item_name(wrapper, &fields)?;
+    let button_top_level_offset = (tag == "Button")
+        .then(|| form_button_top_level_offset(&fields))
+        .unwrap_or(0);
     let data_path = parse_form_child_item_data_path(
         tag,
         &fields,
@@ -3798,6 +3878,7 @@ pub(super) fn parse_form_child_item_with_context(
         Some(tag),
         attribute_names_by_id,
         table_name_by_id,
+        standard_command_owner_name_by_id,
         item_name_by_id,
         table_column_names_by_id,
         data_path_by_binding_key,
@@ -3816,6 +3897,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
@@ -3834,6 +3916,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
@@ -3852,6 +3935,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
@@ -3870,6 +3954,7 @@ pub(super) fn parse_form_child_item_with_context(
             Some(tag),
             attribute_names_by_id,
             table_name_by_id,
+            standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
@@ -3895,8 +3980,13 @@ pub(super) fn parse_form_child_item_with_context(
         .flatten();
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
     let command_name = if tag == "Button" {
-        fields.get(8).and_then(|field| {
-            parse_form_button_command_name(field, &name, commands, object_refs, table_name_by_id)
+        fields.get(8 + button_top_level_offset).and_then(|field| {
+            parse_form_button_command_name(
+                field,
+                commands,
+                object_refs,
+                standard_command_owner_name_by_id,
+            )
         })
     } else {
         None
@@ -4091,7 +4181,7 @@ pub(super) fn parse_form_child_item_with_context(
             }
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(13)
+                .get(13 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_show_title(field))
         } else if matches!(wrapper, "37" | "48")
             && matches!(
@@ -4221,7 +4311,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         button_representation: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(10)
+                .get(10 + button_top_level_offset)
                 .and_then(|field| parse_form_button_representation(field))
         } else {
             None
@@ -4230,14 +4320,14 @@ pub(super) fn parse_form_child_item_with_context(
             && form_button_layout_is_extended(&fields)
         {
             fields
-                .get(43)
+                .get(43 + button_top_level_offset)
                 .and_then(|field| parse_form_button_representation_in_context_menu(field))
         } else {
             None
         },
         group_horizontal_align: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(41)
+                .get(41 + button_top_level_offset)
                 .and_then(|field| parse_form_button_group_horizontal_align(field))
         } else if tag == "LabelDecoration" {
             label_decoration_options
@@ -4257,14 +4347,14 @@ pub(super) fn parse_form_child_item_with_context(
         },
         location_in_command_bar: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(49)
+                .get(49 + button_top_level_offset)
                 .and_then(|field| parse_form_button_location_in_command_bar(field))
         } else {
             None
         },
         default_button: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(11)
+                .get(11 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_show_title(field))
         } else {
             None
@@ -4323,7 +4413,7 @@ pub(super) fn parse_form_child_item_with_context(
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(29)
+                .get(29 + button_top_level_offset)
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             fields
@@ -4518,7 +4608,7 @@ pub(super) fn parse_form_child_item_with_context(
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(16)
+                .get(16 + button_top_level_offset)
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else {
@@ -4558,7 +4648,7 @@ pub(super) fn parse_form_child_item_with_context(
         {
             parse_form_input_field_auto_max_width(input_field_extended_options.as_deref())
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
-            parse_form_button_auto_max_width(fields.get(34).copied())
+            parse_form_button_auto_max_width(fields.get(34 + button_top_level_offset).copied())
         } else if tag == "LabelField" {
             label_field_options
                 .as_ref()
@@ -4578,7 +4668,7 @@ pub(super) fn parse_form_child_item_with_context(
         max_width: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_max_width(input_field_extended_options.as_deref())
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
-            parse_form_button_max_width(fields.get(35).copied())
+            parse_form_button_max_width(fields.get(35 + button_top_level_offset).copied())
         } else if tag == "LabelField" {
             label_field_options
                 .as_ref()
@@ -4730,7 +4820,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(4)
+                .get(4 + button_top_level_offset)
                 .and_then(|field| parse_form_extended_button_type(field))
         } else if tag == "Button" {
             fields
@@ -4752,7 +4842,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         picture_ref: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(25)
+                .get(25 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
                 .map(|(reference, _)| reference)
         } else if tag == "PictureField" {
@@ -4771,7 +4861,7 @@ pub(super) fn parse_form_child_item_with_context(
         },
         picture_load_transparent: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
-                .get(25)
+                .get(25 + button_top_level_offset)
                 .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
                 .map(|(_, load_transparent)| load_transparent)
                 .unwrap_or(false)
@@ -4846,6 +4936,8 @@ pub(super) fn parse_form_child_item_with_context(
             parse_form_command_bar_source_with_items(&fields, item_name_by_id)
         } else if tag == "ButtonGroup" {
             parse_form_button_group_command_source_with_items(&fields, item_name_by_id)
+        } else if tag == "Popup" {
+            parse_form_popup_command_source(&fields)
         } else {
             None
         },
@@ -4878,6 +4970,7 @@ pub(super) fn append_form_table_service_child_items(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -4901,6 +4994,7 @@ pub(super) fn append_form_table_service_child_items(
         parent_tag,
         attribute_names_by_id,
         table_name_by_id,
+        standard_command_owner_name_by_id,
         item_name_by_id,
         table_column_names_by_id,
         data_path_by_binding_key,
@@ -4920,6 +5014,7 @@ pub(super) fn append_form_child_items_by_tag(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -4936,6 +5031,7 @@ pub(super) fn append_form_child_items_by_tag(
             parent_tag,
             attribute_names_by_id,
             table_name_by_id,
+            standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
             data_path_by_binding_key,
@@ -4976,6 +5072,7 @@ pub(super) fn parse_form_text_document_context_menu(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -4994,6 +5091,7 @@ pub(super) fn parse_form_text_document_context_menu(
         parent_tag,
         attribute_names_by_id,
         table_name_by_id,
+        standard_command_owner_name_by_id,
         item_name_by_id,
         table_column_names_by_id,
         data_path_by_binding_key,
@@ -5424,6 +5522,15 @@ pub(super) fn parse_form_child_item_visible(fields: &[&str]) -> Option<bool> {
 
 pub(super) fn form_button_layout_is_extended(fields: &[&str]) -> bool {
     fields.len() > 20
+}
+
+pub(super) fn form_button_top_level_offset(fields: &[&str]) -> usize {
+    fields
+        .get(5)
+        .and_then(|field| parse_1c_quoted_string_with_len(field.trim()))
+        .filter(|(value, _)| !value.is_empty())
+        .map(|_| 0)
+        .unwrap_or(1)
 }
 
 pub(super) fn form_input_field_layout_is_extended(fields: &[&str]) -> bool {
@@ -6363,6 +6470,11 @@ pub(super) fn parse_form_button_group_command_source_with_items(
         (Some("2"), Some(FORM_ITEM_TYPE_UUID), Some("2"), Some("0")) => {
             form_command_source_name(form_ref.first()?.trim(), item_name_by_id)
         }
+        (Some("2"), Some(FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID), Some("2"), Some("0"))
+            if form_ref.first().map(|field| field.trim()) == Some("0") =>
+        {
+            Some("FormCommandPanelGlobalCommands".to_string())
+        }
         _ => None,
     }
 }
@@ -6377,15 +6489,49 @@ pub(super) fn parse_form_command_bar_source_with_items(
     item_name_by_id: &BTreeMap<String, String>,
 ) -> Option<String> {
     let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    if source.len() != 3 {
+        return None;
+    }
     let form_ref = split_1c_braced_fields(source.get(2)?.trim(), 0)?;
+    if form_ref.len() != 2 {
+        return None;
+    }
     match (
         source.first().map(|field| field.trim()),
         form_ref.get(1).map(|field| field.trim()),
-        fields.get(21).map(|field| field.trim()),
     ) {
-        (Some("1"), Some(FORM_ITEM_TYPE_UUID), Some("5")) => {
+        (Some("1"), Some(FORM_ITEM_TYPE_UUID)) => {
             form_command_source_name(form_ref.first()?.trim(), item_name_by_id)
         }
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_popup_command_source(fields: &[&str]) -> Option<String> {
+    let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    if source.len() != 9 {
+        return None;
+    }
+    let source_ref = split_1c_braced_fields(source.get(2)?.trim(), 0)?;
+    if source_ref.len() != 2 {
+        return None;
+    }
+    match (
+        source.first().map(|field| field.trim()),
+        source_ref.first().map(|field| field.trim()),
+        source_ref.get(1).map(|field| field.trim()),
+        source.get(3).map(|field| field.trim()),
+        source.get(5).map(|field| field.trim()),
+        source.get(6).map(|field| field.trim()),
+    ) {
+        (
+            Some("7"),
+            Some("0"),
+            Some(FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID),
+            Some("2"),
+            Some("0"),
+            Some("0"),
+        ) => Some("FormCommandPanelGlobalCommands".to_string()),
         _ => None,
     }
 }
@@ -7225,7 +7371,8 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
 
 pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Option<String> {
     let indexes: &[usize] = match wrapper {
-        "73" | "55" | "31" | "34" => &[5],
+        "73" | "55" => &[5],
+        "31" | "34" => &[5, 6],
         "37" | "48" => &[6, 7],
         _ => &[6],
     };
@@ -7239,7 +7386,7 @@ pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Opti
 pub(super) fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, String)> {
     let indexes: &[usize] = match wrapper {
         "73" | "55" => &[9],
-        "31" | "34" => &[6],
+        "31" | "34" => &[6, 7],
         "37" | "48" => &[9, 10],
         _ => &[7],
     };
@@ -7698,9 +7845,11 @@ pub(super) fn parse_form_child_item_data_path(
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound),
-        "Button" => fields.get(9).and_then(|field| {
-            parse_form_button_data_path(field, table_name_by_id, table_column_names_by_id)
-        }),
+        "Button" => fields
+            .get(9 + form_button_top_level_offset(fields))
+            .and_then(|field| {
+                parse_form_button_data_path(field, table_name_by_id, table_column_names_by_id)
+            }),
         _ => table_name_by_id.get(id).cloned(),
     }
 }
@@ -7943,17 +8092,19 @@ pub(super) fn parse_form_attribute_data_path(
 
 pub(super) fn parse_form_button_command_name(
     field: &str,
-    button_name: &str,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
-    table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let kind = fields.first()?.trim();
+    if fields.len() == 1 && kind == "0" {
+        return Some("0".to_string());
+    }
     let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
     if kind == "0" {
-        if let Some(command_name) = form_standard_button_command_name(&uuid)
-            .or_else(|| form_standard_command_name(&uuid))
+        if let Some(command_name) =
+            form_standard_button_command_name(&uuid).or_else(|| form_standard_command_name(&uuid))
         {
             return Some(command_name.to_owned());
         }
@@ -7962,35 +8113,60 @@ pub(super) fn parse_form_button_command_name(
         }
         return None;
     }
-    if kind == "10" || kind == "21" {
-        if let Some(standard) = form_table_standard_command_suffix(&uuid) {
-            let table_name = if table_name_by_id.len() == 1 {
-                table_name_by_id.values().next()?.as_str()
-            } else {
-                form_standard_command_table_name(button_name, table_name_by_id)?
-            };
-            return Some(format!("Form.Item.{table_name}.StandardCommand.{standard}"));
-        }
-        return None;
-    }
-    commands
+    if let Some(command_name) = commands
         .iter()
         .find(|command| command.id == kind && command.reference_uuid == uuid)
         .map(|command| format!("Form.Command.{}", command.name))
-        .or_else(|| {
-            let standard = form_table_standard_command_suffix(&uuid)?;
-            let table_name = if table_name_by_id.len() == 1 {
-                table_name_by_id.values().next()?.as_str()
-            } else {
-                form_standard_command_table_name(button_name, table_name_by_id)?
-            };
-            Some(format!("Form.Item.{table_name}.StandardCommand.{standard}"))
-        })
+    {
+        return Some(command_name);
+    }
+    if kind == "100"
+        && let Some(reference) = object_refs.get(&uuid)
+        && reference.starts_with("CommonForm.")
+    {
+        return Some(form_object_reference_command_name(reference));
+    }
+    if kind == "4"
+        && let Some(reference) = object_refs.get(&uuid)
+        && reference.starts_with("Catalog.")
+    {
+        return Some(format!("{reference}.StandardCommand.OpenByValue"));
+    }
+    let standard = form_table_standard_command_suffix(&uuid)?;
+    let owner_name = standard_command_owner_name_by_id.get(kind)?;
+    Some(format!("Form.Item.{owner_name}.StandardCommand.{standard}"))
 }
 
 pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
         FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
+        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Form.StandardCommand.Refresh"),
+        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Form.StandardCommand.Delete"),
+        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Form.StandardCommand.Delete"),
+        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Form.StandardCommand.Delete"),
+        "8d7bcd38-1bbb-4dc1-a9ad-cc9d5966ca8e" => Some("Form.StandardCommand.Start"),
+        "e6a9041f-4d43-4f06-8e17-e95753531565" => Some("Form.StandardCommand.StartAndClose"),
+        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("Form.StandardCommand.UndoPosting"),
+        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("Form.StandardCommand.FindByCurrentValue"),
+        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("Form.StandardCommand.ChangeHistory"),
+        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("Form.StandardCommand.List"),
+        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("Form.StandardCommand.HierarchicalList"),
+        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Form.StandardCommand.Tree"),
+        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("Form.StandardCommand.MoveItem"),
+        "eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111" => Some("Form.StandardCommand.SetDateInterval"),
+        "62778a6d-6114-471c-93f7-e1ccd54bd266" => Some("Form.StandardCommand.CreateInitialImage"),
+        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("Form.StandardCommand.LoadVariant"),
+        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("Form.StandardCommand.ReportSettings"),
+        "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Form.StandardCommand.Yes"),
+        "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("Form.StandardCommand.No"),
+        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Form.StandardCommand.Copy"),
+        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Form.StandardCommand.Copy"),
+        "87317f86-057f-477e-9045-2da4e4980199" => Some("Form.StandardCommand.PostAndClose"),
+        "96e0bc70-f8ff-4732-8119-060923203629" => Some("Form.StandardCommand.CancelSearch"),
+        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("Form.StandardCommand.OutputList"),
+        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("Form.StandardCommand.ListSettings"),
+        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Form.StandardCommand.Reread"),
+        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("Form.StandardCommand.ShowInList"),
         "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Form.StandardCommand.Create"),
         "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Form.StandardCommand.Close"),
         "6886601d-276c-4d3f-af0a-05c586025608" => Some("Form.StandardCommand.Change"),
@@ -8002,6 +8178,16 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Form.StandardCommand.Help"),
         "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Form.StandardCommand.Cancel"),
         "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("Form.StandardCommand.WriteAndClose"),
+        "952c2984-9955-415a-8235-5c710aabe732" => {
+            Some("Form.StandardCommand.LoadDynamicListSettings")
+        }
+        "d5c3842d-7252-4370-9174-756a6cc553e5" => {
+            Some("Form.StandardCommand.SaveDynamicListSettings")
+        }
+        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => {
+            Some("Form.StandardCommand.DynamicListStandardSettings")
+        }
+        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("Form.StandardCommand.CreateFolder"),
         "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("Form.StandardCommand.OK"),
         "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Form.StandardCommand.Write"),
         _ => None,
@@ -8032,27 +8218,55 @@ pub(super) fn form_standard_button_command_name(uuid: &str) -> Option<&'static s
 
 pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "01833a5a-6553-4c49-b445-095018107bb5" => Some("HierarchicalList"),
+        "05468165-f954-45a5-84f2-6641c51f9f23" => Some("Tree"),
+        "0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc" => Some("List"),
+        "0e9b637d-cf6e-4330-8a8f-cd44842e34bb" => Some("LevelUp"),
+        "0ae4bea5-23be-42a7-b69e-97b11b29c453" => Some("Copy"),
+        "0f8d6d98-2f8b-405a-b8b3-0538e9d95da5" => Some("Create"),
+        "12acffde-8389-4e5e-bd86-ff248262d84a" => Some("ExpandAllGroups"),
+        "14559f7c-853c-42a4-9ea1-01546107747b" => Some("ListSettings"),
+        "18248aa8-e621-4e19-a611-54fb8923644c" => Some("CheckAll"),
+        "182a793b-22a5-4625-b316-6a5be7f88078" => Some("LoadDynamicListSettings"),
+        "1f1e900a-8488-4159-81be-9704eb96906d" => Some("UserSettingItemProperties"),
+        "27bd521a-51c6-4fe7-846d-a98f988774b5" => Some("MoveItem"),
         "37740564-9e86-44a0-bea9-3f485a5a3f91" => Some("MoveUp"),
         "2bbe4e12-06d2-409b-a972-eea585125d83" => Some("SortListAsc"),
+        "33b7b9cd-6979-4435-8c58-d9bc8250edec" => Some("DynamicListStandardSettings"),
+        "403bc6e6-b98e-4181-9f43-9c75cbbf82cf" => Some("Refresh"),
+        "4a817da0-5797-4e16-906f-02fb869e1873" => Some("GroupFilterItems"),
+        "51c99108-107c-43e1-8918-e48835bf2495" => Some("SelectAll"),
         "c0519548-2a9a-44de-a25e-faf01e089d4d" => Some("Find"),
         "44ad3ec9-f3c2-4913-9224-5f9fb6418743" => Some("CancelSearch"),
         "49602716-fea6-497f-8047-726404038857" => Some("OutputList"),
         "5048cc44-702b-44e3-8445-9af75c02724d" => Some("UncheckAll"),
         "58b2a785-23f6-4b0e-a324-9a1323285595" => Some("SortListDesc"),
+        "5aa38159-2001-42ae-8451-f8cabe0762c3" => Some("Preview"),
+        "714d44cc-63da-4431-b33a-428e398d2a08" => Some("FindByCurrentValue"),
+        "7b683784-b474-441a-ba63-3d757bd0ffd4" => Some("SearchEverywhere"),
+        "825c1c15-ef8f-47ab-b002-e6b84b3e5b10" => Some("OutputList"),
+        "82b88a24-2856-484a-afd9-55a15bdf9785" => Some("Ungroup"),
+        "88078230-1f6b-415f-99e4-ad2ff73810cf" => Some("CopyToClipboard"),
+        "8969c93a-23e5-4bef-941d-aaef315858d2" => Some("Choose"),
         "8d772f97-c0ef-47c0-9cb0-efea28c61341" => Some("Delete"),
+        "95b4bc12-2ece-4d7a-b3e2-6f9293620a06" => Some("SaveDynamicListSettings"),
+        "9ef79140-3de6-436a-8dda-610bb963f5db" => Some("EndEdit"),
+        "a2f737a8-0114-4e86-a214-45e5c213fa65" => Some("SetDeletionMark"),
+        "a5fdef31-bbf0-4a9d-98aa-fd5fd8f1344a" => Some("AddFilterItemGroup"),
+        "b0016a68-ec64-4e6d-b905-c71fd62efc4c" => Some("Add"),
+        "b41f5bbc-ba5d-4888-8cd1-db246a371418" => Some("Change"),
+        "d673d512-f71a-48a6-ae5d-527a64ffd813" => Some("Print"),
+        "d7e55d2e-bfea-4d80-b4ad-a1bb31ec2147" => Some("UseFieldAsValue"),
+        "d82ca05c-2966-4d77-9a39-a1eea087bfa7" => Some("CreateFolder"),
+        "d8e20c4d-3519-49aa-80e5-d6d66fee741a" => Some("Save"),
+        "daa306cd-a78a-4e74-a14c-739daba624cb" => Some("SetDateInterval"),
+        "dc118d99-b351-4e30-9310-e864f2e53ec0" => Some("LevelDown"),
+        "e7216412-03ac-4a81-99c2-1d7c28e88e31" => Some("ShowMultipleSelection"),
+        "fca750bc-4fb6-40e2-ae0f-e818939a32e7" => Some("AddFilterItem"),
         "fa51b106-eae6-44c7-8054-76cbb3100603" => Some("MoveDown"),
+        "ff5c34f8-b172-4ef2-91d3-48283a66a725" => Some("CollapseAllGroups"),
         _ => None,
     }
-}
-
-pub(super) fn form_standard_command_table_name<'a>(
-    _button_name: &str,
-    table_name_by_id: &'a BTreeMap<String, String>,
-) -> Option<&'a String> {
-    if table_name_by_id.len() == 1 {
-        return table_name_by_id.values().next();
-    }
-    None
 }
 
 pub(super) fn collect_form_table_column_names_for_table(
@@ -9428,12 +9642,14 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(behavior)
         ));
     }
-    if let Some(representation) = item.representation.filter(|representation| {
-        !(*representation == "WeakSeparation"
-            && item.tag == "UsualGroup"
-            && item.show_title == Some(false)
-            && item.behavior == Some("Usual"))
-    }) {
+    if item.tag != "Popup"
+        && let Some(representation) = item.representation.filter(|representation| {
+            !(*representation == "WeakSeparation"
+                && item.tag == "UsualGroup"
+                && item.show_title == Some(false)
+                && item.behavior == Some("Usual"))
+        })
+    {
         let tag_name = if item.tag == "Pages" {
             "PagesRepresentation"
         } else {
@@ -9532,7 +9748,9 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(location)
         ));
     }
-    if let Some(command_source) = &item.command_source {
+    if item.tag == "ButtonGroup"
+        && let Some(command_source) = &item.command_source
+    {
         xml.push_str(&format!(
             "{tab}\t<CommandSource>{}</CommandSource>\r\n",
             escape_xml_text(command_source)
@@ -9550,11 +9768,35 @@ pub(super) fn format_form_child_item_xml(
             xml_bool(item.picture_load_transparent)
         ));
     }
+    if item.tag == "Popup"
+        && let Some(command_source) = &item.command_source
+    {
+        xml.push_str(&format!(
+            "{tab}\t<CommandSource>{}</CommandSource>\r\n",
+            escape_xml_text(command_source)
+        ));
+    }
+    if item.tag == "Popup"
+        && let Some(representation) = item.representation
+    {
+        xml.push_str(&format!(
+            "{tab}\t<Representation>{}</Representation>\r\n",
+            escape_xml_text(representation)
+        ));
+    }
     if !matches!(item.tag, "InputField" | "PictureField" | "ButtonGroup") {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
             &item.tooltip,
             indent + 1,
+        ));
+    }
+    if item.tag == "CommandBar"
+        && let Some(command_source) = &item.command_source
+    {
+        xml.push_str(&format!(
+            "{tab}\t<CommandSource>{}</CommandSource>\r\n",
+            escape_xml_text(command_source)
         ));
     }
     if !direct_context_menu_xml.is_empty() {
