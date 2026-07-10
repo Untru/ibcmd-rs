@@ -28,6 +28,14 @@ Model:
   raw `SchemaFile` container. The `SchemaFile` and inner
   `dataCompositionSchema` wrappers are structural storage wrappers and are not
   emitted.
+- A template may contain multiple `SchemaFile` documents. Direct children of a
+  structurally standalone additional `dataCompositionSchema` are inserted,
+  in source order, immediately before the first direct `settingsVariant`.
+  Self-closing additional schema roots are empty sentinels and are no-ops.
+- Additional documents are admitted only when `SchemaFile` has no other element
+  children and the complete document has no area-template namespace. Documents
+  with storage side tables remain fail-closed until their references are
+  resolved; no raw wrapper, side-table node, or unresolved index is emitted.
 - Each embedded `Settings` document is normalized as a `dcsset:settings` block.
   External settings pair by ordinal only with direct `settingsVariant` children
   of the root schema. Nested variants are already inside the schema document and
@@ -96,6 +104,26 @@ Corpus evidence:
   `4,2,14,2,2,2,2,39`; none is a Config FileName, and three already existed in
   the platform builtin type registry. They map only to family QNames, never to
   an object name.
+- The BSP multi-document matrix has 21 remaining DCS rows: five empty second
+  schemas, one standalone nonempty schema, and 15 documents using the
+  area-template namespace. The standalone document reached byte parity with
+  SHA-256
+  `EB4B9AFBC2DEE1FCAA987995FE353A472AEE27A223AF290D772C00564F2DA7A5`.
+  The accepted narrow gate moved the full diff from
+  `1603 files, +31486/-204757` to `1602 files, +31486/-204748` and the 66-file
+  DCS body slice from `21 files, +157/-10975` to
+  `20 files, +157/-10966`. All 66 generated documents parsed successfully;
+  root storage `appearance`, unresolved `appIndex`, and inner storage-wrapper
+  counts were zero. TypeId, TypeSet, settingsVariant, settings name, and Form
+  command guardrails did not change.
+- The remaining area-template storage model is proven but not implemented.
+  Each `dcsat:appIndex` value is a zero-based index into the ordered outer
+  `SchemaFile/appearance` side table. Native replaces the index in place with
+  `dcsat:appearance` containing a deep copy of the indexed wrapper's children;
+  it drops the side-table wrapper attributes and emits no side-table nodes at
+  the schema root. Repeated indexes duplicate the body. In the independent UT
+  corpus, all 1,099 references across 49 side-table documents were in range and
+  every table's referenced unique indexes covered `0..N-1`.
 
 Rejected hypothesis:
 
@@ -105,6 +133,13 @@ Rejected hypothesis:
   `58 insertions` / `58 deletions`. The residual also contains enterprise
   namespace prefix shifts and `v8:StandardPeriod` differences. The accepted
   expanded-QName/output-scope model above supersedes this rejected shortcut.
+- Flattening every additional `SchemaFile` was rejected. The first gate
+  regressed the full diff from 1,603 to 1,650 files because an empty
+  `dataCompositionSchema` event and storage-side area-template appearances were
+  serialized literally. Restricting output to the inner schema fixed the
+  wrapper leak but was still incomplete because unresolved `appIndex` values
+  require the side-table substitution model above. Both failures were reported
+  and rolled into the final fail-closed admission rule.
 
 ## Form.xml `CommandName` / `CommandSource`
 

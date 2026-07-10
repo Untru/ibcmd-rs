@@ -4,6 +4,7 @@ const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schem
 const DCS_COMMON_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/common";
 const DCS_CORE_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/core";
 const DCS_SETTINGS_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/settings";
+const DCS_AREA_TEMPLATE_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/area-template";
 const DATA_CORE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/core";
 const DATA_UI_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui";
 const ENTERPRISE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/enterprise";
@@ -18,6 +19,9 @@ const DCS_SETTINGS_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/sett
 const ENTERPRISE_URI: &str = "http://v8.1c.ru/8.1/data/enterprise";
 const CURRENT_CONFIG_URI: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
 const SETTINGS_ROOT_UI_NAMESPACES: &str = " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"";
+const DATA_COMPOSITION_SCHEMA_DOCUMENT_PREFIX: &str = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
+const DATA_COMPOSITION_SCHEMA_DOCUMENT_SUFFIX: &str = "\r\n</DataCompositionSchema>";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum DcsTypeResolution {
@@ -35,15 +39,19 @@ pub(super) fn normalize_data_composition_schema_template_xml(
     let xml_start = find_bytes(inflated, b"<?xml")?;
     let text = std::str::from_utf8(&inflated[xml_start..]).ok()?;
     let documents = split_embedded_xml_documents(text);
-    let schema_doc = documents.iter().find(|document| {
-        document.contains("<SchemaFile") && document.contains("dataCompositionSchema")
-    })?;
+    let schema_documents = documents
+        .iter()
+        .copied()
+        .filter(|document| {
+            document.contains("<SchemaFile") && document.contains("dataCompositionSchema")
+        })
+        .collect::<Vec<_>>();
     let settings = documents
         .iter()
         .filter(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
         .filter_map(|document| canonicalize_data_composition_settings_document(document))
         .collect::<Vec<_>>();
-    let mut xml = canonicalize_data_composition_schema_document(schema_doc)?;
+    let mut xml = canonicalize_data_composition_schema_documents(&schema_documents)?;
     rewrite_data_composition_type_ids(&mut xml, type_index);
     insert_data_composition_settings(&mut xml, &settings)?;
     Some(xml.into_bytes())
@@ -268,8 +276,94 @@ fn canonicalize_data_composition_schema_document(document: &str) -> Option<Strin
     writer
         .output
         .push_str(&normalize_data_composition_schema_body_indent(&body));
-    writer.output.push_str("\r\n</DataCompositionSchema>");
+    writer
+        .output
+        .push_str(DATA_COMPOSITION_SCHEMA_DOCUMENT_SUFFIX);
     Some(writer.output)
+}
+
+fn canonicalize_data_composition_schema_documents(documents: &[&str]) -> Option<String> {
+    let (first, remaining) = documents.split_first()?;
+    let mut merged = canonicalize_data_composition_schema_document(first)?;
+    let mut insertion_offset = direct_settings_variant_insertion_offset(&merged)?;
+    for document in remaining {
+        if data_composition_schema_requires_external_resolution(document)? {
+            continue;
+        }
+        let canonical = canonicalize_data_composition_schema_document(document)?;
+        let body = canonical
+            .strip_prefix(DATA_COMPOSITION_SCHEMA_DOCUMENT_PREFIX)?
+            .strip_suffix(DATA_COMPOSITION_SCHEMA_DOCUMENT_SUFFIX)?;
+        if body.is_empty() {
+            continue;
+        }
+        merged.insert_str(insertion_offset, body);
+        insertion_offset += body.len();
+    }
+    Some(merged)
+}
+
+fn data_composition_schema_requires_external_resolution(document: &str) -> Option<bool> {
+    let mut reader = NsReader::from_str(document);
+    reader.config_mut().trim_text(false);
+    let mut stack = Vec::<(Option<Vec<u8>>, Vec<u8>)>::new();
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let namespace = namespace_ref(&namespace);
+                let local = local.as_ref();
+                if stack.last().is_some_and(|(namespace, local)| {
+                    namespace.is_none() && local.as_slice() == b"SchemaFile"
+                }) && (namespace != Some(DCS_SCHEMA_NS) || local != b"dataCompositionSchema")
+                    || namespace == Some(DCS_AREA_TEMPLATE_NS)
+                    || event_declares_namespace(&event, DCS_AREA_TEMPLATE_NS)
+                {
+                    return Some(true);
+                }
+                stack.push((namespace.map(<[u8]>::to_vec), local.to_vec()));
+            }
+            Event::Empty(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let namespace = namespace_ref(&namespace);
+                if stack.last().is_some_and(|(namespace, local)| {
+                    namespace.is_none() && local.as_slice() == b"SchemaFile"
+                }) && (namespace != Some(DCS_SCHEMA_NS)
+                    || local.as_ref() != b"dataCompositionSchema")
+                    || namespace == Some(DCS_AREA_TEMPLATE_NS)
+                    || event_declares_namespace(&event, DCS_AREA_TEMPLATE_NS)
+                {
+                    return Some(true);
+                }
+            }
+            Event::End(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let (open_namespace, open_local) = stack.pop()?;
+                if open_namespace.as_deref() != namespace_ref(&namespace)
+                    || open_local.as_slice() != local.as_ref()
+                {
+                    return None;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    stack.is_empty().then_some(false)
+}
+
+fn direct_settings_variant_insertion_offset(xml: &str) -> Option<usize> {
+    let offsets = direct_settings_variant_offsets(xml)?;
+    let mut offset = match offsets.first() {
+        Some(offsets) => offsets.opening,
+        None => xml
+            .strip_suffix(DATA_COMPOSITION_SCHEMA_DOCUMENT_SUFFIX)
+            .map(str::len)?,
+    };
+    while offset > 0 && matches!(xml.as_bytes()[offset - 1], b'\r' | b'\n' | b'\t' | b' ') {
+        offset -= 1;
+    }
+    Some(offset)
 }
 
 fn canonicalize_data_composition_settings_document(document: &str) -> Option<String> {
@@ -283,28 +377,36 @@ fn canonicalize_data_composition_settings_document(document: &str) -> Option<Str
 }
 
 fn insert_data_composition_settings(xml: &mut String, settings: &[String]) -> Option<()> {
-    let offsets = direct_settings_variant_closing_offsets(xml)?;
+    let offsets = direct_settings_variant_offsets(xml)?;
     if offsets.len() != settings.len() {
         return None;
     }
-    for (offset, settings_block) in offsets.into_iter().zip(settings.iter()).rev() {
-        xml.insert_str(offset, settings_block);
+    for (offsets, settings_block) in offsets.into_iter().zip(settings.iter()).rev() {
+        xml.insert_str(offsets.closing, settings_block);
     }
     Some(())
 }
 
-fn direct_settings_variant_closing_offsets(xml: &str) -> Option<Vec<usize>> {
+struct DirectSettingsVariantOffsets {
+    opening: usize,
+    closing: usize,
+}
+
+fn direct_settings_variant_offsets(xml: &str) -> Option<Vec<DirectSettingsVariantOffsets>> {
     let mut reader = NsReader::from_str(xml);
     reader.config_mut().trim_text(false);
-    let mut stack = Vec::<(Option<Vec<u8>>, Vec<u8>)>::new();
+    let mut stack = Vec::<(Option<Vec<u8>>, Vec<u8>, usize)>::new();
     let mut offsets = Vec::new();
     loop {
         match reader.read_event().ok()? {
             Event::Start(event) => {
                 let (namespace, local) = reader.resolve_element(event.name());
+                let event_len = event.as_ref().len().checked_add(2)?;
+                let position = usize::try_from(reader.buffer_position()).ok()?;
                 stack.push((
                     namespace_ref(&namespace).map(<[u8]>::to_vec),
                     local.as_ref().to_vec(),
+                    position.checked_sub(event_len)?,
                 ));
             }
             Event::Empty(event) => {
@@ -319,7 +421,7 @@ fn direct_settings_variant_closing_offsets(xml: &str) -> Option<Vec<usize>> {
             Event::End(event) => {
                 let (namespace, local) = reader.resolve_element(event.name());
                 if stack.len() == 2
-                    && stack.first().is_some_and(|(namespace, local)| {
+                    && stack.first().is_some_and(|(namespace, local, _)| {
                         namespace.as_deref() == Some(DCS_SCHEMA_NS)
                             && local.as_slice() == b"DataCompositionSchema"
                     })
@@ -328,9 +430,12 @@ fn direct_settings_variant_closing_offsets(xml: &str) -> Option<Vec<usize>> {
                 {
                     let end_tag_len = event.name().as_ref().len() + 3;
                     let position = usize::try_from(reader.buffer_position()).ok()?;
-                    offsets.push(position.checked_sub(end_tag_len)?);
+                    offsets.push(DirectSettingsVariantOffsets {
+                        opening: stack.last()?.2,
+                        closing: position.checked_sub(end_tag_len)?,
+                    });
                 }
-                let (open_namespace, open_local) = stack.pop()?;
+                let (open_namespace, open_local, _) = stack.pop()?;
                 if open_namespace.as_deref() != namespace_ref(&namespace)
                     || open_local.as_slice() != local.as_ref()
                 {
@@ -414,28 +519,35 @@ impl DataCompositionXmlWriter {
     }
 
     fn fixed_decl_and_schema_root(&mut self) {
-        self.output.push_str(
-            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
-        );
+        self.output
+            .push_str(DATA_COMPOSITION_SCHEMA_DOCUMENT_PREFIX);
     }
 
     fn write_document(&mut self, document: &str, mode: DataCompositionDocumentMode) -> Option<()> {
         let mut reader = NsReader::from_str(document);
         reader.config_mut().trim_text(false);
+        let mut schema_depth =
+            matches!(mode, DataCompositionDocumentMode::Schema).then_some(0usize);
+        let mut saw_schema_root = false;
         loop {
             match reader.read_event().ok()? {
                 Event::Start(event) => {
                     let (namespace, local) = reader.resolve_element(event.name());
                     let local = local.as_ref();
-                    if self.should_skip(namespace_ref(&namespace), local, &mode) {
-                        continue;
-                    }
-                    if matches!(mode, DataCompositionDocumentMode::Schema)
-                        && namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
-                        && local == b"dataCompositionSchema"
-                    {
-                        continue;
+                    if let Some(depth) = schema_depth.as_mut() {
+                        if *depth == 0 {
+                            if namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
+                                && local == b"dataCompositionSchema"
+                            {
+                                if saw_schema_root {
+                                    return None;
+                                }
+                                saw_schema_root = true;
+                                *depth = 1;
+                            }
+                            continue;
+                        }
+                        *depth = depth.checked_add(1)?;
                     }
                     if self.skip_depth == 0 {
                         let dynamic_prefixes = self.write_start_tag(
@@ -456,8 +568,19 @@ impl DataCompositionXmlWriter {
                     }
                 }
                 Event::Empty(event) => {
+                    let (namespace, local) = reader.resolve_element(event.name());
+                    if schema_depth == Some(0) {
+                        if namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
+                            && local.as_ref() == b"dataCompositionSchema"
+                        {
+                            if saw_schema_root {
+                                return None;
+                            }
+                            saw_schema_root = true;
+                        }
+                        continue;
+                    }
                     if self.skip_depth == 0 {
-                        let (namespace, local) = reader.resolve_element(event.name());
                         self.write_start_tag(
                             &reader,
                             &event,
@@ -471,14 +594,20 @@ impl DataCompositionXmlWriter {
                 Event::End(event) => {
                     let (namespace, local) = reader.resolve_element(event.name());
                     let local = local.as_ref();
-                    if self.should_skip(namespace_ref(&namespace), local, &mode) {
-                        continue;
-                    }
-                    if matches!(mode, DataCompositionDocumentMode::Schema)
-                        && namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
-                        && local == b"dataCompositionSchema"
-                    {
-                        continue;
+                    if let Some(depth) = schema_depth.as_mut() {
+                        if *depth == 0 {
+                            continue;
+                        }
+                        if *depth == 1 {
+                            if namespace_ref(&namespace) != Some(DCS_SCHEMA_NS)
+                                || local != b"dataCompositionSchema"
+                                || !self.element_stack.is_empty()
+                            {
+                                return None;
+                            }
+                            *depth = 0;
+                            continue;
+                        }
                     }
                     let name = if matches!(mode, DataCompositionDocumentMode::Settings)
                         && namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
@@ -497,14 +626,17 @@ impl DataCompositionXmlWriter {
                     {
                         return None;
                     }
+                    if let Some(depth) = schema_depth.as_mut() {
+                        *depth = depth.checked_sub(1)?;
+                    }
                 }
                 Event::Text(event) => {
-                    if self.skip_depth == 0 {
+                    if self.skip_depth == 0 && schema_depth.is_none_or(|depth| depth > 0) {
                         self.write_text(&reader, &event, &mode)?;
                     }
                 }
                 Event::CData(event) => {
-                    if self.skip_depth == 0 {
+                    if self.skip_depth == 0 && schema_depth.is_none_or(|depth| depth > 0) {
                         self.output.push_str("<![CDATA[");
                         self.output
                             .push_str(std::str::from_utf8(event.as_ref()).ok()?);
@@ -512,7 +644,7 @@ impl DataCompositionXmlWriter {
                     }
                 }
                 Event::Comment(event) => {
-                    if self.skip_depth == 0 {
+                    if self.skip_depth == 0 && schema_depth.is_none_or(|depth| depth > 0) {
                         self.output.push_str("<!--");
                         self.output
                             .push_str(std::str::from_utf8(event.as_ref()).ok()?);
@@ -520,7 +652,7 @@ impl DataCompositionXmlWriter {
                     }
                 }
                 Event::GeneralRef(event) => {
-                    if self.skip_depth == 0 {
+                    if self.skip_depth == 0 && schema_depth.is_none_or(|depth| depth > 0) {
                         self.output.push('&');
                         self.output
                             .push_str(std::str::from_utf8(event.as_ref()).ok()?);
@@ -532,18 +664,10 @@ impl DataCompositionXmlWriter {
                 _ => {}
             }
         }
+        if schema_depth.is_some() && (!saw_schema_root || schema_depth != Some(0)) {
+            return None;
+        }
         self.element_stack.is_empty().then_some(())
-    }
-
-    fn should_skip(
-        &self,
-        namespace: Option<&[u8]>,
-        local: &[u8],
-        mode: &DataCompositionDocumentMode,
-    ) -> bool {
-        matches!(mode, DataCompositionDocumentMode::Schema)
-            && namespace.is_none()
-            && local == b"SchemaFile"
     }
 
     fn write_start_tag(
