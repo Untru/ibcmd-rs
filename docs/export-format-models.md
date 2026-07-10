@@ -43,8 +43,11 @@ Model:
   settings namespace are emitted as `dcsset:*`; DCS core values are emitted as
   `dcscor:*`.
 - DCS schema-side type references are normalized in the same pass: known
-  metadata `TypeId` values become current-config `v8:Type` references, and the
-  known AnyIBRef type id becomes a `v8:TypeSet` current-config reference.
+  metadata `TypeId` values use a typed resolution policy. `DefinedType` keeps
+  `v8:TypeId`, ordinary generated types become current-config `v8:Type`, and
+  `Characteristic` plus generic reference-family roots become
+  current-config `v8:TypeSet`. Unknown TypeIds stay unchanged; AnyIBRef keeps
+  its separate `v8:TypeSet` rule.
 - Lexical QNames are resolved through the input namespace stack into
   `{namespace URI, local}` and then serialized for the output scope. Raw `dNp1`
   prefix text is never copied. Dynamic current-config and enterprise prefixes
@@ -82,6 +85,17 @@ Corpus evidence:
   current-config prefixes. The accepted gate moved the full diff from
   `1642 files, +32149/-223052` to `1629 files, +32044/-222947`; all four scoped
   classes reached zero without changing settingsVariant/name/presentation.
+- Typed TypeId evidence covered 19 DefinedType `Type -> TypeId` pairs, 14
+  generic-root `TypeId -> TypeSet` pairs, and two Characteristic
+  `Type -> TypeSet` pairs. The negative corpus contained 98 unchanged `Type`
+  and eight unchanged AnyIBRef `TypeSet` rows. The accepted gate removed all 35
+  pairs and moved the then-current full diff from
+  `1616 files, +31526/-221470` to `1610 files, +31491/-221435`.
+- The eight generic reference-family TypeIds are platform protocol ids. All
+  eight occur in an independent `buh` raw Config sample with counts
+  `4,2,14,2,2,2,2,39`; none is a Config FileName, and three already existed in
+  the platform builtin type registry. They map only to family QNames, never to
+  an object name.
 
 Rejected hypothesis:
 
