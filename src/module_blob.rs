@@ -312,8 +312,6 @@ struct FormXmlChildItem {
     choice_button_representation: Option<FormXmlChoiceButtonRepresentation>,
     item_type: Option<String>,
     addition_source_item: Option<String>,
-    title_text_color: Option<String>,
-    title_font: Option<BTreeMap<String, String>>,
     title: Vec<LocalizedString>,
     tooltip: Vec<LocalizedString>,
     extended_tooltip: Option<FormXmlExtendedTooltip>,
@@ -4903,7 +4901,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ChoiceButtonRepresentation"
                         | "Behavior"
                         | "Representation"
-                        | "TitleTextColor"
                         | "KeyParameter"
                         | "Type"
                         | "Length"
@@ -5055,11 +5052,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with_for_child_events(&path, &current_child_items)
                 {
                     current_child_event_name = xml_attribute_value(&event, "name")?;
-                } else if local == "TitleFont"
-                    && path_ends_with_for_current_usual_group(&path, &current_child_items)
-                    && let Some(item) = current_child_items.last_mut()
-                {
-                    item.title_font = Some(xml_attrs_map(&event));
                 } else if local == "ExtendedTooltip"
                     && path_ends_with_for_current_child_item(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -5131,11 +5123,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     if let Some(parameter) = parse_form_parameter_xml(&event)? {
                         properties.parameters.push(parameter);
                     }
-                } else if local == "TitleFont"
-                    && path_ends_with_for_current_usual_group(&path, &current_child_items)
-                    && let Some(item) = current_child_items.last_mut()
-                {
-                    item.title_font = Some(xml_attrs_map(&event));
                 } else if local == "ExtendedTooltip"
                     && path_ends_with_for_current_child_item(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -5462,7 +5449,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_behavior(&path, &current_child_items)
-                    || path_ends_with_for_usual_group_title_text_color(&path, &current_child_items)
                     || path_ends_with_for_child_group_representation(&path, &current_child_items)
                     || path_ends_with_for_child_table_representation(&path, &current_child_items)
                     || path_ends_with_for_child_table_command_bar_location(
@@ -5952,7 +5938,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
-                    || path_ends_with_for_usual_group_title_text_color(&path, &current_child_items)
                     || path_ends_with_for_child_scroll_on_compress(&path, &current_child_items)
                     || path_ends_with_for_child_table_representation(&path, &current_child_items)
                     || path_ends_with_for_child_table_command_bar_location(
@@ -6087,7 +6072,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::GeneralRef(reference)) => {
                 if form_localized_text_path_allows_entity_ref(&path, &current_child_items)
                     || path_ends_with_for_child_row_picture_data_path(&path, &current_child_items)
-                    || path_ends_with_for_usual_group_title_text_color(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
@@ -7247,16 +7231,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.behavior = Some(parse_form_group_behavior_xml(text_value.trim())?);
                         }
                     }
-                    "TitleTextColor"
-                        if path_ends_with_for_usual_group_title_text_color(
-                            &path,
-                            &current_child_items,
-                        ) =>
-                    {
-                        if let Some(item) = current_child_items.last_mut() {
-                            item.title_text_color = Some(text_value.trim().to_string());
-                        }
-                    }
                     "Representation"
                         if path_ends_with_for_child_group_representation(
                             &path,
@@ -8051,7 +8025,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ChoiceButtonRepresentation"
                         | "Behavior"
                         | "Representation"
-                        | "TitleTextColor"
                         | "lang"
                         | "content"
                 ) {
@@ -8247,8 +8220,6 @@ fn parse_form_child_item_xml(
         choice_button_representation: None,
         item_type: None,
         addition_source_item: None,
-        title_text_color: None,
-        title_font: None,
         title: Vec::new(),
         tooltip: Vec::new(),
         extended_tooltip: None,
@@ -8398,22 +8369,6 @@ fn path_ends_with_for_child_tooltip(path: &[String], items: &[FormXmlChildItem])
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "ToolTip"])
-}
-
-fn path_ends_with_for_usual_group_title_text_color(
-    path: &[String],
-    items: &[FormXmlChildItem],
-) -> bool {
-    let Some(item) = items.last() else {
-        return false;
-    };
-    item.tag == "UsualGroup" && path_ends_with(path, &[item.tag.as_str(), "TitleTextColor"])
-}
-
-fn path_ends_with_for_current_usual_group(path: &[String], items: &[FormXmlChildItem]) -> bool {
-    items.last().is_some_and(|item| {
-        item.tag == "UsualGroup" && path.last().map(String::as_str) == Some(item.tag.as_str())
-    })
 }
 
 fn path_ends_with_for_current_child_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -11810,8 +11765,8 @@ fn format_form_layout_new_extended_group_with_child_span(
         show_title,
         scroll_on_compress,
         height,
-        form_new_extended_group_title_text_color(item, source)?,
-        form_new_extended_group_title_font(item, source)?,
+        form_new_extended_group_style(item),
+        form_new_extended_group_size(item),
         form_new_extended_group_options(item)?,
         creatable_children.len()
     );
@@ -11837,92 +11792,19 @@ fn format_form_layout_new_extended_group_with_child_span(
     Ok(text)
 }
 
-fn form_new_extended_group_title_text_color(
-    item: &FormXmlChildItem,
-    source: Option<&MetadataSourceContext>,
-) -> Result<String> {
-    item.title_text_color
-        .as_deref()
-        .map(|value| format_style_body_color_value(value, source))
-        .transpose()
-        .map(|value| value.unwrap_or_else(|| "{4,4,{0},4}".to_string()))
-}
-
-fn form_new_extended_group_title_font(
-    item: &FormXmlChildItem,
-    source: Option<&MetadataSourceContext>,
-) -> Result<String> {
-    item.title_font
-        .as_ref()
-        .map(|attrs| format_style_body_font_value(attrs, source))
-        .transpose()
-        .map(|value| value.unwrap_or_else(|| "{8,3,0,1,100}".to_string()))
-}
-
-fn form_existing_extended_group_title_text_color(
-    item: &FormXmlChildItem,
-    source: Option<&MetadataSourceContext>,
-    existing: &str,
-) -> Result<String> {
-    let formatted = form_new_extended_group_title_text_color(item, source)?;
-    let existing = existing.trim();
-    let fields = scan_braced_fields(existing, 0)?;
-    match fields.first().map(|field| existing[field.clone()].trim()) {
-        Some("4") => Ok(formatted),
-        Some("3") => {
-            let formatted_fields = scan_braced_fields(&formatted, 0)?;
-            if formatted_fields.len() != 4
-                || formatted_fields
-                    .first()
-                    .map(|field| formatted[field.clone()].trim())
-                    != Some("4")
-            {
-                return Err(anyhow!("unsupported Form UsualGroup TitleTextColor tuple"));
-            }
-            Ok(format!(
-                "{{3,{},{}}}",
-                formatted[formatted_fields[1].clone()].trim(),
-                formatted[formatted_fields[2].clone()].trim()
-            ))
-        }
-        _ => Err(anyhow!(
-            "unsupported existing Form UsualGroup TitleTextColor slot"
-        )),
+fn form_new_extended_group_style(item: &FormXmlChildItem) -> &'static str {
+    if item.tag == "UsualGroup" && item.behavior == Some(FormXmlGroupBehavior::PopUp) {
+        "{4,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f},3}"
+    } else {
+        "{4,4,{0},4}"
     }
 }
 
-fn form_existing_extended_group_title_font(
-    item: &FormXmlChildItem,
-    source: Option<&MetadataSourceContext>,
-    existing: &str,
-) -> Result<String> {
-    let formatted = form_new_extended_group_title_font(item, source)?;
-    let existing = existing.trim();
-    let existing_fields = scan_braced_fields(existing, 0)?;
-    match existing_fields
-        .first()
-        .map(|field| existing[field.clone()].trim())
-    {
-        Some("8") => Ok(formatted),
-        Some("7") => {
-            let formatted_fields = scan_braced_fields(&formatted, 0)?;
-            if formatted_fields
-                .first()
-                .map(|field| formatted[field.clone()].trim())
-                != Some("8")
-            {
-                return Err(anyhow!("unsupported Form UsualGroup TitleFont tuple"));
-            }
-            let mut values = formatted_fields
-                .iter()
-                .map(|field| formatted[field.clone()].trim())
-                .collect::<Vec<_>>();
-            values[0] = "7";
-            Ok(format!("{{{}}}", values.join(",")))
-        }
-        _ => Err(anyhow!(
-            "unsupported existing Form UsualGroup TitleFont slot"
-        )),
+fn form_new_extended_group_size(item: &FormXmlChildItem) -> &'static str {
+    if item.tag == "UsualGroup" && item.behavior == Some(FormXmlGroupBehavior::PopUp) {
+        "{8,2,0,{-31},1,100}"
+    } else {
+        "{8,3,0,1,100}"
     }
 }
 
@@ -12662,34 +12544,25 @@ fn patch_form_layout_child_item_entry(
     {
         replacements.push((settings_range.clone(), settings));
     }
-    if item.tag == "UsualGroup" {
-        if item.title_text_color.is_some() {
-            let style_range = fields.get(16).ok_or_else(|| {
-                anyhow!(
-                    "Form UsualGroup TitleTextColor slot is missing for {}",
-                    item.name
-                )
-            })?;
-            let replacement = form_existing_extended_group_title_text_color(
-                item,
-                source,
-                &text[style_range.clone()],
-            )?;
-            if !one_c_values_equal_ignoring_ws(&text[style_range.clone()], &replacement) {
-                replacements.push((style_range.clone(), replacement));
+    if item.tag == "UsualGroup"
+        && let Some(behavior) = item.behavior
+    {
+        if let Some(style_range) = fields.get(16) {
+            let replacement = match behavior {
+                FormXmlGroupBehavior::PopUp => "{4,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f},3}",
+                FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{4,4,{0},4}",
+            };
+            if !one_c_values_equal_ignoring_ws(&text[style_range.clone()], replacement) {
+                replacements.push((style_range.clone(), replacement.to_string()));
             }
         }
-        if item.title_font.is_some() {
-            let font_range = fields.get(17).ok_or_else(|| {
-                anyhow!(
-                    "Form UsualGroup TitleFont slot is missing for {}",
-                    item.name
-                )
-            })?;
-            let replacement =
-                form_existing_extended_group_title_font(item, source, &text[font_range.clone()])?;
-            if !one_c_values_equal_ignoring_ws(&text[font_range.clone()], &replacement) {
-                replacements.push((font_range.clone(), replacement));
+        if let Some(size_range) = fields.get(17) {
+            let replacement = match behavior {
+                FormXmlGroupBehavior::PopUp => "{8,2,0,{-31},1,100}",
+                FormXmlGroupBehavior::Usual | FormXmlGroupBehavior::Collapsible => "{8,3,0,1,100}",
+            };
+            if !one_c_values_equal_ignoring_ws(&text[size_range.clone()], replacement) {
+                replacements.push((size_range.clone(), replacement.to_string()));
             }
         }
     }
@@ -29732,194 +29605,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.module_text, "Old module");
         assert_eq!(parsed.trailing, vec!["{0}"]);
 
-        Ok(())
-    }
-
-    #[test]
-    fn packs_popup_usual_group_title_styles_from_current_source() -> anyhow::Result<()> {
-        let root = std::env::temp_dir().join(format!(
-            "ibcmd-rs-form-popup-style-source-{}",
-            uuid::Uuid::new_v4().hyphenated()
-        ));
-        std::fs::create_dir_all(root.join("StyleItems"))?;
-        for (name, uuid) in [
-            ("AccentOne", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
-            ("AccentTwo", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
-        ] {
-            std::fs::write(
-                root.join("StyleItems").join(format!("{name}.xml")),
-                format!(
-                    r#"<MetaDataObject><StyleItem uuid="{uuid}"><Properties><Name>{name}</Name></Properties></StyleItem></MetaDataObject>"#
-                ),
-            )?;
-        }
-        let source = super::MetadataSourceContext::new(root.clone());
-        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
-	<ChildItems>
-		<UsualGroup name="PopupA" id="22">
-			<TitleTextColor>style:AccentOne</TitleTextColor>
-			<TitleFont ref="style:NormalTextFont" kind="StyleItem"/>
-			<Behavior>PopUp</Behavior>
-		</UsualGroup>
-		<UsualGroup name="PopupB" id="23">
-			<TitleTextColor>style:AccentTwo</TitleTextColor>
-			<Behavior>PopUp</Behavior>
-		</UsualGroup>
-	</ChildItems>
-</Form>
-"#;
-
-        let packed =
-            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
-        let parsed = super::parse_form_body_blob(&packed.blob)?;
-        let _ = std::fs::remove_dir_all(&root);
-
-        assert!(
-            parsed
-                .layout
-                .contains("{4,3,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},3}")
-        );
-        assert!(
-            parsed
-                .layout
-                .contains("{4,3,{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},3}")
-        );
-        assert!(parsed.layout.contains("{8,2,0,{-31},1,100}"));
-        Ok(())
-    }
-
-    #[test]
-    fn patches_popup_title_style_preserving_form_tuple_flavor() -> anyhow::Result<()> {
-        let root = std::env::temp_dir().join(format!(
-            "ibcmd-rs-form-popup-style-flavor-{}",
-            uuid::Uuid::new_v4().hyphenated()
-        ));
-        std::fs::create_dir_all(root.join("StyleItems"))?;
-        std::fs::write(
-            root.join("StyleItems/AccentLegacy.xml"),
-            br#"<MetaDataObject><StyleItem uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"><Properties><Name>AccentLegacy</Name></Properties></StyleItem></MetaDataObject>"#,
-        )?;
-        let source = super::MetadataSourceContext::new(root.clone());
-        let base = super::deflate_raw(
-            r#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{38,0,0,0,0,{0},{1,0},{"Pattern"},"",{4,4,{0},4},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{4,4,{0},4},0,2,0,0,0,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,0,0,0,2,0,0,0},0,1,0,0,0,3,3,0}},"Old module",{0}}"#
-                .as_bytes(),
-        )?;
-        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><UsualGroup name="MainGroup" id="22"><TitleTextColor>style:AccentLegacy</TitleTextColor><TitleFont ref="style:NormalTextFont" kind="StyleItem"/><Behavior>PopUp</Behavior></UsualGroup></ChildItems></Form>"#;
-
-        let packed =
-            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;
-        let parsed = super::parse_form_body_blob(&packed.blob)?;
-        let _ = std::fs::remove_dir_all(&root);
-
-        assert!(
-            parsed
-                .layout
-                .contains("{3,3,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}}")
-        );
-        assert!(parsed.layout.contains("{7,2,0,{-31},1,100}"));
-        assert!(
-            !parsed
-                .layout
-                .contains("{4,3,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},3}")
-        );
-        assert!(!parsed.layout.contains("{8,2,0,{-31},1,100}"));
-        Ok(())
-    }
-
-    #[test]
-    fn popup_usual_group_style_requires_declared_source_metadata() -> anyhow::Result<()> {
-        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
-	<ChildItems>
-		<UsualGroup name="Popup" id="22">
-			<TitleTextColor>style:MissingAccent</TitleTextColor>
-			<Behavior>PopUp</Behavior>
-		</UsualGroup>
-	</ChildItems>
-</Form>
-"#;
-
-        let source_less = super::pack_form_body_blob_from_form_xml(&base, xml, None)
-            .expect_err("custom StyleItem must not resolve without a source root");
-        assert!(format!("{source_less:#}").contains("source root is required"));
-
-        let root = std::env::temp_dir().join(format!(
-            "ibcmd-rs-form-popup-missing-style-{}",
-            uuid::Uuid::new_v4().hyphenated()
-        ));
-        std::fs::create_dir_all(root.join("StyleItems"))?;
-        let source = super::MetadataSourceContext::new(root.clone());
-        let missing_style =
-            super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))
-                .expect_err("undeclared StyleItem must not produce a serialized UUID");
-        let _ = std::fs::remove_dir_all(&root);
-
-        assert!(format!("{missing_style:#}").contains("failed to read StyleItem XML"));
-        Ok(())
-    }
-
-    #[test]
-    fn popup_behavior_transitions_preserve_undeclared_title_style_slots() -> anyhow::Result<()> {
-        let base = super::deflate_raw(
-            r#"{4,{59,1,11111111-1111-4111-8111-111111111111,{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,3,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},3},{8,2,0,{-31},1,100},{0,0,0},1,{38,0,0,0,0,{0},{1,0},{"Pattern"},"",{4,4,{0},4},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{4,4,{0},4},0,2,0,0,0,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,0,0,0,2,0,0,0},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupExtendedTooltip",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}},"Old module",{0}}"#
-                .as_bytes(),
-        )?;
-        let popup_xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><UsualGroup name="MainGroup" id="22"><Behavior>PopUp</Behavior></UsualGroup></ChildItems></Form>"#;
-        let usual_xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><UsualGroup name="MainGroup" id="22"><Behavior>Usual</Behavior></UsualGroup></ChildItems></Form>"#;
-
-        let new_base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
-        let new_popup = super::pack_form_body_blob_from_form_xml(&new_base, popup_xml, None)?;
-        let new_popup_parsed = super::parse_form_body_blob(&new_popup.blob)?;
-        let new_popup_layout_fields = super::scan_braced_fields(&new_popup_parsed.layout, 0)?;
-        let new_popup_group_fields =
-            super::scan_braced_fields(&new_popup_parsed.layout, new_popup_layout_fields[3].start)?;
-        assert_eq!(
-            &new_popup_parsed.layout[new_popup_group_fields[16].clone()],
-            "{4,4,{0},4}"
-        );
-        assert_eq!(
-            &new_popup_parsed.layout[new_popup_group_fields[17].clone()],
-            "{8,3,0,1,100}"
-        );
-
-        let popup = super::pack_form_body_blob_from_form_xml(&base, popup_xml, None)?;
-        let popup_parsed = super::parse_form_body_blob(&popup.blob)?;
-        let popup_layout_fields = super::scan_braced_fields(&popup_parsed.layout, 0)?;
-        let popup_group_fields =
-            super::scan_braced_fields(&popup_parsed.layout, popup_layout_fields[3].start)?;
-        let popup_options =
-            super::scan_braced_fields(&popup_parsed.layout, popup_group_fields[20].start)?;
-
-        assert_eq!(
-            &popup_parsed.layout[popup_group_fields[16].clone()],
-            "{4,3,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},3}"
-        );
-        assert_eq!(
-            &popup_parsed.layout[popup_group_fields[17].clone()],
-            "{8,2,0,{-31},1,100}"
-        );
-        assert_eq!(&popup_parsed.layout[popup_options[28].clone()], "2");
-
-        let usual = super::pack_form_body_blob_from_form_xml(&popup.blob, usual_xml, None)?;
-        let usual_parsed = super::parse_form_body_blob(&usual.blob)?;
-        let usual_layout_fields = super::scan_braced_fields(&usual_parsed.layout, 0)?;
-        let usual_group_fields =
-            super::scan_braced_fields(&usual_parsed.layout, usual_layout_fields[3].start)?;
-        let usual_options =
-            super::scan_braced_fields(&usual_parsed.layout, usual_group_fields[20].start)?;
-
-        assert_eq!(
-            &usual_parsed.layout[usual_group_fields[16].clone()],
-            "{4,3,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},3}"
-        );
-        assert_eq!(
-            &usual_parsed.layout[usual_group_fields[17].clone()],
-            "{8,2,0,{-31},1,100}"
-        );
-        assert_eq!(&usual_parsed.layout[usual_options[28].clone()], "0");
         Ok(())
     }
 
