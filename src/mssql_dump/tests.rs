@@ -4501,143 +4501,6 @@ fn extracts_form_child_items_from_layout_pairs() {
     );
 }
 
-fn document_field_options_for_test(discriminator: &str) -> String {
-    let (len, options_kind) = match discriminator {
-        "6" => (32, "13"),
-        "8" => (24, "6"),
-        "14" => (14, "3"),
-        "15" => (13, "3"),
-        _ => panic!("unsupported test discriminator"),
-    };
-    let mut options = vec!["0".to_string(); len];
-    options[0] = options_kind.to_string();
-    options[1] = "9".to_string();
-    options[2] = "8".to_string();
-    if discriminator == "8" {
-        options[15] = "1".to_string();
-        options[16] = "6".to_string();
-        options[17] = "2".to_string();
-    }
-    format!("{{{}}}", options.join(","))
-}
-
-fn document_field_record_for_test(discriminator: &str, title: &str) -> String {
-    let mut fields = vec!["0".to_string(); 53];
-    fields[0] = "37".to_string();
-    fields[1] = "{101,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
-    fields[5] = discriminator.to_string();
-    fields[6] = "\"DocumentField\"".to_string();
-    fields[7] = "4".to_string();
-    fields[9] = title.to_string();
-    fields[11] = "{1,{5}}".to_string();
-    fields[14] = matches!(discriminator, "14" | "15")
-        .then_some("1")
-        .unwrap_or("0")
-        .to_string();
-    fields[39] = document_field_options_for_test(discriminator);
-    format!("{{{}}}", fields.join(","))
-}
-
-#[test]
-fn dispatches_wrapper_37_document_fields_without_owner_specific_conditions() {
-    for (discriminator, expected_tag) in [
-        ("6", "SpreadSheetDocumentField"),
-        ("8", "CalendarField"),
-        ("14", "GraphicalSchemaField"),
-        ("15", "HTMLDocumentField"),
-    ] {
-        let record = document_field_record_for_test(discriminator, "{1,0}");
-        let fields = split_1c_braced_fields(&record, 0).unwrap();
-
-        assert_eq!(form_child_item_tag("37", &fields), Some(expected_tag));
-        assert_eq!(form_child_item_tag("48", &fields), None);
-    }
-
-    let record = document_field_record_for_test("8", "{1,0}");
-    let mut fields = split_1c_braced_fields(&record, 0).unwrap();
-    fields[5] = "13";
-    assert_eq!(form_child_item_tag("37", &fields), None);
-}
-
-#[test]
-fn parses_document_field_properties_from_common_and_typed_slots() {
-    let attribute_names = BTreeMap::from([("5".to_string(), "Payload".to_string())]);
-    for (discriminator, expected_tag) in [
-        ("6", "SpreadSheetDocumentField"),
-        ("8", "CalendarField"),
-        ("14", "GraphicalSchemaField"),
-        ("15", "HTMLDocumentField"),
-    ] {
-        let title = if matches!(discriminator, "14" | "15") {
-            r#"{1,1,{"en","Schema"}}"#
-        } else {
-            "{1,0}"
-        };
-        let item = parse_form_child_item_with_attrs(
-            &document_field_record_for_test(discriminator, title),
-            None,
-            None,
-            &attribute_names,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[],
-            &BTreeMap::new(),
-        )
-        .unwrap();
-
-        assert_eq!(item.tag, expected_tag);
-        assert_eq!(item.data_path.as_deref(), Some("Payload"));
-        assert_eq!(item.title_location, Some("Right"));
-        let xml = format_form_child_items_xml(&[item], 1);
-        if discriminator == "8" {
-            assert!(xml.contains("<Width>9</Width>"));
-            assert!(xml.contains("<Height>8</Height>"));
-            assert!(xml.contains("<ShowCurrentDate>true</ShowCurrentDate>"));
-            assert!(xml.contains("<WidthInMonths>6</WidthInMonths>"));
-            assert!(xml.contains("<HeightInMonths>2</HeightInMonths>"));
-        }
-        if matches!(discriminator, "14" | "15") {
-            assert!(xml.find("<ReadOnly>true</ReadOnly>").unwrap() < xml.find("<Title>").unwrap());
-        }
-    }
-}
-
-#[test]
-fn rejects_document_field_records_without_common_identity_or_name() {
-    let record = document_field_record_for_test("8", "{1,0}");
-    let mut fields = split_1c_braced_fields(&record, 0).unwrap();
-    fields[1] = "{0,02023637-7868-4a5f-8576-835a76e0c9ba}";
-    assert!(
-        parse_form_child_item(
-            &format!("{{{}}}", fields.join(",")),
-            None,
-            None,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[],
-            &BTreeMap::new(),
-        )
-        .is_none()
-    );
-
-    fields[1] = "{101,02023637-7868-4a5f-8576-835a76e0c9ba}";
-    fields[6] = "\"\"";
-    assert!(
-        parse_form_child_item(
-            &format!("{{{}}}", fields.join(",")),
-            None,
-            None,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[],
-            &BTreeMap::new(),
-        )
-        .is_none()
-    );
-}
-
 #[test]
 fn extracts_form_usual_group_group_from_layout_code() {
     let item = parse_form_child_item(
@@ -9079,9 +8942,6 @@ fn formats_table_search_additions_as_direct_sections() {
         font_xml: None,
         width: None,
         height: None,
-        show_current_date: None,
-        width_in_months: None,
-        height_in_months: None,
         auto_max_width: None,
         max_width: None,
         auto_max_height: None,
@@ -9194,9 +9054,6 @@ fn formats_table_search_additions_as_direct_sections() {
                 font_xml: None,
                 width: None,
                 height: None,
-                show_current_date: None,
-                width_in_months: None,
-                height_in_months: None,
                 auto_max_width: None,
                 max_width: None,
                 auto_max_height: None,
@@ -9310,9 +9167,6 @@ fn formats_table_search_additions_as_direct_sections() {
                 font_xml: None,
                 width: None,
                 height: None,
-                show_current_date: None,
-                width_in_months: None,
-                height_in_months: None,
                 auto_max_width: None,
                 max_width: None,
                 auto_max_height: None,
