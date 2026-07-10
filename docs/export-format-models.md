@@ -197,6 +197,17 @@ Rejected hypothesis:
   wrapper leak but was still incomplete because unresolved `appIndex` values
   require the side-table substitution model above. Both failures were reported
   and rolled into the final fail-closed admission rule.
+- Reordering mixed `valueType` entries by QName, source order, or an inferred
+  UUID threshold is not supported. In BSP, 19 of 726 schema `valueType` nodes
+  mix symbolic `xs:string` with a metadata `TypeId`; seven have an order-only
+  residual and 12 are native-exact negative controls. In `ut_ibcmd`, the same
+  `CatalogRef.Пользователи` QName sorts on the opposite side of `xs:string`
+  because its dynamic TypeId differs. Raw data stores primitives symbolically
+  (`{"S"}`) and exposes no platform order key for `xs:string`; no builtin type
+  registry was found in Config. A production change therefore requires an
+  authoritative primitive order key/comparator. Until then, the seven residuals
+  remain deliberately unchanged rather than introducing a corpus-derived
+  threshold hardcode.
 
 ## Metadata generated type families
 
