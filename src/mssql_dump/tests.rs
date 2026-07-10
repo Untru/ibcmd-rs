@@ -20913,6 +20913,270 @@ fn extracts_accounting_and_calculation_register_generated_types_internal_info() 
 }
 
 #[test]
+fn routes_and_serializes_calculation_register_recalculation() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let recalculation_uuid = "22222222-2222-4222-8222-222222222222";
+    let dimension_uuid = "33333333-3333-4333-8333-333333333333";
+    let register_dimension_uuid = "44444444-4444-4444-8444-444444444444";
+    let type_ids = [
+        "55555555-5555-4555-8555-555555555551",
+        "55555555-5555-4555-8555-555555555552",
+        "66666666-6666-4666-8666-666666666661",
+        "66666666-6666-4666-8666-666666666662",
+        "77777777-7777-4777-8777-777777777771",
+        "77777777-7777-4777-8777-777777777772",
+    ];
+    let reference_type_id = "88888888-8888-4888-8888-888888888888";
+    let text = format!(
+        "{{1,\r\n\
+{{4,{},{},{},{},{},{},\r\n\
+{{0,\r\n\
+{{3,\r\n\
+{{1,0,{recalculation_uuid}}},\"BaseData\",{{1,\"en\",\"Base data\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n\
+}},1}},1,\r\n\
+{{{RECALCULATION_DIMENSION_LIST_MARKER},1,\r\n\
+{{\r\n\
+{{1,\r\n\
+{{3,\r\n\
+{{1,0,{dimension_uuid}}},\"Employee\",{{1,\"en\",\"Employee\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{register_dimension_uuid},\r\n\
+{{0,1,\r\n\
+{{\"#\",{reference_type_id},\r\n\
+{{1,{register_dimension_uuid}}}\r\n\
+}}\r\n\
+}}\r\n\
+}},0}}\r\n\
+}}\r\n\
+}}}}",
+        type_ids[0], type_ids[1], type_ids[2], type_ids[3], type_ids[4], type_ids[5],
+    );
+    let child = metadata_text_row_from_text(recalculation_uuid, text.clone()).unwrap();
+    assert_eq!(child.object_code, Some(4));
+    assert_eq!(child.kind, None);
+
+    let owner = MetadataTextRow {
+        file_name: owner_uuid.to_string(),
+        text: format!("{{274bf899-db0e-4df6-8ab5-67bf6371ec0b,1,{recalculation_uuid}}}"),
+        object_code: Some(21),
+        header: Some(MetadataHeader {
+            uuid: owner_uuid.to_string(),
+            name: "Payroll".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("CalculationRegister".to_string()),
+        folder: Some("CalculationRegisters"),
+    };
+    let rows = vec![owner, child];
+    let recalculation_refs = build_calculation_recalculation_reference_index(&rows);
+    assert_eq!(
+        recalculation_refs.get(recalculation_uuid),
+        Some(&CalculationRecalculationReference {
+            owner_name: "Payroll".to_string(),
+            recalculation_name: "BaseData".to_string(),
+        })
+    );
+
+    let mut object_refs = build_metadata_object_reference_index_from_texts(&rows);
+    object_refs.insert(
+        register_dimension_uuid.to_string(),
+        "CalculationRegister.Payroll.Dimension.Employee".to_string(),
+    );
+    let blob = deflate_for_test(text.as_bytes());
+    let extracted = extract_metadata_source_xml_with_recalculation_refs(
+        &blob,
+        recalculation_uuid,
+        &BTreeMap::new(),
+        &object_refs,
+        &recalculation_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("CalculationRegisters/Payroll/Recalculations/BaseData.xml")
+    );
+    assert!(xml.starts_with('\u{feff}'));
+    assert_eq!(xml.matches("<xr:GeneratedType").count(), 3);
+    assert!(xml.contains(
+        r#"<xr:GeneratedType name="RecalculationRecord.Payroll.BaseData" category="Record">"#
+    ));
+    assert!(xml.contains(
+        r#"<xr:GeneratedType name="RecalculationManager.Payroll.BaseData" category="Manager">"#
+    ));
+    assert!(xml.contains(r#"<Dimension uuid="33333333-3333-4333-8333-333333333333">"#));
+    assert!(xml.contains(
+        "<RegisterDimension>CalculationRegister.Payroll.Dimension.Employee</RegisterDimension>"
+    ));
+    assert!(xml.contains(
+        r#"<xr:Item xsi:type="xr:MDObjectRef">CalculationRegister.Payroll.Dimension.Employee</xr:Item>"#
+    ));
+    assert!(xml.contains("<DataLockControlMode>Managed</DataLockControlMode>"));
+    assert!(!xml.replace("\r\n", "").contains('\n'));
+
+    let type_index = build_metadata_type_index_from_texts(&rows);
+    assert_eq!(
+        type_index.get(type_ids[0]).map(String::as_str),
+        Some("cfg:RecalculationRecord.Payroll.BaseData")
+    );
+    assert_eq!(
+        type_index.get(type_ids[2]).map(String::as_str),
+        Some("cfg:RecalculationManager.Payroll.BaseData")
+    );
+    assert_eq!(
+        type_index.get(type_ids[4]).map(String::as_str),
+        Some("cfg:RecalculationRecordSet.Payroll.BaseData")
+    );
+}
+
+#[test]
+fn serializes_zero_dimension_recalculation_and_automatic_lock_mode() {
+    let recalculation_uuid = "22222222-2222-4222-8222-222222222222";
+    let text = format!(
+        "{{1,\r\n\
+{{4,55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\r\n\
+{{0,\r\n\
+{{3,\r\n\
+{{1,0,{recalculation_uuid}}},\"NoDimensions\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n\
+}},1}},0,\r\n\
+{{{RECALCULATION_DIMENSION_LIST_MARKER},0}}\r\n\
+}}"
+    );
+    let row = metadata_text_row_from_text(recalculation_uuid, text).unwrap();
+    let needs = selected_configuration_source_asset_index_needs_with_metadata(
+        &BTreeSet::from([recalculation_uuid.to_string()]),
+        std::slice::from_ref(&row),
+    )
+    .unwrap();
+    assert!(needs.object_refs);
+    assert!(needs.type_index);
+    let recalculation_ref = CalculationRecalculationReference {
+        owner_name: "Payroll".to_string(),
+        recalculation_name: "NoDimensions".to_string(),
+    };
+    let properties = parse_recalculation_properties_from_text(
+        &row.text,
+        recalculation_uuid,
+        &recalculation_ref,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(properties.dimensions.is_empty());
+    assert_eq!(properties.data_lock_control_mode, "Automatic");
+
+    let xml = format_recalculation_source_xml(
+        row.header.as_ref().unwrap(),
+        &properties,
+        InfobaseConfigSourceVersion::V2_20,
+    );
+    assert!(xml.contains("<DataLockControlMode>Automatic</DataLockControlMode>"));
+    assert!(xml.contains("\t\t<ChildObjects/>\r\n"));
+    assert!(!xml.contains("<Dimension uuid="));
+}
+
+#[test]
+fn recalculation_route_rejects_ambiguous_owners_and_non_recalculation_code4() {
+    let recalculation_uuid = "22222222-2222-4222-8222-222222222222";
+    let child = |uuid: &str| MetadataTextRow {
+        file_name: uuid.to_string(),
+        text: format!("{{1,{{4,{{0,{{3,{{1,0,{uuid}}},\"Picture\",{{0}},\"\"}},1}}}}}}"),
+        object_code: Some(4),
+        header: Some(MetadataHeader {
+            uuid: uuid.to_string(),
+            name: "Picture".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: None,
+        folder: None,
+    };
+    let owner = |uuid: &str, name: &str| MetadataTextRow {
+        file_name: uuid.to_string(),
+        text: format!("{{274bf899-db0e-4df6-8ab5-67bf6371ec0b,1,{recalculation_uuid}}}"),
+        object_code: Some(21),
+        header: Some(MetadataHeader {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("CalculationRegister".to_string()),
+        folder: Some("CalculationRegisters"),
+    };
+
+    let single_owner_rows = vec![
+        owner("11111111-1111-4111-8111-111111111111", "Payroll"),
+        child(recalculation_uuid),
+    ];
+    let refs = build_calculation_recalculation_reference_index(&single_owner_rows);
+    assert!(refs.contains_key(recalculation_uuid));
+    assert!(
+        parse_recalculation_properties_from_text(
+            &single_owner_rows[1].text,
+            recalculation_uuid,
+            refs.get(recalculation_uuid).unwrap(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let ambiguous_rows = vec![
+        owner("11111111-1111-4111-8111-111111111111", "Payroll"),
+        owner("33333333-3333-4333-8333-333333333333", "OtherPayroll"),
+        child(recalculation_uuid),
+    ];
+    assert!(
+        !build_calculation_recalculation_reference_index(&ambiguous_rows)
+            .contains_key(recalculation_uuid)
+    );
+
+    let colliding_path_rows = vec![
+        owner("11111111-1111-4111-8111-111111111111", "Payroll"),
+        owner("33333333-3333-4333-8333-333333333333", "Payroll"),
+        child(recalculation_uuid),
+    ];
+    assert!(
+        !build_calculation_recalculation_reference_index(&colliding_path_rows)
+            .contains_key(recalculation_uuid)
+    );
+
+    let second_recalculation_uuid = "44444444-4444-4444-8444-444444444444";
+    let same_owner_path_collision_rows = vec![
+        MetadataTextRow {
+            file_name: "11111111-1111-4111-8111-111111111111".to_string(),
+            text: format!(
+                "{{274bf899-db0e-4df6-8ab5-67bf6371ec0b,2,{recalculation_uuid},{second_recalculation_uuid}}}"
+            ),
+            object_code: Some(21),
+            header: Some(MetadataHeader {
+                uuid: "11111111-1111-4111-8111-111111111111".to_string(),
+                name: "Payroll".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some("CalculationRegister".to_string()),
+            folder: Some("CalculationRegisters"),
+        },
+        child(recalculation_uuid),
+        child(second_recalculation_uuid),
+    ];
+    let refs = build_calculation_recalculation_reference_index(&same_owner_path_collision_rows);
+    assert!(!refs.contains_key(recalculation_uuid));
+    assert!(!refs.contains_key(second_recalculation_uuid));
+}
+
+#[test]
 fn extracts_register_dimension_resource_and_attribute_child_objects() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let dimension_uuid = "22222222-2222-4222-8222-222222222222";

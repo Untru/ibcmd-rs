@@ -296,6 +296,7 @@ struct DumpRowContext<'a> {
     type_index: &'a BTreeMap<String, String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
+    recalculation_refs: &'a BTreeMap<String, CalculationRecalculationReference>,
     predefined_item_refs: &'a BTreeMap<String, String>,
     role_rights_object_refs: &'a BTreeMap<String, String>,
     metadata_order: &'a BTreeMap<String, usize>,
@@ -404,6 +405,11 @@ fn dump_table_rows_with_options(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
+    let recalculation_refs = if extract_metadata_xml {
+        build_calculation_recalculation_reference_index(&metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
     let module_text_paths = if extract_module_text {
         module_body_paths_from_texts(&rows, &metadata_texts)
     } else {
@@ -556,6 +562,7 @@ fn dump_table_rows_with_options(
         type_index: &type_index,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        recalculation_refs: &recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
@@ -1081,6 +1088,11 @@ fn dump_table_rows_streamed(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
+    let recalculation_refs = if extract_metadata_xml {
+        build_calculation_recalculation_reference_index(&index_metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
 
     let module_text_paths = if extract_module_text {
         module_body_paths_from_texts(&write_index_rows, &index_metadata_texts)
@@ -1313,6 +1325,7 @@ fn dump_table_rows_streamed(
         type_index: &type_index,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        recalculation_refs: &recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
@@ -1668,6 +1681,7 @@ fn dump_table_row_bytes(
                 row,
                 context.type_index,
                 context.object_refs,
+                context.recalculation_refs,
                 context.functional_option_refs,
                 context.form_refs,
                 context.template_refs,
@@ -1675,11 +1689,12 @@ fn dump_table_row_bytes(
                 context.source_version,
             )
         } else {
-            extract_metadata_source_xml_with_refs(
+            extract_metadata_source_xml_with_recalculation_refs(
                 &bytes,
                 file_name,
                 context.type_index,
                 context.object_refs,
+                context.recalculation_refs,
                 context.functional_option_refs,
                 context.form_refs,
                 context.template_refs,
@@ -3288,6 +3303,17 @@ struct RegisterProperties {
     child_objects: Vec<MetadataChildObject>,
 }
 
+struct RecalculationProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+    data_lock_control_mode: &'static str,
+    dimensions: Vec<RecalculationDimension>,
+}
+
+struct RecalculationDimension {
+    header: MetadataHeader,
+    register_dimension: String,
+}
+
 #[derive(Clone)]
 struct MetadataChildObject {
     tag: &'static str,
@@ -3884,6 +3910,7 @@ fn build_metadata_type_index_from_texts(rows: &[MetadataTextRow]) -> BTreeMap<St
 
 fn build_metadata_type_indexes_from_texts(rows: &[MetadataTextRow]) -> MetadataTypeIndexes {
     let mut indexes = MetadataTypeIndexes::default();
+    let recalculation_refs = build_calculation_recalculation_reference_index(rows);
     for (type_id, qname) in DCS_BUILTIN_REFERENCE_TYPE_SETS {
         indexes.dcs.insert(
             (*type_id).to_string(),
@@ -3893,7 +3920,12 @@ fn build_metadata_type_indexes_from_texts(rows: &[MetadataTextRow]) -> MetadataT
         );
     }
     for row in rows {
-        let entries = parse_indexed_generated_types_from_text(row)
+        let entries = recalculation_refs
+            .get(&row.file_name)
+            .and_then(|recalculation_ref| {
+                parse_indexed_recalculation_generated_types_from_text(row, recalculation_ref)
+            })
+            .or_else(|| parse_indexed_generated_types_from_text(row))
             .or_else(|| parse_indexed_generated_types_from_source_xml_text(&row.text));
         let Some(entries) = entries else { continue };
         for entry in entries {
@@ -4003,6 +4035,37 @@ fn parse_indexed_generated_types_from_text(
     }
 
     Some(entries)
+}
+
+fn parse_indexed_recalculation_generated_types_from_text(
+    row: &MetadataTextRow,
+    recalculation_ref: &CalculationRecalculationReference,
+) -> Option<Vec<IndexedGeneratedType>> {
+    let header = row.header.as_ref()?;
+    if row.object_code != Some(4) || header.name != recalculation_ref.recalculation_name {
+        return None;
+    }
+    let (fields, _, _) = recalculation_object_fields(&row.text, &row.file_name)?;
+    let name = format!(
+        "{}.{}",
+        recalculation_ref.owner_name, recalculation_ref.recalculation_name
+    );
+    let mut entries = Vec::new();
+    for (field_index, generated_type) in [
+        (1usize, "RecalculationRecord"),
+        (3, "RecalculationManager"),
+        (5, "RecalculationRecordSet"),
+    ] {
+        push_indexed_generated_type(
+            &mut entries,
+            &fields,
+            field_index,
+            generated_type,
+            &name,
+            GeneratedTypeDcsPolicy::Type,
+        );
+    }
+    (entries.len() == 3).then_some(entries)
 }
 
 #[derive(Clone, Copy)]
@@ -4636,11 +4699,38 @@ fn extract_metadata_source_xml(
     )
 }
 
+#[cfg(test)]
 fn extract_metadata_source_xml_with_refs(
     blob: &[u8],
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    functional_option_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<ExtractedMetadataSourceXml> {
+    extract_metadata_source_xml_with_recalculation_refs(
+        blob,
+        uuid,
+        type_index,
+        object_refs,
+        &BTreeMap::new(),
+        functional_option_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+        source_version,
+    )
+}
+
+fn extract_metadata_source_xml_with_recalculation_refs(
+    blob: &[u8],
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
@@ -4655,6 +4745,7 @@ fn extract_metadata_source_xml_with_refs(
         &row,
         type_index,
         object_refs,
+        recalculation_refs,
         functional_option_refs,
         form_refs,
         template_refs,
@@ -4667,6 +4758,7 @@ fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
@@ -4685,6 +4777,22 @@ fn extract_metadata_source_xml_from_text_row(
         });
     }
     let object_code = row.object_code?;
+    if object_code == 4 {
+        let recalculation_ref = recalculation_refs.get(uuid)?;
+        let header = row.header.as_ref()?;
+        if header.name != recalculation_ref.recalculation_name {
+            return None;
+        }
+        let properties =
+            parse_recalculation_properties_from_text(text, uuid, recalculation_ref, object_refs)?;
+        let relative_path = PathBuf::from("CalculationRegisters")
+            .join(sanitize_source_path_segment(&recalculation_ref.owner_name))
+            .join("Recalculations")
+            .join(sanitize_source_path_segment(&header.name))
+            .with_extension("xml");
+        let xml = format_recalculation_source_xml(header, &properties, source_version).into_bytes();
+        return Some(ExtractedMetadataSourceXml { relative_path, xml });
+    }
     if object_code == 12 {
         let header = row.header.as_ref()?;
         let flags = parse_common_module_flags_from_text(text, uuid)?;
@@ -5375,6 +5483,181 @@ fn exchange_plan_child_object_tag(text: &str, marker_start: usize) -> Option<&'s
     } else {
         None
     }
+}
+
+fn parse_recalculation_properties_from_text(
+    text: &str,
+    uuid: &str,
+    recalculation_ref: &CalculationRecalculationReference,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<RecalculationProperties> {
+    let (fields, data_lock_field, dimension_field) = recalculation_object_fields(text, uuid)?;
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    if header.name != recalculation_ref.recalculation_name {
+        return None;
+    }
+
+    let generated_type_name = format!(
+        "{}.{}",
+        recalculation_ref.owner_name, recalculation_ref.recalculation_name
+    );
+    let generated_types = [
+        (1usize, 2usize, "RecalculationRecord", "Record"),
+        (3, 4, "RecalculationManager", "Manager"),
+        (5, 6, "RecalculationRecordSet", "RecordSet"),
+    ]
+    .into_iter()
+    .map(|(type_index, value_index, prefix, category)| {
+        Some(GeneratedTypeEntry {
+            name: format!("{prefix}.{generated_type_name}"),
+            category,
+            type_id: parse_non_zero_uuid(fields.get(type_index)?.trim())?,
+            value_id: parse_non_zero_uuid(fields.get(value_index)?.trim())?,
+        })
+    })
+    .collect::<Option<Vec<_>>>()?;
+
+    let data_lock_control_mode = match data_lock_field.trim() {
+        "0" => "Automatic",
+        "1" => "Managed",
+        _ => return None,
+    };
+    let dimensions = parse_recalculation_dimensions(
+        dimension_field,
+        &recalculation_ref.owner_name,
+        object_refs,
+    )?;
+
+    Some(RecalculationProperties {
+        generated_types,
+        data_lock_control_mode,
+        dimensions,
+    })
+}
+
+fn recalculation_object_fields<'a>(
+    text: &'a str,
+    uuid: &str,
+) -> Option<(Vec<&'a str>, &'a str, &'a str)> {
+    let root_fields = split_1c_braced_fields(text, 0)?;
+    if root_fields.len() != 4 || root_fields.first()?.trim() != "1" {
+        return None;
+    }
+    let fields = split_1c_braced_fields(root_fields.get(1)?, 0)?;
+    let dimension_fields = split_1c_braced_fields(root_fields.get(3)?, 0)?;
+    let dimension_count = dimension_fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != 9
+        || fields.first()?.trim() != "4"
+        || metadata_header_field_index(&fields, uuid) != Some(7)
+        || !is_recalculation_header_field(fields.get(7)?, uuid)
+        || fields.get(8)?.trim() != "1"
+        || !matches!(root_fields.get(2)?.trim(), "0" | "1")
+        || dimension_fields.first()?.trim() != RECALCULATION_DIMENSION_LIST_MARKER
+        || dimension_fields.len() != dimension_count + 2
+        || !fields
+            .iter()
+            .skip(1)
+            .take(6)
+            .all(|field| parse_non_zero_uuid(field.trim()).is_some())
+    {
+        return None;
+    }
+    Some((fields, root_fields.get(2)?, root_fields.get(3)?))
+}
+
+fn is_recalculation_header_field(field: &str, uuid: &str) -> bool {
+    let Some(wrapper) = split_1c_braced_fields(field, 0) else {
+        return false;
+    };
+    if wrapper.len() != 2 || wrapper[0].trim() != "0" {
+        return false;
+    }
+    let Some(header_fields) = split_1c_braced_fields(wrapper[1], 0) else {
+        return false;
+    };
+    header_fields.first().map(|field| field.trim()) == Some("3")
+        && metadata_header_field_index(&header_fields, uuid) == Some(1)
+        && parse_metadata_header_from_text(wrapper[1], uuid).is_some()
+}
+
+fn parse_recalculation_dimensions(
+    field: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<RecalculationDimension>> {
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != RECALCULATION_DIMENSION_LIST_MARKER {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != count + 2 {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| parse_recalculation_dimension(field, owner_name, object_refs))
+        .collect()
+}
+
+fn parse_recalculation_dimension(
+    field: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<RecalculationDimension> {
+    let wrapper = split_1c_braced_fields(field, 0)?;
+    if wrapper.len() != 2 || wrapper.get(1)?.trim() != "0" {
+        return None;
+    }
+    let fields = split_1c_braced_fields(wrapper.first()?, 0)?;
+    if fields.len() != 4 || fields.first()?.trim() != "1" {
+        return None;
+    }
+
+    let header_field = fields.get(1)?;
+    let header_fields = split_1c_braced_fields(header_field, 0)?;
+    let dimension_uuid = uuid_like_values_in_text_order(header_field)
+        .into_iter()
+        .next()?;
+    if header_fields.first()?.trim() != "3"
+        || metadata_header_field_index(&header_fields, &dimension_uuid) != Some(1)
+    {
+        return None;
+    }
+    let header = parse_metadata_header_from_text(header_field, &dimension_uuid)?;
+
+    let register_dimension_uuid = parse_non_zero_uuid(fields.get(2)?.trim())?;
+    let leading = split_1c_braced_fields(fields.get(3)?, 0)?;
+    if leading.len() != 3 || leading.first()?.trim() != "0" || leading.get(1)?.trim() != "1" {
+        return None;
+    }
+    let typed_ref = split_1c_braced_fields(leading.get(2)?, 0)?;
+    if typed_ref.len() != 3
+        || typed_ref.first()?.trim() != "\"#\""
+        || parse_non_zero_uuid(typed_ref.get(1)?.trim()).is_none()
+    {
+        return None;
+    }
+    let ref_value = split_1c_braced_fields(typed_ref.get(2)?, 0)?;
+    if ref_value.len() != 2
+        || ref_value.first()?.trim() != "1"
+        || parse_non_zero_uuid(ref_value.get(1)?.trim()).as_deref()
+            != Some(register_dimension_uuid.as_str())
+    {
+        return None;
+    }
+
+    let register_dimension = object_refs.get(&register_dimension_uuid)?.clone();
+    let expected_prefix = format!("CalculationRegister.{owner_name}.Dimension.");
+    if !register_dimension.starts_with(&expected_prefix)
+        || register_dimension.len() == expected_prefix.len()
+    {
+        return None;
+    }
+    Some(RecalculationDimension {
+        header,
+        register_dimension,
+    })
 }
 
 fn parse_register_properties_from_text(
@@ -11232,6 +11515,68 @@ fn format_exchange_plan_internal_info_xml(exchange_plan: &ExchangePlanProperties
     }
     xml.push_str("\t\t</InternalInfo>\r\n");
     xml
+}
+
+fn format_recalculation_source_xml(
+    header: &MetadataHeader,
+    recalculation: &RecalculationProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("Recalculation", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&recalculation.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        xml.insert_str(
+            index,
+            &format!(
+                "\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n",
+                recalculation.data_lock_control_mode
+            ),
+        );
+    }
+    if let Some(index) = xml.find("\t</Recalculation>") {
+        if recalculation.dimensions.is_empty() {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        } else {
+            let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+            for dimension in &recalculation.dimensions {
+                push_recalculation_dimension_xml(&mut child_objects, dimension);
+            }
+            child_objects.push_str("\t\t</ChildObjects>\r\n");
+            xml.insert_str(index, &child_objects);
+        }
+    }
+    xml
+}
+
+fn push_recalculation_dimension_xml(xml: &mut String, dimension: &RecalculationDimension) {
+    xml.push_str(&format!(
+        "\t\t\t<Dimension uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&dimension.header.uuid),
+        escape_xml_element_text(&dimension.header.name),
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &dimension.header.synonyms);
+    if dimension.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&dimension.header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t\t<RegisterDimension>{reference}</RegisterDimension>\r\n\
+\t\t\t\t\t<LeadingRegisterData>\r\n\
+\t\t\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{reference}</xr:Item>\r\n\
+\t\t\t\t\t</LeadingRegisterData>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t</Dimension>\r\n",
+        reference = escape_xml_element_text(&dimension.register_dimension),
+    ));
 }
 
 fn format_register_source_xml(
