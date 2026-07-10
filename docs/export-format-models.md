@@ -389,6 +389,9 @@ Additional confirmed `CommandName` records:
   through the form item id table to `Item.<item-name>`.
 - For `ButtonGroup`, the source tuple must carry both the source item id and the
   managed-form item type UUID `02023637-7868-4a5f-8576-835a76e0c9ba`.
+  The outer source record must contain exactly four fields and its nested typed
+  reference exactly two; trailing fields are not forward-compatible extensions
+  of this proven shape.
   The proven shape is:
 
 ```text
@@ -524,6 +527,11 @@ Confirmed by export:
   was `1902 files changed, 32596 insertions(+), 230365 deletions(-)`.
   `CommandSource` improved from `+0/-17` to `+0/-0`; `CommandName` stayed
   `+0/-55` and both target addition counts stayed zero.
+- The later exact-length ButtonGroup guard was an intentional no-delta gate.
+  The full export stayed at `1591 files, +31369/-193822`, with
+  `CommandName +0/-26` and `CommandSource +0/-0`. Before/after binary-patch and
+  numstat fingerprints were identical, proving that the stricter parser did
+  not exchange one current-corpus difference for another.
 - After the narrow SpreadsheetDocument field-owner model and the five UUIDs
   above, the release/export shortstat was
   `1902 files changed, 32596 insertions(+), 230340 deletions(-)`.
