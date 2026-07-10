@@ -2774,14 +2774,12 @@ pub(super) fn push_predefined_item_xml(
     let tab = "\t".repeat(indent);
     xml.push_str(&format!(
         "{tab}<Item id=\"{}\">\r\n\
-{tab}\t<Name>{}</Name>\r\n\
-{tab}\t<Code>{}</Code>\r\n\
-{tab}\t<Description>{}</Description>\r\n",
+{tab}\t<Name>{}</Name>\r\n",
         escape_xml_text(&item.id),
-        escape_xml_text(&item.name),
-        escape_xml_text(&item.code),
-        escape_xml_text(&item.description),
+        escape_xml_element_text(&item.name),
     ));
+    push_predefined_text_element(xml, &tab, "Code", &item.code);
+    push_predefined_text_element(xml, &tab, "Description", &item.description);
 
     match (&item.data, layout) {
         (
@@ -2885,6 +2883,17 @@ pub(super) fn push_predefined_item_xml(
     }
     xml.push_str(&format!("{tab}</Item>\r\n"));
     Ok(())
+}
+
+fn push_predefined_text_element(xml: &mut String, tab: &str, name: &str, value: &str) {
+    if value.is_empty() {
+        xml.push_str(&format!("{tab}\t<{name}/>\r\n"));
+    } else {
+        xml.push_str(&format!(
+            "{tab}\t<{name}>{}</{name}>\r\n",
+            escape_xml_element_text(value)
+        ));
+    }
 }
 
 fn push_predefined_flags_xml(
