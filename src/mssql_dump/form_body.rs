@@ -6503,7 +6503,13 @@ pub(super) fn parse_form_button_group_command_source_with_items(
     item_name_by_id: &BTreeMap<String, String>,
 ) -> Option<String> {
     let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    if source.len() != 4 {
+        return None;
+    }
     let form_ref = split_1c_braced_fields(source.get(1)?.trim(), 0)?;
+    if form_ref.len() != 2 {
+        return None;
+    }
     match (
         source.first().map(|field| field.trim()),
         form_ref.get(1).map(|field| field.trim()),

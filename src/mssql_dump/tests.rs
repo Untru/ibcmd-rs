@@ -9975,6 +9975,33 @@ fn parses_button_group_command_source_from_live_layout() {
 }
 
 #[test]
+fn parses_button_group_global_command_source_from_typed_layout() {
+    let source = format!("{{2,{{0,{FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID}}},2,0}}");
+    let mut fields = vec!["0"; 21];
+    fields[20] = &source;
+    assert_eq!(
+        parse_form_button_group_command_source(&fields),
+        Some("FormCommandPanelGlobalCommands".to_string())
+    );
+}
+
+#[test]
+fn omits_button_group_global_command_source_with_extra_outer_field() {
+    let source = format!("{{2,{{0,{FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID}}},2,0,1}}");
+    let mut fields = vec!["0"; 21];
+    fields[20] = &source;
+    assert_eq!(parse_form_button_group_command_source(&fields), None);
+}
+
+#[test]
+fn omits_button_group_global_command_source_with_extra_nested_field() {
+    let source = format!("{{2,{{0,{FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID},1}},2,0}}");
+    let mut fields = vec!["0"; 21];
+    fields[20] = &source;
+    assert_eq!(parse_form_button_group_command_source(&fields), None);
+}
+
+#[test]
 fn omits_button_group_command_source_for_bare_form_source() {
     let mut fields = vec!["0"; 21];
     fields[20] = "{2,{0},2,0}";
