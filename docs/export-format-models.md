@@ -16,7 +16,7 @@ Status terms:
 
 ## DCS template `settings` / `settingsVariant`
 
-Status: mostly `confirmed by export`; overflow behavior is a `hypothesis`.
+Status: settings binding and QName scope allocation are `confirmed by export`.
 
 Model:
 
@@ -29,9 +29,10 @@ Model:
   `dataCompositionSchema` wrappers are structural storage wrappers and are not
   emitted.
 - Each embedded `Settings` document is normalized as a `dcsset:settings` block.
-  The block is inserted into a `settingsVariant` element before that variant's
-  closing tag. The pairing is positional: first settings document to first
-  `settingsVariant`, second to second, and so on.
+  External settings pair by ordinal only with direct `settingsVariant` children
+  of the root schema. Nested variants are already inside the schema document and
+  do not consume external settings. A count mismatch is rejected; settings are
+  not appended as root siblings.
 - Existing variant metadata remains inside the same `settingsVariant`. For
   example, variant `name` and `presentation` are normalized into the DCS settings
   namespace and the attached settings payload is added after them as
@@ -44,6 +45,13 @@ Model:
 - DCS schema-side type references are normalized in the same pass: known
   metadata `TypeId` values become current-config `v8:Type` references, and the
   known AnyIBRef type id becomes a `v8:TypeSet` current-config reference.
+- Lexical QNames are resolved through the input namespace stack into
+  `{namespace URI, local}` and then serialized for the output scope. Raw `dNp1`
+  prefix text is never copied. Dynamic current-config and enterprise prefixes
+  use their structural base plus `2 * nestedSchemaDepth`.
+- A settings payload root under a direct `settingsVariant`, or schema settings
+  under `nestedSchema`, always declares `style`, `sys`, `web`, and `win`, even
+  when empty. An inner `dcsset:settings` under an item is not a contract root.
 
 Confirmed by export:
 
@@ -62,14 +70,18 @@ Supported by tests:
 - Settings payload nodes such as selected items, filters, and output parameters
   are rewritten to canonical DCS prefixes.
 
-Hypothesis / needs validation:
+Corpus evidence:
 
-- If there are more embedded `Settings` documents than `settingsVariant`
-  elements, the remaining settings blocks should be appended before the closing
-  `DataCompositionSchema` tag. This is a conservative fallback, but it needs a
-  native export sample before being treated as part of the proven model.
-- The positional pairing should be rechecked on a template with two or more
-  variants and two or more settings payload documents.
+- 661 raw SchemaFile records contained 1,050 external Settings documents and
+  exactly 1,050 direct root variants, with zero count mismatches; 152 schemas
+  were multi-variant and seven also contained nested variants.
+- Native binding matched variant counts, names, and settings in all 69 DCS
+  templates; 23 were multi-variant.
+- QName evidence covered 29 StandardPeriod text QNames, 25 enterprise
+  LinkedValueChangeMode QNames, 145 settings contract roots, and 15 nested
+  current-config prefixes. The accepted gate moved the full diff from
+  `1642 files, +32149/-223052` to `1629 files, +32044/-222947`; all four scoped
+  classes reached zero without changing settingsVariant/name/presentation.
 
 Rejected hypothesis:
 
@@ -77,9 +89,8 @@ Rejected hypothesis:
   inserted `dcsset:settings` roots was tested and rejected. It increased the
   full diff from `1917` to `1924` files while the target DCS file still had
   `58 insertions` / `58 deletions`. The residual also contains enterprise
-  namespace prefix shifts and `v8:StandardPeriod` differences, so the next DCS
-  model must explain those wider namespace/type-reference rules instead of only
-  empty-settings UI namespace attributes.
+  namespace prefix shifts and `v8:StandardPeriod` differences. The accepted
+  expanded-QName/output-scope model above supersedes this rejected shortcut.
 
 ## Form.xml `CommandName` / `CommandSource`
 
@@ -258,6 +269,21 @@ Additional confirmed `CommandName` records:
 | `12acffde-8389-4e5e-bd86-ff248262d84a` | `ExpandAllGroups` |
 | `ff5c34f8-b172-4ef2-91d3-48283a66a725` | `CollapseAllGroups` |
 
+- A wrapper `37` / `48` record with discriminator `17` is a distinct
+  FormattedDocument owner. Standard-command UUID dispatch is owner-typed; these
+  UUIDs must not leak into SpreadsheetDocument or Table resolution:
+
+| UUID | FormattedDocument suffix |
+| --- | --- |
+| `39f6b9f1-7aa1-4a03-a01b-e127d51bc228` | `DecreaseIndent` |
+| `56ae90b6-588f-406e-919c-cc5cc7f86297` | `AlignJustify` |
+| `87ecfbdd-8e2b-4ba2-a315-0897020f382f` | `AlignLeft` |
+| `9d8a3915-de52-4227-91cd-2fce22e09972` | `Picture` |
+| `a8483976-8b13-416a-9680-133b306dc6b0` | `Print` |
+| `ab0ebc39-68ee-4034-b2f4-43eee55bd651` | `AlignCenter` |
+| `d0a4d953-115b-4059-a6cb-6e67f903a4f3` | `IncreaseIndent` |
+| `e428af27-c4f7-4577-b80e-95a79f94322d` | `AlignRight` |
+
 `CommandSource` model:
 
 - `CommandSource` describes which command set a command container reads from; it
@@ -288,6 +314,13 @@ Additional confirmed `CommandName` records:
 {2,{0,2ef6d6fa-847a-485e-8684-d37a3ab5efb8},2,0}
   -> <CommandSource>FormCommandPanelGlobalCommands</CommandSource>
 ```
+
+An independent raw dump of the `buh` infobase found this same marker in 35
+different form blobs among the first 4,096 inflated Config rows. The same
+independent slice also contained the standard-command UUIDs currently mapped
+to `Save`, `Print`, and `Preview`. This rules out those values being metadata
+object UUIDs specific to the BSP infobase; native XML parity on a second full
+tree is still the stronger remaining portability check.
 
 - For `CommandBar`, raw `fields[20]` is the source record. The safe export rule
   accepts only this shape:
@@ -401,6 +434,17 @@ Confirmed by export:
   `CommandName` improved from `+0/-55` to `+0/-47`; the worker predicted seven
   reachable rows on its older branch, while the newer integration baseline
   restored eight. `CommandName +` and `CommandSource +` both remained zero.
+- After typed FormattedDocument owner resolution and the eight UUIDs above, the
+  release/export shortstat was
+  `1686 files changed, 32376 insertions(+), 224137 deletions(-)`.
+  `CommandName` improved from `+0/-47` to `+0/-39`; `CommandSource` remained
+  `+0/-0` and no owner type shared another family's UUID dispatch.
+- Broadly admitting the full FormattedDocumentField subtree was rejected. It
+  improved `CommandName` to `+0/-26` but increased full insertions from 32044
+  to 32051. Exact rollback comparison isolated one false localized `Title`
+  block and one false `VerticalScroll` property (seven diff lines total); the
+  accepted baseline `1629 files, +32044/-222947`, `CommandName +0/-39` was
+  restored before further work.
 - `679b62d9-ff72-4329-bf3a-c0c32b311dd2` maps to
   `Form.StandardCommand.Cancel`.
 - `f3613d5c-20c6-46e5-b4d5-7d712ece1296` maps to
@@ -446,9 +490,9 @@ Supported by tests:
 
 Hypothesis / needs validation:
 
-- The remaining 17 `CommandSource` item references require index/owner coverage;
-  the typed-reference parser itself is confirmed by 164 raw/native CommandBars
-  with zero non-native emissions.
+- `CommandSource` has no remaining target diff (`+0/-0`). Additional item
+  families in other configurations still require the same exact typed-record
+  and owner-index evidence before widening source resolution.
 - Form standard commands beyond the confirmed/test-supported UUID set remain
   hypotheses. Do not infer additional `Button/CommandName` mappings from
   excluded-command tables.
@@ -498,3 +542,100 @@ Confirmed by export:
   gate improved the full diff from
   `1914 files, +32603/-230412` to `1902 files, +32596/-230391`, with zero added
   Attribute, Dimension, Resource, or Command reference lines.
+
+## Subsystem properties and content
+
+Status: confirmed across all 244 raw Subsystem records and by serialized export.
+
+Every record has a four-field root whose metadata-object record at the known
+position has exactly nine fields. The fixed object slots are:
+
+| Slot | Export property | Corpus evidence |
+| --- | --- | --- |
+| `2` | `IncludeHelpInContents` | 110 true / 134 false |
+| `4` | `IncludeInCommandInterface` | 108 true / 136 false |
+| `5` | `Picture` | 231 empty / 12 CommonPicture / 1 StdPicture |
+| `6` | localized `Explanation` | 229 empty / 15 localized |
+| `7` | ordered `Content` references | 4,027 items, zero count/order violations |
+| `8` | `UseOneCommand` | 244 false |
+
+The root slot `3` is the ordered ChildObjects list: 206 are empty and 38 are
+nonempty, containing 225 child subsystem links with zero shape/order
+violations. Empty `Explanation`, `Picture`, `Content`, and `ChildObjects`
+elements are schema-significant and must still be emitted.
+
+The accepted gate improved the full diff from
+`1902 files, +32596/-230340` to `1690 files, +32376/-224580`. `Explanation`,
+`Picture`, `Content`, `ChildObjects`, `IncludeHelpInContents`,
+`IncludeInCommandInterface`, and `UseOneCommand` all reached `+0/-0`; Form
+`CommandName` and `CommandSource` guardrails stayed unchanged.
+
+## CommandInterface section grammar
+
+Status: confirmed across 78 subsystem blobs and by export; scoped issue closed.
+
+The raw root discriminator is `7`, followed by five ordered sections:
+visibility, placement, command order, subsystem order, and group order. Each
+section starts with a `0/1` presence marker; a present section adds a count and
+exactly that many records. The document ends with one trailing `0` and no extra
+fields. Command-order records store `(group UUID, command reference)` in that
+order. Subsystem UUIDs resolve through the qualified subsystem index; all 60
+observations were nested qualified names, with zero leaf fallbacks.
+
+Of 820 command references, three are exact bare `{0}` records: two in
+Visibility and one in CommandsOrder. Native emits literal name `0`. Placement
+has no bare records and remains typed-only; other bare codes, invalid UUIDs,
+wrong arity, or trailing data are rejected.
+
+The first strict parser was rejected because it dropped the 1,074-line
+Administration CommandInterface on the valid bare order record. After rollback
+and the exact `{0}` refinement, the accepted gate moved the full diff from
+`1686 files, +32376/-224137` to `1642 files, +32149/-223052`; all 44 scoped
+CommandInterface files reached byte parity and the source-asset count stayed
+unchanged.
+
+## Source module routing
+
+Status: the Chart module-routing submodel is confirmed by raw/native bytes and
+export.
+
+Module routing keys on `(metadata family, source suffix)`, never suffix alone:
+
+| Family | Suffix | Canonical module |
+| --- | --- | --- |
+| `ChartOfAccounts` | `14` | `ObjectModule.bsl` |
+| `ChartOfAccounts` | `15` | `ManagerModule.bsl` |
+| `ChartOfCalculationTypes` | `0` | `ObjectModule.bsl` |
+| `ChartOfCalculationTypes` | `3` | `ManagerModule.bsl` |
+| `ChartOfCharacteristicTypes` | `15` | `ObjectModule.bsl` |
+| `ChartOfCharacteristicTypes` | `16` | `ManagerModule.bsl` |
+
+The matrix was checked over 1,791 module entries. Help and Predefined suffixes
+are negative controls; suffix `15` itself demonstrates why a global mapping is
+invalid. The accepted gate removed four fallback Config_module_text files and
+restored four canonical modules, improving tracked diff from 1690 to 1686 files
+and deletions from 224580 to 224145.
+
+## ConfigDumpInfo aggregate
+
+Status: corpus model confirmed; implementation remains open.
+
+`ConfigDumpInfo.xml` is not a source asset row or a filesystem-only manifest.
+Native synthesizes it by joining the complete metadata inventory with the
+`Config` row named `versions`. On the BSP corpus, 9,839 version pairs consist of
+one generation entry, 9,835 exported entries, and service entries `root`,
+`version`, and `versions`. The XML has exactly the 9,835 non-service top
+entries; ID-set, version-formula, and ordering mismatches were all zero.
+
+For every entry:
+
+```text
+configVersion = lowercase_hex(Uuid::to_bytes_le(generation_uuid)) + "00000000"
+```
+
+Canonical names/hierarchy come from parsed metadata and row-role indexes, not
+from physical paths or suffix guesses. Top entries sort ordinally by name;
+nested entries sort ordinally by id. Generation is valid only for a complete
+Config source-layout export after all batches succeed. Selected, ConfigSave,
+and row-local helpers must continue not to emit this global aggregate; unknown,
+duplicate, or unmatched inventory entries must fail rather than be skipped.
