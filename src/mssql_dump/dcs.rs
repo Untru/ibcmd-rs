@@ -6,6 +6,8 @@ const DCS_CORE_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/core";
 const DCS_SETTINGS_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/settings";
 const DATA_CORE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/core";
 const DATA_UI_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui";
+const ENTERPRISE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/enterprise";
+const CURRENT_CONFIG_NS: &[u8] = b"http://v8.1c.ru/8.1/data/enterprise/current-config";
 const STYLE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/style";
 const SYS_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/fonts/system";
 const WEB_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/web";
@@ -13,6 +15,9 @@ const WIN_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/windows";
 const XSI_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema-instance";
 const XS_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema";
 const DCS_SETTINGS_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+const ENTERPRISE_URI: &str = "http://v8.1c.ru/8.1/data/enterprise";
+const CURRENT_CONFIG_URI: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
+const SETTINGS_ROOT_UI_NAMESPACES: &str = " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"";
 
 pub(super) fn normalize_data_composition_schema_template_xml(
     inflated: &[u8],
@@ -24,16 +29,14 @@ pub(super) fn normalize_data_composition_schema_template_xml(
     let schema_doc = documents.iter().find(|document| {
         document.contains("<SchemaFile") && document.contains("dataCompositionSchema")
     })?;
-    let mut xml = canonicalize_data_composition_schema_document(schema_doc)?;
-    rewrite_data_composition_type_ids(&mut xml, type_index);
     let settings = documents
         .iter()
         .filter(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
         .filter_map(|document| canonicalize_data_composition_settings_document(document))
         .collect::<Vec<_>>();
-    if !settings.is_empty() {
-        insert_data_composition_settings(&mut xml, &settings);
-    }
+    let mut xml = canonicalize_data_composition_schema_document(schema_doc)?;
+    rewrite_data_composition_type_ids(&mut xml, type_index);
+    insert_data_composition_settings(&mut xml, &settings)?;
     Some(xml.into_bytes())
 }
 
@@ -42,8 +45,6 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
     const CLOSE: &str = "</v8:TypeId>";
     const ANY_IB_REF_TYPE_ID: &str = "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63";
     const CFG_PREFIX: &str = "cfg:";
-    const CURRENT_CONFIG_NS: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
-
     let mut rewritten = String::with_capacity(xml.len());
     let mut cursor = 0usize;
     while let Some(relative_start) = xml[cursor..].find(OPEN) {
@@ -57,7 +58,7 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
         let dcs_cfg_prefix = data_composition_current_config_prefix(xml, start);
         let replacement = if type_id.eq_ignore_ascii_case(ANY_IB_REF_TYPE_ID) {
             Some(format!(
-                "<v8:TypeSet xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_NS}\">{dcs_cfg_prefix}:AnyIBRef</v8:TypeSet>"
+                "<v8:TypeSet xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:AnyIBRef</v8:TypeSet>"
             ))
         } else {
             type_index
@@ -65,7 +66,7 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &BTreeMap<Str
                 .and_then(|reference| reference.strip_prefix(CFG_PREFIX))
                 .map(|reference| {
                     format!(
-                        "<v8:Type xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_NS}\">{dcs_cfg_prefix}:{}</v8:Type>",
+                        "<v8:Type xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:Type>",
                         escape_xml_text(reference)
                     )
                 })
@@ -92,7 +93,7 @@ struct DcsXmlStackEntry<'a> {
     xsi_type: Option<&'a str>,
 }
 
-fn data_composition_current_config_prefix(xml: &str, position: usize) -> &'static str {
+fn data_composition_current_config_prefix(xml: &str, position: usize) -> String {
     let mut stack = Vec::<DcsXmlStackEntry<'_>>::new();
     let mut cursor = 0usize;
     let bytes = xml.as_bytes();
@@ -143,19 +144,24 @@ fn data_composition_current_config_prefix(xml: &str, position: usize) -> &'stati
         cursor = end + 1;
     }
 
-    if stack
+    let base = if stack
         .iter()
         .any(|entry| matches!(entry.name, "parameter" | "calculatedField"))
     {
-        "d4p1"
+        4
     } else if stack
         .iter()
         .any(|entry| entry.name == "item" && entry.xsi_type == Some("DataSetObject"))
     {
-        "d6p1"
+        6
     } else {
-        "d5p1"
-    }
+        5
+    };
+    let nested_schema_depth = stack
+        .iter()
+        .filter(|entry| entry.name == "nestedSchema")
+        .count();
+    format!("d{}p1", base + 2 * nested_schema_depth)
 }
 
 fn find_xml_tag_end(bytes: &[u8], mut cursor: usize, limit: usize) -> Option<usize> {
@@ -257,28 +263,69 @@ fn canonicalize_data_composition_settings_document(document: &str) -> Option<Str
     Some(indent_data_composition_settings(&settings))
 }
 
-fn insert_data_composition_settings(xml: &mut String, settings: &[String]) {
-    let marker = "\r\n\t</settingsVariant>";
-    let mut cursor = 0usize;
-    let mut inserted = 0usize;
-    for settings_block in settings {
-        let Some(relative_index) = xml[cursor..].find(marker) else {
-            break;
-        };
-        let index = cursor + relative_index;
-        xml.insert_str(index, settings_block);
-        cursor = index + settings_block.len() + marker.len();
-        inserted += 1;
+fn insert_data_composition_settings(xml: &mut String, settings: &[String]) -> Option<()> {
+    let offsets = direct_settings_variant_closing_offsets(xml)?;
+    if offsets.len() != settings.len() {
+        return None;
     }
-    if inserted == settings.len() {
-        return;
+    for (offset, settings_block) in offsets.into_iter().zip(settings.iter()).rev() {
+        xml.insert_str(offset, settings_block);
     }
-    let root_marker = "\r\n</DataCompositionSchema>";
-    if let Some(mut index) = xml.find(root_marker) {
-        for settings_block in &settings[inserted..] {
-            xml.insert_str(index, settings_block);
-            index += settings_block.len();
+    Some(())
+}
+
+fn direct_settings_variant_closing_offsets(xml: &str) -> Option<Vec<usize>> {
+    let mut reader = NsReader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut stack = Vec::<(Option<Vec<u8>>, Vec<u8>)>::new();
+    let mut offsets = Vec::new();
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                stack.push((
+                    namespace_ref(&namespace).map(<[u8]>::to_vec),
+                    local.as_ref().to_vec(),
+                ));
+            }
+            Event::Empty(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                if stack.len() == 1
+                    && namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
+                    && local.as_ref() == b"settingsVariant"
+                {
+                    return None;
+                }
+            }
+            Event::End(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                if stack.len() == 2
+                    && stack.first().is_some_and(|(namespace, local)| {
+                        namespace.as_deref() == Some(DCS_SCHEMA_NS)
+                            && local.as_slice() == b"DataCompositionSchema"
+                    })
+                    && namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
+                    && local.as_ref() == b"settingsVariant"
+                {
+                    let end_tag_len = event.name().as_ref().len() + 3;
+                    let position = usize::try_from(reader.buffer_position()).ok()?;
+                    offsets.push(position.checked_sub(end_tag_len)?);
+                }
+                let (open_namespace, open_local) = stack.pop()?;
+                if open_namespace.as_deref() != namespace_ref(&namespace)
+                    || open_local.as_slice() != local.as_ref()
+                {
+                    return None;
+                }
+            }
+            Event::Eof => break,
+            _ => {}
         }
+    }
+    if stack.is_empty() {
+        Some(offsets)
+    } else {
+        None
     }
 }
 
@@ -312,9 +359,30 @@ enum DataCompositionDocumentMode {
     Settings,
 }
 
+#[derive(Debug)]
+struct DcsElementFrame {
+    namespace: Option<Vec<u8>>,
+    local: Vec<u8>,
+    xsi_type_local: Option<String>,
+    dynamic_prefixes: Vec<String>,
+}
+
+#[derive(Debug)]
+struct DcsExpandedQName {
+    namespace: Option<Vec<u8>>,
+    local: String,
+}
+
+#[derive(Debug)]
+struct DcsRenderedQName {
+    value: String,
+    declaration: Option<(String, &'static str)>,
+}
+
 struct DataCompositionXmlWriter {
     output: String,
     skip_depth: usize,
+    element_stack: Vec<DcsElementFrame>,
 }
 
 impl DataCompositionXmlWriter {
@@ -322,6 +390,7 @@ impl DataCompositionXmlWriter {
         Self {
             output: String::new(),
             skip_depth: 0,
+            element_stack: Vec::new(),
         }
     }
 
@@ -343,8 +412,14 @@ impl DataCompositionXmlWriter {
                     if self.should_skip(namespace_ref(&namespace), local, &mode) {
                         continue;
                     }
+                    if matches!(mode, DataCompositionDocumentMode::Schema)
+                        && namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
+                        && local == b"dataCompositionSchema"
+                    {
+                        continue;
+                    }
                     if self.skip_depth == 0 {
-                        self.write_start_tag(
+                        let dynamic_prefixes = self.write_start_tag(
                             &reader,
                             &event,
                             namespace_ref(&namespace),
@@ -352,6 +427,13 @@ impl DataCompositionXmlWriter {
                             false,
                             &mode,
                         )?;
+                        self.element_stack.push(data_composition_element_frame(
+                            &reader,
+                            &event,
+                            namespace_ref(&namespace),
+                            local,
+                            dynamic_prefixes,
+                        )?);
                     }
                 }
                 Event::Empty(event) => {
@@ -390,17 +472,16 @@ impl DataCompositionXmlWriter {
                     self.output.push_str("</");
                     self.output.push_str(&name);
                     self.output.push('>');
+                    let frame = self.element_stack.pop()?;
+                    if frame.namespace.as_deref() != namespace_ref(&namespace)
+                        || frame.local.as_slice() != local
+                    {
+                        return None;
+                    }
                 }
                 Event::Text(event) => {
                     if self.skip_depth == 0 {
-                        let text = std::str::from_utf8(event.as_ref()).ok()?;
-                        if matches!(mode, DataCompositionDocumentMode::Schema)
-                            && is_xml_whitespace(text)
-                        {
-                            self.output.push_str(&deindent_lines_by_one_tab(text));
-                        } else {
-                            self.output.push_str(text);
-                        }
+                        self.write_text(&reader, &event, &mode)?;
                     }
                 }
                 Event::CData(event) => {
@@ -432,7 +513,7 @@ impl DataCompositionXmlWriter {
                 _ => {}
             }
         }
-        Some(())
+        self.element_stack.is_empty().then_some(())
     }
 
     fn should_skip(
@@ -454,27 +535,35 @@ impl DataCompositionXmlWriter {
         local: &[u8],
         empty: bool,
         mode: &DataCompositionDocumentMode,
-    ) -> Option<()> {
-        if matches!(mode, DataCompositionDocumentMode::Schema)
-            && namespace == Some(DCS_SCHEMA_NS)
-            && local == b"dataCompositionSchema"
-        {
-            return Some(());
-        }
+    ) -> Option<Vec<String>> {
         let is_settings_root = matches!(mode, DataCompositionDocumentMode::Settings)
             && namespace == Some(DCS_SETTINGS_NS)
             && local == b"Settings";
+        let is_inline_settings_root = local == b"settings"
+            && self.element_stack.last().is_some_and(|parent| {
+                (namespace == Some(DCS_SETTINGS_NS)
+                    && parent.namespace.as_deref() == Some(DCS_SCHEMA_NS)
+                    && parent.local.as_slice() == b"settingsVariant")
+                    || (namespace == Some(DCS_SCHEMA_NS)
+                        && parent.namespace.as_deref() == Some(DCS_SCHEMA_NS)
+                        && parent.local.as_slice() == b"nestedSchema")
+            });
         let name = if is_settings_root {
             "dcsset:settings".to_string()
         } else {
             canonical_data_composition_name(namespace, local)?
         };
-        self.output.push('<');
-        self.output.push_str(&name);
-        if is_settings_root {
-            self.output.push_str(
-                " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"",
-            );
+        let mut rendered_attributes = Vec::<(String, String)>::new();
+        let mut dynamic_declarations = Vec::<(String, &'static str)>::new();
+        if namespace == Some(DATA_CORE_NS)
+            && matches!(local, b"Type" | b"TypeSet")
+            && event_declares_namespace(event, CURRENT_CONFIG_NS)
+        {
+            push_dynamic_declaration(
+                &mut dynamic_declarations,
+                self.current_config_prefix(),
+                CURRENT_CONFIG_URI,
+            )?;
         }
         for attribute in event.attributes().with_checks(false) {
             let attribute = attribute.ok()?;
@@ -490,7 +579,34 @@ impl DataCompositionXmlWriter {
                 .decode_and_unescape_value(reader.decoder())
                 .ok()?
                 .into_owned();
-            let value = canonical_data_composition_attr_value(&attr_name, &value, namespace);
+            let rendered = if attr_name == "xsi:type" {
+                self.render_xsi_type(reader, &value, namespace, local)
+            } else {
+                None
+            };
+            let value = if let Some(rendered) = rendered {
+                if let Some((prefix, uri)) = rendered.declaration {
+                    push_dynamic_declaration(&mut dynamic_declarations, prefix, uri)?;
+                }
+                rendered.value
+            } else {
+                canonical_data_composition_attr_value(&attr_name, &value, namespace)
+            };
+            rendered_attributes.push((attr_name, value));
+        }
+        self.output.push('<');
+        self.output.push_str(&name);
+        if is_settings_root || is_inline_settings_root {
+            self.output.push_str(SETTINGS_ROOT_UI_NAMESPACES);
+        }
+        for (prefix, uri) in &dynamic_declarations {
+            self.output.push_str(" xmlns:");
+            self.output.push_str(prefix);
+            self.output.push_str("=\"");
+            self.output.push_str(uri);
+            self.output.push('"');
+        }
+        for (attr_name, value) in rendered_attributes {
             self.output.push(' ');
             self.output.push_str(&attr_name);
             self.output.push_str("=\"");
@@ -502,8 +618,260 @@ impl DataCompositionXmlWriter {
         } else {
             self.output.push('>');
         }
+        Some(
+            dynamic_declarations
+                .into_iter()
+                .map(|(prefix, _)| prefix)
+                .collect(),
+        )
+    }
+
+    fn write_text(
+        &mut self,
+        reader: &NsReader<&[u8]>,
+        event: &quick_xml::events::BytesText<'_>,
+        mode: &DataCompositionDocumentMode,
+    ) -> Option<()> {
+        let text = std::str::from_utf8(event.as_ref()).ok()?;
+        if matches!(mode, DataCompositionDocumentMode::Schema) && is_xml_whitespace(text) {
+            self.output.push_str(&deindent_lines_by_one_tab(text));
+            return Some(());
+        }
+        let is_qname_text = self.element_stack.last().is_some_and(|frame| {
+            frame.namespace.as_deref() == Some(DATA_CORE_NS)
+                && matches!(frame.local.as_slice(), b"Type" | b"TypeSet")
+        });
+        if is_qname_text {
+            let value = text.trim();
+            if !value.is_empty()
+                && let Some(rendered) = self.render_lexical_qname(
+                    reader,
+                    value,
+                    Some(DATA_CORE_NS),
+                    self.element_stack.last()?.local.as_slice(),
+                )
+            {
+                if let Some((prefix, _)) = &rendered.declaration
+                    && !self.element_stack.last()?.dynamic_prefixes.contains(prefix)
+                {
+                    return None;
+                }
+                let value_start = text.find(value)?;
+                self.output.push_str(&text[..value_start]);
+                self.output.push_str(&escape_xml_text(&rendered.value));
+                self.output.push_str(&text[value_start + value.len()..]);
+                return Some(());
+            }
+        }
+        self.output.push_str(text);
         Some(())
     }
+
+    fn render_lexical_qname(
+        &self,
+        reader: &NsReader<&[u8]>,
+        value: &str,
+        element_namespace: Option<&[u8]>,
+        element_local: &[u8],
+    ) -> Option<DcsRenderedQName> {
+        let mut expanded = resolve_data_composition_qname(reader, value)?;
+        if !value.contains(':')
+            && matches!(
+                element_namespace,
+                Some(DCS_CORE_NS | DCS_SETTINGS_NS | DATA_CORE_NS)
+            )
+        {
+            expanded.namespace = element_namespace.map(<[u8]>::to_vec);
+        }
+        self.render_expanded_qname(expanded, element_local)
+    }
+
+    fn render_xsi_type(
+        &self,
+        reader: &NsReader<&[u8]>,
+        value: &str,
+        element_namespace: Option<&[u8]>,
+        element_local: &[u8],
+    ) -> Option<DcsRenderedQName> {
+        if value.contains(':') {
+            return self.render_lexical_qname(reader, value, element_namespace, element_local);
+        }
+        let namespace = if is_data_core_xsi_type(value) {
+            Some(DATA_CORE_NS)
+        } else if value == "Field" {
+            Some(DCS_CORE_NS)
+        } else if is_dcs_settings_xsi_type(value) {
+            Some(DCS_SETTINGS_NS)
+        } else if matches!(element_namespace, Some(DCS_CORE_NS | DCS_SETTINGS_NS)) {
+            element_namespace
+        } else {
+            return self.render_lexical_qname(reader, value, element_namespace, element_local);
+        };
+        self.render_expanded_qname(
+            DcsExpandedQName {
+                namespace: namespace.map(<[u8]>::to_vec),
+                local: value.to_string(),
+            },
+            element_local,
+        )
+    }
+
+    fn render_expanded_qname(
+        &self,
+        expanded: DcsExpandedQName,
+        element_local: &[u8],
+    ) -> Option<DcsRenderedQName> {
+        let namespace = expanded.namespace.as_deref();
+        let fixed_prefix = match namespace {
+            None | Some(DCS_SCHEMA_NS) => Some(None),
+            Some(DCS_COMMON_NS) => Some(Some("dcscom")),
+            Some(DCS_CORE_NS) => Some(Some("dcscor")),
+            Some(DCS_SETTINGS_NS) => Some(Some("dcsset")),
+            Some(DATA_CORE_NS) => Some(Some("v8")),
+            Some(DATA_UI_NS) => Some(Some("v8ui")),
+            Some(STYLE_NS) => Some(Some("style")),
+            Some(SYS_NS) => Some(Some("sys")),
+            Some(WEB_NS) => Some(Some("web")),
+            Some(WIN_NS) => Some(Some("win")),
+            Some(XSI_NS) => Some(Some("xsi")),
+            Some(XS_NS) => Some(Some("xs")),
+            _ => None,
+        };
+        if let Some(prefix) = fixed_prefix {
+            let value = prefix
+                .map(|prefix| format!("{prefix}:{}", expanded.local))
+                .unwrap_or(expanded.local);
+            return Some(DcsRenderedQName {
+                value,
+                declaration: None,
+            });
+        }
+        let (prefix, uri) = match namespace {
+            Some(CURRENT_CONFIG_NS) => (self.current_config_prefix(), CURRENT_CONFIG_URI),
+            Some(ENTERPRISE_NS) => (self.enterprise_prefix(element_local), ENTERPRISE_URI),
+            _ => return None,
+        };
+        Some(DcsRenderedQName {
+            value: format!("{prefix}:{}", expanded.local),
+            declaration: Some((prefix, uri)),
+        })
+    }
+
+    fn current_config_prefix(&self) -> String {
+        let base = if self.has_parameter_ancestor() {
+            4
+        } else if self.element_stack.iter().any(|frame| {
+            frame.local.as_slice() == b"item"
+                && frame.xsi_type_local.as_deref() == Some("DataSetObject")
+        }) {
+            6
+        } else {
+            5
+        };
+        self.scope_prefix(base)
+    }
+
+    fn enterprise_prefix(&self, element_local: &[u8]) -> String {
+        let base = if element_local != b"mode" {
+            5
+        } else if self.has_parameter_ancestor() {
+            7
+        } else {
+            8
+        };
+        self.scope_prefix(base)
+    }
+
+    fn has_parameter_ancestor(&self) -> bool {
+        self.element_stack.iter().any(|frame| {
+            frame.namespace.as_deref() == Some(DCS_SCHEMA_NS)
+                && matches!(frame.local.as_slice(), b"parameter" | b"calculatedField")
+        })
+    }
+
+    fn scope_prefix(&self, base: usize) -> String {
+        let nested_schema_depth = self
+            .element_stack
+            .iter()
+            .filter(|frame| {
+                frame.namespace.as_deref() == Some(DCS_SCHEMA_NS)
+                    && frame.local.as_slice() == b"nestedSchema"
+            })
+            .count();
+        format!("d{}p1", base + 2 * nested_schema_depth)
+    }
+}
+
+fn data_composition_element_frame(
+    reader: &NsReader<&[u8]>,
+    event: &quick_xml::events::BytesStart<'_>,
+    namespace: Option<&[u8]>,
+    local: &[u8],
+    dynamic_prefixes: Vec<String>,
+) -> Option<DcsElementFrame> {
+    let mut xsi_type_local = None;
+    for attribute in event.attributes().with_checks(false) {
+        let attribute = attribute.ok()?;
+        let (attr_namespace, attr_local) = reader.resolve_attribute(attribute.key);
+        if namespace_ref(&attr_namespace) == Some(XSI_NS) && attr_local.as_ref() == b"type" {
+            let value = attribute.decode_and_unescape_value(reader.decoder()).ok()?;
+            xsi_type_local = Some(
+                value
+                    .rsplit_once(':')
+                    .map(|(_, local)| local)
+                    .unwrap_or(value.as_ref())
+                    .to_string(),
+            );
+            break;
+        }
+    }
+    Some(DcsElementFrame {
+        namespace: namespace.map(<[u8]>::to_vec),
+        local: local.to_vec(),
+        xsi_type_local,
+        dynamic_prefixes,
+    })
+}
+
+fn resolve_data_composition_qname(
+    reader: &NsReader<&[u8]>,
+    value: &str,
+) -> Option<DcsExpandedQName> {
+    let (namespace, local) = reader.resolve(quick_xml::name::QName(value.as_bytes()), false);
+    let namespace = match namespace {
+        ResolveResult::Bound(namespace) => Some(namespace.0.to_vec()),
+        ResolveResult::Unbound => None,
+        ResolveResult::Unknown(_) => return None,
+    };
+    Some(DcsExpandedQName {
+        namespace,
+        local: std::str::from_utf8(local.as_ref()).ok()?.to_string(),
+    })
+}
+
+fn event_declares_namespace(event: &quick_xml::events::BytesStart<'_>, namespace: &[u8]) -> bool {
+    event
+        .attributes()
+        .with_checks(false)
+        .flatten()
+        .any(|attribute| {
+            is_xmlns_attribute(attribute.key.as_ref()) && attribute.value.as_ref() == namespace
+        })
+}
+
+fn push_dynamic_declaration(
+    declarations: &mut Vec<(String, &'static str)>,
+    prefix: String,
+    uri: &'static str,
+) -> Option<()> {
+    if let Some((_, existing_uri)) = declarations
+        .iter()
+        .find(|(existing_prefix, _)| existing_prefix == &prefix)
+    {
+        return (*existing_uri == uri).then_some(());
+    }
+    declarations.push((prefix, uri));
+    Some(())
 }
 
 fn namespace_ref<'a>(namespace: &'a ResolveResult<'a>) -> Option<&'a [u8]> {
