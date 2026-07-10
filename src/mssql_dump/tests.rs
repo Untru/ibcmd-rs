@@ -21776,6 +21776,7 @@ fn routes_and_serializes_calculation_register_recalculation() {
         recalculation_uuid,
         &BTreeMap::new(),
         &object_refs,
+        &object_refs,
         &recalculation_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -21835,6 +21836,7 @@ fn undeclared_code4_continues_through_common_picture_serializer() {
     let extracted = extract_metadata_source_xml_with_recalculation_refs(
         &blob,
         picture_uuid,
+        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -22614,6 +22616,269 @@ fn extracts_role_xml_with_native_envelope() {
         InfobaseConfigSourceVersion::V2_21,
     );
     assert!(v21.contains(r#"version="2.21""#));
+}
+
+fn flat_configuration_family(family_uuid: &str, child_uuids: &[&str]) -> String {
+    let mut fields = vec![family_uuid.to_string(), child_uuids.len().to_string()];
+    fields.extend(child_uuids.iter().map(|uuid| (*uuid).to_string()));
+    format!("{{{}}}", fields.join(","))
+}
+
+fn flat_configuration_code67_text(
+    uuid: &str,
+    class_ids: &[&str],
+    object_ids: &[&str],
+    families: &[Vec<String>],
+) -> String {
+    assert_eq!(class_ids.len(), 7);
+    assert_eq!(object_ids.len(), 7);
+    assert_eq!(families.len(), 7);
+    assert!(families.iter().all(|families| !families.is_empty()));
+
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let contained = (0..7)
+        .map(|index| {
+            let marker = format!("{{1,0,{}}}", object_ids[index]);
+            let prefix = if index == 0 {
+                let header = format!(
+                    "{{0,{{3,{marker},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,{zero_uuid},0}}}}"
+                );
+                format!("{{67,{header}}}")
+            } else {
+                format!("{{{marker}}}")
+            };
+            let mut payload_fields = vec![
+                "1".to_string(),
+                prefix,
+                families[index].len().to_string(),
+            ];
+            payload_fields.extend(families[index].iter().cloned());
+            format!(
+                "{{{},{{{}}}}}",
+                class_ids[index],
+                payload_fields.join(",")
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut root_fields = vec!["2".to_string(), format!("{{{uuid}}}"), "7".to_string()];
+    root_fields.extend(contained);
+    root_fields.push(r#"{{0,"",""}}"#.to_string());
+    format!("{{{}}}", root_fields.join(","))
+}
+
+fn flat_configuration_fixture() -> (String, String, BTreeMap<String, String>) {
+    let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let class_ids = [
+        "10000000-0000-4000-8000-000000000001",
+        "10000000-0000-4000-8000-000000000002",
+        "10000000-0000-4000-8000-000000000003",
+        "10000000-0000-4000-8000-000000000004",
+        "10000000-0000-4000-8000-000000000005",
+        "10000000-0000-4000-8000-000000000006",
+        "10000000-0000-4000-8000-000000000007",
+    ];
+    let object_ids = [
+        "20000000-0000-4000-8000-000000000001",
+        "20000000-0000-4000-8000-000000000002",
+        "20000000-0000-4000-8000-000000000003",
+        "20000000-0000-4000-8000-000000000004",
+        "20000000-0000-4000-8000-000000000005",
+        "20000000-0000-4000-8000-000000000006",
+        "20000000-0000-4000-8000-000000000007",
+    ];
+    let document_second = "40000000-0000-4000-8000-000000000001";
+    let document_first = "40000000-0000-4000-8000-000000000002";
+    let language = "40000000-0000-4000-8000-000000000003";
+    let families = vec![
+        vec![
+            flat_configuration_family(
+                "30000000-0000-4000-8000-000000000001",
+                &[document_second, document_first],
+            ),
+            flat_configuration_family("30000000-0000-4000-8000-000000000002", &[language]),
+        ],
+        vec![flat_configuration_family(
+            "30000000-0000-4000-8000-000000000003",
+            &[],
+        )],
+        vec![flat_configuration_family(
+            "30000000-0000-4000-8000-000000000004",
+            &[],
+        )],
+        vec![flat_configuration_family(
+            "30000000-0000-4000-8000-000000000005",
+            &[],
+        )],
+        vec![flat_configuration_family(
+            "30000000-0000-4000-8000-000000000006",
+            &[],
+        )],
+        vec![flat_configuration_family(
+            "30000000-0000-4000-8000-000000000007",
+            &[],
+        )],
+        vec![flat_configuration_family(
+            "30000000-0000-4000-8000-000000000008",
+            &[],
+        )],
+    ];
+    let text = flat_configuration_code67_text(uuid, &class_ids, &object_ids, &families);
+    let object_refs = BTreeMap::from([
+        (document_second.to_string(), "Document.Second".to_string()),
+        (document_first.to_string(), "Document.First".to_string()),
+        (language.to_string(), "Language.English".to_string()),
+    ]);
+    (uuid.to_string(), text, object_refs)
+}
+
+#[test]
+fn extracts_flat_configuration_internal_info_and_reference_children() {
+    let (uuid, text, object_refs) = flat_configuration_fixture();
+    let xml = extract_configuration_source_xml(
+        &text,
+        &uuid,
+        &object_refs,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+
+    assert_eq!(xml.matches("<xr:ContainedObject>").count(), 7, "{xml}");
+    assert!(xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap());
+    let mut previous = 0;
+    for suffix in 1..=7 {
+        let class_id = format!("10000000-0000-4000-8000-{suffix:012}");
+        let object_id = format!("20000000-0000-4000-8000-{suffix:012}");
+        let class_position = xml
+            .find(&format!("<xr:ClassId>{class_id}</xr:ClassId>"))
+            .unwrap();
+        let object_position = xml
+            .find(&format!("<xr:ObjectId>{object_id}</xr:ObjectId>"))
+            .unwrap();
+        assert!(previous < class_position && class_position < object_position);
+        previous = object_position;
+    }
+    let language_position = xml.find("<Language>English</Language>").unwrap();
+    let second_position = xml.find("<Document>Second</Document>").unwrap();
+    let first_position = xml.find("<Document>First</Document>").unwrap();
+    assert!(language_position < second_position && second_position < first_position);
+    assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
+    assert!(!xml.contains("ConfigurationExtensionCompatibilityMode"));
+    assert!(!xml.contains("30000000-0000-4000-8000-000000000001"));
+    assert!(!xml.contains("40000000-0000-4000-8000-000000000001"));
+}
+
+#[test]
+fn flat_configuration_children_fail_closed_for_unproven_references() {
+    let (uuid, text, object_refs) = flat_configuration_fixture();
+    let language = "40000000-0000-4000-8000-000000000003";
+    let document_first = "40000000-0000-4000-8000-000000000002";
+    let cases = [
+        {
+            let mut refs = object_refs.clone();
+            refs.remove(language);
+            ("unresolved", refs)
+        },
+        {
+            let mut refs = object_refs.clone();
+            refs.insert(language.to_string(), "FutureKind.English".to_string());
+            ("unknown kind", refs)
+        },
+        {
+            let mut refs = object_refs.clone();
+            refs.insert(
+                language.to_string(),
+                "Language.English.Child.Value".to_string(),
+            );
+            ("nested reference", refs)
+        },
+        {
+            let mut refs = object_refs.clone();
+            refs.insert(document_first.to_string(), "Catalog.First".to_string());
+            ("mixed family", refs)
+        },
+        {
+            let mut refs = object_refs.clone();
+            refs.insert(language.to_string(), "Document.English".to_string());
+            ("duplicate kind", refs)
+        },
+    ];
+
+    for (case, refs) in cases {
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert!(xml.contains("<InternalInfo>"), "{case}: {xml}");
+        assert!(!xml.contains("<ChildObjects"), "{case}: {xml}");
+    }
+}
+
+#[test]
+fn flat_configuration_layout_rejects_count_mismatches_and_root_control_rows() {
+    let (uuid, text, object_refs) = flat_configuration_fixture();
+    let malformed_family_count = text.replacen(
+        ",2,{30000000-0000-4000-8000-000000000001,",
+        ",3,{30000000-0000-4000-8000-000000000001,",
+        1,
+    );
+    assert_ne!(malformed_family_count, text);
+    let xml = extract_configuration_source_xml(
+        &malformed_family_count,
+        &uuid,
+        &object_refs,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    assert!(!xml.contains("<InternalInfo>"), "{xml}");
+    assert!(!xml.contains("<ChildObjects"), "{xml}");
+
+    let malformed_contained_count = text.replacen(
+        &format!("{{2,{{{uuid}}},7,"),
+        &format!("{{2,{{{uuid}}},6,"),
+        1,
+    );
+    assert_ne!(malformed_contained_count, text);
+    let xml = extract_configuration_source_xml(
+        &malformed_contained_count,
+        &uuid,
+        &object_refs,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    assert!(!xml.contains("<InternalInfo>"), "{xml}");
+    assert!(!xml.contains("<ChildObjects"), "{xml}");
+
+    assert!(
+        extract_configuration_source_xml(
+            &format!("{{2,{uuid},}}"),
+            &uuid,
+            &object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn configuration_root_reference_index_scopes_defined_types() {
+    let uuid = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    let text = format!(
+        "{{1,{{0,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,{{3,{{1,0,{uuid}}},\"OwnerType\",{{1,\"en\",\"Owner type\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}}},0}}"
+    );
+    let rows = vec![metadata_text_row_from_text(uuid, text).unwrap()];
+    let object_refs = build_metadata_object_reference_index_from_texts(&rows);
+    assert!(!object_refs.contains_key(uuid));
+
+    let configuration_refs =
+        build_configuration_root_object_reference_index_from_texts(&rows, &object_refs);
+    assert_eq!(
+        configuration_refs.get(uuid).map(String::as_str),
+        Some("DefinedType.OwnerType")
+    );
+    assert!(!object_refs.contains_key(uuid));
 }
 
 #[test]

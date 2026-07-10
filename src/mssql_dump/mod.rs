@@ -303,6 +303,7 @@ struct DumpRowContext<'a> {
     type_index: &'a BTreeMap<String, String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
+    configuration_root_object_refs: &'a BTreeMap<String, String>,
     recalculation_refs: &'a BTreeMap<String, CalculationRecalculationReference>,
     predefined_item_refs: &'a BTreeMap<String, String>,
     role_rights_object_refs: &'a BTreeMap<String, String>,
@@ -470,6 +471,11 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
+    let configuration_root_object_refs = if extract_metadata_xml {
+        build_configuration_root_object_reference_index_from_texts(&metadata_texts, &object_refs)
+    } else {
+        BTreeMap::new()
+    };
     let role_rights_object_refs =
         build_role_rights_object_reference_index(&object_refs, &form_refs);
     let metadata_order = if extract_metadata_xml || needs_source_layout_refs {
@@ -569,6 +575,7 @@ fn dump_table_rows_with_options(
         type_index: &type_index,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
@@ -1188,6 +1195,14 @@ fn dump_table_rows_streamed(
     } else {
         BTreeMap::new()
     };
+    let configuration_root_object_refs = if extract_metadata_xml {
+        build_configuration_root_object_reference_index_from_texts(
+            &index_metadata_texts,
+            &object_refs,
+        )
+    } else {
+        BTreeMap::new()
+    };
     let role_rights_object_refs =
         build_role_rights_object_reference_index(&object_refs, &form_refs);
     timings.prepare_object_refs_ms += elapsed_ms(index_part_started);
@@ -1332,6 +1347,7 @@ fn dump_table_rows_streamed(
         type_index: &type_index,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
@@ -1688,6 +1704,7 @@ fn dump_table_row_bytes(
                 row,
                 context.type_index,
                 context.object_refs,
+                context.configuration_root_object_refs,
                 context.recalculation_refs,
                 context.functional_option_refs,
                 context.form_refs,
@@ -1701,6 +1718,7 @@ fn dump_table_row_bytes(
                 file_name,
                 context.type_index,
                 context.object_refs,
+                context.configuration_root_object_refs,
                 context.recalculation_refs,
                 context.functional_option_refs,
                 context.form_refs,
@@ -3749,6 +3767,24 @@ struct ConfigurationRootReference {
     value: Option<String>,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationContainedObject {
+    class_id: String,
+    object_id: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationRootLayout {
+    contained_objects: Vec<ConfigurationContainedObject>,
+    child_families: Vec<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationRootChildObject {
+    kind: &'static str,
+    name: String,
+}
+
 struct CommonAttributeProperties {
     value_types: Vec<ConstantValueType>,
     property_details: Option<CommonAttributePropertyDetails>,
@@ -4723,6 +4759,7 @@ fn extract_metadata_source_xml_with_refs(
         uuid,
         type_index,
         object_refs,
+        object_refs,
         &BTreeMap::new(),
         functional_option_refs,
         form_refs,
@@ -4737,6 +4774,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
@@ -4752,6 +4790,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
         &row,
         type_index,
         object_refs,
+        configuration_root_object_refs,
         recalculation_refs,
         functional_option_refs,
         form_refs,
@@ -4765,6 +4804,7 @@ fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
@@ -4777,7 +4817,9 @@ fn extract_metadata_source_xml_from_text_row(
         return None;
     }
     let text = row.text.as_str();
-    if let Some(xml) = extract_configuration_source_xml(text, uuid, object_refs, source_version) {
+    if let Some(xml) =
+        extract_configuration_source_xml(text, uuid, configuration_root_object_refs, source_version)
+    {
         return Some(ExtractedMetadataSourceXml {
             relative_path: PathBuf::from("Configuration.xml"),
             xml: xml.into_bytes(),
@@ -11349,6 +11391,55 @@ fn format_configuration_source_xml(
     );
     insert_metadata_properties_xml(&mut xml, &insert);
     xml
+}
+
+fn insert_configuration_internal_info_xml(
+    xml: &mut String,
+    contained_objects: &[ConfigurationContainedObject],
+) {
+    if contained_objects.is_empty() {
+        return;
+    }
+    let Some(index) = xml.find("\t\t<Properties>\r\n") else {
+        return;
+    };
+    let mut internal_info = "\t\t<InternalInfo>\r\n".to_string();
+    for object in contained_objects {
+        internal_info.push_str(&format!(
+            "\t\t\t<xr:ContainedObject>\r\n\
+\t\t\t\t<xr:ClassId>{}</xr:ClassId>\r\n\
+\t\t\t\t<xr:ObjectId>{}</xr:ObjectId>\r\n\
+\t\t\t</xr:ContainedObject>\r\n",
+            escape_xml_element_text(&object.class_id),
+            escape_xml_element_text(&object.object_id),
+        ));
+    }
+    internal_info.push_str("\t\t</InternalInfo>\r\n");
+    xml.insert_str(index, &internal_info);
+}
+
+fn insert_configuration_root_child_objects_xml(
+    xml: &mut String,
+    child_objects: &[ConfigurationRootChildObject],
+) {
+    let Some(index) = xml.find("\t</Configuration>") else {
+        return;
+    };
+    if child_objects.is_empty() {
+        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        return;
+    }
+    let mut children = "\t\t<ChildObjects>\r\n".to_string();
+    for child in child_objects {
+        children.push_str(&format!(
+            "\t\t\t<{}>{}</{}>\r\n",
+            child.kind,
+            escape_xml_element_text(&child.name),
+            child.kind,
+        ));
+    }
+    children.push_str("\t\t</ChildObjects>\r\n");
+    xml.insert_str(index, &children);
 }
 
 fn push_optional_simple_property_xml(xml: &mut String, name: &str, value: Option<&str>) {

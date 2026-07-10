@@ -120,6 +120,26 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
     index
 }
 
+pub(super) fn build_configuration_root_object_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    object_refs: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut index = object_refs.clone();
+    for row in rows {
+        if row.object_code != Some(0) || !is_defined_type_metadata_text(&row.text, &row.file_name) {
+            continue;
+        }
+        let Some(header) = row.header.as_ref() else {
+            continue;
+        };
+        index.insert(
+            row.file_name.clone(),
+            format!("DefinedType.{}", header.name),
+        );
+    }
+    index
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub(super) struct CalculationRecalculationReference {
     pub(super) owner_name: String,
@@ -1713,9 +1733,20 @@ pub(super) fn extract_configuration_source_xml(
     header.uuid = uuid.to_string();
     let properties =
         parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
-    let child_objects = parse_configuration_child_objects(text, uuid, header_uuid);
+    let root_layout = parse_configuration_root_layout(text, uuid);
+    let child_objects = root_layout
+        .is_none()
+        .then(|| parse_configuration_child_objects(text, uuid, header_uuid))
+        .unwrap_or_default();
     let mut xml = format_configuration_source_xml(&header, &properties, source_version);
-    if !child_objects.is_empty() {
+    if let Some(root_layout) = &root_layout {
+        insert_configuration_internal_info_xml(&mut xml, &root_layout.contained_objects);
+        if let Some(child_objects) =
+            resolve_configuration_root_child_objects(root_layout, object_refs)
+        {
+            insert_configuration_root_child_objects_xml(&mut xml, &child_objects);
+        }
+    } else if !child_objects.is_empty() {
         let mut child_xml = String::new();
         for child_object in &child_objects {
             push_metadata_header_child_object_xml(
@@ -1823,6 +1854,297 @@ pub(super) fn parse_configuration_default_roles(
 pub(super) fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
     let start = text.find("{68,")?;
     split_1c_braced_fields(text, start)
+}
+
+const CONFIGURATION_CONTAINED_OBJECT_COUNT: usize = 7;
+
+const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 45] = [
+    "Language",
+    "Subsystem",
+    "StyleItem",
+    "Style",
+    "CommonPicture",
+    "SessionParameter",
+    "Role",
+    "CommonTemplate",
+    "FilterCriterion",
+    "CommonModule",
+    "CommonAttribute",
+    "ExchangePlan",
+    "XDTOPackage",
+    "WebService",
+    "HTTPService",
+    "WSReference",
+    "EventSubscription",
+    "ScheduledJob",
+    "SettingsStorage",
+    "FunctionalOption",
+    "FunctionalOptionsParameter",
+    "DefinedType",
+    "Bot",
+    "CommonCommand",
+    "CommandGroup",
+    "Constant",
+    "CommonForm",
+    "Catalog",
+    "Document",
+    "DocumentNumerator",
+    "Sequence",
+    "DocumentJournal",
+    "Enum",
+    "Report",
+    "DataProcessor",
+    "InformationRegister",
+    "AccumulationRegister",
+    "ChartOfCharacteristicTypes",
+    "ChartOfAccounts",
+    "AccountingRegister",
+    "ChartOfCalculationTypes",
+    "CalculationRegister",
+    "BusinessProcess",
+    "Task",
+    "IntegrationService",
+];
+
+fn parse_configuration_root_layout(text: &str, uuid: &str) -> Option<ConfigurationRootLayout> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "2" {
+        return None;
+    }
+    let uuid_fields = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    if uuid_fields.len() != 1 || uuid_fields.first()?.trim() != uuid {
+        return None;
+    }
+    let contained_count = fields.get(2)?.trim().parse::<usize>().ok()?;
+    if contained_count != CONFIGURATION_CONTAINED_OBJECT_COUNT
+        || fields.len() != contained_count + 4
+        || !is_configuration_root_footer(fields.last()?.trim())
+    {
+        return None;
+    }
+
+    let mut contained_objects = Vec::with_capacity(contained_count);
+    let mut child_families = Vec::new();
+    for field in fields.iter().skip(3).take(contained_count) {
+        let contained_fields = split_1c_braced_fields(field.trim(), 0)?;
+        if contained_fields.len() != 2 {
+            return None;
+        }
+        let class_id = parse_non_zero_uuid(contained_fields.first()?.trim())?;
+        let object_ids = configuration_contained_object_ids(field);
+        if object_ids.len() != 1 {
+            return None;
+        }
+        let object_id = object_ids.into_iter().next()?;
+        let families = configuration_family_sequence(contained_fields.get(1)?.trim(), &object_id)?;
+        contained_objects.push(ConfigurationContainedObject {
+            class_id,
+            object_id,
+        });
+        child_families.extend(families);
+    }
+
+    Some(ConfigurationRootLayout {
+        contained_objects,
+        child_families,
+    })
+}
+
+fn is_configuration_root_footer(field: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
+        return false;
+    };
+    if fields.len() != 1 {
+        return false;
+    }
+    let Some(footer) = fields
+        .first()
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return false;
+    };
+    footer.len() == 3
+        && footer.first().map(|field| field.trim()) == Some("0")
+        && footer
+            .get(1)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_some_and(|value| value.is_empty())
+        && footer
+            .get(2)
+            .and_then(|field| parse_1c_quoted_string(field.trim()))
+            .is_some_and(|value| value.is_empty())
+}
+
+fn configuration_contained_object_ids(text: &str) -> Vec<String> {
+    const MARKER: &str = "{1,0,";
+
+    let mut object_ids = Vec::new();
+    let mut search_start = 0;
+    while let Some(relative_start) = text[search_start..].find(MARKER) {
+        let marker_start = search_start + relative_start;
+        search_start = marker_start + 1;
+        let Some(fields) = split_1c_braced_fields(text, marker_start) else {
+            continue;
+        };
+        if fields.len() != 3
+            || fields.first().map(|field| field.trim()) != Some("1")
+            || fields.get(1).map(|field| field.trim()) != Some("0")
+        {
+            continue;
+        }
+        if let Some(object_id) = fields
+            .get(2)
+            .and_then(|field| parse_non_zero_uuid(field.trim()))
+        {
+            object_ids.push(object_id);
+        }
+    }
+    object_ids
+}
+
+fn configuration_family_sequence(text: &str, object_id: &str) -> Option<Vec<Vec<String>>> {
+    let mut candidates = Vec::new();
+    collect_configuration_family_sequences(text, object_id, 0, &mut candidates);
+    let minimum_depth = candidates.iter().map(|(depth, _)| *depth).min()?;
+    let mut nearest = candidates
+        .into_iter()
+        .filter(|(depth, _)| *depth == minimum_depth)
+        .map(|(_, families)| families);
+    let families = nearest.next()?;
+    nearest.next().is_none().then_some(families)
+}
+
+fn collect_configuration_family_sequences(
+    text: &str,
+    object_id: &str,
+    depth: usize,
+    candidates: &mut Vec<(usize, Vec<Vec<String>>)>,
+) {
+    let Some(fields) = split_1c_braced_fields(text, 0) else {
+        return;
+    };
+    let initial_candidate_count = candidates.len();
+
+    for count_index in 1..fields.len() {
+        let Some(family_count) = fields
+            .get(count_index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+        else {
+            continue;
+        };
+        if family_count == 0 || fields.len() != count_index + family_count + 1 {
+            continue;
+        }
+        if !fields[..count_index].iter().any(|field| {
+            configuration_contained_object_ids(field)
+                .iter()
+                .any(|candidate| candidate == object_id)
+        }) {
+            continue;
+        }
+
+        let mut families = Vec::with_capacity(family_count);
+        let mut valid = true;
+        for family in fields.iter().skip(count_index + 1) {
+            let Some(children) = parse_configuration_family(family.trim()) else {
+                valid = false;
+                break;
+            };
+            families.push(children);
+        }
+        if valid {
+            candidates.push((depth, families));
+        }
+    }
+
+    if candidates.len() != initial_candidate_count {
+        return;
+    }
+
+    for field in &fields {
+        let field = field.trim();
+        if field.starts_with('{') {
+            collect_configuration_family_sequences(field, object_id, depth + 1, candidates);
+        }
+    }
+}
+
+fn parse_configuration_family(text: &str) -> Option<Vec<String>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    parse_non_zero_uuid(fields.first()?.trim())?;
+    let child_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != child_count + 2 {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| parse_non_zero_uuid(field.trim()))
+        .collect()
+}
+
+fn resolve_configuration_root_child_objects(
+    layout: &ConfigurationRootLayout,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<ConfigurationRootChildObject>> {
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_kinds = BTreeSet::new();
+    let mut groups = Vec::new();
+
+    for family in &layout.child_families {
+        if family.is_empty() {
+            continue;
+        }
+        let mut family_kind = None;
+        let mut names = Vec::with_capacity(family.len());
+        for uuid in family {
+            if !seen_uuids.insert(uuid.as_str()) {
+                return None;
+            }
+            let Some(reference) = object_refs.get(uuid) else {
+                return None;
+            };
+            let Some((kind, name)) = reference.split_once('.') else {
+                return None;
+            };
+            if name.is_empty() || name.contains('.') {
+                return None;
+            }
+            let Some((order, kind)) = configuration_root_child_kind(kind) else {
+                return None;
+            };
+            if family_kind.is_some_and(|(_, candidate)| candidate != kind) {
+                return None;
+            }
+            family_kind = Some((order, kind));
+            names.push(name.to_string());
+        }
+        let (order, kind) = family_kind?;
+        if !seen_kinds.insert(kind) {
+            return None;
+        }
+        groups.push((order, kind, names));
+    }
+
+    groups.sort_by_key(|(order, _, _)| *order);
+    Some(
+        groups
+            .into_iter()
+            .flat_map(|(_, kind, names)| {
+                names
+                    .into_iter()
+                    .map(move |name| ConfigurationRootChildObject { kind, name })
+            })
+            .collect(),
+    )
+}
+
+fn configuration_root_child_kind(kind: &str) -> Option<(usize, &'static str)> {
+    CONFIGURATION_ROOT_CHILD_KIND_ORDER
+        .iter()
+        .enumerate()
+        .find(|(_, candidate)| **candidate == kind)
+        .map(|(order, kind)| (order, *kind))
 }
 
 pub(super) fn parse_configuration_localized_property(
