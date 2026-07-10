@@ -4016,6 +4016,7 @@ enum RawGeneratedTypeCondition {
     HeaderIndex(usize),
     FieldPrefix(usize, &'static str),
     FieldUuid(usize),
+    FieldUuidRange(usize, usize),
 }
 
 #[derive(Clone, Copy)]
@@ -4038,6 +4039,12 @@ impl RawGeneratedTypeSchema {
                     .copied()
                     .and_then(parse_uuid_field)
                     .is_some(),
+                RawGeneratedTypeCondition::FieldUuidRange(start, count) => start
+                    .checked_add(count)
+                    .and_then(|end| fields.get(start..end))
+                    .is_some_and(|fields| {
+                        fields.iter().all(|field| parse_uuid_field(field).is_some())
+                    }),
             })
     }
 }
@@ -4311,6 +4318,59 @@ const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
             RawGeneratedTypeSlot {
                 field_index: 11,
                 generated_type: "ChartOfCharacteristicTypesManager",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
+        object_codes: &[35],
+        conditions: &[
+            RawGeneratedTypeCondition::HeaderIndex(1),
+            RawGeneratedTypeCondition::FieldUuidRange(2, 22),
+        ],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 2,
+                generated_type: "ChartOfCalculationTypesObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 4,
+                generated_type: "ChartOfCalculationTypesRef",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 6,
+                generated_type: "ChartOfCalculationTypesSelection",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 8,
+                generated_type: "ChartOfCalculationTypesList",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 10,
+                generated_type: "ChartOfCalculationTypesManager",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 12,
+                generated_type: "DisplacingCalculationTypes",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 14,
+                generated_type: "DisplacingCalculationTypesRow",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 16,
+                generated_type: "BaseCalculationTypes",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 18,
+                generated_type: "BaseCalculationTypesRow",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 20,
+                generated_type: "LeadingCalculationTypes",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 22,
+                generated_type: "LeadingCalculationTypesRow",
             },
         ],
     },

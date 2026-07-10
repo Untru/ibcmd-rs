@@ -25278,6 +25278,163 @@ fn builds_exchange_plan_code_36_generated_type_index_entries() {
 }
 
 #[test]
+fn builds_chart_of_calculation_types_generated_type_index_entries() {
+    let chart_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let generated_types = [
+        (
+            "11111111-1111-4111-8111-111111111101",
+            "11111111-1111-4111-8111-111111111102",
+            "ChartOfCalculationTypesObject",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111103",
+            "11111111-1111-4111-8111-111111111104",
+            "ChartOfCalculationTypesRef",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111105",
+            "11111111-1111-4111-8111-111111111106",
+            "ChartOfCalculationTypesSelection",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111107",
+            "11111111-1111-4111-8111-111111111108",
+            "ChartOfCalculationTypesList",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111109",
+            "11111111-1111-4111-8111-111111111110",
+            "ChartOfCalculationTypesManager",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111111",
+            "11111111-1111-4111-8111-111111111112",
+            "DisplacingCalculationTypes",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111113",
+            "11111111-1111-4111-8111-111111111114",
+            "DisplacingCalculationTypesRow",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111115",
+            "11111111-1111-4111-8111-111111111116",
+            "BaseCalculationTypes",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111117",
+            "11111111-1111-4111-8111-111111111118",
+            "BaseCalculationTypesRow",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111119",
+            "11111111-1111-4111-8111-111111111120",
+            "LeadingCalculationTypes",
+        ),
+        (
+            "11111111-1111-4111-8111-111111111121",
+            "11111111-1111-4111-8111-111111111122",
+            "LeadingCalculationTypesRow",
+        ),
+    ];
+    let generated_type_fields = generated_types
+        .iter()
+        .flat_map(|(type_id, value_id, _)| [*type_id, *value_id])
+        .collect::<Vec<_>>()
+        .join(",");
+    let blob = deflate_for_test(
+        format!(
+            "{{1,\r\n{{35,\r\n{{0,\r\n{{3,\r\n{{1,0,{chart_uuid}}},\"PayrollTypes\",{{1,\"en\",\"Payroll types\"}},\"\"\r\n}}\r\n}},{generated_type_fields}\r\n}},0}}"
+        )
+        .as_bytes(),
+    );
+    let rows = vec![ConfigRow {
+        file_name: chart_uuid.to_string(),
+        part_no: 0,
+        data_size: blob.len() as i64,
+        binary_hex: encode_hex_for_test(&blob),
+    }];
+
+    let index = build_metadata_type_index(&rows);
+
+    assert_eq!(index.len(), generated_types.len());
+    for (type_id, _, generated_type) in generated_types {
+        let expected = format!("cfg:{generated_type}.PayrollTypes");
+        assert_eq!(
+            index.get(type_id).map(String::as_str),
+            Some(expected.as_str())
+        );
+    }
+}
+
+#[test]
+fn resolves_chart_of_calculation_types_generated_types_in_defined_types() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let chart_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let object_type_id = "11111111-1111-4111-8111-000000000101";
+    let ref_type_id = "11111111-1111-4111-8111-000000000103";
+    let generated_type_ids = (101..=122)
+        .map(|suffix| format!("11111111-1111-4111-8111-{suffix:012}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let chart_blob = deflate_for_test(
+        format!(
+            "{{1,\r\n{{35,\r\n{{0,\r\n{{3,\r\n{{1,0,{chart_uuid}}},\"PayrollTypes\",{{1,\"en\",\"Payroll types\"}},\"\"\r\n}}\r\n}},{generated_type_ids}\r\n}},0}}"
+        )
+        .as_bytes(),
+    );
+    let defined_type_row = |uuid: &str, name: &str, type_id: &str, own_type_seed: &str| {
+        let blob = deflate_for_test(
+            format!(
+                "{{1,\r\n{{0,{own_type_seed},22222222-2222-4222-8222-222222222222,\r\n{{3,\r\n{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\"}},\r\n{{\"Pattern\",{{\"#\",{type_id}}}}}\r\n}},0}}"
+            )
+            .as_bytes(),
+        );
+        ConfigRow {
+            file_name: uuid.to_string(),
+            part_no: 0,
+            data_size: blob.len() as i64,
+            binary_hex: encode_hex_for_test(&blob),
+        }
+    };
+    let rows = vec![
+        ConfigRow {
+            file_name: chart_uuid.to_string(),
+            part_no: 0,
+            data_size: chart_blob.len() as i64,
+            binary_hex: encode_hex_for_test(&chart_blob),
+        },
+        defined_type_row(
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "VersionedData",
+            ref_type_id,
+            "33333333-3333-4333-8333-333333333333",
+        ),
+        defined_type_row(
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "VersionedDataObject",
+            object_type_id,
+            "44444444-4444-4444-8444-444444444444",
+        ),
+    ];
+
+    dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+    let ref_xml = fs::read_to_string(root.join("DefinedTypes/VersionedData.xml")).unwrap();
+    let object_xml = fs::read_to_string(root.join("DefinedTypes/VersionedDataObject.xml")).unwrap();
+    assert!(ref_xml.contains("<v8:Type>cfg:ChartOfCalculationTypesRef.PayrollTypes</v8:Type>"));
+    assert!(
+        object_xml.contains("<v8:Type>cfg:ChartOfCalculationTypesObject.PayrollTypes</v8:Type>")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn extracts_document_generated_types_to_metadata_xml() {
     let document_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let object_type_id = "11111111-1111-4111-8111-111111111111";
