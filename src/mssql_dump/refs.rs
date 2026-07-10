@@ -1734,6 +1734,11 @@ pub(super) fn extract_configuration_source_xml(
     let mut properties =
         parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
     properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
+    if configuration_root_property_fields(text, uuid).is_some() {
+        properties.default_roles =
+            parse_configuration_default_roles_from_root(text, uuid, object_refs)
+                .unwrap_or_default();
+    }
     properties.used_mobile_application_functionalities =
         parse_configuration_used_mobile_application_functionalities(
             text,
@@ -1859,6 +1864,55 @@ pub(super) fn parse_configuration_default_roles(
         .filter_map(|field| parse_design_time_reference(field, object_refs))
         .filter(|reference| reference.starts_with("Role."))
         .collect()
+}
+
+const CONFIGURATION_DEFAULT_ROLE_TYPE_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
+
+pub(super) fn parse_configuration_default_roles_from_root(
+    text: &str,
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let raw_fields = split_1c_braced_fields(fields.get(39)?.trim(), 0)?;
+    if raw_fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = raw_fields.get(1)?.trim().parse::<usize>().ok()?;
+    if raw_fields.len() != count.checked_add(2)? {
+        return None;
+    }
+
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_references = BTreeSet::new();
+    let mut roles = Vec::with_capacity(count);
+    for raw_role in raw_fields.iter().skip(2) {
+        let role_fields = split_1c_braced_fields(raw_role.trim(), 0)?;
+        if role_fields.len() != 3
+            || parse_1c_quoted_string(role_fields.first()?.trim()).as_deref() != Some("#")
+            || role_fields.get(1)?.trim() != CONFIGURATION_DEFAULT_ROLE_TYPE_UUID
+        {
+            return None;
+        }
+        let target_fields = split_1c_braced_fields(role_fields.get(2)?.trim(), 0)?;
+        if target_fields.len() != 2 || target_fields.first()?.trim() != "1" {
+            return None;
+        }
+        let role_uuid = parse_non_zero_uuid(target_fields.get(1)?.trim())?;
+        if !seen_uuids.insert(role_uuid.clone()) {
+            return None;
+        }
+        let reference = object_refs.get(&role_uuid)?;
+        let (kind, name) = reference.split_once('.')?;
+        if kind != "Role" || name.is_empty() || name.contains('.') {
+            return None;
+        }
+        if !seen_references.insert(reference.clone()) {
+            return None;
+        }
+        roles.push(reference.clone());
+    }
+    Some(roles)
 }
 
 pub(super) fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {

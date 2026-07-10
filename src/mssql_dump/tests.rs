@@ -23279,6 +23279,16 @@ fn configuration_mobile_raw(
     format!("{{{}}}", fields.join(","))
 }
 
+fn configuration_default_roles_raw(declared_count: usize, role_uuids: &[&str]) -> String {
+    let mut fields = vec!["0".to_string(), declared_count.to_string()];
+    fields.extend(
+        role_uuids
+            .iter()
+            .map(|uuid| format!("{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{uuid}}}}}")),
+    );
+    format!("{{{}}}", fields.join(","))
+}
+
 fn flat_configuration_properties_text(
     code: u32,
     field_count: usize,
@@ -23600,6 +23610,233 @@ fn configuration_use_purposes_fail_closed() {
         1,
     );
     assert!(parse_configuration_use_purposes(&wrong_header, &uuid).is_none());
+}
+
+#[test]
+fn extracts_configuration_default_roles_for_proven_layouts() {
+    let role_uuids = [
+        "50000000-0000-4000-8000-000000000001",
+        "50000000-0000-4000-8000-000000000002",
+        "50000000-0000-4000-8000-000000000003",
+    ];
+    let raw = configuration_default_roles_raw(3, &role_uuids);
+    let object_refs = BTreeMap::from([
+        (role_uuids[0].to_string(), "Role.FullRights".to_string()),
+        (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
+        (role_uuids[2].to_string(), "Role.ExternalOpen".to_string()),
+    ]);
+    let expected = "\t\t\t<DefaultRoles>\r\n\
+\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">Role.FullRights</xr:Item>\r\n\
+\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">Role.SystemAdmin</xr:Item>\r\n\
+\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">Role.ExternalOpen</xr:Item>\r\n\
+\t\t\t</DefaultRoles>\r\n";
+
+    for (code, field_count) in [(67, 60), (68, 61), (76, 77)] {
+        let (uuid, text) = flat_configuration_properties_text(code, field_count, &[(39, &raw)]);
+        assert_eq!(
+            parse_configuration_default_roles_from_root(&text, &uuid, &object_refs),
+            Some(vec![
+                "Role.FullRights".to_string(),
+                "Role.SystemAdmin".to_string(),
+                "Role.ExternalOpen".to_string(),
+            ])
+        );
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert_eq!(
+            xml.matches(expected).count(),
+            1,
+            "{code}/{field_count}: {xml}"
+        );
+        if let Some(script_variant) = xml.find("<ScriptVariant>") {
+            assert!(script_variant < xml.find("<DefaultRoles>").unwrap());
+        }
+        if let Some(vendor) = xml.find("<Vendor>") {
+            assert!(xml.find("</DefaultRoles>").unwrap() < vendor);
+        }
+    }
+}
+
+#[test]
+fn configuration_default_roles_fail_closed() {
+    let role_uuids = [
+        "50000000-0000-4000-8000-000000000001",
+        "50000000-0000-4000-8000-000000000002",
+        "50000000-0000-4000-8000-000000000003",
+    ];
+    let valid = configuration_default_roles_raw(3, &role_uuids);
+    let valid_entry = format!(
+        "{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{}}}}}",
+        role_uuids[0]
+    );
+    let object_refs = BTreeMap::from([
+        (role_uuids[0].to_string(), "Role.FullRights".to_string()),
+        (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
+        (role_uuids[2].to_string(), "Role.ExternalOpen".to_string()),
+    ]);
+    let malformed = [
+        ("outer marker", valid.replacen("{0,3,", "{1,3,", 1)),
+        (
+            "declared count",
+            configuration_default_roles_raw(2, &role_uuids),
+        ),
+        (
+            "missing entry",
+            configuration_default_roles_raw(3, &role_uuids[..2]),
+        ),
+        ("missing count", "{0}".to_string()),
+        (
+            "extra entry",
+            configuration_default_roles_raw(
+                3,
+                &[role_uuids[0], role_uuids[1], role_uuids[2], role_uuids[0]],
+            ),
+        ),
+        (
+            "overflow count",
+            format!("{{0,{},{valid_entry}}}", usize::MAX),
+        ),
+        ("bad marker", valid.replacen("\"#\"", "\"x\"", 1)),
+        ("unquoted marker", valid.replacen("\"#\"", "#", 1)),
+        (
+            "wrong type",
+            valid.replacen(
+                "157fa490-4ce9-11d4-9415-008048da11f9",
+                "257fa490-4ce9-11d4-9415-008048da11f9",
+                1,
+            ),
+        ),
+        (
+            "target marker",
+            valid.replacen("{1,50000000", "{0,50000000", 1),
+        ),
+        (
+            "unknown target marker",
+            valid.replacen("{1,50000000", "{2,50000000", 1),
+        ),
+        (
+            "missing target uuid",
+            valid.replacen("{1,50000000-0000-4000-8000-000000000001}", "{1}", 1),
+        ),
+        (
+            "target extra",
+            valid.replacen(
+                "{1,50000000-0000-4000-8000-000000000001}",
+                "{1,50000000-0000-4000-8000-000000000001,0}",
+                1,
+            ),
+        ),
+        (
+            "entry extra",
+            valid.replacen(
+                "{1,50000000-0000-4000-8000-000000000001}}",
+                "{1,50000000-0000-4000-8000-000000000001},0}",
+                1,
+            ),
+        ),
+        (
+            "zero uuid",
+            valid.replacen(role_uuids[0], "00000000-0000-0000-0000-000000000000", 1),
+        ),
+        (
+            "invalid uuid",
+            valid.replacen(role_uuids[0], "not-a-uuid", 1),
+        ),
+        (
+            "duplicate uuid",
+            configuration_default_roles_raw(3, &[role_uuids[0], role_uuids[0], role_uuids[2]]),
+        ),
+    ];
+    for (case, raw) in malformed {
+        let (uuid, text) = flat_configuration_properties_text(67, 60, &[(39, &raw)]);
+        assert!(
+            parse_configuration_default_roles_from_root(&text, &uuid, &object_refs).is_none(),
+            "{case}: {raw}"
+        );
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert!(!xml.contains("DefaultRoles"), "{case}: {xml}");
+    }
+
+    let reference_cases = [
+        ("unresolved", BTreeMap::new()),
+        (
+            "wrong prefix",
+            BTreeMap::from([
+                (role_uuids[0].to_string(), "Catalog.FullRights".to_string()),
+                (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
+                (role_uuids[2].to_string(), "Role.ExternalOpen".to_string()),
+            ]),
+        ),
+        (
+            "nested reference",
+            BTreeMap::from([
+                (
+                    role_uuids[0].to_string(),
+                    "Role.FullRights.Child".to_string(),
+                ),
+                (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
+                (role_uuids[2].to_string(), "Role.ExternalOpen".to_string()),
+            ]),
+        ),
+        (
+            "duplicate reference",
+            BTreeMap::from([
+                (role_uuids[0].to_string(), "Role.FullRights".to_string()),
+                (role_uuids[1].to_string(), "Role.FullRights".to_string()),
+                (role_uuids[2].to_string(), "Role.ExternalOpen".to_string()),
+            ]),
+        ),
+    ];
+    for (case, refs) in reference_cases {
+        let (uuid, text) = flat_configuration_properties_text(67, 60, &[(39, &valid)]);
+        assert!(
+            parse_configuration_default_roles_from_root(&text, &uuid, &refs).is_none(),
+            "{case}"
+        );
+    }
+
+    let (uuid, swapped) =
+        flat_configuration_properties_text(67, 60, &[(39, "{0,0}"), (40, &valid)]);
+    assert_eq!(
+        parse_configuration_default_roles_from_root(&swapped, &uuid, &object_refs),
+        Some(Vec::new())
+    );
+
+    let (uuid, mut decoy) = flat_configuration_properties_text(67, 60, &[(39, "{0,0}")]);
+    let second_id = "20000000-0000-4000-8000-000000000002";
+    let marker = format!("{{1,0,{second_id}}}");
+    decoy = decoy.replacen(
+        &format!("{{{marker}}}"),
+        &format!("{{{marker},{valid}}}"),
+        1,
+    );
+    assert_eq!(
+        parse_configuration_default_roles_from_root(&decoy, &uuid, &object_refs),
+        Some(Vec::new())
+    );
+
+    for (case, code, field_count) in [
+        ("67 field count", 67, 61),
+        ("68 field count", 68, 60),
+        ("76 field count", 76, 76),
+    ] {
+        let (uuid, text) = flat_configuration_properties_text(code, field_count, &[(39, &valid)]);
+        assert!(
+            parse_configuration_default_roles_from_root(&text, &uuid, &object_refs).is_none(),
+            "{case}"
+        );
+    }
 }
 
 #[test]
