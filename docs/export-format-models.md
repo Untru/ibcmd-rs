@@ -690,6 +690,33 @@ The accepted gate changed only 63 Form.xml files. Full diff improved from
 field nodes is an order-preserving recursive subset of native XML, and no file
 had a positive insertion delta.
 
+### Form item picture assets
+
+External item picture files are classified by the enclosing raw item record and
+the exact property slot that owns the typed picture value. Item names, nearby
+strings, serialized occurrence, payload hash, and configuration UUIDs are not
+part of the model.
+
+| Raw owner/property | External property |
+| --- | --- |
+| wrapper `12` `PictureDecoration`, typed value at options field `18/1` | `Picture` |
+| wrapper `31` or `34` `Button`, typed value at `25 + top-level offset` | `Picture` |
+| wrapper `55` `Table`, typed value at field `44` | `RowsPicture` |
+| wrapper `37` `PictureField`, typed value at `29 + input offset` | `HeaderPicture` |
+| the same PictureField, discriminator-`10` options field `5` | `ValuesPicture` |
+
+The property value must have the typed `{4,3,...}` shape, contain exactly one
+field-7 base64 child, and pass the existing image-signature check. Wrapper `73`,
+nearby slots, non-picture reference kinds, wrong option discriminators, and
+ambiguous payload lists fail closed. Export and inverse pack call the same
+resolver.
+
+An initial candidate additionally required an optional wrapper-55 tail shape
+and admitted only 55 of 61 BSP assets. It was rejected before integration. The
+accepted model covers 61 records in 17 forms: `Picture` 48, `RowsPicture` 7,
+`ValuesPicture` 5, and `HeaderPicture` 1. Generated and native paths and SHA-256
+hashes match 61/61; the serialized 12,198-file before/after tree is identical.
+
 Supported by tests:
 
 - Focused tests cover existing standard-command and table-standard-command

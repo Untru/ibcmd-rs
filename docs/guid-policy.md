@@ -41,9 +41,10 @@ Classification:
   focused sample blobs under `#[cfg(test)]` modules in `src`.
 - Lab documentation: real SFC/SSL sample UUIDs appear in `docs/*lab*` and
   coverage notes as audit evidence only.
-- Confirmed config-specific production behavior that must still be removed or
-  replaced with structural parsing:
-  - form picture-file decisions depend on concrete Russian item names.
+- The confirmed config-specific name/path/UUID behavior found by this audit has
+  been removed. The remaining Cyrillic production literals in the same scan are
+  platform-standard metadata/data-path vocabulary and locale descriptors, not
+  application object or form names.
 - Resolved in `6ee75f0`: the concrete command-group UUID to
   `CommandGroup.Органайзер` mapping was removed. Custom command groups now use
   current-metadata `object_refs`. Separate parent/current exports were identical
@@ -64,6 +65,13 @@ Classification:
   gate was byte-identical across 2,208 files, including two native-exact target
   `Rights.xml` files; the full BSP before/after tree was also identical across
   all 12,198 files.
+- Resolved in `fc67436`: Form item picture assets no longer use Russian item
+  names, serialized occurrence, or nearest-name windows to choose `Picture`,
+  `RowsPicture`, `HeaderPicture`, or `ValuesPicture`. Export and inverse pack
+  share a wrapper/property-slot classifier. An over-strict first gate admitted
+  only 55 of 61 assets and was rejected before integration; the accepted model
+  restores all 61 native paths and SHA-256 hashes. Its isolated and serialized
+  full BSP trees were byte-identical to the 12,198-file accepted snapshot.
 - `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` (`2ef6d6fa-...`) is not in that
   category. It is accepted only in exact typed command-source record shapes,
   maps to the platform token `FormCommandPanelGlobalCommands`, and was also
