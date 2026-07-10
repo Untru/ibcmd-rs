@@ -41,10 +41,8 @@ Classification:
   focused sample blobs under `#[cfg(test)]` modules in `src`.
 - Lab documentation: real SFC/SSL sample UUIDs appear in `docs/*lab*` and
   coverage notes as audit evidence only.
-- Confirmed config-specific production behavior that must be removed or
+- Confirmed config-specific production behavior that must still be removed or
   replaced with structural parsing:
-  - `normalize_form_dynamic_list_settings` special-cases `СписокЗаказов` and
-    `Document.ЗаказКлиента`;
   - form picture-file decisions depend on concrete Russian item names;
   - role-right reconstruction contains mappings between concrete Russian
     characteristic-plan attribute and tabular-section names.
@@ -56,6 +54,11 @@ Classification:
   slot `23 + top_level_offset`, not `СоставЗаказа.*` data paths. The full gate
   restored 13 native `HorizontalAlign=Right` lines across ten forms with zero
   target additions.
+- Resolved in `6b70292`: the `СписокЗаказов` plus
+  `Document.ЗаказКлиента` dynamic-list fallback was removed. The raw
+  `AutoSaveUserSettings` setting already reaches the generic normalizer.
+  Separate before/after exports contained 12,197 files each and had a zero
+  whole-tree content diff.
 - `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` (`2ef6d6fa-...`) is not in that
   category. It is accepted only in exact typed command-source record shapes,
   maps to the platform token `FormCommandPanelGlobalCommands`, and was also
