@@ -4034,8 +4034,6 @@ pub(super) fn parse_form_child_item_with_context(
     let title = parse_form_child_item_title(wrapper, &fields);
     let input_hint = if tag == "InputField" {
         parse_form_input_field_input_hint(input_field_extended_options.as_deref())
-    } else if tag == "FormattedDocumentField" {
-        Vec::new()
     } else {
         parse_form_child_item_input_hint(wrapper, &fields)
     };
@@ -4998,7 +4996,6 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "CheckBoxField"
             | "RadioButtonField"
             | "TextDocumentField"
-            | "FormattedDocumentField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -7398,7 +7395,6 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
             "4" => Some("PictureField"),
             "5" => Some("RadioButtonField"),
             "7" => Some("TextDocumentField"),
-            "17" => Some("FormattedDocumentField"),
             _ => None,
         },
         "5" | "6" => match fields.get(5).map(|value| value.trim())? {
@@ -7859,7 +7855,6 @@ pub(super) fn parse_form_child_item_data_path(
             | "PictureField"
             | "RadioButtonField"
             | "TextDocumentField"
-            | "FormattedDocumentField"
     )
     .then(|| {
         form_input_field_layout_is_extended(fields)
@@ -7872,11 +7867,7 @@ pub(super) fn parse_form_child_item_data_path(
             .get(11)
             .and_then(parse_bound)
             .or_else(|| main_data_path.map(ToOwned::to_owned)),
-        "InputField"
-        | "CheckBoxField"
-        | "PictureField"
-        | "RadioButtonField"
-        | "FormattedDocumentField" => [11usize, 12]
+        "InputField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound)
