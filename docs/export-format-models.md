@@ -828,6 +828,32 @@ in XML element text. The counts sum to all 491 remaining line pairs. After the
 canonical text-element gate, all 19 Predefined files had zero content diff and
 the full diff moved to `1616 files, +31553/-221996`.
 
+## Calculation-register Recalculations
+
+Status: current-metadata routing and the complete selected payload are
+confirmed by a serialized full export.
+
+A Recalculation source row shares raw object code `4` with unrelated metadata
+rows. Code `4` alone is therefore not a route. A row is treated as a
+Recalculation only when its UUID occurs in the Recalculation child list of a
+current `CalculationRegister`. Ambiguous owners and sanitized-path collisions
+are removed from the index. Undeclared code-4 rows continue through the common
+metadata serializers; a declared but malformed Recalculation fails closed.
+
+The child body has an exact four-field root. Its object record supplies six
+nonzero IDs for the `RecalculationRecord`, `RecalculationManager`, and
+`RecalculationRecordSet` generated types. Root lock mode `0` maps to
+`Automatic`, and `1` maps to `Managed`. The dimension list is identified by
+platform serialization marker `3c456b74-4ea5-4b22-a957-e9fad9133b54`; this is
+not a metadata-object UUID. Each dimension must resolve its register-dimension
+UUID through current `object_refs` to
+`CalculationRegister.<owner>.Dimension.<name>`.
+
+The accepted gate added exactly one exported path and no other content change.
+The generated Recalculation is 3,812 bytes and byte-identical to the native
+checkout. Full diff moved from `1565 files, +31308/-192925` to
+`1564 files, +31308/-192861`; Form command guards remained unchanged.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
