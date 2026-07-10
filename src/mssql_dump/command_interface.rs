@@ -93,22 +93,15 @@ pub(super) fn parse_command_interface_sectioned_fields(
     let count = parse_command_interface_section_count(fields, &mut index)?;
     let mut commands_visibility = Vec::with_capacity(count);
     for _ in 0..count {
-        let command_ref = split_1c_braced_fields(fields.get(index)?, 0)?;
+        let name = parse_command_interface_command_name_field(
+            fields.get(index)?,
+            command_refs,
+            metadata_refs,
+            true,
+        )?;
         index += 1;
-        let code = command_ref.first()?.trim();
-        if !code.chars().all(|ch| ch.is_ascii_digit()) {
-            return None;
-        }
         let common = parse_command_interface_common_flag(fields.get(index)?)?;
         index += 1;
-        let name = if let Some(uuid) = command_ref.get(1).map(|value| value.trim()) {
-            if !is_uuid_text(uuid) {
-                return None;
-            }
-            command_interface_command_name(code, uuid, command_refs, metadata_refs)
-        } else {
-            code.to_string()
-        };
         commands_visibility.push(CommandInterfaceVisibilityEntry { name, common });
     }
 
@@ -119,6 +112,7 @@ pub(super) fn parse_command_interface_sectioned_fields(
             fields.get(index)?,
             command_refs,
             metadata_refs,
+            false,
         )?;
         index += 1;
         let command_group = command_interface_group_name(fields.get(index)?.trim(), metadata_refs);
@@ -141,6 +135,7 @@ pub(super) fn parse_command_interface_sectioned_fields(
             fields.get(index)?,
             command_refs,
             metadata_refs,
+            true,
         )?;
         index += 1;
         commands_order.push(CommandInterfaceOrderEntry {
@@ -205,22 +200,23 @@ pub(super) fn parse_command_interface_command_name_field(
     field: &str,
     command_refs: &BTreeMap<String, String>,
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    allow_bare_zero: bool,
 ) -> Option<String> {
     let command_ref = split_1c_braced_fields(field, 0)?;
     let code = command_ref.first()?.trim();
     if !code.chars().all(|ch| ch.is_ascii_digit()) {
         return None;
     }
-    let uuid = command_ref.get(1).map(|value| value.trim())?;
-    if !is_uuid_text(uuid) {
-        return None;
+    match command_ref.as_slice() {
+        [_] if allow_bare_zero && code == "0" => Some(code.to_string()),
+        [_, uuid] if is_uuid_text(uuid.trim()) => Some(command_interface_command_name(
+            code,
+            uuid.trim(),
+            command_refs,
+            metadata_refs,
+        )),
+        _ => None,
     }
-    Some(command_interface_command_name(
-        code,
-        uuid,
-        command_refs,
-        metadata_refs,
-    ))
 }
 
 pub(super) fn command_interface_placement_name(code: &str) -> Option<&'static str> {
