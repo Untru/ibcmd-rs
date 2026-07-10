@@ -488,12 +488,19 @@ Additional confirmed `CommandName` records:
 | `e428af27-c4f7-4577-b80e-95a79f94322d` | `AlignRight` |
 | `b67f202a-dcf8-41f3-bda8-1ff9bed5f2ef` | `SelectAll` |
 
-The final owner-scoped gate changed exactly five Form.xml files by adding 23
-native `CommandName` lines and no other content. Eleven were in object-owned
-forms and 12 in two CommonForms that the former `**/Forms/**` guard path did not
-count. The full diff improved from `1560 files, +31287/-190997` to
-`1560 files, +31287/-190974`; both `CommandName` and `CommandSource` reached
-`+0/-0`.
+The owner-scoped gate changed exactly five Form.xml files by adding 23 native
+`CommandName` lines and no other content. Eleven were in object-owned forms and
+12 in two CommonForms that the former `**/Forms/**` guard path did not count.
+The full diff improved from `1560 files, +31287/-190997` to
+`1560 files, +31287/-190974`; that delta remains accepted.
+
+A later independent guard over both object Forms and CommonForms disproved the
+closure claim. The authoritative residual is `CommandName +0/-80` in seven
+CommonForms and `CommandSource +0/-1` in one CommonForm. All 80 owning Buttons
+and the one Popup already exist in generated XML. The unresolved CommandName
+owners are 69 SpreadsheetDocument fields, eight form-standard commands, and
+three Tables. They require typed raw-command resolution; they are not evidence
+for admitting more item subtrees or for a name-based fallback.
 
 `CommandSource` model:
 
