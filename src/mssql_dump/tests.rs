@@ -23279,10 +23279,10 @@ fn configuration_mobile_raw(
     format!("{{{}}}", fields.join(","))
 }
 
-fn flat_configuration_mobile_text(
+fn flat_configuration_properties_text(
     code: u32,
     field_count: usize,
-    mobile_raw: &str,
+    replacements: &[(usize, &str)],
 ) -> (String, String) {
     let (uuid, text, _) = flat_configuration_fixture();
     let object_id = "20000000-0000-4000-8000-000000000001";
@@ -23292,9 +23292,11 @@ fn flat_configuration_mobile_text(
     fields[1] = format!(
         "{{0,{{3,{{1,0,{object_id}}},\"DemoApp\",{{1,\"en\",\"Demo app\"}},\"\",0,0,{zero_uuid},0}}}}"
     );
-    fields[53] = mobile_raw.to_string();
     if code == 68 && field_count > 60 {
         fields[60] = "1".to_string();
+    }
+    for (index, value) in replacements {
+        fields[*index] = (*value).to_string();
     }
     let properties = format!("{{{}}}", fields.join(","));
     let start = text.find("{67,").unwrap();
@@ -23303,6 +23305,14 @@ fn flat_configuration_mobile_text(
         uuid,
         format!("{}{}{}", &text[..start], properties, &text[end..]),
     )
+}
+
+fn flat_configuration_mobile_text(
+    code: u32,
+    field_count: usize,
+    mobile_raw: &str,
+) -> (String, String) {
+    flat_configuration_properties_text(code, field_count, &[(53, mobile_raw)])
 }
 
 fn configuration_mobile_property_line_count(xml: &str) -> usize {
@@ -23460,6 +23470,136 @@ fn flat_configuration_layout_rejects_count_mismatches_and_root_control_rows() {
         )
         .is_none()
     );
+}
+
+#[test]
+fn extracts_configuration_use_purposes_for_proven_layouts() {
+    let raw = r##"{1,{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,1}}"##;
+    let expected = "\t\t\t<UsePurposes>\r\n\
+\t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>\r\n\
+\t\t\t</UsePurposes>\r\n";
+
+    for (code, field_count) in [(67, 60), (68, 61), (76, 77)] {
+        let (uuid, text) = flat_configuration_properties_text(code, field_count, &[(33, raw)]);
+        assert_eq!(
+            parse_configuration_use_purposes(&text, &uuid),
+            Some(vec!["PlatformApplication"])
+        );
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert_eq!(
+            xml.matches(expected).count(),
+            1,
+            "{code}/{field_count}: {xml}"
+        );
+        if let Some(default_run_mode) = xml.find("<DefaultRunMode>") {
+            assert!(default_run_mode < xml.find("<UsePurposes>").unwrap());
+        }
+        if let Some(script_variant) = xml.find("<ScriptVariant>") {
+            assert!(xml.find("</UsePurposes>").unwrap() < script_variant);
+        }
+    }
+}
+
+#[test]
+fn configuration_use_purposes_fail_closed() {
+    let valid = r##"{1,{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,1}}"##;
+    let malformed = [
+        (
+            "wrong count",
+            r##"{0,{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,1}}"##.to_string(),
+        ),
+        ("missing entry", "{1}".to_string()),
+        (
+            "extra entry",
+            format!("{{1,{0},{0}}}", &valid[3..valid.len() - 1]),
+        ),
+        (
+            "overflow count",
+            format!("{{{},{}}}", usize::MAX, &valid[3..valid.len() - 1]),
+        ),
+        (
+            "bad marker",
+            r#"{1,{"x",1708fdaa-cbce-4289-b373-07a5a74bee91,1}}"#.to_string(),
+        ),
+        (
+            "unquoted marker",
+            r#"{1,{#,1708fdaa-cbce-4289-b373-07a5a74bee91,1}}"#.to_string(),
+        ),
+        (
+            "wrong type",
+            r##"{1,{"#",2708fdaa-cbce-4289-b373-07a5a74bee91,1}}"##.to_string(),
+        ),
+        (
+            "zero code",
+            r##"{1,{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,0}}"##.to_string(),
+        ),
+        (
+            "unknown code",
+            r##"{1,{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}"##.to_string(),
+        ),
+        (
+            "noninteger code",
+            r##"{1,{"#",1708fdaa-cbce-4289-b373-07a5a74bee91,x}}"##.to_string(),
+        ),
+    ];
+    for (case, raw) in malformed {
+        let (uuid, text) = flat_configuration_properties_text(67, 60, &[(33, &raw)]);
+        assert!(
+            parse_configuration_use_purposes(&text, &uuid).is_none(),
+            "{case}"
+        );
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        assert!(!xml.contains("UsePurposes"), "{case}: {xml}");
+    }
+
+    for (case, code, field_count) in [
+        ("67 field count", 67, 61),
+        ("68 field count", 68, 60),
+        ("76 field count", 76, 76),
+        ("unknown layout", 69, 61),
+    ] {
+        let (uuid, text) = flat_configuration_properties_text(code, field_count, &[(33, valid)]);
+        assert!(
+            parse_configuration_use_purposes(&text, &uuid).is_none(),
+            "{case}"
+        );
+    }
+
+    let (uuid, text) = flat_configuration_properties_text(68, 61, &[(33, valid), (60, "0")]);
+    assert!(parse_configuration_use_purposes(&text, &uuid).is_none());
+
+    let (uuid, swapped) = flat_configuration_properties_text(67, 60, &[(33, "{0}"), (34, valid)]);
+    assert!(parse_configuration_use_purposes(&swapped, &uuid).is_none());
+
+    let (uuid, mut decoy) = flat_configuration_properties_text(67, 60, &[(33, "{0}")]);
+    let second_id = "20000000-0000-4000-8000-000000000002";
+    let marker = format!("{{1,0,{second_id}}}");
+    decoy = decoy.replacen(
+        &format!("{{{marker}}}"),
+        &format!("{{{marker},{valid}}}"),
+        1,
+    );
+    assert!(parse_configuration_use_purposes(&decoy, &uuid).is_none());
+
+    let (uuid, wrong_header) = flat_configuration_properties_text(67, 60, &[(33, valid)]);
+    let wrong_header = wrong_header.replacen(
+        "00000000-0000-0000-0000-000000000000",
+        "00000000-0000-0000-0000-000000000099",
+        1,
+    );
+    assert!(parse_configuration_use_purposes(&wrong_header, &uuid).is_none());
 }
 
 #[test]

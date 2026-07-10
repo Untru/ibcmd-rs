@@ -1733,6 +1733,7 @@ pub(super) fn extract_configuration_source_xml(
     header.uuid = uuid.to_string();
     let mut properties =
         parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
+    properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
     properties.used_mobile_application_functionalities =
         parse_configuration_used_mobile_application_functionalities(
             text,
@@ -1782,6 +1783,7 @@ pub(super) fn parse_configuration_properties_from_text(
         default_run_mode: fields
             .get(3)
             .and_then(|field| configuration_default_run_mode_xml(field.trim())),
+        use_purposes: Vec::new(),
         brief_information: parse_configuration_localized_property(&fields, 4),
         detailed_information: parse_configuration_localized_property(&fields, 5),
         copyright: parse_configuration_localized_property(&fields, 6),
@@ -1862,6 +1864,28 @@ pub(super) fn parse_configuration_default_roles(
 pub(super) fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {
     let start = text.find("{68,")?;
     split_1c_braced_fields(text, start)
+}
+
+const CONFIGURATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
+
+pub(super) fn parse_configuration_use_purposes(
+    text: &str,
+    uuid: &str,
+) -> Option<Vec<&'static str>> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    let raw_fields = split_1c_braced_fields(fields.get(33)?.trim(), 0)?;
+    if raw_fields.len() != 2 || raw_fields.first()?.trim() != "1" {
+        return None;
+    }
+    let purpose_fields = split_1c_braced_fields(raw_fields.get(1)?.trim(), 0)?;
+    if purpose_fields.len() != 3
+        || parse_1c_quoted_string(purpose_fields.first()?.trim()).as_deref() != Some("#")
+        || purpose_fields.get(1)?.trim() != CONFIGURATION_USE_PURPOSE_TYPE_UUID
+        || purpose_fields.get(2)?.trim() != "1"
+    {
+        return None;
+    }
+    Some(vec!["PlatformApplication"])
 }
 
 const CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES: [(u32, &str); 38] = [

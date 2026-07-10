@@ -3743,6 +3743,7 @@ struct ConfigurationProperties {
     name_prefix: Option<String>,
     configuration_extension_compatibility_mode: Option<String>,
     default_run_mode: Option<&'static str>,
+    use_purposes: Vec<&'static str>,
     brief_information: Vec<(String, String)>,
     detailed_information: Vec<(String, String)>,
     copyright: Vec<(String, String)>,
@@ -11322,6 +11323,16 @@ fn format_configuration_source_xml(
             .as_deref(),
     );
     push_optional_simple_property_xml(&mut insert, "DefaultRunMode", properties.default_run_mode);
+    if !properties.use_purposes.is_empty() {
+        insert.push_str("\t\t\t<UsePurposes>\r\n");
+        for purpose in &properties.use_purposes {
+            insert.push_str(&format!(
+                "\t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">{}</v8:Value>\r\n",
+                escape_xml_element_text(purpose)
+            ));
+        }
+        insert.push_str("\t\t\t</UsePurposes>\r\n");
+    }
     push_optional_localized_property_xml(
         &mut insert,
         "BriefInformation",
