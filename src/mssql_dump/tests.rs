@@ -9411,6 +9411,7 @@ fn formats_table_search_additions_as_direct_sections() {
         footer_horizontal_align: None,
         hiperlink: None,
         text_color: None,
+        title_text_color: None,
         mark_required_complete: None,
         auto_edit_mode: None,
         auto_insert_new_row: None,
@@ -9527,6 +9528,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_horizontal_align: None,
                 hiperlink: None,
                 text_color: None,
+                title_text_color: None,
                 mark_required_complete: None,
                 auto_edit_mode: None,
                 auto_insert_new_row: None,
@@ -9644,6 +9646,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 footer_horizontal_align: None,
                 hiperlink: None,
                 text_color: None,
+                title_text_color: None,
                 mark_required_complete: None,
                 auto_edit_mode: None,
                 auto_insert_new_row: None,
@@ -9735,6 +9738,139 @@ fn parses_extended_usual_group_properties() {
     assert!(xml.contains("<Behavior>Collapsible</Behavior>"));
     assert!(xml.contains("<Representation>NormalSeparation</Representation>"));
     assert!(xml.contains("<ShowTitle>false</ShowTitle>"));
+}
+
+#[test]
+fn extracts_usual_group_title_style_refs_from_metadata_index() {
+    let color_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let font_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{38,1,0,3,1,{0},{1,0},{"Pattern"},"",{4,4,{0},4},1,1,0,1,{1,0},0,0,3,3,2,0,1,2,{4,4,{0},4},1,2,0,2,1,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,3,2,0,2,0,0,2},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupExtendedTooltip",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}"#;
+    let field = base
+        .replacen(
+            r#""MainGroup",{1,0}"#,
+            r#""MainGroup",{1,1,{"en","Popup"}}"#,
+            1,
+        )
+        .replacen("{4,4,{0},4}", &format!("{{3,3,{{0,{color_uuid}}}}}"), 1)
+        .replacen(
+            "{8,3,0,1,100}",
+            &format!("{{7,2,0,{{0,{font_uuid}}},1,100}}"),
+            1,
+        );
+    let object_refs = BTreeMap::from([
+        (color_uuid.to_string(), "StyleItem.AccentOne".to_string()),
+        (font_uuid.to_string(), "StyleItem.FontTwo".to_string()),
+    ]);
+
+    let item = parse_form_child_item(
+        &field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+
+    assert_eq!(item.title_text_color.as_deref(), Some("style:AccentOne"));
+    assert_eq!(
+        item.title_font_xml.as_deref(),
+        Some(r#"<TitleFont ref="style:FontTwo" kind="StyleItem"/>"#)
+    );
+    let xml = format_form_child_items_xml(&[item], 1);
+    let title_at = xml.find("<Title>").unwrap();
+    let color_at = xml
+        .find("<TitleTextColor>style:AccentOne</TitleTextColor>")
+        .unwrap();
+    let font_at = xml
+        .find(r#"<TitleFont ref="style:FontTwo" kind="StyleItem"/>"#)
+        .unwrap();
+    let behavior_at = xml.find("<Behavior>Collapsible</Behavior>").unwrap();
+    assert!(title_at < color_at && color_at < font_at && font_at < behavior_at);
+
+    let alternate_flavor = field
+        .replacen(
+            &format!("{{3,3,{{0,{color_uuid}}}}}"),
+            &format!("{{4,3,{{0,{color_uuid}}},3}}"),
+            1,
+        )
+        .replacen(
+            &format!("{{7,2,0,{{0,{font_uuid}}},1,100}}"),
+            &format!("{{8,2,0,{{0,{font_uuid}}},1,100}}"),
+            1,
+        );
+    let item = parse_form_child_item(
+        &alternate_flavor,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(item.title_text_color.as_deref(), Some("style:AccentOne"));
+    assert_eq!(
+        item.title_font_xml.as_deref(),
+        Some(r#"<TitleFont ref="style:FontTwo" kind="StyleItem"/>"#)
+    );
+}
+
+#[test]
+fn omits_unresolved_and_ordinary_usual_group_title_style_slots() {
+    let ordinary_usual = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
+    let ordinary_popup = ordinary_usual.replacen(
+        "{3,4,{0}},0,2,0,0,0},0,11111111",
+        "{3,4,{0}},0,2,0,0,2},0,11111111",
+        1,
+    );
+
+    for (raw, expected_behavior) in [
+        (ordinary_usual, "Usual"),
+        (ordinary_popup.as_str(), "PopUp"),
+    ] {
+        let item = parse_form_child_item(
+            raw,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(item.behavior, Some(expected_behavior));
+        assert_eq!(item.title_text_color, None);
+        assert_eq!(item.title_font_xml, None);
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert!(!xml.contains("<TitleTextColor>"));
+        assert!(!xml.contains("<TitleFont"));
+    }
+
+    let unresolved = ordinary_usual
+        .replacen(
+            "{3,4,{0}}",
+            "{3,3,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}}",
+            1,
+        )
+        .replacen(
+            "{7,3,0,1,100}",
+            "{7,2,0,{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},1,100}",
+            1,
+        );
+    let item = parse_form_child_item(
+        &unresolved,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(item.title_text_color, None);
+    assert_eq!(item.title_font_xml, None);
 }
 
 #[test]
