@@ -5475,19 +5475,7 @@ pub(super) fn parse_form_usual_group_title_text_color(
         }
         _ => return None,
     };
-    let reference = split_1c_braced_fields(reference, 0)?;
-    if reference.len() == 1 {
-        let code = reference.first()?.trim().parse::<i32>().ok()?;
-        return style_system_color_name(code).map(ToOwned::to_owned);
-    }
-    if reference.first()?.trim() == "0" {
-        let uuid = parse_uuid_field(reference.get(1)?.trim())?;
-        return object_refs
-            .get(&uuid)
-            .and_then(|reference| reference.strip_prefix("StyleItem."))
-            .map(|name| format!("style:{name}"));
-    }
-    None
+    style_body_ref_name(reference, object_refs)
 }
 
 fn form_usual_group_title_font_fields<'a>(
