@@ -43,9 +43,7 @@ Classification:
   coverage notes as audit evidence only.
 - Confirmed config-specific production behavior that must still be removed or
   replaced with structural parsing:
-  - form picture-file decisions depend on concrete Russian item names;
-  - role-right reconstruction contains mappings between concrete Russian
-    characteristic-plan attribute and tabular-section names.
+  - form picture-file decisions depend on concrete Russian item names.
 - Resolved in `6ee75f0`: the concrete command-group UUID to
   `CommandGroup.Органайзер` mapping was removed. Custom command groups now use
   current-metadata `object_refs`. Separate parent/current exports were identical
@@ -59,6 +57,13 @@ Classification:
   `AutoSaveUserSettings` setting already reaches the generic normalizer.
   Separate before/after exports contained 12,197 files each and had a zero
   whole-tree content diff.
+- Resolved in `1141be9`: Role Rights no longer renames characteristic-plan
+  attributes through concrete Russian attribute/tabular-section names or
+  serialized occurrence. Top-level and tabular-section attributes are resolved
+  by their distinct current-metadata child UUIDs. A selected `ut_ibcmd` runtime
+  gate was byte-identical across 2,208 files, including two native-exact target
+  `Rights.xml` files; the full BSP before/after tree was also identical across
+  all 12,198 files.
 - `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` (`2ef6d6fa-...`) is not in that
   category. It is accepted only in exact typed command-source record shapes,
   maps to the platform token `FormCommandPanelGlobalCommands`, and was also
