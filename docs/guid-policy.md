@@ -81,3 +81,10 @@ Classification:
   maps to the platform token `FormCommandPanelGlobalCommands`, and was also
   observed in an independent infobase sample. A second full native-tree parity
   run remains the stronger portability gate.
+- Configuration `UsePurposes` and `DefaultRoles` use the platform TypeId
+  markers `1708fdaa-...` and `157fa490-...` only inside exact, count-checked
+  envelopes. The markers have the same role in BSP root layout 67 and
+  independent UHA layouts 68 and 76. Actual Role UUIDs must resolve through
+  current `object_refs`; no role name or application object UUID is embedded.
+  Neither marker occurs in the accepted 12,198-file BSP export, including its
+  complete metadata inventory.

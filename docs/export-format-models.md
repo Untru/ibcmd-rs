@@ -1025,6 +1025,26 @@ all lengths are validated as one fail-closed unit. The gate changed only
 residual to `+0/-82`. `ConfigDumpInfo.xml` was explicitly excluded and its
 SHA-256 content did not change.
 
+Three further Configuration-only cohorts use the same admitted root property
+payload and fail closed independently. `UsePurposes` accepts the exact
+application-purpose envelope and emits `PlatformApplication`. `DefaultRoles`
+accepts the exact Role reference envelope, but resolves every target UUID
+through the current `object_refs` index; database role names and object UUIDs
+are not literals in production. The five localized fields at raw slots 4..8
+are parsed atomically with exact declared counts, quoted strings, and unique
+language keys. A malformed member suppresses the entire five-field cohort
+rather than mixing strict and legacy output.
+
+The serialized gates changed only `Configuration.xml`: `UsePurposes` added 3
+native lines, `DefaultRoles` added 5, and the localized cohort added 30. The
+full diff moved successively to `1559/+31284/-187170`,
+`1559/+31284/-187165`, and `1559/+31284/-187135`; the remaining Configuration
+residual is `+0/-44`. The two new UUID literals are platform TypeId markers,
+observed with the same meaning in the BSP layout 67 and independent UHA
+layouts 68 and 76. Neither occurs anywhere in the 12,198-file exported BSP
+tree, which includes the metadata inventory. `ConfigDumpInfo.xml` remained
+outside scope and retained its SHA-256 content after every gate.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
