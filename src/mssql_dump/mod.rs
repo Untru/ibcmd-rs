@@ -3375,7 +3375,10 @@ struct MetadataChildProperties {
     create_on_input: Option<&'static str>,
     choice_form: Option<MetadataChoiceForm>,
     link_by_type_empty: bool,
+    link_by_type: Option<MetadataChildLinkByType>,
     choice_history_on_input: Option<&'static str>,
+    master: Option<bool>,
+    main_filter: Option<bool>,
     balance: Option<bool>,
     accounting_flag: Option<String>,
     ext_dimension_accounting_flag: Option<String>,
@@ -3384,6 +3387,7 @@ struct MetadataChildProperties {
     indexing: Option<&'static str>,
     full_text_search: Option<&'static str>,
     data_history: Option<&'static str>,
+    type_reduction_mode: Option<&'static str>,
     update_data_history_immediately_after_write: Option<bool>,
     execute_after_write_data_history_version_processing: Option<bool>,
 }
@@ -3406,6 +3410,14 @@ enum MetadataChoiceParameterValue {
     Boolean(bool),
     DesignTimeRef(String),
     FixedArray(Vec<String>),
+    Nil,
+    String(String),
+}
+
+#[derive(Clone)]
+struct MetadataChildLinkByType {
+    data_path: String,
+    link_item: u32,
 }
 
 #[derive(Clone)]
@@ -5833,37 +5845,57 @@ fn parse_register_properties_from_text(
         register_standard_attributes(kind, &header.name, register_type, &fields, uuid);
     let (list_presentation, extended_list_presentation, explanation) =
         parse_register_presentations(kind, &fields, uuid);
+    let owner_name = header.name.clone();
     let mut child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
             let tag = register_child_object_tag(kind, text, marker_start)?;
-            let value_types =
-                parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
-            let properties = parse_metadata_child_properties(
-                kind,
-                text,
-                marker_start,
-                &header.uuid,
-                &value_types,
-                object_refs,
-            );
-            let properties = properties.map(|properties| {
-                parse_register_child_extra_properties(
-                    kind,
+            let (value_types, properties, emit_empty_type) = if kind == "InformationRegister" {
+                match parse_information_register_child_payload(
+                    text,
+                    marker_start,
+                    &header,
+                    &owner_name,
                     tag,
+                    type_index,
+                    object_refs,
+                ) {
+                    Some((value_types, properties)) => {
+                        let emit_empty_type = tag == "Attribute" && value_types.is_empty();
+                        (value_types, Some(properties), emit_empty_type)
+                    }
+                    None => (Vec::new(), None, false),
+                }
+            } else {
+                let value_types =
+                    parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
+                let properties = parse_metadata_child_properties(
+                    kind,
                     text,
                     marker_start,
                     &header.uuid,
+                    &value_types,
                     object_refs,
-                    properties,
-                )
-            });
+                );
+                let properties = properties.map(|properties| {
+                    parse_register_child_extra_properties(
+                        kind,
+                        tag,
+                        text,
+                        marker_start,
+                        &header.uuid,
+                        object_refs,
+                        properties,
+                    )
+                });
+                (value_types, properties, tag == "Attribute")
+            };
             Some(MetadataChildObject {
                 tag,
                 header,
                 generated_types: Vec::new(),
                 value_types,
-                emit_empty_type: tag == "Attribute",
+                emit_empty_type,
                 properties,
                 tabular_section_properties: None,
                 child_objects: Vec::new(),
@@ -6688,6 +6720,541 @@ fn parse_metadata_child_properties(
     None
 }
 
+fn parse_information_register_child_payload(
+    text: &str,
+    marker_start: usize,
+    child_header: &MetadataHeader,
+    owner_name: &str,
+    tag: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(Vec<ConstantValueType>, MetadataChildProperties)> {
+    let mut parsed =
+        metadata_object_field_candidates_around_header(text, marker_start, &child_header.uuid)
+            .into_iter()
+            .filter_map(|fields| {
+                parse_information_register_child_payload_from_fields(
+                    &fields,
+                    child_header,
+                    owner_name,
+                    tag,
+                    type_index,
+                    object_refs,
+                )
+            });
+    let value = parsed.next()?;
+    if parsed.next().is_some() {
+        return None;
+    }
+    Some(value)
+}
+
+fn parse_information_register_child_payload_from_fields(
+    fields: &[&str],
+    child_header: &MetadataHeader,
+    owner_name: &str,
+    tag: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(Vec<ConstantValueType>, MetadataChildProperties)> {
+    let (expected_tag, common_field) = match (fields.first()?.trim(), fields.len()) {
+        ("7", 5) | ("8", 7) => ("Resource", fields.get(1)?),
+        ("4", 5) | ("5", 7) => ("Attribute", fields.get(1)?),
+        ("9", 8) | ("10", 9) => ("Dimension", fields.get(1)?),
+        _ => return None,
+    };
+    if expected_tag != tag {
+        return None;
+    }
+
+    let common_fields = split_1c_braced_fields(common_field, 0)?;
+    if common_fields.len() != 23 || common_fields.first()?.trim() != "27" {
+        return None;
+    }
+    let typed_header = split_1c_braced_fields(common_fields.get(1)?, 0)?;
+    if typed_header.len() != 3 || typed_header.first()?.trim() != "2" {
+        return None;
+    }
+    let header_fields = split_1c_braced_fields(typed_header.get(1)?, 0)?;
+    if header_fields.len() != 9
+        || header_fields.first()?.trim() != "3"
+        || metadata_header_field_index(&header_fields, &child_header.uuid) != Some(1)
+    {
+        return None;
+    }
+    let parsed_header = parse_metadata_header_from_text(typed_header.get(1)?, &child_header.uuid)?;
+    if parsed_header.uuid != child_header.uuid
+        || parsed_header.name != child_header.name
+        || parsed_header.synonyms != child_header.synonyms
+        || parsed_header.comment != child_header.comment
+    {
+        return None;
+    }
+
+    let value_types = parse_metadata_type_pattern(typed_header.get(2)?, type_index)?;
+    let mut properties = parse_information_register_common_child_properties(
+        &common_fields,
+        owner_name,
+        object_refs,
+    )?;
+
+    match (fields.first()?.trim(), fields.len()) {
+        ("7", 5) | ("4", 5) => {
+            properties.indexing = information_register_indexing(fields.get(2)?);
+            properties.full_text_search = information_register_full_text_search(fields.get(3)?);
+            properties.data_history = information_register_data_history(fields.get(4)?);
+        }
+        ("8", 7) | ("5", 7) => {
+            if fields.get(5)?.trim() != "0"
+                || !information_register_new_child_tail_is_valid(fields.get(6)?)
+            {
+                return None;
+            }
+            properties.indexing = information_register_indexing(fields.get(2)?);
+            properties.full_text_search = information_register_full_text_search(fields.get(3)?);
+            properties.data_history = information_register_data_history(fields.get(4)?);
+        }
+        ("9", 8) => {
+            properties.master = Some(information_register_bool(fields.get(2)?)?);
+            properties.deny_incomplete_values = Some(information_register_bool(fields.get(3)?)?);
+            properties.indexing = information_register_indexing(fields.get(4)?);
+            properties.main_filter = Some(information_register_bool(fields.get(5)?)?);
+            properties.full_text_search = information_register_full_text_search(fields.get(6)?);
+            properties.data_history = information_register_data_history(fields.get(7)?);
+            properties.type_reduction_mode = Some("TransformValues");
+        }
+        ("10", 9) => {
+            properties.master = Some(information_register_bool(fields.get(2)?)?);
+            properties.deny_incomplete_values = Some(information_register_bool(fields.get(3)?)?);
+            properties.indexing = information_register_indexing(fields.get(4)?);
+            properties.main_filter = Some(information_register_bool(fields.get(5)?)?);
+            properties.full_text_search = information_register_full_text_search(fields.get(6)?);
+            properties.data_history = information_register_data_history(fields.get(7)?);
+            properties.type_reduction_mode = Some(match fields.get(8)?.trim() {
+                "0" => "TransformValues",
+                "1" => "DeleteData",
+                _ => return None,
+            });
+        }
+        _ => return None,
+    }
+
+    if properties.indexing.is_none()
+        || properties.full_text_search.is_none()
+        || properties.data_history.is_none()
+    {
+        return None;
+    }
+    Some((value_types, properties))
+}
+
+fn parse_information_register_common_child_properties(
+    fields: &[&str],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChildProperties> {
+    if fields.len() != 23 || fields.first()?.trim() != "27" {
+        return None;
+    }
+    let min_value = parse_information_register_bound(fields.get(8)?)?;
+    let max_value = parse_information_register_bound(fields.get(9)?)?;
+    let link_by_type =
+        parse_information_register_link_by_type(fields.get(15)?, owner_name, object_refs)?;
+    Some(MetadataChildProperties {
+        password_mode: information_register_bool(fields.get(2)?)?,
+        format: parse_information_register_localized_value(fields.get(3)?)?,
+        edit_format: parse_information_register_localized_value(fields.get(18)?)?,
+        tooltip: parse_information_register_localized_value(fields.get(4)?)?,
+        mark_negatives: information_register_bool(fields.get(5)?)?,
+        mask: parse_1c_quoted_string(fields.get(6)?.trim())?,
+        multi_line: information_register_bool(fields.get(7)?)?,
+        extended_edit: information_register_bool(fields.get(17)?)?,
+        min_value,
+        max_value,
+        fill_from_filling_value: information_register_bool(fields.get(20)?)?,
+        emit_fill_from_filling_value: true,
+        fill_value: Some(parse_information_register_fill_value(
+            fields.get(19)?,
+            object_refs,
+        )?),
+        emit_fill_value: true,
+        fill_checking: match fields.get(13)?.trim() {
+            "0" => "DontCheck",
+            "1" => "ShowError",
+            _ => return None,
+        },
+        choice_folders_and_items: Some(match fields.get(10)?.trim() {
+            "0" => "Items",
+            "1" => "Folders",
+            "2" => "FoldersAndItems",
+            _ => return None,
+        }),
+        choice_parameter_links: Some(parse_information_register_choice_parameter_links(
+            fields.get(14)?,
+            owner_name,
+            object_refs,
+        )?),
+        choice_parameters: Some(parse_information_register_choice_parameters(
+            fields.get(16)?,
+            object_refs,
+        )?),
+        quick_choice: Some(match fields.get(12)?.trim() {
+            "0" => "DontUse",
+            "1" => "Use",
+            "2" => "Auto",
+            _ => return None,
+        }),
+        create_on_input: Some(match fields.get(21)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            "2" => "Use",
+            _ => return None,
+        }),
+        choice_form: Some(parse_information_register_choice_form(
+            fields.get(11)?,
+            object_refs,
+        )?),
+        link_by_type_empty: link_by_type.is_none(),
+        link_by_type,
+        choice_history_on_input: Some(match fields.get(22)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            _ => return None,
+        }),
+        master: None,
+        main_filter: None,
+        balance: None,
+        accounting_flag: None,
+        ext_dimension_accounting_flag: None,
+        deny_incomplete_values: None,
+        use_mode: None,
+        indexing: None,
+        full_text_search: None,
+        data_history: None,
+        type_reduction_mode: None,
+        update_data_history_immediately_after_write: None,
+        execute_after_write_data_history_version_processing: None,
+    })
+}
+
+fn information_register_bool(value: &str) -> Option<bool> {
+    match value.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn information_register_indexing(value: &str) -> Option<&'static str> {
+    metadata_attribute_indexing_xml(value.trim())
+}
+
+fn information_register_full_text_search(value: &str) -> Option<&'static str> {
+    register_child_full_text_search_xml(value.trim())
+}
+
+fn information_register_data_history(value: &str) -> Option<&'static str> {
+    metadata_data_history_xml(value.trim())
+}
+
+fn information_register_new_child_tail_is_valid(value: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.len() == 2
+        && fields.first().map(|field| field.trim()) == Some("1")
+        && fields
+            .get(1)
+            .and_then(|field| parse_uuid_field(field.trim()))
+            .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
+}
+
+fn parse_information_register_localized_value(value: &str) -> Option<Vec<(String, String)>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if fields.len() != 1 + count * 2 {
+        return None;
+    }
+    let mut result = Vec::with_capacity(count);
+    for pair in fields[1..].chunks_exact(2) {
+        result.push((
+            parse_1c_quoted_string(pair[0].trim())?,
+            parse_1c_quoted_string(pair[1].trim())?,
+        ));
+    }
+    Some(result)
+}
+
+fn parse_information_register_bound(value: &str) -> Option<Option<String>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    match fields.first()?.trim() {
+        r#""U""# if fields.len() == 1 => Some(None),
+        r#""S""# if fields.len() == 2 => Some(Some(parse_1c_quoted_string(fields.get(1)?.trim())?)),
+        _ => None,
+    }
+}
+
+fn parse_information_register_fill_value(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChildFillValue> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    match fields.first()?.trim() {
+        r#""U""# if fields.len() == 1 => Some(MetadataChildFillValue::Nil),
+        r#""S""# if fields.len() == 2 => Some(MetadataChildFillValue::String(
+            parse_1c_quoted_string(fields.get(1)?.trim())?,
+        )),
+        r#""N""# if fields.len() == 2 => {
+            let value = fields.get(1)?.trim();
+            information_register_decimal_is_valid(value)
+                .then(|| MetadataChildFillValue::Decimal(value.to_string()))
+        }
+        r#""D""# if fields.len() == 2 => {
+            format_1c_date_time(fields.get(1)?.trim()).map(MetadataChildFillValue::DateTime)
+        }
+        r#""B""# if fields.len() == 2 => {
+            information_register_bool(fields.get(1)?).map(MetadataChildFillValue::Boolean)
+        }
+        r##""#""## if fields.len() == 3 => {
+            parse_information_register_design_time_ref(value, object_refs)
+                .map(MetadataChildFillValue::DesignTimeRef)
+        }
+        _ => None,
+    }
+}
+
+fn information_register_decimal_is_valid(value: &str) -> bool {
+    let value = value.strip_prefix('-').unwrap_or(value);
+    let mut parts = value.split('.');
+    let Some(integer) = parts.next() else {
+        return false;
+    };
+    if integer.is_empty() || !integer.chars().all(|ch| ch.is_ascii_digit()) {
+        return false;
+    }
+    match (parts.next(), parts.next()) {
+        (None, None) => true,
+        (Some(fraction), None) => {
+            !fraction.is_empty() && fraction.chars().all(|ch| ch.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
+fn parse_information_register_choice_form(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChoiceForm> {
+    if parse_uuid_field(value.trim()).is_some_and(|uuid| information_register_uuid_is_zero(&uuid)) {
+        return Some(MetadataChoiceForm::Empty);
+    }
+    let reference = parse_information_register_design_time_ref(value, object_refs)?;
+    if reference.is_empty() {
+        Some(MetadataChoiceForm::Empty)
+    } else {
+        Some(MetadataChoiceForm::Reference(reference))
+    }
+}
+
+fn parse_information_register_design_time_ref(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || parse_non_zero_uuid(fields.get(1)?.trim()).is_none()
+    {
+        return None;
+    }
+    let reference = split_1c_braced_fields(fields.get(2)?, 0)?;
+    if reference.len() != 3 || reference.first()?.trim() != "0" {
+        return None;
+    }
+    let owner_uuid = parse_uuid_field(reference.get(1)?.trim())?;
+    let value_uuid = parse_uuid_field(reference.get(2)?.trim())?;
+    let owner_is_zero = information_register_uuid_is_zero(&owner_uuid);
+    let value_is_zero = information_register_uuid_is_zero(&value_uuid);
+    match (owner_is_zero, value_is_zero) {
+        (true, true) => Some(String::new()),
+        (false, true) => object_refs
+            .get(&owner_uuid)
+            .map(|owner| format!("{owner}.EmptyRef")),
+        (false, false) => {
+            object_refs.get(&owner_uuid)?;
+            object_refs.get(&value_uuid).cloned()
+        }
+        (true, false) => None,
+    }
+}
+
+fn information_register_uuid_is_zero(value: &str) -> bool {
+    value == "00000000-0000-0000-0000-000000000000"
+}
+
+fn parse_information_register_choice_parameter_links(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "5006" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut index = 2usize;
+    let mut result = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name = parse_1c_quoted_string(fields.get(index)?.trim())?;
+        let path_count = fields.get(index + 1)?.trim().parse::<usize>().ok()?;
+        if path_count == 0 {
+            return None;
+        }
+        index += 2;
+        let path_end = index.checked_add(path_count)?;
+        let path = parse_information_register_data_path(
+            fields.get(index..path_end)?,
+            owner_name,
+            object_refs,
+        )?;
+        index = path_end;
+        let value_change = match fields.get(index)?.trim() {
+            "0" => "Clear",
+            "1" => "DontChange",
+            _ => return None,
+        };
+        index += 1;
+        result.push(MetadataChoiceParameterLink {
+            name,
+            data_path: path,
+            value_change,
+        });
+    }
+    (index == fields.len()).then_some(result)
+}
+
+fn parse_information_register_link_by_type(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<MetadataChildLinkByType>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "3" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != count + 3 {
+        return None;
+    }
+    let link_item = fields.last()?.trim().parse::<u32>().ok()?;
+    if link_item > 3 {
+        return None;
+    }
+    if count == 0 {
+        return (link_item == 0).then_some(None);
+    }
+    Some(Some(MetadataChildLinkByType {
+        data_path: parse_information_register_data_path(
+            fields.get(2..2 + count)?,
+            owner_name,
+            object_refs,
+        )?,
+        link_item,
+    }))
+}
+
+fn parse_information_register_data_path(
+    fields: &[&str],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    fields
+        .iter()
+        .map(|field| {
+            let segment = split_1c_braced_fields(field, 0)?;
+            match (segment.first()?.trim(), segment.len()) {
+                ("0", 1) => Some("0".to_string()),
+                ("0", 2) => {
+                    let uuid = parse_uuid_field(segment.get(1)?.trim())?;
+                    Some(
+                        object_refs
+                            .get(&uuid)
+                            .cloned()
+                            .unwrap_or_else(|| format!("0:{uuid}")),
+                    )
+                }
+                ("-2", 1) => Some(format!(
+                    "InformationRegister.{owner_name}.StandardAttribute.Period"
+                )),
+                ("-3", 1) => Some(format!(
+                    "InformationRegister.{owner_name}.StandardAttribute.Recorder"
+                )),
+                _ => None,
+            }
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|segments| segments.join("/"))
+}
+
+fn parse_information_register_choice_parameters(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameter>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != 2 + count * 2 {
+        return None;
+    }
+    let mut result = Vec::with_capacity(count);
+    for pair in fields[2..].chunks_exact(2) {
+        result.push(MetadataChoiceParameter {
+            name: parse_1c_quoted_string(pair[0].trim())?,
+            value: parse_information_register_choice_parameter_value(pair[1], object_refs)?,
+        });
+    }
+    Some(result)
+}
+
+fn parse_information_register_choice_parameter_value(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChoiceParameterValue> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    match fields.first()?.trim() {
+        r#""U""# if fields.len() == 1 => Some(MetadataChoiceParameterValue::Nil),
+        r#""S""# if fields.len() == 2 => Some(MetadataChoiceParameterValue::String(
+            parse_1c_quoted_string(fields.get(1)?.trim())?,
+        )),
+        r#""B""# if fields.len() == 2 => {
+            information_register_bool(fields.get(1)?).map(MetadataChoiceParameterValue::Boolean)
+        }
+        r##""#""## if fields.len() == 3 => {
+            if parse_non_zero_uuid(fields.get(1)?.trim()).is_none() {
+                return None;
+            }
+            let nested = split_1c_braced_fields(fields.get(2)?, 0)?;
+            if nested.first()?.trim() == "0" && nested.len() == 3 {
+                return parse_information_register_design_time_ref(value, object_refs)
+                    .map(MetadataChoiceParameterValue::DesignTimeRef);
+            }
+            let count = nested.first()?.trim().parse::<usize>().ok()?;
+            if nested.len() != count + 1 {
+                return None;
+            }
+            nested
+                .iter()
+                .skip(1)
+                .map(|value| parse_information_register_design_time_ref(value, object_refs))
+                .collect::<Option<Vec<_>>>()
+                .map(MetadataChoiceParameterValue::FixedArray)
+        }
+        _ => None,
+    }
+}
+
 fn parse_accounting_register_child_properties_from_fields(
     fields: &[&str],
     child_uuid: &str,
@@ -6724,7 +7291,10 @@ fn parse_accounting_register_child_properties_from_fields(
         create_on_input: Some("Auto"),
         choice_form: Some(MetadataChoiceForm::Empty),
         link_by_type_empty: true,
+        link_by_type: None,
         choice_history_on_input: Some("Auto"),
+        master: None,
+        main_filter: None,
         balance: None,
         accounting_flag: None,
         ext_dimension_accounting_flag: None,
@@ -6733,6 +7303,7 @@ fn parse_accounting_register_child_properties_from_fields(
         indexing: None,
         full_text_search: None,
         data_history: None,
+        type_reduction_mode: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -6809,9 +7380,12 @@ fn parse_metadata_child_properties_from_fields(
         link_by_type_empty: metadata_child_collection_is_empty(
             fields.get(header_index + 20).copied(),
         ),
+        link_by_type: None,
         choice_history_on_input: fields
             .get(header_index + 21)
             .and_then(|field| metadata_choice_history_on_input_xml(field.trim())),
+        master: None,
+        main_filter: None,
         balance: None,
         accounting_flag: None,
         ext_dimension_accounting_flag: None,
@@ -6840,6 +7414,7 @@ fn parse_metadata_child_properties_from_fields(
         data_history: fields
             .get(header_index + 25)
             .and_then(|field| metadata_data_history_xml(field.trim())),
+        type_reduction_mode: None,
         update_data_history_immediately_after_write: if matches!(owner_kind, "Catalog" | "Document")
         {
             fields
@@ -6937,10 +7512,13 @@ fn parse_data_processor_wrapped_child_properties(
         create_on_input,
         choice_form: parse_metadata_child_choice_form(fields.get(12).copied(), object_refs),
         link_by_type_empty: metadata_child_collection_is_empty(fields.get(17).copied()),
+        link_by_type: None,
         choice_history_on_input: fields
             .get(18)
             .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
             .or(Some("Auto")),
+        master: None,
+        main_filter: None,
         balance: None,
         accounting_flag: None,
         ext_dimension_accounting_flag: None,
@@ -6949,6 +7527,7 @@ fn parse_data_processor_wrapped_child_properties(
         indexing: None,
         full_text_search: None,
         data_history: None,
+        type_reduction_mode: None,
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
@@ -13601,12 +14180,33 @@ fn push_metadata_child_properties_xml(
             }
         }
     }
-    if properties.link_by_type_empty {
+    if let Some(link_by_type) = &properties.link_by_type {
+        xml.push_str(&format!(
+            "{indent}<LinkByType>\r\n\
+{indent}\t<xr:DataPath>{}</xr:DataPath>\r\n\
+{indent}\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
+{indent}</LinkByType>\r\n",
+            escape_xml_element_text(&link_by_type.data_path),
+            link_by_type.link_item,
+        ));
+    } else if properties.link_by_type_empty {
         xml.push_str(&format!("{indent}<LinkByType/>\r\n"));
     }
     if let Some(choice_history_on_input) = properties.choice_history_on_input {
         xml.push_str(&format!(
             "{indent}<ChoiceHistoryOnInput>{choice_history_on_input}</ChoiceHistoryOnInput>\r\n"
+        ));
+    }
+    if let Some(master) = properties.master {
+        xml.push_str(&format!(
+            "{indent}<Master>{}</Master>\r\n",
+            xml_bool(master)
+        ));
+    }
+    if let Some(main_filter) = properties.main_filter {
+        xml.push_str(&format!(
+            "{indent}<MainFilter>{}</MainFilter>\r\n",
+            xml_bool(main_filter)
         ));
     }
     if let Some(balance) = properties.balance {
@@ -13653,6 +14253,11 @@ fn push_metadata_child_properties_xml(
     if let Some(data_history) = properties.data_history {
         xml.push_str(&format!(
             "{indent}<DataHistory>{data_history}</DataHistory>\r\n"
+        ));
+    }
+    if let Some(type_reduction_mode) = properties.type_reduction_mode {
+        xml.push_str(&format!(
+            "{indent}<TypeReductionMode>{type_reduction_mode}</TypeReductionMode>\r\n"
         ));
     }
     if let Some(update_data_history) = properties.update_data_history_immediately_after_write {
@@ -13722,6 +14327,11 @@ fn push_metadata_child_choice_parameters_xml(
                     xml_bool(*value)
                 ));
             }
+            MetadataChoiceParameterValue::DesignTimeRef(value_ref) if value_ref.is_empty() => {
+                xml.push_str(&format!(
+                    "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\"/>\r\n"
+                ));
+            }
             MetadataChoiceParameterValue::DesignTimeRef(value_ref) => {
                 xml.push_str(&format!(
                     "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n",
@@ -13729,16 +14339,36 @@ fn push_metadata_child_choice_parameters_xml(
                 ));
             }
             MetadataChoiceParameterValue::FixedArray(value_refs) => {
-                xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\">\r\n"
-                ));
-                for value_ref in value_refs {
+                if value_refs.is_empty() {
                     xml.push_str(&format!(
-                        "{indent}\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">{}</v8:Value>\r\n",
-                        escape_xml_element_text(value_ref)
+                        "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\"/>\r\n"
                     ));
+                } else {
+                    xml.push_str(&format!(
+                        "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\">\r\n"
+                    ));
+                    for value_ref in value_refs {
+                        xml.push_str(&format!(
+                            "{indent}\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">{}</v8:Value>\r\n",
+                            escape_xml_element_text(value_ref)
+                        ));
+                    }
+                    xml.push_str(&format!("{indent}\t\t</app:value>\r\n"));
                 }
-                xml.push_str(&format!("{indent}\t\t</app:value>\r\n"));
+            }
+            MetadataChoiceParameterValue::Nil => {
+                xml.push_str(&format!("{indent}\t\t<app:value xsi:nil=\"true\"/>\r\n"));
+            }
+            MetadataChoiceParameterValue::String(value) if value.is_empty() => {
+                xml.push_str(&format!(
+                    "{indent}\t\t<app:value xsi:type=\"xs:string\"/>\r\n"
+                ));
+            }
+            MetadataChoiceParameterValue::String(value) => {
+                xml.push_str(&format!(
+                    "{indent}\t\t<app:value xsi:type=\"xs:string\">{}</app:value>\r\n",
+                    escape_xml_element_text(value)
+                ));
             }
         }
         xml.push_str(&format!("{indent}\t</app:item>\r\n"));
@@ -13826,6 +14456,9 @@ fn format_metadata_child_fill_value_xml(value: &MetadataChildFillValue) -> Strin
             "<FillValue xsi:type=\"xs:dateTime\">{}</FillValue>",
             escape_xml_element_text(value)
         ),
+        MetadataChildFillValue::DesignTimeRef(value) if value.is_empty() => {
+            "<FillValue xsi:type=\"xr:DesignTimeRef\"/>".to_string()
+        }
         MetadataChildFillValue::DesignTimeRef(value) => format!(
             "<FillValue xsi:type=\"xr:DesignTimeRef\">{}</FillValue>",
             escape_xml_element_text(value)

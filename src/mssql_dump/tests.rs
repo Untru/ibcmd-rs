@@ -22632,6 +22632,266 @@ fn extracts_register_child_type_and_property_tail() {
     );
 }
 
+fn information_register_common_child_for_test(child_uuid: &str) -> String {
+    format!(
+        "{{27,{{2,{{3,{{1,0,{child_uuid}}},\"Value\",{{1,\"en\",\"Value\"}},\"comment\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}}},0,{{0}},{{1,\"en\",\"Tip\"}},0,\"\",0,{{\"U\"}},{{\"U\"}},0,00000000-0000-0000-0000-000000000000,2,1,{{5006,0}},{{3,0,0}},{{0,0}},1,{{1,\"en\",\"Edit\"}},{{\"B\",1}},1,2,1}}"
+    )
+}
+
+fn information_register_child_header_for_test(child_uuid: &str) -> MetadataHeader {
+    MetadataHeader {
+        uuid: child_uuid.to_string(),
+        name: "Value".to_string(),
+        synonyms: vec![("en".to_string(), "Value".to_string())],
+        comment: "comment".to_string(),
+        template_type_code: None,
+    }
+}
+
+#[test]
+fn parses_exact_information_register_legacy_and_new_child_wrappers() {
+    let child_uuid = "22222222-2222-4222-8222-222222222222";
+    let common = information_register_common_child_for_test(child_uuid);
+    let header = information_register_child_header_for_test(child_uuid);
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let cases = [
+        (
+            "Resource",
+            format!("{{7,{common},0,1,1}}"),
+            None,
+            "DontIndex",
+            "Use",
+        ),
+        (
+            "Resource",
+            format!("{{8,{common},0,1,1,0,{{1,{zero_uuid}}}}}"),
+            None,
+            "DontIndex",
+            "Use",
+        ),
+        (
+            "Attribute",
+            format!("{{4,{common},0,1,1}}"),
+            None,
+            "DontIndex",
+            "Use",
+        ),
+        (
+            "Attribute",
+            format!("{{5,{common},0,1,1,0,{{1,{zero_uuid}}}}}"),
+            None,
+            "DontIndex",
+            "Use",
+        ),
+        (
+            "Dimension",
+            format!("{{9,{common},1,0,2,1,1,0}}"),
+            Some("TransformValues"),
+            "IndexWithAdditionalOrder",
+            "DontUse",
+        ),
+        (
+            "Dimension",
+            format!("{{10,{common},1,0,2,1,1,0,1}}"),
+            Some("DeleteData"),
+            "IndexWithAdditionalOrder",
+            "DontUse",
+        ),
+    ];
+
+    for (tag, wrapper, expected_type_reduction_mode, expected_indexing, expected_data_history) in
+        cases
+    {
+        let fields = split_1c_braced_fields(&wrapper, 0).unwrap();
+        let (value_types, properties) = parse_information_register_child_payload_from_fields(
+            &fields,
+            &header,
+            "Rates",
+            tag,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap_or_else(|| panic!("failed to parse {tag}: {wrapper}"));
+
+        assert_eq!(value_types, vec![ConstantValueType::Boolean]);
+        assert_eq!(properties.quick_choice, Some("Auto"));
+        assert_eq!(properties.create_on_input, Some("Use"));
+        assert_eq!(properties.choice_history_on_input, Some("DontUse"));
+        assert_eq!(properties.indexing, Some(expected_indexing));
+        assert_eq!(properties.full_text_search, Some("Use"));
+        assert_eq!(properties.data_history, Some(expected_data_history));
+        assert_eq!(properties.type_reduction_mode, expected_type_reduction_mode);
+        assert!(matches!(
+            properties.fill_value,
+            Some(MetadataChildFillValue::Boolean(true))
+        ));
+        if tag == "Dimension" {
+            assert_eq!(properties.master, Some(true));
+            assert_eq!(properties.main_filter, Some(true));
+            assert_eq!(properties.deny_incomplete_values, Some(false));
+            let mut xml = String::new();
+            push_metadata_child_properties_xml(&mut xml, "\t", &properties);
+            let ordered = [
+                "<ChoiceHistoryOnInput>",
+                "<Master>",
+                "<MainFilter>",
+                "<DenyIncompleteValues>",
+                "<Indexing>",
+                "<FullTextSearch>",
+                "<DataHistory>",
+                "<TypeReductionMode>",
+            ]
+            .map(|tag| xml.find(tag).unwrap());
+            assert!(ordered.windows(2).all(|pair| pair[0] < pair[1]), "{xml}");
+        } else {
+            assert_eq!(properties.master, None);
+            assert_eq!(properties.main_filter, None);
+            assert_eq!(properties.deny_incomplete_values, None);
+        }
+    }
+}
+
+#[test]
+fn parses_information_register_variable_collections_without_partial_results() {
+    let path_uuid = "11111111-1111-4111-8111-111111111111";
+    let owner_uuid = "22222222-2222-4222-8222-222222222222";
+    let value_uuid = "33333333-3333-4333-8333-333333333333";
+    let second_value_uuid = "44444444-4444-4444-8444-444444444444";
+    let unresolved_path_uuid = "55555555-5555-4555-8555-555555555555";
+    let value_type_uuid = "66666666-6666-4666-8666-666666666666";
+    let array_type_uuid = "77777777-7777-4777-8777-777777777777";
+    let mut object_refs = BTreeMap::new();
+    object_refs.insert(
+        path_uuid.to_string(),
+        "InformationRegister.Rates.Dimension.Target".to_string(),
+    );
+    object_refs.insert(owner_uuid.to_string(), "Enum.Status".to_string());
+    object_refs.insert(
+        value_uuid.to_string(),
+        "Enum.Status.EnumValue.Active".to_string(),
+    );
+    object_refs.insert(
+        second_value_uuid.to_string(),
+        "Enum.Status.EnumValue.Closed".to_string(),
+    );
+
+    let links = parse_information_register_choice_parameter_links(
+        &format!("{{5006,2,\"First\",2,{{-2}},{{0,{path_uuid}}},0,\"Second\",1,{{-3}},1}}"),
+        "Rates",
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(
+        links[0].data_path,
+        "InformationRegister.Rates.StandardAttribute.Period/InformationRegister.Rates.Dimension.Target"
+    );
+    assert_eq!(links[0].value_change, "Clear");
+    assert_eq!(
+        links[1].data_path,
+        "InformationRegister.Rates.StandardAttribute.Recorder"
+    );
+    assert_eq!(links[1].value_change, "DontChange");
+
+    let link_by_type = parse_information_register_link_by_type(
+        &format!("{{3,2,{{0,{unresolved_path_uuid}}},{{0}},3}}"),
+        "Rates",
+        &object_refs,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        link_by_type.data_path,
+        format!("0:{unresolved_path_uuid}/0")
+    );
+    assert_eq!(link_by_type.link_item, 3);
+
+    let reference = format!("{{\"#\",{value_type_uuid},{{0,{owner_uuid},{value_uuid}}}}}");
+    let second_reference =
+        format!("{{\"#\",{value_type_uuid},{{0,{owner_uuid},{second_value_uuid}}}}}");
+    let parameters = parse_information_register_choice_parameters(
+        &format!(
+            "{{0,5,\"Bool\",{{\"B\",1}},\"Text\",{{\"S\",\"value\"}},\"Nil\",{{\"U\"}},\"Ref\",{reference},\"Array\",{{\"#\",{array_type_uuid},{{2,{reference},{second_reference}}}}}}}"
+        ),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(parameters.len(), 5);
+    assert!(matches!(
+        parameters[0].value,
+        MetadataChoiceParameterValue::Boolean(true)
+    ));
+    assert!(matches!(
+        parameters[1].value,
+        MetadataChoiceParameterValue::String(ref value) if value == "value"
+    ));
+    assert!(matches!(
+        parameters[2].value,
+        MetadataChoiceParameterValue::Nil
+    ));
+    assert!(matches!(
+        parameters[3].value,
+        MetadataChoiceParameterValue::DesignTimeRef(ref value)
+            if value == "Enum.Status.EnumValue.Active"
+    ));
+    assert!(matches!(
+        parameters[4].value,
+        MetadataChoiceParameterValue::FixedArray(ref values)
+            if values == &["Enum.Status.EnumValue.Active", "Enum.Status.EnumValue.Closed"]
+    ));
+
+    let mut xml = String::new();
+    push_metadata_child_choice_parameters_xml(&mut xml, "\t", &parameters);
+    assert!(xml.contains(r#"<app:value xsi:type="xs:boolean">true</app:value>"#));
+    assert!(xml.contains(r#"<app:value xsi:type="xs:string">value</app:value>"#));
+    assert!(xml.contains(r#"<app:value xsi:nil="true"/>"#));
+    assert!(xml.contains(r#"<app:value xsi:type="v8:FixedArray">"#));
+}
+
+#[test]
+fn information_register_child_payload_fails_closed_on_shape_errors() {
+    let child_uuid = "22222222-2222-4222-8222-222222222222";
+    let common = information_register_common_child_for_test(child_uuid);
+    let header = information_register_child_header_for_test(child_uuid);
+
+    let unrelated_code9 = format!("{{9,{common},1,0,0,1,1,1,0,0}}");
+    let fields = split_1c_braced_fields(&unrelated_code9, 0).unwrap();
+    assert!(
+        parse_information_register_child_payload_from_fields(
+            &fields,
+            &header,
+            "Rates",
+            "Dimension",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    assert!(
+        parse_information_register_choice_parameter_links(
+            "{5006,1,\"Broken\",2,{0},0}",
+            "Rates",
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_choice_parameters(
+            "{0,2,\"OnlyOne\",{\"B\",1}}",
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_information_register_fill_value(
+            "{\"#\",66666666-6666-4666-8666-666666666666,{0,77777777-7777-4777-8777-777777777777,88888888-8888-4888-8888-888888888888}}",
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+}
+
 #[test]
 fn appends_register_commands_to_existing_child_objects_block() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
