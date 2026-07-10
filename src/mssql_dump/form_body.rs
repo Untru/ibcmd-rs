@@ -1063,7 +1063,7 @@ pub(super) fn extract_form_auto_command_bar(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
     find_form_auto_command_bar(
@@ -1081,7 +1081,7 @@ pub(super) fn find_form_auto_command_bar(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
     for field in fields {
@@ -1121,7 +1121,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
     if fields.first().map(|value| value.trim()) != Some("22") {
@@ -3371,7 +3371,7 @@ pub(super) fn extend_form_attribute_special_columns(
 #[derive(Default)]
 pub(super) struct FormChildItemIndexes {
     pub(super) table_name_by_id: BTreeMap<String, String>,
-    pub(super) standard_command_owner_name_by_id: BTreeMap<String, String>,
+    pub(super) standard_command_owner_name_by_id: BTreeMap<String, FormStandardCommandOwner>,
     pub(super) table_column_names_by_id: BTreeMap<String, BTreeMap<String, String>>,
     pub(super) bound_table_path_by_binding_key: BTreeMap<String, String>,
     pub(super) table_column_names_by_binding_key: BTreeMap<String, BTreeMap<String, String>>,
@@ -3382,6 +3382,18 @@ pub(super) struct FormChildItemIndexes {
     pub(super) command_source_owner_name_by_id: BTreeMap<String, String>,
     pub(super) user_settings_group_id_by_table_id: BTreeMap<String, String>,
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
+}
+
+pub(super) struct FormStandardCommandOwner {
+    name: String,
+    kind: FormStandardCommandOwnerKind,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum FormStandardCommandOwnerKind {
+    Table,
+    SpreadsheetDocument,
+    FormattedDocument,
 }
 
 pub(super) fn collect_form_child_item_indexes(
@@ -3472,9 +3484,26 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         && let Some(id) = form_child_item_id(&fields)
         && let Some(name) = parse_form_child_item_name(wrapper, &fields)
     {
-        indexes
-            .standard_command_owner_name_by_id
-            .insert(id.to_string(), name);
+        indexes.standard_command_owner_name_by_id.insert(
+            id.to_string(),
+            FormStandardCommandOwner {
+                name,
+                kind: FormStandardCommandOwnerKind::SpreadsheetDocument,
+            },
+        );
+    }
+    if let Some(wrapper) = wrapper
+        && form_formatted_document_field_layout(wrapper, &fields)
+        && let Some(id) = form_child_item_id(&fields)
+        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
+    {
+        indexes.standard_command_owner_name_by_id.insert(
+            id.to_string(),
+            FormStandardCommandOwner {
+                name,
+                kind: FormStandardCommandOwnerKind::FormattedDocument,
+            },
+        );
     }
     if let Some(wrapper) = wrapper
         && (form_child_item_tag(wrapper, &fields).is_some() || matches!(wrapper, "37" | "48"))
@@ -3493,9 +3522,13 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         let tag = form_child_item_tag(wrapper, &fields).unwrap_or_default();
         indexes.item_name_by_id.insert(id.to_string(), name.clone());
         if tag == "Table" {
-            indexes
-                .standard_command_owner_name_by_id
-                .insert(id.to_string(), name.clone());
+            indexes.standard_command_owner_name_by_id.insert(
+                id.to_string(),
+                FormStandardCommandOwner {
+                    name: name.clone(),
+                    kind: FormStandardCommandOwnerKind::Table,
+                },
+            );
             indexes
                 .table_name_by_id
                 .insert(id.to_string(), name.clone());
@@ -3600,6 +3633,13 @@ pub(super) fn form_spreadsheet_document_field_layout(wrapper: &str, fields: &[&s
             .is_some_and(|value| value.trim() == "6")
 }
 
+pub(super) fn form_formatted_document_field_layout(wrapper: &str, fields: &[&str]) -> bool {
+    matches!(wrapper, "37" | "48")
+        && fields
+            .get(5 + form_input_field_top_level_offset(fields))
+            .is_some_and(|value| value.trim() == "17")
+}
+
 pub(super) fn form_child_item_id<'a>(fields: &[&'a str]) -> Option<&'a str> {
     let identity = fields
         .get(1)
@@ -3615,7 +3655,7 @@ pub(super) fn parse_form_child_item_pairs(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -3810,7 +3850,7 @@ pub(super) fn parse_form_child_item_with_context(
     _parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -4970,7 +5010,7 @@ pub(super) fn append_form_table_service_child_items(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -5014,7 +5054,7 @@ pub(super) fn append_form_child_items_by_tag(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -5072,7 +5112,7 @@ pub(super) fn parse_form_text_document_context_menu(
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
@@ -8094,7 +8134,7 @@ pub(super) fn parse_form_button_command_name(
     field: &str,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
-    standard_command_owner_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let kind = fields.first()?.trim();
@@ -8132,9 +8172,19 @@ pub(super) fn parse_form_button_command_name(
     {
         return Some(format!("{reference}.StandardCommand.OpenByValue"));
     }
-    let standard = form_table_standard_command_suffix(&uuid)?;
-    let owner_name = standard_command_owner_name_by_id.get(kind)?;
-    Some(format!("Form.Item.{owner_name}.StandardCommand.{standard}"))
+    let owner = standard_command_owner_name_by_id.get(kind)?;
+    let standard = match owner.kind {
+        FormStandardCommandOwnerKind::FormattedDocument => {
+            form_formatted_document_standard_command_suffix(&uuid)
+        }
+        FormStandardCommandOwnerKind::Table | FormStandardCommandOwnerKind::SpreadsheetDocument => {
+            form_table_standard_command_suffix(&uuid)
+        }
+    }?;
+    Some(format!(
+        "Form.Item.{}.StandardCommand.{standard}",
+        owner.name
+    ))
 }
 
 pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
@@ -8212,6 +8262,20 @@ pub(super) fn form_standard_button_command_name(uuid: &str) -> Option<&'static s
     match uuid {
         "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("Form.StandardCommand.SaveValues"),
         "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("Form.StandardCommand.RestoreValues"),
+        _ => None,
+    }
+}
+
+pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "39f6b9f1-7aa1-4a03-a01b-e127d51bc228" => Some("DecreaseIndent"),
+        "56ae90b6-588f-406e-919c-cc5cc7f86297" => Some("AlignJustify"),
+        "87ecfbdd-8e2b-4ba2-a315-0897020f382f" => Some("AlignLeft"),
+        "9d8a3915-de52-4227-91cd-2fce22e09972" => Some("Picture"),
+        "a8483976-8b13-416a-9680-133b306dc6b0" => Some("Print"),
+        "ab0ebc39-68ee-4034-b2f4-43eee55bd651" => Some("AlignCenter"),
+        "d0a4d953-115b-4059-a6cb-6e67f903a4f3" => Some("IncreaseIndent"),
+        "e428af27-c4f7-4577-b80e-95a79f94322d" => Some("AlignRight"),
         _ => None,
     }
 }
