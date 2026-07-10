@@ -3113,6 +3113,10 @@ fn module_owner_module_file(kind: &str, suffix: &str) -> Option<&'static str> {
         ("Task", "7") => Some("ManagerModule.bsl"),
         ("BusinessProcess", "6") => Some("ObjectModule.bsl"),
         ("BusinessProcess", "8") => Some("ManagerModule.bsl"),
+        ("ChartOfAccounts", "14") => Some("ObjectModule.bsl"),
+        ("ChartOfAccounts", "15") => Some("ManagerModule.bsl"),
+        ("ChartOfCalculationTypes", "0") => Some("ObjectModule.bsl"),
+        ("ChartOfCalculationTypes", "3") => Some("ManagerModule.bsl"),
         ("ChartOfCharacteristicTypes", "15") => Some("ObjectModule.bsl"),
         ("ChartOfCharacteristicTypes", "16") => Some("ManagerModule.bsl"),
         _ => None,
@@ -14510,7 +14514,7 @@ fn metadata_id_from_module_file_name(file_name: &str) -> Option<&str> {
     Some(metadata_id)
 }
 
-const MODULE_BODY_SUFFIXES: &[&str] = &["0", "1", "2", "3", "5", "6", "7", "8", "15", "16"];
+const MODULE_BODY_SUFFIXES: &[&str] = &["0", "1", "2", "3", "5", "6", "7", "8", "14", "15", "16"];
 
 fn prepare_output_dir(path: &Path, overwrite: bool) -> Result<()> {
     if path.exists() {
