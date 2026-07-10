@@ -430,7 +430,6 @@ pub(super) struct FormChildItem {
     pub(super) footer_horizontal_align: Option<&'static str>,
     pub(super) hiperlink: Option<bool>,
     pub(super) text_color: Option<String>,
-    pub(super) title_text_color: Option<String>,
     pub(super) mark_required_complete: Option<bool>,
     pub(super) auto_edit_mode: Option<bool>,
     pub(super) auto_insert_new_row: Option<bool>,
@@ -4600,9 +4599,6 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        title_text_color: (tag == "UsualGroup")
-            .then(|| parse_form_usual_group_title_text_color(&fields, object_refs))
-            .flatten(),
         mark_required_complete: if tag == "InputField"
             && form_input_field_layout_is_extended(&fields)
         {
@@ -4640,9 +4636,7 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             Vec::new()
         },
-        title_font_xml: if tag == "UsualGroup" {
-            parse_form_usual_group_title_font_xml(&fields, object_refs)
-        } else if matches!(wrapper, "37" | "48")
+        title_font_xml: if matches!(wrapper, "37" | "48")
             && matches!(
                 tag,
                 "InputField"
@@ -4651,8 +4645,7 @@ pub(super) fn parse_form_child_item_with_context(
                     | "PictureField"
                     | "RadioButtonField"
                     | "TextDocumentField"
-            )
-        {
+            ) {
             fields
                 .get(FieldSlot::TitleFont.index(input_field_top_level_offset))
                 .and_then(|field| parse_form_title_font_tuple_xml(field, object_refs))
@@ -5461,54 +5454,6 @@ pub(super) fn parse_form_label_decoration_options(
             .get(32)
             .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
     })
-}
-
-pub(super) fn parse_form_usual_group_title_text_color(
-    fields: &[&str],
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let color = split_1c_braced_fields(fields.get(16)?.trim(), 0)?;
-    let reference = match color.first()?.trim() {
-        "3" if color.len() == 3 && color.get(1)?.trim() == "3" => color.get(2)?.trim(),
-        "4" if color.len() == 4 && color.get(1)?.trim() == "3" && color.get(3)?.trim() == "3" => {
-            color.get(2)?.trim()
-        }
-        _ => return None,
-    };
-    style_body_ref_name(reference, object_refs)
-}
-
-fn form_usual_group_title_font_fields<'a>(
-    raw: &'a str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<&'a str>> {
-    let font = split_1c_braced_fields(raw, 0)?;
-    if !matches!(font.first()?.trim(), "7" | "8") || font.get(1)?.trim() != "2" {
-        return None;
-    }
-    match font.len() {
-        6 if font.get(2)?.trim() == "0"
-            && font.get(4)?.trim() == "1"
-            && font.get(5)?.trim() == "100" => {}
-        10 if font.get(8)?.trim() == "1" => {}
-        _ => return None,
-    }
-    style_body_ref_name(font.get(3)?.trim(), object_refs)?;
-    Some(font)
-}
-
-pub(super) fn parse_form_usual_group_title_font_xml(
-    fields: &[&str],
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let raw = fields.get(17)?.trim();
-    let font = form_usual_group_title_font_fields(raw, object_refs)?;
-    let normalized = (font.first()?.trim() == "8").then(|| {
-        let mut normalized = font.clone();
-        normalized[0] = "7";
-        format!("{{{}}}", normalized.join(","))
-    });
-    parse_form_title_font_tuple_xml(normalized.as_deref().unwrap_or(raw), object_refs)
 }
 
 pub(super) fn parse_form_usual_group_extended_options(
@@ -9649,9 +9594,7 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
         }
     }
-    if item.tag != "UsualGroup"
-        && let Some(title_font_xml) = &item.title_font_xml
-    {
+    if let Some(title_font_xml) = &item.title_font_xml {
         xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
     }
     if item.tag == "Table"
@@ -9967,17 +9910,6 @@ pub(super) fn format_form_child_item_xml(
             &item.title,
             indent + 1,
         ));
-        if item.tag == "UsualGroup" {
-            if let Some(title_text_color) = &item.title_text_color {
-                xml.push_str(&format!(
-                    "{tab}\t<TitleTextColor>{}</TitleTextColor>\r\n",
-                    escape_xml_text(title_text_color)
-                ));
-            }
-            if let Some(title_font_xml) = &item.title_font_xml {
-                xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
-            }
-        }
         if item.tag == "ButtonGroup" {
             xml.push_str(&format_form_localized_section(
                 "ToolTip",
