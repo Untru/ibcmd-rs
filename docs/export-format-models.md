@@ -188,6 +188,40 @@ Rejected hypothesis:
   require the side-table substitution model above. Both failures were reported
   and rolled into the final fail-closed admission rule.
 
+## Metadata generated type families
+
+Status: ExchangePlan raw codes `36` and `37` are `confirmed by export`.
+
+Model:
+
+- Generated type ids are read from a metadata family's structural raw slots and
+  paired with the parsed metadata header name. They are not database object
+  UUID constants in production code.
+- ExchangePlan raw codes `36` and `37` use the same five TypeId slots at
+  indexes `1,3,5,7,9` of the generated-type payload. In order, they represent
+  `ExchangePlanObject`, `ExchangePlanRef`, `ExchangePlanSelection`,
+  `ExchangePlanList`, and `ExchangePlanManager`.
+- A slot is admitted only when the enclosing metadata row/header is parsed and
+  the slot contains a valid UUID. Unknown or malformed records remain
+  fail-closed; there is no object-name fallback.
+
+Confirmed by export:
+
+- A selected code-36 gate restored five previously absent Constant/DefinedType
+  consumer XML files byte-for-byte. The full gate had a wider, valid downstream
+  effect because the same type index feeds metadata properties, command
+  parameters, subscriptions, and form types.
+- An isolated old-versus-new full export proved the complete delta. The full
+  diff moved from `1591 files, +31369/-193819` to
+  `1575 files, +31350/-193392`. Exactly 25 paths changed: five direct metadata,
+  nine CommonCommands, two EventSubscriptions, two Catalogs, four ExchangePlan
+  forms, and three InformationRegisters. Sixteen became exact.
+- Every one of the 427 new generated lines exists in native output; all 19
+  removed generated lines were non-native empty or partial blocks. The restored
+  typed values were 34 `ExchangePlanRef` and five `ExchangePlanObject` QNames.
+  No path worsened, and production additions contained no database UUID, object
+  name, or local path literal.
+
 ## Form.xml `CommandName` / `CommandSource`
 
 Status: draft model. Several common paths are `confirmed by export`; the full
