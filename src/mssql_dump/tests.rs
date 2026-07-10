@@ -5779,7 +5779,7 @@ fn extracts_button_width_and_command_bar_source_from_extended_layout() {
             &BTreeMap::new(),
         )
         .unwrap();
-    assert_eq!(command_bar.command_source, Some("Form"));
+    assert_eq!(command_bar.command_source, Some("Form".to_string()));
     let bar_xml = format_form_child_items_xml(&[command_bar], 1);
     assert!(bar_xml.contains("<CommandSource>Form</CommandSource>"));
 }
@@ -6719,6 +6719,8 @@ fn extracts_table_label_field_default_item_and_horizontal_stretch_without_height
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeMap::new(),
         )
@@ -6760,6 +6762,8 @@ fn extracts_table_label_field_title_font_and_font_from_style_item_ref() {
         None,
         Some("Список"),
         Some("Table"),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -10689,7 +10693,7 @@ fn parses_button_group_command_source_from_live_layout() {
     fields[20] = "{2,{0,02023637-7868-4a5f-8576-835a76e0c9ba},2,0}";
     assert_eq!(
         parse_form_button_group_command_source(&fields),
-        Some("Form")
+        Some("Form".to_string())
     );
 }
 
