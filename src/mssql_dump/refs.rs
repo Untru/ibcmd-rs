@@ -1738,6 +1738,13 @@ pub(super) fn extract_configuration_source_xml(
         properties.default_roles =
             parse_configuration_default_roles_from_root(text, uuid, object_refs)
                 .unwrap_or_default();
+        properties.brief_information.clear();
+        properties.detailed_information.clear();
+        properties.copyright.clear();
+        properties.vendor_information_address.clear();
+        properties.configuration_information_address.clear();
+        properties.localized_properties =
+            parse_configuration_localized_properties_from_root(text, uuid);
     }
     properties.used_mobile_application_functionalities =
         parse_configuration_used_mobile_application_functionalities(
@@ -1789,6 +1796,7 @@ pub(super) fn parse_configuration_properties_from_text(
             .get(3)
             .and_then(|field| configuration_default_run_mode_xml(field.trim())),
         use_purposes: Vec::new(),
+        localized_properties: None,
         brief_information: parse_configuration_localized_property(&fields, 4),
         detailed_information: parse_configuration_localized_property(&fields, 5),
         copyright: parse_configuration_localized_property(&fields, 6),
@@ -1913,6 +1921,49 @@ pub(super) fn parse_configuration_default_roles_from_root(
         roles.push(reference.clone());
     }
     Some(roles)
+}
+
+pub(super) fn parse_configuration_localized_properties_from_root(
+    text: &str,
+    uuid: &str,
+) -> Option<ConfigurationLocalizedProperties> {
+    let fields = configuration_root_property_fields(text, uuid)?;
+    Some(ConfigurationLocalizedProperties {
+        brief_information: parse_configuration_localized_property_field(fields.get(4)?)?,
+        detailed_information: parse_configuration_localized_property_field(fields.get(5)?)?,
+        copyright: parse_configuration_localized_property_field(fields.get(6)?)?,
+        vendor_information_address: parse_configuration_localized_property_field(fields.get(7)?)?,
+        configuration_information_address: parse_configuration_localized_property_field(
+            fields.get(8)?,
+        )?,
+    })
+}
+
+fn parse_configuration_localized_property_field(field: &str) -> Option<Vec<(String, String)>> {
+    let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let count = raw_fields.first()?.trim().parse::<usize>().ok()?;
+    let expected_len = count.checked_mul(2)?.checked_add(1)?;
+    if raw_fields.len() != expected_len {
+        return None;
+    }
+
+    let mut seen_languages = BTreeSet::new();
+    let mut values = Vec::with_capacity(count);
+    for pair in raw_fields[1..].chunks_exact(2) {
+        let language = parse_exact_1c_quoted_string(pair.first()?.trim())?;
+        if !seen_languages.insert(language.clone()) {
+            return None;
+        }
+        let content = parse_exact_1c_quoted_string(pair.get(1)?.trim())?;
+        values.push((language, content));
+    }
+    Some(values)
+}
+
+fn parse_exact_1c_quoted_string(field: &str) -> Option<String> {
+    let field = field.trim();
+    let (value, consumed) = parse_1c_quoted_string_with_len(field)?;
+    (consumed == field.len()).then_some(value)
 }
 
 pub(super) fn configuration_root_fields(text: &str) -> Option<Vec<&str>> {

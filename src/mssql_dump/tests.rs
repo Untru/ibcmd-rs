@@ -23289,6 +23289,15 @@ fn configuration_default_roles_raw(declared_count: usize, role_uuids: &[&str]) -
     format!("{{{}}}", fields.join(","))
 }
 
+fn configuration_localized_raw(values: &[(&str, &str)]) -> String {
+    let mut fields = vec![values.len().to_string()];
+    for (language, content) in values {
+        fields.push(format!("\"{}\"", language.replace('"', "\"\"")));
+        fields.push(format!("\"{}\"", content.replace('"', "\"\"")));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
 fn flat_configuration_properties_text(
     code: u32,
     field_count: usize,
@@ -23840,6 +23849,244 @@ fn configuration_default_roles_fail_closed() {
 }
 
 #[test]
+fn extracts_atomic_configuration_localized_properties_for_proven_layouts() {
+    let brief = configuration_localized_raw(&[("en", "Brief info")]);
+    let detailed = configuration_localized_raw(&[("en", "Detailed & \"quoted\" info")]);
+    let copyright =
+        configuration_localized_raw(&[("en", "Copyright Vendor"), ("ru", "Vendor rights")]);
+    let vendor_address = configuration_localized_raw(&[
+        ("en", "https://vendor.example.invalid/?a=1&b=2"),
+        ("ru", "https://vendor.example.invalid/ru/"),
+    ]);
+    let configuration_address = configuration_localized_raw(&[]);
+    let mobile = configuration_mobile_raw(
+        37,
+        &configuration_mobile_functionality_ids(37),
+        None,
+        Some("0"),
+    );
+    let replacements = [
+        (4, brief.as_str()),
+        (5, detailed.as_str()),
+        (6, copyright.as_str()),
+        (7, vendor_address.as_str()),
+        (8, configuration_address.as_str()),
+        (53, mobile.as_str()),
+    ];
+    let expected = ConfigurationLocalizedProperties {
+        brief_information: vec![("en".to_string(), "Brief info".to_string())],
+        detailed_information: vec![("en".to_string(), "Detailed & \"quoted\" info".to_string())],
+        copyright: vec![
+            ("en".to_string(), "Copyright Vendor".to_string()),
+            ("ru".to_string(), "Vendor rights".to_string()),
+        ],
+        vendor_information_address: vec![
+            (
+                "en".to_string(),
+                "https://vendor.example.invalid/?a=1&b=2".to_string(),
+            ),
+            (
+                "ru".to_string(),
+                "https://vendor.example.invalid/ru/".to_string(),
+            ),
+        ],
+        configuration_information_address: Vec::new(),
+    };
+
+    for (code, field_count) in [(67, 60), (68, 61), (76, 77)] {
+        let (uuid, text) = flat_configuration_properties_text(code, field_count, &replacements);
+        assert_eq!(
+            parse_configuration_localized_properties_from_root(&text, &uuid),
+            Some(expected.clone())
+        );
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        for name in [
+            "BriefInformation",
+            "DetailedInformation",
+            "Copyright",
+            "VendorInformationAddress",
+        ] {
+            assert_eq!(xml.matches(&format!("<{name}>")).count(), 1, "{xml}");
+            assert_eq!(xml.matches(&format!("</{name}>")).count(), 1, "{xml}");
+        }
+        assert_eq!(xml.matches("<ConfigurationInformationAddress/>").count(), 1);
+        assert!(xml.contains("Detailed &amp; \"quoted\" info"), "{xml}");
+        assert!(
+            xml.contains("https://vendor.example.invalid/?a=1&amp;b=2"),
+            "{xml}"
+        );
+        assert!(
+            xml.find("</UsedMobileApplicationFunctionalities>").unwrap()
+                < xml.find("<BriefInformation>").unwrap(),
+            "{xml}"
+        );
+    }
+
+    let mut properties = ConfigurationProperties::default();
+    properties.default_language = Some("Language.English".to_string());
+    properties.used_mobile_application_functionalities =
+        vec![ConfigurationMobileApplicationFunctionality {
+            name: "Biometrics",
+            use_functionality: true,
+        }];
+    properties.localized_properties = Some(expected);
+    properties.compatibility_mode = Some("Version8_3_20".to_string());
+    let xml = format_configuration_source_xml(
+        &MetadataHeader {
+            uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            name: "DemoApp".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        },
+        &properties,
+        InfobaseConfigSourceVersion::V2_20,
+    );
+    assert!(xml.find("<DefaultLanguage>").unwrap() < xml.find("<BriefInformation>").unwrap());
+    assert!(
+        xml.find("</UsedMobileApplicationFunctionalities>").unwrap()
+            < xml.find("<BriefInformation>").unwrap()
+    );
+    assert!(
+        xml.find("<ConfigurationInformationAddress/>").unwrap()
+            < xml.find("<CompatibilityMode>").unwrap()
+    );
+}
+
+#[test]
+fn configuration_localized_properties_fail_closed_atomically() {
+    let valid = [
+        configuration_localized_raw(&[("en", "Brief info")]),
+        configuration_localized_raw(&[("en", "Detailed info")]),
+        configuration_localized_raw(&[("en", "Copyright Vendor")]),
+        configuration_localized_raw(&[("en", "https://vendor.example.invalid/")]),
+        configuration_localized_raw(&[("en", "https://config.example.invalid/")]),
+    ];
+    let property_names = [
+        "BriefInformation",
+        "DetailedInformation",
+        "Copyright",
+        "VendorInformationAddress",
+        "ConfigurationInformationAddress",
+    ];
+
+    for invalid_index in 0..valid.len() {
+        let replacements = (0..valid.len())
+            .map(|index| {
+                (
+                    index + 4,
+                    if index == invalid_index {
+                        "{1,\"en\"}"
+                    } else {
+                        valid[index].as_str()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let (uuid, text) = flat_configuration_properties_text(68, 61, &replacements);
+        assert!(
+            parse_configuration_localized_properties_from_root(&text, &uuid).is_none(),
+            "slot {}",
+            invalid_index + 4
+        );
+        let xml = extract_configuration_source_xml(
+            &text,
+            &uuid,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        for name in property_names {
+            assert!(!xml.contains(name), "slot {}: {xml}", invalid_index + 4);
+        }
+    }
+
+    let malformed = [
+        ("noninteger count", "{x}".to_string()),
+        ("count mismatch", r#"{2,"en","value"}"#.to_string()),
+        ("missing content", r#"{1,"en"}"#.to_string()),
+        ("extra content", r#"{1,"en","value","extra"}"#.to_string()),
+        (
+            "duplicate language",
+            r#"{2,"en","first","en","second"}"#.to_string(),
+        ),
+        ("unquoted language", r#"{1,en,"value"}"#.to_string()),
+        ("quoted trailing data", r#"{1,"en"x,"value"}"#.to_string()),
+        ("unterminated quote", r#"{1,"en","value}"#.to_string()),
+        ("overflow count", format!("{{{}}}", usize::MAX)),
+        ("not braced", "0".to_string()),
+    ];
+    for (case, malformed_field) in malformed {
+        let replacements = [
+            (4, malformed_field.as_str()),
+            (5, valid[1].as_str()),
+            (6, valid[2].as_str()),
+            (7, valid[3].as_str()),
+            (8, valid[4].as_str()),
+        ];
+        let (uuid, text) = flat_configuration_properties_text(67, 60, &replacements);
+        assert!(
+            parse_configuration_localized_properties_from_root(&text, &uuid).is_none(),
+            "{case}: {malformed_field}"
+        );
+    }
+
+    let valid_replacements = [
+        (4, valid[0].as_str()),
+        (5, valid[1].as_str()),
+        (6, valid[2].as_str()),
+        (7, valid[3].as_str()),
+        (8, valid[4].as_str()),
+    ];
+    for (case, code, field_count) in [
+        ("67 field count", 67, 61),
+        ("68 field count", 68, 60),
+        ("76 field count", 76, 76),
+    ] {
+        let (uuid, text) =
+            flat_configuration_properties_text(code, field_count, &valid_replacements);
+        assert!(
+            parse_configuration_localized_properties_from_root(&text, &uuid).is_none(),
+            "{case}"
+        );
+    }
+
+    let swapped_replacements = [
+        (4, "0"),
+        (5, valid[1].as_str()),
+        (6, valid[2].as_str()),
+        (7, valid[3].as_str()),
+        (8, valid[4].as_str()),
+        (9, valid[0].as_str()),
+    ];
+    let (uuid, swapped) = flat_configuration_properties_text(67, 60, &swapped_replacements);
+    assert!(parse_configuration_localized_properties_from_root(&swapped, &uuid).is_none());
+
+    let invalid_replacements = [
+        (4, "0"),
+        (5, valid[1].as_str()),
+        (6, valid[2].as_str()),
+        (7, valid[3].as_str()),
+        (8, valid[4].as_str()),
+    ];
+    let (uuid, mut decoy) = flat_configuration_properties_text(67, 60, &invalid_replacements);
+    let second_id = "20000000-0000-4000-8000-000000000002";
+    let marker = format!("{{1,0,{second_id}}}");
+    decoy = decoy.replacen(
+        &format!("{{{marker}}}"),
+        &format!("{{{marker},{}}}", valid[0]),
+        1,
+    );
+    assert!(parse_configuration_localized_properties_from_root(&decoy, &uuid).is_none());
+}
+
+#[test]
 fn extracts_configuration_used_mobile_application_functionalities_for_proven_layouts() {
     let raw37 = configuration_mobile_raw(
         37,
@@ -24337,8 +24584,14 @@ fn extracts_configuration_xml_with_localized_info_properties() {
                 < xml.find("<BriefInformation>").unwrap()
         );
         assert!(
+            xml.find("<DefaultStyle>Style.Main</DefaultStyle>").unwrap()
+                < xml.find("<BriefInformation>").unwrap()
+        );
+        assert!(
             xml.find("</ConfigurationInformationAddress>").unwrap()
-                < xml.find("<DefaultStyle>Style.Main</DefaultStyle>").unwrap()
+                < xml
+                    .find("<CompatibilityMode>Version8_3_20</CompatibilityMode>")
+                    .unwrap()
         );
         assert!(!xml.contains(style_uuid));
         assert!(!xml.contains("ConfigDumpInfo"));

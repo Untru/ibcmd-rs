@@ -3744,6 +3744,7 @@ struct ConfigurationProperties {
     configuration_extension_compatibility_mode: Option<String>,
     default_run_mode: Option<&'static str>,
     use_purposes: Vec<&'static str>,
+    localized_properties: Option<ConfigurationLocalizedProperties>,
     brief_information: Vec<(String, String)>,
     detailed_information: Vec<(String, String)>,
     copyright: Vec<(String, String)>,
@@ -3762,6 +3763,15 @@ struct ConfigurationProperties {
     form_data_settings_storage: Option<ConfigurationRootReference>,
     used_mobile_application_functionalities: Vec<ConfigurationMobileApplicationFunctionality>,
     compatibility_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ConfigurationLocalizedProperties {
+    brief_information: Vec<(String, String)>,
+    detailed_information: Vec<(String, String)>,
+    copyright: Vec<(String, String)>,
+    vendor_information_address: Vec<(String, String)>,
+    configuration_information_address: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -11333,27 +11343,6 @@ fn format_configuration_source_xml(
         }
         insert.push_str("\t\t\t</UsePurposes>\r\n");
     }
-    push_optional_localized_property_xml(
-        &mut insert,
-        "BriefInformation",
-        &properties.brief_information,
-    );
-    push_optional_localized_property_xml(
-        &mut insert,
-        "DetailedInformation",
-        &properties.detailed_information,
-    );
-    push_optional_localized_property_xml(&mut insert, "Copyright", &properties.copyright);
-    push_optional_localized_property_xml(
-        &mut insert,
-        "VendorInformationAddress",
-        &properties.vendor_information_address,
-    );
-    push_optional_localized_property_xml(
-        &mut insert,
-        "ConfigurationInformationAddress",
-        &properties.configuration_information_address,
-    );
     push_optional_simple_property_xml(
         &mut insert,
         "DefaultStyle",
@@ -11420,6 +11409,55 @@ fn format_configuration_source_xml(
             insert.push_str("\t\t\t\t</app:functionality>\r\n");
         }
         insert.push_str("\t\t\t</UsedMobileApplicationFunctionalities>\r\n");
+    }
+    if let Some(localized) = &properties.localized_properties {
+        push_localized_property(
+            &mut insert,
+            "\t\t\t",
+            "BriefInformation",
+            &localized.brief_information,
+        );
+        push_localized_property(
+            &mut insert,
+            "\t\t\t",
+            "DetailedInformation",
+            &localized.detailed_information,
+        );
+        push_localized_property(&mut insert, "\t\t\t", "Copyright", &localized.copyright);
+        push_localized_property(
+            &mut insert,
+            "\t\t\t",
+            "VendorInformationAddress",
+            &localized.vendor_information_address,
+        );
+        push_localized_property(
+            &mut insert,
+            "\t\t\t",
+            "ConfigurationInformationAddress",
+            &localized.configuration_information_address,
+        );
+    } else {
+        push_optional_localized_property_xml(
+            &mut insert,
+            "BriefInformation",
+            &properties.brief_information,
+        );
+        push_optional_localized_property_xml(
+            &mut insert,
+            "DetailedInformation",
+            &properties.detailed_information,
+        );
+        push_optional_localized_property_xml(&mut insert, "Copyright", &properties.copyright);
+        push_optional_localized_property_xml(
+            &mut insert,
+            "VendorInformationAddress",
+            &properties.vendor_information_address,
+        );
+        push_optional_localized_property_xml(
+            &mut insert,
+            "ConfigurationInformationAddress",
+            &properties.configuration_information_address,
+        );
     }
     push_optional_simple_property_xml(
         &mut insert,
