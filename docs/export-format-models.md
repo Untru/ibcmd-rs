@@ -962,6 +962,44 @@ The generated Recalculation is 3,812 bytes and byte-identical to the native
 checkout. Full diff moved from `1565 files, +31308/-192925` to
 `1564 files, +31308/-192861`; Form command guards remained unchanged.
 
+## Configuration root indexes
+
+Status: `InternalInfo` and `ChildObjects` are `confirmed by export` for the
+2.20/BSP code-67 root layout. Root `Properties` remain separately incomplete.
+
+The admitted root envelope is structurally:
+
+```text
+{2,{<configuration UUID>},7,<contained 0>...<contained 6>,{{0,"",""}}}
+```
+
+Each contained entry has a nonzero class UUID and one payload. The payload has
+exactly one `{1,0,<ObjectId>}` marker and an ordered sequence of family lists.
+The seven `(ClassId,ObjectId)` pairs serialize unchanged and in raw order as
+`InternalInfo/xr:ContainedObject`.
+
+Each family list contains a family UUID, an exact child count, and that many
+metadata UUIDs. Empty families are skipped. Every nonempty family must resolve
+all UUIDs to one supported metadata kind; unresolved, nested, mixed-kind,
+duplicate-kind, duplicate-UUID, unknown-kind, and malformed count/footer cases
+fail closed. Order inside a family is raw order. Family groups use the proven
+platform metadata-kind order, not metadata object names or UUID sorting.
+
+The ordinary object reference index deliberately excludes `DefinedType` for
+other serializers. Configuration therefore receives a separate reference view
+that adds only structurally recognized DefinedType root rows. This avoids a
+broad reference-index change: the rejected broad variant also changed 32
+Subsystem XML files, while the scoped variant changed only `Configuration.xml`.
+
+The accepted gate preserved all 12,198 exported paths and 4,929 metadata XML
+rows. Native/generated `InternalInfo` matched `7/7` in exact sequence and
+`ChildObjects` matched `3518/3518` in exact kind/name sequence. A whole-tree
+SHA-256 manifest found exactly one changed path. The full diff moved from
+`1559 files, +31284/-190971` to `1559 files, +31284/-187421`; the Configuration
+residual moved from `+0/-3786` to `+0/-236`, with no added lines. Code-67,
+code-68, and code-76 root property layouts have different field counts and are
+not treated as interchangeable merely because each is a configuration root.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
