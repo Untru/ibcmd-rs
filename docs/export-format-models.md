@@ -424,8 +424,8 @@ Additional confirmed `CommandName` records:
   index. A generic id-to-any-item-name map is not a valid substitute.
 - A wrapper `37` / `48` record whose layout discriminator is `6` is a
   SpreadsheetDocument field owner. It may own standard commands even when that
-  field subtree is not yet emitted as a form item. Five correlated platform
-  command UUIDs are currently proven for reachable Buttons:
+  field subtree is not yet emitted as a form item. The following owner-scoped
+  platform command UUIDs are proven for reachable Buttons:
 
 | UUID | Standard-command suffix |
 | --- | --- |
@@ -434,6 +434,22 @@ Additional confirmed `CommandName` records:
 | `5aa38159-2001-42ae-8451-f8cabe0762c3` | `Preview` |
 | `12acffde-8389-4e5e-bd86-ff248262d84a` | `ExpandAllGroups` |
 | `ff5c34f8-b172-4ef2-91d3-48283a66a725` | `CollapseAllGroups` |
+| `1ba33890-92e9-42a3-95bd-a5c783f46d55` | `CopyToClipboard` |
+| `edf14e37-e755-4d1c-970c-48ed776e3a0e` | `PasteFromClipboard` |
+| `ff533ae0-46a9-4e1d-aa3a-6dffa27e076b` | `SearchEverywhere` |
+| `7eae9c22-db31-4f27-a56a-b4dd62d21a2c` | `ClearContent` |
+| `59e67a77-8141-42cf-b062-7cb92e210b6d` | `ClearAll` |
+| `ed6630f2-c296-43dd-b408-d370513fcebc` | `InsertComment` |
+| `be8800c3-8ccf-444a-bbf0-8f3078ff0ded` | `Properties` |
+
+- A wrapper `37` record with discriminator `14` is a GraphicalSchema owner.
+  Its command IDs are distinct from SpreadsheetDocument and Table commands:
+
+| UUID | GraphicalSchema suffix |
+| --- | --- |
+| `e2d6f793-b786-4640-a91b-8d77f73860f1` | `Print` |
+| `1d13f9a3-402a-46cb-9c68-1709356840f2` | `Preview` |
+| `01db2225-b62d-4112-a4b6-d39d627bf79f` | `PageSetup` |
 
 - A wrapper `37` / `48` record with discriminator `17` is a distinct
   FormattedDocument owner. Standard-command UUID dispatch is owner-typed; these
@@ -452,11 +468,14 @@ Additional confirmed `CommandName` records:
 | `ab0ebc39-68ee-4034-b2f4-43eee55bd651` | `AlignCenter` |
 | `d0a4d953-115b-4059-a6cb-6e67f903a4f3` | `IncreaseIndent` |
 | `e428af27-c4f7-4577-b80e-95a79f94322d` | `AlignRight` |
+| `b67f202a-dcf8-41f3-bda8-1ff9bed5f2ef` | `SelectAll` |
 
-The three later additions above were present in both Button references and the
-FormattedDocument command set, and were cross-checked against an independent
-raw form corpus. `SelectAll` was not promoted because its reachable-owner
-evidence was incomplete.
+The final owner-scoped gate changed exactly five Form.xml files by adding 23
+native `CommandName` lines and no other content. Eleven were in object-owned
+forms and 12 in two CommonForms that the former `**/Forms/**` guard path did not
+count. The full diff improved from `1560 files, +31287/-190997` to
+`1560 files, +31287/-190974`; both `CommandName` and `CommandSource` reached
+`+0/-0`.
 
 `CommandSource` model:
 
