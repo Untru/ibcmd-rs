@@ -11843,9 +11843,60 @@ fn form_new_extended_group_title_text_color(
 ) -> Result<String> {
     item.title_text_color
         .as_deref()
-        .map(|value| format_style_body_color_value(value, source))
+        .map(|value| format_form_usual_group_title_text_color_value(value, source))
         .transpose()
         .map(|value| value.unwrap_or_else(|| "{4,4,{0},4}".to_string()))
+}
+
+fn format_form_usual_group_title_text_color_value(
+    value: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value = value.trim();
+    if let Some(name) = value.strip_prefix("style:") {
+        if let Some(code) = form_usual_group_system_color_code_for_name(name) {
+            return Ok(format!("{{4,3,{{{code}}},3}}"));
+        }
+        if style_body_standard_code_for_name(name).is_some() {
+            return Err(anyhow!(
+                "unsupported Form UsualGroup system color reference: {value}"
+            ));
+        }
+        let key = style_body_ref_key(value, source)?;
+        return Ok(format!("{{4,3,{key},3}}"));
+    }
+    format_style_body_color_value(value, source)
+}
+
+fn form_usual_group_system_color_code_for_name(name: &str) -> Option<i32> {
+    match name {
+        "FormBackColor" => Some(-1),
+        "FormTextColor" => Some(-3),
+        "ButtonTextColor" => Some(-15),
+        "FieldBackColor" => Some(-7),
+        "FieldTextColor" => Some(-13),
+        "FieldSelectionBackColor" => Some(-21),
+        "FieldSelectedTextColor" => Some(-10),
+        "FieldAlternativeBackColor" => Some(-14),
+        "ToolTipBackColor" => Some(-23),
+        "ToolTipTextColor" => Some(-24),
+        "SpecialTextColor" => Some(-16),
+        "NegativeTextColor" => Some(-17),
+        "BorderColor" => Some(-22),
+        "ReportHeaderBackColor" => Some(-25),
+        "ReportGroup1BackColor" => Some(-26),
+        "ReportGroup2BackColor" => Some(-27),
+        "ReportLineColor" => Some(-28),
+        "ButtonBorderColor" => Some(-34),
+        "TableHeaderBackColor" => Some(-35),
+        "TableHeaderTextColor" => Some(-36),
+        "TableFooterBackColor" => Some(-37),
+        "TableFooterTextColor" => Some(-38),
+        "NavigationColor" => Some(-42),
+        "AuxiliaryNavigationColor" => Some(-43),
+        "ActivityColor" => Some(-44),
+        _ => None,
+    }
 }
 
 fn form_new_extended_group_title_font(
@@ -29787,6 +29838,20 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .contains("{4,3,{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},3}")
         );
         assert!(parsed.layout.contains("{8,2,0,{-31},1,100}"));
+        Ok(())
+    }
+
+    #[test]
+    fn packs_usual_group_title_color_with_form_system_codes() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><UsualGroup name="FormText" id="22"><TitleTextColor>style:FormTextColor</TitleTextColor><Behavior>Usual</Behavior></UsualGroup><UsualGroup name="Selection" id="23"><TitleTextColor>style:FieldSelectionBackColor</TitleTextColor><Behavior>Usual</Behavior></UsualGroup></ChildItems></Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+
+        assert!(parsed.layout.contains("{4,3,{-3},3}"));
+        assert!(parsed.layout.contains("{4,3,{-21},3}"));
+        assert!(!parsed.layout.contains("{4,3,{-11},3}"));
         Ok(())
     }
 
