@@ -9786,6 +9786,13 @@ fn extracts_usual_group_title_style_refs_from_metadata_index() {
     let color_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let font_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{38,1,0,3,1,{0},{1,0},{"Pattern"},"",{4,4,{0},4},1,1,0,1,{1,0},0,0,3,3,2,0,1,2,{4,4,{0},4},1,2,0,2,1,0,0,0,{4,0,{0},"",-1,-1,1,0,""},{0,1,0},0,3,2,0,2,0,0,2},0,1,0,1,{12,{23,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"MainGroupExtendedTooltip",{1,0},{1,0},0,0,0,2,2,{4,4,{0},4},{4,4,{0},4},{4,4,{0},4},{0},0,0,0,1,{1,0},{0,0,0},0,3},0,3,3,0}"#;
+    let mut base_fields = split_1c_braced_fields(base, 0)
+        .unwrap()
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    base_fields[12] = "43".to_string();
+    let base = format!("{{{}}}", base_fields.join(","));
     let field = base
         .replacen(
             r#""MainGroup",{1,0}"#,
@@ -9827,8 +9834,11 @@ fn extracts_usual_group_title_style_refs_from_metadata_index() {
     let font_at = xml
         .find(r#"<TitleFont ref="style:FontTwo" kind="StyleItem"/>"#)
         .unwrap();
+    let width_at = xml.find("<Width>43</Width>").unwrap();
     let behavior_at = xml.find("<Behavior>Collapsible</Behavior>").unwrap();
-    assert!(title_at < color_at && color_at < font_at && font_at < behavior_at);
+    assert!(
+        title_at < color_at && color_at < font_at && font_at < width_at && width_at < behavior_at
+    );
 
     let alternate_flavor = field
         .replacen(
