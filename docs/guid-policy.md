@@ -47,11 +47,12 @@ Classification:
     `Document.ЗаказКлиента`;
   - form picture and numeric-label decisions depend on concrete Russian item
     names and data paths;
-  - a concrete command-group metadata UUID maps directly to
-    `CommandGroup.Органайзер` even though current-metadata reference resolution
-    is available;
   - role-right reconstruction contains mappings between concrete Russian
     characteristic-plan attribute and tabular-section names.
+- Resolved in `6ee75f0`: the concrete command-group UUID to
+  `CommandGroup.Органайзер` mapping was removed. Custom command groups now use
+  current-metadata `object_refs`. Separate parent/current exports were identical
+  across all 12,197 relative paths, lengths, and SHA-256 content hashes.
 - `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` (`2ef6d6fa-...`) is not in that
   category. It is accepted only in exact typed command-source record shapes,
   maps to the platform token `FormCommandPanelGlobalCommands`, and was also
