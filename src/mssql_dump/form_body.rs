@@ -5095,7 +5095,7 @@ pub(super) fn parse_form_child_item_with_context(
         } else if tag == "ButtonGroup" {
             parse_form_button_group_command_source_with_items(&fields, item_name_by_id)
         } else if tag == "Popup" {
-            parse_form_popup_command_source(&fields)
+            parse_form_popup_command_source_with_items(&fields, item_name_by_id)
         } else {
             None
         },
@@ -6737,7 +6737,15 @@ pub(super) fn parse_form_command_bar_source_with_items(
     }
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_popup_command_source(fields: &[&str]) -> Option<String> {
+    parse_form_popup_command_source_with_items(fields, &BTreeMap::new())
+}
+
+pub(super) fn parse_form_popup_command_source_with_items(
+    fields: &[&str],
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<String> {
     let source = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
     if source.len() != 9 {
         return None;
@@ -6746,22 +6754,28 @@ pub(super) fn parse_form_popup_command_source(fields: &[&str]) -> Option<String>
     if source_ref.len() != 2 {
         return None;
     }
+    if !matches!(
+        (
+            source.first().map(|field| field.trim()),
+            source.get(3).map(|field| field.trim()),
+            source.get(5).map(|field| field.trim()),
+            source.get(6).map(|field| field.trim()),
+        ),
+        (Some("7"), Some("2"), Some("0"), Some("0"))
+    ) {
+        return None;
+    }
+
     match (
-        source.first().map(|field| field.trim()),
         source_ref.first().map(|field| field.trim()),
         source_ref.get(1).map(|field| field.trim()),
-        source.get(3).map(|field| field.trim()),
-        source.get(5).map(|field| field.trim()),
-        source.get(6).map(|field| field.trim()),
     ) {
-        (
-            Some("7"),
-            Some("0"),
-            Some(FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID),
-            Some("2"),
-            Some("0"),
-            Some("0"),
-        ) => Some("FormCommandPanelGlobalCommands".to_string()),
+        (Some(source_id), Some(FORM_ITEM_TYPE_UUID)) => {
+            form_command_source_name(source_id, item_name_by_id)
+        }
+        (Some("0"), Some(FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID)) => {
+            Some("FormCommandPanelGlobalCommands".to_string())
+        }
         _ => None,
     }
 }

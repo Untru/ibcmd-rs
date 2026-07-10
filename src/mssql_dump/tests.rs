@@ -11173,6 +11173,103 @@ fn omits_button_group_command_source_xml_for_bare_form_source() {
 }
 
 #[test]
+fn parses_popup_item_command_sources_from_typed_layouts() {
+    let item_source = format!(
+        r#"{{7,{{4,1,{{0}},"",-1,-1,0,0,""}},{{68,{FORM_ITEM_TYPE_UUID}}},2,1,0,0,{{3,4,{{0}}}},{{3,4,{{0}}}}}}"#
+    );
+    let mut item_fields = vec!["0"; 21];
+    item_fields[20] = &item_source;
+    assert_eq!(
+        parse_form_popup_command_source_with_items(
+            &item_fields,
+            &BTreeMap::from([("68".to_string(), "RenamedOwner".to_string())]),
+        ),
+        Some("Item.RenamedOwner".to_string())
+    );
+
+    let form_source = format!(
+        r#"{{7,{{4,1,{{-13}},"",-1,-1,1,0,""}},{{0,{FORM_ITEM_TYPE_UUID}}},2,3,0,0,{{3,4,{{0}}}},{{3,4,{{0}}}}}}"#
+    );
+    let mut form_fields = vec!["0"; 21];
+    form_fields[20] = &form_source;
+    assert_eq!(
+        parse_form_popup_command_source_with_items(&form_fields, &BTreeMap::new()),
+        Some("Form".to_string())
+    );
+
+    let popup_field = format!(
+        r#"{{22,{{77,{FORM_ITEM_TYPE_UUID}}},0,0,0,1,"PopupRenamed",{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{form_source},0}}"#
+    );
+    let popup = parse_form_child_item(
+        &popup_field,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(popup.command_source.as_deref(), Some("Form"));
+    let xml = format_form_child_items_xml(&[popup], 1);
+    assert!(xml.contains("<CommandSource>Form</CommandSource>"), "{xml}");
+}
+
+#[test]
+fn preserves_popup_global_command_source_from_its_distinct_type_marker() {
+    let source = format!(
+        r#"{{7,{{4,0,{{0}},"",-1,-1,1,0,""}},{{0,{FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID}}},2,3,0,0,{{3,4,{{0}}}},{{3,4,{{0}}}}}}"#
+    );
+    let mut fields = vec!["0"; 21];
+    fields[20] = &source;
+    assert_eq!(
+        parse_form_popup_command_source(&fields),
+        Some("FormCommandPanelGlobalCommands".to_string())
+    );
+}
+
+#[test]
+fn omits_popup_item_source_without_an_exact_owner_or_type() {
+    let unknown_owner = format!(r#"{{7,{{0}},{{68,{FORM_ITEM_TYPE_UUID}}},2,1,0,0,{{0}},{{0}}}}"#);
+    let wrong_type = r#"{7,{0},{68,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},2,1,0,0,{0},{0}}"#;
+    let nonzero_global =
+        format!(r#"{{7,{{0}},{{68,{FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID}}},2,1,0,0,{{0}},{{0}}}}"#);
+
+    for source in [&unknown_owner, wrong_type, &nonzero_global] {
+        let mut fields = vec!["0"; 21];
+        fields[20] = source;
+        assert_eq!(
+            parse_form_popup_command_source_with_items(&fields, &BTreeMap::new()),
+            None,
+            "unexpected Popup source for {source}"
+        );
+    }
+}
+
+#[test]
+fn requires_exact_popup_command_source_shape_and_sentinels() {
+    let cases = [
+        format!(r#"{{7,{{0}},{{1,{FORM_ITEM_TYPE_UUID}}},2,3,0,0,{{0}},{{0}},1}}"#),
+        format!(r#"{{7,{{0}},{{1,{FORM_ITEM_TYPE_UUID},0}},2,3,0,0,{{0}},{{0}}}}"#),
+        format!(r#"{{6,{{0}},{{1,{FORM_ITEM_TYPE_UUID}}},2,3,0,0,{{0}},{{0}}}}"#),
+        format!(r#"{{7,{{0}},{{1,{FORM_ITEM_TYPE_UUID}}},1,3,0,0,{{0}},{{0}}}}"#),
+        format!(r#"{{7,{{0}},{{1,{FORM_ITEM_TYPE_UUID}}},2,3,1,0,{{0}},{{0}}}}"#),
+        format!(r#"{{7,{{0}},{{1,{FORM_ITEM_TYPE_UUID}}},2,3,0,1,{{0}},{{0}}}}"#),
+    ];
+    let owners = BTreeMap::from([("1".to_string(), "RenamedOwner".to_string())]);
+
+    for source in &cases {
+        let mut fields = vec!["0"; 21];
+        fields[20] = source;
+        assert_eq!(
+            parse_form_popup_command_source_with_items(&fields, &owners),
+            None,
+            "unexpected Popup source for {source}"
+        );
+    }
+}
+
+#[test]
 fn recognizes_form_item_picture_asset_formats() {
     assert!(is_form_item_picture_content(b"\x89PNG\r\n\x1a\npayload"));
     assert!(is_form_item_picture_content(b"GIF87apayload"));
