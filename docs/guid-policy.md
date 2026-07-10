@@ -41,4 +41,19 @@ Classification:
   focused sample blobs under `#[cfg(test)]` modules in `src`.
 - Lab documentation: real SFC/SSL sample UUIDs appear in `docs/*lab*` and
   coverage notes as audit evidence only.
-- Suspicious production DB-specific items: none found in this pass.
+- Confirmed config-specific production behavior that must be removed or
+  replaced with structural parsing:
+  - `normalize_form_dynamic_list_settings` special-cases `СписокЗаказов` and
+    `Document.ЗаказКлиента`;
+  - form picture and numeric-label decisions depend on concrete Russian item
+    names and data paths;
+  - a concrete command-group metadata UUID maps directly to
+    `CommandGroup.Органайзер` even though current-metadata reference resolution
+    is available;
+  - role-right reconstruction contains mappings between concrete Russian
+    characteristic-plan attribute and tabular-section names.
+- `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` (`2ef6d6fa-...`) is not in that
+  category. It is accepted only in exact typed command-source record shapes,
+  maps to the platform token `FormCommandPanelGlobalCommands`, and was also
+  observed in an independent infobase sample. A second full native-tree parity
+  run remains the stronger portability gate.
