@@ -9741,6 +9741,47 @@ fn parses_extended_usual_group_properties() {
 }
 
 #[test]
+fn maps_usual_group_title_color_platform_codes_in_form_context() {
+    let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
+
+    for (code, expected) in [
+        ("-3", "style:FormTextColor"),
+        ("-21", "style:FieldSelectionBackColor"),
+    ] {
+        let field = base.replacen("{3,4,{0}}", &format!("{{3,3,{{{code}}}}}"), 1);
+        let item = parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(item.title_text_color.as_deref(), Some(expected));
+    }
+
+    let field = base.replacen("{3,4,{0}}", "{3,3,{-3}}", 1);
+    let xml = format_form_child_items_xml(
+        &[parse_form_child_item(
+            &field,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap()],
+        1,
+    );
+    assert!(xml.contains("<TitleTextColor>style:FormTextColor</TitleTextColor>"));
+    assert!(!xml.contains("style:ButtonBackColor"));
+}
+
+#[test]
 fn extracts_usual_group_title_style_refs_from_metadata_index() {
     let color_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let font_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
