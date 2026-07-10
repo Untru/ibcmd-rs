@@ -61,6 +61,14 @@ Model:
   `{namespace URI, local}` and then serialized for the output scope. Raw `dNp1`
   prefix text is never copied. Dynamic current-config and enterprise prefixes
   use their structural base plus `2 * nestedSchemaDepth`.
+- Reparenting a standalone storage `Settings` document into a
+  `settingsVariant` adds one output namespace layer. For an otherwise unknown
+  generated namespace, an exact input prefix `dNp1` therefore becomes
+  `d(N+2)p1`; Schema mode, vendor prefixes, and other suffix families such as
+  `dNp2` do not shift. The writer records URI-to-output-prefix bindings in each
+  emitted element scope and applies them consistently to element start/end
+  names, qualified attribute names, and `xsi:type`. Prefix conflicts and
+  unbound qualified names fail closed.
 - A settings payload root under a direct `settingsVariant`, or schema settings
   under `nestedSchema`, always declares `style`, `sys`, `web`, and `win`, even
   when empty. An inner `dcsset:settings` under an item is not a contract root.
@@ -181,6 +189,16 @@ Corpus evidence:
   DCS slice moved from `9 files, +40/-40` to `5 files, +10/-10`. All 66 DCS
   documents parse, no dynamic Picture prefix remains, and Form, ConfigDumpInfo,
   and Help guardrails stayed unchanged.
+- The standalone Settings namespace-layer rule was confirmed by three
+  `ChartSplineMode` values in one template. Their chart namespace changed from
+  storage `d6p1` to native output `d8p1`; no chart/report/path condition exists
+  in the implementation. The exact old/new tree delta was one path and
+  `+3/-3`. The full diff moved from
+  `1560 files, +31287/-190974` to
+  `1559 files, +31284/-190971`, while the DCS residual moved from
+  `5 files, +10/-10` to `4 files, +7/-7`. All 69 BSP DCS template bodies parse;
+  the remaining seven pairs are the deliberately unresolved mixed-valueType
+  order described below.
 
 Rejected hypothesis:
 
