@@ -6,7 +6,7 @@ use super::{
     inflate_raw_deflate, is_template_metadata_text, is_uuid_text,
     metadata_kind_needs_form_template_reference_indexes, metadata_text_row_from_text,
     nested_command_headers_from_text, parse_command_interface_common_flag,
-    parse_generated_type_entries_from_text, split_1c_braced_fields,
+    parse_generated_type_entries_from_text, recalculation_object_fields, split_1c_braced_fields,
     template_template_type_from_metadata, uuid_like_values,
 };
 
@@ -176,6 +176,13 @@ pub(super) fn selected_configuration_source_asset_index_needs_with_metadata(
         }
     }) {
         needs.object_refs = true;
+    }
+    if metadata_texts.iter().any(|row| {
+        row.object_code == Some(4)
+            && recalculation_object_fields(&row.text, &row.file_name).is_some()
+    }) {
+        needs.object_refs = true;
+        needs.type_index = true;
     }
     Some(needs)
 }
