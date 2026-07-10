@@ -42,7 +42,9 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
     let empty_form_refs = BTreeMap::new();
     let empty_template_refs = BTreeMap::new();
     let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
-    let recalculation_refs = build_calculation_recalculation_reference_index(rows);
+    let headers_by_uuid = metadata_headers_by_uuid(rows);
+    let recalculation_refs =
+        build_calculation_recalculation_reference_index(rows, &headers_by_uuid);
     for row in rows {
         if let Some(name) = parse_configuration_reference_text(&row.text) {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
@@ -111,79 +113,33 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
             insert_http_service_child_role_refs(&mut index, &row.text, &header.uuid, &header.name);
         }
     }
-    index.extend(
-        recalculation_refs
-            .iter()
-            .map(|(uuid, recalculation)| (uuid.clone(), recalculation.object_reference())),
-    );
+    index.extend(recalculation_refs.clone());
     insert_recalculation_dimension_refs(&mut index, rows, &recalculation_refs);
     index
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub(super) struct CalculationRecalculationReference {
-    pub(super) owner_name: String,
-    pub(super) recalculation_name: String,
-}
-
-impl CalculationRecalculationReference {
-    pub(super) fn object_reference(&self) -> String {
-        format!(
-            "CalculationRegister.{}.Recalculation.{}",
-            self.owner_name, self.recalculation_name
-        )
-    }
-}
-
-pub(super) fn build_calculation_recalculation_reference_index(
+fn build_calculation_recalculation_reference_index(
     rows: &[MetadataTextRow],
-) -> BTreeMap<String, CalculationRecalculationReference> {
-    let headers_by_uuid = metadata_headers_by_uuid(rows);
+    headers_by_uuid: &BTreeMap<String, MetadataHeader>,
+) -> BTreeMap<String, String> {
     let mut refs = BTreeMap::new();
-    let mut owner_uuids = BTreeMap::<String, String>::new();
-    let mut ambiguous = BTreeSet::new();
     for row in rows {
         let (Some("CalculationRegister"), Some(owner)) = (row.kind.as_deref(), row.header.as_ref())
         else {
             continue;
         };
-        let declared = calculation_register_recalculation_uuids_from_text(&row.text);
-        for uuid in declared {
+        for uuid in calculation_register_recalculation_uuids_from_text(&row.text) {
             let Some(recalculation) = headers_by_uuid.get(&uuid) else {
                 continue;
             };
-            let reference = CalculationRecalculationReference {
-                owner_name: owner.name.clone(),
-                recalculation_name: recalculation.name.clone(),
-            };
-            if let Some(previous) = refs.get(&uuid) {
-                if previous != &reference
-                    || owner_uuids.get(&uuid).map(String::as_str) != Some(owner.uuid.as_str())
-                {
-                    refs.remove(&uuid);
-                    owner_uuids.remove(&uuid);
-                    ambiguous.insert(uuid);
-                }
-            } else if !ambiguous.contains(&uuid) {
-                owner_uuids.insert(uuid.clone(), owner.uuid.clone());
-                refs.insert(uuid, reference);
-            }
+            refs.insert(
+                uuid,
+                format!(
+                    "CalculationRegister.{}.Recalculation.{}",
+                    owner.name, recalculation.name
+                ),
+            );
         }
-    }
-    let mut ids_by_path = BTreeMap::<(String, String), String>::new();
-    let mut colliding_ids = BTreeSet::new();
-    for (uuid, reference) in &refs {
-        let path_key = (
-            sanitize_source_path_segment(&reference.owner_name),
-            sanitize_source_path_segment(&reference.recalculation_name),
-        );
-        if let Some(previous_uuid) = ids_by_path.insert(path_key, uuid.clone()) {
-            colliding_ids.insert(previous_uuid);
-            colliding_ids.insert(uuid.clone());
-        }
-    }
-    for uuid in colliding_ids {
-        refs.remove(&uuid);
     }
     refs
 }
@@ -241,13 +197,12 @@ fn insert_web_service_parameter_refs(
 fn insert_recalculation_dimension_refs(
     index: &mut BTreeMap<String, String>,
     rows: &[MetadataTextRow],
-    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    recalculation_refs: &BTreeMap<String, String>,
 ) {
     for row in rows {
-        let Some(recalculation) = recalculation_refs.get(&row.file_name) else {
+        let Some(owner_ref) = recalculation_refs.get(&row.file_name) else {
             continue;
         };
-        let owner_ref = recalculation.object_reference();
         for (dimension, _marker_start) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |marker_start| {
                 is_offset_inside_recalculation_dimension_list(&row.text, marker_start)
@@ -1024,8 +979,6 @@ fn is_offset_inside_chart_of_accounts_ext_dimension_accounting_flag_list(
 fn is_offset_inside_sequence_dimension_list(text: &str, offset: usize) -> bool {
     is_offset_inside_any_list_marker(text, offset, &["{437488c0-35e2-11d6-a3c7-0050bae0a776,"])
 }
-
-pub(super) const RECALCULATION_DIMENSION_LIST_MARKER: &str = "3c456b74-4ea5-4b22-a957-e9fad9133b54";
 
 fn is_offset_inside_recalculation_dimension_list(text: &str, offset: usize) -> bool {
     is_offset_inside_any_list_marker(text, offset, &["{3c456b74-4ea5-4b22-a957-e9fad9133b54,"])
