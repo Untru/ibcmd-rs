@@ -41,12 +41,14 @@ Classification:
   focused sample blobs under `#[cfg(test)]` modules in `src`.
 - Lab documentation: real SFC/SSL sample UUIDs appear in `docs/*lab*` and
   coverage notes as audit evidence only.
-- One additional config/library UUID remains under active cleanup: the inverse
-  Form pack path currently injects BSP `StyleItem.ГиперссылкаЦвет` UUID
-  `757b547b-...` for every PopUp group. Corpus evidence shows the style belongs
-  only to an explicit `TitleTextColor` property, not to PopUp behavior itself.
-  The remaining Cyrillic production literals in the same scan are otherwise
-  platform-standard metadata/data-path vocabulary and locale descriptors.
+- Resolved in the accepted UsualGroup style gate: the inverse Form pack path no
+  longer injects the BSP `StyleItem.ГиперссылкаЦвет` UUID. Custom title colors
+  and fonts resolve through the current metadata index; built-in title-color
+  codes use the field-specific platform mapping (`-3 -> FormTextColor`,
+  `-21 -> FieldSelectionBackColor`). The final gate changed exactly six
+  `Form.xml` files by adding 13 native lines and no non-native lines. A scan of
+  232 production UUID literals against 10,080 exported metadata-object UUIDs
+  found an empty intersection; the removed BSP UUID has no production hit.
 - Resolved in `6ee75f0`: the concrete command-group UUID to
   `CommandGroup.Органайзер` mapping was removed. Custom command groups now use
   current-metadata `object_refs`. Separate parent/current exports were identical

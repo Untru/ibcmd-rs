@@ -495,12 +495,21 @@ The full diff improved from `1560 files, +31287/-190997` to
 `1560 files, +31287/-190974`; that delta remains accepted.
 
 A later independent guard over both object Forms and CommonForms disproved the
-closure claim. The authoritative residual is `CommandName +0/-80` in seven
-CommonForms and `CommandSource +0/-1` in one CommonForm. All 80 owning Buttons
-and the one Popup already exist in generated XML. The unresolved CommandName
-owners are 69 SpreadsheetDocument fields, eight form-standard commands, and
-three Tables. They require typed raw-command resolution; they are not evidence
-for admitting more item subtrees or for a name-based fallback.
+earlier closure claim and found `CommandName +0/-80` plus
+`CommandSource +0/-1`. The accepted follow-up resolves all 81 rows through
+typed owners: 69 SpreadsheetDocument commands, eight form-standard commands,
+three `Table.StandardCommand.Pickup` rows, and one Popup item source. The broad
+SpreadsheetDocument-to-Table fallback was removed; each owner family now has
+an explicit platform-command allowlist.
+
+The final gate changed exactly seven CommonForms by adding 81 native lines and
+no other content. All 1,108 exported `Form.xml` files parse, and the complete
+native/generated guard is now `CommandName extra/missing 0/0` and
+`CommandSource extra/missing 0/0`. The full diff moved from
+`1559 files, +31284/-187408` to `1559 files, +31284/-187327`. The seven shared
+files are SHA-256 identical to an independent private export. A full
+`ut_ibcmd` matrix matched 181/181 raw Button tuples and 5/5 Popup sources; none
+of the added command/type UUIDs is a metadata-object UUID in BSP or UT.
 
 `CommandSource` model:
 
@@ -564,10 +573,14 @@ fields[20] = {1,<ignored>,{<source-id>,02023637-7868-4a5f-8576-835a76e0c9ba}}
   -> no <CommandSource>
 ```
 
-- Popup global-command source is a separate nine-field discriminator-7 record.
-  Its typed source is `{0,2ef6d6fa-847a-485e-8684-d37a3ab5efb8}` and structural
-  sentinels are `source[3] == 2`, `source[5] == 0`, `source[6] == 0`; varying
-  mode fields do not affect the source meaning.
+- Popup command source is a separate nine-field discriminator-7 record.
+  Structural sentinels are `source[3] == 2`, `source[5] == 0`, and
+  `source[6] == 0`; varying mode fields do not affect the source meaning. A
+  typed `{id,02023637-7868-4a5f-8576-835a76e0c9ba}` reference resolves through
+  the form item-id index (`0 -> Form`, otherwise `Item.<name>`). The distinct
+  typed `{0,2ef6d6fa-847a-485e-8684-d37a3ab5efb8}` reference maps only to
+  `FormCommandPanelGlobalCommands`. Unknown type, owner, length, or sentinel
+  combinations fail closed.
 - Native schema order is item-specific: CommandBar writes `CommandSource`
   after optional `ToolTip`; Popup writes `Picture`, `CommandSource`, then
   `Representation`. This order is required to avoid semantic matches appearing
