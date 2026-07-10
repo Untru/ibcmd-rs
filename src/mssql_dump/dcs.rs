@@ -1046,22 +1046,30 @@ fn indent_data_composition_settings(settings: &str) -> String {
     indented
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum DataCompositionDocumentMode {
     Schema,
     Settings,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DcsDynamicNamespace {
+    prefix: String,
+    uri: String,
 }
 
 #[derive(Debug)]
 struct DcsElementFrame {
     namespace: Option<Vec<u8>>,
     local: Vec<u8>,
+    rendered_name: String,
     xsi_type_local: Option<String>,
-    dynamic_prefixes: Vec<String>,
+    dynamic_namespaces: Vec<DcsDynamicNamespace>,
     is_data_ui_color_value: bool,
     output_namespace_offset: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DcsExpandedQName {
     namespace: Option<Vec<u8>>,
     local: String,
@@ -1074,7 +1082,8 @@ struct DcsRenderedQName {
 }
 
 struct DcsWrittenStart {
-    dynamic_prefixes: Vec<String>,
+    rendered_name: String,
+    dynamic_namespaces: Vec<DcsDynamicNamespace>,
     output_namespace_offset: usize,
 }
 
@@ -1186,23 +1195,15 @@ impl<'a> DataCompositionXmlWriter<'a> {
                             continue;
                         }
                     }
-                    let name = if matches!(mode, DataCompositionDocumentMode::Settings)
-                        && namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
-                        && local == b"Settings"
-                    {
-                        "dcsset:settings".to_string()
-                    } else {
-                        canonical_data_composition_name(namespace_ref(&namespace), local)?
-                    };
-                    self.output.push_str("</");
-                    self.output.push_str(&name);
-                    self.output.push('>');
                     let frame = self.element_stack.pop()?;
                     if frame.namespace.as_deref() != namespace_ref(&namespace)
                         || frame.local.as_slice() != local
                     {
                         return None;
                     }
+                    self.output.push_str("</");
+                    self.output.push_str(&frame.rendered_name);
+                    self.output.push('>');
                     if let Some(depth) = schema_depth.as_mut() {
                         *depth = depth.checked_sub(1)?;
                     }
@@ -1268,13 +1269,8 @@ impl<'a> DataCompositionXmlWriter<'a> {
                         && parent.namespace.as_deref() == Some(DCS_SCHEMA_NS)
                         && parent.local.as_slice() == b"nestedSchema")
             });
-        let name = if is_settings_root {
-            "dcsset:settings".to_string()
-        } else {
-            canonical_data_composition_name(namespace, local)?
-        };
         let mut rendered_attributes = Vec::<(String, String)>::new();
-        let mut dynamic_declarations = Vec::<(String, String)>::new();
+        let mut dynamic_namespaces = Vec::<DcsDynamicNamespace>::new();
         let is_data_ui_picture_value = namespace == Some(DCS_CORE_NS)
             && local == b"value"
             && data_composition_xsi_type_is(reader, event, DATA_UI_NS, b"Picture")?;
@@ -1282,8 +1278,8 @@ impl<'a> DataCompositionXmlWriter<'a> {
             && matches!(local, b"Type" | b"TypeSet")
             && event_declares_namespace(event, CURRENT_CONFIG_NS)
         {
-            push_dynamic_declaration(
-                &mut dynamic_declarations,
+            self.push_dynamic_namespace(
+                &mut dynamic_namespaces,
                 self.current_config_prefix(),
                 CURRENT_CONFIG_URI.to_string(),
             )?;
@@ -1294,10 +1290,18 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 continue;
             }
             let (attr_namespace, attr_local) = reader.resolve_attribute(attribute.key);
-            let attr_name = canonical_data_composition_attr_name(
+            let rendered_attr_name = self.render_data_composition_node_name(
+                attribute.key.as_ref(),
                 namespace_ref(&attr_namespace),
                 attr_local.as_ref(),
+                true,
+                *mode,
+                &dynamic_namespaces,
             )?;
+            if let Some((prefix, uri)) = rendered_attr_name.declaration {
+                self.push_dynamic_namespace(&mut dynamic_namespaces, prefix, uri)?;
+            }
+            let attr_name = rendered_attr_name.value;
             let value = attribute
                 .decode_and_unescape_value(reader.decoder())
                 .ok()?
@@ -1308,41 +1312,59 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 value
             };
             let rendered = if attr_name == "xsi:type" {
-                self.render_xsi_type(reader, &value, namespace, local)
+                let rendered = self.render_xsi_type(
+                    reader,
+                    &value,
+                    namespace,
+                    local,
+                    *mode,
+                    &dynamic_namespaces,
+                );
+                if value.contains(':') {
+                    Some(rendered?)
+                } else {
+                    rendered
+                }
             } else {
                 None
             };
             let value = if let Some(rendered) = rendered {
                 if let Some((prefix, uri)) = rendered.declaration {
-                    push_dynamic_declaration(&mut dynamic_declarations, prefix, uri)?;
+                    self.push_dynamic_namespace(&mut dynamic_namespaces, prefix, uri)?;
                 }
                 rendered.value
             } else {
-                if attr_name == "xsi:type" && value.contains(':') {
-                    let (prefix, uri) = data_composition_input_qname_declaration(reader, &value)?;
-                    if !self
-                        .element_stack
-                        .iter()
-                        .any(|frame| frame.dynamic_prefixes.contains(&prefix))
-                    {
-                        push_dynamic_declaration(&mut dynamic_declarations, prefix, uri)?;
-                    }
-                }
                 canonical_data_composition_attr_value(&attr_name, &value, namespace)
             };
             rendered_attributes.push((attr_name, value));
         }
+        let name = if is_settings_root {
+            "dcsset:settings".to_string()
+        } else {
+            let rendered_name = self.render_data_composition_node_name(
+                event.name().as_ref(),
+                namespace,
+                local,
+                false,
+                *mode,
+                &dynamic_namespaces,
+            )?;
+            if let Some((prefix, uri)) = rendered_name.declaration {
+                self.push_dynamic_namespace(&mut dynamic_namespaces, prefix, uri)?;
+            }
+            rendered_name.value
+        };
         self.output.push('<');
         self.output.push_str(&name);
         let output_namespace_offset = self.output.len();
         if is_settings_root || is_inline_settings_root {
             self.output.push_str(SETTINGS_ROOT_UI_NAMESPACES);
         }
-        for (prefix, uri) in &dynamic_declarations {
+        for namespace in &dynamic_namespaces {
             self.output.push_str(" xmlns:");
-            self.output.push_str(prefix);
+            self.output.push_str(&namespace.prefix);
             self.output.push_str("=\"");
-            self.output.push_str(uri);
+            self.output.push_str(&namespace.uri);
             self.output.push('"');
         }
         for (attr_name, value) in rendered_attributes {
@@ -1358,10 +1380,8 @@ impl<'a> DataCompositionXmlWriter<'a> {
             self.output.push('>');
         }
         Some(DcsWrittenStart {
-            dynamic_prefixes: dynamic_declarations
-                .into_iter()
-                .map(|(prefix, _)| prefix)
-                .collect(),
+            rendered_name: name,
+            dynamic_namespaces,
             output_namespace_offset,
         })
     }
@@ -1392,7 +1412,12 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 )
             {
                 if let Some((prefix, _)) = &rendered.declaration
-                    && !self.element_stack.last()?.dynamic_prefixes.contains(prefix)
+                    && !self
+                        .element_stack
+                        .last()?
+                        .dynamic_namespaces
+                        .iter()
+                        .any(|namespace| &namespace.prefix == prefix)
                 {
                     return None;
                 }
@@ -1448,6 +1473,147 @@ impl<'a> DataCompositionXmlWriter<'a> {
         Some(())
     }
 
+    fn render_data_composition_node_name(
+        &self,
+        lexical_name: &[u8],
+        namespace: Option<&[u8]>,
+        local: &[u8],
+        is_attribute: bool,
+        mode: DataCompositionDocumentMode,
+        local_namespaces: &[DcsDynamicNamespace],
+    ) -> Option<DcsRenderedQName> {
+        if namespace.is_none() && lexical_name.contains(&b':') {
+            return None;
+        }
+        let canonical = if is_attribute {
+            canonical_data_composition_attr_name(namespace, local)
+        } else {
+            canonical_data_composition_name(namespace, local)
+        };
+        if let Some(value) = canonical {
+            return Some(DcsRenderedQName {
+                value,
+                declaration: None,
+            });
+        }
+        self.render_dynamic_qname(
+            lexical_name,
+            DcsExpandedQName {
+                namespace: Some(namespace?.to_vec()),
+                local: std::str::from_utf8(local).ok()?.to_string(),
+            },
+            mode,
+            local_namespaces,
+        )
+    }
+
+    fn render_dynamic_qname(
+        &self,
+        lexical_name: &[u8],
+        expanded: DcsExpandedQName,
+        mode: DataCompositionDocumentMode,
+        local_namespaces: &[DcsDynamicNamespace],
+    ) -> Option<DcsRenderedQName> {
+        let uri = std::str::from_utf8(expanded.namespace.as_deref()?).ok()?;
+        if let Some(prefix) = self.output_prefix_for_namespace(uri, local_namespaces) {
+            return Some(DcsRenderedQName {
+                value: format!("{prefix}:{}", expanded.local),
+                declaration: None,
+            });
+        }
+        let lexical_name = std::str::from_utf8(lexical_name).ok()?;
+        let (input_prefix, lexical_local) = lexical_name.split_once(':')?;
+        if lexical_local != expanded.local {
+            return None;
+        }
+        let output_prefix = data_composition_output_scope_prefix(input_prefix, mode)?;
+        if let Some(existing_uri) =
+            self.dynamic_namespace_uri_for_prefix(&output_prefix, local_namespaces)
+        {
+            if existing_uri != uri {
+                return None;
+            }
+            return Some(DcsRenderedQName {
+                value: format!("{output_prefix}:{}", expanded.local),
+                declaration: None,
+            });
+        }
+        Some(DcsRenderedQName {
+            value: format!("{output_prefix}:{}", expanded.local),
+            declaration: Some((output_prefix, uri.to_string())),
+        })
+    }
+
+    fn output_prefix_for_namespace(
+        &self,
+        uri: &str,
+        local_namespaces: &[DcsDynamicNamespace],
+    ) -> Option<String> {
+        local_namespaces
+            .iter()
+            .rev()
+            .chain(
+                self.element_stack
+                    .iter()
+                    .rev()
+                    .flat_map(|frame| frame.dynamic_namespaces.iter().rev()),
+            )
+            .find(|namespace| namespace.uri == uri)
+            .map(|namespace| namespace.prefix.clone())
+            .or_else(|| {
+                globally_declared_data_composition_prefix(uri.as_bytes()).map(str::to_string)
+            })
+    }
+
+    fn dynamic_namespace_uri_for_prefix<'b>(
+        &'b self,
+        prefix: &str,
+        local_namespaces: &'b [DcsDynamicNamespace],
+    ) -> Option<&'b str> {
+        local_namespaces
+            .iter()
+            .rev()
+            .chain(
+                self.element_stack
+                    .iter()
+                    .rev()
+                    .flat_map(|frame| frame.dynamic_namespaces.iter().rev()),
+            )
+            .find(|namespace| namespace.prefix == prefix)
+            .map(|namespace| namespace.uri.as_str())
+    }
+
+    fn push_dynamic_namespace(
+        &self,
+        namespaces: &mut Vec<DcsDynamicNamespace>,
+        prefix: String,
+        uri: String,
+    ) -> Option<()> {
+        if reserved_data_composition_namespace_uri(&prefix)
+            .is_some_and(|reserved_uri| reserved_uri.as_bytes() != uri.as_bytes())
+        {
+            return None;
+        }
+        if self
+            .element_stack
+            .iter()
+            .rev()
+            .flat_map(|frame| frame.dynamic_namespaces.iter().rev())
+            .find(|namespace| namespace.prefix == prefix)
+            .is_some_and(|namespace| namespace.uri != uri)
+        {
+            return None;
+        }
+        if let Some(existing) = namespaces
+            .iter()
+            .find(|namespace| namespace.prefix == prefix)
+        {
+            return (existing.uri == uri).then_some(());
+        }
+        namespaces.push(DcsDynamicNamespace { prefix, uri });
+        Some(())
+    }
+
     fn render_lexical_qname(
         &self,
         reader: &NsReader<&[u8]>,
@@ -1473,9 +1639,15 @@ impl<'a> DataCompositionXmlWriter<'a> {
         value: &str,
         element_namespace: Option<&[u8]>,
         element_local: &[u8],
+        mode: DataCompositionDocumentMode,
+        local_namespaces: &[DcsDynamicNamespace],
     ) -> Option<DcsRenderedQName> {
         if value.contains(':') {
-            return self.render_lexical_qname(reader, value, element_namespace, element_local);
+            let expanded = resolve_data_composition_qname(reader, value)?;
+            if let Some(rendered) = self.render_expanded_qname(expanded.clone(), element_local) {
+                return Some(rendered);
+            }
+            return self.render_dynamic_qname(value.as_bytes(), expanded, mode, local_namespaces);
         }
         let namespace = if element_namespace == Some(DCS_AREA_TEMPLATE_NS) {
             Some(DCS_AREA_TEMPLATE_NS)
@@ -1507,10 +1679,12 @@ impl<'a> DataCompositionXmlWriter<'a> {
         let namespace = expanded.namespace.as_deref();
         if namespace == Some(DCS_AREA_TEMPLATE_NS) {
             let prefix = "dcsat".to_string();
-            let declaration = (!self
-                .element_stack
-                .iter()
-                .any(|frame| frame.dynamic_prefixes.contains(&prefix)))
+            let declaration = (!self.element_stack.iter().any(|frame| {
+                frame
+                    .dynamic_namespaces
+                    .iter()
+                    .any(|namespace| namespace.prefix == prefix)
+            }))
             .then(|| (prefix.clone(), DCS_AREA_TEMPLATE_URI.to_string()));
             return Some(DcsRenderedQName {
                 value: format!("{prefix}:{}", expanded.local),
@@ -1634,8 +1808,9 @@ fn data_composition_element_frame(
     Some(DcsElementFrame {
         namespace: namespace.map(<[u8]>::to_vec),
         local: local.to_vec(),
+        rendered_name: written_start.rendered_name,
         xsi_type_local,
-        dynamic_prefixes: written_start.dynamic_prefixes,
+        dynamic_namespaces: written_start.dynamic_namespaces,
         is_data_ui_color_value,
         output_namespace_offset: written_start.output_namespace_offset,
     })
@@ -1648,6 +1823,7 @@ fn resolve_data_composition_qname(
     let (namespace, local) = reader.resolve(quick_xml::name::QName(value.as_bytes()), false);
     let namespace = match namespace {
         ResolveResult::Bound(namespace) => Some(namespace.0.to_vec()),
+        ResolveResult::Unbound if value.contains(':') => return None,
         ResolveResult::Unbound => None,
         ResolveResult::Unknown(_) => return None,
     };
@@ -1667,29 +1843,53 @@ fn event_declares_namespace(event: &quick_xml::events::BytesStart<'_>, namespace
         })
 }
 
-fn push_dynamic_declaration(
-    declarations: &mut Vec<(String, String)>,
-    prefix: String,
-    uri: String,
-) -> Option<()> {
-    if let Some((_, existing_uri)) = declarations
-        .iter()
-        .find(|(existing_prefix, _)| existing_prefix == &prefix)
+fn data_composition_output_scope_prefix(
+    input_prefix: &str,
+    mode: DataCompositionDocumentMode,
+) -> Option<String> {
+    if mode == DataCompositionDocumentMode::Settings
+        && let Some(number) = input_prefix
+            .strip_prefix('d')
+            .and_then(|value| value.strip_suffix("p1"))
+            .filter(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        && let Ok(number) = number.parse::<usize>()
+        && input_prefix == format!("d{number}p1")
     {
-        return (existing_uri == &uri).then_some(());
+        return Some(format!("d{}p1", number.checked_add(2)?));
     }
-    declarations.push((prefix, uri));
-    Some(())
+    Some(input_prefix.to_string())
 }
 
-fn data_composition_input_qname_declaration(
-    reader: &NsReader<&[u8]>,
-    value: &str,
-) -> Option<(String, String)> {
-    let (prefix, _) = value.split_once(':')?;
-    let expanded = resolve_data_composition_qname(reader, value)?;
-    let namespace = std::str::from_utf8(expanded.namespace.as_deref()?).ok()?;
-    Some((prefix.to_string(), namespace.to_string()))
+fn globally_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'static str> {
+    match namespace {
+        DCS_COMMON_NS => Some("dcscom"),
+        DCS_CORE_NS => Some("dcscor"),
+        DCS_SETTINGS_NS => Some("dcsset"),
+        DATA_CORE_NS => Some("v8"),
+        DATA_UI_NS => Some("v8ui"),
+        XSI_NS => Some("xsi"),
+        XS_NS => Some("xs"),
+        _ => None,
+    }
+}
+
+fn reserved_data_composition_namespace_uri(prefix: &str) -> Option<&'static str> {
+    let namespace = match prefix {
+        "dcscom" => DCS_COMMON_NS,
+        "dcscor" => DCS_CORE_NS,
+        "dcsset" => DCS_SETTINGS_NS,
+        "dcsat" => DCS_AREA_TEMPLATE_NS,
+        "v8" => DATA_CORE_NS,
+        "v8ui" => DATA_UI_NS,
+        "style" => STYLE_NS,
+        "sys" => SYS_NS,
+        "web" => WEB_NS,
+        "win" => WIN_NS,
+        "xsi" => XSI_NS,
+        "xs" => XS_NS,
+        _ => return None,
+    };
+    std::str::from_utf8(namespace).ok()
 }
 
 fn namespace_ref<'a>(namespace: &'a ResolveResult<'a>) -> Option<&'a [u8]> {
@@ -1719,7 +1919,8 @@ fn canonical_data_composition_name(namespace: Option<&[u8]>, local: &[u8]) -> Op
         Some(WIN_NS) => Some(format!("win:{local}")),
         Some(XSI_NS) => Some(format!("xsi:{local}")),
         Some(XS_NS) => Some(format!("xs:{local}")),
-        Some(_) | None => Some(local.to_string()),
+        Some(_) => None,
+        None => Some(local.to_string()),
     }
 }
 
@@ -1734,7 +1935,8 @@ fn canonical_data_composition_attr_name(namespace: Option<&[u8]>, local: &[u8]) 
         Some(DCS_SETTINGS_NS) => Some(format!("dcsset:{local}")),
         Some(DCS_COMMON_NS) => Some(format!("dcscom:{local}")),
         Some(DCS_AREA_TEMPLATE_NS) => Some(format!("dcsat:{local}")),
-        Some(_) | None => Some(local.to_string()),
+        Some(_) => None,
+        None => Some(local.to_string()),
     }
 }
 

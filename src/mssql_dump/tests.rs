@@ -12293,6 +12293,136 @@ fn detects_data_composition_appearance_template_body() {
     assert!(matches!(kind, SourceAssetKind::InflatedBinary));
 }
 
+fn normalize_dcs_namespace_fixture(schema_fragment: &str, settings_body: &str) -> Option<String> {
+    let raw = format!(
+        concat!(
+            "\0\0\0\0\0\0\0\0",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+            "{schema_fragment}",
+            "\t\t<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Default</name></settingsVariant>\r\n",
+            "\t</dataCompositionSchema>\r\n",
+            "</SchemaFile>",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "{settings_body}",
+            "</Settings>"
+        ),
+        schema_fragment = schema_fragment,
+        settings_body = settings_body,
+    );
+    String::from_utf8(normalize_data_composition_schema_template_xml(
+        raw.as_bytes(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )?)
+    .ok()
+}
+
+#[test]
+fn shifts_generated_namespace_prefix_for_reparented_dcs_settings() {
+    let xml = normalize_dcs_namespace_fixture(
+        "",
+        r#"<dcscor:value xmlns:d6p1="urn:example:simple" xsi:type="d6p1:Payload"/>"#,
+    )
+    .unwrap();
+
+    assert!(
+        xml.contains(r#"<dcscor:value xmlns:d8p1="urn:example:simple" xsi:type="d8p1:Payload"/>"#)
+    );
+    assert!(!xml.contains(r#"xmlns:d6p1="urn:example:simple""#));
+}
+
+#[test]
+fn remaps_complex_dcs_settings_type_names_and_attributes_by_namespace() {
+    let xml = normalize_dcs_namespace_fixture(
+        "",
+        concat!(
+            r#"<dcscor:value xmlns:d8p1="urn:example:complex" xsi:type="d8p1:Container">"#,
+            r#"<d8p1:node d8p1:flag="yes"><d8p1:leaf/></d8p1:node>"#,
+            "</dcscor:value>"
+        ),
+    )
+    .unwrap();
+
+    assert!(xml.contains(
+        r#"<dcscor:value xmlns:d10p1="urn:example:complex" xsi:type="d10p1:Container">"#
+    ));
+    assert!(xml.contains(r#"<d10p1:node d10p1:flag="yes"><d10p1:leaf/></d10p1:node>"#));
+    assert!(!xml.contains("d8p1:node"));
+}
+
+#[test]
+fn keeps_generated_namespace_prefix_in_dcs_schema_mode() {
+    let xml = normalize_dcs_namespace_fixture(
+        concat!(
+            r#"<field xmlns:d6p1="urn:example:schema" xsi:type="d6p1:Payload">"#,
+            r#"<d6p1:node d6p1:flag="yes"/></field>"#
+        ),
+        "<selection/>",
+    )
+    .unwrap();
+
+    assert!(xml.contains(r#"<field xmlns:d6p1="urn:example:schema" xsi:type="d6p1:Payload">"#));
+    assert!(xml.contains(r#"<d6p1:node d6p1:flag="yes"/>"#));
+    assert!(!xml.contains(r#"xmlns:d8p1="urn:example:schema""#));
+}
+
+#[test]
+fn keeps_vendor_fixed_and_special_namespace_prefixes_in_dcs_settings() {
+    let xml = normalize_dcs_namespace_fixture(
+        "",
+        concat!(
+            r#"<dcscor:value xmlns:vendor="urn:example:vendor" xsi:type="vendor:Payload">"#,
+            r#"<vendor:part vendor:flag="yes"/></dcscor:value>"#,
+            r#"<dcscor:value xmlns:d6p2="urn:example:vendor-like" xsi:type="d6p2:Payload"/>"#,
+            r#"<dcscor:value xsi:type="v8ui:Color"/>"#,
+            r#"<dcscor:value xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xsi:type="ent:Payload"/>"#,
+            r#"<dcscor:value xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xsi:type="cfg:CatalogRef.Sample"/>"#
+        ),
+    )
+    .unwrap();
+
+    assert!(
+        xml.contains(
+            r#"<dcscor:value xmlns:vendor="urn:example:vendor" xsi:type="vendor:Payload">"#
+        )
+    );
+    assert!(xml.contains(r#"<vendor:part vendor:flag="yes"/>"#));
+    assert!(xml.contains(
+        r#"<dcscor:value xmlns:d6p2="urn:example:vendor-like" xsi:type="d6p2:Payload"/>"#
+    ));
+    assert!(xml.contains(r#"<dcscor:value xsi:type="v8ui:Color"/>"#));
+    assert!(xml.contains(
+        r#"<dcscor:value xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise" xsi:type="d5p1:Payload"/>"#
+    ));
+    assert!(xml.contains(
+        r#"<dcscor:value xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise/current-config" xsi:type="d5p1:CatalogRef.Sample"/>"#
+    ));
+}
+
+#[test]
+fn rejects_conflicting_reparented_dcs_namespace_scope() {
+    let xml = normalize_dcs_namespace_fixture(
+        "",
+        concat!(
+            r#"<dcscor:value xmlns:d6p1="urn:example:outer" xsi:type="d6p1:Outer">"#,
+            r#"<dcscor:value xmlns:d6p1="urn:example:inner" xsi:type="d6p1:Inner"/>"#,
+            "</dcscor:value>"
+        ),
+    );
+
+    assert!(xml.is_none());
+}
+
+#[test]
+fn rejects_unbound_qualified_dcs_type_name() {
+    let xml = normalize_dcs_namespace_fixture("", r#"<dcscor:value xsi:type="missing:Payload"/>"#);
+
+    assert!(xml.is_none());
+}
+
 #[test]
 fn normalizes_data_composition_schema_template_body_container() {
     let raw = concat!(
