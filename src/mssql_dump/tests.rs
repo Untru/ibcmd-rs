@@ -12303,6 +12303,157 @@ fn leaves_unresolved_and_non_style_dcs_color_values_unchanged() {
 }
 
 #[test]
+fn merges_self_contained_inline_area_template_schema() {
+    let raw = concat!(
+        "\0\0\0\0",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<SchemaFile xmlns=\"\">\r\n",
+        "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+        "\t\t<dataSource><name>Source</name></dataSource>\r\n",
+        "\t</dataCompositionSchema>\r\n",
+        "</SchemaFile>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+        "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+        "\t\t<template><name>Inline</name>",
+        "<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">",
+        "<dcsat:item xsi:type=\"dcsat:Field\"/>",
+        "</template></template>\r\n",
+        "\t</dataCompositionSchema>\r\n",
+        "</SchemaFile>"
+    );
+
+    let xml = String::from_utf8(
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert!(xml.contains("<name>Inline</name>"));
+    assert!(xml.contains(
+        r#"<template xmlns:dcsat="http://v8.1c.ru/8.1/data-composition-system/area-template" xsi:type="dcsat:AreaTemplate">"#
+    ));
+    assert!(xml.contains(r#"<dcsat:item xsi:type="dcsat:Field"/>"#));
+    assert_eq!(xml.matches("<DataCompositionSchema ").count(), 1);
+    assert!(!xml.contains("SchemaFile"));
+}
+
+#[test]
+fn resolves_style_item_reference_in_self_contained_inline_area_template() {
+    let style_uuid = "66666666-6666-4666-8666-666666666666";
+    let raw = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n\
+</SchemaFile><?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">\r\n\
+\t\t\t<dcsat:appearance>\r\n\
+\t\t\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:{style_uuid}</value>\r\n\
+\t\t\t</dcsat:appearance>\r\n\
+\t\t</template>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+    );
+    let object_refs =
+        BTreeMap::from([(style_uuid.to_string(), "StyleItem.InlineAccent".to_string())]);
+
+    let xml = String::from_utf8(
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &object_refs,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert!(xml.contains(
+        r#"<dcscor:value xmlns:d8p1="http://v8.1c.ru/8.1/data/ui/style" xsi:type="v8ui:Color">d8p1:InlineAccent</dcscor:value>"#
+    ));
+    assert!(!xml.contains(&format!("0:{style_uuid}")));
+}
+
+#[test]
+fn rejects_non_self_contained_inline_area_template_envelopes() {
+    let documents = [
+        concat!(
+            "<?xml version=\"1.0\"?>",
+            "<SchemaFile xmlns=\"\" xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\">",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"><dcsat:item/></dataCompositionSchema>",
+            "<dcsat:appearance><dcsat:item/></dcsat:appearance>",
+            "</SchemaFile>"
+        ),
+        concat!(
+            "<?xml version=\"1.0\"?>",
+            "<SchemaFile xmlns=\"\" xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\">",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"><dcsat:appIndex>0</dcsat:appIndex></dataCompositionSchema>",
+            "</SchemaFile>"
+        ),
+        concat!(
+            "<?xml version=\"1.0\"?>",
+            "<SchemaFile xmlns=\"\" xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"><dcsat:value xsi:type=\"v8ui:Color\">0:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</dcsat:value></dataCompositionSchema>",
+            "</SchemaFile>"
+        ),
+        concat!(
+            "<?xml version=\"1.0\"?>",
+            "<SchemaFile xmlns=\"\" xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\">",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"><dcsat:item/></dataCompositionSchema>",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"><dcsat:item/></dataCompositionSchema>",
+            "</SchemaFile>"
+        ),
+        concat!(
+            "<?xml version=\"1.0\"?>",
+            "<SchemaFile xmlns=\"\">",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"><template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\"/></dataCompositionSchema>",
+            "</SchemaFile>"
+        ),
+    ];
+
+    for document in documents {
+        assert_eq!(
+            data_composition_inline_area_template_document_is_self_contained(
+                document,
+                &BTreeMap::new(),
+            ),
+            Some(false)
+        );
+    }
+}
+
+#[test]
+fn rejects_malformed_inline_area_document_after_external_classification() {
+    let raw = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<SchemaFile xmlns=\"\">\r\n",
+        "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n",
+        "</SchemaFile>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+        "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+        "\t\t<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">",
+        "<dcsat:item></template>\r\n",
+        "\t</dataCompositionSchema>\r\n",
+        "</SchemaFile>"
+    );
+
+    assert!(
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn detects_data_composition_schema_template_body_with_container_prefix() {
     let body = deflate_for_test(
             concat!(

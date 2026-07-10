@@ -300,12 +300,18 @@ fn canonicalize_data_composition_schema_documents(
         let canonical = match data_composition_schema_requires_external_resolution(document)? {
             false => canonicalize_data_composition_schema_document(document, object_refs)?,
             true => {
-                let Some(resolved) =
+                if let Some(resolved) =
                     resolve_data_composition_area_template_document(document, object_refs)
-                else {
+                {
+                    canonicalize_data_composition_schema_document(&resolved, object_refs)?
+                } else if data_composition_inline_area_template_document_is_self_contained(
+                    document,
+                    object_refs,
+                )? {
+                    canonicalize_data_composition_schema_document(document, object_refs)?
+                } else {
                     continue;
-                };
-                canonicalize_data_composition_schema_document(&resolved, object_refs)?
+                }
             }
         };
         let body = canonical
@@ -726,6 +732,140 @@ fn data_composition_style_item_name(
     })?;
     let name = reference.strip_prefix("StyleItem.")?;
     (!name.is_empty()).then(|| name.to_string())
+}
+
+#[derive(Debug)]
+struct DcsInlineAreaFrame {
+    namespace: Option<Vec<u8>>,
+    local: Vec<u8>,
+    is_data_ui_color: bool,
+}
+
+pub(super) fn data_composition_inline_area_template_document_is_self_contained(
+    document: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<bool> {
+    let mut reader = NsReader::from_str(document);
+    reader.config_mut().trim_text(false);
+    let mut stack = Vec::<DcsInlineAreaFrame>::new();
+    let mut schema_children = 0usize;
+    let mut saw_schema = false;
+    let mut saw_area_template = false;
+
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let namespace = namespace_ref(&namespace);
+                let local = local.as_ref();
+                if stack.is_empty() {
+                    if namespace.is_some() || local != b"SchemaFile" {
+                        return Some(false);
+                    }
+                } else if stack.len() == 1 {
+                    schema_children = schema_children.checked_add(1)?;
+                    if namespace != Some(DCS_SCHEMA_NS)
+                        || local != b"dataCompositionSchema"
+                        || saw_schema
+                    {
+                        return Some(false);
+                    }
+                    saw_schema = true;
+                }
+                if namespace == Some(DCS_AREA_TEMPLATE_NS) && local == b"appIndex"
+                    || stack.len() == 1
+                        && namespace == Some(DCS_AREA_TEMPLATE_NS)
+                        && local == b"appearance"
+                {
+                    return Some(false);
+                }
+                saw_area_template |= namespace == Some(DCS_AREA_TEMPLATE_NS)
+                    || data_composition_xsi_type_uses_namespace(
+                        &reader,
+                        &event,
+                        DCS_AREA_TEMPLATE_NS,
+                    )?;
+                let is_data_ui_color =
+                    data_composition_xsi_type_is(&reader, &event, DATA_UI_NS, b"Color")?;
+                stack.push(DcsInlineAreaFrame {
+                    namespace: namespace.map(<[u8]>::to_vec),
+                    local: local.to_vec(),
+                    is_data_ui_color,
+                });
+            }
+            Event::Empty(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let namespace = namespace_ref(&namespace);
+                let local = local.as_ref();
+                if stack.is_empty()
+                    || stack.len() == 1
+                    || namespace == Some(DCS_AREA_TEMPLATE_NS) && local == b"appIndex"
+                {
+                    return Some(false);
+                }
+                saw_area_template |= namespace == Some(DCS_AREA_TEMPLATE_NS)
+                    || data_composition_xsi_type_uses_namespace(
+                        &reader,
+                        &event,
+                        DCS_AREA_TEMPLATE_NS,
+                    )?;
+            }
+            Event::End(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let frame = stack.pop()?;
+                if frame.namespace.as_deref() != namespace_ref(&namespace)
+                    || frame.local.as_slice() != local.as_ref()
+                {
+                    return None;
+                }
+            }
+            Event::Text(event) => {
+                let text = std::str::from_utf8(event.as_ref()).ok()?;
+                let is_serialized_color_ref =
+                    serialized_data_composition_color_ref_uuid(text).is_some();
+                let is_resolvable_style_value = stack.last().is_some_and(|frame| {
+                    frame.is_data_ui_color
+                        && frame.namespace.as_deref() == Some(DCS_CORE_NS)
+                        && frame.local.as_slice() == b"value"
+                        && data_composition_style_item_name(text, object_refs).is_some()
+                });
+                if stack.is_empty() && !is_xml_whitespace(text)
+                    || is_serialized_color_ref
+                        && stack.iter().any(|frame| frame.is_data_ui_color)
+                        && !is_resolvable_style_value
+                {
+                    return Some(false);
+                }
+            }
+            Event::CData(_) | Event::GeneralRef(_)
+                if stack.iter().any(|frame| frame.is_data_ui_color) =>
+            {
+                return Some(false);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+
+    Some(stack.is_empty() && saw_schema && schema_children == 1 && saw_area_template)
+}
+
+fn data_composition_xsi_type_uses_namespace(
+    reader: &NsReader<&[u8]>,
+    event: &quick_xml::events::BytesStart<'_>,
+    expected_namespace: &[u8],
+) -> Option<bool> {
+    for attribute in event.attributes().with_checks(false) {
+        let attribute = attribute.ok()?;
+        let (namespace, local) = reader.resolve_attribute(attribute.key);
+        if namespace_ref(&namespace) != Some(XSI_NS) || local.as_ref() != b"type" {
+            continue;
+        }
+        let value = attribute.decode_and_unescape_value(reader.decoder()).ok()?;
+        let (namespace, _) = reader.resolve(quick_xml::name::QName(value.as_bytes()), false);
+        return Some(namespace_ref(&namespace) == Some(expected_namespace));
+    }
+    Some(false)
 }
 
 fn data_composition_schema_requires_external_resolution(document: &str) -> Option<bool> {
