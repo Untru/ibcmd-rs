@@ -21,6 +21,7 @@ use crate::module_blob::{
 use crate::parallel;
 
 mod command_interface;
+mod config_dump_info;
 mod config_rows;
 mod dcs;
 mod fetch;
@@ -35,6 +36,7 @@ mod source_assets;
 mod timing;
 
 use command_interface::*;
+use config_dump_info::*;
 use config_rows::*;
 use dcs::*;
 use fetch::*;
@@ -615,6 +617,11 @@ fn dump_table_rows_streamed(
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
 ) -> Result<DumpedTable> {
+    let generate_config_dump_info = table == "Config"
+        && selected_file_names.is_empty()
+        && !write_binary_rows
+        && extract_module_text
+        && extract_metadata_xml;
     let table_dir = output_dir.join(table);
     if write_binary_rows {
         fs::create_dir_all(&table_dir)
@@ -1321,6 +1328,7 @@ fn dump_table_rows_streamed(
     let mut module_text_rows = 0;
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
+    let mut versions_blob = None;
     let file_name_batches = build_dump_file_name_batches(&headers, &file_names);
     for chunk in file_name_batches {
         let selected = chunk.iter().cloned().collect::<BTreeSet<_>>();
@@ -1349,6 +1357,16 @@ fn dump_table_rows_streamed(
         timings.fetch_row_batch_max_binary_bytes = timings
             .fetch_row_batch_max_binary_bytes
             .max(batch_binary_bytes);
+        if generate_config_dump_info {
+            for row in rows.iter().filter(|row| row.file_name == "versions") {
+                if row.part_no != 0 {
+                    bail!("Config versions row has unsupported PartNo {}", row.part_no);
+                }
+                if versions_blob.replace(row.binary.clone()).is_some() {
+                    bail!("Config versions row was fetched more than once");
+                }
+            }
+        }
         let process_started = Instant::now();
         let dumped_rows = parallel::install(|| {
             rows.par_iter()
@@ -1366,6 +1384,29 @@ fn dump_table_rows_streamed(
             timings.add_assign(&dumped.timings);
             manifests.push(dumped.manifest);
         }
+    }
+
+    if generate_config_dump_info {
+        let started = Instant::now();
+        write_config_dump_info(
+            output_dir,
+            source_version,
+            versions_blob
+                .as_deref()
+                .ok_or_else(|| anyhow!("full Config export has no versions row"))?,
+            ConfigDumpInfoInventory {
+                file_names: &file_names,
+                metadata_texts: &index_metadata_texts,
+                object_refs: &object_refs,
+                form_refs: &form_refs,
+                template_refs: &template_refs,
+                subsystem_refs: &subsystem_refs,
+                module_text_paths: &module_text_paths,
+                source_assets: &source_assets,
+                configuration_module_groups: &configuration_module_groups,
+            },
+        )?;
+        timings.source_asset_config_dump_info_cpu_ms += elapsed_ms(started);
     }
 
     Ok(DumpedTable {
