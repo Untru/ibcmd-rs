@@ -1013,6 +1013,18 @@ residual moved from `+0/-3786` to `+0/-236`, with no added lines. Code-67,
 code-68, and code-76 root property layouts have different field counts and are
 not treated as interchangeable merely because each is a configuration root.
 
+The next accepted Configuration-only cohort reconstructs
+`UsedMobileApplicationFunctionalities` from raw slot 53. Root admission is the
+structural `root[3] -> contained payload -> property payload` path with exact
+67/60, 68/61, or 76/77 layouts and matching internal header identity. Layout
+does not imply source version. The accepted raw count pairs are 2.17/37,
+2.20/37, and 2.21/38; platform ids, order, boolean values, trailing field, and
+all lengths are validated as one fail-closed unit. The gate changed only
+`Configuration.xml` by +154/-0, moved the full diff from
+`1559/+31284/-187327` to `1559/+31284/-187173`, and reduced the Configuration
+residual to `+0/-82`. `ConfigDumpInfo.xml` was explicitly excluded and its
+SHA-256 content did not change.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
