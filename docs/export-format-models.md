@@ -190,7 +190,8 @@ Rejected hypothesis:
 
 ## Metadata generated type families
 
-Status: ExchangePlan raw codes `36` and `37` are `confirmed by export`.
+Status: ExchangePlan raw codes `36`/`37` and ChartOfCalculationTypes raw code
+`35` are `confirmed by export`.
 
 Model:
 
@@ -204,6 +205,12 @@ Model:
 - A slot is admitted only when the enclosing metadata row/header is parsed and
   the slot contains a valid UUID. Unknown or malformed records remain
   fail-closed; there is no object-name fallback.
+- ChartOfCalculationTypes code `35` has its metadata header at index `1` and
+  requires all 22 UUID fields at indexes `2..23`. The TypeIds occupy the even
+  indexes `2..22` and map, in order, to Object, Ref, Selection, List, Manager,
+  DisplacingCalculationTypes and Row, BaseCalculationTypes and Row, and
+  LeadingCalculationTypes and Row. Requiring the complete UUID range prevents
+  partial records from matching this family.
 
 Confirmed by export:
 
@@ -221,6 +228,14 @@ Confirmed by export:
   typed values were 34 `ExchangePlanRef` and five `ExchangePlanObject` QNames.
   No path worsened, and production additions contained no database UUID, object
   name, or local path literal.
+- The ChartOfCalculationTypes gate was also verified with an isolated pre-gate
+  full export. The full diff moved from `1575 files, +31350/-193392` to
+  `1569 files, +31338/-192968`. Only seven paths changed: two DefinedTypes and
+  four EventSubscriptions became exact, and one form gained its native
+  three-line main-attribute type block. All 424 inserted old-to-new lines are
+  native; the 12 removals were non-native partial subscription shells. The
+  newly resolved values were six `ChartOfCalculationTypesObject` and one
+  `ChartOfCalculationTypesRef` QName.
 
 ## Form.xml `CommandName` / `CommandSource`
 
