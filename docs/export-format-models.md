@@ -158,6 +158,19 @@ Corpus evidence:
   wrappers are all zero. TypeId, TypeSet, settingsVariant, settings name, Form,
   ConfigDumpInfo, and configuration Help guardrails did not regress. Production
   additions contain no database UUID, object name, or local path literals.
+- A self-contained additional area document is a separate envelope from the
+  side-table form. It has one nonempty direct `dataCompositionSchema` child,
+  no sibling elements, no root storage `appearance`, and no `appIndex`.
+  Admission requires an actual expanded area-template element or `xsi:type`;
+  an unused namespace declaration is insufficient. Serialized Color references
+  remain subject to the same dynamic `StyleItem.*` rule. Parser, QName, and
+  attribute errors propagate; only an explicit unsupported-envelope result is
+  skipped. This class occurred once in BSP and three times in the independent
+  UT corpus. The accepted gate made the BSP `Reports/Задания` template exact,
+  moving the full diff from `1592 files, +31369/-193848` to
+  `1591 files, +31369/-193822` and the DCS slice from
+  `10 files, +40/-66` to `9 files, +40/-40`. All DCS and cross-group guards
+  remained unchanged.
 
 Rejected hypothesis:
 
