@@ -264,12 +264,13 @@ pub(super) fn dynamic_source_asset(
             kind: SourceAssetKind::Help,
         });
     }
-    if let Some(xsi_type) = predefined_data_xsi_type(&owner.kind)
-        && parse_predefined_data_blob(bytes, context.type_index).is_some()
+    if let Some(model) = predefined_data_source_model(&owner.kind)
+        && suffix == model.suffix
+        && parse_predefined_data_blob_with_model(bytes, context.type_index, model).is_some()
     {
         return Some(SourceAsset {
             primary_path: owner.object_path.join("Ext").join("Predefined.xml"),
-            kind: SourceAssetKind::PredefinedData { xsi_type },
+            kind: SourceAssetKind::PredefinedData { model },
         });
     }
     if let Some(module_file) = module_owner_module_file(&owner.kind, suffix)
@@ -418,6 +419,21 @@ fn append_source_asset_diagnostic(
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum PredefinedDataRowsetLayout {
+    NestedTable,
+    Root,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PredefinedDataSourceModel {
+    suffix: &'static str,
+    xsi_type: &'static str,
+    root_tag: &'static str,
+    rowset_layout: PredefinedDataRowsetLayout,
+    unwrap_single_root: bool,
+}
+
 #[derive(Clone)]
 pub(crate) enum SourceAssetKind {
     AccumulationRegisterAggregates { register_name: String },
@@ -433,7 +449,7 @@ pub(crate) enum SourceAssetKind {
     InflatedBase64OrBinary,
     InflatedBinary,
     MoxelSpreadsheet,
-    PredefinedData { xsi_type: &'static str },
+    PredefinedData { model: PredefinedDataSourceModel },
     RoleRights,
     Schedule,
     StandaloneContent,
@@ -885,15 +901,16 @@ pub(super) fn source_assets_from_metadata_text_inner(
             ));
             continue;
         }
-        if let Some(xsi_type) = predefined_data_xsi_type(kind)
+        if let Some(model) = predefined_data_source_model(kind)
+            && (*body_id).strip_prefix(&object_row_prefix) == Some(model.suffix)
             && let Ok(predefined_bytes) = decode_hex(&body_row.binary_hex)
-            && parse_predefined_data_blob(&predefined_bytes, type_index).is_some()
+            && parse_predefined_data_blob_with_model(&predefined_bytes, type_index, model).is_some()
         {
             assets.push((
                 (*body_id).to_string(),
                 SourceAsset {
                     primary_path: object_path.join("Ext").join("Predefined.xml"),
-                    kind: SourceAssetKind::PredefinedData { xsi_type },
+                    kind: SourceAssetKind::PredefinedData { model },
                 },
             ));
         }
@@ -1245,9 +1262,9 @@ pub(super) fn write_source_asset(
                     .with_context(|| format!("failed to write {}", path.display()))?;
             }
         }
-        SourceAssetKind::PredefinedData { xsi_type } => {
-            let items =
-                parse_predefined_data_blob(bytes, context.type_index).with_context(|| {
+        SourceAssetKind::PredefinedData { model } => {
+            let items = parse_predefined_data_blob_with_model(bytes, context.type_index, *model)
+                .with_context(|| {
                     format!(
                         "failed to extract predefined data from source asset {}",
                         asset.primary_path.display()
@@ -1260,7 +1277,7 @@ pub(super) fn write_source_asset(
             }
             write_source_xml_file(
                 &path,
-                format_predefined_data_xml(xsi_type, &items),
+                format_predefined_data_xml(model.xsi_type, &items),
                 context.source_version,
             )?;
         }
@@ -1763,32 +1780,106 @@ fn help_standard_picture_by_negative_index(index: &str) -> Option<&'static str> 
     }
 }
 
-pub(super) fn predefined_data_xsi_type(kind: &str) -> Option<&'static str> {
-    match kind {
-        "Catalog" => Some("CatalogPredefinedItems"),
-        "ChartOfCharacteristicTypes" => Some("PlanOfCharacteristicKindPredefinedItems"),
-        _ => None,
-    }
+const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
+    (
+        "Catalog",
+        PredefinedDataSourceModel {
+            suffix: "1c",
+            xsi_type: "CatalogPredefinedItems",
+            root_tag: "0",
+            rowset_layout: PredefinedDataRowsetLayout::NestedTable,
+            unwrap_single_root: true,
+        },
+    ),
+    (
+        "ChartOfCharacteristicTypes",
+        PredefinedDataSourceModel {
+            suffix: "7",
+            xsi_type: "PlanOfCharacteristicKindPredefinedItems",
+            root_tag: "1",
+            rowset_layout: PredefinedDataRowsetLayout::NestedTable,
+            unwrap_single_root: true,
+        },
+    ),
+    (
+        "ChartOfAccounts",
+        PredefinedDataSourceModel {
+            suffix: "9",
+            xsi_type: "ChartOfAccountsPredefinedItems",
+            root_tag: "2",
+            rowset_layout: PredefinedDataRowsetLayout::NestedTable,
+            unwrap_single_root: true,
+        },
+    ),
+    (
+        "ChartOfCalculationTypes",
+        PredefinedDataSourceModel {
+            suffix: "2",
+            xsi_type: "CalculationTypePredefinedItems",
+            root_tag: "9",
+            rowset_layout: PredefinedDataRowsetLayout::Root,
+            unwrap_single_root: false,
+        },
+    ),
+];
+
+pub(super) fn predefined_data_source_model(kind: &str) -> Option<PredefinedDataSourceModel> {
+    PREDEFINED_DATA_SOURCE_MODELS
+        .iter()
+        .find_map(|(candidate, model)| (*candidate == kind).then_some(*model))
 }
 
+#[allow(dead_code)]
 pub(super) fn parse_predefined_data_blob(
     bytes: &[u8],
     type_index: &BTreeMap<String, String>,
+) -> Option<Vec<PredefinedItem>> {
+    parse_predefined_data_blob_inner(bytes, type_index, None)
+}
+
+fn parse_predefined_data_blob_with_model(
+    bytes: &[u8],
+    type_index: &BTreeMap<String, String>,
+    model: PredefinedDataSourceModel,
+) -> Option<Vec<PredefinedItem>> {
+    parse_predefined_data_blob_inner(bytes, type_index, Some(model))
+}
+
+fn parse_predefined_data_blob_inner(
+    bytes: &[u8],
+    type_index: &BTreeMap<String, String>,
+    expected_model: Option<PredefinedDataSourceModel>,
 ) -> Option<Vec<PredefinedItem>> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let text = text.trim_start_matches('\u{feff}');
     let fields = split_1c_braced_fields(text, 0)?;
-    if !matches!(fields.first()?.trim(), "0" | "1") {
+    let root_tag = fields.first()?.trim();
+    let model = expected_model.or_else(|| {
+        PREDEFINED_DATA_SOURCE_MODELS
+            .iter()
+            .find_map(|(_, model)| (model.root_tag == root_tag).then_some(*model))
+    })?;
+    if root_tag != model.root_tag {
         return None;
     }
-    let table_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
-    let root_items = table_fields
-        .iter()
-        .find_map(|field| parse_predefined_rowset_roots(field, type_index))?;
-    if let [root_item] = root_items.as_slice()
-        && matches!(root_item.name.as_str(), "Элементы" | "Характеристики")
-    {
+
+    let root_items = match model.rowset_layout {
+        PredefinedDataRowsetLayout::NestedTable => {
+            let table_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+            table_fields
+                .iter()
+                .find_map(|field| parse_predefined_rowset_roots(field, type_index))?
+        }
+        PredefinedDataRowsetLayout::Root => fields
+            .iter()
+            .skip(1)
+            .find_map(|field| parse_predefined_rowset_roots(field, type_index))?,
+    };
+    if model.unwrap_single_root {
+        let [root_item] = root_items.as_slice() else {
+            return None;
+        };
         Some(root_item.children.clone())
     } else {
         Some(root_items)
