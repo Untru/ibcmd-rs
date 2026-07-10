@@ -23628,6 +23628,7 @@ fn parses_detailed_information_register_command_picture_and_parameter_types() {
         ),
         ("caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb", "StdPicture.Setting"),
     ] {
+        assert_eq!(common_command_standard_picture_name(uuid), None);
         let descriptor = format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,1,0,\"\"}}");
         let properties = parse_command(&descriptor, &BTreeMap::new()).unwrap();
         assert_eq!(properties.picture_ref.as_deref(), Some(expected));

@@ -3472,7 +3472,7 @@ fn parse_information_register_command_picture_descriptor(
         }
         "1" if reference.len() == 2 && reference.first()?.trim() == "0" => {
             let uuid = parse_non_zero_uuid(reference.get(1)?.trim())?;
-            if let Some(picture) = common_command_standard_picture_name(&uuid) {
+            if let Some(picture) = information_register_command_standard_picture_name(&uuid) {
                 return Some((Some(picture.to_string()), load_transparent));
             }
             let picture = object_refs.get(&uuid)?;
@@ -3483,6 +3483,14 @@ fn parse_information_register_command_picture_descriptor(
             Some((Some(picture.clone()), load_transparent))
         }
         _ => None,
+    }
+}
+
+fn information_register_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
+    match uuid.to_ascii_lowercase().as_str() {
+        "46598f81-5f95-4485-9b33-bfe4fd1276d0" => Some("StdPicture.SpreadsheetShowHeaders"),
+        "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb" => Some("StdPicture.Setting"),
+        _ => common_command_standard_picture_name(uuid),
     }
 }
 
@@ -11362,8 +11370,6 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "03665ff1-3a05-41d1-96d3-04bda2d8ede3" => Some("StdPicture.SpreadsheetInsertComment"),
         "2846af8d-af84-47e3-82b9-01b01f960426" => Some("StdPicture.SpreadsheetReadOnly"),
         "3bdc16c8-6a96-4467-9442-a8e4804b3fa2" => Some("StdPicture.SyncContents"),
-        "46598f81-5f95-4485-9b33-bfe4fd1276d0" => Some("StdPicture.SpreadsheetShowHeaders"),
-        "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb" => Some("StdPicture.Setting"),
         _ => None,
     }
 }
