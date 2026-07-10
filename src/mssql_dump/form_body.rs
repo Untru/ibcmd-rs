@@ -8289,7 +8289,10 @@ pub(super) fn form_standard_button_command_name(uuid: &str) -> Option<&'static s
 pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
         "39f6b9f1-7aa1-4a03-a01b-e127d51bc228" => Some("DecreaseIndent"),
+        "4ca32834-6f9f-4dfb-89ce-6db36931c89b" => Some("Preview"),
         "56ae90b6-588f-406e-919c-cc5cc7f86297" => Some("AlignJustify"),
+        "5a331cec-bf93-4af5-8f51-80fd7118db47" => Some("SaveAs"),
+        "7a294bdc-b86b-4b73-abc4-df9c811f61ef" => Some("CopyToClipboard"),
         "87ecfbdd-8e2b-4ba2-a315-0897020f382f" => Some("AlignLeft"),
         "9d8a3915-de52-4227-91cd-2fce22e09972" => Some("Picture"),
         "a8483976-8b13-416a-9680-133b306dc6b0" => Some("Print"),
