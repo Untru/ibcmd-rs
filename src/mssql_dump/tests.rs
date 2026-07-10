@@ -11588,7 +11588,12 @@ fn normalizes_data_composition_schema_template_body_container() {
         },
     )]);
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &type_index,
+            &BTreeMap::new(),
+        )
+        .unwrap(),
     )
     .unwrap();
 
@@ -11940,7 +11945,8 @@ fn normalizes_dcs_type_id_using_source_xml_generated_type_index() {
     );
 
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &index).unwrap(),
+        normalize_data_composition_schema_template_xml(raw.as_bytes(), &index, &BTreeMap::new())
+            .unwrap(),
     )
     .unwrap();
 
@@ -11979,7 +11985,8 @@ fn normalizes_dcs_type_id_using_case_insensitive_generated_type_index() {
     );
 
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &index).unwrap(),
+        normalize_data_composition_schema_template_xml(raw.as_bytes(), &index, &BTreeMap::new())
+            .unwrap(),
     )
     .unwrap();
 
@@ -12012,7 +12019,12 @@ fn normalizes_dcs_parameter_type_id_with_parameter_current_config_prefix() {
     );
 
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &type_index,
+            &BTreeMap::new(),
+        )
+        .unwrap(),
     )
     .unwrap();
 
@@ -12049,7 +12061,12 @@ fn normalizes_dcs_dataset_object_type_id_with_nested_current_config_prefix() {
     );
 
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &type_index,
+            &BTreeMap::new(),
+        )
+        .unwrap(),
     )
     .unwrap();
 
@@ -12082,7 +12099,12 @@ fn normalizes_dcs_calculated_field_type_id_with_parameter_current_config_prefix(
     );
 
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &type_index).unwrap(),
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &type_index,
+            &BTreeMap::new(),
+        )
+        .unwrap(),
     )
     .unwrap();
 
@@ -12112,7 +12134,12 @@ fn normalizes_dcs_core_xsi_type_values() {
     );
 
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &BTreeMap::new()).unwrap(),
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap(),
     )
     .unwrap();
 
@@ -12141,13 +12168,138 @@ fn normalizes_dcs_data_core_standard_period_xsi_type_values() {
     );
 
     let xml = String::from_utf8(
-        normalize_data_composition_schema_template_xml(raw.as_bytes(), &BTreeMap::new()).unwrap(),
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap(),
     )
     .unwrap();
 
     assert!(xml.contains(r#"<value xsi:type="v8:StandardPeriod">"#));
     assert!(xml.contains(r#"<v8:variant xsi:type="v8:StandardPeriodVariant">Custom</v8:variant>"#));
     assert!(!xml.contains("d4p1:StandardPeriod"));
+}
+
+#[test]
+fn resolves_dcs_color_style_item_reference_from_metadata() {
+    let style_uuid = "11111111-1111-4111-8111-111111111111";
+    let raw = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<appearance>\r\n\
+\t\t\t<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">\r\n\
+\t\t\t\t<parameter>BackgroundColor</parameter>\r\n\
+\t\t\t\t<value xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:{style_uuid}</value>\r\n\
+\t\t\t</item>\r\n\
+\t\t</appearance>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+    );
+    let object_refs = BTreeMap::from([(style_uuid.to_string(), "StyleItem.Accent".to_string())]);
+
+    let xml = String::from_utf8(
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &object_refs,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert!(xml.contains(r#"<dcscor:value xsi:type="v8ui:Color">style:Accent</dcscor:value>"#));
+    assert!(!xml.contains(&format!("0:{style_uuid}")));
+}
+
+#[test]
+fn resolves_dcs_area_side_table_color_with_dynamic_style_scope() {
+    let style_uuid = "22222222-2222-4222-8222-222222222222";
+    let raw = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\"/>\r\n\
+</SchemaFile>\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<template>\r\n\
+\t\t\t<name>Area</name>\r\n\
+\t\t\t<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">\r\n\
+\t\t\t\t<dcsat:item xsi:type=\"dcsat:TableRow\">\r\n\
+\t\t\t\t\t<dcsat:tableCell>\r\n\
+\t\t\t\t\t\t<dcsat:appIndex>0</dcsat:appIndex>\r\n\
+\t\t\t\t\t</dcsat:tableCell>\r\n\
+\t\t\t\t</dcsat:item>\r\n\
+\t\t\t</template>\r\n\
+\t\t</template>\r\n\
+\t</dataCompositionSchema>\r\n\
+\t<appearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"TableCellAppearance\">\r\n\
+\t\t<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">\r\n\
+\t\t\t<parameter>BackgroundColor</parameter>\r\n\
+\t\t\t<value xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:{style_uuid}</value>\r\n\
+\t\t</item>\r\n\
+\t</appearance>\r\n\
+</SchemaFile>"
+    );
+    let object_refs =
+        BTreeMap::from([(style_uuid.to_string(), "StyleItem.AreaAccent".to_string())]);
+
+    let xml = String::from_utf8(
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &object_refs,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert!(xml.contains(
+        r#"<dcscor:value xmlns:d8p1="http://v8.1c.ru/8.1/data/ui/style" xsi:type="v8ui:Color">d8p1:AreaAccent</dcscor:value>"#
+    ));
+    assert!(!xml.contains("appIndex"));
+    assert!(!xml.contains(&format!("0:{style_uuid}")));
+}
+
+#[test]
+fn leaves_unresolved_and_non_style_dcs_color_values_unchanged() {
+    let unknown_uuid = "33333333-3333-4333-8333-333333333333";
+    let non_style_uuid = "44444444-4444-4444-8444-444444444444";
+    let style_uuid = "55555555-5555-4555-8555-555555555555";
+    let raw = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\
+\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:{unknown_uuid}</value>\r\n\
+\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:{non_style_uuid}</value>\r\n\
+\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:not-a-uuid</value>\r\n\
+\t\t<value xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">style:Existing</value>\r\n\
+\t\t<other xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"v8ui:Color\">0:{style_uuid}</other>\r\n\
+\t</dataCompositionSchema>\r\n\
+</SchemaFile>"
+    );
+    let object_refs = BTreeMap::from([
+        (non_style_uuid.to_string(), "Catalog.Products".to_string()),
+        (style_uuid.to_string(), "StyleItem.Accent".to_string()),
+    ]);
+
+    let xml = String::from_utf8(
+        normalize_data_composition_schema_template_xml(
+            raw.as_bytes(),
+            &BTreeMap::new(),
+            &object_refs,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert!(xml.contains(&format!(">0:{unknown_uuid}</dcscor:value>")));
+    assert!(xml.contains(&format!(">0:{non_style_uuid}</dcscor:value>")));
+    assert!(xml.contains(">0:not-a-uuid</dcscor:value>"));
+    assert!(xml.contains(">style:Existing</dcscor:value>"));
+    assert!(xml.contains(&format!(">0:{style_uuid}</dcscor:other>")));
 }
 
 #[test]
@@ -23599,6 +23751,34 @@ fn selected_configuration_source_assets_request_only_required_indexes() {
         ]))
         .is_none()
     );
+}
+
+#[test]
+fn selected_dcs_body_requests_metadata_object_references() {
+    let template_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let file_names = BTreeSet::from([format!("{template_uuid}.0")]);
+    let body_only = selected_configuration_source_asset_index_needs_with_metadata(&file_names, &[])
+        .expect("body-only template selection");
+    assert!(body_only.object_refs);
+
+    let template_text = |template_type_code| {
+        format!(
+            "{{1,{{2,{template_type_code},{{3,{{1,0,{template_uuid}}},\"Template\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0}}}}"
+        )
+    };
+    let dcs_metadata = metadata_text_row_from_text(template_uuid, template_text(6)).unwrap();
+    let dcs =
+        selected_configuration_source_asset_index_needs_with_metadata(&file_names, &[dcs_metadata])
+            .expect("DCS template selection");
+    assert!(dcs.object_refs);
+
+    let text_metadata = metadata_text_row_from_text(template_uuid, template_text(4)).unwrap();
+    let text = selected_configuration_source_asset_index_needs_with_metadata(
+        &file_names,
+        &[text_metadata],
+    )
+    .expect("text template selection");
+    assert!(!text.object_refs);
 }
 
 #[test]

@@ -3,10 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     ConfigRow, MetadataCommandReference, MetadataTextRow, command_interface_placement_name,
     command_interface_reference_entries_from_text, command_interface_standard_command, decode_hex,
-    inflate_raw_deflate, is_uuid_text, metadata_kind_needs_form_template_reference_indexes,
-    metadata_text_row_from_text, nested_command_headers_from_text,
-    parse_command_interface_common_flag, parse_generated_type_entries_from_text,
-    split_1c_braced_fields, uuid_like_values,
+    inflate_raw_deflate, is_template_metadata_text, is_uuid_text,
+    metadata_kind_needs_form_template_reference_indexes, metadata_text_row_from_text,
+    nested_command_headers_from_text, parse_command_interface_common_flag,
+    parse_generated_type_entries_from_text, split_1c_braced_fields,
+    template_template_type_from_metadata, uuid_like_values,
 };
 
 pub(super) fn selected_export_needs_broad_metadata_indexes(
@@ -142,6 +143,39 @@ pub(super) fn selected_configuration_source_asset_index_needs(
             }
             _ => return None,
         }
+    }
+    Some(needs)
+}
+
+pub(super) fn selected_configuration_source_asset_index_needs_with_metadata(
+    file_names: &BTreeSet<String>,
+    metadata_texts: &[MetadataTextRow],
+) -> Option<SourceReferenceIndexNeeds> {
+    let mut needs = selected_configuration_source_asset_index_needs(file_names)?;
+    let metadata_by_id = metadata_texts
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    if file_names.iter().any(|file_name| {
+        let Some(metadata_id) = file_name.strip_suffix(".0") else {
+            return false;
+        };
+        let Some(row) = metadata_by_id.get(metadata_id) else {
+            return true;
+        };
+        if !is_template_metadata_text(&row.text, &row.file_name) {
+            return false;
+        }
+        match row
+            .header
+            .as_ref()
+            .and_then(|header| template_template_type_from_metadata(header))
+        {
+            Some("DataCompositionSchema") | None => true,
+            Some(_) => false,
+        }
+    }) {
+        needs.object_refs = true;
     }
     Some(needs)
 }

@@ -36,6 +36,7 @@ pub(super) type DcsTypeIndex = BTreeMap<String, DcsTypeResolution>;
 pub(super) fn normalize_data_composition_schema_template_xml(
     inflated: &[u8],
     type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<u8>> {
     let xml_start = find_bytes(inflated, b"<?xml")?;
     let text = std::str::from_utf8(&inflated[xml_start..]).ok()?;
@@ -50,9 +51,11 @@ pub(super) fn normalize_data_composition_schema_template_xml(
     let settings = documents
         .iter()
         .filter(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
-        .filter_map(|document| canonicalize_data_composition_settings_document(document))
+        .filter_map(|document| {
+            canonicalize_data_composition_settings_document(document, object_refs)
+        })
         .collect::<Vec<_>>();
-    let mut xml = canonicalize_data_composition_schema_documents(&schema_documents)?;
+    let mut xml = canonicalize_data_composition_schema_documents(&schema_documents, object_refs)?;
     rewrite_data_composition_type_ids(&mut xml, type_index);
     insert_data_composition_settings(&mut xml, &settings)?;
     Some(xml.into_bytes())
@@ -267,8 +270,11 @@ fn split_embedded_xml_documents(text: &str) -> Vec<&str> {
         .collect()
 }
 
-fn canonicalize_data_composition_schema_document(document: &str) -> Option<String> {
-    let mut writer = DataCompositionXmlWriter::new();
+fn canonicalize_data_composition_schema_document(
+    document: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut writer = DataCompositionXmlWriter::new(object_refs);
     writer.fixed_decl_and_schema_root();
     let root_len = writer.output.len();
     writer.write_document(document, DataCompositionDocumentMode::Schema)?;
@@ -283,19 +289,23 @@ fn canonicalize_data_composition_schema_document(document: &str) -> Option<Strin
     Some(writer.output)
 }
 
-fn canonicalize_data_composition_schema_documents(documents: &[&str]) -> Option<String> {
+fn canonicalize_data_composition_schema_documents(
+    documents: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
     let (first, remaining) = documents.split_first()?;
-    let mut merged = canonicalize_data_composition_schema_document(first)?;
+    let mut merged = canonicalize_data_composition_schema_document(first, object_refs)?;
     let mut insertion_offset = direct_settings_variant_insertion_offset(&merged)?;
     for document in remaining {
         let canonical = match data_composition_schema_requires_external_resolution(document)? {
-            false => canonicalize_data_composition_schema_document(document)?,
+            false => canonicalize_data_composition_schema_document(document, object_refs)?,
             true => {
-                let Some(resolved) = resolve_data_composition_area_template_document(document)
+                let Some(resolved) =
+                    resolve_data_composition_area_template_document(document, object_refs)
                 else {
                     continue;
                 };
-                canonicalize_data_composition_schema_document(&resolved)?
+                canonicalize_data_composition_schema_document(&resolved, object_refs)?
             }
         };
         let body = canonical
@@ -338,12 +348,15 @@ struct DcsAreaStorageFrame {
     app_index_text: Option<String>,
     app_index_text_events: usize,
     is_area_template: bool,
-    is_data_ui_color: bool,
+    is_data_ui_color_value: bool,
     has_unsupported_color_ref: bool,
     namespace_declarations: String,
 }
 
-fn resolve_data_composition_area_template_document(document: &str) -> Option<String> {
+fn resolve_data_composition_area_template_document(
+    document: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
     let mut reader = NsReader::from_str(document);
     reader.config_mut().trim_text(false);
     let mut stack = Vec::<DcsAreaStorageFrame>::new();
@@ -422,8 +435,9 @@ fn resolve_data_composition_area_template_document(document: &str) -> Option<Str
                     DCS_AREA_TEMPLATE_NS,
                     b"AreaTemplate",
                 )?;
-                let is_data_ui_color =
-                    data_composition_xsi_type_is(&reader, &event, DATA_UI_NS, b"Color")?;
+                let is_data_ui_color_value = namespace == Some(DCS_CORE_NS)
+                    && local == b"value"
+                    && data_composition_xsi_type_is(&reader, &event, DATA_UI_NS, b"Color")?;
                 stack.push(DcsAreaStorageFrame {
                     namespace: namespace.map(<[u8]>::to_vec),
                     local: local.to_vec(),
@@ -435,7 +449,7 @@ fn resolve_data_composition_area_template_document(document: &str) -> Option<Str
                     app_index_text: None,
                     app_index_text_events: 0,
                     is_area_template,
-                    is_data_ui_color,
+                    is_data_ui_color_value,
                     has_unsupported_color_ref: false,
                     namespace_declarations: if is_outer_appearance {
                         data_composition_namespace_declarations(&reader, &event)?
@@ -531,8 +545,11 @@ fn resolve_data_composition_area_template_document(document: &str) -> Option<Str
                     frame.app_index_text_events = frame.app_index_text_events.checked_add(1)?;
                     frame.app_index_text = Some(text.to_string());
                 }
-                if stack.iter().any(|frame| frame.is_data_ui_color)
-                    && is_unsupported_data_composition_color_ref(text)
+                if stack
+                    .last()
+                    .is_some_and(|frame| frame.is_data_ui_color_value)
+                    && serialized_data_composition_color_ref_uuid(text).is_some()
+                    && data_composition_style_item_name(text, object_refs).is_none()
                 {
                     if stack.iter().any(|frame| {
                         frame.namespace.as_deref() == Some(DCS_SCHEMA_NS)
@@ -689,18 +706,26 @@ fn reindent_data_composition_fragment(
     Some(output)
 }
 
-fn is_unsupported_data_composition_color_ref(text: &str) -> bool {
-    let Some(uuid) = text.trim().strip_prefix("0:") else {
-        return false;
-    };
-    uuid.len() == 36
-        && uuid.bytes().enumerate().all(|(index, byte)| {
-            if matches!(index, 8 | 13 | 18 | 23) {
-                byte == b'-'
-            } else {
-                byte.is_ascii_hexdigit()
-            }
-        })
+fn serialized_data_composition_color_ref_uuid(text: &str) -> Option<String> {
+    let uuid = text.trim().strip_prefix("0:")?;
+    if uuid.len() != 36 {
+        return None;
+    }
+    let canonical = uuid::Uuid::parse_str(uuid).ok()?.hyphenated().to_string();
+    canonical.eq_ignore_ascii_case(uuid).then_some(canonical)
+}
+
+fn data_composition_style_item_name(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let uuid = serialized_data_composition_color_ref_uuid(text)?;
+    let reference = object_refs.get(&uuid).or_else(|| {
+        let source_uuid = text.trim().strip_prefix("0:")?;
+        object_refs.get(source_uuid)
+    })?;
+    let name = reference.strip_prefix("StyleItem.")?;
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 fn data_composition_schema_requires_external_resolution(document: &str) -> Option<bool> {
@@ -766,8 +791,11 @@ fn direct_settings_variant_insertion_offset(xml: &str) -> Option<usize> {
     Some(offset)
 }
 
-fn canonicalize_data_composition_settings_document(document: &str) -> Option<String> {
-    let mut writer = DataCompositionXmlWriter::new();
+fn canonicalize_data_composition_settings_document(
+    document: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut writer = DataCompositionXmlWriter::new(object_refs);
     writer.write_document(document, DataCompositionDocumentMode::Settings)?;
     let settings = writer
         .output
@@ -889,6 +917,8 @@ struct DcsElementFrame {
     local: Vec<u8>,
     xsi_type_local: Option<String>,
     dynamic_prefixes: Vec<String>,
+    is_data_ui_color_value: bool,
+    output_namespace_offset: usize,
 }
 
 #[derive(Debug)]
@@ -903,18 +933,25 @@ struct DcsRenderedQName {
     declaration: Option<(String, String)>,
 }
 
-struct DataCompositionXmlWriter {
+struct DcsWrittenStart {
+    dynamic_prefixes: Vec<String>,
+    output_namespace_offset: usize,
+}
+
+struct DataCompositionXmlWriter<'a> {
     output: String,
     skip_depth: usize,
     element_stack: Vec<DcsElementFrame>,
+    object_refs: &'a BTreeMap<String, String>,
 }
 
-impl DataCompositionXmlWriter {
-    fn new() -> Self {
+impl<'a> DataCompositionXmlWriter<'a> {
+    fn new(object_refs: &'a BTreeMap<String, String>) -> Self {
         Self {
             output: String::new(),
             skip_depth: 0,
             element_stack: Vec::new(),
+            object_refs,
         }
     }
 
@@ -950,7 +987,7 @@ impl DataCompositionXmlWriter {
                         *depth = depth.checked_add(1)?;
                     }
                     if self.skip_depth == 0 {
-                        let dynamic_prefixes = self.write_start_tag(
+                        let written_start = self.write_start_tag(
                             &reader,
                             &event,
                             namespace_ref(&namespace),
@@ -963,7 +1000,7 @@ impl DataCompositionXmlWriter {
                             &event,
                             namespace_ref(&namespace),
                             local,
-                            dynamic_prefixes,
+                            written_start,
                         )?);
                     }
                 }
@@ -1078,7 +1115,7 @@ impl DataCompositionXmlWriter {
         local: &[u8],
         empty: bool,
         mode: &DataCompositionDocumentMode,
-    ) -> Option<Vec<String>> {
+    ) -> Option<DcsWrittenStart> {
         let is_settings_root = matches!(mode, DataCompositionDocumentMode::Settings)
             && namespace == Some(DCS_SETTINGS_NS)
             && local == b"Settings";
@@ -1149,6 +1186,7 @@ impl DataCompositionXmlWriter {
         }
         self.output.push('<');
         self.output.push_str(&name);
+        let output_namespace_offset = self.output.len();
         if is_settings_root || is_inline_settings_root {
             self.output.push_str(SETTINGS_ROOT_UI_NAMESPACES);
         }
@@ -1171,12 +1209,13 @@ impl DataCompositionXmlWriter {
         } else {
             self.output.push('>');
         }
-        Some(
-            dynamic_declarations
+        Some(DcsWrittenStart {
+            dynamic_prefixes: dynamic_declarations
                 .into_iter()
                 .map(|(prefix, _)| prefix)
                 .collect(),
-        )
+            output_namespace_offset,
+        })
     }
 
     fn write_text(
@@ -1212,6 +1251,47 @@ impl DataCompositionXmlWriter {
                 let value_start = text.find(value)?;
                 self.output.push_str(&text[..value_start]);
                 self.output.push_str(&escape_xml_text(&rendered.value));
+                self.output.push_str(&text[value_start + value.len()..]);
+                return Some(());
+            }
+        }
+        if self
+            .element_stack
+            .last()
+            .is_some_and(|frame| frame.is_data_ui_color_value)
+        {
+            let value = text.trim();
+            let value_start = text.find(value)?;
+            let in_area_template = self.element_stack.iter().any(|frame| {
+                frame.namespace.as_deref() == Some(DCS_AREA_TEMPLATE_NS)
+                    && frame.local.as_slice() == b"appearance"
+            });
+            let resolved_style_name = data_composition_style_item_name(text, self.object_refs);
+            let qualified_area_value = (in_area_template && value.contains(':'))
+                .then(|| resolve_data_composition_qname(reader, value))
+                .flatten()
+                .and_then(|expanded| {
+                    let namespace = expanded.namespace?;
+                    Some((namespace, expanded.local))
+                });
+            if let Some((namespace, local)) = resolved_style_name
+                .map(|name| (STYLE_NS.to_vec(), name))
+                .or(qualified_area_value)
+            {
+                let prefix = in_area_template.then(|| self.scope_prefix(8));
+                if let Some(prefix) = &prefix {
+                    let output_namespace_offset =
+                        self.element_stack.last()?.output_namespace_offset;
+                    let namespace = std::str::from_utf8(&namespace).ok()?;
+                    self.output.insert_str(
+                        output_namespace_offset,
+                        &format!(" xmlns:{prefix}=\"{}\"", escape_xml_text(namespace)),
+                    );
+                }
+                self.output.push_str(&text[..value_start]);
+                self.output.push_str(prefix.as_deref().unwrap_or("style"));
+                self.output.push(':');
+                self.output.push_str(&escape_xml_text(&local));
                 self.output.push_str(&text[value_start + value.len()..]);
                 return Some(());
             }
@@ -1379,14 +1459,20 @@ fn data_composition_element_frame(
     event: &quick_xml::events::BytesStart<'_>,
     namespace: Option<&[u8]>,
     local: &[u8],
-    dynamic_prefixes: Vec<String>,
+    written_start: DcsWrittenStart,
 ) -> Option<DcsElementFrame> {
     let mut xsi_type_local = None;
+    let mut is_data_ui_color_value = false;
     for attribute in event.attributes().with_checks(false) {
         let attribute = attribute.ok()?;
         let (attr_namespace, attr_local) = reader.resolve_attribute(attribute.key);
         if namespace_ref(&attr_namespace) == Some(XSI_NS) && attr_local.as_ref() == b"type" {
             let value = attribute.decode_and_unescape_value(reader.decoder()).ok()?;
+            let expanded = resolve_data_composition_qname(reader, &value)?;
+            is_data_ui_color_value = namespace == Some(DCS_CORE_NS)
+                && local == b"value"
+                && expanded.namespace.as_deref() == Some(DATA_UI_NS)
+                && expanded.local == "Color";
             xsi_type_local = Some(
                 value
                     .rsplit_once(':')
@@ -1401,7 +1487,9 @@ fn data_composition_element_frame(
         namespace: namespace.map(<[u8]>::to_vec),
         local: local.to_vec(),
         xsi_type_local,
-        dynamic_prefixes,
+        dynamic_prefixes: written_start.dynamic_prefixes,
+        is_data_ui_color_value,
+        output_namespace_offset: written_start.output_namespace_offset,
     })
 }
 

@@ -1138,9 +1138,12 @@ pub(super) fn write_source_asset(
                     asset.primary_path.display()
                 )
             })?;
-            let content =
-                normalize_data_composition_schema_template_xml(&inflated, context.dcs_type_index)
-                    .unwrap_or(inflated);
+            let content = normalize_data_composition_schema_template_xml(
+                &inflated,
+                context.dcs_type_index,
+                context.object_refs,
+            )
+            .unwrap_or(inflated);
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)

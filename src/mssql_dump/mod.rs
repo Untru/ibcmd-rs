@@ -755,7 +755,10 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
     let selected_configuration_index_needs =
-        selected_configuration_source_asset_index_needs(&file_names);
+        selected_configuration_source_asset_index_needs_with_metadata(
+            &file_names,
+            &selected_metadata_texts,
+        );
     let selected_metadata_index_needs = if selected_configuration_index_needs.is_none() {
         selected_metadata_source_reference_index_needs(&selected_metadata_texts)
     } else {
