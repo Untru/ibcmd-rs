@@ -4031,9 +4031,11 @@ pub(super) fn parse_form_child_item_with_context(
     } else {
         None
     };
-    let title = parse_form_child_item_title(wrapper, &fields);
+    let title = parse_form_child_item_title(tag, wrapper, &fields);
     let input_hint = if tag == "InputField" {
         parse_form_input_field_input_hint(input_field_extended_options.as_deref())
+    } else if tag == "FormattedDocumentField" {
+        Vec::new()
     } else {
         parse_form_child_item_input_hint(wrapper, &fields)
     };
@@ -4996,6 +4998,7 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "CheckBoxField"
             | "RadioButtonField"
             | "TextDocumentField"
+            | "FormattedDocumentField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -7395,6 +7398,7 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
             "4" => Some("PictureField"),
             "5" => Some("RadioButtonField"),
             "7" => Some("TextDocumentField"),
+            "17" => Some("FormattedDocumentField"),
             _ => None,
         },
         "5" | "6" => match fields.get(5).map(|value| value.trim())? {
@@ -7423,11 +7427,16 @@ pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Opti
     })
 }
 
-pub(super) fn parse_form_child_item_title(wrapper: &str, fields: &[&str]) -> Vec<(String, String)> {
-    let indexes: &[usize] = match wrapper {
-        "73" | "55" => &[9],
-        "31" | "34" => &[6, 7],
-        "37" | "48" => &[9, 10],
+pub(super) fn parse_form_child_item_title(
+    tag: &str,
+    wrapper: &str,
+    fields: &[&str],
+) -> Vec<(String, String)> {
+    let indexes: &[usize] = match (tag, wrapper) {
+        ("FormattedDocumentField", "37" | "48") => &[9],
+        (_, "73" | "55") => &[9],
+        (_, "31" | "34") => &[6, 7],
+        (_, "37" | "48") => &[9, 10],
         _ => &[7],
     };
     indexes
@@ -7855,6 +7864,7 @@ pub(super) fn parse_form_child_item_data_path(
             | "PictureField"
             | "RadioButtonField"
             | "TextDocumentField"
+            | "FormattedDocumentField"
     )
     .then(|| {
         form_input_field_layout_is_extended(fields)
@@ -7867,7 +7877,11 @@ pub(super) fn parse_form_child_item_data_path(
             .get(11)
             .and_then(parse_bound)
             .or_else(|| main_data_path.map(ToOwned::to_owned)),
-        "InputField" | "CheckBoxField" | "PictureField" | "RadioButtonField" => [11usize, 12]
+        "InputField"
+        | "CheckBoxField"
+        | "PictureField"
+        | "RadioButtonField"
+        | "FormattedDocumentField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound)
@@ -8662,12 +8676,6 @@ pub(super) fn format_form_body_xml(
     if properties.auto_fill_check == Some(false) {
         xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
     }
-    if let Some(value) = properties.use_for_folders_and_items {
-        xml.push_str(&format!(
-            "\t<UseForFoldersAndItems>{}</UseForFoldersAndItems>\r\n",
-            escape_xml_text(value)
-        ));
-    }
     if properties.customizable == Some(false) {
         xml.push_str("\t<Customizable>false</Customizable>\r\n");
     }
@@ -8676,16 +8684,6 @@ pub(super) fn format_form_body_xml(
             "\t<CommandBarLocation>{}</CommandBarLocation>\r\n",
             escape_xml_text(command_bar_location)
         ));
-    }
-    if !properties.command_set_excluded_commands.is_empty() {
-        xml.push_str("\t<CommandSet>\r\n");
-        for command in &properties.command_set_excluded_commands {
-            xml.push_str(&format!(
-                "\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
-                escape_xml_text(command)
-            ));
-        }
-        xml.push_str("\t</CommandSet>\r\n");
     }
     if let Some(vertical_scroll) = properties.vertical_scroll {
         xml.push_str(&format!(
@@ -8703,6 +8701,22 @@ pub(super) fn format_form_body_xml(
         xml.push_str(&format!(
             "\t<ConversationsRepresentation>{}</ConversationsRepresentation>\r\n",
             escape_xml_text(conversations_representation)
+        ));
+    }
+    if !properties.command_set_excluded_commands.is_empty() {
+        xml.push_str("\t<CommandSet>\r\n");
+        for command in &properties.command_set_excluded_commands {
+            xml.push_str(&format!(
+                "\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
+                escape_xml_text(command)
+            ));
+        }
+        xml.push_str("\t</CommandSet>\r\n");
+    }
+    if let Some(value) = properties.use_for_folders_and_items {
+        xml.push_str(&format!(
+            "\t<UseForFoldersAndItems>{}</UseForFoldersAndItems>\r\n",
+            escape_xml_text(value)
         ));
     }
     if properties.show_title == Some(false) {
