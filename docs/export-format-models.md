@@ -616,6 +616,29 @@ invalid. The accepted gate removed four fallback Config_module_text files and
 restored four canonical modules, improving tracked diff from 1690 to 1686 files
 and deletions from 224580 to 224145.
 
+## Chart predefined data
+
+Status: the `ChartOfAccounts` and `ChartOfCalculationTypes` models are confirmed
+by raw structure and full export.
+
+Predefined-data routing and parsing are keyed by metadata family and exact
+source layout. `ChartOfAccounts` uses suffix `9`, root discriminator `2`, and a
+nested rowset; `ChartOfCalculationTypes` uses suffix `2`, root discriminator
+`9`, and a root rowset. Row schemas provide column ids and value offsets.
+Account flags are the non-fixed boolean schema columns, and references are
+resolved through metadata-derived object and predefined-item indexes.
+
+The reference index is built from all parsed Predefined bodies and contained
+314 unique items in the BSP corpus. Missing or ambiguous references fail the
+export; UUID passthrough and owner/file exceptions are not used. Catalog and
+ChartOfCharacteristicTypes bodies retain their independent generic parser.
+
+The accepted gate restored the complete 442-line ChartOfAccounts payload and
+18-line ChartOfCalculationTypes payload. Both target files reached zero content
+diff, while the full diff moved from `1629 files, +32044/-222947` to
+`1627 files, +32044/-222487`. Added production lines contained no UUID literals,
+Cyrillic object names, or object/path special cases.
+
 ## ConfigDumpInfo aggregate
 
 Status: corpus model confirmed; implementation remains open.
