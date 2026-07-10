@@ -45,14 +45,17 @@ Classification:
   replaced with structural parsing:
   - `normalize_form_dynamic_list_settings` special-cases `СписокЗаказов` and
     `Document.ЗаказКлиента`;
-  - form picture and numeric-label decisions depend on concrete Russian item
-    names and data paths;
+  - form picture-file decisions depend on concrete Russian item names;
   - role-right reconstruction contains mappings between concrete Russian
     characteristic-plan attribute and tabular-section names.
 - Resolved in `6ee75f0`: the concrete command-group UUID to
   `CommandGroup.Органайзер` mapping was removed. Custom command groups now use
   current-metadata `object_refs`. Separate parent/current exports were identical
   across all 12,197 relative paths, lengths, and SHA-256 content hashes.
+- Resolved in `8485b02`: Input/Label field right alignment now comes from raw
+  slot `23 + top_level_offset`, not `СоставЗаказа.*` data paths. The full gate
+  restored 13 native `HorizontalAlign=Right` lines across ten forms with zero
+  target additions.
 - `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` (`2ef6d6fa-...`) is not in that
   category. It is accepted only in exact typed command-source record shapes,
   maps to the platform token `FormCommandPanelGlobalCommands`, and was also
