@@ -3585,6 +3585,80 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
 }
 
 #[test]
+fn derives_default_list_settings_from_auto_save_for_renamed_attribute() {
+    let object_refs = BTreeMap::from([(
+        "11111111-1111-4111-8111-111111111111".to_string(),
+        "Document.СинтетическийДокумент".to_string(),
+    )]);
+    let attribute = parse_form_attribute(
+        r##"{9,{17},0,"ПереименованныйСписокА",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,2,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,11111111-1111-4111-8111-111111111111},"AutoSaveUserSettings",{"B",1}},{0,0}}"##,
+        &BTreeMap::new(),
+        &object_refs,
+    )
+    .expect("renamed dynamic-list attribute");
+    let settings = attribute.settings.expect("dynamic-list settings");
+
+    assert!(settings.auto_save_user_settings);
+    assert_eq!(
+        settings.main_table.as_deref(),
+        Some("Document.СинтетическийДокумент")
+    );
+    assert!(settings.list_settings.filter.is_some());
+    assert!(settings.list_settings.order.is_some());
+    assert!(settings.list_settings.conditional_appearance.is_some());
+    assert_eq!(
+        settings.list_settings.items_view_mode.as_deref(),
+        Some("Normal")
+    );
+    assert!(settings.list_settings.items_user_setting_id.is_some());
+}
+
+#[test]
+fn preserves_custom_order_without_auto_save_for_renamed_attribute() {
+    let order_xml = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+        "\t<item xsi:type=\"OrderItemField\">\r\n",
+        "\t\t<field>Дата</field>\r\n",
+        "\t\t<orderType>Asc</orderType>\r\n",
+        "\t</item>\r\n",
+        "</Order>",
+    );
+    let object_refs = BTreeMap::from([(
+        "11111111-1111-4111-8111-111111111111".to_string(),
+        "Document.СинтетическийДокумент".to_string(),
+    )]);
+    let raw_attribute = r##"{9,{18},0,"ПереименованныйСписокБ",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,3,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,11111111-1111-4111-8111-111111111111},"AutoSaveUserSettings",{"B",0},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:ORDER_XML}}},{0,0}}"##
+        .replace("ORDER_XML", &encode_base64_for_test(order_xml.as_bytes()));
+    let attribute = parse_form_attribute(&raw_attribute, &BTreeMap::new(), &object_refs)
+        .expect("renamed dynamic-list attribute");
+    let settings = attribute.settings.expect("dynamic-list settings");
+
+    assert!(!settings.auto_save_user_settings);
+    assert_eq!(
+        settings.main_table.as_deref(),
+        Some("Document.СинтетическийДокумент")
+    );
+    assert!(settings.list_settings.filter.is_none());
+    let order = settings
+        .list_settings
+        .order
+        .as_ref()
+        .expect("explicit custom order");
+    assert_eq!(
+        order.items,
+        vec![FormListSettingsOrderItem {
+            field: "Дата".to_string(),
+            order_type: Some("Asc".to_string()),
+        }]
+    );
+    assert!(settings.list_settings.conditional_appearance.is_none());
+    assert!(settings.list_settings.items_view_mode.is_none());
+    assert!(settings.list_settings.items_user_setting_id.is_none());
+}
+
+#[test]
 fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
     let mut settings = FormDynamicListSettings {
         auto_save_user_settings: true,
@@ -3696,7 +3770,7 @@ fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
             &BTreeMap::new(),
         )
         .expect("dynamic list settings");
-    let settings = normalize_form_dynamic_list_settings("Список", settings);
+    let settings = normalize_form_dynamic_list_settings(settings);
 
     assert!(settings.list_settings.filter.is_some());
     assert_eq!(

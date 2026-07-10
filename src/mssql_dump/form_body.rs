@@ -1720,7 +1720,7 @@ pub(super) fn parse_form_attribute(
     let settings = fields
         .get(14)
         .and_then(|field| parse_form_dynamic_list_settings(field, object_refs));
-    let settings = settings.map(|settings| normalize_form_dynamic_list_settings(&name, settings));
+    let settings = settings.map(normalize_form_dynamic_list_settings);
     let spreadsheet_document_settings = fields.get(14).and_then(|field| {
         parse_form_spreadsheet_document_settings(field, &value_types, object_refs)
     });
@@ -1788,38 +1788,8 @@ pub(super) fn parse_form_type_description_settings(
 }
 
 pub(super) fn normalize_form_dynamic_list_settings(
-    attribute_name: &str,
     mut settings: FormDynamicListSettings,
 ) -> FormDynamicListSettings {
-    if attribute_name == "СписокЗаказов"
-        && settings.list_settings.filter.is_none()
-        && settings.list_settings.order.is_none()
-        && settings.list_settings.conditional_appearance.is_none()
-        && settings.list_settings.items_view_mode.is_none()
-        && settings.list_settings.items_user_setting_id.is_none()
-        && settings.main_table.as_deref() == Some("Document.ЗаказКлиента")
-    {
-        settings.list_settings = FormListSettings {
-            filter: Some(FormListSettingsStandardSection {
-                view_mode: Some("Normal".to_string()),
-                user_setting_id: Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb".to_string()),
-                raw_xml: None,
-            }),
-            order: Some(FormListSettingsOrder {
-                items: Vec::new(),
-                view_mode: Some("Normal".to_string()),
-                user_setting_id: Some("88619765-ccb3-46c6-ac52-38e9c992ebd4".to_string()),
-                raw_xml: None,
-            }),
-            conditional_appearance: Some(FormListSettingsStandardSection {
-                view_mode: Some("Normal".to_string()),
-                user_setting_id: Some("b75fecce-942b-4aed-abc9-e6a02e460fb3".to_string()),
-                raw_xml: None,
-            }),
-            items_view_mode: Some("Normal".to_string()),
-            items_user_setting_id: Some("911b6018-f537-43e8-a417-da56b22f9aec".to_string()),
-        };
-    }
     apply_implicit_form_dynamic_list_settings(&mut settings);
     settings
 }
