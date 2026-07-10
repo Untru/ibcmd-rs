@@ -116,14 +116,34 @@ Corpus evidence:
   root storage `appearance`, unresolved `appIndex`, and inner storage-wrapper
   counts were zero. TypeId, TypeSet, settingsVariant, settings name, and Form
   command guardrails did not change.
-- The remaining area-template storage model is proven but not implemented.
-  Each `dcsat:appIndex` value is a zero-based index into the ordered outer
-  `SchemaFile/appearance` side table. Native replaces the index in place with
+- The area-template storage model is implemented for structurally complete
+  side-table documents. Each `dcsat:appIndex` value is a zero-based index into
+  the ordered outer `SchemaFile/appearance` side table. Native replaces the
+  index in place with
   `dcsat:appearance` containing a deep copy of the indexed wrapper's children;
   it drops the side-table wrapper attributes and emits no side-table nodes at
   the schema root. Repeated indexes duplicate the body. In the independent UT
   corpus, all 1,099 references across 49 side-table documents were in range and
-  every table's referenced unique indexes covered `0..N-1`.
+  every table's referenced unique indexes covered `0..N-1`. The resolver
+  requires that exact coverage, validates the table-cell/index shape, applies
+  byte offsets in reverse order, and rejects unknown or partial envelopes.
+- The BSP area gate covered 14 side-table documents with 165 entries and 458
+  references. Twelve were admitted; two with 13 referenced unresolved color
+  UUIDs stayed fail-closed. The full diff moved from
+  `1602 files, +31486/-204748` to `1599 files, +31470/-201297`, and the DCS body
+  slice moved from `20 files, +157/-10966` to
+  `17 files, +141/-7515`. All 66 DCS documents parse; 150 inline area
+  appearances were emitted, while root storage appearances, `appIndex`, and
+  inner storage wrappers remained zero. Existing unresolved direct color UUID
+  additions remained exactly 124, so the area merge introduced none.
+- A serialized Color value shaped exactly as `0:<UUID>` is a reference to a
+  `StyleItem` object in the current configuration, not a platform identifier.
+  BSP contains 14 unique referenced StyleItems and independent UT contains nine;
+  every observed UUID resolves through metadata and none is a platform constant.
+  The future color gate must use the existing metadata-derived `object_refs`
+  index and accept only `StyleItem.*`. Hardcoding these UUIDs or native names is
+  prohibited. Direct literals and already-qualified style/web values are
+  negative controls and must remain unchanged.
 
 Rejected hypothesis:
 
