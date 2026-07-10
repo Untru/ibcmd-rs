@@ -372,13 +372,21 @@ Additional confirmed `CommandName` records:
 | UUID | FormattedDocument suffix |
 | --- | --- |
 | `39f6b9f1-7aa1-4a03-a01b-e127d51bc228` | `DecreaseIndent` |
+| `4ca32834-6f9f-4dfb-89ce-6db36931c89b` | `Preview` |
 | `56ae90b6-588f-406e-919c-cc5cc7f86297` | `AlignJustify` |
+| `5a331cec-bf93-4af5-8f51-80fd7118db47` | `SaveAs` |
+| `7a294bdc-b86b-4b73-abc4-df9c811f61ef` | `CopyToClipboard` |
 | `87ecfbdd-8e2b-4ba2-a315-0897020f382f` | `AlignLeft` |
 | `9d8a3915-de52-4227-91cd-2fce22e09972` | `Picture` |
 | `a8483976-8b13-416a-9680-133b306dc6b0` | `Print` |
 | `ab0ebc39-68ee-4034-b2f4-43eee55bd651` | `AlignCenter` |
 | `d0a4d953-115b-4059-a6cb-6e67f903a4f3` | `IncreaseIndent` |
 | `e428af27-c4f7-4577-b80e-95a79f94322d` | `AlignRight` |
+
+The three later additions above were present in both Button references and the
+FormattedDocument command set, and were cross-checked against an independent
+raw form corpus. `SelectAll` was not promoted because its reachable-owner
+evidence was incomplete.
 
 `CommandSource` model:
 
@@ -543,6 +551,10 @@ Confirmed by export:
   `1686 files changed, 32376 insertions(+), 224137 deletions(-)`.
   `CommandName` improved from `+0/-47` to `+0/-39`; `CommandSource` remained
   `+0/-0` and no owner type shared another family's UUID dispatch.
+- Adding the three independently confirmed FormattedDocument commands later
+  moved the full diff from `1591 files, +31369/-193822` to
+  `1591 files, +31369/-193819`. `CommandName` improved from `+0/-26` to
+  `+0/-23`; `CommandSource` and every non-Form guard remained unchanged.
 - Broadly admitting the full FormattedDocumentField subtree was rejected. It
   improved `CommandName` to `+0/-26` but increased full insertions from 32044
   to 32051. Exact rollback comparison isolated one false localized `Title`
