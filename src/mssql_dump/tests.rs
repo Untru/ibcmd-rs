@@ -22761,11 +22761,12 @@ fn parses_information_register_variable_collections_without_partial_results() {
     let value_type_uuid = "66666666-6666-4666-8666-666666666666";
     let array_type_uuid = "77777777-7777-4777-8777-777777777777";
     let mut object_refs = BTreeMap::new();
+    let mut type_index = BTreeMap::new();
     object_refs.insert(
         path_uuid.to_string(),
         "InformationRegister.Rates.Dimension.Target".to_string(),
     );
-    object_refs.insert(owner_uuid.to_string(), "Enum.Status".to_string());
+    type_index.insert(owner_uuid.to_string(), "cfg:EnumRef.Status".to_string());
     object_refs.insert(
         value_uuid.to_string(),
         "Enum.Status.EnumValue.Active".to_string(),
@@ -22813,6 +22814,7 @@ fn parses_information_register_variable_collections_without_partial_results() {
         &format!(
             "{{0,5,\"Bool\",{{\"B\",1}},\"Text\",{{\"S\",\"value\"}},\"Nil\",{{\"U\"}},\"Ref\",{reference},\"Array\",{{\"#\",{array_type_uuid},{{2,{reference},{second_reference}}}}}}}"
         ),
+        &type_index,
         &object_refs,
     )
     .unwrap();
@@ -22838,6 +22840,17 @@ fn parses_information_register_variable_collections_without_partial_results() {
         parameters[4].value,
         MetadataChoiceParameterValue::FixedArray(ref values)
             if values == &["Enum.Status.EnumValue.Active", "Enum.Status.EnumValue.Closed"]
+    ));
+    assert!(matches!(
+        parse_information_register_fill_value(
+            &format!(
+                "{{\"#\",{value_type_uuid},{{0,{owner_uuid},00000000-0000-0000-0000-000000000000}}}}"
+            ),
+            &type_index,
+            &object_refs,
+        ),
+        Some(MetadataChildFillValue::DesignTimeRef(ref value))
+            if value == "Enum.Status.EmptyRef"
     ));
 
     let mut xml = String::new();
@@ -22880,12 +22893,165 @@ fn information_register_child_payload_fails_closed_on_shape_errors() {
         parse_information_register_choice_parameters(
             "{0,2,\"OnlyOne\",{\"B\",1}}",
             &BTreeMap::new(),
+            &BTreeMap::new(),
         )
         .is_none()
     );
     assert!(
         parse_information_register_fill_value(
             "{\"#\",66666666-6666-4666-8666-666666666666,{0,77777777-7777-4777-8777-777777777777,88888888-8888-4888-8888-888888888888}}",
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn classifies_information_register_type_sets_and_preserves_partition_order() {
+    let specific_type_id = "11111111-1111-4111-8111-111111111111";
+    let defined_type_id = "22222222-2222-4222-8222-222222222222";
+    let characteristic_type_id = "33333333-3333-4333-8333-333333333333";
+    let mut type_index = BTreeMap::new();
+    type_index.insert(
+        specific_type_id.to_string(),
+        "cfg:CatalogRef.Items".to_string(),
+    );
+    type_index.insert(
+        defined_type_id.to_string(),
+        "cfg:DefinedType.Custom".to_string(),
+    );
+    type_index.insert(
+        characteristic_type_id.to_string(),
+        "cfg:Characteristic.Custom".to_string(),
+    );
+    let value_types = information_register_stable_partition_types(
+        parse_information_register_type_pattern(
+            &format!(
+                "{{\"Pattern\",{{\"#\",{defined_type_id}}},{{\"S\"}},{{\"#\",{specific_type_id}}},{{\"#\",e61ef7b8-f3e1-4f4b-8ac7-676e90524997}},{{\"#\",474c3bf6-08b5-4ddc-a2ad-989cedf11583}},{{\"B\"}},{{\"#\",{characteristic_type_id}}}}}"
+            ),
+            &type_index,
+        )
+        .unwrap(),
+    );
+
+    assert!(matches!(value_types[0], ConstantValueType::String { .. }));
+    assert!(matches!(
+        value_types[1],
+        ConstantValueType::Reference { ref reference }
+            if reference == "cfg:CatalogRef.Items"
+    ));
+    assert!(matches!(value_types[2], ConstantValueType::Boolean));
+    let type_set_names = value_types[3..]
+        .iter()
+        .map(metadata_type_xml_name)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        type_set_names,
+        [
+            "cfg:DefinedType.Custom",
+            "cfg:CatalogRef",
+            "cfg:EnumRef",
+            "cfg:Characteristic.Custom",
+        ]
+    );
+    assert!(
+        value_types[3..]
+            .iter()
+            .all(|value| matches!(value, ConstantValueType::ReferenceTypeSet { .. }))
+    );
+
+    let xml = format_metadata_types_xml_with_indent(&value_types, "\t");
+    assert!(xml.contains("<v8:Type>cfg:CatalogRef.Items</v8:Type>"));
+    assert!(xml.contains("<v8:TypeSet>cfg:CatalogRef</v8:TypeSet>"));
+    assert!(xml.contains("<v8:TypeSet>cfg:EnumRef</v8:TypeSet>"));
+    assert!(
+        xml.find("<v8:Type>xs:string</v8:Type>").unwrap()
+            < xml
+                .find("<v8:TypeSet>cfg:DefinedType.Custom</v8:TypeSet>")
+                .unwrap()
+    );
+
+    assert!(
+        parse_information_register_type_pattern(
+            "{\"Pattern\",{\"#\",99999999-9999-4999-8999-999999999999}}",
+            &type_index,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn parses_detailed_information_register_command_without_descriptor_picture() {
+    let command_uuid = "11111111-1111-4111-8111-111111111111";
+    let parameter_type_id = "22222222-2222-4222-8222-222222222222";
+    let command = format!(
+        "{{9,{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},2,{{1,\"en\",\"Run command\"}},1,{{0,0,0}},0,{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},{{\"Pattern\",{{\"#\",{parameter_type_id}}}}},{{3,{{1,0,{command_uuid}}},\"Run\",{{1,\"en\",\"Run\"}},\"comment\",0,0,00000000-0000-0000-0000-000000000000,0}},1,1,0}}"
+    );
+    let fields = split_1c_braced_fields(&command, 0).unwrap();
+    let header = MetadataHeader {
+        uuid: command_uuid.to_string(),
+        name: "Run".to_string(),
+        synonyms: vec![("en".to_string(), "Run".to_string())],
+        comment: "comment".to_string(),
+        template_type_code: None,
+    };
+    let mut type_index = BTreeMap::new();
+    type_index.insert(
+        parameter_type_id.to_string(),
+        "cfg:CatalogRef.Items".to_string(),
+    );
+    let properties = parse_information_register_child_command_properties_from_fields(
+        &fields,
+        &header,
+        &type_index,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(properties.group.as_deref(), Some("ActionsPanelTools"));
+    assert_eq!(properties.representation, "PictureAndText");
+    assert_eq!(properties.parameter_use_mode, "Multiple");
+    assert!(properties.modifies_data);
+    assert_eq!(properties.command_parameter_types, ["cfg:CatalogRef.Items"]);
+    assert_eq!(properties.picture_ref, None);
+    assert!(!properties.picture_load_transparent);
+
+    let metadata_command = MetadataChildCommand {
+        header: header.clone(),
+        properties: Some(properties),
+    };
+    let mut xml = String::new();
+    push_metadata_child_command_xml(&mut xml, &metadata_command);
+    assert!(xml.contains("<Group>ActionsPanelTools</Group>"));
+    assert!(xml.contains("<v8:Type>cfg:CatalogRef.Items</v8:Type>"));
+    assert!(xml.contains("<ParameterUseMode>Multiple</ParameterUseMode>"));
+    assert!(xml.contains("<ModifiesData>true</ModifiesData>"));
+    assert!(xml.contains("<Representation>PictureAndText</Representation>"));
+    assert!(xml.contains("<Picture/>"));
+    assert!(xml.contains("<Shortcut/>"));
+
+    let mut owner_xml = "\t<InformationRegister>\r\n\t\t<ChildObjects>\r\n\t\t\t<Resource/>\r\n\t\t</ChildObjects>\r\n\t</InformationRegister>".to_string();
+    insert_metadata_child_objects_xml(
+        &mut owner_xml,
+        "InformationRegister",
+        "\t\t\t<Form>Record</Form>\r\n",
+    );
+    insert_metadata_child_command_objects_xml(
+        &mut owner_xml,
+        "InformationRegister",
+        &[metadata_command],
+    );
+    assert!(owner_xml.find("<Resource/>").unwrap() < owner_xml.find("<Form>").unwrap());
+    assert!(owner_xml.find("<Form>").unwrap() < owner_xml.find("<Command ").unwrap());
+
+    let malformed = command.replacen("{4,0,{0}", "{4,0,0", 1);
+    let malformed_fields = split_1c_braced_fields(&malformed, 0).unwrap();
+    assert!(
+        parse_information_register_child_command_properties_from_fields(
+            &malformed_fields,
+            &header,
+            &type_index,
             &BTreeMap::new(),
         )
         .is_none()
