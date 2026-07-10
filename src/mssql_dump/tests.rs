@@ -9402,6 +9402,10 @@ fn extracts_real_world_form_command_interface_command_bar_variants() {
             "CommonCommand.СозданиеСвязанныхОбъектов".to_string(),
         ),
         (
+            "c59e11f3-6bcb-404a-9d76-1416c12be354".to_string(),
+            "CommandGroup.Органайзер".to_string(),
+        ),
+        (
             "25896075-2484-4879-8310-7f5680d80b48".to_string(),
             "CommonCommand.Напомнить".to_string(),
         ),
@@ -9455,6 +9459,25 @@ fn extracts_real_world_form_command_interface_command_bar_variants() {
     assert!(
         form_xml.contains("<Command>CommonCommand.СоздатьЗаметкуПоПредмету</Command>"),
         "{form_xml}"
+    );
+}
+
+#[test]
+fn resolves_custom_form_command_group_only_from_object_refs() {
+    let group_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let group_reference = "CommandGroup.RenamedOrganizer";
+    let object_refs = BTreeMap::from([(group_uuid.to_string(), group_reference.to_string())]);
+
+    assert_eq!(
+        parse_form_command_group_reference(&format!("{{0,{group_uuid}}}"), &object_refs).as_deref(),
+        Some(group_reference)
+    );
+    assert_eq!(
+        parse_form_command_group_reference(
+            "{0,c59e11f3-6bcb-404a-9d76-1416c12be354}",
+            &BTreeMap::new(),
+        ),
+        None
     );
 }
 

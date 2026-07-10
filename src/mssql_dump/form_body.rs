@@ -8562,7 +8562,6 @@ pub(super) fn parse_form_command_group_reference(
 
 pub(super) fn form_standard_command_group_name(uuid: &str) -> Option<&'static str> {
     match uuid {
-        "c59e11f3-6bcb-404a-9d76-1416c12be354" => Some("CommandGroup.Органайзер"),
         "dc2ade0f-383e-4c78-85f2-c0dabc0e2dc0" => Some("FormCommandBarCreateBasedOn"),
         "cb50f5c0-8013-4262-93a2-f0db379d6b6b" => Some("FormCommandBarImportant"),
         "eacad741-96b9-4b3a-bf79-dde9ecead1a1" => Some("FormNavigationPanelGoTo"),
