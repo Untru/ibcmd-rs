@@ -7186,7 +7186,7 @@ fn parse_attribute_tabular_section_child_objects(
         roots.push(child);
     }
 
-    if owner_kind == "DataProcessor" {
+    if matches!(owner_kind, "Catalog" | "DataProcessor") {
         roots.sort_by_key(|child| match child.tag {
             "Attribute" => 0usize,
             "TabularSection" => 1usize,

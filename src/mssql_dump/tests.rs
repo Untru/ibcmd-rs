@@ -32071,13 +32071,13 @@ fn extracts_catalog_attribute_and_tabular_section_child_headers() {
 {zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
 55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
 0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,0}}}}}},\
-{{3,\r\n{{1,0,{attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\"}}\r\n}},\
 {{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
 {{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
 {{5,\r\n{{2,0,{{\"Pattern\",{{\"#\",{catalog_ref_type_id}}}}}}},\
 {{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Price\",{{1,\"en\",\"Price\"}},\"\"}}\r\n}}\
-}}}}\r\n}}"
+}}}},\
+{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,0}}}}}},\
+{{3,\r\n{{1,0,{attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\"}}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
