@@ -97,3 +97,9 @@ Classification:
   `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` remains an exact typed source marker:
   it has no BSP metadata-object hit and was independently observed in 35 form
   blobs from another infobase.
+- Catalog Attribute routing uses only the direct and nested platform collection
+  markers `cf4abea7-...` and `888744e1-...`, plus the zero UUID in the exact
+  layout-57 reserved tail. The markers occur with the same structural role in
+  BSP and UT and have zero intersections with either metadata-object UUID
+  inventory. Catalog names, Attribute UUIDs, form names, and paths are resolved
+  from current indexes; none is a production literal.

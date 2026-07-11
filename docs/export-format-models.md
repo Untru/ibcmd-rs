@@ -872,6 +872,45 @@ metadata identity UUIDs; no database object names or absolute paths were
 added. `Configuration.xml`, all Form/DCS files, and `ConfigDumpInfo.xml`
 retained their accepted SHA-256 content.
 
+## Catalog attribute payloads
+
+Status: confirmed by complete BSP and independent UT corpora, serialized
+exports, and an integrated native-tree gate.
+
+Catalog Attributes use an exact `27/23` payload under a typed header and
+Pattern. BSP direct Attributes use wrapper code 5/length 6 under Catalog root
+layout 56; UT direct Attributes use code 6/length 8 under root layout 57, with
+the exact reserved `0,{1,zero UUID}` tail. Nested Attributes use code 8/length
+5 in both corpora. Direct and nested collection markers are platform
+structural discriminators, declared counts and every item close exactly, and a
+collection cannot mix wrapper cohorts.
+
+All scalar enums are Catalog-specific. Structured ChoiceParameterLinks,
+LinkByType, ChoiceParameters, FillValue, and typed arrays use checked counts
+and current metadata/predefined indexes. Nonempty ChoiceForm references are
+valid only when their form owner is the unique CatalogRef in that Attribute's
+Pattern; all 10 independent UT cases are cross-Catalog references. Nested
+Attributes omit Use, FillFromFillingValue, and FillValue only after proving the
+raw omitted values are their exact defaults. Unsupported or ambiguous values
+suppress the complete property tail.
+
+The accepted BSP gate reconstructed all 1,560 tails (1,108 direct and 452
+nested) across exactly 109 changed Catalog root XML files, adding 44,663 native
+lines and no non-native lines. The UT gate matched all 8,607 tails (7,106
+direct and 1,501 nested), including ChoiceForm 10/10. A full metadata-only
+manifest checked 9,212 files with zero changes outside the 109 roots and did
+not generate ConfigDumpInfo.
+
+The first integrated export was held because adding large exact tails exposed
+an older group-order debt in 57 mixed Catalogs. Raw traversal put
+TabularSection before Attribute, while native requires stable
+`Attribute -> TabularSection` groups. A metadata-kind-only stable sort preserved
+UUID sets and within-group order and reduced the Catalog root diff from
+`114/+34013/-35695` to `114/+1718/-3400`. The final full diff moved from
+`1559/+31268/-142685` to `1559/+20562/-87316`; manifest outside/add/missing
+counts were all zero. Remaining Catalog differences are pre-existing root,
+TabularSection, and Type nodes, not Attribute tails or child order.
+
 ## Subsystem properties and content
 
 Status: confirmed across all 244 raw Subsystem records and by serialized export.
