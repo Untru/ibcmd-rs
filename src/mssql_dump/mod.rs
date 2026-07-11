@@ -3834,6 +3834,10 @@ struct DefaultListFormMetadataProperties {
     default_list_form: Option<String>,
 }
 
+struct DocumentJournalProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+}
+
 struct SubsystemProperties {
     include_help_in_contents: bool,
     include_in_command_interface: bool,
@@ -5830,6 +5834,9 @@ fn extract_metadata_source_xml_from_text_row(
             template_refs,
         )?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
+    } else if kind == "DocumentJournal" {
+        let document_journal = parse_document_journal_properties_from_text(text, header)?;
+        format_document_journal_source_xml(header, &document_journal, source_version).into_bytes()
     } else if kind == "BusinessProcess" {
         let business_process = parse_business_process_properties_from_text(text, uuid, form_refs)?;
         format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
@@ -12112,6 +12119,59 @@ fn parse_settings_storage_properties_from_text(
     })
 }
 
+fn parse_document_journal_properties_from_text(
+    text: &str,
+    header: &MetadataHeader,
+) -> Option<DocumentJournalProperties> {
+    let root_fields = split_information_register_braced_fields(text)?;
+    if root_fields.len() != 7
+        || root_fields.first()?.trim() != "1"
+        || root_fields.get(2)?.trim() != "4"
+    {
+        return None;
+    }
+
+    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+    if owner_fields.len() != 17 || owner_fields.first()?.trim() != "26" {
+        return None;
+    }
+    let header_wrapper = split_information_register_braced_fields(owner_fields.get(3)?)?;
+    if header_wrapper.len() != 2 || header_wrapper.first()?.trim() != "0" {
+        return None;
+    }
+    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    if !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+    {
+        return None;
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut generated_types = Vec::with_capacity(3);
+    for (type_index, value_index, name_prefix, category) in [
+        (10, 11, "DocumentJournalSelection", "Selection"),
+        (1, 2, "DocumentJournalList", "List"),
+        (8, 9, "DocumentJournalManager", "Manager"),
+    ] {
+        let type_id = parse_information_register_non_zero_uuid(owner_fields.get(type_index)?)?;
+        let value_id = parse_information_register_non_zero_uuid(owner_fields.get(value_index)?)?;
+        if !seen.insert(type_id.to_ascii_lowercase()) || !seen.insert(value_id.to_ascii_lowercase())
+        {
+            return None;
+        }
+        generated_types.push(GeneratedTypeEntry {
+            name: format!("{name_prefix}.{}", parsed_header.name),
+            category,
+            type_id,
+            value_id,
+        });
+    }
+
+    Some(DocumentJournalProperties { generated_types })
+}
+
 fn parse_settings_storage_collection(
     value: &str,
     expected_collection_uuid: &str,
@@ -17719,6 +17779,19 @@ fn format_data_processor_source_xml(
         if let Some(index) = xml.find("\t</DataProcessor>") {
             xml.insert_str(index, &child_objects);
         }
+    }
+    xml
+}
+
+fn format_document_journal_source_xml(
+    header: &MetadataHeader,
+    document_journal: &DocumentJournalProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("DocumentJournal", header, source_version);
+    let internal_info = format_generated_types_internal_info_xml(&document_journal.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
     }
     xml
 }

@@ -32715,19 +32715,344 @@ fn extracts_exchange_plan_child_form_and_template_refs_from_current_indexes() {
     assert_eq!(xml.matches("<Template>Rules</Template>").count(), 1);
 }
 
+fn strict_document_journal_text_for_test(
+    journal_uuid: &str,
+    name: &str,
+    generated_type_ids: [&str; 6],
+    root_collections: [&str; 4],
+) -> String {
+    let [
+        selection_type_id,
+        selection_value_id,
+        list_type_id,
+        list_value_id,
+        manager_type_id,
+        manager_value_id,
+    ] = generated_type_ids;
+    let [forms, templates, commands, other] = root_collections;
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    format!(
+        "{{1,{{26,{list_type_id},{list_value_id},\
+{{0,{{3,{{1,0,{journal_uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,{zero_uuid},0}}}},\
+aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,{{0}},0,{manager_type_id},{manager_value_id},\
+{selection_type_id},{selection_value_id},{{0}},{zero_uuid},{{0}},{{0}},{{0}}}},\
+4,{forms},{templates},{commands},{other}}}"
+    )
+}
+
 #[test]
-fn extracts_document_journal_child_form_and_template_refs_from_current_indexes() {
+fn extracts_four_document_journal_generated_type_cohorts_in_native_order() {
+    for (journal_uuid, name, ids) in [
+        (
+            "11000000-0000-4000-8000-000000000001",
+            "Interactions",
+            [
+                "10000000-0000-4000-8000-000000000001",
+                "10000000-0000-4000-8000-000000000002",
+                "10000000-0000-4000-8000-000000000003",
+                "10000000-0000-4000-8000-000000000004",
+                "10000000-0000-4000-8000-000000000005",
+                "10000000-0000-4000-8000-000000000006",
+            ],
+        ),
+        (
+            "22000000-0000-4000-8000-000000000002",
+            "MailJournal",
+            [
+                "20000000-0000-4000-8000-000000000001",
+                "20000000-0000-4000-8000-000000000002",
+                "20000000-0000-4000-8000-000000000003",
+                "20000000-0000-4000-8000-000000000004",
+                "20000000-0000-4000-8000-000000000005",
+                "20000000-0000-4000-8000-000000000006",
+            ],
+        ),
+        (
+            "33000000-0000-4000-8000-000000000003",
+            "Calls",
+            [
+                "30000000-0000-4000-8000-000000000001",
+                "30000000-0000-4000-8000-000000000002",
+                "30000000-0000-4000-8000-000000000003",
+                "30000000-0000-4000-8000-000000000004",
+                "30000000-0000-4000-8000-000000000005",
+                "30000000-0000-4000-8000-000000000006",
+            ],
+        ),
+        (
+            "44000000-0000-4000-8000-000000000004",
+            "Archive",
+            [
+                "40000000-0000-4000-8000-000000000001",
+                "40000000-0000-4000-8000-000000000002",
+                "40000000-0000-4000-8000-000000000003",
+                "40000000-0000-4000-8000-000000000004",
+                "40000000-0000-4000-8000-000000000005",
+                "40000000-0000-4000-8000-000000000006",
+            ],
+        ),
+    ] {
+        let text = strict_document_journal_text_for_test(
+            journal_uuid,
+            name,
+            ids,
+            ["{0}", "{0}", "{0}", "{0}"],
+        );
+        let blob = deflate_for_test(text.as_bytes());
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            journal_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap_or_else(|| panic!("failed positive {name}"));
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("DocumentJournals").join(format!("{name}.xml"))
+        );
+        assert_eq!(
+            xml.matches("<xr:GeneratedType ").count(),
+            3,
+            "{name}: {xml}"
+        );
+        let selection = xml
+            .find(&format!(
+                r#"<xr:GeneratedType name="DocumentJournalSelection.{name}" category="Selection">"#
+            ))
+            .unwrap();
+        let list = xml
+            .find(&format!(
+                r#"<xr:GeneratedType name="DocumentJournalList.{name}" category="List">"#
+            ))
+            .unwrap();
+        let manager = xml
+            .find(&format!(
+                r#"<xr:GeneratedType name="DocumentJournalManager.{name}" category="Manager">"#
+            ))
+            .unwrap();
+        assert!(selection < list && list < manager, "{name}: {xml}");
+        for (prefix, category, type_id, value_id) in [
+            ("DocumentJournalSelection", "Selection", ids[0], ids[1]),
+            ("DocumentJournalList", "List", ids[2], ids[3]),
+            ("DocumentJournalManager", "Manager", ids[4], ids[5]),
+        ] {
+            let exact_block = format!(
+                "\t\t\t<xr:GeneratedType name=\"{prefix}.{name}\" category=\"{category}\">\r\n\
+\t\t\t\t<xr:TypeId>{type_id}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{value_id}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n"
+            );
+            assert!(
+                xml.contains(&exact_block),
+                "wrong {category} pair in {name}: {xml}"
+            );
+        }
+        assert!(xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap());
+        for unrelated in [
+            "<UseStandardCommands>",
+            "<DefaultListForm>",
+            "<RegisteredDocuments>",
+            "<StandardAttributes>",
+            "<Column ",
+        ] {
+            assert!(
+                !xml.contains(unrelated),
+                "unexpected {unrelated} in {name}: {xml}"
+            );
+        }
+    }
+}
+
+#[test]
+fn derives_document_journal_generated_type_names_from_renamed_header() {
+    let journal_uuid = "55000000-0000-4000-8000-000000000005";
+    let name = "RenamedJournal";
+    let text = strict_document_journal_text_for_test(
+        journal_uuid,
+        name,
+        [
+            "50000000-0000-4000-8000-000000000001",
+            "50000000-0000-4000-8000-000000000002",
+            "50000000-0000-4000-8000-000000000003",
+            "50000000-0000-4000-8000-000000000004",
+            "50000000-0000-4000-8000-000000000005",
+            "50000000-0000-4000-8000-000000000006",
+        ],
+        ["{0}", "{0}", "{0}", "{0}"],
+    );
+    let blob = deflate_for_test(text.as_bytes());
+    let extracted = extract_metadata_source_xml(
+        &blob,
+        journal_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("DocumentJournals/RenamedJournal.xml")
+    );
+    for (prefix, category) in [
+        ("DocumentJournalSelection", "Selection"),
+        ("DocumentJournalList", "List"),
+        ("DocumentJournalManager", "Manager"),
+    ] {
+        assert!(xml.contains(&format!(
+            r#"<xr:GeneratedType name="{prefix}.{name}" category="{category}">"#
+        )));
+    }
+}
+
+#[test]
+fn rejects_non_exact_document_journal_generated_type_cohorts_atomically() {
+    let journal_uuid = "11000000-0000-4000-8000-000000000001";
+    let ids = [
+        "a0000000-0000-4000-8000-000000000001",
+        "a0000000-0000-4000-8000-000000000002",
+        "a0000000-0000-4000-8000-000000000003",
+        "a0000000-0000-4000-8000-000000000004",
+        "a0000000-0000-4000-8000-000000000005",
+        "a0000000-0000-4000-8000-000000000006",
+    ];
+    let valid = strict_document_journal_text_for_test(
+        journal_uuid,
+        "Interactions",
+        ids,
+        ["{0}", "{0}", "{0}", "{0}"],
+    );
+    let owner_header = format!(
+        "{{0,{{3,{{1,0,{journal_uuid}}},\"Interactions\",{{1,\"en\",\"Interactions\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}}"
+    );
+    let owner_marker = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let wrong_header_slot = valid.replacen(
+        &format!("{owner_header},{owner_marker}"),
+        &format!("{owner_marker},{owner_header}"),
+        1,
+    );
+    let wrong_owner_len = valid.replacen("{26,", "{26,0,", 1);
+    let wrong_root_len = valid
+        .strip_suffix('}')
+        .map(|prefix| format!("{prefix},{{0}}}}"))
+        .unwrap();
+    let trailing = format!("{valid},0");
+    let malformed_uuid = valid.replacen(ids[0], "not-a-uuid", 1);
+    let zero_uuid = valid.replacen(ids[0], "00000000-0000-0000-0000-000000000000", 1);
+    let duplicate_uuid = valid.replacen(ids[2], ids[0], 1);
+    let case_duplicate_uuid = valid.replacen(ids[4], &ids[0].to_ascii_uppercase(), 1);
+    let wrong_header_wrapper =
+        valid.replacen(&owner_header, &owner_header.replacen("{0,", "{1,", 1), 1);
+    let long_header_wrapper = valid.replacen(
+        &owner_header,
+        &owner_header
+            .strip_suffix('}')
+            .map(|prefix| format!("{prefix},0}}"))
+            .unwrap(),
+        1,
+    );
+
+    for (case, text) in [
+        ("root tag", valid.replacen("{1,", "{2,", 1)),
+        (", root count", valid.replacen("},4,{0}", "},3,{0}", 1)),
+        ("root length", wrong_root_len),
+        ("owner code", valid.replacen("{26,", "{25,", 1)),
+        ("owner length", wrong_owner_len),
+        ("header slot", wrong_header_slot),
+        ("header wrapper", wrong_header_wrapper),
+        ("header wrapper length", long_header_wrapper),
+        ("malformed uuid", malformed_uuid),
+        ("zero uuid", zero_uuid),
+        ("duplicate uuid", duplicate_uuid),
+        ("case duplicate uuid", case_duplicate_uuid),
+        ("trailing field", trailing),
+    ] {
+        let blob = deflate_for_test(text.as_bytes());
+        assert!(
+            extract_metadata_source_xml(
+                &blob,
+                journal_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "accepted {case}; a partial InternalInfo would be observable"
+        );
+    }
+
+    for (case, uuid, name, synonyms, comment) in [
+        (
+            "header uuid",
+            "22000000-0000-4000-8000-000000000002",
+            "Interactions",
+            vec![("en".to_string(), "Interactions".to_string())],
+            "",
+        ),
+        (
+            "header name",
+            journal_uuid,
+            "OtherName",
+            vec![("en".to_string(), "Interactions".to_string())],
+            "",
+        ),
+        (
+            "header synonym",
+            journal_uuid,
+            "Interactions",
+            vec![("en".to_string(), "Other synonym".to_string())],
+            "",
+        ),
+        (
+            "header comment",
+            journal_uuid,
+            "Interactions",
+            vec![("en".to_string(), "Interactions".to_string())],
+            "other comment",
+        ),
+    ] {
+        let mismatched_header = MetadataHeader {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms,
+            comment: comment.to_string(),
+            template_type_code: None,
+        };
+        assert!(
+            parse_document_journal_properties_from_text(&valid, &mismatched_header).is_none(),
+            "accepted {case} mismatch"
+        );
+    }
+}
+
+#[test]
+fn extracts_document_journal_child_form_template_and_command_refs_from_current_indexes() {
     let journal_uuid = "11111111-1111-4111-8111-111111111111";
     let form_uuid = "22222222-2222-4222-8222-222222222222";
     let template_uuid = "33333333-3333-4333-8333-333333333333";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let command_uuid = "44444444-4444-4444-8444-444444444444";
     let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let journal_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{26,\r\n{{3,\r\n{{1,0,{journal_uuid}}},\"Interactions\",{{1,\"en\",\"Interactions\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let generated_type_ids = [
+        "50000000-0000-4000-8000-000000000001",
+        "50000000-0000-4000-8000-000000000002",
+        "50000000-0000-4000-8000-000000000003",
+        "50000000-0000-4000-8000-000000000004",
+        "50000000-0000-4000-8000-000000000005",
+        "50000000-0000-4000-8000-000000000006",
+    ];
+    let forms = format!("{{{form_list_marker},1,{form_uuid}}}");
+    let command = format!("{{9,{{3,{{1,0,{command_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}}");
+    let journal_text = strict_document_journal_text_for_test(
+        journal_uuid,
+        "Interactions",
+        generated_type_ids,
+        [&forms, template_uuid, &command, "{0}"],
+    );
+    let journal_blob = deflate_for_test(journal_text.as_bytes());
     let form_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
@@ -32792,13 +33117,17 @@ fn extracts_document_journal_child_form_and_template_refs_from_current_indexes()
     assert!(xml.contains("<ChildObjects>"));
     assert!(xml.contains("<Form>ListForm</Form>"));
     assert!(xml.contains("<Template>Print</Template>"));
+    assert!(xml.contains(&format!(r#"<Command uuid="{command_uuid}">"#)));
+    assert_eq!(xml.matches("<xr:GeneratedType ").count(), 3);
     assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
     assert!(
         xml.find("<Form>ListForm</Form>").unwrap()
             < xml.find("<Template>Print</Template>").unwrap()
     );
+    assert!(xml.find("<Template>Print</Template>").unwrap() < xml.find("<Command uuid=").unwrap());
     assert_eq!(xml.matches("<Form>ListForm</Form>").count(), 1);
     assert_eq!(xml.matches("<Template>Print</Template>").count(), 1);
+    assert_eq!(xml.matches("<Command uuid=").count(), 1);
 }
 
 #[test]
