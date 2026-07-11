@@ -1889,6 +1889,66 @@ remain HOLD. The saved normalized isolated residual is two roots totaling
 not claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## AccumulationRegister bounded presentation tail
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+This model shares the exact AccumulationRegister code-28/26-field validator
+with totals splitting. The routed owner marker must be unique at field 13, and
+the wrapped header must parse completely and match the routed UUID, name,
+synonyms, and comment. Both BSP roots store strict localized values in fields
+23, 24, and 25; all three are `{0}`. Native emits mandatory self-closing
+`ListPresentation`, `ExtendedListPresentation`, and `Explanation` nodes, while
+the previous generated roots omitted them.
+
+A saved UT/direct corpus supplies 102 exact raw/native pairs. All have valid
+unique owner boundaries and strict localized tails. Fields 23 and 24 are empty
+in all 102. Field 25 is empty in 98 and contains a Russian Explanation in four;
+raw/native empty shape matches in every pair. Three nonempty texts match
+byte-for-byte and one matches after CRLF/LF normalization. Native includes
+additional language items supplied by broader language/version data, so the
+comparison claims only raw-present language pairs.
+
+Native-only SFC breadth contains 252 AccumulationRegister roots. Every root has
+all three nodes in the order `EnableTotalsSplitting`, `ListPresentation`,
+`ExtendedListPresentation`, `Explanation`. List and Extended List are empty in
+251 roots and localized in one; Explanation is empty in 245 and localized in
+seven. There is no paired raw nonempty field-23 or field-24 sample, so their
+nonempty corpus semantics remain a structural inference rather than a direct
+evidence claim.
+
+The presentation parser explicitly calls the same full exact-layout validator
+as totals splitting; its safety does not depend on call order. Exact fields
+23, 24, and 25 use the strict counted localized-value parser. A malformed
+count, pair, atom, duplicate language, trailing field, invalid XML character,
+or invalid owner boundary rejects the whole source atomically. Nonexact
+code-28 arities 21, 25, and 27 retain omission and do not consume slot-like
+values. A separate emission flag preserves the three mandatory nodes when the
+parsed vectors are empty.
+
+Formatting adds the trio only in the AccumulationRegister branch, immediately
+after totals splitting. AccountingRegister retains its distinct fields
+26/27/28 and order after FullTextSearch. CalculationRegister code-21/33-field
+roots use another tail layout and remain an explicit omission control.
+
+Integrated commit `915a427` passes eight strict-tail, boundary, mandatory-empty,
+paired-style, nonexact, property-only, and literal tests plus all ten totals
+splitting regressions. The full suite changed from
+`1342 passed / 74 failed / 6 ignored` to
+`1350 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 19,726-byte diff with SHA-256
+`5DD4E4ECD7112FEAA7766D2E187BF67E8F145A352A2B59C5C1595C8CE0FF030D`.
+Production contains no register name, owner UUID, database identity, path, or
+corpus-specific branch.
+
+CalculationRegister presentations, alternate code-28 layouts, global register
+offsets, and a direct corpus claim for nonempty fields 23 and 24 remain HOLD.
+The saved normalized isolated residual is two roots totaling `+0/-6`. The
+expected future permitted native gate is `+0/-0`, but exactness is not claimed
+without that gate. No database access, ConfigDump, configuration export, or
+`ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
