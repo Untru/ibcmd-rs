@@ -2190,6 +2190,46 @@ native gate is `+0/-0`, but exactness is not claimed without that gate. No
 database access, ConfigDump, configuration export, or `ConfigDumpInfo.xml`
 change was performed.
 
+## CalculationRegister bounded full-text-search flag
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+In the exact code-21/33-field CalculationRegister owner layout, absolute field
+27 is zero and native emits `FullTextSearch=DontUse`. The previous generated
+root omitted the property. Both native-only SFC CalculationRegister roots also
+emit `DontUse`, while their DataLockControlMode differs from the paired BSP
+root, confirming that the neighboring properties must remain independent.
+
+The parser independently invokes the shared full header-15 owner validator.
+Only field 27 equal to `0` after outer whitespace trimming returns the explicit
+`DontUse` value. Field 27 equal to `1`, other numeric or textual atoms, braced
+values, UUIDs, and every other alternative remain accepted omissions; the
+implementation neither infers `Use` nor rejects the source. Nonexact arities do
+not consume field 27, while a malformed exact owner boundary remains fatal.
+
+Fields 26 and 28 are deliberately not inspected. Calculation
+DataLockControlMode and the complex 11-item StandardAttributes collection remain
+HOLD. AccountingRegister code 21 with 30 fields and AccumulationRegister code
+28 retain their independent parsers. Formatting reuses the established
+FullTextSearch position before the presentation tail.
+
+Integrated commit `923a2e9` passes eight exact, alternative-omission, neighbor,
+boundary, nonexact, family-control, property-only, and literal tests. The full
+suite changed from `1387 passed / 74 failed / 6 ignored` to
+`1395 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 10,913-byte diff with SHA-256
+`DB4F71C16E66373842A0F5E44EEF3EC7108EA15534117306AE95375090EED868`.
+Production contains no register name, UUID, database identity, path, or
+corpus-specific branch.
+
+Calculation FullTextSearch values other than the paired zero,
+DataLockControlMode, StandardAttributes, alternate layouts, and global offsets
+remain HOLD. The saved normalized isolated residual is one root totaling
+`+0/-1`. The expected future permitted native gate is `+0/-0`, but exactness is
+not claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
