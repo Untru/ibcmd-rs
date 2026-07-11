@@ -7925,7 +7925,7 @@ fn parse_register_properties_from_text(
     } else {
         parse_register_data_lock_control_mode(kind, &fields, uuid)
     };
-    let enable_totals_splitting = parse_register_enable_totals_splitting(kind, &fields, uuid);
+    let enable_totals_splitting = parse_register_enable_totals_splitting(kind, &fields, &header)?;
     let full_text_search = if kind == "InformationRegister" {
         information_register
             .as_ref()
@@ -8398,12 +8398,48 @@ fn parse_register_data_lock_control_mode(
     }
 }
 
-fn parse_register_enable_totals_splitting(kind: &str, fields: &[&str], uuid: &str) -> Option<bool> {
-    if kind != "AccountingRegister" {
+fn parse_wrapped_register_owner_header(value: &str) -> Option<MetadataHeader> {
+    let wrapper = split_information_register_braced_fields(value)?;
+    if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
         return None;
     }
-    let header_index = metadata_header_field_index(fields, uuid)?;
-    parse_1c_bool_field(fields.get(header_index + 8).copied())
+    parse_information_register_owner_header(wrapper.get(1)?)
+}
+
+fn parse_register_enable_totals_splitting(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<Option<bool>> {
+    if kind == "AccountingRegister" {
+        let value = metadata_header_field_index(fields, &expected_header.uuid)
+            .and_then(|index| parse_1c_bool_field(fields.get(index + 8).copied()));
+        return Some(value);
+    }
+    if kind != "AccumulationRegister"
+        || fields.first().map(|field| field.trim()) != Some("28")
+        || fields.len() != 26
+    {
+        return Some(None);
+    }
+
+    let parsed_header = parse_wrapped_register_owner_header(fields.get(13)?)?;
+    let mut matching_header_indexes = fields.iter().enumerate().filter_map(|(index, field)| {
+        (metadata_header_field_index(&[*field], &expected_header.uuid) == Some(0)).then_some(index)
+    });
+    if matching_header_indexes.next() != Some(13)
+        || matching_header_indexes.next().is_some()
+        || !parsed_header
+            .uuid
+            .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return None;
+    }
+
+    Some(Some(parse_1c_bool_field(fields.get(20).copied())?))
 }
 
 fn parse_register_full_text_search(
@@ -17608,6 +17644,14 @@ fn format_register_source_xml(
                 "FullTextSearch",
                 register.full_text_search,
             );
+            if kind == "AccumulationRegister"
+                && let Some(enable_totals_splitting) = register.enable_totals_splitting
+            {
+                properties.push_str(&format!(
+                    "\t\t\t<EnableTotalsSplitting>{}</EnableTotalsSplitting>\r\n",
+                    xml_bool(enable_totals_splitting)
+                ));
+            }
             xml.insert_str(index, &properties);
         }
     }

@@ -24425,6 +24425,7 @@ fn extracts_accumulation_register_lock_and_full_text_flags() {
     );
     assert!(xml.contains("<DataLockControlMode>Automatic</DataLockControlMode>"));
     assert!(xml.contains("<FullTextSearch>DontUse</FullTextSearch>"));
+    assert!(!xml.contains("<EnableTotalsSplitting>"));
     assert!(
         xml.find("<IncludeHelpInContents>false</IncludeHelpInContents>")
             .unwrap()
@@ -42040,5 +42041,318 @@ fn rejects_web_service_global_uuid_qname_package_and_reuse_session_violations() 
             extract_web_service_fixture_for_test(&raw, refs).is_none(),
             "accepted WebService invariant violation ({label}): {raw}"
         );
+    }
+}
+
+const ACCUMULATION_TOTALS_TEST_UUID: &str = "11111111-1111-4111-8111-111111111111";
+const ACCUMULATION_TOTALS_ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
+
+fn register_generated_type_fields(count: usize) -> Vec<String> {
+    (1..=count)
+        .map(|index| format!("00000000-0000-4000-8000-{index:012x}"))
+        .collect()
+}
+
+fn register_owner_header(uuid: &str, name: &str) -> String {
+    format!(
+        "{{0,{{3,{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,{ACCUMULATION_TOTALS_ZERO_UUID},0}}}}"
+    )
+}
+
+fn extract_register_fields(fields: &[String], uuid: &str) -> Option<ExtractedMetadataSourceXml> {
+    let raw = format!("{{1,{{{}}}}}", fields.join(","));
+    extract_metadata_source_xml_with_refs(
+        &deflate_for_test(raw.as_bytes()),
+        uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+}
+
+#[derive(Clone)]
+struct AccumulationRegisterTotalsFixture {
+    fields: Vec<String>,
+}
+
+impl AccumulationRegisterTotalsFixture {
+    fn exact(flag: &str) -> Self {
+        let mut fields = vec!["28".to_string()];
+        fields.extend(register_generated_type_fields(12));
+        fields.extend([
+            register_owner_header(ACCUMULATION_TOTALS_TEST_UUID, "Totals"),
+            "1".to_string(),
+            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "1".to_string(),
+            "1".to_string(),
+            "0".to_string(),
+            flag.to_string(),
+            "{0}".to_string(),
+            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "{0}".to_string(),
+            "{0}".to_string(),
+            "{0}".to_string(),
+        ]);
+        assert_eq!(fields.len(), 26);
+        Self { fields }
+    }
+
+    fn extract(&self) -> Option<ExtractedMetadataSourceXml> {
+        extract_register_fields(&self.fields, ACCUMULATION_TOTALS_TEST_UUID)
+    }
+
+    fn xml(&self) -> Option<String> {
+        self.extract()
+            .and_then(|source| String::from_utf8(source.xml).ok())
+    }
+}
+
+#[test]
+fn accumulation_totals_extracts_exact_true_and_false() {
+    for (flag, expected) in [("1", "true"), ("0", "false")] {
+        let source = AccumulationRegisterTotalsFixture::exact(flag)
+            .extract()
+            .expect("exact accumulation register");
+        let xml = String::from_utf8(source.xml).unwrap();
+        let totals = format!("<EnableTotalsSplitting>{expected}</EnableTotalsSplitting>");
+
+        assert_eq!(
+            source.relative_path,
+            PathBuf::from("AccumulationRegisters/Totals.xml")
+        );
+        assert_eq!(xml.matches("<EnableTotalsSplitting>").count(), 1);
+        assert!(xml.contains(&totals));
+        assert!(
+            xml.find("<DataLockControlMode>Managed</DataLockControlMode>")
+                .unwrap()
+                < xml
+                    .find("<FullTextSearch>DontUse</FullTextSearch>")
+                    .unwrap()
+        );
+        assert!(
+            xml.find("<FullTextSearch>DontUse</FullTextSearch>")
+                .unwrap()
+                < xml.find(&totals).unwrap()
+        );
+    }
+}
+
+#[test]
+fn accumulation_totals_rejects_malformed_exact_slot_atomically() {
+    for malformed in ["", "value", "-1", "2", "00", "01", "4294967296", "{0}"] {
+        let fixture = AccumulationRegisterTotalsFixture::exact(malformed);
+        assert!(fixture.extract().is_none(), "accepted slot 20: {malformed}");
+    }
+}
+
+#[test]
+fn accumulation_totals_rejects_invalid_exact_owner_boundary_atomically() {
+    let valid_header = register_owner_header(ACCUMULATION_TOTALS_TEST_UUID, "Totals");
+    let short_header = format!(
+        "{{0,{{3,{{1,0,{ACCUMULATION_TOTALS_TEST_UUID}}},\"Totals\",{{1,\"en\",\"Totals\"}},\"\"}}}}"
+    );
+
+    let mut malformed = AccumulationRegisterTotalsFixture::exact("1");
+    malformed.fields[13] = short_header;
+    assert!(malformed.extract().is_none());
+
+    let mut unwrapped = AccumulationRegisterTotalsFixture::exact("1");
+    unwrapped.fields[13] = valid_header
+        .strip_prefix("{0,")
+        .unwrap()
+        .strip_suffix('}')
+        .unwrap()
+        .to_string();
+    assert!(unwrapped.extract().is_none());
+
+    let mut moved = AccumulationRegisterTotalsFixture::exact("1");
+    moved.fields[12] = moved.fields[13].clone();
+    moved.fields[13] = "0".to_string();
+    assert!(moved.extract().is_none());
+
+    let mut duplicate = AccumulationRegisterTotalsFixture::exact("1");
+    duplicate.fields[25] = duplicate.fields[13].clone();
+    assert!(duplicate.extract().is_none());
+
+    let mut partial_duplicate = AccumulationRegisterTotalsFixture::exact("1");
+    partial_duplicate.fields[25] =
+        format!("{{0,{{3,{{1,0,{ACCUMULATION_TOTALS_TEST_UUID}}},\"Partial\"}}}}");
+    assert!(partial_duplicate.extract().is_none());
+
+    let mut wrong_then_valid = AccumulationRegisterTotalsFixture::exact("1");
+    wrong_then_valid.fields[13] = wrong_then_valid.fields[13].replace(
+        ACCUMULATION_TOTALS_TEST_UUID,
+        "22222222-2222-4222-8222-222222222222",
+    );
+    wrong_then_valid.fields[25] = valid_header;
+    assert!(wrong_then_valid.extract().is_none());
+}
+
+#[test]
+fn accumulation_totals_ignores_plain_embedded_uuid_outside_owner_header() {
+    let mut fixture = AccumulationRegisterTotalsFixture::exact("1");
+    fixture.fields[25] = format!("{{0,{ACCUMULATION_TOTALS_TEST_UUID}}}");
+
+    let xml = fixture
+        .xml()
+        .expect("plain UUID is not another owner header");
+    assert!(xml.contains("<EnableTotalsSplitting>true</EnableTotalsSplitting>"));
+}
+
+#[test]
+fn accumulation_totals_rejects_exact_header_metadata_mismatches() {
+    let fixture = AccumulationRegisterTotalsFixture::exact("1");
+    let raw = format!("{{1,{{{}}}}}", fixture.fields.join(","));
+    let fields = metadata_object_fields(&raw).unwrap();
+    let parsed = parse_metadata_header_from_text(&raw, ACCUMULATION_TOTALS_TEST_UUID).unwrap();
+    let mut mismatches = Vec::new();
+    let mut name = parsed.clone();
+    name.name = "Other".to_string();
+    mismatches.push(name);
+    let mut synonyms = parsed.clone();
+    synonyms.synonyms = vec![("en".to_string(), "Other".to_string())];
+    mismatches.push(synonyms);
+    let mut comment = parsed;
+    comment.comment = "Other".to_string();
+    mismatches.push(comment);
+
+    for expected in mismatches {
+        assert!(
+            parse_register_enable_totals_splitting("AccumulationRegister", &fields, &expected,)
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn accumulation_totals_keeps_nonexact_arities_on_legacy_omission() {
+    for field_count in [21, 25, 27] {
+        let mut enabled = AccumulationRegisterTotalsFixture::exact("1");
+        enabled.fields.truncate(field_count.min(26));
+        while enabled.fields.len() < field_count {
+            enabled.fields.push("0".to_string());
+        }
+        let mut disabled = enabled.clone();
+        disabled.fields[20] = "0".to_string();
+        let enabled_xml = enabled.xml().expect("legacy enabled-shaped fixture");
+        let disabled_xml = disabled.xml().expect("legacy disabled-shaped fixture");
+
+        assert!(!enabled_xml.contains("<EnableTotalsSplitting>"));
+        assert_eq!(
+            enabled_xml, disabled_xml,
+            "consumed slot 20 at len {field_count}"
+        );
+    }
+}
+
+#[test]
+fn accumulation_totals_preserves_accounting_slot_and_order() {
+    let uuid = "33333333-3333-4333-8333-333333333333";
+    let mut fields = vec!["21".to_string()];
+    fields.extend(register_generated_type_fields(14));
+    fields.push(register_owner_header(uuid, "Ledger"));
+    fields.extend([
+        "1".to_string(),
+        "0".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+    ]);
+    assert_eq!(fields.len(), 30);
+
+    let source = extract_register_fields(&fields, uuid).expect("accounting control");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert_eq!(
+        source.relative_path,
+        PathBuf::from("AccountingRegisters/Ledger.xml")
+    );
+    assert!(xml.contains("<DataLockControlMode>Automatic</DataLockControlMode>"));
+    assert_eq!(
+        xml.matches("<EnableTotalsSplitting>true</EnableTotalsSplitting>")
+            .count(),
+        1
+    );
+    assert!(
+        xml.find("<DataLockControlMode>Automatic</DataLockControlMode>")
+            .unwrap()
+            < xml
+                .find("<EnableTotalsSplitting>true</EnableTotalsSplitting>")
+                .unwrap()
+    );
+    assert!(
+        xml.find("<EnableTotalsSplitting>true</EnableTotalsSplitting>")
+            .unwrap()
+            < xml
+                .find("<FullTextSearch>DontUse</FullTextSearch>")
+                .unwrap()
+    );
+}
+
+#[test]
+fn accumulation_totals_omits_calculation_code21_len33_control() {
+    let uuid = "44444444-4444-4444-8444-444444444444";
+    let calculation_type_uuid = "55555555-5555-4555-8555-555555555555";
+    let mut fields = vec!["21".to_string()];
+    fields.extend(register_generated_type_fields(14));
+    fields.push(register_owner_header(uuid, "Payroll"));
+    fields.extend((16..33).map(|index| {
+        if index == 22 {
+            calculation_type_uuid.to_string()
+        } else {
+            "0".to_string()
+        }
+    }));
+    assert_eq!(fields.len(), 33);
+
+    let source = extract_register_fields(&fields, uuid).expect("calculation control");
+    let xml = String::from_utf8(source.xml).unwrap();
+    assert_eq!(
+        source.relative_path,
+        PathBuf::from("CalculationRegisters/Payroll.xml")
+    );
+    assert!(!xml.contains("<EnableTotalsSplitting>"));
+}
+
+#[test]
+fn accumulation_totals_changes_only_exact_property() {
+    let enabled = AccumulationRegisterTotalsFixture::exact("1").xml().unwrap();
+    let disabled = AccumulationRegisterTotalsFixture::exact("0").xml().unwrap();
+    let enabled_line = "\t\t\t<EnableTotalsSplitting>true</EnableTotalsSplitting>\r\n";
+    let disabled_line = "\t\t\t<EnableTotalsSplitting>false</EnableTotalsSplitting>\r\n";
+
+    assert_eq!(
+        enabled.replace(enabled_line, ""),
+        disabled.replace(disabled_line, "")
+    );
+
+    let mut legacy = AccumulationRegisterTotalsFixture::exact("1");
+    legacy.fields.pop();
+    assert_eq!(enabled.replace(enabled_line, ""), legacy.xml().unwrap());
+}
+
+#[test]
+fn accumulation_totals_has_no_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "44947459-75aa-48e8-b40f-907177c2afb3",
+        "6707f7f5-4a6c-4d8b-84cf-483768cb71b9",
+        "_ДемоОстаткиТоваровВМестахХранения",
+        "_ДемоОборотыПоСчетамНаОплату",
+    ] {
+        assert!(!source.contains(forbidden));
     }
 }
