@@ -1374,6 +1374,45 @@ future permitted native gate is `+0/-0`, but this has not been claimed without
 that gate. No database access, ConfigDump, configuration export, or
 `ConfigDumpInfo.xml` change was performed.
 
+## Sequence generated types in EventSubscription patterns
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+Sequence metadata uses object code `6` with its header at field 7. Fields 1/2,
+3/4, and 5/6 are the dynamic TypeId/ValueId pairs for SequenceRecord,
+SequenceManager, and SequenceRecordSet. The generated-type index retains only
+TypeIds at fields 1, 3, and 5 and derives each qualified `cfg:` name from the
+parsed Sequence header. Generated IDs, Sequence names, and object UUIDs are not
+production literals.
+
+Object code `6` is shared with Role, whose header is at field 1. The Sequence
+schema therefore requires both `HeaderIndex(7)` and a valid UUID range covering
+all six generated-type fields. The header guard anchors the Sequence owner
+shape; the UUID-range guard validates the complete three-pair envelope rather
+than only the selected TypeId slots. Saved BSP evidence admits the Sequence and
+rejects all 160 Roles. UHA and SFC saved selections contain no additional code-6
+positive, so they provide absence rather than independent positive coverage.
+
+The existing strict EventSubscription parser resolves specific pattern TypeIds
+through this index. Qualified Sequence types are emitted as `v8:Type` in their
+input order; the unqualified `cfg:SequenceRecordSet` family remains a
+`v8:TypeSet`. No EventSubscription-specific name or TypeId fallback was added.
+
+Integrated commit `e278bc2` passes the guarded Sequence index, Role collision,
+malformed UUID-range/header, Event Source order, and generic TypeSet tests. The
+full suite changed from `1264 passed / 74 failed / 6 ignored` to
+`1268 passed / 74 failed / 6 ignored`; the exact 74 failure names are unchanged.
+Two independent reviews approved frozen diff SHA-256
+`CDB40AAA3B674E8DA54D12D3F1368D9DB2877A7012B3454D6DC3BD993573E336`.
+The production change adds no UUID literal, object name, path, or corpus branch.
+
+The saved normalized residual is two EventSubscription roots totaling
+`+8/-150`. The expected future permitted native gate is `+0/-0` for those two
+roots, but exactness is not claimed without that gate. The full Sequence root
+and Dimension serializer remains outside this scope. No database access,
+ConfigDump, configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
