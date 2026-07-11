@@ -2145,6 +2145,51 @@ remain HOLD. The saved normalized isolated residual is one root totaling
 not claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## CalculationRegister bounded schedule tuple
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+In the exact code-21/33-field CalculationRegister owner layout, fields 19
+through 22 contain four nonzero UUIDs. They resolve respectively to an
+InformationRegister root, a Resource and Dimension of that same register, and
+a ChartOfCalculationTypes root. Native emits the qualified `Schedule`,
+`ScheduleValue`, `ScheduleDate`, and `ChartOfCalculationTypes` properties as
+one ordered tuple; the previous generated root omitted all four.
+
+The parser independently invokes the shared full header-15 owner validator and
+then resolves the tuple atomically. Every UUID must be strict and nonzero,
+every case-insensitive reference match must be unique, the resource and
+dimension must have the same InformationRegister owner, and all qualified names
+must have the exact expected family and segment count. Zero, malformed,
+partial, unknown, cross-owner, wrong-family, wrong-role, and case-collision
+alternatives remain accepted omissions of the entire tuple. Only a malformed
+exact owner boundary remains fatal.
+
+Formatting emits the tuple only in CalculationRegister, after the fixed period
+properties and before `IncludeHelpInContents`. AccountingRegister code 21 with
+30 fields and AccumulationRegister code 28 retain their independent behavior.
+Selected CalculationRegister extraction now requests the object-reference
+index needed by this resolver.
+
+Integrated commit `a958f08` passes eight exact, resolver-alternative, partial,
+boundary, nonexact, family-control, property-only, and literal tests plus the
+selected-index regression. The full suite changed from
+`1378 passed / 74 failed / 6 ignored` to
+`1387 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 27,297-byte diff with SHA-256
+`2FBAF59D8A866B4579E5B9E757D76BD52D0327772616F75BB4953F750069E469`.
+Production contains no register name, UUID, database identity, path, or
+corpus-specific branch.
+
+Empty or chart-only schedule semantics, exact duplicate UUID rows collapsed by
+the current index, StandardAttributes, DataLockControlMode and FullTextSearch,
+alternate layouts, and global offsets remain HOLD. The saved normalized
+isolated residual is one root totaling `+0/-4`. The expected future permitted
+native gate is `+0/-0`, but exactness is not claimed without that gate. No
+database access, ConfigDump, configuration export, or `ConfigDumpInfo.xml`
+change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
