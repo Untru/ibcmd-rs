@@ -215,7 +215,7 @@ fn insert_web_service_parameter_refs(
     owner_name: &str,
     operations: &[MetadataHeader],
 ) {
-    const PARAMETER_LIST_MARKER: &str = "{b78a00b2-2260-4ef5-a70c-17889cfee695,";
+    let parameter_list_marker = format!("{{{WEB_SERVICE_PARAMETER_COLLECTION_UUID},");
 
     let operation_ids = operations
         .iter()
@@ -229,9 +229,9 @@ fn insert_web_service_parameter_refs(
         .collect::<Vec<_>>();
 
     let mut offset = 0usize;
-    while let Some(relative_start) = text[offset..].find(PARAMETER_LIST_MARKER) {
+    while let Some(relative_start) = text[offset..].find(&parameter_list_marker) {
         let start = offset + relative_start;
-        offset = start + PARAMETER_LIST_MARKER.len();
+        offset = start + parameter_list_marker.len();
         let Some(end) = scan_1c_braced_value(text, start) else {
             continue;
         };
@@ -1874,8 +1874,6 @@ pub(super) fn parse_configuration_default_roles(
         .collect()
 }
 
-const CONFIGURATION_DEFAULT_ROLE_TYPE_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
-
 pub(super) fn parse_configuration_default_roles_from_root(
     text: &str,
     uuid: &str,
@@ -1898,7 +1896,7 @@ pub(super) fn parse_configuration_default_roles_from_root(
         let role_fields = split_1c_braced_fields(raw_role.trim(), 0)?;
         if role_fields.len() != 3
             || parse_1c_quoted_string(role_fields.first()?.trim()).as_deref() != Some("#")
-            || role_fields.get(1)?.trim() != CONFIGURATION_DEFAULT_ROLE_TYPE_UUID
+            || role_fields.get(1)?.trim() != METADATA_OBJECT_REF_TYPE_UUID
         {
             return None;
         }

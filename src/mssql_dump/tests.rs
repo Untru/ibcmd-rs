@@ -34519,3 +34519,1118 @@ fn push_native_bcp_row(
     target.extend_from_slice(&(binary.len() as i64).to_le_bytes());
     target.extend_from_slice(binary);
 }
+
+const WEB_SERVICE_TEST_UUID: &str = "11111111-1111-4111-8111-111111111111";
+const WEB_SERVICE_OPERATION_A_UUID: &str = "22222222-2222-4222-8222-222222222222";
+const WEB_SERVICE_OPERATION_B_UUID: &str = "33333333-3333-4333-8333-333333333333";
+const WEB_SERVICE_PARAMETER_IN_UUID: &str = "44444444-4444-4444-8444-444444444444";
+const WEB_SERVICE_PARAMETER_OUT_UUID: &str = "55555555-5555-4555-8555-555555555555";
+const WEB_SERVICE_PARAMETER_IN_OUT_UUID: &str = "66666666-6666-4666-8666-666666666666";
+const WEB_SERVICE_PACKAGE_UUID: &str = "77777777-7777-4777-8777-777777777777";
+
+fn web_service_header_for_test(uuid: &str, name: &str) -> String {
+    format!(
+        "{{3,{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}"
+    )
+}
+
+fn web_service_xdto_type_for_test(namespace: &str, name: &str) -> String {
+    format!("{{0,\"{namespace}\",\"{name}\"}}")
+}
+
+fn web_service_parameter_for_test(
+    uuid: &str,
+    name: &str,
+    namespace: &str,
+    type_name: &str,
+    nillable: u8,
+    direction: u8,
+) -> String {
+    let header = web_service_header_for_test(uuid, name);
+    let value_type = web_service_xdto_type_for_test(namespace, type_name);
+    format!("{{{{0,{header},{value_type},{nillable},{direction}}},0}}")
+}
+
+fn web_service_operation_for_test(
+    uuid: &str,
+    name: &str,
+    return_namespace: &str,
+    return_type_name: &str,
+    nillable: u8,
+    transactioned: u8,
+    lock_mode: u8,
+    parameters: &[String],
+) -> String {
+    let header = web_service_header_for_test(uuid, name);
+    let return_type = web_service_xdto_type_for_test(return_namespace, return_type_name);
+    let parameter_collection =
+        web_service_collection_for_test(WEB_SERVICE_PARAMETER_COLLECTION_UUID, parameters);
+    format!(
+        "{{{{1,{header},{return_type},{nillable},{transactioned},\"Handle{name}\",{lock_mode}}},1,{parameter_collection}}}"
+    )
+}
+
+fn web_service_collection_for_test(marker: &str, items: &[String]) -> String {
+    let mut fields = vec![marker.to_string(), items.len().to_string()];
+    fields.extend(items.iter().cloned());
+    format!("{{{}}}", fields.join(","))
+}
+
+fn web_service_local_package_for_test(uuid: &str) -> String {
+    format!("{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{uuid}}}}}")
+}
+
+fn web_service_fixture_for_test(
+    local_packages: &[String],
+    uri_packages: &[&str],
+    operations: &[String],
+) -> String {
+    let mut local_fields = vec!["0".to_string(), local_packages.len().to_string()];
+    local_fields.extend(local_packages.iter().cloned());
+    let local_packages = format!("{{{}}}", local_fields.join(","));
+
+    let mut uri_fields = vec![uri_packages.len().to_string()];
+    uri_fields.extend(uri_packages.iter().map(|value| format!("\"{value}\"")));
+    let uri_packages = format!("{{{}}}", uri_fields.join(","));
+    let operations =
+        web_service_collection_for_test(WEB_SERVICE_OPERATION_COLLECTION_UUID, operations);
+    let header = web_service_header_for_test(WEB_SERVICE_TEST_UUID, "RemoteApi");
+
+    format!(
+        "{{1,{{4,\"http://example.com/service\",{header},{local_packages},\"RemoteApi.1cws\",{uri_packages},0,20}},1,{operations}}}"
+    )
+}
+
+fn extract_web_service_fixture_for_test(
+    raw: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ExtractedMetadataSourceXml> {
+    extract_web_service_fixture_for_test_at_version(
+        raw,
+        object_refs,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
+fn extract_web_service_fixture_for_test_at_version(
+    raw: &str,
+    object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<ExtractedMetadataSourceXml> {
+    let blob = deflate_for_test(raw.as_bytes());
+    extract_metadata_source_xml_with_refs(
+        &blob,
+        WEB_SERVICE_TEST_UUID,
+        &BTreeMap::new(),
+        object_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        source_version,
+    )
+}
+
+#[test]
+fn extracts_web_service_with_empty_packages_and_zero_parameter_operation() {
+    let operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        &[],
+    );
+    let raw = web_service_fixture_for_test(&[], &[], &[operation]);
+    let extracted = extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("WebServices").join("RemoteApi.xml")
+    );
+    assert!(xml.contains(&format!(r#"<WebService uuid="{WEB_SERVICE_TEST_UUID}">"#)));
+    assert!(xml.contains("<XDTOPackages/>"));
+    assert!(xml.contains("<DescriptorFileName>RemoteApi.1cws</DescriptorFileName>"));
+    assert!(xml.contains("<ReuseSessions>DontUse</ReuseSessions>"));
+    assert!(xml.contains("<SessionMaxAge>20</SessionMaxAge>"));
+    assert!(xml.contains(&format!(
+        r#"<Operation uuid="{WEB_SERVICE_OPERATION_A_UUID}">"#
+    )));
+    assert!(xml.contains("<XDTOReturningValueType>xs:boolean</XDTOReturningValueType>"));
+    assert!(xml.contains("<DataLockControlMode>Managed</DataLockControlMode>"));
+    assert!(xml.contains("\t\t\t\t<ChildObjects/>\r\n\t\t\t</Operation>"));
+    assert!(!xml.contains("<Parameter uuid="));
+
+    let root_properties = [
+        "<Name>RemoteApi</Name>",
+        "<Synonym>",
+        "<Comment/>",
+        "<Namespace>http://example.com/service</Namespace>",
+        "<XDTOPackages/>",
+        "<DescriptorFileName>RemoteApi.1cws</DescriptorFileName>",
+        "<ReuseSessions>DontUse</ReuseSessions>",
+        "<SessionMaxAge>20</SessionMaxAge>",
+    ]
+    .map(|value| xml.find(value).unwrap());
+    assert!(root_properties.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn extracts_web_service_with_zero_operations_and_version_specific_namespaces() {
+    let raw = web_service_fixture_for_test(&[], &[], &[]);
+    let refs = BTreeMap::new();
+    let xml_20 = String::from_utf8(
+        extract_web_service_fixture_for_test_at_version(
+            &raw,
+            &refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap()
+        .xml,
+    )
+    .unwrap();
+    let xml_21 = String::from_utf8(
+        extract_web_service_fixture_for_test_at_version(
+            &raw,
+            &refs,
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap()
+        .xml,
+    )
+    .unwrap();
+
+    assert!(xml_20.contains("version=\"2.20\""));
+    assert!(!xml_20.contains("xmlns:pal="));
+    assert!(xml_20.contains("\t\t</Properties>\r\n\t\t<ChildObjects/>\r\n\t</WebService>"));
+
+    assert!(xml_21.contains("version=\"2.21\""));
+    assert_eq!(xml_21.matches("xmlns:pal=").count(), 1);
+    assert!(xml_21.contains(
+        "xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\""
+    ));
+    assert!(xml_21.contains("\t\t</Properties>\r\n\t\t<ChildObjects/>\r\n\t</WebService>"));
+}
+
+#[test]
+fn maps_all_web_service_reuse_session_modes() {
+    let base = web_service_fixture_for_test(&[], &[], &[]);
+    for (raw_code, xml_value) in [("0", "DontUse"), ("1", "Use"), ("2", "AutoUse")] {
+        let raw = base.replacen(
+            "\"RemoteApi.1cws\",{0},0,20",
+            &format!("\"RemoteApi.1cws\",{{0}},{raw_code},20"),
+            1,
+        );
+        let xml = String::from_utf8(
+            extract_web_service_fixture_for_test(&raw, &BTreeMap::new())
+                .unwrap()
+                .xml,
+        )
+        .unwrap();
+        assert!(xml.contains(&format!("<ReuseSessions>{xml_value}</ReuseSessions>")));
+    }
+}
+
+#[test]
+fn extracts_web_service_packages_namespaces_directions_and_lock_modes() {
+    let parameters = vec![
+        web_service_parameter_for_test(
+            WEB_SERVICE_PARAMETER_IN_UUID,
+            "Request",
+            "http://example.com/request",
+            "Input",
+            0,
+            0,
+        ),
+        web_service_parameter_for_test(
+            WEB_SERVICE_PARAMETER_OUT_UUID,
+            "Response",
+            "http://example.com/request",
+            "Output",
+            1,
+            1,
+        ),
+        web_service_parameter_for_test(
+            WEB_SERVICE_PARAMETER_IN_OUT_UUID,
+            "State",
+            "http://www.w3.org/2001/XMLSchema",
+            "string",
+            1,
+            2,
+        ),
+    ];
+    let managed = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Compute",
+        "http://example.com/result",
+        "Result",
+        1,
+        0,
+        1,
+        &parameters,
+    );
+    let automatic = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_B_UUID,
+        "Inspect",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        0,
+        &[],
+    );
+    let local_package = web_service_local_package_for_test(WEB_SERVICE_PACKAGE_UUID);
+    let raw = web_service_fixture_for_test(
+        &[local_package],
+        &["http://v8.1c.ru/8.1/data/core"],
+        &[managed, automatic],
+    );
+    let refs = BTreeMap::from([(
+        WEB_SERVICE_PACKAGE_UUID.to_string(),
+        "XDTOPackage.CustomTypes".to_string(),
+    )]);
+    let extracted = extract_web_service_fixture_for_test(&raw, &refs).unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    let local_package_position = xml
+        .find(r#"<xr:Value xsi:type="xr:MDObjectRef">XDTOPackage.CustomTypes</xr:Value>"#)
+        .unwrap();
+    let uri_package_position = xml
+        .find(r#"<xr:Value xsi:type="xs:string">http://v8.1c.ru/8.1/data/core</xr:Value>"#)
+        .unwrap();
+    assert!(local_package_position < uri_package_position);
+    assert!(xml.contains(
+        r#"<XDTOReturningValueType xmlns:d6p1="http://example.com/result">d6p1:Result</XDTOReturningValueType>"#
+    ));
+    assert!(xml.contains(
+        r#"<XDTOValueType xmlns:d8p1="http://example.com/request">d8p1:Input</XDTOValueType>"#
+    ));
+    assert!(xml.contains("<TransferDirection>In</TransferDirection>"));
+    assert!(xml.contains("<TransferDirection>Out</TransferDirection>"));
+    assert!(xml.contains("<TransferDirection>InOut</TransferDirection>"));
+    assert!(xml.contains("<DataLockControlMode>Managed</DataLockControlMode>"));
+    assert!(xml.contains("<DataLockControlMode>Automatic</DataLockControlMode>"));
+
+    let operation_positions = [
+        format!(r#"<Operation uuid="{WEB_SERVICE_OPERATION_A_UUID}">"#),
+        format!(r#"<Operation uuid="{WEB_SERVICE_OPERATION_B_UUID}">"#),
+    ]
+    .map(|value| xml.find(&value).unwrap());
+    assert!(operation_positions[0] < operation_positions[1]);
+}
+
+#[test]
+fn rejects_malformed_web_service_collection_markers_counts_and_wrappers() {
+    let parameter = web_service_parameter_for_test(
+        WEB_SERVICE_PARAMETER_IN_UUID,
+        "Request",
+        "http://www.w3.org/2001/XMLSchema",
+        "string",
+        0,
+        0,
+    );
+    let operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        std::slice::from_ref(&parameter),
+    );
+    let valid = web_service_fixture_for_test(&[], &[], std::slice::from_ref(&operation));
+
+    let bad_operation_wrapper = operation.replacen("{{1,", "{{2,", 1);
+    let bad_parameter_wrapper = parameter.replacen("{{0,", "{{1,", 1);
+    let bad_parameter_tail = format!(
+        "{},1}}",
+        parameter.strip_suffix(",0}").expect("parameter item tail")
+    );
+    let malformed = [
+        valid.replacen(
+            WEB_SERVICE_OPERATION_COLLECTION_UUID,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            1,
+        ),
+        valid.replacen(
+            &format!("{WEB_SERVICE_OPERATION_COLLECTION_UUID},1,"),
+            &format!("{WEB_SERVICE_OPERATION_COLLECTION_UUID},2,"),
+            1,
+        ),
+        web_service_fixture_for_test(&[], &[], &[bad_operation_wrapper]),
+        valid.replacen(
+            WEB_SERVICE_PARAMETER_COLLECTION_UUID,
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            1,
+        ),
+        valid.replacen(
+            &format!("{WEB_SERVICE_PARAMETER_COLLECTION_UUID},1,"),
+            &format!("{WEB_SERVICE_PARAMETER_COLLECTION_UUID},2,"),
+            1,
+        ),
+        web_service_fixture_for_test(
+            &[],
+            &[],
+            &[operation.replace(&parameter, &bad_parameter_wrapper)],
+        ),
+        web_service_fixture_for_test(
+            &[],
+            &[],
+            &[operation.replace(&parameter, &bad_parameter_tail)],
+        ),
+    ];
+
+    for raw in malformed {
+        assert!(
+            extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).is_none(),
+            "accepted malformed WebService raw fixture: {raw}"
+        );
+    }
+}
+
+#[test]
+fn rejects_web_service_trailing_data_at_nested_boundaries() {
+    let parameter = web_service_parameter_for_test(
+        WEB_SERVICE_PARAMETER_IN_UUID,
+        "Request",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "string",
+        0,
+        0,
+    );
+    let operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        std::slice::from_ref(&parameter),
+    );
+    let raw = web_service_fixture_for_test(&[], &[], std::slice::from_ref(&operation));
+    assert!(
+        extract_web_service_fixture_for_test(&format!("{raw}junk"), &BTreeMap::new()).is_none()
+    );
+
+    let root = split_web_service_braced_fields(&raw).unwrap();
+    let object_suffix = format!("{{{},{}junk,{},{}}}", root[0], root[1], root[2], root[3]);
+    assert!(extract_web_service_fixture_for_test(&object_suffix, &BTreeMap::new()).is_none());
+
+    let header = web_service_header_for_test(WEB_SERVICE_TEST_UUID, "RemoteApi");
+    assert!(parse_web_service_header(&format!("{header}junk")).is_none());
+    let header_fields = split_web_service_braced_fields(&header).unwrap();
+    let identity_suffix = format!(
+        "{{{},{}junk,{},{},{},{},{},{},{}}}",
+        header_fields[0],
+        header_fields[1],
+        header_fields[2],
+        header_fields[3],
+        header_fields[4],
+        header_fields[5],
+        header_fields[6],
+        header_fields[7],
+        header_fields[8]
+    );
+    assert!(parse_web_service_header(&identity_suffix).is_none());
+    assert!(parse_web_service_localized_value("{1,\"en\"junk,\"Name\"}").is_none());
+    assert!(parse_web_service_localized_value("{1,\"en\",\"Name\"junk}").is_none());
+
+    let qname = web_service_xdto_type_for_test(XDTO_XML_SCHEMA_NAMESPACE, "string");
+    assert!(parse_web_service_xdto_type(&format!("{qname}junk")).is_none());
+
+    let refs = BTreeMap::from([(
+        WEB_SERVICE_PACKAGE_UUID.to_string(),
+        "XDTOPackage.CustomTypes".to_string(),
+    )]);
+    let package = web_service_local_package_for_test(WEB_SERVICE_PACKAGE_UUID);
+    let package_collection = format!("{{0,1,{package}}}");
+    assert!(
+        parse_web_service_metadata_packages(
+            &format!("{package_collection}junk"),
+            &refs,
+            &mut BTreeSet::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_web_service_metadata_packages(
+            &format!("{{0,1,{package}junk}}"),
+            &refs,
+            &mut BTreeSet::new(),
+        )
+        .is_none()
+    );
+    let package_target = format!("{{1,{WEB_SERVICE_PACKAGE_UUID}}}");
+    let target_suffix = package.replacen(&package_target, &format!("{package_target}junk"), 1);
+    assert!(
+        parse_web_service_metadata_packages(
+            &format!("{{0,1,{target_suffix}}}"),
+            &refs,
+            &mut BTreeSet::new(),
+        )
+        .is_none()
+    );
+    assert!(parse_web_service_namespace_packages("{1,\"urn:test\"}junk").is_none());
+
+    let operation_collection = web_service_collection_for_test(
+        WEB_SERVICE_OPERATION_COLLECTION_UUID,
+        &[operation.clone()],
+    );
+    assert!(
+        parse_web_service_operations(&format!("{operation_collection}junk"), &mut BTreeSet::new(),)
+            .is_none()
+    );
+    let entry_suffix_collection =
+        format!("{{{WEB_SERVICE_OPERATION_COLLECTION_UUID},1,{operation}junk}}");
+    assert!(parse_web_service_operations(&entry_suffix_collection, &mut BTreeSet::new()).is_none());
+    let operation_entry = split_web_service_braced_fields(&operation).unwrap();
+    let definition_suffix_entry = format!(
+        "{{{}junk,{},{}}}",
+        operation_entry[0], operation_entry[1], operation_entry[2]
+    );
+    let definition_suffix_collection = web_service_collection_for_test(
+        WEB_SERVICE_OPERATION_COLLECTION_UUID,
+        &[definition_suffix_entry],
+    );
+    assert!(
+        parse_web_service_operations(&definition_suffix_collection, &mut BTreeSet::new()).is_none()
+    );
+
+    let parameter_collection = web_service_collection_for_test(
+        WEB_SERVICE_PARAMETER_COLLECTION_UUID,
+        &[parameter.clone()],
+    );
+    assert!(
+        parse_web_service_parameters(&format!("{parameter_collection}junk"), &mut BTreeSet::new(),)
+            .is_none()
+    );
+    let parameter_entry_suffix =
+        format!("{{{WEB_SERVICE_PARAMETER_COLLECTION_UUID},1,{parameter}junk}}");
+    assert!(parse_web_service_parameters(&parameter_entry_suffix, &mut BTreeSet::new()).is_none());
+    let parameter_entry = split_web_service_braced_fields(&parameter).unwrap();
+    let parameter_definition_suffix =
+        format!("{{{}junk,{}}}", parameter_entry[0], parameter_entry[1]);
+    let parameter_definition_collection = web_service_collection_for_test(
+        WEB_SERVICE_PARAMETER_COLLECTION_UUID,
+        &[parameter_definition_suffix],
+    );
+    assert!(
+        parse_web_service_parameters(&parameter_definition_collection, &mut BTreeSet::new(),)
+            .is_none()
+    );
+}
+
+#[test]
+fn rejects_web_service_non_decimal_and_overflowing_counts() {
+    let usize_overflow = format!("{}0", usize::MAX);
+    let u32_overflow = format!("{}0", u32::MAX);
+    assert!(parse_web_service_usize("+1").is_none());
+    assert!(parse_web_service_usize(&usize_overflow).is_none());
+    assert!(parse_web_service_u32("+20").is_none());
+    assert!(parse_web_service_u32(&u32_overflow).is_none());
+    assert!(parse_web_service_localized_value(&format!("{{{usize_overflow}}}")).is_none());
+    assert!(
+        parse_web_service_operations(
+            &format!("{{{WEB_SERVICE_OPERATION_COLLECTION_UUID},{usize_overflow}}}"),
+            &mut BTreeSet::new(),
+        )
+        .is_none()
+    );
+
+    let valid = web_service_fixture_for_test(&[], &[], &[]);
+    let plus_session_age = valid.replacen(",0,20},1,", ",0,+20},1,", 1);
+    assert_ne!(plus_session_age, valid);
+    assert!(extract_web_service_fixture_for_test(&plus_session_age, &BTreeMap::new()).is_none());
+}
+
+#[test]
+fn rejects_unresolved_foreign_and_malformed_web_service_package_references() {
+    let operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        &[],
+    );
+    let local_package = web_service_local_package_for_test(WEB_SERVICE_PACKAGE_UUID);
+    let raw = web_service_fixture_for_test(
+        std::slice::from_ref(&local_package),
+        &[],
+        std::slice::from_ref(&operation),
+    );
+    assert!(extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).is_none());
+
+    let foreign_refs = BTreeMap::from([(
+        WEB_SERVICE_PACKAGE_UUID.to_string(),
+        "Catalog.Foreign".to_string(),
+    )]);
+    assert!(extract_web_service_fixture_for_test(&raw, &foreign_refs).is_none());
+
+    let package_refs = BTreeMap::from([(
+        WEB_SERVICE_PACKAGE_UUID.to_string(),
+        "XDTOPackage.CustomTypes".to_string(),
+    )]);
+    assert!(extract_web_service_fixture_for_test(&raw, &package_refs).is_some());
+
+    let malformed_package = local_package.replacen(
+        METADATA_OBJECT_REF_TYPE_UUID,
+        "88888888-8888-4888-8888-888888888888",
+        1,
+    );
+    let malformed_raw =
+        web_service_fixture_for_test(&[malformed_package], &[], std::slice::from_ref(&operation));
+    assert!(extract_web_service_fixture_for_test(&malformed_raw, &package_refs).is_none());
+}
+
+#[test]
+fn rejects_empty_or_path_ambiguous_web_service_names_and_required_text() {
+    let parameter = web_service_parameter_for_test(
+        WEB_SERVICE_PARAMETER_IN_UUID,
+        "Request",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "string",
+        0,
+        0,
+    );
+    let operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        std::slice::from_ref(&parameter),
+    );
+    let valid = web_service_fixture_for_test(&[], &[], std::slice::from_ref(&operation));
+    let empty_operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        &[],
+    );
+    let dotted_operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping.Method",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        &[],
+    );
+    let empty_parameter = web_service_parameter_for_test(
+        WEB_SERVICE_PARAMETER_IN_UUID,
+        "",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "string",
+        0,
+        0,
+    );
+    let dotted_parameter = web_service_parameter_for_test(
+        WEB_SERVICE_PARAMETER_IN_UUID,
+        "Request.Value",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "string",
+        0,
+        0,
+    );
+
+    let cases = [
+        valid.replacen("\"http://example.com/service\"", "\"\"", 1),
+        valid.replacen("\"RemoteApi.1cws\"", "\"\"", 1),
+        valid.replacen("\"HandlePing\"", "\"\"", 1),
+        valid.replacen(
+            "\"RemoteApi\",{1,\"en\",\"RemoteApi\"}",
+            "\"\",{1,\"en\",\"RemoteApi\"}",
+            1,
+        ),
+        valid.replacen(
+            "\"RemoteApi\",{1,\"en\",\"RemoteApi\"}",
+            "\"Remote.Api\",{1,\"en\",\"RemoteApi\"}",
+            1,
+        ),
+        web_service_fixture_for_test(&[], &[], &[empty_operation]),
+        web_service_fixture_for_test(&[], &[], &[dotted_operation]),
+        web_service_fixture_for_test(
+            &[],
+            &[],
+            &[web_service_operation_for_test(
+                WEB_SERVICE_OPERATION_A_UUID,
+                "Ping",
+                XDTO_XML_SCHEMA_NAMESPACE,
+                "boolean",
+                0,
+                0,
+                1,
+                &[empty_parameter],
+            )],
+        ),
+        web_service_fixture_for_test(
+            &[],
+            &[],
+            &[web_service_operation_for_test(
+                WEB_SERVICE_OPERATION_A_UUID,
+                "Ping",
+                XDTO_XML_SCHEMA_NAMESPACE,
+                "boolean",
+                0,
+                0,
+                1,
+                &[dotted_parameter],
+            )],
+        ),
+    ];
+    for raw in cases {
+        assert!(
+            extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).is_none(),
+            "accepted empty/path-ambiguous WebService field: {raw}"
+        );
+    }
+}
+
+#[test]
+fn enforces_case_insensitive_web_service_child_name_uniqueness() {
+    let operation = |uuid: &str, name: &str, parameters: &[String]| {
+        web_service_operation_for_test(
+            uuid,
+            name,
+            XDTO_XML_SCHEMA_NAMESPACE,
+            "boolean",
+            0,
+            0,
+            1,
+            parameters,
+        )
+    };
+    let parameter = |uuid: &str, name: &str| {
+        web_service_parameter_for_test(uuid, name, XDTO_XML_SCHEMA_NAMESPACE, "string", 0, 0)
+    };
+
+    for names in [["Ping", "Ping"], ["Ping", "pING"]] {
+        let raw = web_service_fixture_for_test(
+            &[],
+            &[],
+            &[
+                operation(WEB_SERVICE_OPERATION_A_UUID, names[0], &[]),
+                operation(WEB_SERVICE_OPERATION_B_UUID, names[1], &[]),
+            ],
+        );
+        assert!(extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).is_none());
+    }
+
+    for names in [["Request", "Request"], ["Request", "rEQUEST"]] {
+        let parameters = vec![
+            parameter(WEB_SERVICE_PARAMETER_IN_UUID, names[0]),
+            parameter(WEB_SERVICE_PARAMETER_OUT_UUID, names[1]),
+        ];
+        let raw = web_service_fixture_for_test(
+            &[],
+            &[],
+            &[operation(WEB_SERVICE_OPERATION_A_UUID, "Ping", &parameters)],
+        );
+        assert!(extract_web_service_fixture_for_test(&raw, &BTreeMap::new()).is_none());
+    }
+
+    let first_parameter = parameter(WEB_SERVICE_PARAMETER_IN_UUID, "Request");
+    let second_parameter = parameter(WEB_SERVICE_PARAMETER_OUT_UUID, "Request");
+    let repeated_across_operations = web_service_fixture_for_test(
+        &[],
+        &[],
+        &[
+            operation(WEB_SERVICE_OPERATION_A_UUID, "First", &[first_parameter]),
+            operation(WEB_SERVICE_OPERATION_B_UUID, "Second", &[second_parameter]),
+        ],
+    );
+    assert!(
+        extract_web_service_fixture_for_test(&repeated_across_operations, &BTreeMap::new())
+            .is_some()
+    );
+}
+
+#[test]
+fn validates_web_service_uuids_and_global_package_uuid_uniqueness() {
+    let wrong_hyphen_positions = "111111111-111-4111-8111-111111111111";
+    let only_hyphens = "------------------------------------";
+    assert!(parse_web_service_non_zero_uuid(wrong_hyphen_positions).is_none());
+    assert!(parse_web_service_non_zero_uuid(only_hyphens).is_none());
+
+    let header = web_service_header_for_test(WEB_SERVICE_TEST_UUID, "RemoteApi");
+    assert!(
+        parse_web_service_header(&header.replacen(WEB_SERVICE_TEST_UUID, only_hyphens, 1))
+            .is_none()
+    );
+
+    let bad_operation = web_service_operation_for_test(
+        wrong_hyphen_positions,
+        "Ping",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        &[],
+    );
+    assert!(
+        extract_web_service_fixture_for_test(
+            &web_service_fixture_for_test(&[], &[], &[bad_operation]),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let bad_parameter = web_service_parameter_for_test(
+        only_hyphens,
+        "Request",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "string",
+        0,
+        0,
+    );
+    let bad_parameter_operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        &[bad_parameter],
+    );
+    assert!(
+        extract_web_service_fixture_for_test(
+            &web_service_fixture_for_test(&[], &[], &[bad_parameter_operation]),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let malformed_package = web_service_local_package_for_test(wrong_hyphen_positions);
+    let malformed_refs = BTreeMap::from([(
+        wrong_hyphen_positions.to_string(),
+        "XDTOPackage.CustomTypes".to_string(),
+    )]);
+    assert!(
+        extract_web_service_fixture_for_test(
+            &web_service_fixture_for_test(&[malformed_package], &[], &[]),
+            &malformed_refs,
+        )
+        .is_none()
+    );
+
+    let operation = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "Ping",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        &[web_service_parameter_for_test(
+            WEB_SERVICE_PARAMETER_IN_UUID,
+            "Request",
+            XDTO_XML_SCHEMA_NAMESPACE,
+            "string",
+            0,
+            0,
+        )],
+    );
+    for collision_uuid in [
+        WEB_SERVICE_TEST_UUID,
+        WEB_SERVICE_OPERATION_A_UUID,
+        WEB_SERVICE_PARAMETER_IN_UUID,
+    ] {
+        let package = web_service_local_package_for_test(collision_uuid);
+        let refs = BTreeMap::from([(
+            collision_uuid.to_string(),
+            "XDTOPackage.Collision".to_string(),
+        )]);
+        let raw = web_service_fixture_for_test(&[package], &[], std::slice::from_ref(&operation));
+        assert!(
+            extract_web_service_fixture_for_test(&raw, &refs).is_none(),
+            "accepted package/global UUID collision: {collision_uuid}"
+        );
+    }
+}
+
+#[test]
+fn validates_web_service_xml_namespaces_ncname_and_xml_characters() {
+    for valid_name in [
+        "\u{0422}\u{0438}\u{043f}",
+        "\u{037a}Type",
+        "A\u{0301}",
+        "\u{1f600}Type",
+    ] {
+        assert!(
+            parse_web_service_xdto_type(&web_service_xdto_type_for_test("urn:test", valid_name))
+                .is_some(),
+            "rejected valid XML NCName: {valid_name:?}"
+        );
+    }
+    for invalid_name in ["\u{00aa}Type", "\u{00b5}Type", "A\u{00b2}", "\u{037e}Type"] {
+        assert!(
+            parse_web_service_xdto_type(&web_service_xdto_type_for_test("urn:test", invalid_name))
+                .is_none(),
+            "accepted invalid XML NCName: {invalid_name:?}"
+        );
+    }
+
+    let reserved_return = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "ReservedReturn",
+        XML_NAMESPACE,
+        "Type",
+        0,
+        0,
+        1,
+        &[],
+    );
+    let reserved_parameter = web_service_parameter_for_test(
+        WEB_SERVICE_PARAMETER_IN_UUID,
+        "ReservedParameter",
+        XMLNS_NAMESPACE,
+        "Type",
+        0,
+        0,
+    );
+    let operation_with_reserved_parameter = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "ReservedParameterOperation",
+        XDTO_XML_SCHEMA_NAMESPACE,
+        "boolean",
+        0,
+        0,
+        1,
+        &[reserved_parameter],
+    );
+    for operation in [reserved_return, operation_with_reserved_parameter] {
+        assert!(
+            extract_web_service_fixture_for_test(
+                &web_service_fixture_for_test(&[], &[], &[operation]),
+                &BTreeMap::new(),
+            )
+            .is_none()
+        );
+    }
+
+    assert!(parse_web_service_quoted_string("\"tab\tand non-BMP \u{1f600}\"").is_some());
+    for invalid_char in ['\0', '\u{fffe}', '\u{ffff}'] {
+        assert!(
+            parse_web_service_quoted_string(&format!("\"before{invalid_char}after\"")).is_none()
+        );
+    }
+
+    let package = web_service_local_package_for_test(WEB_SERVICE_PACKAGE_UUID);
+    let raw = web_service_fixture_for_test(&[package], &[], &[]);
+    let invalid_reference = BTreeMap::from([(
+        WEB_SERVICE_PACKAGE_UUID.to_string(),
+        "XDTOPackage.Invalid\0Name".to_string(),
+    )]);
+    assert!(extract_web_service_fixture_for_test(&raw, &invalid_reference).is_none());
+}
+
+#[test]
+fn rejects_web_service_global_uuid_qname_package_and_reuse_session_violations() {
+    let plain_parameter = || {
+        web_service_parameter_for_test(
+            WEB_SERVICE_PARAMETER_IN_UUID,
+            "Request",
+            "http://www.w3.org/2001/XMLSchema",
+            "string",
+            0,
+            0,
+        )
+    };
+    let plain_operation = || {
+        web_service_operation_for_test(
+            WEB_SERVICE_OPERATION_A_UUID,
+            "Ping",
+            "http://www.w3.org/2001/XMLSchema",
+            "boolean",
+            0,
+            0,
+            1,
+            &[],
+        )
+    };
+    let empty_refs = BTreeMap::new();
+    let package_refs = BTreeMap::from([(
+        WEB_SERVICE_PACKAGE_UUID.to_string(),
+        "XDTOPackage.CustomTypes".to_string(),
+    )]);
+
+    let owner_uuid_operation = web_service_operation_for_test(
+        WEB_SERVICE_TEST_UUID,
+        "OwnerCollision",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        &[],
+    );
+    let operation_uuid_parameter = web_service_parameter_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "OperationCollision",
+        "http://www.w3.org/2001/XMLSchema",
+        "string",
+        0,
+        0,
+    );
+    let operation_with_own_uuid_parameter = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "OperationCollision",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        &[operation_uuid_parameter],
+    );
+    let shared_parameter = plain_parameter();
+    let first_with_shared_parameter = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "First",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        std::slice::from_ref(&shared_parameter),
+    );
+    let second_with_shared_parameter = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_B_UUID,
+        "Second",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        std::slice::from_ref(&shared_parameter),
+    );
+    let invalid_start_qname = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "InvalidStart",
+        "http://example.com/result",
+        "1Result",
+        0,
+        0,
+        1,
+        &[],
+    );
+    let invalid_punctuation_parameter = web_service_parameter_for_test(
+        WEB_SERVICE_PARAMETER_IN_UUID,
+        "InvalidPunctuation",
+        "http://example.com/request",
+        "Bad!Type",
+        0,
+        0,
+    );
+    let invalid_punctuation_qname = web_service_operation_for_test(
+        WEB_SERVICE_OPERATION_A_UUID,
+        "InvalidPunctuation",
+        "http://www.w3.org/2001/XMLSchema",
+        "boolean",
+        0,
+        0,
+        1,
+        &[invalid_punctuation_parameter],
+    );
+    let local_package = web_service_local_package_for_test(WEB_SERVICE_PACKAGE_UUID);
+    let valid = web_service_fixture_for_test(&[], &[], &[plain_operation()]);
+    let expected_header = MetadataHeader {
+        uuid: WEB_SERVICE_TEST_UUID.to_string(),
+        name: "RemoteApi".to_string(),
+        synonyms: vec![("en".to_string(), "RemoteApi".to_string())],
+        comment: String::new(),
+        template_type_code: None,
+    };
+    let mismatched_root_header = valid.replacen(
+        "\"RemoteApi\",{1,\"en\",\"RemoteApi\"}",
+        "\"ForeignApi\",{1,\"en\",\"ForeignApi\"}",
+        1,
+    );
+    assert!(
+        parse_web_service_properties_from_text(
+            &mismatched_root_header,
+            &expected_header,
+            &empty_refs,
+        )
+        .is_none()
+    );
+    let reuse_unknown = valid.replacen(
+        "\"RemoteApi.1cws\",{0},0,20",
+        "\"RemoteApi.1cws\",{0},3,20",
+        1,
+    );
+
+    let cases = [
+        (
+            "owner UUID reused by operation",
+            web_service_fixture_for_test(&[], &[], &[owner_uuid_operation]),
+            &empty_refs,
+        ),
+        (
+            "operation UUID reused by its parameter",
+            web_service_fixture_for_test(&[], &[], &[operation_with_own_uuid_parameter]),
+            &empty_refs,
+        ),
+        (
+            "parameter UUID reused across operations",
+            web_service_fixture_for_test(
+                &[],
+                &[],
+                &[first_with_shared_parameter, second_with_shared_parameter],
+            ),
+            &empty_refs,
+        ),
+        (
+            "QName starts with a digit",
+            web_service_fixture_for_test(&[], &[], &[invalid_start_qname]),
+            &empty_refs,
+        ),
+        (
+            "QName contains invalid punctuation",
+            web_service_fixture_for_test(&[], &[], &[invalid_punctuation_qname]),
+            &empty_refs,
+        ),
+        (
+            "duplicate metadata package",
+            web_service_fixture_for_test(
+                &[local_package.clone(), local_package],
+                &[],
+                &[plain_operation()],
+            ),
+            &package_refs,
+        ),
+        (
+            "duplicate namespace package",
+            web_service_fixture_for_test(
+                &[],
+                &["http://example.com/types", "http://example.com/types"],
+                &[plain_operation()],
+            ),
+            &empty_refs,
+        ),
+        ("unknown ReuseSessions raw code", reuse_unknown, &empty_refs),
+    ];
+
+    for (label, raw, refs) in cases {
+        assert!(
+            extract_web_service_fixture_for_test(&raw, refs).is_none(),
+            "accepted WebService invariant violation ({label}): {raw}"
+        );
+    }
+}

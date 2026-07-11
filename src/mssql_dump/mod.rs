@@ -80,12 +80,19 @@ const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013
 // Platform serialized-value type IDs, independent of metadata in any infobase.
 const DESIGN_TIME_REF_TYPE_UUID: &str = "5c14e26f-099b-4d37-84a6-b433d87400da";
 const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
+const METADATA_OBJECT_REF_TYPE_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
 const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f80211";
 const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
+const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
+const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
+const XDTO_XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
+const XDTO_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
+const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
+const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
 
 const FORM_APPLICATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
 // Platform picture descriptor code for StdPicture.Print.
@@ -4256,6 +4263,47 @@ struct XdtoPackageProperties {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+struct WebServiceProperties {
+    namespace: String,
+    xdto_packages: Vec<WebServiceXdtoPackage>,
+    descriptor_file_name: String,
+    reuse_sessions: &'static str,
+    session_max_age: u32,
+    operations: Vec<WebServiceOperationProperties>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum WebServiceXdtoPackage {
+    MetadataReference(String),
+    Namespace(String),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WebServiceOperationProperties {
+    header: MetadataHeader,
+    returning_value_type: WebServiceXdtoType,
+    nillable: bool,
+    transactioned: bool,
+    procedure_name: String,
+    data_lock_control_mode: &'static str,
+    parameters: Vec<WebServiceParameterProperties>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WebServiceParameterProperties {
+    header: MetadataHeader,
+    value_type: WebServiceXdtoType,
+    nillable: bool,
+    transfer_direction: &'static str,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct WebServiceXdtoType {
+    namespace: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct HttpServiceProperties {
     root_url: String,
     reuse_sessions: &'static str,
@@ -5713,6 +5761,9 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "XDTOPackage" {
         let package = parse_xdto_package_properties_from_text(text, uuid)?;
         format_xdto_package_source_xml(&header, &package, source_version).into_bytes()
+    } else if kind == "WebService" {
+        let service = parse_web_service_properties_from_text(text, header, object_refs)?;
+        format_web_service_source_xml(&header, &service, source_version).into_bytes()
     } else if kind == "HTTPService" {
         let service = parse_http_service_properties_from_text(text, uuid)?;
         format_http_service_source_xml(&header, &service, source_version).into_bytes()
@@ -11946,6 +11997,380 @@ fn parse_xdto_package_properties_from_text(
     Some(XdtoPackageProperties { namespace })
 }
 
+fn parse_web_service_properties_from_text(
+    text: &str,
+    expected_header: &MetadataHeader,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<WebServiceProperties> {
+    let root = split_web_service_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 4 || root.first()?.trim() != "1" || root.get(2)?.trim() != "1" {
+        return None;
+    }
+    let fields = split_web_service_braced_fields(root.get(1)?)?;
+    if fields.len() != 8 || fields.first()?.trim() != "4" {
+        return None;
+    }
+    let header = parse_web_service_header(fields.get(2)?)?;
+    if !header.uuid.eq_ignore_ascii_case(&expected_header.uuid)
+        || header.name != expected_header.name
+        || header.synonyms != expected_header.synonyms
+        || header.comment != expected_header.comment
+    {
+        return None;
+    }
+
+    let mut seen_uuids = BTreeSet::from([header.uuid.to_ascii_lowercase()]);
+    let mut xdto_packages =
+        parse_web_service_metadata_packages(fields.get(3)?, object_refs, &mut seen_uuids)?;
+    xdto_packages.extend(
+        parse_web_service_namespace_packages(fields.get(5)?)?
+            .into_iter()
+            .map(WebServiceXdtoPackage::Namespace),
+    );
+
+    Some(WebServiceProperties {
+        namespace: parse_web_service_nonempty_quoted_string(fields.get(1)?)?,
+        xdto_packages,
+        descriptor_file_name: parse_web_service_nonempty_quoted_string(fields.get(4)?)?,
+        reuse_sessions: parse_web_service_reuse_sessions(fields.get(6)?)?,
+        session_max_age: parse_web_service_u32(fields.get(7)?)?,
+        operations: parse_web_service_operations(root.get(3)?, &mut seen_uuids)?,
+    })
+}
+
+fn parse_web_service_metadata_packages(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    seen_uuids: &mut BTreeSet<String>,
+) -> Option<Vec<WebServiceXdtoPackage>> {
+    let fields = split_web_service_braced_fields(value)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_web_service_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let mut seen_references = BTreeSet::new();
+    let mut packages = Vec::with_capacity(count);
+    for field in fields.iter().skip(2) {
+        let typed = split_web_service_braced_fields(field)?;
+        if typed.len() != 3
+            || parse_web_service_quoted_string(typed.first()?)? != "#"
+            || !typed
+                .get(1)?
+                .trim()
+                .eq_ignore_ascii_case(METADATA_OBJECT_REF_TYPE_UUID)
+        {
+            return None;
+        }
+        let target = split_web_service_braced_fields(typed.get(2)?)?;
+        if target.len() != 2 || target.first()?.trim() != "1" {
+            return None;
+        }
+        let uuid = parse_web_service_non_zero_uuid(target.get(1)?)?;
+        let reference = object_refs.get(&uuid)?;
+        let name = reference.strip_prefix("XDTOPackage.")?;
+        if name.is_empty()
+            || name.contains('.')
+            || !reference.chars().all(is_xml_1_0_char)
+            || !seen_uuids.insert(uuid.to_ascii_lowercase())
+            || !seen_references.insert(reference.clone())
+        {
+            return None;
+        }
+        packages.push(WebServiceXdtoPackage::MetadataReference(reference.clone()));
+    }
+    Some(packages)
+}
+
+fn parse_web_service_namespace_packages(value: &str) -> Option<Vec<String>> {
+    let fields = split_web_service_braced_fields(value)?;
+    let count = parse_web_service_usize(fields.first()?)?;
+    if fields.len() != count.checked_add(1)? {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    let mut packages = Vec::with_capacity(count);
+    for field in fields.iter().skip(1) {
+        let namespace = parse_web_service_quoted_string(field)?;
+        if namespace.is_empty() || !seen.insert(namespace.clone()) {
+            return None;
+        }
+        packages.push(namespace);
+    }
+    Some(packages)
+}
+
+fn parse_web_service_operations(
+    value: &str,
+    seen_uuids: &mut BTreeSet<String>,
+) -> Option<Vec<WebServiceOperationProperties>> {
+    let fields = split_web_service_braced_fields(value)?;
+    if !parse_uuid_field(fields.first()?.trim())
+        .is_some_and(|marker| marker.eq_ignore_ascii_case(WEB_SERVICE_OPERATION_COLLECTION_UUID))
+    {
+        return None;
+    }
+    let count = parse_web_service_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let mut seen_names = BTreeSet::new();
+    let mut operations = Vec::with_capacity(count);
+    for field in fields.iter().skip(2) {
+        let entry = split_web_service_braced_fields(field)?;
+        if entry.len() != 3 || entry.get(1)?.trim() != "1" {
+            return None;
+        }
+        let operation = split_web_service_braced_fields(entry.first()?)?;
+        if operation.len() != 7 || operation.first()?.trim() != "1" {
+            return None;
+        }
+        let header = parse_web_service_header(operation.get(1)?)?;
+        if header.name.is_empty()
+            || !seen_names.insert(web_service_case_insensitive_name_key(&header.name))
+            || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+        {
+            return None;
+        }
+        let data_lock_control_mode = match operation.get(6)?.trim() {
+            "0" => "Automatic",
+            "1" => "Managed",
+            _ => return None,
+        };
+        operations.push(WebServiceOperationProperties {
+            header,
+            returning_value_type: parse_web_service_xdto_type(operation.get(2)?)?,
+            nillable: information_register_bool(operation.get(3)?)?,
+            transactioned: information_register_bool(operation.get(4)?)?,
+            procedure_name: parse_web_service_nonempty_quoted_string(operation.get(5)?)?,
+            data_lock_control_mode,
+            parameters: parse_web_service_parameters(entry.get(2)?, seen_uuids)?,
+        });
+    }
+    Some(operations)
+}
+
+fn parse_web_service_parameters(
+    value: &str,
+    seen_uuids: &mut BTreeSet<String>,
+) -> Option<Vec<WebServiceParameterProperties>> {
+    let fields = split_web_service_braced_fields(value)?;
+    if !parse_uuid_field(fields.first()?.trim())
+        .is_some_and(|marker| marker.eq_ignore_ascii_case(WEB_SERVICE_PARAMETER_COLLECTION_UUID))
+    {
+        return None;
+    }
+    let count = parse_web_service_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let mut seen_names = BTreeSet::new();
+    let mut parameters = Vec::with_capacity(count);
+    for field in fields.iter().skip(2) {
+        let entry = split_web_service_braced_fields(field)?;
+        if entry.len() != 2 || entry.get(1)?.trim() != "0" {
+            return None;
+        }
+        let parameter = split_web_service_braced_fields(entry.first()?)?;
+        if parameter.len() != 5 || parameter.first()?.trim() != "0" {
+            return None;
+        }
+        let header = parse_web_service_header(parameter.get(1)?)?;
+        if header.name.is_empty()
+            || !seen_names.insert(web_service_case_insensitive_name_key(&header.name))
+            || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+        {
+            return None;
+        }
+        let transfer_direction = match parameter.get(4)?.trim() {
+            "0" => "In",
+            "1" => "Out",
+            "2" => "InOut",
+            _ => return None,
+        };
+        parameters.push(WebServiceParameterProperties {
+            header,
+            value_type: parse_web_service_xdto_type(parameter.get(2)?)?,
+            nillable: information_register_bool(parameter.get(3)?)?,
+            transfer_direction,
+        });
+    }
+    Some(parameters)
+}
+
+fn parse_web_service_xdto_type(value: &str) -> Option<WebServiceXdtoType> {
+    let fields = split_web_service_braced_fields(value)?;
+    if fields.len() != 3 || fields.first()?.trim() != "0" {
+        return None;
+    }
+    let namespace = parse_web_service_quoted_string(fields.get(1)?)?;
+    let name = parse_web_service_quoted_string(fields.get(2)?)?;
+    if namespace.is_empty()
+        || namespace.chars().any(char::is_control)
+        || matches!(namespace.as_str(), XML_NAMESPACE | XMLNS_NAMESPACE)
+        || !is_xml_ncname(&name)
+    {
+        return None;
+    }
+    Some(WebServiceXdtoType { namespace, name })
+}
+
+fn parse_web_service_header(value: &str) -> Option<MetadataHeader> {
+    let fields = split_web_service_braced_fields(value)?;
+    if fields.len() != 9
+        || fields.first()?.trim() != "3"
+        || fields.get(5)?.trim() != "0"
+        || fields.get(6)?.trim() != "0"
+        || !parse_uuid_field(fields.get(7)?.trim())
+            .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
+        || fields.get(8)?.trim() != "0"
+    {
+        return None;
+    }
+    let identity = split_web_service_braced_fields(fields.get(1)?)?;
+    if identity.len() != 3 || identity.first()?.trim() != "1" || identity.get(1)?.trim() != "0" {
+        return None;
+    }
+    let name = parse_web_service_nonempty_quoted_string(fields.get(2)?)?;
+    if name.contains('.') {
+        return None;
+    }
+    Some(MetadataHeader {
+        uuid: parse_web_service_non_zero_uuid(identity.get(2)?)?,
+        name,
+        synonyms: parse_web_service_localized_value(fields.get(3)?)?,
+        comment: parse_web_service_quoted_string(fields.get(4)?)?,
+        template_type_code: None,
+    })
+}
+
+fn parse_web_service_quoted_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    let (parsed, consumed) = parse_1c_quoted_string_with_len(value)?;
+    (consumed == value.len() && parsed.chars().all(is_xml_1_0_char)).then_some(parsed)
+}
+
+fn parse_web_service_nonempty_quoted_string(value: &str) -> Option<String> {
+    let value = parse_web_service_quoted_string(value)?;
+    (!value.is_empty()).then_some(value)
+}
+
+fn parse_web_service_localized_value(value: &str) -> Option<Vec<(String, String)>> {
+    let fields = split_web_service_braced_fields(value)?;
+    let count = parse_web_service_usize(fields.first()?)?;
+    if fields.len() != count.checked_mul(2)?.checked_add(1)? {
+        return None;
+    }
+    let mut languages = BTreeSet::new();
+    let mut values = Vec::with_capacity(count);
+    for pair in fields[1..].chunks_exact(2) {
+        let language = parse_web_service_quoted_string(pair[0])?;
+        let content = parse_web_service_quoted_string(pair[1])?;
+        if !languages.insert(language.clone()) {
+            return None;
+        }
+        values.push((language, content));
+    }
+    Some(values)
+}
+
+fn split_web_service_braced_fields(value: &str) -> Option<Vec<&str>> {
+    let value = value.trim();
+    if scan_1c_braced_value(value, 0)? != value.len() {
+        return None;
+    }
+    split_1c_braced_fields(value, 0)
+}
+
+fn parse_web_service_usize(value: &str) -> Option<usize> {
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+fn parse_web_service_u32(value: &str) -> Option<u32> {
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+fn parse_web_service_reuse_sessions(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        "2" => Some("AutoUse"),
+        _ => None,
+    }
+}
+
+fn parse_web_service_non_zero_uuid(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.len() != 36
+        || value.bytes().enumerate().any(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte != b'-',
+            _ => !byte.is_ascii_hexdigit(),
+        })
+        || value == "00000000-0000-0000-0000-000000000000"
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn web_service_case_insensitive_name_key(value: &str) -> String {
+    value.chars().flat_map(char::to_lowercase).collect()
+}
+
+fn is_xml_1_0_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{0009}' | '\u{000a}' | '\u{000d}' | '\u{0020}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
+    )
+}
+
+fn is_xml_ncname(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    is_xml_ncname_start_char(first) && chars.all(is_xml_ncname_char)
+}
+
+fn is_xml_ncname_start_char(ch: char) -> bool {
+    matches!(
+        ch,
+        'A'..='Z'
+            | '_'
+            | 'a'..='z'
+            | '\u{00c0}'..='\u{00d6}'
+            | '\u{00d8}'..='\u{00f6}'
+            | '\u{00f8}'..='\u{02ff}'
+            | '\u{0370}'..='\u{037d}'
+            | '\u{037f}'..='\u{1fff}'
+            | '\u{200c}'..='\u{200d}'
+            | '\u{2070}'..='\u{218f}'
+            | '\u{2c00}'..='\u{2fef}'
+            | '\u{3001}'..='\u{d7ff}'
+            | '\u{f900}'..='\u{fdcf}'
+            | '\u{fdf0}'..='\u{fffd}'
+            | '\u{10000}'..='\u{effff}'
+    )
+}
+
+fn is_xml_ncname_char(ch: char) -> bool {
+    is_xml_ncname_start_char(ch)
+        || matches!(
+            ch,
+            '-' | '.' | '0'..='9' | '\u{00b7}' | '\u{0300}'..='\u{036f}' | '\u{203f}'..='\u{2040}'
+        )
+}
+
 fn parse_http_service_properties_from_text(
     text: &str,
     uuid: &str,
@@ -17402,6 +17827,193 @@ fn insert_metadata_properties_xml(xml: &mut String, insert: &str) {
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, insert);
+    }
+}
+
+fn format_web_service_source_xml(
+    header: &MetadataHeader,
+    service: &WebServiceProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml = format_full_metadata_source_xml("WebService", header, source_version);
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        const STYLE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
+        const PALETTE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
+        if let Some(style_index) = xml.find(STYLE_NAMESPACE_ATTRIBUTE) {
+            xml.insert_str(style_index, PALETTE_NAMESPACE_ATTRIBUTE);
+        }
+    }
+    let mut properties = String::new();
+    push_web_service_text_property(&mut properties, "\t\t\t", "Namespace", &service.namespace);
+    push_web_service_xdto_packages_xml(&mut properties, &service.xdto_packages);
+    push_web_service_text_property(
+        &mut properties,
+        "\t\t\t",
+        "DescriptorFileName",
+        &service.descriptor_file_name,
+    );
+    properties.push_str(&format!(
+        "\t\t\t<ReuseSessions>{}</ReuseSessions>\r\n\
+\t\t\t<SessionMaxAge>{}</SessionMaxAge>\r\n",
+        service.reuse_sessions, service.session_max_age
+    ));
+    insert_metadata_properties_xml(&mut xml, &properties);
+
+    let child_objects = if service.operations.is_empty() {
+        "\t\t<ChildObjects/>\r\n".to_string()
+    } else {
+        let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+        for operation in &service.operations {
+            push_web_service_operation_xml(&mut child_objects, operation);
+        }
+        child_objects.push_str("\t\t</ChildObjects>\r\n");
+        child_objects
+    };
+    if let Some(index) = xml.find("\t</WebService>\r\n") {
+        xml.insert_str(index, &child_objects);
+    }
+    xml
+}
+
+fn push_web_service_xdto_packages_xml(xml: &mut String, packages: &[WebServiceXdtoPackage]) {
+    if packages.is_empty() {
+        xml.push_str("\t\t\t<XDTOPackages/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<XDTOPackages>\r\n");
+    for package in packages {
+        let (value_type, value) = match package {
+            WebServiceXdtoPackage::MetadataReference(reference) => {
+                ("xr:MDObjectRef", reference.as_str())
+            }
+            WebServiceXdtoPackage::Namespace(namespace) => ("xs:string", namespace.as_str()),
+        };
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Item>\r\n\
+\t\t\t\t\t<xr:Presentation/>\r\n\
+\t\t\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t\t\t<xr:Value xsi:type=\"{}\">{}</xr:Value>\r\n\
+\t\t\t\t</xr:Item>\r\n",
+            value_type,
+            escape_xml_element_text(value)
+        ));
+    }
+    xml.push_str("\t\t\t</XDTOPackages>\r\n");
+}
+
+fn push_web_service_operation_xml(xml: &mut String, operation: &WebServiceOperationProperties) {
+    xml.push_str(&format!(
+        "\t\t\t<Operation uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n",
+        escape_xml_text(&operation.header.uuid)
+    ));
+    push_web_service_header_properties_xml(xml, "\t\t\t\t\t", &operation.header);
+    push_web_service_xdto_type_xml(
+        xml,
+        "\t\t\t\t\t",
+        "XDTOReturningValueType",
+        &operation.returning_value_type,
+        "d6p1",
+    );
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Nillable>{}</Nillable>\r\n\
+\t\t\t\t\t<Transactioned>{}</Transactioned>\r\n",
+        xml_bool(operation.nillable),
+        xml_bool(operation.transactioned)
+    ));
+    push_web_service_text_property(
+        xml,
+        "\t\t\t\t\t",
+        "ProcedureName",
+        &operation.procedure_name,
+    );
+    xml.push_str(&format!(
+        "\t\t\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t\t</Properties>\r\n",
+        operation.data_lock_control_mode
+    ));
+    if operation.parameters.is_empty() {
+        xml.push_str("\t\t\t\t<ChildObjects/>\r\n");
+    } else {
+        xml.push_str("\t\t\t\t<ChildObjects>\r\n");
+        for parameter in &operation.parameters {
+            push_web_service_parameter_xml(xml, parameter);
+        }
+        xml.push_str("\t\t\t\t</ChildObjects>\r\n");
+    }
+    xml.push_str("\t\t\t</Operation>\r\n");
+}
+
+fn push_web_service_parameter_xml(xml: &mut String, parameter: &WebServiceParameterProperties) {
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Parameter uuid=\"{}\">\r\n\
+\t\t\t\t\t\t<Properties>\r\n",
+        escape_xml_text(&parameter.header.uuid)
+    ));
+    push_web_service_header_properties_xml(xml, "\t\t\t\t\t\t\t", &parameter.header);
+    push_web_service_xdto_type_xml(
+        xml,
+        "\t\t\t\t\t\t\t",
+        "XDTOValueType",
+        &parameter.value_type,
+        "d8p1",
+    );
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t\t<Nillable>{}</Nillable>\r\n\
+\t\t\t\t\t\t\t<TransferDirection>{}</TransferDirection>\r\n\
+\t\t\t\t\t\t</Properties>\r\n\
+\t\t\t\t\t</Parameter>\r\n",
+        xml_bool(parameter.nillable),
+        parameter.transfer_direction
+    ));
+}
+
+fn push_web_service_header_properties_xml(xml: &mut String, indent: &str, header: &MetadataHeader) {
+    xml.push_str(&format!(
+        "{indent}<Name>{}</Name>\r\n",
+        escape_xml_element_text(&header.name)
+    ));
+    push_header_synonym_xml(xml, indent, &header.synonyms);
+    push_web_service_text_property(xml, indent, "Comment", &header.comment);
+}
+
+fn push_web_service_xdto_type_xml(
+    xml: &mut String,
+    indent: &str,
+    tag: &str,
+    value_type: &WebServiceXdtoType,
+    custom_prefix: &str,
+) {
+    let (prefix, namespace_attribute) = match value_type.namespace.as_str() {
+        XDTO_XML_SCHEMA_NAMESPACE => ("xs", None),
+        XDTO_CORE_NAMESPACE => ("v8", None),
+        namespace => (custom_prefix, Some(namespace)),
+    };
+    let namespace_attribute = namespace_attribute
+        .map(|namespace| {
+            format!(
+                " xmlns:{}=\"{}\"",
+                custom_prefix,
+                escape_xml_text(namespace)
+            )
+        })
+        .unwrap_or_default();
+    xml.push_str(&format!(
+        "{indent}<{tag}{namespace_attribute}>{prefix}:{}</{tag}>\r\n",
+        escape_xml_element_text(&value_type.name)
+    ));
+}
+
+fn push_web_service_text_property(xml: &mut String, indent: &str, tag: &str, value: &str) {
+    if value.is_empty() {
+        xml.push_str(&format!("{indent}<{tag}/>\r\n"));
+    } else {
+        xml.push_str(&format!(
+            "{indent}<{tag}>{}</{tag}>\r\n",
+            escape_xml_element_text(value)
+        ));
     }
 }
 
