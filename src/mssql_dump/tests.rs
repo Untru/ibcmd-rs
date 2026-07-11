@@ -30427,6 +30427,284 @@ fn parses_http_service_url_templates_from_real_layout_text() {
     assert_eq!(templates[0].methods[0].handler, "HandlePost");
 }
 
+struct StrictFilterCriterionFixture {
+    raw: String,
+    owner_uuid: String,
+    generated_ids: Vec<String>,
+    type_ids: Vec<String>,
+    content_ids: Vec<String>,
+    tail_ids: Vec<String>,
+    type_index: BTreeMap<String, String>,
+    object_refs: BTreeMap<String, String>,
+}
+
+fn strict_filter_criterion_fixture() -> StrictFilterCriterionFixture {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let generated_ids = (0..4)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let type_ids = (0..3)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let content_ids = (0..2)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let tail_ids = (0..2)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let type_references = [
+        "cfg:CatalogRef.Products",
+        "cfg:DocumentRef.Invoice",
+        "cfg:EnumRef.Status",
+    ];
+    let content_references = [
+        "Catalog.Products.Attribute.Code",
+        "Document.Invoice.TabularSection.Lines.Attribute.Item",
+    ];
+    let type_index = type_ids
+        .iter()
+        .zip(type_references)
+        .map(|(uuid, reference)| (uuid.clone(), reference.to_string()))
+        .collect();
+    let object_refs = content_ids
+        .iter()
+        .zip(content_references)
+        .map(|(uuid, reference)| (uuid.clone(), reference.to_string()))
+        .collect();
+    let raw = strict_filter_criterion_raw_for_test(
+        &owner_uuid,
+        "DynamicCriterion",
+        &generated_ids,
+        &type_ids,
+        &content_ids,
+        &tail_ids,
+    );
+    StrictFilterCriterionFixture {
+        raw,
+        owner_uuid,
+        generated_ids,
+        type_ids,
+        content_ids,
+        tail_ids,
+        type_index,
+        object_refs,
+    }
+}
+
+fn strict_filter_criterion_raw_for_test(
+    owner_uuid: &str,
+    owner_name: &str,
+    generated_ids: &[String],
+    type_ids: &[String],
+    content_ids: &[String],
+    tail_ids: &[String],
+) -> String {
+    assert_eq!(generated_ids.len(), 4);
+    assert_eq!(tail_ids.len(), 2);
+    let type_members = type_ids
+        .iter()
+        .map(|uuid| format!(r##",{{"#",{uuid}}}"##))
+        .collect::<String>();
+    let content_members = content_ids
+        .iter()
+        .map(|uuid| format!(r##",{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{uuid}}}}}"##))
+        .collect::<String>();
+    format!(
+        "{{1,\
+{{14,{},{},{},{},\
+{{2,\
+{{3,{{1,0,{owner_uuid}}},\"{owner_name}\",{{1,\"en\",\"Dynamic criterion\"}},\"criterion comment\",0,0,00000000-0000-0000-0000-000000000000,0}},\
+{{\"Pattern\"{type_members}}}\
+}},\
+{{0,{}{content_members}}},\
+0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{{0}},{{0}},{{0}}\
+}},2,{{{},0}},{{{},0}}}}",
+        generated_ids[0],
+        generated_ids[1],
+        generated_ids[2],
+        generated_ids[3],
+        content_ids.len(),
+        tail_ids[0],
+        tail_ids[1],
+    )
+}
+
+fn extract_filter_criterion_with_distinct_object_ref_indexes(
+    fixture: &StrictFilterCriterionFixture,
+    raw: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<ExtractedMetadataSourceXml> {
+    let blob = deflate_for_test(raw.as_bytes());
+    extract_metadata_source_xml_with_recalculation_refs(
+        &blob,
+        &fixture.owner_uuid,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        source_version,
+    )
+}
+
+fn assert_strict_filter_criterion_is_suppressed(
+    fixture: &StrictFilterCriterionFixture,
+    raw: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    case: &str,
+) {
+    assert!(
+        extract_filter_criterion_with_distinct_object_ref_indexes(
+            fixture,
+            raw,
+            type_index,
+            object_refs,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .is_none(),
+        "{case}"
+    );
+}
+
+fn replace_filter_criterion_test_value(raw: &str, from: &str, to: &str) -> String {
+    assert!(raw.contains(from), "missing replacement source: {from}");
+    raw.replacen(from, to, 1)
+}
+
+fn uuid_with_ascii_case_difference_for_filter_criterion_test() -> String {
+    loop {
+        let uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+        if uuid.to_ascii_uppercase() != uuid {
+            return uuid;
+        }
+    }
+}
+
+#[test]
+fn extracts_strict_v20_filter_criterion_in_native_order_from_base_indexes() {
+    let fixture = strict_filter_criterion_fixture();
+    let extracted = extract_filter_criterion_with_distinct_object_ref_indexes(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &fixture.object_refs,
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("FilterCriteria/DynamicCriterion.xml")
+    );
+    assert!(xml.contains(r#"version="2.20""#));
+    assert!(!xml.contains(r#"version="2.21""#));
+    assert!(xml.contains(&format!(
+        r#"<xr:GeneratedType name="FilterCriterionManager.DynamicCriterion" category="Manager">"#
+    )));
+    assert!(xml.contains(&format!(
+        "<xr:TypeId>{}</xr:TypeId>",
+        fixture.generated_ids[0]
+    )));
+    assert!(xml.contains(&format!(
+        "<xr:ValueId>{}</xr:ValueId>",
+        fixture.generated_ids[1]
+    )));
+    assert!(xml.contains(&format!(
+        r#"<xr:GeneratedType name="FilterCriterionList.DynamicCriterion" category="List">"#
+    )));
+    assert!(xml.contains(&format!(
+        "<xr:TypeId>{}</xr:TypeId>",
+        fixture.generated_ids[2]
+    )));
+    assert!(xml.contains(&format!(
+        "<xr:ValueId>{}</xr:ValueId>",
+        fixture.generated_ids[3]
+    )));
+    assert_eq!(xml.matches("<xr:GeneratedType ").count(), 2);
+    assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+    assert!(!xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+    assert_eq!(xml.matches("<v8:Type>").count(), 3);
+    assert_eq!(
+        xml.matches(r#"<xr:Item xsi:type="xr:MDObjectRef">"#)
+            .count(),
+        2
+    );
+
+    let ordered = [
+        "<InternalInfo>",
+        "category=\"Manager\"",
+        "category=\"List\"",
+        "<Properties>",
+        "<Name>DynamicCriterion</Name>",
+        "<Synonym>",
+        "<Comment>criterion comment</Comment>",
+        "<Type>",
+        "cfg:CatalogRef.Products",
+        "cfg:DocumentRef.Invoice",
+        "cfg:EnumRef.Status",
+        "<UseStandardCommands>false</UseStandardCommands>",
+        "<Content>",
+        "Catalog.Products.Attribute.Code",
+        "Document.Invoice.TabularSection.Lines.Attribute.Item",
+        "<DefaultForm/>",
+        "<AuxiliaryForm/>",
+        "<ListPresentation/>",
+        "<ExtendedListPresentation/>",
+        "<Explanation/>",
+        "</Properties>",
+        "<ChildObjects/>",
+    ];
+    let positions = ordered
+        .iter()
+        .map(|needle| {
+            xml.find(needle)
+                .unwrap_or_else(|| panic!("missing {needle}"))
+        })
+        .collect::<Vec<_>>();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+
+    assert!(
+        extract_filter_criterion_with_distinct_object_ref_indexes(
+            &fixture,
+            &fixture.raw,
+            &fixture.type_index,
+            &BTreeMap::new(),
+            &fixture.object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .is_none(),
+        "Content must not resolve from the expanded metadata-object map"
+    );
+}
+
+#[test]
+fn routes_selected_filter_criterion_through_full_type_and_object_indexes() {
+    let fixture = strict_filter_criterion_fixture();
+    let selected = metadata_text_row_from_text(&fixture.owner_uuid, fixture.raw.clone()).unwrap();
+    let selected_texts = vec![selected];
+    assert!(selected_export_needs_broad_metadata_indexes(
+        false,
+        &BTreeSet::from([fixture.owner_uuid.clone()]),
+        &selected_texts,
+    ));
+    let selected_needs = selected_metadata_source_reference_index_needs(&selected_texts);
+    assert!(selected_needs.is_none());
+    let full_needs = selected_needs.unwrap_or_else(SourceReferenceIndexNeeds::full);
+    assert!(full_needs.type_index);
+    assert!(full_needs.object_refs);
+}
+
 #[test]
 fn extracts_filter_criterion_xml_with_standard_commands() {
     let uuid = "55555555-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -30474,6 +30752,584 @@ fn extracts_filter_criterion_xml_with_standard_commands() {
     assert!(xml_v21.contains(r#"version="2.21""#));
     assert!(!xml_v21.contains(r#"version="2.20""#));
     assert!(xml_v21.contains("<UseStandardCommands>true</UseStandardCommands>"));
+}
+
+#[test]
+fn preserves_exact_wrapped_legacy_filter_criterion_in_v20_and_v21() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let criterion_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let raw = format!(
+        "{{1,{{14,{owner_uuid},{{2,{{3,{{1,0,{criterion_uuid}}},\"WrappedLegacy\",{{1,\"en\",\"Wrapped legacy\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\"}}}}}},0}}"
+    );
+    let blob = deflate_for_test(raw.as_bytes());
+
+    for source_version in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            &criterion_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            source_version,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+        assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        assert!(!xml.contains("<InternalInfo>"));
+        assert!(!xml.contains("<Type>"));
+        assert!(!xml.contains("<Content>"));
+    }
+}
+
+#[test]
+fn rejects_filter_criterion_legacy_near_misses_without_partial_xml() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let criterion_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let direct_header = format!(
+        "{{1,{{14,{{3,{{1,0,{criterion_uuid}}},\"DirectLegacy\",{{1,\"en\",\"Direct legacy\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0}},0}}"
+    );
+    let wrapped_header = format!(
+        "{{1,{{14,{owner_uuid},{{2,{{3,{{1,0,{criterion_uuid}}},\"WrappedLegacy\",{{1,\"en\",\"Wrapped legacy\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\"}}}}}},0}}"
+    );
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let other_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let cases = [
+        (
+            "direct root tail",
+            replace_filter_criterion_test_value(&direct_header, "},0}", "},1}"),
+        ),
+        (
+            "direct owner tail",
+            replace_filter_criterion_test_value(&direct_header, "},0},0}", "},1},0}"),
+        ),
+        (
+            "direct header UUID",
+            replace_filter_criterion_test_value(&direct_header, &criterion_uuid, &other_uuid),
+        ),
+        (
+            "wrapped zero owner",
+            replace_filter_criterion_test_value(&wrapped_header, &owner_uuid, zero_uuid),
+        ),
+        (
+            "wrapped tag",
+            replace_filter_criterion_test_value(&wrapped_header, "{2,{3,", "{1,{3,"),
+        ),
+        (
+            "wrapped nonempty Pattern",
+            replace_filter_criterion_test_value(
+                &wrapped_header,
+                r#"{"Pattern"}"#,
+                &format!(r##"{{"Pattern",{{"#",{other_uuid}}}}}"##),
+            ),
+        ),
+        (
+            "wrapped header UUID",
+            replace_filter_criterion_test_value(&wrapped_header, &criterion_uuid, &other_uuid),
+        ),
+        ("trailing raw", format!("{wrapped_header},0")),
+    ];
+
+    for (case, raw) in cases {
+        let blob = deflate_for_test(raw.as_bytes());
+        assert!(
+            extract_metadata_source_xml(
+                &blob,
+                &criterion_uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
+    let fixture = strict_filter_criterion_fixture();
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let root_count_marker = format!("}},2,{{{},0}}", fixture.tail_ids[0]);
+    let pattern = format!(
+        r##"{{"Pattern",{{"#",{}}},{{"#",{}}},{{"#",{}}}}}"##,
+        fixture.type_ids[0], fixture.type_ids[1], fixture.type_ids[2]
+    );
+    let cases = [
+        (
+            "root tag",
+            replace_filter_criterion_test_value(&fixture.raw, "{1,", "{0,"),
+        ),
+        (
+            "root declared collections",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &root_count_marker,
+                &root_count_marker.replacen("},2,", "},3,", 1),
+            ),
+        ),
+        (
+            "root plus declared collections",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &root_count_marker,
+                &root_count_marker.replacen("},2,", "},+2,", 1),
+            ),
+        ),
+        (
+            "owner code",
+            replace_filter_criterion_test_value(&fixture.raw, "{14,", "{014,"),
+        ),
+        (
+            "short owner",
+            replace_filter_criterion_test_value(&fixture.raw, ",{0},{0},{0}},2,", ",{0},{0}},2,"),
+        ),
+        (
+            "long owner",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                ",{0},{0},{0}},2,",
+                ",{0},{0},{0},0},2,",
+            ),
+        ),
+        (
+            "header wrapper tag",
+            replace_filter_criterion_test_value(&fixture.raw, "{2,{3,", "{1,{3,"),
+        ),
+        (
+            "header wrapper cardinality",
+            replace_filter_criterion_test_value(&fixture.raw, &pattern, &format!("{pattern},0")),
+        ),
+        (
+            "header fixed scalar",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                "\"criterion comment\",0,0,00000000-0000-0000-0000-000000000000,0}",
+                "\"criterion comment\",1,0,00000000-0000-0000-0000-000000000000,0}",
+            ),
+        ),
+        (
+            "zero generated UUID",
+            replace_filter_criterion_test_value(&fixture.raw, &fixture.generated_ids[0], zero_uuid),
+        ),
+        (
+            "malformed generated UUID",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.generated_ids[0],
+                "not-a-generated-uuid",
+            ),
+        ),
+        (
+            "duplicate generated UUID",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.generated_ids[1],
+                &fixture.generated_ids[0],
+            ),
+        ),
+        (
+            "case-duplicate generated UUID",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.generated_ids[1],
+                &fixture.generated_ids[0].to_ascii_uppercase(),
+            ),
+        ),
+        (
+            "boolean",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                "},0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{0},{0},{0}}",
+                "},2,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{0},{0},{0}}",
+            ),
+        ),
+        (
+            "default form",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                "},0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{0},{0},{0}}",
+                &format!(
+                    "}},0,{},00000000-0000-0000-0000-000000000000,{{0}},{{0}},{{0}}}}",
+                    uuid::Uuid::new_v4()
+                ),
+            ),
+        ),
+        (
+            "localized presentation",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                ",{0},{0},{0}},2,",
+                ",{1,\"en\",\"List\"},{0},{0}},2,",
+            ),
+        ),
+        (
+            "zero tail UUID",
+            replace_filter_criterion_test_value(&fixture.raw, &fixture.tail_ids[0], zero_uuid),
+        ),
+        (
+            "nonempty tail collection",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &format!("{{{},0}}", fixture.tail_ids[0]),
+                &format!("{{{},1,{{opaque}}}}", fixture.tail_ids[0]),
+            ),
+        ),
+        (
+            "empty tail with extra payload",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &format!("{{{},0}}", fixture.tail_ids[0]),
+                &format!("{{{},0,{{opaque}}}}", fixture.tail_ids[0]),
+            ),
+        ),
+        (
+            "duplicate tail collection UUID",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.tail_ids[1],
+                &fixture.tail_ids[0].to_ascii_uppercase(),
+            ),
+        ),
+        ("trailing raw", format!("{},0", fixture.raw)),
+    ];
+
+    for (case, raw) in cases {
+        assert_strict_filter_criterion_is_suppressed(
+            &fixture,
+            &raw,
+            &fixture.type_index,
+            &fixture.object_refs,
+            case,
+        );
+    }
+
+    let mut mismatched_header =
+        parse_metadata_header_from_text(&fixture.raw, &fixture.owner_uuid).unwrap();
+    mismatched_header.name = "OtherCriterion".to_string();
+    assert!(
+        parse_filter_criterion_properties_from_text(
+            &fixture.raw,
+            &mismatched_header,
+            &fixture.type_index,
+            &fixture.object_refs,
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .is_none(),
+        "strict full owner header must match the selected metadata header"
+    );
+
+    assert!(
+        extract_filter_criterion_with_distinct_object_ref_indexes(
+            &fixture,
+            &fixture.raw,
+            &fixture.type_index,
+            &fixture.object_refs,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .is_none(),
+        "strict full V2.21 is unsupported"
+    );
+}
+
+#[test]
+fn rejects_invalid_strict_filter_criterion_type_patterns_atomically() {
+    let fixture = strict_filter_criterion_fixture();
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let pattern = format!(
+        r##"{{"Pattern",{{"#",{}}},{{"#",{}}},{{"#",{}}}}}"##,
+        fixture.type_ids[0], fixture.type_ids[1], fixture.type_ids[2]
+    );
+    let cases = [
+        (
+            "empty Pattern",
+            replace_filter_criterion_test_value(&fixture.raw, &pattern, r#"{"Pattern"}"#),
+        ),
+        (
+            "Pattern token",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &pattern,
+                &pattern.replacen(r#""Pattern""#, r#""Types""#, 1),
+            ),
+        ),
+        (
+            "Pattern member tag",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &format!(r##"{{"#",{}}}"##, fixture.type_ids[0]),
+                &format!(r##"{{"Type",{}}}"##, fixture.type_ids[0]),
+            ),
+        ),
+        (
+            "Pattern member cardinality",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &format!(r##"{{"#",{}}}"##, fixture.type_ids[0]),
+                &format!(r##"{{"#",{},0}}"##, fixture.type_ids[0]),
+            ),
+        ),
+        (
+            "zero Pattern TypeId",
+            replace_filter_criterion_test_value(&fixture.raw, &fixture.type_ids[0], zero_uuid),
+        ),
+        (
+            "malformed Pattern TypeId",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.type_ids[0],
+                "not-a-pattern-type-uuid",
+            ),
+        ),
+        (
+            "duplicate Pattern TypeId",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.type_ids[1],
+                &fixture.type_ids[0].to_ascii_uppercase(),
+            ),
+        ),
+    ];
+    for (case, raw) in cases {
+        assert_strict_filter_criterion_is_suppressed(
+            &fixture,
+            &raw,
+            &fixture.type_index,
+            &fixture.object_refs,
+            case,
+        );
+    }
+
+    let mut unresolved = fixture.type_index.clone();
+    unresolved.remove(&fixture.type_ids[0]);
+    assert_strict_filter_criterion_is_suppressed(
+        &fixture,
+        &fixture.raw,
+        &unresolved,
+        &fixture.object_refs,
+        "unresolved Pattern TypeId",
+    );
+
+    let mut case_key_collision = fixture.type_index.clone();
+    case_key_collision.insert(
+        fixture.type_ids[0].to_ascii_uppercase(),
+        "cfg:CatalogRef.OtherProducts".to_string(),
+    );
+    assert_strict_filter_criterion_is_suppressed(
+        &fixture,
+        &fixture.raw,
+        &case_key_collision,
+        &fixture.object_refs,
+        "case-colliding Pattern index keys",
+    );
+
+    let mut resolved_collision = fixture.type_index.clone();
+    resolved_collision.insert(
+        fixture.type_ids[0].clone(),
+        "cfg:CatalogRef.Макет".to_string(),
+    );
+    resolved_collision.insert(
+        fixture.type_ids[1].clone(),
+        "cfg:CatalogRef.макет".to_string(),
+    );
+    assert_strict_filter_criterion_is_suppressed(
+        &fixture,
+        &fixture.raw,
+        &resolved_collision,
+        &fixture.object_refs,
+        "Unicode case-colliding Pattern references",
+    );
+
+    for invalid_reference in [
+        "DocumentRef.Invoice",
+        "cfg:DocumentManager.Invoice",
+        "cfg:DocumentRef.Invoice.Extra",
+        "cfg:RefOnly.",
+    ] {
+        let mut invalid_index = fixture.type_index.clone();
+        invalid_index.insert(fixture.type_ids[0].clone(), invalid_reference.to_string());
+        assert_strict_filter_criterion_is_suppressed(
+            &fixture,
+            &fixture.raw,
+            &invalid_index,
+            &fixture.object_refs,
+            invalid_reference,
+        );
+    }
+}
+
+#[test]
+fn rejects_invalid_strict_filter_criterion_content_atomically() {
+    let fixture = strict_filter_criterion_fixture();
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let content = format!(
+        r##"{{0,2,{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{}}}}},{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{}}}}}}}"##,
+        fixture.content_ids[0], fixture.content_ids[1]
+    );
+    let first_member = format!(
+        r##"{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{}}}}}"##,
+        fixture.content_ids[0]
+    );
+    let wrong_marker = uuid::Uuid::new_v4().hyphenated().to_string();
+    let cases = [
+        (
+            "empty Content",
+            replace_filter_criterion_test_value(&fixture.raw, &content, "{0,0}"),
+        ),
+        (
+            "Content wrapper tag",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &content,
+                &content.replacen("{0,2,", "{1,2,", 1),
+            ),
+        ),
+        (
+            "Content plus count",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &content,
+                &content.replacen("{0,2,", "{0,+2,", 1),
+            ),
+        ),
+        (
+            "Content count mismatch",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &content,
+                &content.replacen("{0,2,", "{0,3,", 1),
+            ),
+        ),
+        (
+            "Content member tag",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &first_member,
+                &first_member.replacen(r##"{"#","##, r##"{"Ref","##, 1),
+            ),
+        ),
+        (
+            "Content platform marker",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                METADATA_OBJECT_REF_TYPE_UUID,
+                &wrong_marker,
+            ),
+        ),
+        (
+            "Content payload tag",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &format!("{{1,{}}}", fixture.content_ids[0]),
+                &format!("{{0,{}}}", fixture.content_ids[0]),
+            ),
+        ),
+        (
+            "Content payload cardinality",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &format!("{{1,{}}}", fixture.content_ids[0]),
+                &format!("{{1,{},0}}", fixture.content_ids[0]),
+            ),
+        ),
+        (
+            "zero Content UUID",
+            replace_filter_criterion_test_value(&fixture.raw, &fixture.content_ids[0], zero_uuid),
+        ),
+        (
+            "malformed Content UUID",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.content_ids[0],
+                "not-a-content-object-uuid",
+            ),
+        ),
+        (
+            "duplicate Content UUID",
+            replace_filter_criterion_test_value(
+                &fixture.raw,
+                &fixture.content_ids[1],
+                &fixture.content_ids[0].to_ascii_uppercase(),
+            ),
+        ),
+    ];
+    for (case, raw) in cases {
+        assert_strict_filter_criterion_is_suppressed(
+            &fixture,
+            &raw,
+            &fixture.type_index,
+            &fixture.object_refs,
+            case,
+        );
+    }
+
+    let mut unresolved = fixture.object_refs.clone();
+    unresolved.remove(&fixture.content_ids[0]);
+    assert_strict_filter_criterion_is_suppressed(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &unresolved,
+        "unresolved Content UUID",
+    );
+
+    let mut case_key_collision = fixture.object_refs.clone();
+    case_key_collision.insert(
+        fixture.content_ids[0].to_ascii_uppercase(),
+        "Catalog.Products.Attribute.OtherCode".to_string(),
+    );
+    assert_strict_filter_criterion_is_suppressed(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &case_key_collision,
+        "case-colliding Content index keys",
+    );
+
+    let mut resolved_collision = fixture.object_refs.clone();
+    resolved_collision.insert(
+        fixture.content_ids[0].clone(),
+        "Catalog.Products.Attribute.Макет".to_string(),
+    );
+    resolved_collision.insert(
+        fixture.content_ids[1].clone(),
+        "Catalog.Products.Attribute.макет".to_string(),
+    );
+    assert_strict_filter_criterion_is_suppressed(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &resolved_collision,
+        "Unicode case-colliding Content references",
+    );
+
+    for invalid_reference in [
+        "Document.Invoice",
+        "Document.Invoice.Command.Open",
+        "Document.Invoice.TabularSection.Lines.Item",
+        "Document..Attribute.Code",
+        "Document.Invoice.Attribute.Code.Extra",
+    ] {
+        let mut invalid_refs = fixture.object_refs.clone();
+        invalid_refs.insert(
+            fixture.content_ids[0].clone(),
+            invalid_reference.to_string(),
+        );
+        assert_strict_filter_criterion_is_suppressed(
+            &fixture,
+            &fixture.raw,
+            &fixture.type_index,
+            &invalid_refs,
+            invalid_reference,
+        );
+    }
 }
 
 #[test]

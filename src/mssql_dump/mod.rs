@@ -4246,6 +4246,18 @@ struct SettingsStorageProperties {
     default_load_form: Option<String>,
 }
 
+enum FilterCriterionProperties {
+    LegacyMinimal,
+    StrictFull(FilterCriterionFullProperties),
+}
+
+struct FilterCriterionFullProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+    value_types: Vec<ConstantValueType>,
+    use_standard_commands: bool,
+    content: Vec<String>,
+}
+
 struct EnumProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
@@ -5887,7 +5899,14 @@ fn extract_metadata_source_xml_from_text_row(
             parse_common_attribute_properties_from_text(text, uuid, type_index, object_refs)?;
         format_common_attribute_source_xml(&header, &common_attribute, source_version).into_bytes()
     } else if kind == "FilterCriterion" {
-        format_filter_criterion_source_xml(&header, source_version).into_bytes()
+        let filter_criterion = parse_filter_criterion_properties_from_text(
+            text,
+            header,
+            type_index,
+            object_refs,
+            source_version,
+        )?;
+        format_filter_criterion_source_xml(&header, &filter_criterion, source_version).into_bytes()
     } else if metadata_kind_uses_default_list_form_properties(kind) {
         let properties =
             parse_default_list_form_metadata_properties_from_text(kind, text, uuid, form_refs)?;
@@ -19754,15 +19773,331 @@ fn format_xdto_package_source_xml(
     xml
 }
 
+fn parse_filter_criterion_properties_from_text(
+    text: &str,
+    expected_header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<FilterCriterionProperties> {
+    let root_fields = split_information_register_braced_fields(text)?;
+    if root_fields.first()?.trim() != "1" {
+        return None;
+    }
+    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+
+    if root_fields.len() == 3 && root_fields.get(2)?.trim() == "0" {
+        if filter_criterion_legacy_direct_header_is_valid(&owner_fields, expected_header)
+            || filter_criterion_legacy_wrapped_header_is_valid(&owner_fields, expected_header)
+        {
+            return Some(FilterCriterionProperties::LegacyMinimal);
+        }
+        return None;
+    }
+
+    if source_version != InfobaseConfigSourceVersion::V2_20
+        || root_fields.len() != 5
+        || root_fields.get(2)?.trim() != "2"
+        || owner_fields.len() != 13
+        || owner_fields.first()?.trim() != "14"
+    {
+        return None;
+    }
+
+    let generated_ids = owner_fields[1..5]
+        .iter()
+        .map(|value| parse_information_register_non_zero_uuid(value))
+        .collect::<Option<Vec<_>>>()?;
+    let mut unique_generated_ids = BTreeSet::new();
+    if !generated_ids
+        .iter()
+        .all(|uuid| unique_generated_ids.insert(uuid.to_ascii_lowercase()))
+    {
+        return None;
+    }
+
+    let header_wrapper = split_information_register_braced_fields(owner_fields.get(5)?)?;
+    if header_wrapper.len() != 3 || header_wrapper.first()?.trim() != "2" {
+        return None;
+    }
+    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    if !filter_criterion_headers_match(&parsed_header, expected_header) {
+        return None;
+    }
+    let value_types = parse_filter_criterion_type_pattern(header_wrapper.get(2)?, type_index)?;
+    let content = parse_filter_criterion_content(owner_fields.get(6)?, object_refs)?;
+    let use_standard_commands = parse_1c_bool_flag(owner_fields.get(7)?.trim())?;
+
+    for index in [8usize, 9] {
+        let uuid = parse_information_register_uuid(owner_fields.get(index)?)?;
+        if !information_register_uuid_is_zero(&uuid) {
+            return None;
+        }
+    }
+    for index in [10usize, 11, 12] {
+        let fields = split_information_register_braced_fields(owner_fields.get(index)?)?;
+        if fields.len() != 1 || fields.first()?.trim() != "0" {
+            return None;
+        }
+    }
+
+    let first_collection = parse_filter_criterion_empty_collection(root_fields.get(3)?)?;
+    let second_collection = parse_filter_criterion_empty_collection(root_fields.get(4)?)?;
+    if first_collection.eq_ignore_ascii_case(&second_collection) {
+        return None;
+    }
+
+    Some(FilterCriterionProperties::StrictFull(
+        FilterCriterionFullProperties {
+            generated_types: vec![
+                GeneratedTypeEntry {
+                    name: format!("FilterCriterionManager.{}", expected_header.name),
+                    category: "Manager",
+                    type_id: generated_ids[0].clone(),
+                    value_id: generated_ids[1].clone(),
+                },
+                GeneratedTypeEntry {
+                    name: format!("FilterCriterionList.{}", expected_header.name),
+                    category: "List",
+                    type_id: generated_ids[2].clone(),
+                    value_id: generated_ids[3].clone(),
+                },
+            ],
+            value_types,
+            use_standard_commands,
+            content,
+        },
+    ))
+}
+
+fn filter_criterion_legacy_direct_header_is_valid(
+    owner_fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> bool {
+    owner_fields.len() == 3
+        && owner_fields
+            .first()
+            .is_some_and(|value| value.trim() == "14")
+        && owner_fields.get(2).is_some_and(|value| value.trim() == "0")
+        && owner_fields
+            .get(1)
+            .and_then(|value| parse_information_register_owner_header(value))
+            .is_some_and(|header| filter_criterion_headers_match(&header, expected_header))
+}
+
+fn filter_criterion_legacy_wrapped_header_is_valid(
+    owner_fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> bool {
+    if owner_fields.len() != 3
+        || owner_fields
+            .first()
+            .is_none_or(|value| value.trim() != "14")
+        || owner_fields
+            .get(1)
+            .and_then(|value| parse_information_register_non_zero_uuid(value))
+            .is_none()
+    {
+        return false;
+    }
+    let Some(wrapper) = owner_fields
+        .get(2)
+        .and_then(|value| split_information_register_braced_fields(value))
+    else {
+        return false;
+    };
+    if wrapper.len() != 3 || wrapper.first().is_none_or(|value| value.trim() != "2") {
+        return false;
+    }
+    let Some(header) = wrapper
+        .get(1)
+        .and_then(|value| parse_information_register_owner_header(value))
+    else {
+        return false;
+    };
+    let Some(pattern) = wrapper
+        .get(2)
+        .and_then(|value| split_information_register_braced_fields(value))
+    else {
+        return false;
+    };
+    filter_criterion_headers_match(&header, expected_header)
+        && pattern.len() == 1
+        && pattern
+            .first()
+            .is_some_and(|value| value.trim() == r#""Pattern""#)
+}
+
+fn filter_criterion_headers_match(left: &MetadataHeader, right: &MetadataHeader) -> bool {
+    left.uuid.eq_ignore_ascii_case(&right.uuid)
+        && left.name == right.name
+        && left.synonyms == right.synonyms
+        && left.comment == right.comment
+}
+
+fn parse_filter_criterion_type_pattern(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() < 2 || fields.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    let mut ids = BTreeSet::new();
+    let mut references = BTreeSet::new();
+    let mut value_types = Vec::with_capacity(fields.len().saturating_sub(1));
+    for value in fields.iter().skip(1) {
+        let member = split_information_register_braced_fields(value)?;
+        if member.len() != 2 || member.first()?.trim() != r##""#""## {
+            return None;
+        }
+        let uuid = parse_information_register_non_zero_uuid(member.get(1)?)?;
+        if !ids.insert(uuid.to_ascii_lowercase()) {
+            return None;
+        }
+        let reference = resolve_filter_criterion_index_reference(type_index, &uuid)?;
+        if !filter_criterion_type_reference_is_valid(&reference)
+            || !references.insert(reference.to_lowercase())
+        {
+            return None;
+        }
+        value_types.push(ConstantValueType::Reference { reference });
+    }
+    Some(value_types)
+}
+
+fn parse_filter_criterion_content(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() < 3 || fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if count.checked_add(2) != Some(fields.len()) {
+        return None;
+    }
+
+    let mut ids = BTreeSet::new();
+    let mut references = BTreeSet::new();
+    let mut content = Vec::with_capacity(count);
+    for value in fields.iter().skip(2) {
+        let member = split_information_register_braced_fields(value)?;
+        if member.len() != 3
+            || member.first()?.trim() != r##""#""##
+            || !parse_information_register_uuid(member.get(1)?)?
+                .eq_ignore_ascii_case(METADATA_OBJECT_REF_TYPE_UUID)
+        {
+            return None;
+        }
+        let payload = split_information_register_braced_fields(member.get(2)?)?;
+        if payload.len() != 2 || payload.first()?.trim() != "1" {
+            return None;
+        }
+        let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
+        if !ids.insert(uuid.to_ascii_lowercase()) {
+            return None;
+        }
+        let reference = resolve_filter_criterion_index_reference(object_refs, &uuid)?;
+        if !filter_criterion_content_reference_is_valid(&reference)
+            || !references.insert(reference.to_lowercase())
+        {
+            return None;
+        }
+        content.push(reference);
+    }
+    Some(content)
+}
+
+fn resolve_filter_criterion_index_reference(
+    index: &BTreeMap<String, String>,
+    uuid: &str,
+) -> Option<String> {
+    let mut matches = index
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+    let (_, reference) = matches.next()?;
+    if matches.next().is_some() || reference.is_empty() {
+        return None;
+    }
+    Some(reference.clone())
+}
+
+fn filter_criterion_type_reference_is_valid(reference: &str) -> bool {
+    let Some(reference) = reference.strip_prefix("cfg:") else {
+        return false;
+    };
+    let mut parts = reference.split('.');
+    let (Some(family), Some(name), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    !family.is_empty() && family.ends_with("Ref") && !name.is_empty()
+}
+
+fn filter_criterion_content_reference_is_valid(reference: &str) -> bool {
+    let parts = reference.split('.').collect::<Vec<_>>();
+    if parts.iter().any(|part| part.is_empty()) {
+        return false;
+    }
+    matches!(parts.as_slice(), [_, _, "Attribute", _])
+        || matches!(
+            parts.as_slice(),
+            [_, _, "TabularSection", _, "Attribute", _]
+        )
+}
+
+fn parse_filter_criterion_empty_collection(value: &str) -> Option<String> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 2 || parse_information_register_usize(fields.get(1)?)? != 0 {
+        return None;
+    }
+    parse_information_register_non_zero_uuid(fields.first()?)
+}
+
 fn format_filter_criterion_source_xml(
     header: &MetadataHeader,
+    properties: &FilterCriterionProperties,
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("FilterCriterion", header, source_version);
-    insert_metadata_properties_xml(
-        &mut xml,
-        "\t\t\t<UseStandardCommands>true</UseStandardCommands>\r\n",
+    let FilterCriterionProperties::StrictFull(properties) = properties else {
+        insert_metadata_properties_xml(
+            &mut xml,
+            "\t\t\t<UseStandardCommands>true</UseStandardCommands>\r\n",
+        );
+        return xml;
+    };
+
+    let internal_info = format_generated_types_internal_info_xml(&properties.generated_types);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(index, &internal_info);
+    }
+
+    let mut insert = format_metadata_types_xml(&properties.value_types);
+    insert.push_str(&format!(
+        "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+        xml_bool(properties.use_standard_commands)
+    ));
+    insert.push_str("\t\t\t<Content>\r\n");
+    for reference in &properties.content {
+        insert.push_str(&format!(
+            "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+            escape_xml_element_text(reference)
+        ));
+    }
+    insert.push_str("\t\t\t</Content>\r\n");
+    insert.push_str(
+        "\t\t\t<DefaultForm/>\r\n\
+\t\t\t<AuxiliaryForm/>\r\n\
+\t\t\t<ListPresentation/>\r\n\
+\t\t\t<ExtendedListPresentation/>\r\n\
+\t\t\t<Explanation/>\r\n",
     );
+    insert_metadata_properties_xml(&mut xml, &insert);
+    if let Some(index) = xml.find("\t</FilterCriterion>\r\n") {
+        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+    }
     xml
 }
 
