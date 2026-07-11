@@ -42059,6 +42059,23 @@ fn register_owner_header(uuid: &str, name: &str) -> String {
     )
 }
 
+fn register_localized_field(values: &[(&str, &str)]) -> String {
+    let mut fields = vec![values.len().to_string()];
+    for (language, content) in values {
+        fields.push(format!("\"{}\"", language.replace('"', "\"\"")));
+        fields.push(format!("\"{}\"", content.replace('"', "\"\"")));
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn localized_property_block<'a>(xml: &'a str, name: &str) -> &'a str {
+    let open = format!("<{name}>");
+    let start = xml.find(&open).unwrap();
+    let close = format!("</{name}>");
+    let end = xml[start..].find(&close).unwrap() + start + close.len();
+    &xml[start..end]
+}
+
 fn extract_register_fields(fields: &[String], uuid: &str) -> Option<ExtractedMetadataSourceXml> {
     let raw = format!("{{1,{{{}}}}}", fields.join(","));
     extract_metadata_source_xml_with_refs(
@@ -42104,6 +42121,10 @@ impl AccumulationRegisterTotalsFixture {
 
     fn extract(&self) -> Option<ExtractedMetadataSourceXml> {
         extract_register_fields(&self.fields, ACCUMULATION_TOTALS_TEST_UUID)
+    }
+
+    fn raw(&self) -> String {
+        format!("{{1,{{{}}}}}", self.fields.join(","))
     }
 
     fn xml(&self) -> Option<String> {
@@ -42197,11 +42218,14 @@ fn accumulation_totals_rejects_invalid_exact_owner_boundary_atomically() {
 fn accumulation_totals_ignores_plain_embedded_uuid_outside_owner_header() {
     let mut fixture = AccumulationRegisterTotalsFixture::exact("1");
     fixture.fields[25] = format!("{{0,{ACCUMULATION_TOTALS_TEST_UUID}}}");
+    let raw = fixture.raw();
+    let fields = metadata_object_fields(&raw).unwrap();
+    let header = parse_metadata_header_from_text(&raw, ACCUMULATION_TOTALS_TEST_UUID).unwrap();
 
-    let xml = fixture
-        .xml()
-        .expect("plain UUID is not another owner header");
-    assert!(xml.contains("<EnableTotalsSplitting>true</EnableTotalsSplitting>"));
+    assert_eq!(
+        validate_exact_accumulation_code28_layout(&fields, &header),
+        Some(true)
+    );
 }
 
 #[test]
@@ -42267,9 +42291,9 @@ fn accumulation_totals_preserves_accounting_slot_and_order() {
         "1".to_string(),
         "{0}".to_string(),
         "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
+        register_localized_field(&[("en", "Accounting list")]),
+        register_localized_field(&[("de", "Accounting extended")]),
+        register_localized_field(&[("fr", "Accounting explanation")]),
         "0".to_string(),
     ]);
     assert_eq!(fields.len(), 30);
@@ -42300,6 +42324,17 @@ fn accumulation_totals_preserves_accounting_slot_and_order() {
                 .find("<FullTextSearch>DontUse</FullTextSearch>")
                 .unwrap()
     );
+    assert!(
+        xml.find("<FullTextSearch>DontUse</FullTextSearch>")
+            .unwrap()
+            < xml.find("<ListPresentation>").unwrap()
+    );
+    assert!(xml.find("<ListPresentation>").unwrap() < xml.find("<Explanation>").unwrap());
+    assert!(localized_property_block(&xml, "ListPresentation").contains("Accounting list"));
+    assert!(
+        localized_property_block(&xml, "ExtendedListPresentation").contains("Accounting extended")
+    );
+    assert!(localized_property_block(&xml, "Explanation").contains("Accounting explanation"));
 }
 
 #[test]
@@ -42312,6 +42347,8 @@ fn accumulation_totals_omits_calculation_code21_len33_control() {
     fields.extend((16..33).map(|index| {
         if index == 22 {
             calculation_type_uuid.to_string()
+        } else if matches!(index, 30..=32) {
+            register_localized_field(&[("en", "calculation tail must remain omitted")])
         } else {
             "0".to_string()
         }
@@ -42325,6 +42362,9 @@ fn accumulation_totals_omits_calculation_code21_len33_control() {
         PathBuf::from("CalculationRegisters/Payroll.xml")
     );
     assert!(!xml.contains("<EnableTotalsSplitting>"));
+    assert!(!xml.contains("<ListPresentation"));
+    assert!(!xml.contains("<ExtendedListPresentation"));
+    assert!(!xml.contains("<Explanation"));
 }
 
 #[test]
@@ -42341,11 +42381,243 @@ fn accumulation_totals_changes_only_exact_property() {
 
     let mut legacy = AccumulationRegisterTotalsFixture::exact("1");
     legacy.fields.pop();
-    assert_eq!(enabled.replace(enabled_line, ""), legacy.xml().unwrap());
+    let exact_without_bounded_tail = enabled
+        .replace(enabled_line, "")
+        .replace("\t\t\t<ListPresentation/>\r\n", "")
+        .replace("\t\t\t<ExtendedListPresentation/>\r\n", "")
+        .replace("\t\t\t<Explanation/>\r\n", "");
+    assert_eq!(exact_without_bounded_tail, legacy.xml().unwrap());
 }
 
 #[test]
 fn accumulation_totals_has_no_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "44947459-75aa-48e8-b40f-907177c2afb3",
+        "6707f7f5-4a6c-4d8b-84cf-483768cb71b9",
+        "_ДемоОстаткиТоваровВМестахХранения",
+        "_ДемоОборотыПоСчетамНаОплату",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+#[test]
+fn accumulation_presentations_emit_mandatory_empty_triple_in_order() {
+    let xml = AccumulationRegisterTotalsFixture::exact("1")
+        .xml()
+        .expect("exact accumulation presentation tail");
+
+    for property in [
+        "ListPresentation",
+        "ExtendedListPresentation",
+        "Explanation",
+    ] {
+        assert_eq!(xml.matches(&format!("<{property}/>")).count(), 1);
+    }
+    let totals = xml
+        .find("<EnableTotalsSplitting>true</EnableTotalsSplitting>")
+        .unwrap();
+    let list = xml.find("<ListPresentation/>").unwrap();
+    let extended = xml.find("<ExtendedListPresentation/>").unwrap();
+    let explanation = xml.find("<Explanation/>").unwrap();
+    assert!(totals < list && list < extended && extended < explanation);
+}
+
+#[test]
+fn accumulation_presentations_use_distinct_strict_slots_and_preserve_item_order() {
+    let mut fixture = AccumulationRegisterTotalsFixture::exact("1");
+    fixture.fields[23] = register_localized_field(&[("ru", "List & one"), ("en", "List < two")]);
+    fixture.fields[24] = register_localized_field(&[("de", "Extended & three")]);
+    fixture.fields[25] = register_localized_field(&[("fr", "Explanation < four")]);
+    let xml = fixture.xml().expect("distinct localized presentation tail");
+    let list = localized_property_block(&xml, "ListPresentation");
+    let extended = localized_property_block(&xml, "ExtendedListPresentation");
+    let explanation = localized_property_block(&xml, "Explanation");
+
+    assert!(list.contains("List &amp; one"));
+    assert!(list.contains("List &lt; two"));
+    assert!(
+        list.find("<v8:lang>ru</v8:lang>").unwrap() < list.find("<v8:lang>en</v8:lang>").unwrap()
+    );
+    assert!(!list.contains("Extended &amp; three"));
+    assert!(extended.contains("Extended &amp; three"));
+    assert!(!extended.contains("Explanation &lt; four"));
+    assert!(explanation.contains("Explanation &lt; four"));
+}
+
+#[test]
+fn accumulation_presentations_preserve_four_explanation_style_values() {
+    for (raw_content, expected_content) in [
+        (
+            "Учет себестоимости товаров, и учет расходов, распределенных на себестоимость товаров.",
+            "Учет себестоимости товаров, и учет расходов, распределенных на себестоимость товаров.",
+        ),
+        (
+            "Учет товаров, проданных в рамках интеркомпани.",
+            "Учет товаров, проданных в рамках интеркомпани.",
+        ),
+        (
+            "Положительный остаток в этом регистре это сумма долга дебитора перед нами.\r\nОтрицательный остаток - наш долг перед кредитором.",
+            "Положительный остаток в этом регистре это сумма долга дебитора перед нами.\nОтрицательный остаток - наш долг перед кредитором.",
+        ),
+        (
+            "Расчеты с банками по платежам, совершенным с помощью платежных карт.",
+            "Расчеты с банками по платежам, совершенным с помощью платежных карт.",
+        ),
+    ] {
+        let mut fixture = AccumulationRegisterTotalsFixture::exact("1");
+        fixture.fields[25] = register_localized_field(&[("ru", raw_content)]);
+        let xml = fixture.xml().expect("paired-style explanation");
+        let explanation = localized_property_block(&xml, "Explanation");
+        let escaped = escape_xml_element_text(expected_content);
+
+        assert!(explanation.contains("<v8:lang>ru</v8:lang>"));
+        assert!(explanation.contains(&escaped));
+    }
+}
+
+#[test]
+fn accumulation_presentations_reject_each_malformed_exact_slot_atomically() {
+    let invalid_xml = register_localized_field(&[("en", "invalid\0xml")]);
+    let malformed = [
+        "{3,\"en\",\"value\",\"fr\",\"other\"}".to_string(),
+        "{1,\"en\"}".to_string(),
+        "{1,en,\"value\"}".to_string(),
+        "{2,\"en\",\"first\",\"en\",\"second\"}".to_string(),
+        "{1,\"en\",\"value\",0}".to_string(),
+        invalid_xml,
+    ];
+
+    for slot in 23..=25 {
+        for value in &malformed {
+            let mut fixture = AccumulationRegisterTotalsFixture::exact("1");
+            fixture.fields[slot] = value.clone();
+            assert!(
+                fixture.extract().is_none(),
+                "accepted malformed exact field {slot}: {value:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn accumulation_presentations_direct_seam_requires_full_exact_owner_boundary() {
+    let original = AccumulationRegisterTotalsFixture::exact("1");
+    let raw = original.raw();
+    let expected = parse_metadata_header_from_text(&raw, ACCUMULATION_TOTALS_TEST_UUID).unwrap();
+
+    let mut malformed = original.clone();
+    malformed.fields[13] = format!(
+        "{{0,{{3,{{1,0,{ACCUMULATION_TOTALS_TEST_UUID}}},\"Totals\",{{1,\"en\",\"Totals\"}},\"\"}}}}"
+    );
+    let mut moved = original.clone();
+    moved.fields[12] = moved.fields[13].clone();
+    moved.fields[13] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[22] = duplicate.fields[13].clone();
+    let mut wrong_then_valid = original.clone();
+    wrong_then_valid.fields[13] = wrong_then_valid.fields[13].replace(
+        ACCUMULATION_TOTALS_TEST_UUID,
+        "22222222-2222-4222-8222-222222222222",
+    );
+    wrong_then_valid.fields[22] = original.fields[13].clone();
+
+    for fixture in [malformed, moved, duplicate, wrong_then_valid] {
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            parse_accumulation_register_presentations("AccumulationRegister", &fields, &expected,)
+                .is_none()
+        );
+    }
+
+    let fields = original
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let mut mismatched = expected;
+    mismatched.name = "Other".to_string();
+    assert!(
+        parse_accumulation_register_presentations("AccumulationRegister", &fields, &mismatched,)
+            .is_none()
+    );
+}
+
+#[test]
+fn accumulation_presentations_keep_nonexact_arities_unconsumed_and_omitted() {
+    for field_count in [21, 25, 27] {
+        let mut baseline = AccumulationRegisterTotalsFixture::exact("1");
+        baseline.fields.truncate(field_count.min(26));
+        while baseline.fields.len() < field_count {
+            baseline.fields.push("0".to_string());
+        }
+        let mut slot_like = baseline.clone();
+        for slot in 23..=25 {
+            if let Some(field) = slot_like.fields.get_mut(slot) {
+                *field = register_localized_field(&[("en", "must remain unconsumed")]);
+            }
+        }
+        let baseline_xml = baseline.xml().expect("nonexact baseline");
+        let slot_like_xml = slot_like.xml().expect("nonexact slot-like values");
+
+        for property in [
+            "ListPresentation",
+            "ExtendedListPresentation",
+            "Explanation",
+        ] {
+            assert!(!slot_like_xml.contains(&format!("<{property}")));
+            assert!(!slot_like_xml.contains(&format!("<{property}/>")));
+        }
+        assert_eq!(
+            baseline_xml, slot_like_xml,
+            "consumed tail at len {field_count}"
+        );
+    }
+}
+
+#[test]
+fn accumulation_presentations_change_only_the_mandatory_exact_trio() {
+    let fixture = AccumulationRegisterTotalsFixture::exact("1");
+    let raw = fixture.raw();
+    let header = parse_metadata_header_from_text(&raw, ACCUMULATION_TOTALS_TEST_UUID).unwrap();
+    let mut register = parse_register_properties_from_text(
+        "AccumulationRegister",
+        &raw,
+        ACCUMULATION_TOTALS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let with_presentations = format_register_source_xml(
+        "AccumulationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    register.emit_accumulation_presentations = false;
+    let without_presentations = format_register_source_xml(
+        "AccumulationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    let stripped = with_presentations
+        .replace("\t\t\t<ListPresentation/>\r\n", "")
+        .replace("\t\t\t<ExtendedListPresentation/>\r\n", "")
+        .replace("\t\t\t<Explanation/>\r\n", "");
+
+    assert_eq!(stripped, without_presentations);
+}
+
+#[test]
+fn accumulation_presentations_have_no_production_corpus_literals() {
     let source = include_str!("mod.rs");
     for forbidden in [
         "44947459-75aa-48e8-b40f-907177c2afb3",

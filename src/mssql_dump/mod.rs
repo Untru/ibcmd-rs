@@ -3922,6 +3922,7 @@ struct RegisterProperties {
     full_text_search: Option<&'static str>,
     default_list_form: Option<String>,
     auxiliary_list_form: Option<String>,
+    emit_accumulation_presentations: bool,
     list_presentation: Vec<(String, String)>,
     extended_list_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
@@ -7943,9 +7944,14 @@ fn parse_register_properties_from_text(
     } else {
         register_standard_attributes(kind, &header.name, register_type, &fields, uuid)
     };
+    let accumulation_presentations =
+        parse_accumulation_register_presentations(kind, &fields, &header)?;
+    let emit_accumulation_presentations = accumulation_presentations.is_some();
     let (list_presentation, extended_list_presentation, explanation) =
         if kind == "InformationRegister" {
             (Vec::new(), Vec::new(), Vec::new())
+        } else if let Some(presentations) = accumulation_presentations {
+            presentations
         } else {
             parse_register_presentations(kind, &fields, uuid)
         };
@@ -8030,6 +8036,7 @@ fn parse_register_properties_from_text(
         full_text_search,
         default_list_form: register_form_refs.0,
         auxiliary_list_form: register_form_refs.1,
+        emit_accumulation_presentations,
         list_presentation,
         extended_list_presentation,
         explanation,
@@ -8406,21 +8413,12 @@ fn parse_wrapped_register_owner_header(value: &str) -> Option<MetadataHeader> {
     parse_information_register_owner_header(wrapper.get(1)?)
 }
 
-fn parse_register_enable_totals_splitting(
-    kind: &str,
+fn validate_exact_accumulation_code28_layout(
     fields: &[&str],
     expected_header: &MetadataHeader,
-) -> Option<Option<bool>> {
-    if kind == "AccountingRegister" {
-        let value = metadata_header_field_index(fields, &expected_header.uuid)
-            .and_then(|index| parse_1c_bool_field(fields.get(index + 8).copied()));
-        return Some(value);
-    }
-    if kind != "AccumulationRegister"
-        || fields.first().map(|field| field.trim()) != Some("28")
-        || fields.len() != 26
-    {
-        return Some(None);
+) -> Option<bool> {
+    if fields.first().map(|field| field.trim()) != Some("28") || fields.len() != 26 {
+        return Some(false);
     }
 
     let parsed_header = parse_wrapped_register_owner_header(fields.get(13)?)?;
@@ -8438,8 +8436,49 @@ fn parse_register_enable_totals_splitting(
     {
         return None;
     }
+    Some(true)
+}
+
+fn parse_register_enable_totals_splitting(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<Option<bool>> {
+    if kind == "AccountingRegister" {
+        let value = metadata_header_field_index(fields, &expected_header.uuid)
+            .and_then(|index| parse_1c_bool_field(fields.get(index + 8).copied()));
+        return Some(value);
+    }
+    if kind != "AccumulationRegister"
+        || !validate_exact_accumulation_code28_layout(fields, expected_header)?
+    {
+        return Some(None);
+    }
 
     Some(Some(parse_1c_bool_field(fields.get(20).copied())?))
+}
+
+type RegisterPresentations = (
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+);
+
+fn parse_accumulation_register_presentations(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<Option<RegisterPresentations>> {
+    if kind != "AccumulationRegister"
+        || !validate_exact_accumulation_code28_layout(fields, expected_header)?
+    {
+        return Some(None);
+    }
+    Some(Some((
+        parse_information_register_owner_localized_value(fields.get(23)?)?,
+        parse_information_register_owner_localized_value(fields.get(24)?)?,
+        parse_information_register_owner_localized_value(fields.get(25)?)?,
+    )))
 }
 
 fn parse_register_full_text_search(
@@ -17651,6 +17690,26 @@ fn format_register_source_xml(
                     "\t\t\t<EnableTotalsSplitting>{}</EnableTotalsSplitting>\r\n",
                     xml_bool(enable_totals_splitting)
                 ));
+            }
+            if kind == "AccumulationRegister" && register.emit_accumulation_presentations {
+                push_localized_property(
+                    &mut properties,
+                    "\t\t\t",
+                    "ListPresentation",
+                    &register.list_presentation,
+                );
+                push_localized_property(
+                    &mut properties,
+                    "\t\t\t",
+                    "ExtendedListPresentation",
+                    &register.extended_list_presentation,
+                );
+                push_localized_property(
+                    &mut properties,
+                    "\t\t\t",
+                    "Explanation",
+                    &register.explanation,
+                );
             }
             xml.insert_str(index, &properties);
         }
