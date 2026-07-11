@@ -89,7 +89,7 @@ const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f8021
 const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
-const SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
+const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
 const SETTINGS_STORAGE_FORM_COLLECTION_UUID: &str = "b8533c0c-2342-4db3-91a2-c2b08cbf6b23";
 const XDTO_XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const XDTO_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
@@ -11581,6 +11581,12 @@ fn parse_report_properties_from_text(
         "Manager",
     );
 
+    let child_templates = if fields.first()?.trim() == "19" {
+        parse_report_child_templates_from_text(text, &header, template_refs).unwrap_or_default()
+    } else {
+        parse_legacy_report_child_templates_from_text(text, template_refs)
+    };
+
     Some(ReportProperties {
         generated_types,
         use_standard_commands: parse_1c_bool_field(fields.get(7).copied()).unwrap_or(true),
@@ -11608,7 +11614,7 @@ fn parse_report_properties_from_text(
             form_refs,
         ),
         child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
-        child_templates: parse_report_child_templates_from_text(text, template_refs),
+        child_templates,
         child_commands: nested_child_commands_from_text(text, uuid, type_index, object_refs),
     })
 }
@@ -11893,11 +11899,8 @@ fn parse_settings_storage_properties_from_text(
         return None;
     }
 
-    if !parse_settings_storage_collection(
-        root_fields.get(3)?,
-        SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID,
-    )?
-    .is_empty()
+    if !parse_settings_storage_collection(root_fields.get(3)?, METADATA_TEMPLATE_COLLECTION_UUID)?
+        .is_empty()
     {
         return None;
     }
@@ -12518,6 +12521,121 @@ fn parse_wrapped_1c_synonyms(value: &str) -> Vec<(String, String)> {
 }
 
 fn parse_report_child_templates_from_text(
+    text: &str,
+    expected_header: &MetadataHeader,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let root_fields = split_information_register_braced_fields(text)?;
+    if root_fields.len() != 8
+        || root_fields.first()?.trim() != "1"
+        || parse_information_register_usize(root_fields.get(2)?)? != 5
+    {
+        return None;
+    }
+
+    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+    let header_wrapper = split_information_register_braced_fields(owner_fields.get(3)?)?;
+    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    if owner_fields.len() != 18
+        || owner_fields.first()?.trim() != "19"
+        || metadata_header_field_index(&owner_fields, &expected_header.uuid) != Some(3)
+        || header_wrapper.len() != 2
+        || header_wrapper.first()?.trim() != "0"
+        || !parsed_header
+            .uuid
+            .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return None;
+    }
+
+    let (template_collection_uuid, template_uuids) =
+        parse_report_child_collection(root_fields.get(3)?)?;
+    if !template_collection_uuid.eq_ignore_ascii_case(METADATA_TEMPLATE_COLLECTION_UUID) {
+        return None;
+    }
+    let mut collection_ids = BTreeSet::from([template_collection_uuid.to_ascii_lowercase()]);
+    for value in root_fields.iter().skip(4) {
+        let (collection_uuid, _) = parse_report_collection_envelope(value)?;
+        if !collection_ids.insert(collection_uuid.to_ascii_lowercase()) {
+            return None;
+        }
+    }
+
+    let mut templates = Vec::new();
+    let mut template_names = BTreeSet::new();
+    for uuid in template_uuids {
+        let name = resolve_report_child_template(&uuid, &expected_header.name, template_refs)?;
+        if !template_names.insert(name.to_lowercase()) {
+            return None;
+        }
+        templates.push(name);
+    }
+    Some(templates)
+}
+
+fn parse_report_child_collection(value: &str) -> Option<(String, Vec<String>)> {
+    let (collection_uuid, values) = parse_report_collection_envelope(value)?;
+
+    let mut seen = BTreeSet::new();
+    let mut members = Vec::with_capacity(values.len());
+    for value in values {
+        let uuid = parse_information_register_non_zero_uuid(value)?.to_ascii_lowercase();
+        if !seen.insert(uuid.clone()) {
+            return None;
+        }
+        members.push(uuid);
+    }
+    Some((collection_uuid, members))
+}
+
+fn parse_report_collection_envelope(value: &str) -> Option<(String, Vec<&str>)> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() < 2 {
+        return None;
+    }
+    let collection_uuid = parse_information_register_non_zero_uuid(fields.first()?)?;
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if count.checked_add(2) != Some(fields.len()) {
+        return None;
+    }
+    Some((collection_uuid, fields.into_iter().skip(2).collect()))
+}
+
+fn resolve_report_child_template(
+    uuid: &str,
+    owner_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<String> {
+    let mut matches = template_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+    let (_, template_ref) = matches.next()?;
+    if matches.next().is_some()
+        || template_ref.kind != "Template"
+        || !is_owned_metadata_child_path(
+            &template_ref.relative_path,
+            "Reports",
+            owner_name,
+            "Templates",
+        )
+    {
+        return None;
+    }
+
+    let reference = template_source_reference_name(template_ref)?;
+    let expected_prefix = format!("Report.{owner_name}.Template.");
+    let name = reference.strip_prefix(&expected_prefix)?;
+    if name.is_empty() || name.contains('.') {
+        return None;
+    }
+    let path_name = source_path_file_stem(&template_ref.relative_path)?;
+    (path_name == name).then_some(path_name)
+}
+
+fn parse_legacy_report_child_templates_from_text(
     text: &str,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Vec<String> {

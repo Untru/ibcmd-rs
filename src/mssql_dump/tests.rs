@@ -21044,11 +21044,11 @@ fn disambiguates_colliding_metadata_object_codes() {
         );
     let report_uuid = "22222222-2222-4222-8222-222222222222";
     let report_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{20,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\"}}\r\n}},0}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        format!(
+            "{{1,\r\n{{20,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\"}}\r\n}},0}}\r\n}}"
+        )
+        .as_bytes(),
+    );
     let subsystem_uuid = "33333333-3333-4333-8333-333333333333";
     let subsystem_blob = deflate_for_test(
             format!(
@@ -31935,6 +31935,485 @@ fn extracts_direct_metadata_references_from_selected_configuration_body_rows() {
     );
 }
 
+const REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
+const ZERO_UUID_FOR_REPORT_TEMPLATE_TEST: &str = "00000000-0000-0000-0000-000000000000";
+
+fn report_uuid_with_ascii_case_difference_for_test() -> String {
+    loop {
+        let uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+        if uuid.to_ascii_uppercase() != uuid {
+            return uuid;
+        }
+    }
+}
+
+fn report_root_for_child_templates_test(
+    owner_uuid: &str,
+    owner_name: &str,
+    main_dcs_uuid: &str,
+    template_uuids: &[String],
+    other_collections: &[String; 4],
+) -> String {
+    let object_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let object_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let template_values = template_uuids
+        .iter()
+        .map(|uuid| format!(",{uuid}"))
+        .collect::<String>();
+    let template_collection = format!(
+        "{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},{}{template_values}}}",
+        template_uuids.len()
+    );
+    format!(
+        "{{1,\r\n\
+{{19,{object_type_id},{object_value_id},\r\n\
+{{0,\r\n\
+{{3,\r\n\
+{{1,0,{owner_uuid}}},\"{owner_name}\",{{1,\"en\",\"Report under test\"}},\"\",0,0,{zero_uuid},0}}\r\n\
+}},{zero_uuid},{main_dcs_uuid},{zero_uuid},1,{zero_uuid},{zero_uuid},{zero_uuid},0,{manager_type_id},{manager_value_id},{zero_uuid},{{0}},{{0}},{zero_uuid}}},5,\r\n\
+{template_collection},\r\n\
+{},\r\n\
+{},\r\n\
+{},\r\n\
+{}\r\n\
+}}",
+        other_collections[0],
+        other_collections[1],
+        other_collections[2],
+        other_collections[3],
+        zero_uuid = ZERO_UUID_FOR_REPORT_TEMPLATE_TEST,
+    )
+}
+
+fn report_template_refs_for_test(
+    owner_name: &str,
+    templates: &[(String, String)],
+) -> BTreeMap<String, TemplateSourceReference> {
+    templates
+        .iter()
+        .map(|(uuid, name)| {
+            (
+                uuid.clone(),
+                TemplateSourceReference {
+                    relative_path: PathBuf::from("Reports")
+                        .join(owner_name)
+                        .join("Templates")
+                        .join(name)
+                        .with_extension("xml"),
+                    kind: "Template",
+                    template_type: "DataCompositionSchema",
+                },
+            )
+        })
+        .collect()
+}
+
+fn parse_report_properties_for_child_template_test(
+    raw: &str,
+    owner_uuid: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<ReportProperties> {
+    parse_report_properties_from_text(
+        raw,
+        owner_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        template_refs,
+        &BTreeMap::new(),
+    )
+}
+
+fn report_other_collections_for_test() -> [String; 4] {
+    [
+        format!(
+            "{{{},1,{{nested,{}}}}}",
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4()
+        ),
+        format!("{{{},0}}", uuid::Uuid::new_v4()),
+        format!("{{{},0}}", uuid::Uuid::new_v4()),
+        format!("{{{},0}}", uuid::Uuid::new_v4()),
+    ]
+}
+
+fn report_raw_with_owner_fields_for_test(raw: &str, owner_fields: &[&str]) -> String {
+    let root_fields = split_information_register_braced_fields(raw).unwrap();
+    format!(
+        "{{{},{{{}}},{},{},{},{},{},{}}}",
+        root_fields[0],
+        owner_fields.join(","),
+        root_fields[2],
+        root_fields[3],
+        root_fields[4],
+        root_fields[5],
+        root_fields[6],
+        root_fields[7]
+    )
+}
+
+#[test]
+fn extracts_all_report_child_templates_in_raw_order_across_observed_cardinalities() {
+    let cases = [
+        ("ReportFour", 4usize),
+        ("ReportThree", 3),
+        ("ReportTwoA", 2),
+        ("ReportTwoB", 2),
+        ("ReportTwoC", 2),
+    ];
+    let ordered_names = ["Z_First", "MainDCS", "A_Third", "M_Fourth"];
+
+    for (owner_name, count) in cases {
+        let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+        let template_uuids = (0..count)
+            .map(|_| uuid::Uuid::new_v4().hyphenated().to_string())
+            .collect::<Vec<_>>();
+        let templates = template_uuids
+            .iter()
+            .zip(ordered_names.iter())
+            .map(|(uuid, name)| (uuid.clone(), (*name).to_string()))
+            .collect::<Vec<_>>();
+        let other_collections = report_other_collections_for_test();
+        let raw = report_root_for_child_templates_test(
+            &owner_uuid,
+            owner_name,
+            &template_uuids[1],
+            &template_uuids,
+            &other_collections,
+        );
+        let template_refs = report_template_refs_for_test(owner_name, &templates);
+        let properties =
+            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &template_refs)
+                .unwrap();
+        let expected_names = ordered_names[..count]
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(properties.child_templates, expected_names);
+
+        let blob = deflate_for_test(raw.as_bytes());
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            &owner_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &template_refs,
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_20,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let positions = expected_names
+            .iter()
+            .map(|name| xml.find(&format!("<Template>{name}</Template>")).unwrap())
+            .collect::<Vec<_>>();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(xml.matches("<Template>").count(), count);
+        assert!(xml.contains(&format!(
+            "<MainDataCompositionSchema>Report.{owner_name}.Template.MainDCS</MainDataCompositionSchema>"
+        )));
+        assert!(positions[0] < positions[1]);
+    }
+}
+
+#[test]
+fn fails_report_child_template_cohort_closed_on_invalid_envelopes() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let template_uuids = (0..2)
+        .map(|_| uuid::Uuid::new_v4().hyphenated().to_string())
+        .collect::<Vec<_>>();
+    let templates = vec![
+        (template_uuids[0].clone(), "First".to_string()),
+        (template_uuids[1].clone(), "MainDCS".to_string()),
+    ];
+    let refs = report_template_refs_for_test("EnvelopeReport", &templates);
+    let other_collections = report_other_collections_for_test();
+    let base_raw = report_root_for_child_templates_test(
+        &owner_uuid,
+        "EnvelopeReport",
+        &template_uuids[1],
+        &template_uuids,
+        &other_collections,
+    );
+    let valid_collection = format!(
+        "{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},2,{},{}}}",
+        template_uuids[0], template_uuids[1]
+    );
+    let wrong_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let wrong_platform = base_raw.replacen(
+        REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST,
+        &wrong_collection_uuid,
+        1,
+    );
+    let plus_count = base_raw.replacen(
+        &valid_collection,
+        &format!(
+            "{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},+2,{},{}}}",
+            template_uuids[0], template_uuids[1]
+        ),
+        1,
+    );
+    let count_mismatch = base_raw.replacen(
+        &valid_collection,
+        &format!(
+            "{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},3,{},{}}}",
+            template_uuids[0], template_uuids[1]
+        ),
+        1,
+    );
+    let malformed_member = base_raw.replacen(
+        &template_uuids[0],
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa----",
+        1,
+    );
+    let duplicate_members = report_root_for_child_templates_test(
+        &owner_uuid,
+        "EnvelopeReport",
+        &template_uuids[1],
+        &[
+            template_uuids[0].clone(),
+            template_uuids[0].to_ascii_uppercase(),
+        ],
+        &other_collections,
+    );
+    let wrong_root_count = base_raw.replacen(
+        &format!("}},5,\r\n{valid_collection}"),
+        &format!("}},4,\r\n{valid_collection}"),
+        1,
+    );
+    let invalid_other_collection = report_root_for_child_templates_test(
+        &owner_uuid,
+        "EnvelopeReport",
+        &template_uuids[1],
+        &template_uuids,
+        &[
+            format!("{{{},+1,{{opaque}}}}", uuid::Uuid::new_v4()),
+            other_collections[1].clone(),
+            other_collections[2].clone(),
+            other_collections[3].clone(),
+        ],
+    );
+    let duplicate_collection_id = report_root_for_child_templates_test(
+        &owner_uuid,
+        "EnvelopeReport",
+        &template_uuids[1],
+        &template_uuids,
+        &[
+            format!("{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},0}}"),
+            other_collections[1].clone(),
+            other_collections[2].clone(),
+            other_collections[3].clone(),
+        ],
+    );
+    let owner_fields = metadata_object_fields(&base_raw).unwrap();
+    let mut short_owner_fields = owner_fields.clone();
+    short_owner_fields.pop();
+    let short_owner = report_raw_with_owner_fields_for_test(&base_raw, &short_owner_fields);
+    let wrapper_without_close = owner_fields[3].strip_suffix('}').unwrap();
+    let extra_wrapper = format!("{wrapper_without_close},0}}");
+    let mut extra_wrapper_fields = owner_fields.clone();
+    extra_wrapper_fields[3] = &extra_wrapper;
+    let extra_wrapper_field =
+        report_raw_with_owner_fields_for_test(&base_raw, &extra_wrapper_fields);
+
+    for (case, raw) in [
+        ("wrong template collection UUID", wrong_platform),
+        ("plus count", plus_count),
+        ("count mismatch", count_mismatch),
+        ("malformed member UUID", malformed_member),
+        ("duplicate member UUID", duplicate_members),
+        ("declared root collection count", wrong_root_count),
+        ("invalid opaque collection", invalid_other_collection),
+        ("duplicate collection UUID", duplicate_collection_id),
+        ("short owner", short_owner),
+        ("extra header wrapper field", extra_wrapper_field),
+        ("trailing root garbage", format!("{base_raw},0")),
+    ] {
+        let properties =
+            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).unwrap();
+        assert!(properties.child_templates.is_empty(), "{case}");
+        assert_eq!(
+            properties.main_data_composition_schema.as_deref(),
+            Some("Report.EnvelopeReport.Template.MainDCS"),
+            "{case}"
+        );
+        assert_eq!(properties.generated_types.len(), 2, "{case}");
+    }
+}
+
+#[test]
+fn fails_report_child_template_cohort_closed_on_resolution_collisions() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let template_uuids = vec![
+        report_uuid_with_ascii_case_difference_for_test(),
+        uuid::Uuid::new_v4().hyphenated().to_string(),
+        uuid::Uuid::new_v4().hyphenated().to_string(),
+    ];
+    let templates = vec![
+        (template_uuids[0].clone(), "First".to_string()),
+        (template_uuids[1].clone(), "MainDCS".to_string()),
+        (template_uuids[2].clone(), "Third".to_string()),
+    ];
+    let raw = report_root_for_child_templates_test(
+        &owner_uuid,
+        "ResolutionReport",
+        &template_uuids[1],
+        &template_uuids,
+        &report_other_collections_for_test(),
+    );
+    let valid_refs = report_template_refs_for_test("ResolutionReport", &templates);
+
+    let mut unresolved = report_template_refs_for_test("ResolutionReport", &templates);
+    unresolved.remove(&template_uuids[0]);
+
+    let mut wrong_kind = report_template_refs_for_test("ResolutionReport", &templates);
+    wrong_kind.get_mut(&template_uuids[0]).unwrap().kind = "CommonTemplate";
+
+    let mut cross_owner = report_template_refs_for_test("ResolutionReport", &templates);
+    cross_owner
+        .get_mut(&template_uuids[0])
+        .unwrap()
+        .relative_path = PathBuf::from("Reports")
+        .join("OtherReport")
+        .join("Templates")
+        .join("First.xml");
+
+    let mut case_key_collision = report_template_refs_for_test("ResolutionReport", &templates);
+    case_key_collision.insert(
+        template_uuids[0].to_ascii_uppercase(),
+        TemplateSourceReference {
+            relative_path: PathBuf::from("Reports/ResolutionReport/Templates/First.xml"),
+            kind: "Template",
+            template_type: "DataCompositionSchema",
+        },
+    );
+
+    let cyrillic_name_collision = report_template_refs_for_test(
+        "ResolutionReport",
+        &[
+            (template_uuids[0].clone(), "Макет".to_string()),
+            (template_uuids[1].clone(), "MainDCS".to_string()),
+            (template_uuids[2].clone(), "макет".to_string()),
+        ],
+    );
+
+    let mut empty_name = report_template_refs_for_test("ResolutionReport", &templates);
+    empty_name
+        .get_mut(&template_uuids[0])
+        .unwrap()
+        .relative_path = PathBuf::from("Reports")
+        .join("ResolutionReport")
+        .join("Templates")
+        .join(".xml");
+
+    let mut nested_path = report_template_refs_for_test("ResolutionReport", &templates);
+    nested_path
+        .get_mut(&template_uuids[0])
+        .unwrap()
+        .relative_path = PathBuf::from("Reports")
+        .join("ResolutionReport")
+        .join("Templates")
+        .join("Nested")
+        .join("First.xml");
+
+    for (case, refs) in [
+        ("unresolved member", unresolved),
+        ("wrong kind", wrong_kind),
+        ("cross owner", cross_owner),
+        ("case-colliding keys", case_key_collision),
+        ("Unicode case-colliding names", cyrillic_name_collision),
+        ("empty filename", empty_name),
+        ("nested template path", nested_path),
+    ] {
+        let properties =
+            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).unwrap();
+        assert!(properties.child_templates.is_empty(), "{case}");
+        assert_eq!(properties.generated_types.len(), 2, "{case}");
+    }
+
+    let malformed_refs = {
+        let mut refs = valid_refs;
+        refs.get_mut(&template_uuids[0]).unwrap().relative_path =
+            PathBuf::from("Reports/ResolutionReport/Templates/First.Part.xml");
+        refs
+    };
+    assert!(
+        parse_report_properties_for_child_template_test(&raw, &owner_uuid, &malformed_refs)
+            .unwrap()
+            .child_templates
+            .is_empty()
+    );
+}
+
+#[test]
+fn extracts_selected_report_templates_from_broad_reference_index() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let template_uuids = (0..2)
+        .map(|_| uuid::Uuid::new_v4().hyphenated().to_string())
+        .collect::<Vec<_>>();
+    let names = ["First", "MainDCS"];
+    let raw = report_root_for_child_templates_test(
+        &owner_uuid,
+        "SelectedReport",
+        &template_uuids[1],
+        &template_uuids,
+        &report_other_collections_for_test(),
+    );
+    let report_blob = deflate_for_test(raw.as_bytes());
+    let report_row = ConfigRow {
+        file_name: owner_uuid.clone(),
+        part_no: 0,
+        data_size: report_blob.len() as i64,
+        binary_hex: encode_hex_for_test(&report_blob),
+    };
+    let selected_report_texts = build_metadata_text_rows(std::slice::from_ref(&report_row));
+    assert_eq!(selected_report_texts.len(), 1);
+    assert!(selected_export_needs_broad_metadata_indexes(
+        false,
+        &BTreeSet::from([owner_uuid.clone()]),
+        &selected_report_texts,
+    ));
+    assert!(selected_metadata_source_reference_index_needs(&selected_report_texts).is_none());
+
+    let mut rows = vec![report_row];
+    for (uuid, name) in template_uuids.iter().zip(names) {
+        let template_raw = format!(
+            "{{1,\r\n{{2,4,\r\n{{3,\r\n{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"Template\"}},\"\"}}\r\n,0}}\r\n}}"
+        );
+        let blob = deflate_for_test(template_raw.as_bytes());
+        rows.push(ConfigRow {
+            file_name: uuid.clone(),
+            part_no: 0,
+            data_size: blob.len() as i64,
+            binary_hex: encode_hex_for_test(&blob),
+        });
+    }
+    let broad_template_refs = build_template_source_reference_index(&rows);
+    assert_eq!(broad_template_refs.len(), 2);
+
+    let extracted = extract_metadata_source_xml_with_refs(
+        &report_blob,
+        &owner_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &broad_template_refs,
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert!(
+        xml.find("<Template>First</Template>").unwrap()
+            < xml.find("<Template>MainDCS</Template>").unwrap()
+    );
+    assert_eq!(xml.matches("<Template>").count(), 2);
+}
+
 #[test]
 fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
     let report_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -31949,12 +32428,27 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
     let command_uuid = "ffffffff-ffff-4fff-8fff-ffffffffffff";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
     let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let report_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Refresh tip\"}},1,\r\n{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}},0,0,0}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let command_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let fourth_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let fifth_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let report_raw = format!(
+        "{{1,\r\n{{19,{object_type_id},{object_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\",0,0,{zero_uuid},0}}\r\n}},{main_form_uuid},{template_uuid},{settings_form_uuid},1,{storage_uuid},{zero_uuid},{zero_uuid},1,{manager_type_id},{manager_value_id},{zero_uuid},\r\n{{1,\"en\",\"Sales report extended\"}},\r\n{{1,\"en\",\"Builds sales summary\"}},{zero_uuid}}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}},{{{form_list_marker},2,{settings_form_uuid},{main_form_uuid}}},\r\n{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Refresh tip\"}},1,\r\n{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n{{\"Pattern\"}},\r\n{{3,\r\n{{1,0,{command_uuid}}},\"Refresh\",{{1,\"en\",\"Refresh\"}},\"command comment\"}},0,0,0}}\r\n}}"
+    );
+    let report_raw = report_raw.replacen(
+        &format!("}},1,\r\n{{11111111-1111-4111-8111-111111111111,1,{template_uuid}}}"),
+        &format!("}},5,\r\n{{{REPORT_TEMPLATE_COLLECTION_UUID_FOR_TEST},1,{template_uuid}}}"),
+        1,
+    );
+    let report_raw = report_raw.replacen(
+        ",\r\n{9,\r\n",
+        &format!(",\r\n{{{command_collection_uuid},1,\r\n{{9,\r\n"),
+        1,
+    );
+    let root_without_close = report_raw.strip_suffix('}').unwrap();
+    let report_raw = format!(
+        "{root_without_close}}},\r\n{{{fourth_collection_uuid},0}},\r\n{{{fifth_collection_uuid},0}}}}"
+    );
+    let report_blob = deflate_for_test(report_raw.as_bytes());
     let form_refs = BTreeMap::from([
         (
             main_form_uuid.to_string(),
