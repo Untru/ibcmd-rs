@@ -3922,6 +3922,7 @@ struct RegisterProperties {
     full_text_search: Option<&'static str>,
     default_list_form: Option<String>,
     auxiliary_list_form: Option<String>,
+    calculation_period: Option<CalculationRegisterPeriodProperties>,
     emit_accumulation_presentations: bool,
     emit_calculation_presentations: bool,
     list_presentation: Vec<(String, String)>,
@@ -3929,6 +3930,12 @@ struct RegisterProperties {
     explanation: Vec<(String, String)>,
     standard_attributes: Vec<RegisterStandardAttribute>,
     child_objects: Vec<MetadataChildObject>,
+}
+
+struct CalculationRegisterPeriodProperties {
+    periodicity: &'static str,
+    action_period: bool,
+    base_period: bool,
 }
 
 struct InformationRegisterOwnerFields<'a> {
@@ -7940,6 +7947,7 @@ fn parse_register_properties_from_text(
     } else {
         parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs)
     };
+    let calculation_period = parse_calculation_register_fixed_period(kind, &fields, &header)?;
     let standard_attributes = if kind == "InformationRegister" {
         Vec::new()
     } else {
@@ -8039,6 +8047,7 @@ fn parse_register_properties_from_text(
         full_text_search,
         default_list_form: register_form_refs.0,
         auxiliary_list_form: register_form_refs.1,
+        calculation_period,
         emit_accumulation_presentations,
         emit_calculation_presentations,
         list_presentation,
@@ -8515,6 +8524,29 @@ fn parse_calculation_register_empty_presentations(
         return None;
     }
     Some(true)
+}
+
+fn parse_calculation_register_fixed_period(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<Option<CalculationRegisterPeriodProperties>> {
+    if kind != "CalculationRegister"
+        || !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)?
+    {
+        return Some(None);
+    }
+    if fields.get(16)?.trim() != "2"
+        || fields.get(17)?.trim() != "1"
+        || fields.get(18)?.trim() != "1"
+    {
+        return Some(None);
+    }
+    Some(Some(CalculationRegisterPeriodProperties {
+        periodicity: "Month",
+        action_period: true,
+        base_period: true,
+    }))
 }
 
 fn parse_register_full_text_search(
@@ -17696,6 +17728,18 @@ fn format_register_source_xml(
                     "AuxiliaryListForm",
                     register.auxiliary_list_form.as_deref(),
                 );
+            }
+            if kind == "CalculationRegister"
+                && let Some(period) = register.calculation_period.as_ref()
+            {
+                properties.push_str(&format!(
+                    "\t\t\t<Periodicity>{}</Periodicity>\r\n\
+\t\t\t<ActionPeriod>{}</ActionPeriod>\r\n\
+\t\t\t<BasePeriod>{}</BasePeriod>\r\n",
+                    period.periodicity,
+                    xml_bool(period.action_period),
+                    xml_bool(period.base_period),
+                ));
             }
             if let Some(register_type) = register.register_type {
                 properties.push_str(&format!(

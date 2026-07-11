@@ -42149,6 +42149,8 @@ impl CalculationRegisterPresentationsFixture {
             "Payroll",
         ));
         fields.extend((16..33).map(|index| match index {
+            16 => "2".to_string(),
+            17 | 18 => "1".to_string(),
             22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
             29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
             30..=32 => "{0}".to_string(),
@@ -42877,6 +42879,240 @@ fn calculation_presentations_change_only_the_mandatory_empty_trio() {
 
 #[test]
 fn calculation_presentations_have_no_production_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "a6756af4-964f-400d-97d4-0bd3f5916693",
+        "_ДемоОсновныеНачисления",
+        "ca9501a5-a0d3-422e-afd3-8c8cfbbcbb01",
+        "03ccda6c-33a9-4c9e-9f21-27fc6dd07aaf",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+#[test]
+fn calculation_period_emits_fixed_vector_once_in_schema_order() {
+    let xml = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .expect("exact calculation period vector");
+
+    for property in [
+        "<Periodicity>Month</Periodicity>",
+        "<ActionPeriod>true</ActionPeriod>",
+        "<BasePeriod>true</BasePeriod>",
+    ] {
+        assert_eq!(xml.matches(property).count(), 1);
+    }
+    let use_standard_commands = xml
+        .find("<UseStandardCommands>true</UseStandardCommands>")
+        .unwrap();
+    let periodicity = xml.find("<Periodicity>Month</Periodicity>").unwrap();
+    let action_period = xml.find("<ActionPeriod>true</ActionPeriod>").unwrap();
+    let base_period = xml.find("<BasePeriod>true</BasePeriod>").unwrap();
+    let presentations = xml.find("<ListPresentation/>").unwrap();
+    assert!(
+        use_standard_commands < periodicity
+            && periodicity < action_period
+            && action_period < base_period
+            && base_period < presentations
+    );
+}
+
+#[test]
+fn calculation_period_alternative_scalars_remain_accepted_omissions() {
+    let fixed = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .unwrap();
+    let fixed_without_period = fixed
+        .replace("\t\t\t<Periodicity>Month</Periodicity>\r\n", "")
+        .replace("\t\t\t<ActionPeriod>true</ActionPeriod>\r\n", "")
+        .replace("\t\t\t<BasePeriod>true</BasePeriod>\r\n", "");
+    let alternatives = [
+        (16, vec!["0", "1", "3", "-1", "value", "{0}"]),
+        (17, vec!["0", "2", "-1", "value", "{0}"]),
+        (18, vec!["0", "2", "-1", "value", "{0}"]),
+    ];
+
+    for (slot, values) in alternatives {
+        for value in values {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact();
+            fixture.fields[slot] = value.to_string();
+            let raw = fixture.raw();
+            let fields = fixture
+                .fields
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            let header =
+                parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+            assert!(matches!(
+                parse_calculation_register_fixed_period("CalculationRegister", &fields, &header,),
+                Some(None)
+            ));
+
+            let source = fixture
+                .extract()
+                .expect("alternative period vector must remain accepted");
+            let xml = String::from_utf8(source.xml).unwrap();
+            assert!(!xml.contains("<Periodicity>"));
+            assert!(!xml.contains("<ActionPeriod>"));
+            assert!(!xml.contains("<BasePeriod>"));
+            if slot == 16 && value == "0" {
+                assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+            }
+
+            let mut register = parse_register_properties_from_text(
+                "CalculationRegister",
+                &raw,
+                CALCULATION_PRESENTATIONS_TEST_UUID,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                InfobaseConfigSourceVersion::V2_21,
+            )
+            .unwrap();
+            assert!(register.calculation_period.is_none());
+            let before = format_register_source_xml(
+                "CalculationRegister",
+                &header,
+                &register,
+                InfobaseConfigSourceVersion::V2_21,
+            );
+            register.calculation_period = None;
+            let after = format_register_source_xml(
+                "CalculationRegister",
+                &header,
+                &register,
+                InfobaseConfigSourceVersion::V2_21,
+            );
+            assert_eq!(before, after, "period marker changed slot {slot}={value}");
+
+            if slot != 16 {
+                assert_eq!(
+                    xml, fixed_without_period,
+                    "non-neighbor scalar changed XML at slot {slot}={value}"
+                );
+            }
+        }
+    }
+
+    let mut false_action = CalculationRegisterPresentationsFixture::exact();
+    false_action.fields[17] = "0".to_string();
+    assert_eq!(false_action.xml().unwrap(), fixed_without_period);
+}
+
+#[test]
+fn calculation_period_direct_seam_requires_full_exact_owner_boundary() {
+    let original = CalculationRegisterPresentationsFixture::exact();
+    let raw = original.raw();
+    let expected =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let valid_header = original.fields[15].clone();
+
+    let mut short = original.clone();
+    short.fields[15] = format!(
+        "{{0,{{3,{{1,0,{CALCULATION_PRESENTATIONS_TEST_UUID}}},\"Payroll\",{{1,\"en\",\"Payroll\"}},\"\"}}}}"
+    );
+    let mut moved = original.clone();
+    moved.fields[14] = valid_header.clone();
+    moved.fields[15] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[29] = valid_header.clone();
+    let mut wrong_then_valid = original.clone();
+    wrong_then_valid.fields[15] = wrong_then_valid.fields[15].replace(
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        "77777777-7777-4777-8777-777777777777",
+    );
+    wrong_then_valid.fields[29] = valid_header;
+
+    for fixture in [short, moved, duplicate, wrong_then_valid] {
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            parse_calculation_register_fixed_period("CalculationRegister", &fields, &expected,)
+                .is_none()
+        );
+    }
+
+    let fields = original
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let mut mismatch = expected;
+    mismatch.name = "Other".to_string();
+    assert!(
+        parse_calculation_register_fixed_period("CalculationRegister", &fields, &mismatch,)
+            .is_none()
+    );
+}
+
+#[test]
+fn calculation_period_keeps_nonexact_arities_unconsumed_and_omitted() {
+    for field_count in [32, 34] {
+        let mut baseline = CalculationRegisterPresentationsFixture::exact();
+        baseline.fields.truncate(field_count.min(33));
+        while baseline.fields.len() < field_count {
+            baseline.fields.push("0".to_string());
+        }
+        let mut slot_like = baseline.clone();
+        slot_like.fields[17] = "0".to_string();
+        slot_like.fields[18] = "0".to_string();
+        let baseline_xml = baseline.xml().expect("nonexact calculation baseline");
+        let slot_like_xml = slot_like.xml().expect("nonexact calculation slots");
+
+        for property in ["Periodicity", "ActionPeriod", "BasePeriod"] {
+            assert!(!slot_like_xml.contains(&format!("<{property}>")));
+        }
+        assert_eq!(
+            baseline_xml, slot_like_xml,
+            "consumed period vector at len {field_count}"
+        );
+    }
+}
+
+#[test]
+fn calculation_period_changes_only_the_fixed_trio() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let raw = fixture.raw();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &raw,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let with_period = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    register.calculation_period = None;
+    let without_period = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    let stripped = with_period
+        .replace("\t\t\t<Periodicity>Month</Periodicity>\r\n", "")
+        .replace("\t\t\t<ActionPeriod>true</ActionPeriod>\r\n", "")
+        .replace("\t\t\t<BasePeriod>true</BasePeriod>\r\n", "");
+
+    assert_eq!(stripped, without_period);
+}
+
+#[test]
+fn calculation_period_has_no_production_corpus_literals() {
     let source = include_str!("mod.rs");
     for forbidden in [
         "a6756af4-964f-400d-97d4-0bd3f5916693",
