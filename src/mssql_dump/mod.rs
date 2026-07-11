@@ -89,6 +89,8 @@ const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f8021
 const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
+const SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
+const SETTINGS_STORAGE_FORM_COLLECTION_UUID: &str = "b8533c0c-2342-4db3-91a2-c2b08cbf6b23";
 const XDTO_XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const XDTO_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
 const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
@@ -4240,6 +4242,8 @@ struct TaskProperties {
 
 struct SettingsStorageProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    default_save_form: Option<String>,
+    default_load_form: Option<String>,
 }
 
 struct EnumProperties {
@@ -5817,7 +5821,7 @@ fn extract_metadata_source_xml_from_text_row(
         let task = parse_task_properties_from_text(text, uuid, form_refs)?;
         format_task_source_xml(&header, &task, source_version).into_bytes()
     } else if kind == "SettingsStorage" {
-        let settings_storage = parse_settings_storage_properties_from_text(text, uuid)?;
+        let settings_storage = parse_settings_storage_properties_from_text(text, uuid, form_refs)?;
         format_settings_storage_source_xml(&header, &settings_storage, source_version).into_bytes()
     } else if kind == "Enum" {
         let enumeration = parse_enum_properties_from_text(text, uuid, form_refs, template_refs)?;
@@ -11855,27 +11859,148 @@ fn parse_task_properties_from_text(
 fn parse_settings_storage_properties_from_text(
     text: &str,
     uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<SettingsStorageProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("2")
+    let root_fields = split_information_register_braced_fields(text)?;
+    if root_fields.len() != 5
+        || root_fields.first().map(|value| value.trim()) != Some("1")
+        || root_fields.get(2).map(|value| value.trim()) != Some("2")
+    {
+        return None;
+    }
+    let fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+    let header_wrapper = split_information_register_braced_fields(fields.get(1)?)?;
+    let wrapped_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    if fields.len() != 8
+        || fields.first().map(|value| value.trim()) != Some("2")
         || metadata_header_field_index(&fields, uuid) != Some(1)
-        || !field_starts_with(fields.get(1), "{0,")
+        || header_wrapper.len() != 2
+        || header_wrapper.first()?.trim() != "0"
+        || !wrapped_header.uuid.eq_ignore_ascii_case(uuid)
+        || wrapped_header.name != header.name
+        || wrapped_header.synonyms != header.synonyms
+        || wrapped_header.comment != header.comment
     {
         return None;
     }
 
-    let mut generated_types = Vec::new();
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        2,
-        3,
-        &format!("SettingsStorageManager.{}", header.name),
-        "Manager",
-    );
+    let manager_type_id = parse_information_register_non_zero_uuid(fields.get(2)?)?;
+    let manager_value_id = parse_information_register_non_zero_uuid(fields.get(3)?)?;
+    if !settings_storage_uuid_is_zero(fields.get(6)?)
+        || !settings_storage_uuid_is_zero(fields.get(7)?)
+    {
+        return None;
+    }
 
-    Some(SettingsStorageProperties { generated_types })
+    if !parse_settings_storage_collection(
+        root_fields.get(3)?,
+        SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID,
+    )?
+    .is_empty()
+    {
+        return None;
+    }
+    let form_uuids = parse_settings_storage_collection(
+        root_fields.get(4)?,
+        SETTINGS_STORAGE_FORM_COLLECTION_UUID,
+    )?;
+    let default_load_form = parse_settings_storage_default_form_ref(
+        fields.get(4)?,
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let default_save_form = parse_settings_storage_default_form_ref(
+        fields.get(5)?,
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+
+    Some(SettingsStorageProperties {
+        generated_types: vec![GeneratedTypeEntry {
+            name: format!("SettingsStorageManager.{}", header.name),
+            category: "Manager",
+            type_id: manager_type_id,
+            value_id: manager_value_id,
+        }],
+        default_save_form,
+        default_load_form,
+    })
+}
+
+fn parse_settings_storage_collection(
+    value: &str,
+    expected_collection_uuid: &str,
+) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() < 2
+        || !fields
+            .first()?
+            .trim()
+            .eq_ignore_ascii_case(expected_collection_uuid)
+    {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if count.checked_add(2) != Some(fields.len()) {
+        return None;
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut uuids = Vec::with_capacity(count);
+    for field in fields.iter().skip(2) {
+        let uuid = parse_information_register_non_zero_uuid(field)?.to_ascii_lowercase();
+        if !seen.insert(uuid.clone()) {
+            return None;
+        }
+        uuids.push(uuid);
+    }
+    Some(uuids)
+}
+
+fn settings_storage_uuid_is_zero(value: &str) -> bool {
+    value.trim() == "00000000-0000-0000-0000-000000000000"
+}
+
+fn parse_settings_storage_default_form_ref(
+    value: &str,
+    owner_form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if settings_storage_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    if !owner_form_uuids.iter().any(|candidate| candidate == &uuid) {
+        return None;
+    }
+    let mut matches = form_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
+    let (_, form) = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    if form.kind != "Form"
+        || !is_owned_metadata_child_path(
+            &form.relative_path,
+            "SettingsStorages",
+            owner_name,
+            "Forms",
+        )
+    {
+        return None;
+    }
+    let reference = form_source_reference_name(form)?;
+    let expected_prefix = format!("SettingsStorage.{owner_name}.Form.");
+    let form_name = reference.strip_prefix(&expected_prefix)?;
+    if form_name.is_empty() || form_name.contains('.') {
+        return None;
+    }
+    Some(Some(reference))
 }
 
 fn parse_data_processor_properties_from_text(
@@ -17162,9 +17287,36 @@ fn format_settings_storage_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("SettingsStorage", header, source_version);
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        const STYLE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
+        const PALETTE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
+        if let Some(style_index) = xml.find(STYLE_NAMESPACE_ATTRIBUTE) {
+            xml.insert_str(style_index, PALETTE_NAMESPACE_ATTRIBUTE);
+        }
+    }
     let internal_info = format_generated_types_internal_info_xml(&settings_storage.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
+    }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties = String::new();
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultSaveForm",
+            settings_storage.default_save_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultLoadForm",
+            settings_storage.default_load_form.as_deref(),
+        );
+        properties.push_str("\t\t\t<AuxiliarySaveForm/>\r\n");
+        properties.push_str("\t\t\t<AuxiliaryLoadForm/>\r\n");
+        xml.insert_str(index, &properties);
     }
     xml
 }

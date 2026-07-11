@@ -29604,27 +29604,167 @@ fn extracts_functional_options_parameter_xml_without_confusing_defined_type() {
     assert!(!repacked.blob.is_empty());
 }
 
+const SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID_FOR_TEST: &str =
+    "3daea016-69b7-4ed4-9453-127911372fe6";
+const SETTINGS_STORAGE_FORM_COLLECTION_UUID_FOR_TEST: &str = "b8533c0c-2342-4db3-91a2-c2b08cbf6b23";
+const ZERO_UUID_FOR_SETTINGS_STORAGE_TEST: &str = "00000000-0000-0000-0000-000000000000";
+
+struct SettingsStorageRawTestOptions<'a> {
+    owner_uuid: &'a str,
+    owner_name: &'a str,
+    manager_type_id: &'a str,
+    manager_value_id: &'a str,
+    default_load_form: &'a str,
+    default_save_form: &'a str,
+    slot_6: &'a str,
+    slot_7: &'a str,
+    collection_count: usize,
+    template_collection_uuid: &'a str,
+    template_count: usize,
+    template_uuids: &'a [&'a str],
+    form_collection_uuid: &'a str,
+    form_count: usize,
+    form_uuids: &'a [&'a str],
+}
+
+fn settings_storage_raw_for_forms_test(options: &SettingsStorageRawTestOptions<'_>) -> String {
+    let template_values = options
+        .template_uuids
+        .iter()
+        .map(|uuid| format!(",{uuid}"))
+        .collect::<String>();
+    let form_values = options
+        .form_uuids
+        .iter()
+        .map(|uuid| format!(",{uuid}"))
+        .collect::<String>();
+    format!(
+        "{{1,\r\n\
+{{2,\r\n\
+{{0,\r\n\
+{{3,\r\n\
+{{1,0,{owner_uuid}}},\"{owner_name}\",{{1,\"en\",\"User settings\"}},\"\",0,0,{zero_uuid},0}}\r\n\
+}},{manager_type_id},{manager_value_id},{default_load_form},{default_save_form},{slot_6},{slot_7}}},{collection_count},\r\n\
+{{{template_collection_uuid},{template_count}{template_values}}},\r\n\
+{{{form_collection_uuid},{form_count}{form_values}}}\r\n\
+}}",
+        owner_uuid = options.owner_uuid,
+        owner_name = options.owner_name,
+        zero_uuid = ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        manager_type_id = options.manager_type_id,
+        manager_value_id = options.manager_value_id,
+        default_load_form = options.default_load_form,
+        default_save_form = options.default_save_form,
+        slot_6 = options.slot_6,
+        slot_7 = options.slot_7,
+        collection_count = options.collection_count,
+        template_collection_uuid = options.template_collection_uuid,
+        template_count = options.template_count,
+        template_values = template_values,
+        form_collection_uuid = options.form_collection_uuid,
+        form_count = options.form_count,
+        form_values = form_values,
+    )
+}
+
+fn settings_storage_test_options<'a>(
+    owner_uuid: &'a str,
+    manager_type_id: &'a str,
+    manager_value_id: &'a str,
+    default_load_form: &'a str,
+    default_save_form: &'a str,
+    form_uuids: &'a [&'a str],
+) -> SettingsStorageRawTestOptions<'a> {
+    SettingsStorageRawTestOptions {
+        owner_uuid,
+        owner_name: "UserSettings",
+        manager_type_id,
+        manager_value_id,
+        default_load_form,
+        default_save_form,
+        slot_6: ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        slot_7: ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        collection_count: 2,
+        template_collection_uuid: SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID_FOR_TEST,
+        template_count: 0,
+        template_uuids: &[],
+        form_collection_uuid: SETTINGS_STORAGE_FORM_COLLECTION_UUID_FOR_TEST,
+        form_count: form_uuids.len(),
+        form_uuids,
+    }
+}
+
+fn settings_storage_form_refs_for_test(
+    owner_name: &str,
+    forms: &[(&str, &str)],
+) -> BTreeMap<String, FormSourceReference> {
+    forms
+        .iter()
+        .map(|(uuid, name)| {
+            (
+                (*uuid).to_string(),
+                FormSourceReference {
+                    relative_path: PathBuf::from("SettingsStorages")
+                        .join(owner_name)
+                        .join("Forms")
+                        .join(name)
+                        .with_extension("xml"),
+                    kind: "Form",
+                },
+            )
+        })
+        .collect()
+}
+
+fn settings_storage_raw_with_owner_fields_for_test(raw: &str, owner_fields: &[&str]) -> String {
+    let root_fields = split_1c_braced_fields(raw, 0).unwrap();
+    format!(
+        "{{{},{{{}}},{},{},{}}}",
+        root_fields[0],
+        owner_fields.join(","),
+        root_fields[2],
+        root_fields[3],
+        root_fields[4]
+    )
+}
+
 #[test]
-fn extracts_settings_storage_xml_with_manager_generated_type() {
-    let uuid = "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    let manager_type_id = "44444444-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    let manager_value_id = "44444444-cccc-4ccc-8ccc-cccccccccccc";
-    let plain = format!(
-        "{{1,\r\n{{2,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"UserSettings\",{{1,\"en\",\"User settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},{manager_type_id},{manager_value_id},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000}},2,\r\n{{0}},\r\n{{0}}\r\n}},0}}"
+fn extracts_settings_storage_default_forms_from_guarded_owner_collections() {
+    let uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let load_form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let save_form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let other_form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let form_uuids = [
+        load_form_uuid.as_str(),
+        other_form_uuid.as_str(),
+        save_form_uuid.as_str(),
+    ];
+    let plain = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &uuid,
+        &manager_type_id,
+        &manager_value_id,
+        &load_form_uuid,
+        &save_form_uuid,
+        &form_uuids,
+    ));
+    let form_refs = settings_storage_form_refs_for_test(
+        "UserSettings",
+        &[
+            (&load_form_uuid, "LoadForm"),
+            (&save_form_uuid, "SaveForm"),
+            (&other_form_uuid, "UnrelatedForm"),
+        ],
     );
     let blob = deflate_for_test(plain.as_bytes());
 
-    let extracted = extract_metadata_source_xml(
-        &blob,
-        uuid,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-    )
-    .unwrap();
+    let extracted =
+        extract_metadata_source_xml(&blob, &uuid, &BTreeMap::new(), &form_refs, &BTreeMap::new())
+            .unwrap();
     let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
     let repacked = pack_simple_metadata_blob_from_xml(&blob, &extracted.xml).unwrap();
-    let generated_types = parse_generated_type_entries_from_blob(&blob, uuid).unwrap();
+    let generated_types = parse_generated_type_entries_from_blob(&blob, &uuid).unwrap();
     let xml = String::from_utf8(extracted.xml.clone()).unwrap();
 
     assert_eq!(
@@ -29632,12 +29772,20 @@ fn extracts_settings_storage_xml_with_manager_generated_type() {
         PathBuf::from("SettingsStorages").join("UserSettings.xml")
     );
     assert_eq!(properties.kind, "SettingsStorage");
-    assert_eq!(properties.uuid, uuid);
+    assert_eq!(properties.uuid, uuid.as_str());
     assert!(xml.contains(
         r#"<xr:GeneratedType name="SettingsStorageManager.UserSettings" category="Manager">"#
     ));
     assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
     assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
+    assert!(xml.contains(
+        "\t\t\t<Comment/>\r\n\
+\t\t\t<DefaultSaveForm>SettingsStorage.UserSettings.Form.SaveForm</DefaultSaveForm>\r\n\
+\t\t\t<DefaultLoadForm>SettingsStorage.UserSettings.Form.LoadForm</DefaultLoadForm>\r\n\
+\t\t\t<AuxiliarySaveForm/>\r\n\
+\t\t\t<AuxiliaryLoadForm/>\r\n"
+    ));
+    assert!(!xml.contains("xmlns:pal="));
     assert!(generated_types.contains(&(
         manager_type_id.to_string(),
         "cfg:SettingsStorageManager.UserSettings".to_string()
@@ -29648,11 +29796,11 @@ fn extracts_settings_storage_xml_with_manager_generated_type() {
 
     let extracted_v21 = extract_metadata_source_xml_with_refs(
         &blob,
-        uuid,
+        &uuid,
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
+        &form_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
@@ -29662,6 +29810,423 @@ fn extracts_settings_storage_xml_with_manager_generated_type() {
     assert!(xml_v21.contains(r#"version="2.21""#));
     assert!(!xml_v21.contains(r#"version="2.20""#));
     assert!(xml_v21.contains("SettingsStorageManager.UserSettings"));
+    assert_eq!(xml_v21.matches("xmlns:pal=").count(), 1);
+    assert!(xml_v21.contains(
+        "xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\""
+    ));
+}
+
+#[test]
+fn keeps_settings_storage_defaults_empty_when_child_forms_exist() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let child_form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let form_uuids = [child_form_uuid.as_str()];
+    let raw = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &form_uuids,
+    ));
+    let form_refs =
+        settings_storage_form_refs_for_test("UserSettings", &[(&child_form_uuid, "OnlyChildForm")]);
+
+    let properties =
+        parse_settings_storage_properties_from_text(&raw, &owner_uuid, &form_refs).unwrap();
+    assert_eq!(properties.generated_types.len(), 1);
+    assert_eq!(properties.generated_types[0].type_id, manager_type_id);
+    assert_eq!(properties.generated_types[0].value_id, manager_value_id);
+    assert_eq!(properties.default_save_form, None);
+    assert_eq!(properties.default_load_form, None);
+
+    let blob = deflate_for_test(raw.as_bytes());
+    let extracted = extract_metadata_source_xml(
+        &blob,
+        &owner_uuid,
+        &BTreeMap::new(),
+        &form_refs,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert!(xml.contains(
+        "\t\t\t<DefaultSaveForm/>\r\n\
+\t\t\t<DefaultLoadForm/>\r\n\
+\t\t\t<AuxiliarySaveForm/>\r\n\
+\t\t\t<AuxiliaryLoadForm/>\r\n"
+    ));
+    assert!(!xml.contains("SettingsStorage.UserSettings.Form.OnlyChildForm"));
+}
+
+#[test]
+fn rejects_settings_storage_owner_shape_and_generated_id_collisions() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let base_raw = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    ));
+    let owner_fields = metadata_object_fields(&base_raw).unwrap();
+
+    let mut wrong_code_fields = owner_fields.clone();
+    wrong_code_fields[0] = "9";
+    let wrong_code = settings_storage_raw_with_owner_fields_for_test(&base_raw, &wrong_code_fields);
+
+    let short_owner =
+        settings_storage_raw_with_owner_fields_for_test(&base_raw, &owner_fields[..7]);
+
+    let mut shifted_header_fields = owner_fields.clone();
+    shifted_header_fields.swap(1, 2);
+    let shifted_header =
+        settings_storage_raw_with_owner_fields_for_test(&base_raw, &shifted_header_fields);
+
+    let mut extra_wrapper_fields = owner_fields.clone();
+    let wrapper_without_close = owner_fields[1].strip_suffix('}').unwrap();
+    let extra_wrapper = format!("{wrapper_without_close},0}}");
+    extra_wrapper_fields[1] = &extra_wrapper;
+    let extra_wrapper_field =
+        settings_storage_raw_with_owner_fields_for_test(&base_raw, &extra_wrapper_fields);
+
+    let other_owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let mismatched_header_value = owner_fields[1].replace(&owner_uuid, &other_owner_uuid);
+    let mut mismatched_header_fields = owner_fields.clone();
+    mismatched_header_fields[1] = &mismatched_header_value;
+    let mismatched_header =
+        settings_storage_raw_with_owner_fields_for_test(&base_raw, &mismatched_header_fields);
+
+    let zero_type = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    ));
+    let zero_value = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    ));
+    let malformed_type = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa----",
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    ));
+    let trailing_root_garbage = format!("{base_raw},0");
+
+    for (case, raw) in [
+        ("owner code", wrong_code),
+        ("owner length", short_owner),
+        ("header index", shifted_header),
+        ("extra wrapper field", extra_wrapper_field),
+        ("header UUID", mismatched_header),
+        ("manager TypeId", zero_type),
+        ("manager ValueId", zero_value),
+        ("malformed manager TypeId", malformed_type),
+        ("trailing root garbage", trailing_root_garbage),
+    ] {
+        assert!(
+            parse_settings_storage_properties_from_text(&raw, &owner_uuid, &BTreeMap::new())
+                .is_none(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn rejects_settings_storage_collection_envelope_count_and_platform_ids() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let template_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let wrong_collection_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let duplicate_forms = [form_uuid.as_str(), form_uuid.as_str()];
+
+    let mut wrong_outer_count = settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    );
+    wrong_outer_count.collection_count = 1;
+
+    let mut wrong_template_id = settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    );
+    wrong_template_id.template_collection_uuid = &wrong_collection_uuid;
+
+    let mut wrong_form_id = settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    );
+    wrong_form_id.form_collection_uuid = &wrong_collection_uuid;
+
+    let mut wrong_template_count = settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    );
+    wrong_template_count.template_count = 1;
+
+    let template_uuids = [template_uuid.as_str()];
+    let mut nonempty_template_collection = settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    );
+    nonempty_template_collection.template_count = 1;
+    nonempty_template_collection.template_uuids = &template_uuids;
+
+    let one_form = [form_uuid.as_str()];
+    let mut wrong_form_count = settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &one_form,
+    );
+    wrong_form_count.form_count = 2;
+
+    let duplicate_form_options = settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &duplicate_forms,
+    );
+    let plus_count_base = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    ));
+    let valid_empty_template =
+        format!("{{{SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID_FOR_TEST},0}}");
+    let plus_empty_template =
+        format!("{{{SETTINGS_STORAGE_TEMPLATE_COLLECTION_UUID_FOR_TEST},+0}}");
+    let plus_count = plus_count_base.replacen(&valid_empty_template, &plus_empty_template, 1);
+
+    for (case, raw) in [
+        (
+            "outer collection count",
+            settings_storage_raw_for_forms_test(&wrong_outer_count),
+        ),
+        (
+            "template collection id",
+            settings_storage_raw_for_forms_test(&wrong_template_id),
+        ),
+        (
+            "form collection id",
+            settings_storage_raw_for_forms_test(&wrong_form_id),
+        ),
+        (
+            "template collection count",
+            settings_storage_raw_for_forms_test(&wrong_template_count),
+        ),
+        (
+            "nonempty template collection",
+            settings_storage_raw_for_forms_test(&nonempty_template_collection),
+        ),
+        (
+            "form collection count",
+            settings_storage_raw_for_forms_test(&wrong_form_count),
+        ),
+        (
+            "duplicate form id",
+            settings_storage_raw_for_forms_test(&duplicate_form_options),
+        ),
+        ("plus collection count", plus_count),
+    ] {
+        assert!(
+            parse_settings_storage_properties_from_text(&raw, &owner_uuid, &BTreeMap::new())
+                .is_none(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn rejects_settings_storage_nonzero_auxiliary_form_slots_atomically() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let auxiliary_form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+
+    for slot in [6usize, 7] {
+        let mut options = settings_storage_test_options(
+            &owner_uuid,
+            &manager_type_id,
+            &manager_value_id,
+            ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+            ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+            &[],
+        );
+        if slot == 6 {
+            options.slot_6 = &auxiliary_form_uuid;
+        } else {
+            options.slot_7 = &auxiliary_form_uuid;
+        }
+        let raw = settings_storage_raw_for_forms_test(&options);
+        assert!(
+            parse_settings_storage_properties_from_text(&raw, &owner_uuid, &BTreeMap::new())
+                .is_none(),
+            "slot {slot}"
+        );
+    }
+}
+
+#[test]
+fn rejects_settings_storage_default_form_outside_unique_owner_collection() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let default_form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let other_form_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+
+    let other_forms = [other_form_uuid.as_str()];
+    let missing_from_collection =
+        settings_storage_raw_for_forms_test(&settings_storage_test_options(
+            &owner_uuid,
+            &manager_type_id,
+            &manager_value_id,
+            &default_form_uuid,
+            ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+            &other_forms,
+        ));
+    let missing_refs = settings_storage_form_refs_for_test(
+        "UserSettings",
+        &[
+            (&default_form_uuid, "LoadForm"),
+            (&other_form_uuid, "OtherForm"),
+        ],
+    );
+    assert!(
+        parse_settings_storage_properties_from_text(
+            &missing_from_collection,
+            &owner_uuid,
+            &missing_refs,
+        )
+        .is_none()
+    );
+
+    let owner_forms = [default_form_uuid.as_str()];
+    let owned_raw = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        &default_form_uuid,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &owner_forms,
+    ));
+    for form_ref in [
+        FormSourceReference {
+            relative_path: PathBuf::from("SettingsStorages")
+                .join("OtherStorage")
+                .join("Forms")
+                .join("LoadForm.xml"),
+            kind: "Form",
+        },
+        FormSourceReference {
+            relative_path: PathBuf::from("CommonForms").join("LoadForm.xml"),
+            kind: "CommonForm",
+        },
+        FormSourceReference {
+            relative_path: PathBuf::from("SettingsStorages")
+                .join("UserSettings")
+                .join("Forms")
+                .join(".xml"),
+            kind: "Form",
+        },
+        FormSourceReference {
+            relative_path: PathBuf::from("SettingsStorages")
+                .join("UserSettings")
+                .join("Forms")
+                .join("Nested")
+                .join("LoadForm.xml"),
+            kind: "Form",
+        },
+    ] {
+        let refs = BTreeMap::from([(default_form_uuid.clone(), form_ref)]);
+        assert!(
+            parse_settings_storage_properties_from_text(&owned_raw, &owner_uuid, &refs).is_none()
+        );
+    }
+
+    let case_collision_uuid = loop {
+        let candidate = uuid::Uuid::new_v4().hyphenated().to_string();
+        if candidate.to_ascii_uppercase() != candidate {
+            break candidate;
+        }
+    };
+    let collision_forms = [case_collision_uuid.as_str()];
+    let collision_raw = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        &owner_uuid,
+        &manager_type_id,
+        &manager_value_id,
+        &case_collision_uuid,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &collision_forms,
+    ));
+    let collision_path = PathBuf::from("SettingsStorages")
+        .join("UserSettings")
+        .join("Forms")
+        .join("LoadForm.xml");
+    let collision_refs = BTreeMap::from([
+        (
+            case_collision_uuid.clone(),
+            FormSourceReference {
+                relative_path: collision_path.clone(),
+                kind: "Form",
+            },
+        ),
+        (
+            case_collision_uuid.to_ascii_uppercase(),
+            FormSourceReference {
+                relative_path: collision_path,
+                kind: "Form",
+            },
+        ),
+    ]);
+    assert!(
+        parse_settings_storage_properties_from_text(&collision_raw, &owner_uuid, &collision_refs,)
+            .is_none()
+    );
 }
 
 #[test]
@@ -29690,12 +30255,15 @@ fn extracts_additional_simple_service_metadata_xml_from_blobs() {
             .as_bytes(),
         );
     let storage_uuid = "44444444-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    let storage_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{2,\r\n{{0,\r\n{{3,\r\n{{1,0,{storage_uuid}}},\"UserSettings\",{{1,\"en\",\"User settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000}},2,\r\n{{0}},\r\n{{0}}\r\n}},0}}"
-            )
-            .as_bytes(),
-        );
+    let storage_raw = settings_storage_raw_for_forms_test(&settings_storage_test_options(
+        storage_uuid,
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        ZERO_UUID_FOR_SETTINGS_STORAGE_TEST,
+        &[],
+    ));
+    let storage_blob = deflate_for_test(storage_raw.as_bytes());
     let job_uuid = "55555555-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let job_blob = deflate_for_test(
             format!(
