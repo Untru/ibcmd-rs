@@ -4868,6 +4868,27 @@ const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
         }],
     },
     RawGeneratedTypeSchema {
+        object_codes: &[6],
+        conditions: &[
+            RawGeneratedTypeCondition::HeaderIndex(7),
+            RawGeneratedTypeCondition::FieldUuidRange(1, 6),
+        ],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "SequenceRecord",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 3,
+                generated_type: "SequenceManager",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 5,
+                generated_type: "SequenceRecordSet",
+            },
+        ],
+    },
+    RawGeneratedTypeSchema {
         object_codes: &[16],
         conditions: &[],
         slots: &[

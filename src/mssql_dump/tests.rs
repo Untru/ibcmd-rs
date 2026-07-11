@@ -12280,6 +12280,10 @@ fn formats_event_subscription_type_sets() {
         "TypeSet"
     );
     assert_eq!(
+        event_subscription_source_type_tag("cfg:SequenceRecordSet"),
+        "TypeSet"
+    );
+    assert_eq!(
         event_subscription_source_type_tag("cfg:CatalogObject.Products"),
         "Type"
     );
@@ -32006,6 +32010,186 @@ fn builds_object_family_generated_type_index_entries() {
         index.get(exchange_ref_type_id).map(String::as_str),
         Some("cfg:ExchangePlanRef.Sync")
     );
+}
+
+fn sequence_raw_for_generated_type_index_test(
+    sequence_uuid: &str,
+    name: &str,
+    generated_type_fields: &[String],
+    header_index: usize,
+) -> String {
+    assert_eq!(generated_type_fields.len(), 6);
+    assert!(header_index >= 7);
+    let header = format!(
+        "{{0,\r\n{{3,\r\n{{1,0,{sequence_uuid}}},\"{name}\",{{1,\"en\",\"Sequence under test\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}"
+    );
+    let mut fields = vec!["6".to_string()];
+    fields.extend(generated_type_fields.iter().cloned());
+    fields.resize(header_index, "0".to_string());
+    fields.push(header);
+    fields.push("{0}".to_string());
+    format!("{{1,\r\n{{{}\r\n}},0}}", fields.join(",\r\n"))
+}
+
+fn config_row_from_raw_for_generated_type_test(file_name: &str, raw: &str) -> ConfigRow {
+    let blob = deflate_for_test(raw.as_bytes());
+    ConfigRow {
+        file_name: file_name.to_string(),
+        part_no: 0,
+        data_size: blob.len() as i64,
+        binary_hex: encode_hex_for_test(&blob),
+    }
+}
+
+#[test]
+fn builds_sequence_generated_type_index_from_guarded_code6_raw_metadata() {
+    let sequence_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let generated_type_fields = (0..6)
+        .map(|_| uuid::Uuid::new_v4().hyphenated().to_string())
+        .collect::<Vec<_>>();
+    let raw = sequence_raw_for_generated_type_index_test(
+        &sequence_uuid,
+        "SequenceProbe_42",
+        &generated_type_fields,
+        7,
+    );
+    let index = build_metadata_type_index(&[config_row_from_raw_for_generated_type_test(
+        &sequence_uuid,
+        &raw,
+    )]);
+
+    assert_eq!(index.len(), 3);
+    for (field_index, generated_type) in [
+        (0usize, "SequenceRecord"),
+        (2, "SequenceManager"),
+        (4, "SequenceRecordSet"),
+    ] {
+        let expected = format!("cfg:{generated_type}.SequenceProbe_42");
+        assert_eq!(
+            index
+                .get(&generated_type_fields[field_index])
+                .map(String::as_str),
+            Some(expected.as_str())
+        );
+    }
+    for value_id_index in [1usize, 3, 5] {
+        assert!(!index.contains_key(&generated_type_fields[value_id_index]));
+    }
+}
+
+#[test]
+fn keeps_code6_role_with_header_index_one_out_of_sequence_type_index() {
+    let role_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let field_three_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let field_five_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let raw = format!(
+        "{{1,\r\n{{6,\r\n{{3,\r\n{{1,0,{role_uuid}}},\"RoleUnderTest\",{{1,\"en\",\"Role under test\"}},\"\"}},0,{field_three_uuid},0,{field_five_uuid},0\r\n}},0}}"
+    );
+    let fields = metadata_object_fields(&raw).unwrap();
+
+    assert_eq!(metadata_header_field_index(&fields, &role_uuid), Some(1));
+    assert!(
+        build_metadata_type_index(&[config_row_from_raw_for_generated_type_test(
+            &role_uuid, &raw,
+        )])
+        .is_empty()
+    );
+}
+
+#[test]
+fn rejects_malformed_sequence_generated_type_guards() {
+    let sequence_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let generated_type_fields = (0..6)
+        .map(|_| uuid::Uuid::new_v4().hyphenated().to_string())
+        .collect::<Vec<_>>();
+    let mut malformed_uuid_fields = generated_type_fields.clone();
+    malformed_uuid_fields[1] = "not-a-uuid".to_string();
+    let cases = [
+        (
+            "malformed UUID range",
+            sequence_raw_for_generated_type_index_test(
+                &sequence_uuid,
+                "MalformedSequence",
+                &malformed_uuid_fields,
+                7,
+            ),
+        ),
+        (
+            "wrong header index",
+            sequence_raw_for_generated_type_index_test(
+                &sequence_uuid,
+                "ShiftedSequence",
+                &generated_type_fields,
+                8,
+            ),
+        ),
+    ];
+
+    for (case, raw) in cases {
+        let index = build_metadata_type_index(&[config_row_from_raw_for_generated_type_test(
+            &sequence_uuid,
+            &raw,
+        )]);
+        assert!(index.is_empty(), "{case}");
+    }
+}
+
+#[test]
+fn resolves_specific_sequence_record_set_in_full_event_subscription_xml() {
+    let sequence_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let generated_type_fields = (0..6)
+        .map(|_| uuid::Uuid::new_v4().hyphenated().to_string())
+        .collect::<Vec<_>>();
+    let sequence_raw = sequence_raw_for_generated_type_index_test(
+        &sequence_uuid,
+        "SequenceProbe_42",
+        &generated_type_fields,
+        7,
+    );
+    let type_index = build_metadata_type_index(&[config_row_from_raw_for_generated_type_test(
+        &sequence_uuid,
+        &sequence_raw,
+    )]);
+    let event_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let module_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let event_blob = deflate_for_test(
+        format!(
+            "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{event_uuid}}},\"BeforeSequenceWrite\",{{1,\"en\",\"Before sequence write\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"#\",{record_set_type_id}}},{{\"#\",{record_type_id}}},{{\"#\",{manager_type_id}}}}},\"BeforeWrite_BeforeWrite\",{module_uuid},\"HandleSequenceWrite\"}},0}}",
+            record_set_type_id = generated_type_fields[4],
+            record_type_id = generated_type_fields[0],
+            manager_type_id = generated_type_fields[2],
+        )
+        .as_bytes(),
+    );
+    let extracted = extract_metadata_source_xml_with_refs(
+        &event_blob,
+        &event_uuid,
+        &type_index,
+        &BTreeMap::from([(module_uuid, "CommonModule.SequenceEvents".to_string())]),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("EventSubscriptions").join("BeforeSequenceWrite.xml")
+    );
+    assert!(xml.contains("<Source>"));
+    assert!(xml.contains(
+        "\t\t\t<Source>\r\n\
+\t\t\t\t<v8:Type>cfg:SequenceRecordSet.SequenceProbe_42</v8:Type>\r\n\
+\t\t\t\t<v8:Type>cfg:SequenceRecord.SequenceProbe_42</v8:Type>\r\n\
+\t\t\t\t<v8:Type>cfg:SequenceManager.SequenceProbe_42</v8:Type>\r\n\
+\t\t\t</Source>\r\n"
+    ));
+    assert!(!xml.contains("<v8:TypeSet>cfg:SequenceRecordSet"));
+    assert!(xml.contains("<Event>BeforeWrite</Event>"));
+    assert!(xml.contains("<Handler>CommonModule.SequenceEvents.HandleSequenceWrite</Handler>"));
 }
 
 #[test]
