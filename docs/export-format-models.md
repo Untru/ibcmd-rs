@@ -1612,6 +1612,48 @@ The expected future permitted native gate is `+0/-0`, but exactness is not
 claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## DocumentJournal generated type InternalInfo
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+All four saved DocumentJournal owners have an exact seven-field root with tag
+`1`, declared collection count `4`, and a 17-field code-26 owner. The exact
+metadata header is wrapped at owner slot 3. Generated type/value UUID pairs are
+stored at slots 10/11 for Selection, 1/2 for List, and 8/9 for Manager. Native
+XML order is Selection, List, Manager, independent of slot order. Type names
+derive only from the parsed owner name.
+
+The parser requires the exact root, owner, header wrapper, and complete header
+match. All six IDs must be strict nonzero UUIDs and unique case-insensitively.
+Any wrong tag, count, length, header component, malformed or zero UUID,
+duplicate or case-duplicate UUID, or trailing field suppresses the whole source
+instead of producing a partial InternalInfo cohort. No other DocumentJournal
+property is inferred or emitted.
+
+The dedicated formatter only adds the three GeneratedType blocks to the
+minimal metadata root. Existing shared post-format routing still inserts owned
+forms, templates, and commands once and in their established order. Tests use
+four distinct six-ID cohorts with exact block assertions, a renamed header,
+the complete malformed/duplicate matrix, absence of unrelated properties, and
+nonempty Form/Template/Command preservation.
+
+Integrated commit `92a1139` passes the five exact parser/routing gates. A broad
+name filter also selects one already-known external-path source test; the full
+suite proves it is unchanged. The suite moved from
+`1291 passed / 74 failed / 6 ignored` to
+`1294 passed / 74 failed / 6 ignored`, with exact failure-name delta zero.
+Independent frozen review approved the 18,483-byte diff with SHA-256
+`A733A7B2E07746C03193955B4D4639419F80E619FB777626B491BA63264ADDB9`.
+Production adds no UUID, owner name, database identity, or path literal.
+
+The saved normalized isolated residual is four DocumentJournal roots totaling
+`+0/-56`: 14 lines per root, comprising the two InternalInfo wrapper lines and
+three four-line GeneratedType blocks. An earlier `-68` estimate was corrected
+before the implementation freeze. The expected future permitted native gate
+is `+0/-0`, but exactness is not claimed without that gate. No database access,
+ConfigDump, configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
