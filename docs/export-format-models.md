@@ -872,6 +872,59 @@ metadata identity UUIDs; no database object names or absolute paths were
 added. `Configuration.xml`, all Form/DCS files, and `ConfigDumpInfo.xml`
 retained their accepted SHA-256 content.
 
+## InformationRegister root properties
+
+Status: the physical owner protocol and formatter are implemented and covered
+by focused tests. A native-tree exactness gate remains pending because the
+current run explicitly excludes ConfigDump and full configuration export.
+
+The root envelope is exact: 9 fields with the owner at index 1. A true
+InformationRegister owner has code 33, exactly 39 fields, and the metadata
+header wrapper at owner index 15 as `{0, header}`. The 25 logical property
+slots are the wrapper code/header followed by owner fields 16 through 38. Code
+33 alone is not sufficient: Task uses the same code with a different shape and
+is a required negative control.
+
+The scalar tail uses strict platform domains for the four form references,
+periodicity, write mode, edit type, standard commands, help/filter flags, data
+lock mode, full-text search, five localized presentations, totals, and data
+history. Localized wrappers must be counted, fully consumed, and preserve
+language order. Nonzero form UUIDs resolve only to a unique form owned by the
+same InformationRegister. Any malformed scalar, localized wrapper, or form
+reference suppresses the complete owner-property result; the generic legacy
+fallback is not mixed into a partially decoded InformationRegister.
+
+Slot 12 is a strict union:
+
+- `{0}` omits `StandardAttributes`;
+- legacy bags use `{13,24}` and contain the canonical property-key set without
+  `TypeReductionMode`;
+- modern bags use `{14,25}` and contain all 25 canonical property keys.
+
+Both populated variants use the exact four-marker payload for Active,
+LineNumber, Recorder, and Period. Property identity is resolved by named
+platform property UUID, not by object name or corpus position. Wrapper types,
+counts, marker order, section UUID, keys, duplicates, enum values, fill-value
+types, and full consumption are validated fail closed. The legacy shape derives
+the structural default `TypeReductionMode=TransformValues`.
+
+The formatter emits the decoded block once in native direct-child order and
+does not emit a generic InformationRegister property subset when exact parsing
+fails. Independent captured legacy/modern bags, reordered and duplicate keys,
+wrong wrapper types, malformed counts, foreign forms, alternate owner shapes,
+and nonmodal property values are covered by focused tests.
+
+Integrated commit `7ce449f` passes 30 InformationRegister tests and 12 shared
+register-standard-attribute tests. Exact full-suite failure-name comparison
+against its parent found no new failure and fixed the prior
+`extracts_information_register_data_lock_control_mode_from_extended_owner_fields`
+failure. Production contains only platform serialization identifiers; audits
+found no database/object identities, corpus names, absolute evidence paths, or
+corpus/raw-shape version branches. The only source-version branch is the
+independently proven V2.21 `pal` namespace insertion; V2.20 omits it. No
+ConfigDump, configuration export, DB access, or `ConfigDumpInfo.xml` change was
+performed for this gate.
+
 ## Catalog attribute payloads
 
 Status: confirmed by complete BSP and independent UT corpora, serialized
