@@ -911,6 +911,56 @@ UUID sets and within-group order and reduced the Catalog root diff from
 counts were all zero. Remaining Catalog differences are pre-existing root,
 TabularSection, and Type nodes, not Attribute tails or child order.
 
+## Document attribute payloads
+
+Status: confirmed by complete BSP, UT, and SFC corpora, serialized
+metadata-only exports, and an integrated native-tree gate.
+
+Document Attributes use the same exact `27/23` common payload shape under a
+typed header and Pattern, but their wrapper and omission rules are
+Document-specific. BSP direct Attributes use wrapper code 5/length 5; UT and
+SFC direct Attributes use code 6/length 7 with the reserved
+`0,{1,zero UUID}` tail. Nested Attributes use code 8/length 5. Direct and
+nested collection markers are platform storage discriminators. The parser
+validates declared counts, wrapper cohorts, item closure, child identity, and
+the parent TabularSection before emitting any property tail.
+
+Direct Attributes emit 24 tail properties. Nested Attributes emit 22 and omit
+`FillFromFillingValue` and `FillValue` only after validating their exact raw
+defaults. `ChoiceForm` is accepted only when its owner is the unique matching
+CatalogRef or DocumentRef in the Attribute Pattern. Choice parameters use a
+recursive typed FixedArray representation because arrays can mix
+DesignTimeRef, Nil, Decimal, String, and nested arrays. Predefined values are
+indexed by canonical `owner-value:{owner}:{uuid}` keys; ambiguous bare UUIDs
+are removed, qualified conflicts fail, and qualified keys are never emitted.
+
+Document data paths require current-owner structural proof, exact global
+reference agreement, and the correct direct or TabularSection/child role.
+Only ChoiceParameterLinks may preserve native raw paths, and only for exact
+`{-8}`, `{0}`, `{0}/{0}`, or single/double UUID shapes whose IDs are not
+ambiguous and do not resolve to the current Document. LinkByType never uses
+this fallback. A dangling Enum FillValue is preserved as raw owner/value UUIDs
+only for an exact nonzero DesignTimeRef envelope, a sole matching
+`cfg:EnumRef.*` Attribute type, and a value absent from every bare, qualified,
+type, and form index.
+
+The accepted gates covered 25 BSP Documents and 441 Attributes, 285 UT
+Documents and 13,479 Attributes, and 891 SFC Documents and 48,662 Attributes.
+All tail, identity, and group-order mismatches were zero. SFC additionally
+proved 6,556 ChoiceParameterLinks (6,508 semantic plus 48 controlled raw), 384
+nonempty LinkByType values, 61 ChoiceForms, 5,136 ChoiceParameters, and one
+guarded dangling Enum FillValue. Eager and streamed full-run dependency
+prefetch both include Document owners; selected runs preserve their exact
+requested set.
+
+Shared integration changed exactly 25 root `Documents/*.xml` files and nothing
+else. The full diff moved from `1559/+20562/-87316` to
+`1559/+15818/-69978`, removing 22,082 differing lines. `ConfigDumpInfo.xml`
+was not generated or modified; its SHA-256 remained
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Production adds only the two platform collection marker UUIDs and contains no
+database object names, absolute paths, or source-version data-shape branches.
+
 ## Subsystem properties and content
 
 Status: confirmed across all 244 raw Subsystem records and by serialized export.
