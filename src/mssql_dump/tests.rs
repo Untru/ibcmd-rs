@@ -35535,6 +35535,242 @@ fn keeps_data_processor_top_level_attribute_before_tabular_section_when_raw_orde
     );
 }
 
+#[derive(Clone, Copy)]
+enum SettingsComposerAttributeLayout {
+    Direct,
+    TabularSection,
+}
+
+struct SettingsComposerDataProcessorFixture {
+    raw: String,
+    owner_uuid: String,
+    attribute_uuid: String,
+}
+
+fn settings_composer_data_processor_fixture(
+    layout: SettingsComposerAttributeLayout,
+    attribute_code: u32,
+    pattern: &str,
+) -> SettingsComposerDataProcessorFixture {
+    settings_composer_data_processor_fixture_with_comment(layout, attribute_code, pattern, "")
+}
+
+fn settings_composer_data_processor_fixture_with_comment(
+    layout: SettingsComposerAttributeLayout,
+    attribute_code: u32,
+    pattern: &str,
+    comment: &str,
+) -> SettingsComposerDataProcessorFixture {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let attribute_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let object_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let object_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_type_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let manager_value_id = uuid::Uuid::new_v4().hyphenated().to_string();
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let attribute_header = format!(
+        "{{3,{{1,0,{attribute_uuid}}},\"Composer\",{{1,\"en\",\"Composer\"}},\"{comment}\",0,0,{zero_uuid},0}}"
+    );
+    let attribute = format!(
+        "{{{attribute_code},{{2,{attribute_header},{pattern}}},0,{{0}},{{0}},0,\"\",0,\
+{{\"U\"}},{{\"U\"}},0,{zero_uuid},0,0,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},{{\"U\"}},0,2,0}}"
+    );
+    let child = match layout {
+        SettingsComposerAttributeLayout::Direct => attribute,
+        SettingsComposerAttributeLayout::TabularSection => {
+            let tabular_section_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+            format!(
+                "{{11,{{3,{{1,0,{tabular_section_uuid}}},\"Rows\",{{1,\"en\",\"Rows\"}},\"\",0,0,{zero_uuid},0}},\
+{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,{attribute}}}}}"
+            )
+        }
+    };
+    let raw = format!(
+        "{{1,{{17,{object_type_id},{object_value_id},\
+{{0,{{3,{{1,0,{owner_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}}},\
+{zero_uuid},1,0,{manager_type_id},{manager_value_id},{zero_uuid},{{0}},{{0}}}},\
+{child},{{\"Pattern\"}}}}"
+    );
+    SettingsComposerDataProcessorFixture {
+        raw,
+        owner_uuid,
+        attribute_uuid,
+    }
+}
+
+fn extract_settings_composer_data_processor(
+    fixture: &SettingsComposerDataProcessorFixture,
+    type_index: &BTreeMap<String, String>,
+) -> Option<ExtractedMetadataSourceXml> {
+    extract_metadata_source_xml(
+        &deflate_for_test(fixture.raw.as_bytes()),
+        &fixture.owner_uuid,
+        type_index,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+}
+
+#[test]
+fn extracts_strict_settings_composer_type_from_both_data_processor_attribute_layouts() {
+    let pattern =
+        format!(r##"{{"Pattern",{{"#",{DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID}}}}}"##);
+    for layout in [
+        SettingsComposerAttributeLayout::Direct,
+        SettingsComposerAttributeLayout::TabularSection,
+    ] {
+        let fixture = settings_composer_data_processor_fixture(layout, 27, &pattern);
+        let extracted = extract_settings_composer_data_processor(&fixture, &BTreeMap::new())
+            .expect("strict SettingsComposer attribute must be extracted without indexes");
+        let xml = String::from_utf8(extracted.xml).unwrap();
+        let expected_type = format!(
+            r#"<v8:Type{DATA_COMPOSITION_SETTINGS_NAMESPACE_ATTRIBUTE}>{DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME}</v8:Type>"#
+        );
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("DataProcessors/Loader.xml")
+        );
+        assert!(xml.contains(&format!(r#"<Attribute uuid="{}">"#, fixture.attribute_uuid)));
+        assert!(xml.contains(&expected_type), "{xml}");
+        assert_eq!(xml.matches("xmlns:dcsset=").count(), 1, "{xml}");
+        let root_tag_end = xml.find(">\r\n\t<DataProcessor").unwrap();
+        assert!(!xml[..root_tag_end].contains("xmlns:dcsset="), "{xml}");
+        assert!(!xml.contains("<Type/>"), "{xml}");
+    }
+}
+
+#[test]
+fn rejects_malformed_duplicated_and_mixed_settings_composer_candidates_atomically() {
+    let id = DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID;
+    let cases = [
+        ("empty Pattern", format!(r#"{{"Pattern",{id}}}"#)),
+        (
+            "wrong member marker",
+            format!(r#"{{"Pattern",{{"Type",{id}}}}}"#),
+        ),
+        (
+            "member cardinality",
+            format!(r##"{{"Pattern",{{"#",{id},0}}}}"##),
+        ),
+        (
+            "duplicate candidate",
+            format!(r##"{{"Pattern",{{"#",{id}}},{{"#",{id}}}}}"##),
+        ),
+        (
+            "mixed candidate",
+            format!(r##"{{"Pattern",{{"#",{id}}},{{"S"}}}}"##),
+        ),
+    ];
+
+    for (case, pattern) in cases {
+        let fixture = settings_composer_data_processor_fixture(
+            SettingsComposerAttributeLayout::Direct,
+            27,
+            &pattern,
+        );
+        assert!(
+            extract_settings_composer_data_processor(&fixture, &BTreeMap::new()).is_none(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn rejects_case_insensitive_settings_composer_type_index_collisions() {
+    let pattern =
+        format!(r##"{{"Pattern",{{"#",{DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID}}}}}"##);
+    let fixture = settings_composer_data_processor_fixture(
+        SettingsComposerAttributeLayout::Direct,
+        27,
+        &pattern,
+    );
+    for key in [
+        DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID.to_string(),
+        DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID.to_ascii_uppercase(),
+    ] {
+        let type_index =
+            BTreeMap::from([(key, DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME.to_string())]);
+        assert!(
+            extract_settings_composer_data_processor(&fixture, &type_index).is_none(),
+            "even an equal-qname index entry is a collision"
+        );
+    }
+}
+
+#[test]
+fn does_not_admit_settings_composer_outside_code27_data_processor_attributes() {
+    let pattern =
+        format!(r##"{{"Pattern",{{"#",{DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID}}}}}"##);
+    let fixture = settings_composer_data_processor_fixture(
+        SettingsComposerAttributeLayout::Direct,
+        5,
+        &pattern,
+    );
+    let extracted = extract_settings_composer_data_processor(&fixture, &BTreeMap::new())
+        .expect("wrong-code patterns retain legacy extraction");
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert!(!xml.contains(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME));
+    assert!(!xml.contains("xmlns:dcsset="));
+}
+
+#[test]
+fn ignores_settings_composer_uuid_outside_the_attribute_type_pattern() {
+    let fixture = settings_composer_data_processor_fixture_with_comment(
+        SettingsComposerAttributeLayout::Direct,
+        27,
+        r#"{"Pattern",{"S",40,1}}"#,
+        DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID,
+    );
+    let extracted = extract_settings_composer_data_processor(&fixture, &BTreeMap::new())
+        .expect("a UUID in an unrelated property is not candidate intent");
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert!(xml.contains("<v8:Type>xs:string</v8:Type>"), "{xml}");
+    assert!(!xml.contains(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME));
+    assert!(!xml.contains("xmlns:dcsset="));
+}
+
+#[test]
+fn preserves_twenty_five_unrelated_code27_patterns_around_settings_composer_cohort() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let attributes = (0..25)
+        .map(|index| {
+            let attribute_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+            format!(
+                "{{27,{{2,0,{{\"Pattern\",{{\"S\",{},1}}}}}},\
+{{3,{{1,0,{attribute_uuid}}},\"Control{index}\",{{1,\"en\",\"Control {index}\"}},\"\",0,0,{zero_uuid},0}}}}",
+                index + 1
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let raw = format!(
+        "{{1,{{17,{}, {},{{0,{{3,{{1,0,{owner_uuid}}},\"Controls\",{{1,\"en\",\"Controls\"}},\"\"}}}},\
+{zero_uuid},1,0,{}, {},{zero_uuid},{{0}},{{0}}}},{attributes},{{\"Pattern\"}}}}",
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4(),
+    );
+    let extracted = extract_metadata_source_xml(
+        &deflate_for_test(raw.as_bytes()),
+        &owner_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(xml.matches("<Attribute uuid=").count(), 25, "{xml}");
+    assert_eq!(xml.matches("<v8:Type>xs:string</v8:Type>").count(), 25);
+    assert!(!xml.contains(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME));
+    assert!(!xml.contains("xmlns:dcsset="));
+}
+
 #[test]
 fn extracts_data_processor_child_attribute_types() {
     let data_processor_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";

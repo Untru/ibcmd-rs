@@ -81,6 +81,10 @@ const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013
 const DESIGN_TIME_REF_TYPE_UUID: &str = "5c14e26f-099b-4d37-84a6-b433d87400da";
 const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
 const METADATA_OBJECT_REF_TYPE_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
+const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str = "cab0d12b-3c88-4993-8edc-8c3827cadc7d";
+const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME: &str = "dcsset:SettingsComposer";
+const DATA_COMPOSITION_SETTINGS_NAMESPACE_ATTRIBUTE: &str =
+    r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#;
 const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
@@ -8730,6 +8734,158 @@ fn parse_metadata_child_value_types(
         .unwrap_or_default()
 }
 
+fn parse_data_processor_settings_composer_attributes(
+    text: &str,
+    owner_header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+) -> Option<BTreeSet<String>> {
+    let mut attributes = BTreeSet::new();
+
+    for (header, marker_start) in
+        nested_headers_with_offsets_from_text(text, &owner_header.uuid, |_| true)
+    {
+        if !is_offset_inside_metadata_object_code(text, marker_start, 27)
+            || !matches!(
+                attribute_tabular_section_child_object_tag(
+                    "DataProcessor",
+                    &owner_header.name,
+                    &owner_header.uuid,
+                    text,
+                    marker_start,
+                    &header,
+                ),
+                Some(("Attribute", _))
+            )
+        {
+            continue;
+        }
+
+        let mut matching_object = None;
+        for fields in
+            metadata_object_field_candidates_around_header(text, marker_start, &header.uuid)
+                .into_iter()
+                .filter(|fields| fields.first().is_some_and(|field| field.trim() == "27"))
+        {
+            let Some(pattern) = data_processor_code27_type_pattern(&fields, &header) else {
+                continue;
+            };
+            if !pattern
+                .to_ascii_lowercase()
+                .contains(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID)
+            {
+                continue;
+            }
+            if matching_object.is_some() {
+                return None;
+            }
+            matching_object = Some((fields, pattern));
+        }
+
+        let Some((fields, pattern)) = matching_object else {
+            continue;
+        };
+        if type_index
+            .keys()
+            .any(|type_id| type_id.eq_ignore_ascii_case(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID))
+            || parse_metadata_code27_payload_fields(fields).is_none()
+            || !data_processor_settings_composer_pattern_is_exact(pattern)
+            || !attributes.insert(header.uuid.to_ascii_lowercase())
+        {
+            return None;
+        }
+    }
+
+    Some(attributes)
+}
+
+fn data_processor_code27_type_pattern<'a>(
+    fields: &[&'a str],
+    expected_header: &MetadataHeader,
+) -> Option<&'a str> {
+    if fields.first()?.trim() != "27" {
+        return None;
+    }
+    let detail = split_information_register_braced_fields(fields.get(1)?)?;
+    if detail.len() != 3 || detail.first()?.trim() != "2" {
+        return None;
+    }
+    let parsed_header = parse_information_register_owner_header(detail.get(1)?)?;
+    if !parsed_header
+        .uuid
+        .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return None;
+    }
+    detail.get(2).copied()
+}
+
+fn data_processor_settings_composer_pattern_is_exact(pattern: &str) -> bool {
+    let Some(pattern) = split_information_register_braced_fields(pattern) else {
+        return false;
+    };
+    if pattern.len() != 2
+        || pattern
+            .first()
+            .is_none_or(|value| value.trim() != r#""Pattern""#)
+    {
+        return false;
+    }
+    let Some(member) = split_information_register_braced_fields(pattern[1]) else {
+        return false;
+    };
+    member.len() == 2
+        && member
+            .first()
+            .is_some_and(|value| value.trim() == r##""#""##)
+        && parse_information_register_non_zero_uuid(member[1]).is_some_and(|type_id| {
+            type_id.eq_ignore_ascii_case(DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID)
+        })
+}
+
+fn apply_data_processor_settings_composer_types(
+    child_objects: &mut [MetadataChildObject],
+    expected_attributes: &BTreeSet<String>,
+) -> bool {
+    let mut matched_attributes = BTreeSet::new();
+    apply_data_processor_settings_composer_types_inner(
+        child_objects,
+        expected_attributes,
+        &mut matched_attributes,
+    ) && matched_attributes == *expected_attributes
+}
+
+fn apply_data_processor_settings_composer_types_inner(
+    child_objects: &mut [MetadataChildObject],
+    expected_attributes: &BTreeSet<String>,
+    matched_attributes: &mut BTreeSet<String>,
+) -> bool {
+    for child in child_objects {
+        let uuid = child.header.uuid.to_ascii_lowercase();
+        if expected_attributes.contains(&uuid) {
+            if child.tag != "Attribute"
+                || !child.value_types.is_empty()
+                || !matched_attributes.insert(uuid)
+            {
+                return false;
+            }
+            child.value_types.push(ConstantValueType::Reference {
+                reference: DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME.to_string(),
+            });
+        }
+        if !apply_data_processor_settings_composer_types_inner(
+            &mut child.child_objects,
+            expected_attributes,
+            matched_attributes,
+        ) {
+            return false;
+        }
+    }
+    true
+}
+
 fn parse_data_processor_tabular_section_generated_types(
     text: &str,
     marker_start: usize,
@@ -9855,6 +10011,10 @@ fn parse_catalog_attribute_wrapper_fields<'a>(
 
 fn parse_metadata_code27_payload(field: &str) -> Option<(Vec<&str>, String)> {
     let payload = split_1c_braced_fields(field, 0)?;
+    parse_metadata_code27_payload_fields(payload)
+}
+
+fn parse_metadata_code27_payload_fields(payload: Vec<&str>) -> Option<(Vec<&str>, String)> {
     if payload.len() != 23 || payload.first()?.trim() != "27" {
         return None;
     }
@@ -12039,6 +12199,26 @@ fn parse_data_processor_properties_from_text(
         return None;
     }
 
+    let settings_composer_attributes =
+        parse_data_processor_settings_composer_attributes(text, &header, type_index)?;
+    let mut child_metadata_objects = parse_attribute_tabular_section_child_objects(
+        "DataProcessor",
+        &header.name,
+        text,
+        uuid,
+        None,
+        type_index,
+        object_refs,
+        &BTreeMap::new(),
+        form_refs,
+    );
+    if !apply_data_processor_settings_composer_types(
+        &mut child_metadata_objects,
+        &settings_composer_attributes,
+    ) {
+        return None;
+    }
+
     let mut generated_types = Vec::new();
     push_generated_type_entry(
         &mut generated_types,
@@ -12065,17 +12245,7 @@ fn parse_data_processor_properties_from_text(
         include_help_in_contents: parse_1c_bool_field(fields.get(6).copied()).unwrap_or(false),
         extended_presentation: parse_1c_synonyms(fields.get(10).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(11).copied().unwrap_or("{0}")),
-        child_metadata_objects: parse_attribute_tabular_section_child_objects(
-            "DataProcessor",
-            &header.name,
-            text,
-            uuid,
-            None,
-            type_index,
-            object_refs,
-            &BTreeMap::new(),
-            form_refs,
-        ),
+        child_metadata_objects,
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_data_processor_template_names_in_text_order(
             text,
@@ -20823,6 +20993,12 @@ fn metadata_type_xml_name(value_type: &ConstantValueType) -> String {
 
 fn metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'static str {
     match value_type {
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME =>
+        {
+            DATA_COMPOSITION_SETTINGS_NAMESPACE_ATTRIBUTE
+        }
         ConstantValueType::Reference { reference }
         | ConstantValueType::ReferenceTypeSet { reference }
             if reference.starts_with("mxl:") =>
