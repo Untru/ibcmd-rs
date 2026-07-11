@@ -1654,6 +1654,52 @@ before the implementation freeze. The expected future permitted native gate
 is `+0/-0`, but exactness is not claimed without that gate. No database access,
 ConfigDump, configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## CommonAttribute additional-order exact tail
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+Two saved CommonAttribute roots have an exact three-field `[1, owner, 0]`
+envelope, a 15-field code-5 owner, and owner fields 3 through 14 equal to:
+
+```text
+2,1,1,1,{1,zero},{1,zero},{1,zero},0,0,0,0,1
+```
+
+For only this complete structural candidate, native places an adjacent
+11-element block immediately after `AutoUse`: DataSeparation `DontUse`,
+SeparatedDataUse `Independently`, three empty separation references, Users,
+Authentication, and ConfigurationExtensions separation `DontUse`, Indexing
+`IndexWithAdditionalOrder`, FullTextSearch `Use`, and DataHistory `Use`.
+
+Field 3 value `2` is candidate intent. The candidate parser requires the exact
+root, owner, typed payload, full metadata header, scalar vector, and three exact
+zero-reference envelopes. Any mismatch suppresses the whole source rather than
+silently omitting the block. Field 3 values other than `2` continue through the
+unchanged legacy separation parser. The broad CommonAttribute indexing and
+separation mappings are deliberately unchanged.
+
+Evidence includes two BSP positives, five same-code BSP controls with field 3
+equal to `0`, and an independent saved UT raw pair with the same positive tail.
+Three controls have the otherwise default zero-reference tail and native
+`DontIndex`; two nonzero-reference controls prove that broader separation enum
+semantics are not safe to infer. Across ten paired BSP/UT raws, all four field-3
+value-2 occurrences match the exact candidate and no alternative tail occurs.
+An SFC native-only positive lacks paired raw and does not broaden the model.
+
+Integrated commit `4c553da` passes six candidate, control, header, mutation,
+atomicity, adjacency, and production-literal tests. The full suite changed from
+`1294 passed / 74 failed / 6 ignored` to
+`1300 passed / 74 failed / 6 ignored`; the exact failure names are unchanged.
+Independent frozen review approved the 18,090-byte diff with SHA-256
+`1D2FBEDD94F138CF968437B4654C3C6D83493C903D59497E361919AB7328167B`.
+Production adds no UUID, CommonAttribute name, database identity, or path.
+
+The saved normalized isolated residual is two CommonAttribute roots totaling
+`+0/-22`. The expected future permitted native gate is `+0/-0`, but exactness
+is not claimed without that gate. No database access, ConfigDump,
+configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
