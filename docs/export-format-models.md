@@ -1572,6 +1572,46 @@ The expected future permitted native gate is `+0/-0`, but exactness is not
 claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## DataProcessor SettingsComposer attribute types
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+Two independent DataProcessor attributes have the same platform type ID and
+native qualified type `dcsset:SettingsComposer`. The code-27 Attribute cohort
+in their owner raws contains 27 type Patterns: two exact single-member
+positives and 25 local negatives. Across the complete raws there are 28
+Pattern occurrences; the extra owner-level empty Pattern is outside code 27.
+
+The platform type is admitted only after DataProcessor routing, code-27
+Attribute recognition, an exact detail header match, an exact two-field
+`Pattern`, and an exact two-field nonzero UUID member. A malformed, duplicate,
+or mixed candidate, a duplicate resolved attribute, or any case-insensitive
+collision with the dynamic type index suppresses the whole DataProcessor
+source instead of degrading the candidate to `<Type/>`. The same UUID outside
+the Attribute type Pattern has no special meaning. Both direct and
+tabular-section attribute routes use this contract.
+
+The namespace declaration is local to the emitted type element:
+
+```xml
+<v8:Type xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings">dcsset:SettingsComposer</v8:Type>
+```
+
+Integrated commit `58c8c78` passes six focused positive, routing, malformed,
+collision, unrelated-context, and 25-negative-cohort tests. The full suite
+changed from `1285 passed / 74 failed / 6 ignored` to
+`1291 passed / 74 failed / 6 ignored`; the exact 74 failure names are unchanged.
+Independent frozen review approved the 18,736-byte diff with SHA-256
+`932040B4942A888FF3BE3272DE0EF04A780092D260D88284DCBB114DC64DC989`.
+Production adds only the platform type ID, qualified name, and namespace; no
+metadata owner/attribute identity, database name, or path is embedded.
+
+The saved normalized residual is two DataProcessor roots totaling `+2/-6`.
+The expected future permitted native gate is `+0/-0`, but exactness is not
+claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
