@@ -1700,6 +1700,63 @@ The saved normalized isolated residual is two CommonAttribute roots totaling
 is not claimed without that gate. No database access, ConfigDump,
 configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## DataProcessor strict EmptyRef FillValue
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The saved DataProcessor residual is one missing DesignTimeRef FillValue in a
+tabular-section Attribute. The exact raw descriptor is an owner/zero reference
+whose nonzero owner TypeId equals the Attribute's sole Pattern TypeId. A unique
+type-index result of generic shape `cfg:<Kind>Ref.<name>` derives the native
+value `<Kind>.<name>.EmptyRef`; no metadata-object identity is involved.
+
+The admitted route is narrower than a lexical code-11 child. Native stores the
+tabular Attribute list after the closed code-11 TabularSection payload. The
+existing structural router must associate a code-27 Attribute with a parent
+TabularSection, and the candidate must be inside the exact tabular attribute
+list. Its inner `{0,{27,...},0}` and outer `{{0,{27,...},0},0}` wrappers,
+declared count, cardinality, payload, full header, Pattern, and flattened
+FillValue slot are all exact. Direct modern and legacy DataProcessor Attribute
+layouts remain noncandidates; legacy FillValue omission is unchanged.
+
+A descriptor-shaped DesignTimeRef envelope anywhere in the code-27 fields is
+candidate intent. Once intent exists, the envelope must occur exactly in
+flattened slot 20 with owner-nonzero/value-zero shape and the same singleton
+Pattern TypeId. This catches shifted and malformed descriptors instead of
+silently treating them as noncandidates. Mere UUID text in another property or
+comment has no special meaning.
+
+`MetadataTypeIndexes` now keeps a collision sidecar while preserving the
+existing last-writer reference map and DCS inserts byte-for-byte. Any repeated
+normalized TypeId, including an equal-qname duplicate, is marked collided.
+Only this strict candidate consults the sidecar and a case-insensitive unique
+map scan. The saved native tree has 4,623 generated TypeIds, all unique, and
+their intersection with 10,818 XML object UUIDs is zero. A TypeId/object-index
+collision is therefore rejected. Generic DesignTimeRef resolvers are unchanged.
+
+The pre-scan/apply contract is atomic. Pattern/descriptor mismatches, missing
+or malformed type references, collisions, bad qname grammar, duplicate
+candidate identities, malformed list counts/wrappers, nonzero value IDs, or a
+target whose FillValue emission is disabled suppress the whole source. A
+matched target must be exactly one Attribute with one matching Reference type
+and no pre-resolved FillValue.
+
+Integrated commit `ec1f003` passes 11 EmptyRef protocol/routing tests, the
+type-index collision invariant, and the selected DataProcessor broad-fallback
+test. The full suite changed from `1300 passed / 74 failed / 6 ignored` to
+`1313 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 41,480-byte diff with SHA-256
+`BC1451E1A298A9D41EA7B77E3E618A764672CF73B5E71CE9ACF379BF0D731F59`.
+Production contains no positive owner, tabular section, Attribute, TypeId,
+qualified name, database identity, or path literal. The existing platform
+DesignTimeRef TypeId remains a serialization discriminator.
+
+The saved normalized isolated residual is one DataProcessor root at `+0/-1`.
+The expected future permitted native gate is `+0/-0`, but exactness is not
+claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
