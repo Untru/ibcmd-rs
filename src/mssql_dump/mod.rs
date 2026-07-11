@@ -327,6 +327,7 @@ struct DumpRowContext<'a> {
     command_refs: &'a BTreeMap<String, String>,
     metadata_refs: &'a BTreeMap<String, MetadataCommandReference>,
     type_index: &'a BTreeMap<String, String>,
+    type_index_collisions: &'a BTreeSet<String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
     metadata_object_refs: &'a BTreeMap<String, String>,
@@ -462,6 +463,7 @@ fn dump_table_rows_with_options(
     };
     let MetadataTypeIndexes {
         references: type_index,
+        reference_collisions: type_index_collisions,
         dcs: dcs_type_index,
     } = if extract_metadata_xml || needs_source_layout_refs {
         build_metadata_type_indexes_from_texts(&metadata_texts)
@@ -625,6 +627,7 @@ fn dump_table_rows_with_options(
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
         type_index: &type_index,
+        type_index_collisions: &type_index_collisions,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
         metadata_object_refs: &metadata_object_refs,
@@ -1215,6 +1218,7 @@ fn dump_table_rows_streamed(
     let index_part_started = Instant::now();
     let MetadataTypeIndexes {
         references: type_index,
+        reference_collisions: type_index_collisions,
         dcs: dcs_type_index,
     } = if (extract_metadata_xml || needs_source_layout_refs)
         && (source_reference_needs.type_index || build_selected_local_refs)
@@ -1468,6 +1472,7 @@ fn dump_table_rows_streamed(
         command_refs: &command_refs,
         metadata_refs: &metadata_refs,
         type_index: &type_index,
+        type_index_collisions: &type_index_collisions,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
         metadata_object_refs: &metadata_object_refs,
@@ -2062,6 +2067,7 @@ fn dump_table_row_bytes(
             extract_metadata_source_xml_from_text_row(
                 row,
                 context.type_index,
+                context.type_index_collisions,
                 context.object_refs,
                 context.metadata_object_refs,
                 context.configuration_root_object_refs,
@@ -2077,6 +2083,7 @@ fn dump_table_row_bytes(
                 &bytes,
                 file_name,
                 context.type_index,
+                context.type_index_collisions,
                 context.object_refs,
                 context.metadata_object_refs,
                 context.configuration_root_object_refs,
@@ -4644,6 +4651,7 @@ struct IndexedGeneratedType {
 #[derive(Default)]
 struct MetadataTypeIndexes {
     references: BTreeMap<String, String>,
+    reference_collisions: BTreeSet<String>,
     dcs: DcsTypeIndex,
 }
 
@@ -4700,9 +4708,13 @@ fn build_metadata_type_indexes_from_texts(rows: &[MetadataTextRow]) -> MetadataT
         let Some(entries) = entries else { continue };
         for entry in entries {
             let type_id = entry.type_id.to_ascii_lowercase();
-            indexes
+            if indexes
                 .references
-                .insert(type_id.clone(), entry.reference.clone());
+                .insert(type_id.clone(), entry.reference.clone())
+                .is_some()
+            {
+                indexes.reference_collisions.insert(type_id.clone());
+            }
             let resolution = match entry.dcs_policy {
                 GeneratedTypeDcsPolicy::KeepId => DcsTypeResolution::KeepId,
                 GeneratedTypeDcsPolicy::Type => DcsTypeResolution::Type {
@@ -4716,6 +4728,22 @@ fn build_metadata_type_indexes_from_texts(rows: &[MetadataTextRow]) -> MetadataT
         }
     }
     indexes
+}
+
+fn unique_metadata_type_reference<'a>(
+    type_index: &'a BTreeMap<String, String>,
+    reference_collisions: &BTreeSet<String>,
+    type_id: &str,
+) -> Option<&'a str> {
+    let normalized = type_id.to_ascii_lowercase();
+    if reference_collisions.contains(&normalized) {
+        return None;
+    }
+    let mut matches = type_index
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(type_id));
+    let (_, reference) = matches.next()?;
+    matches.next().is_none().then_some(reference.as_str())
 }
 
 #[allow(dead_code)]
@@ -5506,6 +5534,7 @@ fn extract_metadata_source_xml_with_refs(
         blob,
         uuid,
         type_index,
+        &BTreeSet::new(),
         object_refs,
         object_refs,
         object_refs,
@@ -5518,10 +5547,36 @@ fn extract_metadata_source_xml_with_refs(
     )
 }
 
+#[cfg(test)]
+fn extract_metadata_source_xml_with_type_collisions(
+    blob: &[u8],
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ExtractedMetadataSourceXml> {
+    extract_metadata_source_xml_with_recalculation_refs(
+        blob,
+        uuid,
+        type_index,
+        type_index_collisions,
+        object_refs,
+        object_refs,
+        object_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+}
+
 fn extract_metadata_source_xml_with_recalculation_refs(
     blob: &[u8],
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
@@ -5539,6 +5594,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     extract_metadata_source_xml_from_text_row(
         &row,
         type_index,
+        type_index_collisions,
         object_refs,
         metadata_object_refs,
         configuration_root_object_refs,
@@ -5554,6 +5610,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
 fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
@@ -5818,6 +5875,7 @@ fn extract_metadata_source_xml_from_text_row(
             text,
             uuid,
             type_index,
+            type_index_collisions,
             object_refs,
             form_refs,
             template_refs,
@@ -8739,6 +8797,273 @@ fn parse_metadata_child_value_types(
         .filter_map(|field| parse_metadata_type_pattern_from_child_field(field, type_index))
         .find(|value_types| !value_types.is_empty())
         .unwrap_or_default()
+}
+
+struct DataProcessorEmptyRefExpectation {
+    type_reference: String,
+    fill_value: String,
+}
+
+fn parse_data_processor_empty_ref_fill_values(
+    text: &str,
+    owner_header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<BTreeMap<String, DataProcessorEmptyRefExpectation>> {
+    let mut attributes = BTreeMap::new();
+
+    for (header, marker_start) in
+        nested_headers_with_offsets_from_text(text, &owner_header.uuid, |_| true)
+    {
+        if !is_offset_inside_metadata_object_code(text, marker_start, 27)
+            || !is_offset_inside_tabular_section_attribute_list(text, marker_start)
+            || !matches!(
+                attribute_tabular_section_child_object_tag(
+                    "DataProcessor",
+                    &owner_header.name,
+                    &owner_header.uuid,
+                    text,
+                    marker_start,
+                    &header,
+                ),
+                Some(("Attribute", Some(_)))
+            )
+        {
+            continue;
+        }
+
+        let mut matching_object = None;
+        for fields in
+            metadata_object_field_candidates_around_header(text, marker_start, &header.uuid)
+                .into_iter()
+                .filter(|fields| fields.first().is_some_and(|field| field.trim() == "27"))
+        {
+            if !fields
+                .iter()
+                .any(|field| data_processor_design_time_ref_descriptor(field))
+            {
+                continue;
+            }
+            if matching_object.is_some() {
+                return None;
+            }
+            let flattened = flatten_data_processor_wrapped_child_fields(&fields)?;
+            let fill_value = flattened.get(20).copied()?;
+            matching_object = Some((fields, flattened, fill_value));
+        }
+
+        let Some((fields, flattened, fill_value)) = matching_object else {
+            continue;
+        };
+        if data_processor_tabular_attribute_identity_count(text, &header.uuid) != 1 {
+            return None;
+        }
+        if !has_exact_data_processor_tabular_attribute_wrappers(
+            text,
+            marker_start,
+            &header.uuid,
+            &fields,
+        ) {
+            return None;
+        }
+        if flattened.len() != 24 {
+            return None;
+        }
+        let (_, parsed_child_uuid) = parse_metadata_code27_payload_fields(fields.clone())?;
+        if !parsed_child_uuid.eq_ignore_ascii_case(&header.uuid) {
+            return None;
+        }
+        let pattern = data_processor_code27_type_pattern(&fields, &header)?;
+        let pattern_type_id = data_processor_single_reference_pattern_type_id(pattern)?;
+        let fill_owner_type_id = parse_data_processor_empty_ref_fill_owner(fill_value)?;
+        if !pattern_type_id.eq_ignore_ascii_case(&fill_owner_type_id)
+            || object_refs
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case(&fill_owner_type_id))
+        {
+            return None;
+        }
+        let type_reference =
+            unique_metadata_type_reference(type_index, type_index_collisions, &fill_owner_type_id)?;
+        let owner_reference = data_processor_empty_ref_owner_reference(type_reference)?;
+        let key = header.uuid.to_ascii_lowercase();
+        if attributes
+            .insert(
+                key,
+                DataProcessorEmptyRefExpectation {
+                    type_reference: type_reference.to_string(),
+                    fill_value: format!("{owner_reference}.EmptyRef"),
+                },
+            )
+            .is_some()
+        {
+            return None;
+        }
+    }
+
+    Some(attributes)
+}
+
+fn data_processor_tabular_attribute_identity_count(text: &str, child_uuid: &str) -> usize {
+    let lower_text = text.to_ascii_lowercase();
+    let lower_uuid = child_uuid.to_ascii_lowercase();
+    lower_text
+        .match_indices(&lower_uuid)
+        .filter(|(offset, _)| {
+            is_offset_inside_metadata_object_code(text, *offset, 27)
+                && is_offset_inside_tabular_section_attribute_list(text, *offset)
+                && text[..*offset].rfind('{').is_some_and(|start| {
+                    split_1c_braced_fields(text, start).is_some_and(|identity| {
+                        identity.len() == 3
+                            && identity.first().map(|field| field.trim()) == Some("1")
+                            && identity.get(1).map(|field| field.trim()) == Some("0")
+                            && identity
+                                .get(2)
+                                .is_some_and(|field| field.trim().eq_ignore_ascii_case(child_uuid))
+                    })
+                })
+        })
+        .count()
+}
+
+fn data_processor_design_time_ref_descriptor(field: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return false;
+    };
+    fields.first().map(|field| field.trim()) == Some(r##""#""##)
+        && fields
+            .get(1)
+            .and_then(|field| parse_uuid_field(field.trim()))
+            .is_some_and(|type_id| type_id.eq_ignore_ascii_case(DESIGN_TIME_REF_TYPE_UUID))
+}
+
+fn has_exact_data_processor_tabular_attribute_wrappers(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    expected_payload: &[&str],
+) -> bool {
+    let mut matching_wrappers = 0;
+    for outer in metadata_object_field_candidates_around_header(text, marker_start, child_uuid) {
+        if outer.len() != 2 || outer.get(1).map(|field| field.trim()) != Some("0") {
+            continue;
+        }
+        let Some(inner) = outer
+            .first()
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        else {
+            continue;
+        };
+        if inner.len() != 3
+            || inner.first().map(|field| field.trim()) != Some("0")
+            || inner.get(2).map(|field| field.trim()) != Some("0")
+        {
+            continue;
+        }
+        let Some(payload) = inner
+            .get(1)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        else {
+            continue;
+        };
+        if payload == expected_payload {
+            matching_wrappers += 1;
+        }
+    }
+    matching_wrappers == 1
+}
+
+fn data_processor_single_reference_pattern_type_id(pattern: &str) -> Option<String> {
+    let pattern = split_information_register_braced_fields(pattern)?;
+    if pattern.len() != 2 || pattern.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    let member = split_information_register_braced_fields(pattern.get(1)?)?;
+    if member.len() != 2 || member.first()?.trim() != r##""#""## {
+        return None;
+    }
+    parse_information_register_non_zero_uuid(member.get(1)?)
+}
+
+fn parse_data_processor_empty_ref_fill_owner(value: &str) -> Option<String> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || !fields
+            .get(1)?
+            .trim()
+            .eq_ignore_ascii_case(DESIGN_TIME_REF_TYPE_UUID)
+    {
+        return None;
+    }
+    let reference = split_information_register_braced_fields(fields.get(2)?)?;
+    if reference.len() != 3 || reference.first()?.trim() != "0" {
+        return None;
+    }
+    let owner_type_id = parse_information_register_non_zero_uuid(reference.get(1)?)?;
+    let value_id = parse_information_register_uuid(reference.get(2)?)?;
+    information_register_uuid_is_zero(&value_id).then_some(owner_type_id)
+}
+
+fn data_processor_empty_ref_owner_reference(type_reference: &str) -> Option<String> {
+    let generated_type = type_reference.strip_prefix("cfg:")?;
+    let (kind, name) = generated_type.split_once("Ref.")?;
+    if kind.is_empty() || kind.contains('.') || name.is_empty() || name.contains('.') {
+        return None;
+    }
+    Some(format!("{kind}.{name}"))
+}
+
+fn apply_data_processor_empty_ref_fill_values(
+    child_objects: &mut [MetadataChildObject],
+    expected_attributes: &BTreeMap<String, DataProcessorEmptyRefExpectation>,
+) -> bool {
+    let mut matched_attributes = BTreeSet::new();
+    apply_data_processor_empty_ref_fill_values_inner(
+        child_objects,
+        expected_attributes,
+        &mut matched_attributes,
+    ) && matched_attributes.len() == expected_attributes.len()
+}
+
+fn apply_data_processor_empty_ref_fill_values_inner(
+    child_objects: &mut [MetadataChildObject],
+    expected_attributes: &BTreeMap<String, DataProcessorEmptyRefExpectation>,
+    matched_attributes: &mut BTreeSet<String>,
+) -> bool {
+    for child in child_objects {
+        let uuid = child.header.uuid.to_ascii_lowercase();
+        if let Some(expected) = expected_attributes.get(&uuid) {
+            let value_type_matches = matches!(
+                child.value_types.as_slice(),
+                [ConstantValueType::Reference { reference }]
+                    if reference == &expected.type_reference
+            );
+            let Some(properties) = child.properties.as_mut() else {
+                return false;
+            };
+            if child.tag != "Attribute"
+                || !value_type_matches
+                || !properties.emit_fill_value
+                || properties.fill_value.is_some()
+                || !matched_attributes.insert(uuid)
+            {
+                return false;
+            }
+            properties.fill_value = Some(MetadataChildFillValue::DesignTimeRef(
+                expected.fill_value.clone(),
+            ));
+        }
+        if !apply_data_processor_empty_ref_fill_values_inner(
+            &mut child.child_objects,
+            expected_attributes,
+            matched_attributes,
+        ) {
+            return false;
+        }
+    }
+    true
 }
 
 fn parse_data_processor_settings_composer_attributes(
@@ -12249,6 +12574,7 @@ fn parse_data_processor_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
@@ -12261,6 +12587,13 @@ fn parse_data_processor_properties_from_text(
 
     let settings_composer_attributes =
         parse_data_processor_settings_composer_attributes(text, &header, type_index)?;
+    let empty_ref_fill_values = parse_data_processor_empty_ref_fill_values(
+        text,
+        &header,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    )?;
     let mut child_metadata_objects = parse_attribute_tabular_section_child_objects(
         "DataProcessor",
         &header.name,
@@ -12275,6 +12608,12 @@ fn parse_data_processor_properties_from_text(
     if !apply_data_processor_settings_composer_types(
         &mut child_metadata_objects,
         &settings_composer_attributes,
+    ) {
+        return None;
+    }
+    if !apply_data_processor_empty_ref_fill_values(
+        &mut child_metadata_objects,
+        &empty_ref_fill_values,
     ) {
         return None;
     }

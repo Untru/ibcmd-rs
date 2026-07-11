@@ -13643,6 +13643,60 @@ fn normalizes_dcs_type_id_using_case_insensitive_generated_type_index() {
     assert!(!xml.contains("<v8:TypeId>"));
 }
 
+fn generated_type_source_row(file_name: &str, type_id: &str, name: &str) -> MetadataTextRow {
+    MetadataTextRow {
+        file_name: file_name.to_string(),
+        text: format!(
+            r#"<MetaDataObject xmlns:xr="http://v8.1c.ru/8.3/xcf/readable"><Catalog><InternalInfo><xr:GeneratedType name="{name}" category="Ref"><xr:TypeId>{type_id}</xr:TypeId></xr:GeneratedType></InternalInfo></Catalog></MetaDataObject>"#
+        ),
+        object_code: None,
+        header: None,
+        kind: Some("Catalog".to_string()),
+        folder: Some("Catalogs"),
+    }
+}
+
+#[test]
+fn generated_type_builder_records_collisions_without_changing_last_writer_indexes() {
+    let duplicate_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
+    let unique_id = "290a7469-3325-4d33-b5ec-28a63ac83b06";
+    let rows = [
+        generated_type_source_row("first", duplicate_id, "CatalogRef.First"),
+        generated_type_source_row(
+            "second",
+            &duplicate_id.to_ascii_uppercase(),
+            "CatalogRef.Second",
+        ),
+        generated_type_source_row("unique", unique_id, "CatalogRef.Unique"),
+    ];
+    let indexes = build_metadata_type_indexes_from_texts(&rows);
+
+    assert_eq!(
+        indexes.references.get(duplicate_id).map(String::as_str),
+        Some("cfg:CatalogRef.Second")
+    );
+    assert!(indexes.reference_collisions.contains(duplicate_id));
+    assert!(!indexes.reference_collisions.contains(unique_id));
+    assert!(matches!(
+        indexes.dcs.get(duplicate_id),
+        Some(DcsTypeResolution::Type { qname }) if qname == "cfg:CatalogRef.Second"
+    ));
+
+    let same_qname = build_metadata_type_indexes_from_texts(&[
+        generated_type_source_row("same-first", duplicate_id, "CatalogRef.Same"),
+        generated_type_source_row(
+            "same-second",
+            &duplicate_id.to_ascii_uppercase(),
+            "CatalogRef.Same",
+        ),
+    ]);
+    assert!(same_qname.reference_collisions.contains(duplicate_id));
+    assert_eq!(
+        same_qname.references.get(duplicate_id).map(String::as_str),
+        Some("cfg:CatalogRef.Same")
+    );
+}
+
 #[test]
 fn normalizes_dcs_parameter_type_id_with_parameter_current_config_prefix() {
     let type_id = "190a7469-3325-4d33-b5ec-28a63ac83b06";
@@ -24648,6 +24702,7 @@ fn routes_and_serializes_calculation_register_recalculation() {
         &blob,
         recalculation_uuid,
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &object_refs,
         &object_refs,
         &object_refs,
@@ -24711,6 +24766,7 @@ fn undeclared_code4_continues_through_common_picture_serializer() {
         &blob,
         picture_uuid,
         &BTreeMap::new(),
+        &BTreeSet::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -30964,6 +31020,7 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
         &blob,
         &fixture.owner_uuid,
         type_index,
+        &BTreeSet::new(),
         object_refs,
         metadata_object_refs,
         &BTreeMap::new(),
@@ -32222,6 +32279,32 @@ fn selected_enum_metadata_requests_child_and_type_indexes() {
     assert!(!needs.functional_option_refs);
     assert!(!needs.command_refs);
     assert!(needs.type_index);
+}
+
+#[test]
+fn selected_data_processor_metadata_requests_broad_type_index() {
+    let data_processor = MetadataTextRow {
+        file_name: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+        text: String::new(),
+        object_code: Some(17),
+        header: Some(MetadataHeader {
+            uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            name: "Loader".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("DataProcessor".to_string()),
+        folder: Some("DataProcessors"),
+    };
+
+    let rows = [data_processor];
+    assert!(selected_metadata_source_reference_index_needs(&rows).is_none());
+    assert!(selected_export_needs_broad_metadata_indexes(
+        false,
+        &BTreeSet::from([rows[0].file_name.clone()]),
+        &rows,
+    ));
 }
 
 #[test]
@@ -36252,6 +36335,569 @@ fn keeps_data_processor_top_level_attribute_before_tabular_section_when_raw_orde
 enum SettingsComposerAttributeLayout {
     Direct,
     TabularSection,
+}
+
+#[derive(Clone, Copy)]
+enum EmptyRefDataProcessorLayout {
+    SavedTabular,
+    DirectModern,
+    DirectLegacy,
+}
+
+struct EmptyRefDataProcessorFixture {
+    raw: String,
+    owner_uuid: String,
+    attribute_uuid: String,
+    owner_type_id: String,
+}
+
+fn empty_ref_data_processor_fixture(
+    layout: EmptyRefDataProcessorLayout,
+    payload_prefix: &str,
+    payload_suffix: &str,
+    inner_wrapper_suffix: &str,
+    outer_suffix: &str,
+) -> EmptyRefDataProcessorFixture {
+    let owner_uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".to_string();
+    let attribute_uuid = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb".to_string();
+    let tabular_uuid = "cccccccc-3333-4333-8333-cccccccccccc";
+    let owner_type_id = "dddddddd-4444-4444-8444-dddddddddddd".to_string();
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let pattern = format!(r##"{{"Pattern",{{"#",{owner_type_id}}}}}"##);
+    let fill = format!(r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_type_id},{zero}}}}}"##);
+    let header = format!(
+        "{{3,{{1,0,{attribute_uuid}}},\"Currency\",{{1,\"en\",\"Currency\"}},\"\",0,0,{zero},0}}"
+    );
+    let payload = format!(
+        "{{27,{{2,{header},{pattern}}},0,{{0}},{{0}},0,\"\",0,\
+{{\"U\"}},{{\"U\"}},0,{zero},0,0,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},\
+{payload_prefix}{fill}{payload_suffix},0,2,0}}"
+    );
+    let child = match layout {
+        EmptyRefDataProcessorLayout::SavedTabular => {
+            let inner_wrapper = format!("{{0,{payload}{inner_wrapper_suffix}}}");
+            let outer_wrapper = format!("{{{inner_wrapper},{outer_suffix}}}");
+            format!(
+                "{{11,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,\
+{{0,{{3,{{1,0,{tabular_uuid}}},\"Rows\",{{1,\"en\",\"Rows\"}},\"\",0,0,{zero},0}},0,{{0}}}},0}},\
+{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,{outer_wrapper}}}"
+            )
+        }
+        EmptyRefDataProcessorLayout::DirectModern => payload,
+        EmptyRefDataProcessorLayout::DirectLegacy => {
+            format!("{{ec6bb5e5-b7a8-4d75-bec9-658107a699cf,1,{{{{0,{payload},0}},0}}}}")
+        }
+    };
+    let raw = format!(
+        "{{1,{{17,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,\
+{{0,{{3,{{1,0,{owner_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}}},\
+{zero},1,0,77777777-7777-4777-8777-777777777777,88888888-8888-4888-8888-888888888888,\
+{zero},{{0}},{{0}}}},{child},{{\"Pattern\"}}}}"
+    );
+
+    EmptyRefDataProcessorFixture {
+        raw,
+        owner_uuid,
+        attribute_uuid,
+        owner_type_id,
+    }
+}
+
+fn extract_empty_ref_data_processor(
+    fixture: &EmptyRefDataProcessorFixture,
+    type_index: &BTreeMap<String, String>,
+    collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<ExtractedMetadataSourceXml> {
+    extract_metadata_source_xml_with_type_collisions(
+        &deflate_for_test(fixture.raw.as_bytes()),
+        &fixture.owner_uuid,
+        type_index,
+        collisions,
+        object_refs,
+    )
+}
+
+#[test]
+fn derives_empty_ref_for_saved_data_processor_tabular_attribute() {
+    let fixture = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    let type_index = BTreeMap::from([(
+        fixture.owner_type_id.clone(),
+        "cfg:CatalogRef.CurrenciesRenamed".to_string(),
+    )]);
+    let extracted =
+        extract_empty_ref_data_processor(&fixture, &type_index, &BTreeSet::new(), &BTreeMap::new())
+            .expect(
+                "saved tabular-section attribute must resolve through its generated Ref TypeId",
+            );
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("DataProcessors/Loader.xml")
+    );
+    assert!(xml.contains(&format!(r#"<Attribute uuid="{}">"#, fixture.attribute_uuid)));
+    assert!(xml.contains("<v8:Type>cfg:CatalogRef.CurrenciesRenamed</v8:Type>"));
+    assert_eq!(
+        xml.matches(
+            r#"<FillValue xsi:type="xr:DesignTimeRef">Catalog.CurrenciesRenamed.EmptyRef</FillValue>"#
+        )
+        .count(),
+        1,
+        "{xml}"
+    );
+}
+
+#[test]
+fn keeps_direct_data_processor_empty_ref_shapes_as_noncandidates() {
+    for layout in [
+        EmptyRefDataProcessorLayout::DirectModern,
+        EmptyRefDataProcessorLayout::DirectLegacy,
+    ] {
+        let fixture = empty_ref_data_processor_fixture(layout, "", "", ",0", "0");
+        let type_index = BTreeMap::from([(
+            fixture.owner_type_id.clone(),
+            "cfg:CatalogRef.Currencies".to_string(),
+        )]);
+        let extracted = extract_empty_ref_data_processor(
+            &fixture,
+            &type_index,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .expect("direct layouts retain their legacy extraction behavior");
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(!xml.contains("Catalog.Currencies.EmptyRef"), "{xml}");
+        assert!(!xml.contains("<FillValue"), "{xml}");
+    }
+}
+
+#[test]
+fn rejects_empty_ref_type_index_and_object_id_collisions_atomically() {
+    let fixture = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    let type_index = BTreeMap::from([(
+        fixture.owner_type_id.clone(),
+        "cfg:CatalogRef.Currencies".to_string(),
+    )]);
+    let collisions = BTreeSet::from([fixture.owner_type_id.to_ascii_lowercase()]);
+    assert!(
+        extract_empty_ref_data_processor(&fixture, &type_index, &collisions, &BTreeMap::new())
+            .is_none()
+    );
+
+    let mixed_case_index = BTreeMap::from([
+        (
+            fixture.owner_type_id.to_ascii_lowercase(),
+            "cfg:CatalogRef.Currencies".to_string(),
+        ),
+        (
+            fixture.owner_type_id.to_ascii_uppercase(),
+            "cfg:CatalogRef.Currencies".to_string(),
+        ),
+    ]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &fixture,
+            &mixed_case_index,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+
+    let object_refs = BTreeMap::from([(
+        fixture.owner_type_id.to_ascii_uppercase(),
+        "Catalog.Currencies".to_string(),
+    )]);
+    assert!(
+        extract_empty_ref_data_processor(&fixture, &type_index, &BTreeSet::new(), &object_refs)
+            .is_none()
+    );
+}
+
+#[test]
+fn rejects_malformed_empty_ref_wrappers_and_shifted_slot_atomically() {
+    let cases = [
+        ("missing inner tail", "", "", "", "0"),
+        ("extra inner tail", "", "", ",0,0", "0"),
+        ("missing outer tail", "", "", ",0", ""),
+        ("extra outer tail", "", "", ",0", "0,0"),
+        ("extra field before fill", "0,", "", ",0", "0"),
+        ("extra field after fill", "", ",0", ",0", "0"),
+    ];
+    for (case, payload_prefix, payload_suffix, inner_wrapper_suffix, outer_suffix) in cases {
+        let fixture = empty_ref_data_processor_fixture(
+            EmptyRefDataProcessorLayout::SavedTabular,
+            payload_prefix,
+            payload_suffix,
+            inner_wrapper_suffix,
+            outer_suffix,
+        );
+        let type_index = BTreeMap::from([(
+            fixture.owner_type_id.clone(),
+            "cfg:CatalogRef.Currencies".to_string(),
+        )]);
+        assert!(
+            extract_empty_ref_data_processor(
+                &fixture,
+                &type_index,
+                &BTreeSet::new(),
+                &BTreeMap::new()
+            )
+            .is_none(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn rejects_missing_ambiguous_and_malformed_empty_ref_owners_atomically() {
+    let fixture = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    assert!(
+        extract_empty_ref_data_processor(
+            &fixture,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "missing generated TypeId"
+    );
+
+    for malformed in [
+        "CatalogRef.Currencies",
+        "cfg:CatalogObject.Currencies",
+        "cfg:CatalogRef.Currencies.Archive",
+        "cfg:CatalogRef.",
+    ] {
+        let type_index = BTreeMap::from([(fixture.owner_type_id.clone(), malformed.to_string())]);
+        assert!(
+            extract_empty_ref_data_processor(
+                &fixture,
+                &type_index,
+                &BTreeSet::new(),
+                &BTreeMap::new()
+            )
+            .is_none(),
+            "{malformed}"
+        );
+    }
+
+    let other_owner = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+    let mut mismatched_pattern = fixture.raw.clone();
+    mismatched_pattern = mismatched_pattern.replacen(&fixture.owner_type_id, other_owner, 1);
+    let mismatched_fixture = EmptyRefDataProcessorFixture {
+        raw: mismatched_pattern,
+        owner_uuid: fixture.owner_uuid.clone(),
+        attribute_uuid: fixture.attribute_uuid.clone(),
+        owner_type_id: fixture.owner_type_id.clone(),
+    };
+    let type_index = BTreeMap::from([
+        (
+            fixture.owner_type_id.clone(),
+            "cfg:CatalogRef.Currencies".to_string(),
+        ),
+        (other_owner.to_string(), "cfg:CatalogRef.Other".to_string()),
+    ]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &mismatched_fixture,
+            &type_index,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "Pattern and FillValue owners differ"
+    );
+}
+
+#[test]
+fn rejects_malformed_empty_ref_protocol_fields_atomically() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let nonzero = "ffffffff-6666-4666-8666-ffffffffffff";
+    let pattern = format!(r##"{{"Pattern",{{"#",{}}}}}"##, base.owner_type_id);
+    let multi_pattern = format!(
+        r##"{{"Pattern",{{"#",{0}}},{{"#",{0}}}}}"##,
+        base.owner_type_id
+    );
+    let fill = format!(
+        r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}}}}"##,
+        base.owner_type_id
+    );
+    let cases = [
+        (
+            "multi-member Pattern",
+            base.raw.replacen(&pattern, &multi_pattern, 1),
+        ),
+        (
+            "wrong reference inner tag",
+            base.raw.replacen(
+                &fill,
+                &format!(
+                    r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{1,{},{zero}}}}}"##,
+                    base.owner_type_id
+                ),
+                1,
+            ),
+        ),
+        (
+            "nonzero reference value",
+            base.raw.replacen(
+                &fill,
+                &format!(
+                    r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{nonzero}}}}}"##,
+                    base.owner_type_id
+                ),
+                1,
+            ),
+        ),
+        (
+            "descriptor extra arity",
+            base.raw.replacen(
+                &fill,
+                &format!(
+                    r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}},0}}"##,
+                    base.owner_type_id
+                ),
+                1,
+            ),
+        ),
+    ];
+    let type_index = BTreeMap::from([(
+        base.owner_type_id.clone(),
+        "cfg:CatalogRef.Currencies".to_string(),
+    )]);
+    for (case, raw) in cases {
+        let fixture = EmptyRefDataProcessorFixture {
+            raw,
+            owner_uuid: base.owner_uuid.clone(),
+            attribute_uuid: base.attribute_uuid.clone(),
+            owner_type_id: base.owner_type_id.clone(),
+        };
+        assert!(
+            extract_empty_ref_data_processor(
+                &fixture,
+                &type_index,
+                &BTreeSet::new(),
+                &BTreeMap::new()
+            )
+            .is_none(),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn treats_wrong_empty_ref_descriptor_tag_and_uuid_as_noncandidates() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let fill = format!(
+        r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}}}}"##,
+        base.owner_type_id
+    );
+    let wrong_uuid = "ffffffff-7777-4777-8777-ffffffffffff";
+    let replacements = [
+        format!(
+            r##"{{"X",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}}}}"##,
+            base.owner_type_id
+        ),
+        format!(
+            r##"{{"#",{wrong_uuid},{{0,{},{zero}}}}}"##,
+            base.owner_type_id
+        ),
+    ];
+    let type_index = BTreeMap::from([(
+        base.owner_type_id.clone(),
+        "cfg:CatalogRef.Currencies".to_string(),
+    )]);
+    for replacement in replacements {
+        assert!(!data_processor_design_time_ref_descriptor(&replacement));
+        let fixture = EmptyRefDataProcessorFixture {
+            raw: base.raw.replacen(&fill, &replacement, 1),
+            owner_uuid: base.owner_uuid.clone(),
+            attribute_uuid: base.attribute_uuid.clone(),
+            owner_type_id: base.owner_type_id.clone(),
+        };
+        let extracted = extract_empty_ref_data_processor(
+            &fixture,
+            &type_index,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .expect("wrong descriptor discriminator retains legacy extraction");
+        assert!(
+            !String::from_utf8(extracted.xml)
+                .unwrap()
+                .contains("<FillValue")
+        );
+    }
+}
+
+#[test]
+fn rejects_duplicate_empty_ref_attribute_candidate_atomically() {
+    let mut fixture = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    let marker = "{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,";
+    let start = fixture.raw.find(marker).unwrap();
+    let end = scan_1c_braced_value(&fixture.raw, start).unwrap();
+    let list = split_1c_braced_fields(&fixture.raw[start..end], 0).unwrap();
+    let outer = list.get(2).unwrap().trim();
+    let duplicate = format!("{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,2,{outer},{outer}}}");
+    fixture.raw.replace_range(start..end, &duplicate);
+    let type_index = BTreeMap::from([(
+        fixture.owner_type_id.clone(),
+        "cfg:CatalogRef.Currencies".to_string(),
+    )]);
+
+    assert!(
+        extract_empty_ref_data_processor(&fixture, &type_index, &BTreeSet::new(), &BTreeMap::new())
+            .is_none()
+    );
+}
+
+#[test]
+fn derives_empty_ref_for_any_valid_generated_ref_kind() {
+    let fixture = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    let type_index = BTreeMap::from([(
+        fixture.owner_type_id.clone(),
+        "cfg:EnumRef.PaymentStateRenamed".to_string(),
+    )]);
+    let extracted =
+        extract_empty_ref_data_processor(&fixture, &type_index, &BTreeSet::new(), &BTreeMap::new())
+            .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert!(xml.contains("<v8:Type>cfg:EnumRef.PaymentStateRenamed</v8:Type>"));
+    assert!(xml.contains(
+        r#"<FillValue xsi:type="xr:DesignTimeRef">Enum.PaymentStateRenamed.EmptyRef</FillValue>"#
+    ));
+}
+
+#[test]
+fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
+    let fixture = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        ",0",
+        "0",
+    );
+    let type_index = BTreeMap::from([(
+        fixture.owner_type_id.clone(),
+        "cfg:CatalogRef.Currencies".to_string(),
+    )]);
+    let owner_header = parse_metadata_header_from_text(&fixture.raw, &fixture.owner_uuid).unwrap();
+    let expectations = parse_data_processor_empty_ref_fill_values(
+        &fixture.raw,
+        &owner_header,
+        &type_index,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let mut child_objects = parse_attribute_tabular_section_child_objects(
+        "DataProcessor",
+        &owner_header.name,
+        &fixture.raw,
+        &fixture.owner_uuid,
+        None,
+        &type_index,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+    let attribute = child_objects
+        .iter_mut()
+        .flat_map(|child| child.child_objects.iter_mut())
+        .find(|child| {
+            child
+                .header
+                .uuid
+                .eq_ignore_ascii_case(&fixture.attribute_uuid)
+        })
+        .unwrap();
+    let properties = attribute.properties.as_mut().unwrap();
+    assert!(properties.fill_value.is_none());
+    properties.emit_fill_value = false;
+
+    assert!(!apply_data_processor_empty_ref_fill_values(
+        &mut child_objects,
+        &expectations
+    ));
+    let properties = child_objects
+        .iter()
+        .flat_map(|child| child.child_objects.iter())
+        .find(|child| {
+            child
+                .header
+                .uuid
+                .eq_ignore_ascii_case(&fixture.attribute_uuid)
+        })
+        .and_then(|child| child.properties.as_ref())
+        .unwrap();
+    assert!(properties.fill_value.is_none());
+}
+
+#[test]
+fn empty_ref_recovery_production_has_no_fixture_literals() {
+    let production = include_str!("mod.rs");
+    for forbidden in [
+        "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+        "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+        "dddddddd-4444-4444-8444-dddddddddddd",
+        "CurrenciesRenamed",
+        "PaymentStateRenamed",
+        "DataProcessors/Loader.xml",
+    ] {
+        assert!(
+            !production.contains(forbidden),
+            "production literal: {forbidden}"
+        );
+    }
 }
 
 struct SettingsComposerDataProcessorFixture {
