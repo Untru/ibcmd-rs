@@ -11687,6 +11687,44 @@ fn parses_common_command_input_field_open_picture_and_shortcut() {
 }
 
 #[test]
+fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
+    for (raw, expected) in [
+        ("{0,65,0}", "A"),
+        ("{0,90,0}", "Z"),
+        ("{0,112,0}", "F1"),
+        ("{0,123,0}", "F12"),
+        ("{0,83,4}", "Shift+S"),
+        ("{0,83,8}", "Ctrl+S"),
+        ("{0,83,16}", "Alt+S"),
+        ("{0,83,12}", "Ctrl+Shift+S"),
+        ("{0,70,24}", "Ctrl+Alt+F"),
+        ("{0,70,28}", "Ctrl+Alt+Shift+F"),
+    ] {
+        assert_eq!(
+            parse_common_command_shortcut_value(raw).as_deref(),
+            Some(expected),
+            "{raw}"
+        );
+    }
+
+    for raw in [
+        "{0,0,0}",
+        "{0,0,8}",
+        "{0,64,0}",
+        "{0,91,0}",
+        "{0,111,0}",
+        "{0,124,0}",
+        "{0,70,1}",
+        "{0,70,32}",
+        "{1,70,24}",
+        "{0,70}",
+        "{0,70,24,0}",
+    ] {
+        assert_eq!(parse_common_command_shortcut_value(raw), None, "{raw}");
+    }
+}
+
+#[test]
 fn formats_common_command_tooltip_text_like_native() {
     let mut xml = String::new();
     push_common_command_tooltip_xml(
@@ -35339,7 +35377,7 @@ fn extracts_data_processor_child_command_properties_to_metadata_xml() {
 00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
 00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
 {{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Load tip\"}},1,\r\n\
-{{0,0,0}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n\
+{{0,70,24}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n\
 {{\"Pattern\",{{\"#\",{catalog_type_uuid}}}}},\r\n\
 {{3,\r\n{{1,0,{command_uuid}}},\"Load\",{{1,\"en\",\"Load\"}},\"command comment\"}},1,0,0}}\r\n}}"
             )
@@ -35380,7 +35418,7 @@ fn extracts_data_processor_child_command_properties_to_metadata_xml() {
     assert!(xml.contains("<ToolTip>"));
     assert!(xml.contains("<v8:content>Load tip</v8:content>"));
     assert!(xml.contains("<Picture/>"));
-    assert!(xml.contains("<Shortcut/>"));
+    assert!(xml.contains("<Shortcut>Ctrl+Alt+F</Shortcut>"));
     assert!(xml.contains("<OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>"));
     assert_eq!(xml.matches("<Command uuid=").count(), 1, "{xml}");
     assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());

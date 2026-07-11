@@ -14598,21 +14598,34 @@ fn parse_common_command_picture_value(
 
 fn parse_common_command_shortcut_value(value: &str) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
-    if fields.first()?.trim() != "0" {
+    if fields.len() != 3 || fields.first()?.trim() != "0" {
         return None;
     }
     let key_code = fields.get(1)?.trim().parse::<u16>().ok()?;
-    let modifier_code = fields
-        .get(2)
-        .and_then(|field| field.trim().parse::<u16>().ok())
-        .unwrap_or(0);
-    if key_code == 0 || modifier_code != 0 {
+    let modifier_code = fields.get(2)?.trim().parse::<u16>().ok()?;
+    const SHIFT: u16 = 4;
+    const CTRL: u16 = 8;
+    const ALT: u16 = 16;
+    if key_code == 0 || modifier_code & !(SHIFT | CTRL | ALT) != 0 {
         return None;
     }
-    if (112..=123).contains(&key_code) {
-        return Some(format!("F{}", key_code - 111));
+    let key = match key_code {
+        65..=90 => char::from_u32(u32::from(key_code))?.to_string(),
+        112..=123 => format!("F{}", key_code - 111),
+        _ => return None,
+    };
+    let mut parts = Vec::with_capacity(4);
+    if modifier_code & CTRL != 0 {
+        parts.push("Ctrl".to_string());
     }
-    None
+    if modifier_code & ALT != 0 {
+        parts.push("Alt".to_string());
+    }
+    if modifier_code & SHIFT != 0 {
+        parts.push("Shift".to_string());
+    }
+    parts.push(key);
+    Some(parts.join("+"))
 }
 
 fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
