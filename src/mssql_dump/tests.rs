@@ -43123,3 +43123,274 @@ fn calculation_period_has_no_production_corpus_literals() {
         assert!(!source.contains(forbidden));
     }
 }
+
+#[test]
+fn calculation_include_help_emits_fixed_false_once_in_schema_order() {
+    let xml = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .expect("exact calculation include-help flag");
+
+    assert_eq!(
+        xml.matches("<IncludeHelpInContents>false</IncludeHelpInContents>")
+            .count(),
+        1
+    );
+    assert!(!xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+    assert!(
+        xml.find("<BasePeriod>true</BasePeriod>").unwrap()
+            < xml
+                .find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                .unwrap()
+    );
+    assert!(
+        xml.find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+            .unwrap()
+            < xml.find("<ListPresentation/>").unwrap()
+    );
+
+    let mut padded = CalculationRegisterPresentationsFixture::exact();
+    padded.fields[25] = " \r\n0\t".to_string();
+    assert_eq!(padded.xml().unwrap(), xml);
+}
+
+#[test]
+fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
+    let exact = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .unwrap();
+    let include_help_line = "\t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n";
+    let expected_omission = exact.replace(include_help_line, "");
+
+    for value in [
+        "1",
+        " 1 ",
+        "2",
+        "-1",
+        "00",
+        "01",
+        "4294967296",
+        "value",
+        "{0}",
+        ACCUMULATION_TOTALS_ZERO_UUID,
+    ] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[25] = value.to_string();
+        let raw = fixture.raw();
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let header =
+            parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+
+        assert!(matches!(
+            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header,),
+            Some(None)
+        ));
+        let xml = fixture
+            .xml()
+            .expect("alternative include-help atom must remain accepted");
+        assert!(!xml.contains("<IncludeHelpInContents>"));
+        assert_eq!(xml, expected_omission, "consumed field 25 value {value}");
+    }
+}
+
+#[test]
+fn calculation_include_help_does_not_consume_hold_neighbors() {
+    let expected = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .unwrap();
+
+    for slot in [26, 27] {
+        for value in ["0", "1", "2", "-1", "value", "{0}"] {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact();
+            fixture.fields[slot] = value.to_string();
+            let xml = fixture.xml().expect("HOLD neighbor must remain accepted");
+
+            assert_eq!(
+                xml, expected,
+                "include-help consumed HOLD field {slot} value {value}"
+            );
+        }
+    }
+}
+
+#[test]
+fn calculation_include_help_direct_seam_requires_full_exact_owner_boundary() {
+    let original = CalculationRegisterPresentationsFixture::exact();
+    let raw = original.raw();
+    let expected =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let valid_header = original.fields[15].clone();
+
+    let mut short = original.clone();
+    short.fields[15] = format!(
+        "{{0,{{3,{{1,0,{CALCULATION_PRESENTATIONS_TEST_UUID}}},\"Payroll\",{{1,\"en\",\"Payroll\"}},\"\"}}}}"
+    );
+    let mut moved = original.clone();
+    moved.fields[14] = valid_header.clone();
+    moved.fields[15] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[29] = valid_header.clone();
+    let mut wrong_then_valid = original.clone();
+    wrong_then_valid.fields[15] = wrong_then_valid.fields[15].replace(
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        "88888888-8888-4888-8888-888888888888",
+    );
+    wrong_then_valid.fields[29] = valid_header;
+
+    for fixture in [short, moved, duplicate, wrong_then_valid] {
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            parse_calculation_register_fixed_include_help(
+                "CalculationRegister",
+                &fields,
+                &expected,
+            )
+            .is_none()
+        );
+    }
+
+    let fields = original
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let mut mismatch = expected;
+    mismatch.name = "Other".to_string();
+    assert!(
+        parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &mismatch,)
+            .is_none()
+    );
+}
+
+#[test]
+fn calculation_include_help_keeps_nonexact_arities_unconsumed_and_omitted() {
+    for field_count in [32, 34] {
+        let mut omitted = CalculationRegisterPresentationsFixture::exact();
+        omitted.fields.truncate(field_count.min(33));
+        while omitted.fields.len() < field_count {
+            omitted.fields.push("0".to_string());
+        }
+        omitted.fields[25] = "1".to_string();
+        let mut slot_like = omitted.clone();
+        slot_like.fields[25] = "0".to_string();
+
+        let omitted_xml = omitted.xml().expect("nonexact omission baseline");
+        let slot_like_xml = slot_like.xml().expect("nonexact slot-like value");
+        assert!(!slot_like_xml.contains("<IncludeHelpInContents>"));
+        assert_eq!(
+            omitted_xml, slot_like_xml,
+            "consumed field 25 at len {field_count}"
+        );
+    }
+}
+
+#[test]
+fn calculation_include_help_preserves_accounting_true_and_accumulation_false() {
+    let accounting_uuid = "33333333-3333-4333-8333-333333333333";
+    let mut accounting_fields = vec!["21".to_string()];
+    accounting_fields.extend(register_generated_type_fields(14));
+    accounting_fields.push(register_owner_header(accounting_uuid, "Ledger"));
+    accounting_fields.extend([
+        "1".to_string(),
+        "1".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+    ]);
+    assert_eq!(accounting_fields.len(), 30);
+    let accounting = extract_register_fields(&accounting_fields, accounting_uuid)
+        .and_then(|source| String::from_utf8(source.xml).ok())
+        .expect("accounting include-help control");
+    assert_eq!(
+        accounting
+            .matches("<IncludeHelpInContents>true</IncludeHelpInContents>")
+            .count(),
+        1
+    );
+    assert!(!accounting.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"));
+    assert!(
+        accounting
+            .find("<UseStandardCommands>true</UseStandardCommands>")
+            .unwrap()
+            < accounting
+                .find("<IncludeHelpInContents>true</IncludeHelpInContents>")
+                .unwrap()
+    );
+
+    let accumulation = AccumulationRegisterTotalsFixture::exact("1")
+        .xml()
+        .expect("accumulation include-help control");
+    assert_eq!(
+        accumulation
+            .matches("<IncludeHelpInContents>false</IncludeHelpInContents>")
+            .count(),
+        1
+    );
+    assert!(!accumulation.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+}
+
+#[test]
+fn calculation_include_help_changes_only_the_fixed_false_line() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let raw = fixture.raw();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &raw,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let with_include_help = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    register.include_help_in_contents = None;
+    let without_include_help = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    let stripped = with_include_help.replace(
+        "\t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n",
+        "",
+    );
+
+    assert_eq!(stripped, without_include_help);
+}
+
+#[test]
+fn calculation_include_help_has_no_production_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "a6756af4-964f-400d-97d4-0bd3f5916693",
+        "_ДемоОсновныеНачисления",
+        "ca9501a5-a0d3-422e-afd3-8c8cfbbcbb01",
+        "03ccda6c-33a9-4c9e-9f21-27fc6dd07aaf",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
