@@ -3922,6 +3922,7 @@ struct RegisterProperties {
     full_text_search: Option<&'static str>,
     default_list_form: Option<String>,
     auxiliary_list_form: Option<String>,
+    calculation_form_pair: Option<CalculationRegisterFormPair>,
     calculation_period: Option<CalculationRegisterPeriodProperties>,
     emit_accumulation_presentations: bool,
     emit_calculation_presentations: bool,
@@ -3930,6 +3931,10 @@ struct RegisterProperties {
     explanation: Vec<(String, String)>,
     standard_attributes: Vec<RegisterStandardAttribute>,
     child_objects: Vec<MetadataChildObject>,
+}
+
+struct CalculationRegisterFormPair {
+    default_list_form: String,
 }
 
 struct CalculationRegisterPeriodProperties {
@@ -7949,6 +7954,8 @@ fn parse_register_properties_from_text(
     } else {
         parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs)
     };
+    let calculation_form_pair =
+        parse_calculation_register_fixed_form_pair(kind, &fields, &header, form_refs)?;
     let calculation_period = parse_calculation_register_fixed_period(kind, &fields, &header)?;
     let standard_attributes = if kind == "InformationRegister" {
         Vec::new()
@@ -8049,6 +8056,7 @@ fn parse_register_properties_from_text(
         full_text_search,
         default_list_form: register_form_refs.0,
         auxiliary_list_form: register_form_refs.1,
+        calculation_form_pair,
         calculation_period,
         emit_accumulation_presentations,
         emit_calculation_presentations,
@@ -8549,6 +8557,71 @@ fn parse_calculation_register_fixed_period(
         action_period: true,
         base_period: true,
     }))
+}
+
+fn parse_calculation_register_fixed_form_pair(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<CalculationRegisterFormPair>> {
+    if kind != "CalculationRegister"
+        || !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)?
+    {
+        return Some(None);
+    }
+
+    let Some(default_form_uuid) = fields
+        .get(23)
+        .and_then(|field| parse_information_register_non_zero_uuid(field))
+    else {
+        return Some(None);
+    };
+    let Some(auxiliary_form_uuid) = fields
+        .get(29)
+        .and_then(|field| parse_information_register_uuid(field))
+    else {
+        return Some(None);
+    };
+    if !information_register_uuid_is_zero(&auxiliary_form_uuid) {
+        return Some(None);
+    }
+
+    let mut matches = form_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&default_form_uuid));
+    let Some((_, form)) = matches.next() else {
+        return Some(None);
+    };
+    if matches.next().is_some()
+        || form.kind != "Form"
+        || form
+            .relative_path
+            .extension()
+            .and_then(|value| value.to_str())
+            != Some("xml")
+        || !is_owned_metadata_child_path(
+            &form.relative_path,
+            "CalculationRegisters",
+            &expected_header.name,
+            "Forms",
+        )
+    {
+        return Some(None);
+    }
+
+    let Some(default_list_form) = form_source_reference_name(form) else {
+        return Some(None);
+    };
+    let expected_prefix = format!("CalculationRegister.{}.Form.", expected_header.name);
+    let Some(form_name) = default_list_form.strip_prefix(&expected_prefix) else {
+        return Some(None);
+    };
+    if form_name.is_empty() || form_name.contains('.') {
+        return Some(None);
+    }
+
+    Some(Some(CalculationRegisterFormPair { default_list_form }))
 }
 
 fn parse_calculation_register_fixed_include_help(
@@ -17746,6 +17819,17 @@ fn format_register_source_xml(
                     "AuxiliaryListForm",
                     register.auxiliary_list_form.as_deref(),
                 );
+            }
+            if kind == "CalculationRegister"
+                && let Some(form_pair) = register.calculation_form_pair.as_ref()
+            {
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "DefaultListForm",
+                    Some(form_pair.default_list_form.as_str()),
+                );
+                properties.push_str("\t\t\t<AuxiliaryListForm/>\r\n");
             }
             if kind == "CalculationRegister"
                 && let Some(period) = register.calculation_period.as_ref()

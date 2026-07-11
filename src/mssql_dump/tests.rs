@@ -42048,6 +42048,7 @@ const ACCUMULATION_TOTALS_TEST_UUID: &str = "11111111-1111-4111-8111-11111111111
 const ACCUMULATION_TOTALS_ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const CALCULATION_PRESENTATIONS_TEST_UUID: &str = "44444444-4444-4444-8444-444444444444";
 const CALCULATION_PRESENTATIONS_TYPE_UUID: &str = "55555555-5555-4555-8555-555555555555";
+const CALCULATION_DEFAULT_FORM_TEST_UUID: &str = "abcdefab-cdef-4abc-8def-abcdefabcdef";
 
 fn register_generated_type_fields(count: usize) -> Vec<String> {
     (1..=count)
@@ -42079,6 +42080,14 @@ fn localized_property_block<'a>(xml: &'a str, name: &str) -> &'a str {
 }
 
 fn extract_register_fields(fields: &[String], uuid: &str) -> Option<ExtractedMetadataSourceXml> {
+    extract_register_fields_with_form_refs(fields, uuid, &BTreeMap::new())
+}
+
+fn extract_register_fields_with_form_refs(
+    fields: &[String],
+    uuid: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<ExtractedMetadataSourceXml> {
     let raw = format!("{{1,{{{}}}}}", fields.join(","));
     extract_metadata_source_xml_with_refs(
         &deflate_for_test(raw.as_bytes()),
@@ -42086,10 +42095,32 @@ fn extract_register_fields(fields: &[String], uuid: &str) -> Option<ExtractedMet
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &BTreeMap::new(),
+        form_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
+    )
+}
+
+fn form_refs_for_test(
+    uuid: &str,
+    relative_path: &str,
+    kind: &'static str,
+) -> BTreeMap<String, FormSourceReference> {
+    BTreeMap::from([(
+        uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from(relative_path),
+            kind,
+        },
+    )])
+}
+
+fn calculation_form_refs_for_test() -> BTreeMap<String, FormSourceReference> {
+    form_refs_for_test(
+        CALCULATION_DEFAULT_FORM_TEST_UUID,
+        "CalculationRegisters/Payroll/Forms/List.xml",
+        "Form",
     )
 }
 
@@ -42152,6 +42183,7 @@ impl CalculationRegisterPresentationsFixture {
             16 => "2".to_string(),
             17 | 18 => "1".to_string(),
             22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
+            23 => CALCULATION_DEFAULT_FORM_TEST_UUID.to_string(),
             29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
             30..=32 => "{0}".to_string(),
             _ => "0".to_string(),
@@ -42170,6 +42202,25 @@ impl CalculationRegisterPresentationsFixture {
 
     fn xml(&self) -> Option<String> {
         self.extract()
+            .and_then(|source| String::from_utf8(source.xml).ok())
+    }
+
+    fn extract_with_form_refs(
+        &self,
+        form_refs: &BTreeMap<String, FormSourceReference>,
+    ) -> Option<ExtractedMetadataSourceXml> {
+        extract_register_fields_with_form_refs(
+            &self.fields,
+            CALCULATION_PRESENTATIONS_TEST_UUID,
+            form_refs,
+        )
+    }
+
+    fn xml_with_form_refs(
+        &self,
+        form_refs: &BTreeMap<String, FormSourceReference>,
+    ) -> Option<String> {
+        self.extract_with_form_refs(form_refs)
             .and_then(|source| String::from_utf8(source.xml).ok())
     }
 }
@@ -43390,6 +43441,436 @@ fn calculation_include_help_has_no_production_corpus_literals() {
         "_ДемоОсновныеНачисления",
         "ca9501a5-a0d3-422e-afd3-8c8cfbbcbb01",
         "03ccda6c-33a9-4c9e-9f21-27fc6dd07aaf",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+#[test]
+fn calculation_form_pair_emits_same_owner_default_and_mandatory_empty_auxiliary() {
+    let form_refs = calculation_form_refs_for_test();
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let source = fixture
+        .extract_with_form_refs(&form_refs)
+        .expect("exact calculation form pair");
+    let xml = String::from_utf8(source.xml).unwrap();
+    let default = "<DefaultListForm>CalculationRegister.Payroll.Form.List</DefaultListForm>";
+
+    assert_eq!(
+        source.relative_path,
+        PathBuf::from("CalculationRegisters/Payroll.xml")
+    );
+    assert_eq!(xml.matches(default).count(), 1);
+    assert_eq!(xml.matches("<AuxiliaryListForm/>").count(), 1);
+    assert!(
+        xml.find("<UseStandardCommands>true</UseStandardCommands>")
+            .unwrap()
+            < xml.find(default).unwrap()
+    );
+    assert!(xml.find(default).unwrap() < xml.find("<AuxiliaryListForm/>").unwrap());
+    assert!(
+        xml.find("<AuxiliaryListForm/>").unwrap()
+            < xml.find("<Periodicity>Month</Periodicity>").unwrap()
+    );
+
+    let mut padded = fixture;
+    padded.fields[23] = format!(
+        " \r\n{}\t",
+        CALCULATION_DEFAULT_FORM_TEST_UUID.to_uppercase()
+    );
+    padded.fields[29] = format!(" \r\n{ACCUMULATION_TOTALS_ZERO_UUID}\t");
+    assert_eq!(padded.xml_with_form_refs(&form_refs).unwrap(), xml);
+}
+
+#[test]
+fn calculation_form_pair_resolver_alternatives_are_accepted_omissions() {
+    let preferred_fallback_uuid = "11111111-1111-4111-8111-111111111111";
+    let unknown_uuid = "22222222-2222-4222-8222-222222222222";
+    let mut cases = Vec::new();
+
+    let mut zero = CalculationRegisterPresentationsFixture::exact();
+    zero.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+    cases.push(("zero F23", zero, calculation_form_refs_for_test()));
+
+    let mut malformed = CalculationRegisterPresentationsFixture::exact();
+    malformed.fields[23] = "0".to_string();
+    cases.push(("malformed F23", malformed, calculation_form_refs_for_test()));
+
+    let mut unknown = CalculationRegisterPresentationsFixture::exact();
+    unknown.fields[23] = unknown_uuid.to_string();
+    cases.push((
+        "unknown F23 with preferred-name fallback available",
+        unknown,
+        form_refs_for_test(
+            preferred_fallback_uuid,
+            "CalculationRegisters/Payroll/Forms/List.xml",
+            "Form",
+        ),
+    ));
+
+    cases.push((
+        "cross-owner F23",
+        CalculationRegisterPresentationsFixture::exact(),
+        form_refs_for_test(
+            CALCULATION_DEFAULT_FORM_TEST_UUID,
+            "CalculationRegisters/Other/Forms/List.xml",
+            "Form",
+        ),
+    ));
+    cases.push((
+        "CommonForm F23",
+        CalculationRegisterPresentationsFixture::exact(),
+        form_refs_for_test(
+            CALCULATION_DEFAULT_FORM_TEST_UUID,
+            "CommonForms/List.xml",
+            "CommonForm",
+        ),
+    ));
+    cases.push((
+        "wrong-kind F23",
+        CalculationRegisterPresentationsFixture::exact(),
+        form_refs_for_test(
+            CALCULATION_DEFAULT_FORM_TEST_UUID,
+            "CalculationRegisters/Payroll/Forms/List.xml",
+            "CommonForm",
+        ),
+    ));
+    cases.push((
+        "nested-path F23",
+        CalculationRegisterPresentationsFixture::exact(),
+        form_refs_for_test(
+            CALCULATION_DEFAULT_FORM_TEST_UUID,
+            "CalculationRegisters/Payroll/Forms/Nested/List.xml",
+            "Form",
+        ),
+    ));
+    cases.push((
+        "wrong-extension F23",
+        CalculationRegisterPresentationsFixture::exact(),
+        form_refs_for_test(
+            CALCULATION_DEFAULT_FORM_TEST_UUID,
+            "CalculationRegisters/Payroll/Forms/List.bin",
+            "Form",
+        ),
+    ));
+    cases.push((
+        "multi-segment QName F23",
+        CalculationRegisterPresentationsFixture::exact(),
+        form_refs_for_test(
+            CALCULATION_DEFAULT_FORM_TEST_UUID,
+            "CalculationRegisters/Payroll/Forms/List.Detail.xml",
+            "Form",
+        ),
+    ));
+
+    let mut collisions = calculation_form_refs_for_test();
+    collisions.insert(
+        CALCULATION_DEFAULT_FORM_TEST_UUID.to_uppercase(),
+        FormSourceReference {
+            relative_path: PathBuf::from("CalculationRegisters/Payroll/Forms/List.xml"),
+            kind: "Form",
+        },
+    );
+    cases.push((
+        "case-insensitive UUID collision",
+        CalculationRegisterPresentationsFixture::exact(),
+        collisions,
+    ));
+
+    for (label, fixture, form_refs) in cases {
+        let raw = fixture.raw();
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let header =
+            parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+        assert!(matches!(
+            parse_calculation_register_fixed_form_pair(
+                "CalculationRegister",
+                &fields,
+                &header,
+                &form_refs,
+            ),
+            Some(None)
+        ));
+
+        let xml = fixture
+            .xml_with_form_refs(&form_refs)
+            .unwrap_or_else(|| panic!("rejected resolver omission: {label}"));
+        assert!(!xml.contains("<DefaultListForm"), "{label}");
+        assert!(!xml.contains("<AuxiliaryListForm"), "{label}");
+
+        let mut baseline = fixture.clone();
+        baseline.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+        let baseline_xml = baseline.xml_with_form_refs(&form_refs).unwrap();
+        assert_eq!(xml, baseline_xml, "resolver consumed {label}");
+    }
+}
+
+#[test]
+fn calculation_form_pair_nonzero_or_malformed_auxiliary_is_accepted_omission() {
+    let form_refs = calculation_form_refs_for_test();
+    for value in [
+        CALCULATION_DEFAULT_FORM_TEST_UUID,
+        "00000000-0000-0000-0000-000000000001",
+        "0",
+        "00",
+        "value",
+        "{0}",
+    ] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[29] = value.to_string();
+        let raw = fixture.raw();
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let header =
+            parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+        assert!(matches!(
+            parse_calculation_register_fixed_form_pair(
+                "CalculationRegister",
+                &fields,
+                &header,
+                &form_refs,
+            ),
+            Some(None)
+        ));
+
+        let xml = fixture
+            .xml_with_form_refs(&form_refs)
+            .expect("alternative F29 must remain accepted");
+        assert!(!xml.contains("<DefaultListForm"));
+        assert!(!xml.contains("<AuxiliaryListForm"));
+        let mut baseline = fixture;
+        baseline.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+        assert_eq!(xml, baseline.xml_with_form_refs(&form_refs).unwrap());
+    }
+}
+
+#[test]
+fn calculation_form_pair_direct_seam_requires_full_exact_owner_boundary() {
+    let original = CalculationRegisterPresentationsFixture::exact();
+    let raw = original.raw();
+    let expected =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let form_refs = calculation_form_refs_for_test();
+    let fields = original
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        parse_calculation_register_fixed_form_pair(
+            "CalculationRegister",
+            &fields,
+            &expected,
+            &form_refs,
+        ),
+        Some(Some(_))
+    ));
+    let valid_header = original.fields[15].clone();
+
+    let mut short = original.clone();
+    short.fields[15] = format!(
+        "{{0,{{3,{{1,0,{CALCULATION_PRESENTATIONS_TEST_UUID}}},\"Payroll\",{{1,\"en\",\"Payroll\"}},\"\"}}}}"
+    );
+    let mut moved = original.clone();
+    moved.fields[14] = valid_header.clone();
+    moved.fields[15] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[29] = valid_header.clone();
+    let mut wrong_then_valid = original.clone();
+    wrong_then_valid.fields[15] = wrong_then_valid.fields[15].replace(
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        "99999999-9999-4999-8999-999999999999",
+    );
+    wrong_then_valid.fields[29] = valid_header;
+
+    for fixture in [short, moved, duplicate, wrong_then_valid] {
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            parse_calculation_register_fixed_form_pair(
+                "CalculationRegister",
+                &fields,
+                &expected,
+                &form_refs,
+            )
+            .is_none()
+        );
+    }
+
+    let mut mismatch = expected;
+    mismatch.name = "Other".to_string();
+    assert!(
+        parse_calculation_register_fixed_form_pair(
+            "CalculationRegister",
+            &fields,
+            &mismatch,
+            &form_refs,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn calculation_form_pair_keeps_nonexact_arities_unconsumed_and_omitted() {
+    let form_refs = calculation_form_refs_for_test();
+    for field_count in [32, 34] {
+        let mut slot_like = CalculationRegisterPresentationsFixture::exact();
+        slot_like.fields.truncate(field_count.min(33));
+        while slot_like.fields.len() < field_count {
+            slot_like.fields.push("0".to_string());
+        }
+        let mut omitted = slot_like.clone();
+        omitted.fields[23] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+
+        let slot_like_xml = slot_like.xml_with_form_refs(&form_refs).unwrap();
+        let omitted_xml = omitted.xml_with_form_refs(&form_refs).unwrap();
+        assert!(!slot_like_xml.contains("<DefaultListForm"));
+        assert!(!slot_like_xml.contains("<AuxiliaryListForm"));
+        assert_eq!(
+            slot_like_xml, omitted_xml,
+            "consumed form slots at len {field_count}"
+        );
+    }
+}
+
+#[test]
+fn calculation_form_pair_preserves_accounting_and_accumulation_form_slots() {
+    let accounting_uuid = "33333333-3333-4333-8333-333333333333";
+    let accounting_form_uuid = "66666666-6666-4666-8666-666666666666";
+    let mut accounting_fields = vec!["21".to_string()];
+    accounting_fields.extend(register_generated_type_fields(14));
+    accounting_fields.push(register_owner_header(accounting_uuid, "Ledger"));
+    accounting_fields.extend([
+        "1".to_string(),
+        "1".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        accounting_form_uuid.to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+    ]);
+    let accounting_form_refs = form_refs_for_test(
+        accounting_form_uuid,
+        "AccountingRegisters/Ledger/Forms/List.xml",
+        "Form",
+    );
+    let accounting = extract_register_fields_with_form_refs(
+        &accounting_fields,
+        accounting_uuid,
+        &accounting_form_refs,
+    )
+    .and_then(|source| String::from_utf8(source.xml).ok())
+    .expect("accounting form control");
+    assert!(
+        accounting
+            .contains("<DefaultListForm>AccountingRegister.Ledger.Form.List</DefaultListForm>")
+    );
+    assert!(accounting.contains("<AuxiliaryListForm/>"));
+
+    let accumulation_default_uuid = "77777777-7777-4777-8777-777777777777";
+    let accumulation_aux_uuid = "88888888-8888-4888-8888-888888888888";
+    let mut accumulation_fixture = AccumulationRegisterTotalsFixture::exact("1");
+    accumulation_fixture.fields[15] = accumulation_default_uuid.to_string();
+    accumulation_fixture.fields[16] = accumulation_aux_uuid.to_string();
+    let accumulation_form_refs = BTreeMap::from([
+        (
+            accumulation_default_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("AccumulationRegisters/Totals/Forms/List.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            accumulation_aux_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("AccumulationRegisters/Totals/Forms/Aux.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+    let accumulation = extract_register_fields_with_form_refs(
+        &accumulation_fixture.fields,
+        ACCUMULATION_TOTALS_TEST_UUID,
+        &accumulation_form_refs,
+    )
+    .and_then(|source| String::from_utf8(source.xml).ok())
+    .expect("accumulation form control");
+    assert!(
+        accumulation
+            .contains("<DefaultListForm>AccumulationRegister.Totals.Form.List</DefaultListForm>")
+    );
+    assert!(
+        accumulation.contains(
+            "<AuxiliaryListForm>AccumulationRegister.Totals.Form.Aux</AuxiliaryListForm>"
+        )
+    );
+}
+
+#[test]
+fn calculation_form_pair_changes_only_the_two_mandatory_lines() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let raw = fixture.raw();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let form_refs = calculation_form_refs_for_test();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &raw,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &form_refs,
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let with_pair = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    register.calculation_form_pair = None;
+    let without_pair = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    let stripped = with_pair
+        .replace(
+            "\t\t\t<DefaultListForm>CalculationRegister.Payroll.Form.List</DefaultListForm>\r\n",
+            "",
+        )
+        .replace("\t\t\t<AuxiliaryListForm/>\r\n", "");
+
+    assert_eq!(stripped, without_pair);
+}
+
+#[test]
+fn calculation_form_pair_has_no_production_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "a6756af4-964f-400d-97d4-0bd3f5916693",
+        "dafd4131-f955-4461-b7c2-726df6d62fbb",
+        "_ДемоОсновныеНачисления",
+        "ФормаСписка",
     ] {
         assert!(!source.contains(forbidden));
     }
