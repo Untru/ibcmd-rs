@@ -42046,6 +42046,8 @@ fn rejects_web_service_global_uuid_qname_package_and_reuse_session_violations() 
 
 const ACCUMULATION_TOTALS_TEST_UUID: &str = "11111111-1111-4111-8111-111111111111";
 const ACCUMULATION_TOTALS_ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
+const CALCULATION_PRESENTATIONS_TEST_UUID: &str = "44444444-4444-4444-8444-444444444444";
+const CALCULATION_PRESENTATIONS_TYPE_UUID: &str = "55555555-5555-4555-8555-555555555555";
 
 fn register_generated_type_fields(count: usize) -> Vec<String> {
     (1..=count)
@@ -42125,6 +42127,43 @@ impl AccumulationRegisterTotalsFixture {
 
     fn raw(&self) -> String {
         format!("{{1,{{{}}}}}", self.fields.join(","))
+    }
+
+    fn xml(&self) -> Option<String> {
+        self.extract()
+            .and_then(|source| String::from_utf8(source.xml).ok())
+    }
+}
+
+#[derive(Clone)]
+struct CalculationRegisterPresentationsFixture {
+    fields: Vec<String>,
+}
+
+impl CalculationRegisterPresentationsFixture {
+    fn exact() -> Self {
+        let mut fields = vec!["21".to_string()];
+        fields.extend(register_generated_type_fields(14));
+        fields.push(register_owner_header(
+            CALCULATION_PRESENTATIONS_TEST_UUID,
+            "Payroll",
+        ));
+        fields.extend((16..33).map(|index| match index {
+            22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
+            29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            30..=32 => "{0}".to_string(),
+            _ => "0".to_string(),
+        }));
+        assert_eq!(fields.len(), 33);
+        Self { fields }
+    }
+
+    fn raw(&self) -> String {
+        format!("{{1,{{{}}}}}", self.fields.join(","))
+    }
+
+    fn extract(&self) -> Option<ExtractedMetadataSourceXml> {
+        extract_register_fields(&self.fields, CALCULATION_PRESENTATIONS_TEST_UUID)
     }
 
     fn xml(&self) -> Option<String> {
@@ -42338,33 +42377,19 @@ fn accumulation_totals_preserves_accounting_slot_and_order() {
 }
 
 #[test]
-fn accumulation_totals_omits_calculation_code21_len33_control() {
-    let uuid = "44444444-4444-4444-8444-444444444444";
-    let calculation_type_uuid = "55555555-5555-4555-8555-555555555555";
-    let mut fields = vec!["21".to_string()];
-    fields.extend(register_generated_type_fields(14));
-    fields.push(register_owner_header(uuid, "Payroll"));
-    fields.extend((16..33).map(|index| {
-        if index == 22 {
-            calculation_type_uuid.to_string()
-        } else if matches!(index, 30..=32) {
-            register_localized_field(&[("en", "calculation tail must remain omitted")])
-        } else {
-            "0".to_string()
-        }
-    }));
-    assert_eq!(fields.len(), 33);
-
-    let source = extract_register_fields(&fields, uuid).expect("calculation control");
+fn accumulation_totals_preserves_calculation_empty_presentation_control() {
+    let source = CalculationRegisterPresentationsFixture::exact()
+        .extract()
+        .expect("calculation control");
     let xml = String::from_utf8(source.xml).unwrap();
     assert_eq!(
         source.relative_path,
         PathBuf::from("CalculationRegisters/Payroll.xml")
     );
     assert!(!xml.contains("<EnableTotalsSplitting>"));
-    assert!(!xml.contains("<ListPresentation"));
-    assert!(!xml.contains("<ExtendedListPresentation"));
-    assert!(!xml.contains("<Explanation"));
+    assert!(xml.contains("<ListPresentation/>"));
+    assert!(xml.contains("<ExtendedListPresentation/>"));
+    assert!(xml.contains("<Explanation/>"));
 }
 
 #[test]
@@ -42624,6 +42649,240 @@ fn accumulation_presentations_have_no_production_corpus_literals() {
         "6707f7f5-4a6c-4d8b-84cf-483768cb71b9",
         "_ДемоОстаткиТоваровВМестахХранения",
         "_ДемоОборотыПоСчетамНаОплату",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+#[test]
+fn calculation_presentations_emit_mandatory_empty_triple_in_schema_position() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let source = fixture
+        .extract()
+        .expect("exact calculation presentation tail");
+    let xml = String::from_utf8(source.xml).unwrap();
+
+    assert_eq!(
+        source.relative_path,
+        PathBuf::from("CalculationRegisters/Payroll.xml")
+    );
+    for property in [
+        "ListPresentation",
+        "ExtendedListPresentation",
+        "Explanation",
+    ] {
+        assert_eq!(xml.matches(&format!("<{property}/>")).count(), 1);
+    }
+    let list = xml.find("<ListPresentation/>").unwrap();
+    let extended = xml.find("<ExtendedListPresentation/>").unwrap();
+    let explanation = xml.find("<Explanation/>").unwrap();
+    assert!(list < extended && extended < explanation);
+    assert!(!xml.contains("<EnableTotalsSplitting>"));
+
+    let raw = fixture.raw();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &raw,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    register.full_text_search = Some("DontUse");
+    let ordered = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    assert!(
+        ordered
+            .find("<FullTextSearch>DontUse</FullTextSearch>")
+            .unwrap()
+            < ordered.find("<ListPresentation/>").unwrap()
+    );
+
+    let mut padded = CalculationRegisterPresentationsFixture::exact();
+    for slot in 30..=32 {
+        padded.fields[slot] = " \r\n{0}\t".to_string();
+    }
+    assert!(
+        padded.extract().is_some(),
+        "trimmed empty tail was rejected"
+    );
+}
+
+#[test]
+fn calculation_presentations_reject_nonempty_and_malformed_slots_atomically() {
+    let rejected = [
+        register_localized_field(&[("en", "valid but unsupported")]),
+        "{1,\"en\"}".to_string(),
+        "{1,en,\"value\"}".to_string(),
+        "{2,\"en\",\"first\",\"en\",\"second\"}".to_string(),
+        "{1,\"en\",\"value\",0}".to_string(),
+        "{ 0 }".to_string(),
+        "0".to_string(),
+    ];
+
+    for slot in 30..=32 {
+        for value in &rejected {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact();
+            fixture.fields[slot] = value.clone();
+            assert!(
+                fixture.extract().is_none(),
+                "accepted unsupported exact field {slot}: {value:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn calculation_presentations_direct_seam_requires_full_exact_owner_boundary() {
+    let original = CalculationRegisterPresentationsFixture::exact();
+    let raw = original.raw();
+    let expected =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let valid_header = original.fields[15].clone();
+
+    let mut short = original.clone();
+    short.fields[15] = format!(
+        "{{0,{{3,{{1,0,{CALCULATION_PRESENTATIONS_TEST_UUID}}},\"Payroll\",{{1,\"en\",\"Payroll\"}},\"\"}}}}"
+    );
+    let mut moved = original.clone();
+    moved.fields[14] = valid_header.clone();
+    moved.fields[15] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[29] = valid_header.clone();
+    let mut wrong_then_valid = original.clone();
+    wrong_then_valid.fields[15] = wrong_then_valid.fields[15].replace(
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        "66666666-6666-4666-8666-666666666666",
+    );
+    wrong_then_valid.fields[29] = valid_header;
+
+    for fixture in [short, moved, duplicate, wrong_then_valid] {
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            parse_calculation_register_empty_presentations(
+                "CalculationRegister",
+                &fields,
+                &expected,
+            )
+            .is_none()
+        );
+    }
+
+    let fields = original
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let mut mismatches = Vec::new();
+    let mut name = expected.clone();
+    name.name = "Other".to_string();
+    mismatches.push(name);
+    let mut synonyms = expected.clone();
+    synonyms.synonyms = vec![("en".to_string(), "Other".to_string())];
+    mismatches.push(synonyms);
+    let mut comment = expected;
+    comment.comment = "Other".to_string();
+    mismatches.push(comment);
+    for mismatch in mismatches {
+        assert!(
+            parse_calculation_register_empty_presentations(
+                "CalculationRegister",
+                &fields,
+                &mismatch,
+            )
+            .is_none()
+        );
+    }
+}
+
+#[test]
+fn calculation_presentations_keep_nonexact_arities_unconsumed_and_omitted() {
+    for field_count in [32, 34] {
+        let mut baseline = CalculationRegisterPresentationsFixture::exact();
+        baseline.fields.truncate(field_count.min(33));
+        while baseline.fields.len() < field_count {
+            baseline.fields.push("0".to_string());
+        }
+        let mut tail_like = baseline.clone();
+        for slot in 30..=32 {
+            if let Some(field) = tail_like.fields.get_mut(slot) {
+                *field = register_localized_field(&[("en", "must remain unconsumed")]);
+            }
+        }
+        let baseline_xml = baseline.xml().expect("nonexact calculation baseline");
+        let tail_like_xml = tail_like.xml().expect("nonexact calculation tail control");
+
+        for property in [
+            "ListPresentation",
+            "ExtendedListPresentation",
+            "Explanation",
+        ] {
+            assert!(!tail_like_xml.contains(&format!("<{property}")));
+        }
+        assert_eq!(
+            baseline_xml, tail_like_xml,
+            "consumed calculation tail at len {field_count}"
+        );
+    }
+}
+
+#[test]
+fn calculation_presentations_change_only_the_mandatory_empty_trio() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let raw = fixture.raw();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &raw,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let with_presentations = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    register.emit_calculation_presentations = false;
+    let without_presentations = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    let stripped = with_presentations
+        .replace("\t\t\t<ListPresentation/>\r\n", "")
+        .replace("\t\t\t<ExtendedListPresentation/>\r\n", "")
+        .replace("\t\t\t<Explanation/>\r\n", "");
+
+    assert_eq!(stripped, without_presentations);
+}
+
+#[test]
+fn calculation_presentations_have_no_production_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "a6756af4-964f-400d-97d4-0bd3f5916693",
+        "_ДемоОсновныеНачисления",
+        "ca9501a5-a0d3-422e-afd3-8c8cfbbcbb01",
+        "03ccda6c-33a9-4c9e-9f21-27fc6dd07aaf",
     ] {
         assert!(!source.contains(forbidden));
     }

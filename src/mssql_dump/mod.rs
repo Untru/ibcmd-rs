@@ -3923,6 +3923,7 @@ struct RegisterProperties {
     default_list_form: Option<String>,
     auxiliary_list_form: Option<String>,
     emit_accumulation_presentations: bool,
+    emit_calculation_presentations: bool,
     list_presentation: Vec<(String, String)>,
     extended_list_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
@@ -7947,6 +7948,8 @@ fn parse_register_properties_from_text(
     let accumulation_presentations =
         parse_accumulation_register_presentations(kind, &fields, &header)?;
     let emit_accumulation_presentations = accumulation_presentations.is_some();
+    let emit_calculation_presentations =
+        parse_calculation_register_empty_presentations(kind, &fields, &header)?;
     let (list_presentation, extended_list_presentation, explanation) =
         if kind == "InformationRegister" {
             (Vec::new(), Vec::new(), Vec::new())
@@ -8037,6 +8040,7 @@ fn parse_register_properties_from_text(
         default_list_form: register_form_refs.0,
         auxiliary_list_form: register_form_refs.1,
         emit_accumulation_presentations,
+        emit_calculation_presentations,
         list_presentation,
         extended_list_presentation,
         explanation,
@@ -8413,19 +8417,24 @@ fn parse_wrapped_register_owner_header(value: &str) -> Option<MetadataHeader> {
     parse_information_register_owner_header(wrapper.get(1)?)
 }
 
-fn validate_exact_accumulation_code28_layout(
+fn validate_exact_wrapped_register_owner_layout(
     fields: &[&str],
     expected_header: &MetadataHeader,
+    expected_code: &str,
+    expected_field_count: usize,
+    expected_header_index: usize,
 ) -> Option<bool> {
-    if fields.first().map(|field| field.trim()) != Some("28") || fields.len() != 26 {
+    if fields.first().map(|field| field.trim()) != Some(expected_code)
+        || fields.len() != expected_field_count
+    {
         return Some(false);
     }
 
-    let parsed_header = parse_wrapped_register_owner_header(fields.get(13)?)?;
+    let parsed_header = parse_wrapped_register_owner_header(fields.get(expected_header_index)?)?;
     let mut matching_header_indexes = fields.iter().enumerate().filter_map(|(index, field)| {
         (metadata_header_field_index(&[*field], &expected_header.uuid) == Some(0)).then_some(index)
     });
-    if matching_header_indexes.next() != Some(13)
+    if matching_header_indexes.next() != Some(expected_header_index)
         || matching_header_indexes.next().is_some()
         || !parsed_header
             .uuid
@@ -8437,6 +8446,13 @@ fn validate_exact_accumulation_code28_layout(
         return None;
     }
     Some(true)
+}
+
+fn validate_exact_accumulation_code28_layout(
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<bool> {
+    validate_exact_wrapped_register_owner_layout(fields, expected_header, "28", 26, 13)
 }
 
 fn parse_register_enable_totals_splitting(
@@ -8479,6 +8495,26 @@ fn parse_accumulation_register_presentations(
         parse_information_register_owner_localized_value(fields.get(24)?)?,
         parse_information_register_owner_localized_value(fields.get(25)?)?,
     )))
+}
+
+fn parse_calculation_register_empty_presentations(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<bool> {
+    if kind != "CalculationRegister" {
+        return Some(false);
+    }
+    if !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)? {
+        return Some(false);
+    }
+    if fields.get(30)?.trim() != "{0}"
+        || fields.get(31)?.trim() != "{0}"
+        || fields.get(32)?.trim() != "{0}"
+    {
+        return None;
+    }
+    Some(true)
 }
 
 fn parse_register_full_text_search(
@@ -17709,6 +17745,13 @@ fn format_register_source_xml(
                     "\t\t\t",
                     "Explanation",
                     &register.explanation,
+                );
+            }
+            if kind == "CalculationRegister" && register.emit_calculation_presentations {
+                properties.push_str(
+                    "\t\t\t<ListPresentation/>\r\n\
+\t\t\t<ExtendedListPresentation/>\r\n\
+\t\t\t<Explanation/>\r\n",
                 );
             }
             xml.insert_str(index, &properties);
