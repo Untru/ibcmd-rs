@@ -11976,6 +11976,7 @@ fn parse_catalog_properties_from_text(
         catalog_code_allowed_length_xml(parse_1c_u32_field(fields.get(20).copied()).unwrap_or(1));
     let use_standard_commands = parse_1c_bool_field(fields.get(33).copied()).unwrap_or(true);
     let include_help_in_contents = parse_1c_bool_field(fields.get(31).copied()).unwrap_or(false);
+    let default_presentation = parse_catalog_default_presentation(&fields, &header)?;
 
     Some(CatalogProperties {
         generated_types,
@@ -11992,7 +11993,7 @@ fn parse_catalog_properties_from_text(
         code_series,
         check_unique,
         autonumbering,
-        default_presentation: Some("AsDescription"),
+        default_presentation: Some(default_presentation),
         quick_choice: parse_1c_bool_field(fields.get(41).copied()).unwrap_or(true),
         choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(40).copied()).unwrap_or(2)),
         input_by_string_fields: parse_catalog_input_by_string_fields(
@@ -12057,6 +12058,40 @@ fn parse_catalog_properties_from_text(
             &header.name,
             template_refs,
         ),
+    })
+}
+
+fn parse_catalog_default_presentation(
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<&'static str> {
+    if fields.first().map(|field| field.trim()) != Some("56") || fields.len() != 61 {
+        return Some("AsDescription");
+    }
+
+    let header_wrapper = split_information_register_braced_fields(fields.get(9)?)?;
+    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    let mut owner_header_indexes = fields.iter().enumerate().filter_map(|(index, field)| {
+        (metadata_header_field_index(&[*field], &expected_header.uuid) == Some(0)).then_some(index)
+    });
+    if header_wrapper.len() != 2
+        || header_wrapper.first()?.trim() != "0"
+        || owner_header_indexes.next() != Some(9)
+        || owner_header_indexes.next().is_some()
+        || !parsed_header
+            .uuid
+            .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return None;
+    }
+
+    Some(if parse_1c_u32_field(fields.get(19).copied())? == 0 {
+        "AsCode"
+    } else {
+        "AsDescription"
     })
 }
 

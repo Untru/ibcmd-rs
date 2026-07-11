@@ -37851,6 +37851,283 @@ fn extracts_data_processor_child_attribute_choice_parameters() {
     );
 }
 
+struct CatalogDefaultPresentationFixture {
+    owner_uuid: String,
+    fields: Vec<String>,
+}
+
+impl CatalogDefaultPresentationFixture {
+    fn raw(&self) -> String {
+        format!("{{1,{{{}}}}}", self.fields.join(","))
+    }
+
+    fn extract(&self) -> Option<ExtractedMetadataSourceXml> {
+        extract_metadata_source_xml(
+            &deflate_for_test(self.raw().as_bytes()),
+            &self.owner_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+    }
+}
+
+fn catalog_default_presentation_fixture(
+    code: &str,
+    field_count: usize,
+    description_length: &str,
+    name: &str,
+) -> CatalogDefaultPresentationFixture {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let owner_uuid = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa".to_string();
+    let mut fields = vec!["0".to_string(); field_count];
+    assert!(field_count >= 60);
+    fields[0] = code.to_string();
+    for (index, value) in [
+        "11111111-1111-4111-8111-111111111111",
+        "11111111-1111-4111-8111-111111111112",
+        "22222222-2222-4222-8222-222222222221",
+        "22222222-2222-4222-8222-222222222222",
+        "33333333-3333-4333-8333-333333333331",
+        "33333333-3333-4333-8333-333333333332",
+        "44444444-4444-4444-8444-444444444441",
+        "44444444-4444-4444-8444-444444444442",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fields[index + 1] = value.to_string();
+    }
+    fields[9] = format!(
+        "{{0,{{3,{{1,0,{owner_uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,{zero},0}}}}"
+    );
+    fields[10] = "2".to_string();
+    fields[11] = "1".to_string();
+    fields[12] = "{0,0}".to_string();
+    fields[13] = "1".to_string();
+    fields[17] = "9".to_string();
+    fields[18] = "1".to_string();
+    fields[19] = description_length.to_string();
+    fields[20] = "1".to_string();
+    for field in &mut fields[21..=30] {
+        *field = zero.to_string();
+    }
+    fields[31] = "1".to_string();
+    fields[32] = "{0,0}".to_string();
+    fields[33] = "1".to_string();
+    fields[34] = "55555555-5555-4555-8555-555555555551".to_string();
+    fields[35] = "55555555-5555-4555-8555-555555555552".to_string();
+    fields[40] = "2".to_string();
+    fields[41] = "1".to_string();
+    fields[42] = "{0}".to_string();
+    fields[43] = "1".to_string();
+    fields[45] = "{0}".to_string();
+    for field in &mut fields[46..=50] {
+        *field = "{0}".to_string();
+    }
+
+    CatalogDefaultPresentationFixture { owner_uuid, fields }
+}
+
+fn catalog_default_presentation_xml(
+    code: &str,
+    field_count: usize,
+    description_length: &str,
+    name: &str,
+) -> Option<String> {
+    catalog_default_presentation_fixture(code, field_count, description_length, name)
+        .extract()
+        .map(|source| String::from_utf8(source.xml).unwrap())
+}
+
+#[test]
+fn extracts_as_code_for_six_renamed_exact_code56_zero_length_catalogs() {
+    for name in [
+        "ExtensionRevisionsRenamed",
+        "QueuedTasksRenamed",
+        "DeliveredPayloadsRenamed",
+        "LegacyQueuedTasksRenamed",
+        "BinaryPayloadsRenamed",
+        "PrintLanguagesRenamed",
+    ] {
+        let source = catalog_default_presentation_fixture("56", 61, "0", name)
+            .extract()
+            .expect("exact code-56 zero-length Catalog");
+        let xml = String::from_utf8(source.xml).unwrap();
+
+        assert_eq!(
+            source.relative_path,
+            PathBuf::from(format!("Catalogs/{name}.xml"))
+        );
+        assert_eq!(
+            xml.matches("<DefaultPresentation>AsCode</DefaultPresentation>")
+                .count(),
+            1,
+            "{name}: {xml}"
+        );
+        assert!(!xml.contains("<DefaultPresentation>AsDescription</DefaultPresentation>"));
+    }
+}
+
+#[test]
+fn keeps_107_observed_nonzero_code56_controls_as_description() {
+    for (length, count) in [
+        (10, 1),
+        (25, 2),
+        (36, 1),
+        (50, 11),
+        (60, 1),
+        (80, 1),
+        (100, 29),
+        (128, 1),
+        (150, 60),
+    ] {
+        for index in 0..count {
+            let name = format!("NonZeroControl{length}_{index}");
+            let xml = catalog_default_presentation_xml("56", 61, &length.to_string(), &name)
+                .expect("nonzero exact code-56 Catalog");
+            assert!(
+                xml.contains("<DefaultPresentation>AsDescription</DefaultPresentation>"),
+                "{name}: {xml}"
+            );
+            assert!(!xml.contains("<DefaultPresentation>AsCode</DefaultPresentation>"));
+        }
+    }
+}
+
+#[test]
+fn leaves_nonzero_as_code_native_exception_unresolved() {
+    let xml = catalog_default_presentation_xml("56", 61, "150", "UnresolvedNativeException")
+        .expect("nonzero exception-shaped control");
+
+    assert!(xml.contains("<DescriptionLength>150</DescriptionLength>"));
+    assert!(xml.contains("<DefaultPresentation>AsDescription</DefaultPresentation>"));
+    assert!(!xml.contains("<DefaultPresentation>AsCode</DefaultPresentation>"));
+}
+
+#[test]
+fn keeps_489_code57_controls_on_legacy_as_description() {
+    let nonzero_lengths = [10, 25, 36, 50, 60, 80, 100, 128, 150];
+    for index in 0..489 {
+        let length = if index < 26 {
+            0
+        } else {
+            nonzero_lengths[(index - 26) % nonzero_lengths.len()]
+        };
+        let name = format!("Code57Control{index}");
+        let xml = catalog_default_presentation_xml("57", 61, &length.to_string(), &name)
+            .expect("code-57 legacy control");
+
+        assert!(
+            xml.contains("<DefaultPresentation>AsDescription</DefaultPresentation>"),
+            "{name}: {xml}"
+        );
+        assert!(!xml.contains("<DefaultPresentation>AsCode</DefaultPresentation>"));
+    }
+}
+
+#[test]
+fn keeps_non_exact_code56_arities_on_legacy_as_description() {
+    for field_count in [60, 62] {
+        let name = format!("Code56Arity{field_count}");
+        let xml = catalog_default_presentation_xml("56", field_count, "0", &name)
+            .expect("non-exact code-56 legacy control");
+
+        assert!(xml.contains("<DefaultPresentation>AsDescription</DefaultPresentation>"));
+        assert!(!xml.contains("<DefaultPresentation>AsCode</DefaultPresentation>"));
+    }
+}
+
+#[test]
+fn rejects_malformed_exact_code56_description_length_atomically() {
+    for malformed in ["", "value", "-1", "4294967296", "{0}"] {
+        let fixture =
+            catalog_default_presentation_fixture("56", 61, malformed, "MalformedDescriptionLength");
+        assert!(fixture.extract().is_none(), "accepted slot 19: {malformed}");
+    }
+}
+
+#[test]
+fn rejects_malformed_exact_code56_owner_header_atomically() {
+    let mut fixture = catalog_default_presentation_fixture("56", 61, "0", "MalformedOwnerHeader");
+    let insertion = fixture.fields[9].len() - 1;
+    fixture.fields[9].insert_str(insertion, ",0");
+
+    assert!(fixture.extract().is_none());
+}
+
+#[test]
+fn rejects_duplicate_exact_code56_owner_header_atomically() {
+    let mut fixture = catalog_default_presentation_fixture("56", 61, "0", "DuplicateOwnerHeader");
+    fixture.fields[56] = fixture.fields[9].clone();
+
+    assert!(fixture.extract().is_none());
+}
+
+#[test]
+fn rejects_moved_exact_code56_owner_header_atomically() {
+    let mut fixture = catalog_default_presentation_fixture("56", 61, "0", "MovedOwnerHeader");
+    fixture.fields[8] = fixture.fields[9].clone();
+    fixture.fields[9] = "0".to_string();
+
+    assert!(fixture.extract().is_none());
+}
+
+#[test]
+fn rejects_wrong_slot9_uuid_with_later_valid_owner_header_atomically() {
+    let mut fixture = catalog_default_presentation_fixture("56", 61, "0", "WrongSlotNineUuid");
+    fixture.fields[56] = fixture.fields[9].clone();
+    fixture.fields[9] =
+        fixture.fields[9].replace(&fixture.owner_uuid, "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb");
+
+    assert!(fixture.extract().is_none());
+}
+
+#[test]
+fn changes_only_default_presentation_and_preserves_schema_order() {
+    let as_code = catalog_default_presentation_xml("56", 61, "0", "OrderingControl")
+        .expect("exact code-56 Catalog");
+    let legacy = catalog_default_presentation_xml("57", 61, "0", "OrderingControl")
+        .expect("code-57 control");
+
+    assert_eq!(
+        as_code.replace(
+            "<DefaultPresentation>AsCode</DefaultPresentation>",
+            "<DefaultPresentation>AsDescription</DefaultPresentation>",
+        ),
+        legacy
+    );
+    assert_eq!(as_code.matches("<DefaultPresentation>").count(), 1);
+    assert!(
+        as_code.find("<Autonumbering>").unwrap() < as_code.find("<DefaultPresentation>").unwrap()
+    );
+    assert!(
+        as_code.find("<DefaultPresentation>").unwrap()
+            < as_code.find("<StandardAttributes>").unwrap()
+    );
+}
+
+#[test]
+fn catalog_default_presentation_production_has_no_fixture_literals() {
+    let production = include_str!("mod.rs");
+    for forbidden in [
+        "ВерсииРасширений",
+        "ВерсииФайлов",
+        "ОчередьЗаданий",
+        "ПоставляемыеДанные",
+        "УдалитьОчередьЗаданий",
+        "ХранилищеДвоичныхДанных",
+        "ЯзыкиПечатныхФорм",
+        "UnresolvedNativeException",
+        "ExtensionRevisionsRenamed",
+    ] {
+        assert!(
+            !production.contains(forbidden),
+            "production literal: {forbidden}"
+        );
+    }
+}
+
 #[test]
 fn extracts_catalog_generated_types_to_metadata_xml() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
