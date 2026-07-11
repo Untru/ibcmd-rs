@@ -925,6 +925,83 @@ independently proven V2.21 `pal` namespace insertion; V2.20 omits it. No
 ConfigDump, configuration export, DB access, or `ConfigDumpInfo.xml` change was
 performed for this gate.
 
+## ExchangePlan root properties
+
+Status: the exact saved BSP/UT owner protocol and formatter are implemented
+and covered by independent captured-tail and mutation tests. The saved export
+tree was not refreshed; native exactness, outside-scope preservation, and an
+ExchangePlan-specific V2.21/SFC gate remain pending.
+
+The root is exactly `{1, owner, 5, C0, C1, C2, C3, C4}`. The five ordered
+counted collections have platform TypeIds for Attributes, Templates,
+TabularSections, Forms, and Commands. Declared counts, item counts, TypeId
+order, and complete consumption are strict. Direct Template and Form items use
+strict nonzero UUIDs; Attribute, TabularSection, and Command collection items
+are required only to be nonempty fully braced payload shells at this layer.
+BSP owners use code 36 with 50 fields; UT owners use code 37 with 51 fields and
+the final strict sentinel `1`. Both layouts have the direct metadata header at
+owner index 12. Code 37 is observed with XML 2.20 and is not a source-version
+discriminator.
+
+Owner fields 13 through 49 encode the complete root property tail:
+
+- standard commands, code and description lengths, presentation/edit/choice
+  enums, and input-by-string behavior;
+- six form properties: three default and three auxiliary forms;
+- BasedOn, Characteristics, distributed-mode, help, extension, lock, search,
+  creation, choice-history, and data-history properties;
+- five localized presentation/explanation wrappers;
+- StandardAttributes and DataLockFields reference collections.
+
+Every enum, boolean, decimal, wrapper, and ordered field-reference sequence is
+validated against the saved 6 BSP + 22 UT contract. BasedOn uses a resolved
+metadata design reference. DataLockFields accepts only Code or an Attribute of
+the current owner. All 31 observed nonzero form UUIDs resolve uniquely under
+the same ExchangePlan; filename/name fallback is forbidden. The same strict
+resolver covers the three auxiliary slots, whose saved corpus values are all
+zero and whose nonzero tests are ownership-protocol extensions rather than
+corpus claims.
+
+StandardAttributes is either exact `{0}` or an eight-marker payload in the
+fixed order ExchangeDate, ThisNode, ReceivedNo, SentNo, Ref, DeletionMark,
+Description, Code. The legacy shape has 24 canonical keyed properties and the
+modern shape adds TypeReductionMode as the 25th protocol property. Shape,
+never owner code or XML version, selects the variant. Shared named-key and
+wrapper parsing is reused from InformationRegister, but dynamic policy remains
+family- and marker-specific. In particular, ExchangePlan string FillValue is
+allowed only for Description and Code; InformationRegister Boolean, decimal,
+and date FillValue domains do not leak into this family.
+
+The complete owner-property result is atomic for the root collection
+envelopes/counts/TypeIds/item shells and for every owner scalar, localized
+wrapper, form/reference, and StandardAttributes bag. Malformed nested
+Attribute, TabularSection, or Command payloads remain independently omittable
+by their existing child parsers and do not suppress a valid root property tail.
+Generated types, existing Attribute children, and generic Form/Template child
+references remain independently preserved and are emitted once in their
+existing order. The dedicated formatter inserts the complete tail once in
+native direct-child order.
+
+The independent captured owner-tail fixtures use an explicit leaf-only
+sanitization: whitespace outside quoted strings is compacted, every nonempty
+Russian localized content value is replaced with `Text`, and the two nonzero
+UT form UUIDs are replaced with neutral `90000000-0000-4000-8000-000000000001`
+and `90000000-0000-4000-8000-000000000002`. Braces, field order, scalar values,
+wrapper shapes, protocol UUIDs, and all other leaf values remain unchanged.
+
+Integrated commit `060ea1b` passes 23 ExchangePlan tests, 24 shared
+StandardAttributes tests, and all 30 InformationRegister regressions. Two
+independent reviews approved frozen diff SHA-256
+`A7860C04D02719EAA2D38C422CEE2F88448C5444698AC961F3B311DF25700370`.
+Exact full-suite comparison against parent produced the same 74 failure names
+with five additional passing tests. The new production UUID literals are
+exactly six named platform protocol TypeIds; no database object/form/header
+UUID, object name, evidence path, or filename fallback is present.
+
+No DB access, ConfigDump, configuration export, or `ConfigDumpInfo.xml` change
+was performed. The V2.21 `pal` namespace test reuses the generic metadata
+envelope rule and is not presented as ExchangePlan-native proof.
+
 ## Catalog attribute payloads
 
 Status: confirmed by complete BSP and independent UT corpora, serialized
