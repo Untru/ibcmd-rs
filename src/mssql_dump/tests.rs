@@ -29102,6 +29102,390 @@ fn extracts_common_attribute_xml_with_native_separation_tail() {
     }
 }
 
+const COMMON_ATTRIBUTE_CANDIDATE_ZERO_UUID_FOR_TEST: &str = "00000000-0000-0000-0000-000000000000";
+
+fn common_attribute_additional_order_tail_for_test(fields: [&str; 12]) -> String {
+    fields.join(",")
+}
+
+fn common_attribute_additional_order_text_for_test(uuid: &str, name: &str, tail: &str) -> String {
+    r#"{1,
+{5,
+{27,
+{2,
+{3,
+{1,0,@UUID@},"@NAME@",
+{1,"en","@NAME@"},"",0,0,@ZERO@,0},
+{"Pattern",
+{"S",20,1}
+}
+},0,
+{0},
+{0},0,"",0,
+{"U"},
+{"U"},0,@ZERO@,2,0,
+{5006,0},
+{3,0,0},
+{0,0},0,
+{0},
+{"S",""},0,0,0},
+{1,0},@TAIL@},0}"#
+        .replace("@UUID@", uuid)
+        .replace("@NAME@", name)
+        .replace("@ZERO@", COMMON_ATTRIBUTE_CANDIDATE_ZERO_UUID_FOR_TEST)
+        .replace("@TAIL@", tail)
+}
+
+fn common_attribute_additional_order_candidate_tail_for_test() -> String {
+    common_attribute_additional_order_tail_for_test([
+        "2",
+        "1",
+        "1",
+        "1",
+        "{1,00000000-0000-0000-0000-000000000000}",
+        "{1,00000000-0000-0000-0000-000000000000}",
+        "{1,00000000-0000-0000-0000-000000000000}",
+        "0",
+        "0",
+        "0",
+        "0",
+        "1",
+    ])
+}
+
+fn common_attribute_header_for_test(uuid: &str, name: &str) -> MetadataHeader {
+    MetadataHeader {
+        uuid: uuid.to_string(),
+        name: name.to_string(),
+        synonyms: vec![("en".to_string(), name.to_string())],
+        comment: String::new(),
+        template_type_code: None,
+    }
+}
+
+#[test]
+fn extracts_two_renamed_common_attribute_additional_order_candidates_exactly() {
+    let expected_block = "\t\t\t<DataSeparation>DontUse</DataSeparation>\r\n\
+\t\t\t<SeparatedDataUse>Independently</SeparatedDataUse>\r\n\
+\t\t\t<DataSeparationValue/>\r\n\
+\t\t\t<DataSeparationUse/>\r\n\
+\t\t\t<ConditionalSeparation/>\r\n\
+\t\t\t<UsersSeparation>DontUse</UsersSeparation>\r\n\
+\t\t\t<AuthenticationSeparation>DontUse</AuthenticationSeparation>\r\n\
+\t\t\t<ConfigurationExtensionsSeparation>DontUse</ConfigurationExtensionsSeparation>\r\n\
+\t\t\t<Indexing>IndexWithAdditionalOrder</Indexing>\r\n\
+\t\t\t<FullTextSearch>Use</FullTextSearch>\r\n\
+\t\t\t<DataHistory>Use</DataHistory>\r\n";
+
+    for (uuid, name) in [
+        ("10000000-0000-4000-8000-000000000001", "PrimaryLabel"),
+        ("20000000-0000-4000-8000-000000000002", "SecondaryLabel"),
+    ] {
+        let text = common_attribute_additional_order_text_for_test(
+            uuid,
+            name,
+            &common_attribute_additional_order_candidate_tail_for_test(),
+        );
+        let blob = deflate_for_test(text.as_bytes());
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap_or_else(|| panic!("failed candidate {name}"));
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(
+            extracted.relative_path,
+            PathBuf::from("CommonAttributes").join(format!("{name}.xml"))
+        );
+        assert!(xml.contains(expected_block), "{xml}");
+        assert!(
+            xml.contains(&format!("<AutoUse>Use</AutoUse>\r\n{expected_block}")),
+            "{xml}"
+        );
+        for needle in [
+            "<DataSeparation>DontUse</DataSeparation>",
+            "<SeparatedDataUse>Independently</SeparatedDataUse>",
+            "<DataSeparationValue/>",
+            "<DataSeparationUse/>",
+            "<ConditionalSeparation/>",
+            "<UsersSeparation>DontUse</UsersSeparation>",
+            "<AuthenticationSeparation>DontUse</AuthenticationSeparation>",
+            "<ConfigurationExtensionsSeparation>DontUse</ConfigurationExtensionsSeparation>",
+            "<Indexing>IndexWithAdditionalOrder</Indexing>",
+            "<FullTextSearch>Use</FullTextSearch>",
+            "<DataHistory>Use</DataHistory>",
+        ] {
+            assert_eq!(xml.matches(needle).count(), 1, "{needle}: {xml}");
+        }
+    }
+}
+
+#[test]
+fn preserves_five_common_attribute_additional_order_field_three_zero_controls_on_legacy_path() {
+    let zero_ref = "{1,00000000-0000-0000-0000-000000000000}";
+    let data_value = "{1,30000000-0000-4000-8000-000000000001}";
+    let data_use = "{1,30000000-0000-4000-8000-000000000002}";
+    let conditional = "{1,30000000-0000-4000-8000-000000000003}";
+    let controls = [
+        [
+            "0", "1", "1", "1", zero_ref, zero_ref, zero_ref, "0", "0", "0", "0", "1",
+        ],
+        [
+            "0", "1", "1", "1", zero_ref, zero_ref, zero_ref, "0", "0", "0", "0", "1",
+        ],
+        [
+            "0", "1", "1", "1", zero_ref, zero_ref, zero_ref, "0", "0", "0", "0", "1",
+        ],
+        [
+            "0",
+            "1",
+            "0",
+            "1",
+            data_value,
+            data_use,
+            conditional,
+            "0",
+            "0",
+            "1",
+            "0",
+            "1",
+        ],
+        [
+            "0",
+            "1",
+            "0",
+            "0",
+            data_value,
+            data_use,
+            conditional,
+            "1",
+            "1",
+            "0",
+            "1",
+            "1",
+        ],
+    ];
+
+    for (index, fields) in controls.into_iter().enumerate() {
+        let uuid = format!("30000000-0000-4000-8000-{index:012}");
+        let name = format!("LegacyControl{index}");
+        let text = common_attribute_additional_order_text_for_test(
+            &uuid,
+            &name,
+            &common_attribute_additional_order_tail_for_test(fields),
+        );
+        let blob = deflate_for_test(text.as_bytes());
+        let extracted = extract_metadata_source_xml(
+            &blob,
+            &uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap_or_else(|| panic!("legacy control {index} was suppressed"));
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert!(!xml.contains("IndexWithAdditionalOrder"), "{index}: {xml}");
+        if index < 4 {
+            assert!(
+                xml.contains("<Indexing>DontIndex</Indexing>"),
+                "{index}: {xml}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rejects_common_attribute_additional_order_scalar_and_reference_mutations_atomically() {
+    let uuid = "40000000-0000-4000-8000-000000000001";
+    let name = "StrictCandidate";
+    let zero_ref = "{1,00000000-0000-0000-0000-000000000000}";
+    let base = [
+        "2", "1", "1", "1", zero_ref, zero_ref, zero_ref, "0", "0", "0", "0", "1",
+    ];
+
+    let mut noncandidate = base;
+    noncandidate[0] = "0";
+    let text = common_attribute_additional_order_text_for_test(
+        uuid,
+        name,
+        &common_attribute_additional_order_tail_for_test(noncandidate),
+    );
+    let blob = deflate_for_test(text.as_bytes());
+    assert!(
+        extract_metadata_source_xml(
+            &blob,
+            uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_some(),
+        "field 3 = 0 must stay on the legacy path"
+    );
+
+    for index in [1usize, 2, 3, 7, 8, 9, 10, 11] {
+        let mut mutated = base;
+        mutated[index] = "9";
+        let text = common_attribute_additional_order_text_for_test(
+            uuid,
+            name,
+            &common_attribute_additional_order_tail_for_test(mutated),
+        );
+        let blob = deflate_for_test(text.as_bytes());
+        assert!(
+            extract_metadata_source_xml(
+                &blob,
+                uuid,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "accepted scalar mutation at owner field {}",
+            index + 3
+        );
+    }
+
+    for reference_index in [4usize, 5, 6] {
+        for invalid_reference in [
+            "{0,00000000-0000-0000-0000-000000000000}",
+            "{1,50000000-0000-4000-8000-000000000001}",
+            "{1,00000000-0000-0000-0000-000000000000,0}",
+        ] {
+            let mut mutated = base;
+            mutated[reference_index] = invalid_reference;
+            let text = common_attribute_additional_order_text_for_test(
+                uuid,
+                name,
+                &common_attribute_additional_order_tail_for_test(mutated),
+            );
+            let blob = deflate_for_test(text.as_bytes());
+            assert!(
+                extract_metadata_source_xml(
+                    &blob,
+                    uuid,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                )
+                .is_none(),
+                "accepted reference mutation at owner field {}: {invalid_reference}",
+                reference_index + 3
+            );
+        }
+    }
+}
+
+#[test]
+fn rejects_common_attribute_additional_order_root_owner_and_trailing_mutations() {
+    let uuid = "60000000-0000-4000-8000-000000000001";
+    let name = "StrictEnvelope";
+    let valid = common_attribute_additional_order_text_for_test(
+        uuid,
+        name,
+        &common_attribute_additional_order_candidate_tail_for_test(),
+    );
+    let expected_header = common_attribute_header_for_test(uuid, name);
+    let root_extra = format!("{},0}}", valid.strip_suffix('}').unwrap());
+    let owner_extra = format!("{},0}},0}}", valid.strip_suffix("},0}").unwrap());
+    let owner_short = format!("{}}},0}}", valid.strip_suffix(",1},0}").unwrap());
+
+    for (case, text) in [
+        ("root tag", valid.replacen("{1,\n{5,", "{2,\n{5,", 1)),
+        (
+            "root tail",
+            format!("{},1}}", valid.strip_suffix(",0}").unwrap()),
+        ),
+        ("root length", root_extra),
+        ("owner code", valid.replacen("{5,", "{6,", 1)),
+        ("owner length extra", owner_extra),
+        ("owner length short", owner_short),
+        ("trailing field", format!("{valid},0")),
+    ] {
+        assert!(
+            parse_common_attribute_properties_from_text(
+                &text,
+                &expected_header,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "accepted {case}; a partial tail would be observable"
+        );
+    }
+}
+
+#[test]
+fn rejects_common_attribute_additional_order_header_mismatches() {
+    let uuid = "70000000-0000-4000-8000-000000000001";
+    let name = "HeaderBoundCandidate";
+    let text = common_attribute_additional_order_text_for_test(
+        uuid,
+        name,
+        &common_attribute_additional_order_candidate_tail_for_test(),
+    );
+    let expected = common_attribute_header_for_test(uuid, name);
+    assert!(
+        parse_common_attribute_properties_from_text(
+            &text,
+            &expected,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_some()
+    );
+
+    let mut mismatches = Vec::new();
+    let mut wrong_uuid = expected.clone();
+    wrong_uuid.uuid = "70000000-0000-4000-8000-000000000002".to_string();
+    mismatches.push(wrong_uuid);
+    let mut wrong_name = expected.clone();
+    wrong_name.name = "OtherName".to_string();
+    mismatches.push(wrong_name);
+    let mut wrong_synonym = expected.clone();
+    wrong_synonym.synonyms = vec![("en".to_string(), "Other synonym".to_string())];
+    mismatches.push(wrong_synonym);
+    let mut wrong_comment = expected;
+    wrong_comment.comment = "Other comment".to_string();
+    mismatches.push(wrong_comment);
+
+    for mismatch in mismatches {
+        assert!(
+            parse_common_attribute_properties_from_text(
+                &text,
+                &mismatch,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "accepted mismatched header: {mismatch:?}"
+        );
+    }
+}
+
+#[test]
+fn common_attribute_additional_order_production_has_no_corpus_literals() {
+    let production = include_str!("mod.rs");
+    for forbidden in [
+        "03f9d2d0-eae4-4098-a70e-4eb569b11fd9",
+        "30031e74-e58a-44a2-98dd-fc8c950831c4",
+        "НаименованиеЯзык1",
+        "НаименованиеЯзык2",
+        "CommonAttributes/НаименованиеЯзык1.xml",
+        "CommonAttributes/НаименованиеЯзык2.xml",
+    ] {
+        assert!(
+            !production.contains(forbidden),
+            "production literal: {forbidden}"
+        );
+    }
+}
+
 #[test]
 fn extracts_functional_option_xml_from_metadata_blob() {
     let uuid = "44444444-4444-4444-8444-444444444444";

@@ -5907,7 +5907,7 @@ fn extract_metadata_source_xml_from_text_row(
         format_http_service_source_xml(&header, &service, source_version).into_bytes()
     } else if kind == "CommonAttribute" {
         let common_attribute =
-            parse_common_attribute_properties_from_text(text, uuid, type_index, object_refs)?;
+            parse_common_attribute_properties_from_text(text, header, type_index, object_refs)?;
         format_common_attribute_source_xml(&header, &common_attribute, source_version).into_bytes()
     } else if kind == "FilterCriterion" {
         let filter_criterion = parse_filter_criterion_properties_from_text(
@@ -13501,11 +13501,13 @@ fn parse_typed_metadata_properties_from_text(
 
 fn parse_common_attribute_properties_from_text(
     text: &str,
-    uuid: &str,
+    expected_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<CommonAttributeProperties> {
-    let typed = parse_typed_metadata_properties_from_text(text, uuid, type_index)?;
+    let additional_order_tail =
+        parse_common_attribute_additional_order_tail(text, expected_header)?;
+    let typed = parse_typed_metadata_properties_from_text(text, &expected_header.uuid, type_index)?;
     let fields = metadata_object_fields(text)?;
     if fields.first().map(|field| field.trim()) != Some("5") {
         return None;
@@ -13527,8 +13529,92 @@ fn parse_common_attribute_properties_from_text(
         property_details: parse_common_attribute_property_details(&fields),
         auto_use,
         content,
-        separation: parse_common_attribute_separation_properties(&fields, object_refs),
+        separation: additional_order_tail
+            .or_else(|| parse_common_attribute_separation_properties(&fields, object_refs)),
     })
+}
+
+fn parse_common_attribute_additional_order_tail(
+    text: &str,
+    expected_header: &MetadataHeader,
+) -> Option<Option<CommonAttributeSeparationProperties>> {
+    let candidate_fields = metadata_object_fields(text)?;
+    if candidate_fields.get(3).map(|field| field.trim()) != Some("2") {
+        return Some(None);
+    }
+
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 3 || root.first()?.trim() != "1" || root.get(2)?.trim() != "0" {
+        return None;
+    }
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    if fields.len() != 15 || fields.first()?.trim() != "5" {
+        return None;
+    }
+
+    let typed = split_information_register_braced_fields(fields.get(1)?)?;
+    if typed.len() != 23 || typed.first()?.trim() != "27" {
+        return None;
+    }
+    let detail = split_information_register_braced_fields(typed.get(1)?)?;
+    if detail.len() != 3 || detail.first()?.trim() != "2" {
+        return None;
+    }
+    let parsed_header = parse_information_register_owner_header(detail.get(1)?)?;
+    if !parsed_header
+        .uuid
+        .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return None;
+    }
+
+    for (index, expected) in [
+        (3, "2"),
+        (4, "1"),
+        (5, "1"),
+        (6, "1"),
+        (10, "0"),
+        (11, "0"),
+        (12, "0"),
+        (13, "0"),
+        (14, "1"),
+    ] {
+        if fields.get(index)?.trim() != expected {
+            return None;
+        }
+    }
+    if !(7..=9).all(|index| common_attribute_zero_reference_envelope(fields[index])) {
+        return None;
+    }
+
+    Some(Some(CommonAttributeSeparationProperties {
+        data_separation: "DontUse",
+        separated_data_use: "Independently",
+        data_separation_value: None,
+        data_separation_use: None,
+        conditional_separation: None,
+        users_separation: "DontUse",
+        authentication_separation: "DontUse",
+        configuration_extensions_separation: "DontUse",
+        indexing: "IndexWithAdditionalOrder",
+        full_text_search: "Use",
+        data_history: "Use",
+    }))
+}
+
+fn common_attribute_zero_reference_envelope(value: &str) -> bool {
+    let Some(fields) = split_information_register_braced_fields(value) else {
+        return false;
+    };
+    fields.len() == 2
+        && fields.first().is_some_and(|field| field.trim() == "1")
+        && fields.get(1).is_some_and(|field| {
+            parse_information_register_uuid(field)
+                .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
+        })
 }
 
 fn parse_common_attribute_property_details(
