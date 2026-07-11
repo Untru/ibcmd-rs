@@ -80,9 +80,12 @@ const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013
 // Platform serialized-value type IDs, independent of metadata in any infobase.
 const DESIGN_TIME_REF_TYPE_UUID: &str = "5c14e26f-099b-4d37-84a6-b433d87400da";
 const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
+const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
+const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f80211";
+const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
 
 const FORM_APPLICATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
 // Platform picture descriptor code for StdPicture.Print.
@@ -567,11 +570,7 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
-    let metadata_value_owner_file_names = metadata_texts
-        .iter()
-        .filter(|row| matches!(row.kind.as_deref(), Some("InformationRegister" | "Catalog")))
-        .map(|row| row.file_name.clone())
-        .collect::<BTreeSet<_>>();
+    let metadata_value_owner_file_names = eager_metadata_value_owner_file_names(&metadata_texts);
     let metadata_value_owner_ids = selected_metadata_predefined_owner_ids(
         &metadata_texts,
         &metadata_value_owner_file_names,
@@ -591,8 +590,11 @@ fn dump_table_rows_with_options(
         &object_refs,
     )?;
     let mut metadata_object_refs = object_refs.clone();
-    metadata_object_refs.extend(predefined_item_refs.clone());
-    metadata_object_refs.extend(metadata_value_predefined_item_refs);
+    extend_metadata_owner_value_references(&mut metadata_object_refs, &predefined_item_refs)?;
+    extend_metadata_owner_value_references(
+        &mut metadata_object_refs,
+        &metadata_value_predefined_item_refs,
+    )?;
     let configuration_module_groups = configuration_module_groups(&file_names_owned);
     ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
 
@@ -1388,15 +1390,8 @@ fn dump_table_rows_streamed(
     } else {
         BTreeMap::new()
     };
-    let metadata_value_owner_file_names = if selected_file_names.is_empty() {
-        index_metadata_texts
-            .iter()
-            .filter(|row| matches!(row.kind.as_deref(), Some("InformationRegister" | "Catalog")))
-            .map(|row| row.file_name.clone())
-            .collect::<BTreeSet<_>>()
-    } else {
-        selected_file_names.clone()
-    };
+    let metadata_value_owner_file_names =
+        streamed_metadata_value_owner_file_names(&index_metadata_texts, &selected_file_names);
     let owner_ids = selected_metadata_predefined_owner_ids(
         &index_metadata_texts,
         &metadata_value_owner_file_names,
@@ -1436,8 +1431,11 @@ fn dump_table_rows_streamed(
         &object_refs,
     )?;
     let mut metadata_object_refs = object_refs.clone();
-    metadata_object_refs.extend(predefined_item_refs.clone());
-    metadata_object_refs.extend(metadata_value_predefined_item_refs);
+    extend_metadata_owner_value_references(&mut metadata_object_refs, &predefined_item_refs)?;
+    extend_metadata_owner_value_references(
+        &mut metadata_object_refs,
+        &metadata_value_predefined_item_refs,
+    )?;
     let configuration_module_groups = configuration_module_groups(&file_names);
     ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
     timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
@@ -1834,8 +1832,10 @@ fn selected_metadata_predefined_owner_ids(
 ) -> BTreeSet<String> {
     let mut owners = BTreeSet::new();
     for row in rows {
-        if !matches!(row.kind.as_deref(), Some("InformationRegister" | "Catalog"))
-            || !selected_file_names.contains(&row.file_name)
+        if !matches!(
+            row.kind.as_deref(),
+            Some("InformationRegister" | "Catalog" | "Document")
+        ) || !selected_file_names.contains(&row.file_name)
         {
             continue;
         }
@@ -1845,21 +1845,21 @@ fn selected_metadata_predefined_owner_ids(
                 parse_information_register_design_time_ref_ids(value)
                 && !information_register_uuid_is_zero(&owner_uuid)
                 && !information_register_uuid_is_zero(&value_uuid)
-                && !object_refs.contains_key(&value_uuid)
-            {
-                if let Some(owner_reference) = information_register_design_time_owner_reference(
+                && let Some(owner_reference) = information_register_design_time_owner_reference(
                     &owner_uuid,
                     type_index,
                     object_refs,
-                ) {
-                    let mut matches = body_owners
-                        .keys()
-                        .filter(|candidate| object_refs.get(*candidate) == Some(&owner_reference));
-                    if let (Some(owner_metadata_uuid), None) =
-                        (matches.next().cloned(), matches.next())
-                    {
-                        owners.insert(owner_metadata_uuid);
-                    }
+                )
+                && !object_refs.get(&value_uuid).is_some_and(|reference| {
+                    information_register_reference_belongs_to_owner(&owner_reference, reference)
+                })
+            {
+                let mut matches = body_owners
+                    .keys()
+                    .filter(|candidate| object_refs.get(*candidate) == Some(&owner_reference));
+                if let (Some(owner_metadata_uuid), None) = (matches.next().cloned(), matches.next())
+                {
+                    owners.insert(owner_metadata_uuid);
                 }
             }
             let Some(fields) = split_1c_braced_fields(value, 0) else {
@@ -1873,6 +1873,33 @@ fn selected_metadata_predefined_owner_ids(
         }
     }
     owners
+}
+
+fn metadata_value_owner_file_names(rows: &[MetadataTextRow]) -> BTreeSet<String> {
+    rows.iter()
+        .filter(|row| {
+            matches!(
+                row.kind.as_deref(),
+                Some("InformationRegister" | "Catalog" | "Document")
+            )
+        })
+        .map(|row| row.file_name.clone())
+        .collect()
+}
+
+fn eager_metadata_value_owner_file_names(rows: &[MetadataTextRow]) -> BTreeSet<String> {
+    metadata_value_owner_file_names(rows)
+}
+
+fn streamed_metadata_value_owner_file_names(
+    rows: &[MetadataTextRow],
+    selected_file_names: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    if selected_file_names.is_empty() {
+        metadata_value_owner_file_names(rows)
+    } else {
+        selected_file_names.clone()
+    }
 }
 
 fn merge_config_rows_by_file_name(
@@ -3878,6 +3905,7 @@ struct MetadataChildProperties {
     choice_folders_and_items: Option<&'static str>,
     choice_parameter_links: Option<Vec<MetadataChoiceParameterLink>>,
     choice_parameters: Option<Vec<MetadataChoiceParameter>>,
+    self_close_empty_choice_parameter_refs: bool,
     quick_choice: Option<&'static str>,
     create_on_input: Option<&'static str>,
     choice_form: Option<MetadataChoiceForm>,
@@ -3919,7 +3947,7 @@ enum MetadataChoiceParameterValue {
     Decimal(String),
     DateTime(String),
     DesignTimeRef(String),
-    FixedArray(Vec<String>),
+    FixedArray(Vec<MetadataChoiceParameterValue>),
     String(String),
 }
 
@@ -5623,6 +5651,7 @@ fn extract_metadata_source_xml_from_text_row(
             uuid,
             type_index,
             object_refs,
+            metadata_object_refs,
             form_refs,
             template_refs,
         )?;
@@ -7086,6 +7115,8 @@ fn parse_attribute_tabular_section_child_objects(
     let mut roots = Vec::<MetadataChildObject>::new();
     let mut tabular_section_indexes = BTreeMap::<String, usize>::new();
     let mut pending_by_tabular_section = BTreeMap::<String, Vec<MetadataChildObject>>::new();
+    let document_data_path_owner_proof = (owner_kind == "Document")
+        .then(|| build_document_data_path_owner_proof(owner_name, text, owner_uuid));
 
     for (header, marker_start) in nested_headers_with_offsets_from_text(text, owner_uuid, |_| true)
     {
@@ -7125,6 +7156,22 @@ fn parse_attribute_tabular_section_child_objects(
                 metadata_object_refs,
                 form_refs,
             )
+        } else if tag == "Attribute" && owner_kind == "Document" {
+            document_data_path_owner_proof.as_ref().and_then(|proof| {
+                parse_document_child_properties(
+                    owner_name,
+                    text,
+                    marker_start,
+                    &header.uuid,
+                    parent_tabular_section.is_some(),
+                    &value_types,
+                    type_index,
+                    object_refs,
+                    metadata_object_refs,
+                    form_refs,
+                    proof,
+                )
+            })
         } else if tag == "Attribute" {
             parse_metadata_child_properties(
                 owner_kind,
@@ -7595,6 +7642,7 @@ fn parse_information_register_common_child_properties(
             type_index,
             object_refs,
         )?),
+        self_close_empty_choice_parameter_refs: false,
         quick_choice: Some(match fields.get(12)?.trim() {
             "0" => "DontUse",
             "1" => "Use",
@@ -7831,11 +7879,50 @@ fn parse_information_register_design_time_ref(
                 type_index,
                 object_refs,
             )?;
-            let value = object_refs.get(&value_uuid)?.clone();
+            let qualified_key = metadata_owner_value_reference_key(&owner, &value_uuid);
+            let value = object_refs
+                .get(&qualified_key)
+                .or_else(|| object_refs.get(&value_uuid))?
+                .clone();
             information_register_reference_belongs_to_owner(&owner, &value).then_some(value)
         }
         (true, false) => None,
     }
+}
+
+fn metadata_owner_value_reference_key(owner_reference: &str, value_uuid: &str) -> String {
+    format!("owner-value:{owner_reference}:{value_uuid}")
+}
+
+fn metadata_owner_value_reference_key_parts(key: &str) -> Option<(&str, &str)> {
+    let (owner_reference, value_uuid) = key.strip_prefix("owner-value:")?.rsplit_once(':')?;
+    is_uuid_text(value_uuid).then_some((owner_reference, value_uuid))
+}
+
+fn metadata_owner_value_reference_key_is_valid(key: &str) -> bool {
+    metadata_owner_value_reference_key_parts(key).is_some_and(|(owner_reference, _)| {
+        information_register_owner_reference_is_valid(owner_reference)
+    })
+}
+
+fn extend_metadata_owner_value_references(
+    target: &mut BTreeMap<String, String>,
+    source: &BTreeMap<String, String>,
+) -> Result<()> {
+    for (key, reference) in source
+        .iter()
+        .filter(|(key, _)| metadata_owner_value_reference_key_is_valid(key))
+    {
+        if let Some(previous) = target.get(key)
+            && previous != reference
+        {
+            bail!(
+                "owner-qualified metadata value {key} resolves to both {previous} and {reference}"
+            );
+        }
+        target.insert(key.clone(), reference.clone());
+    }
+    Ok(())
 }
 
 fn information_register_owner_reference_is_valid(owner: &str) -> bool {
@@ -7858,12 +7945,16 @@ fn information_register_reference_belongs_to_owner(owner: &str, value: &str) -> 
     let mut owner_parts = owner.split('.');
     let owner_kind = owner_parts.next().expect("validated owner kind");
     let owner_name = owner_parts.next().expect("validated owner name");
-    let mut value_parts = value.split('.');
-    if value_parts.next() != Some(owner_kind) || value_parts.next() != Some(owner_name) {
-        return false;
+    let value_parts = value.split('.').collect::<Vec<_>>();
+    match value_parts.as_slice() {
+        [kind, name, item] => {
+            owner_kind != "Enum" && *kind == owner_kind && *name == owner_name && !item.is_empty()
+        }
+        ["Enum", name, "EnumValue", item] => {
+            owner_kind == "Enum" && *name == owner_name && !item.is_empty()
+        }
+        _ => false,
     }
-    value_parts.next().is_some_and(|part| !part.is_empty())
-        && value_parts.all(|part| !part.is_empty())
 }
 
 fn parse_information_register_design_time_ref_ids(value: &str) -> Option<(String, String)> {
@@ -8062,6 +8153,18 @@ fn parse_information_register_choice_parameter_value(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MetadataChoiceParameterValue> {
+    parse_metadata_choice_parameter_typed_value(value, type_index, object_refs, 0)
+}
+
+fn parse_metadata_choice_parameter_typed_value(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    depth: usize,
+) -> Option<MetadataChoiceParameterValue> {
+    if depth > MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH {
+        return None;
+    }
     let fields = split_1c_braced_fields(value, 0)?;
     match fields.first()?.trim() {
         r#""U""# if fields.len() == 1 => Some(MetadataChoiceParameterValue::Nil),
@@ -8098,7 +8201,12 @@ fn parse_information_register_choice_parameter_value(
                 .iter()
                 .skip(1)
                 .map(|value| {
-                    parse_information_register_design_time_ref(value, type_index, object_refs)
+                    parse_metadata_choice_parameter_typed_value(
+                        value,
+                        type_index,
+                        object_refs,
+                        depth.checked_add(1)?,
+                    )
                 })
                 .collect::<Option<Vec<_>>>()
                 .map(MetadataChoiceParameterValue::FixedArray)
@@ -8142,8 +8250,8 @@ fn parse_catalog_child_properties(
     }
 
     let password_mode = information_register_bool(payload.get(2)?)?;
-    let format = parse_catalog_localized_value(payload.get(3)?)?;
-    let tooltip = parse_catalog_localized_value(payload.get(4)?)?;
+    let format = parse_metadata_child_localized_value(payload.get(3)?)?;
+    let tooltip = parse_metadata_child_localized_value(payload.get(4)?)?;
     let mark_negatives = information_register_bool(payload.get(5)?)?;
     let mask = parse_1c_quoted_string(payload.get(6)?.trim())?;
     let multi_line = information_register_bool(payload.get(7)?)?;
@@ -8167,7 +8275,7 @@ fn parse_catalog_child_properties(
         metadata_object_refs,
     )?;
     let extended_edit = information_register_bool(payload.get(17)?)?;
-    let edit_format = parse_catalog_localized_value(payload.get(18)?)?;
+    let edit_format = parse_metadata_child_localized_value(payload.get(18)?)?;
     let fill_value =
         parse_information_register_fill_value(payload.get(19)?, type_index, metadata_object_refs)?;
     let fill_from_filling_value = information_register_bool(payload.get(20)?)?;
@@ -8213,6 +8321,7 @@ fn parse_catalog_child_properties(
         choice_folders_and_items: Some(choice_folders_and_items),
         choice_parameter_links: Some(choice_parameter_links),
         choice_parameters: Some(choice_parameters),
+        self_close_empty_choice_parameter_refs: false,
         quick_choice: Some(quick_choice),
         create_on_input: Some(create_on_input),
         choice_form: Some(choice_form),
@@ -8249,7 +8358,7 @@ fn parse_catalog_attribute_wrapper_fields<'a>(
     if fields.len() != expected_len {
         return None;
     }
-    let (payload, child_uuid) = parse_catalog_code27_payload(fields.get(1)?.trim())?;
+    let (payload, child_uuid) = parse_metadata_code27_payload(fields.get(1)?.trim())?;
     if expected_child_uuid.is_some_and(|expected| expected != child_uuid) {
         return None;
     }
@@ -8264,7 +8373,7 @@ fn parse_catalog_attribute_wrapper_fields<'a>(
             catalog_attribute_use_mode_xml(fields.get(3)?.trim())?;
             catalog_attribute_full_text_search_xml(fields.get(4)?.trim())?;
             metadata_data_history_xml(fields.get(5)?.trim())?;
-            if fields.get(6)?.trim() != "0" || !catalog_reserved_wrapper_tail(fields.get(7)?) {
+            if fields.get(6)?.trim() != "0" || !metadata_reserved_wrapper_tail(fields.get(7)?) {
                 return None;
             }
         }
@@ -8277,7 +8386,7 @@ fn parse_catalog_attribute_wrapper_fields<'a>(
     Some((payload, fields.to_vec(), wrapper_code, child_uuid))
 }
 
-fn parse_catalog_code27_payload(field: &str) -> Option<(Vec<&str>, String)> {
+fn parse_metadata_code27_payload(field: &str) -> Option<(Vec<&str>, String)> {
     let payload = split_1c_braced_fields(field, 0)?;
     if payload.len() != 23 || payload.first()?.trim() != "27" {
         return None;
@@ -8306,7 +8415,7 @@ fn parse_catalog_code27_payload(field: &str) -> Option<(Vec<&str>, String)> {
     Some((payload, child_uuid))
 }
 
-fn catalog_reserved_wrapper_tail(field: &str) -> bool {
+fn metadata_reserved_wrapper_tail(field: &str) -> bool {
     let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
         return false;
     };
@@ -8363,7 +8472,578 @@ fn catalog_attribute_collection_is_closed(
     child_occurrences == 1
 }
 
-fn parse_catalog_localized_value(value: &str) -> Option<Vec<(String, String)>> {
+struct DocumentDataPathOwnerProof {
+    entries: BTreeMap<String, DocumentDataPathOwnerEntry>,
+    ambiguous: BTreeSet<String>,
+}
+
+struct DocumentDataPathOwnerEntry {
+    reference: String,
+    role: DocumentDataPathOwnerRole,
+}
+
+#[derive(Eq, PartialEq)]
+enum DocumentDataPathOwnerRole {
+    DirectAttribute,
+    TabularSection,
+    TabularAttribute { parent_uuid: String },
+}
+
+fn build_document_data_path_owner_proof(
+    owner_name: &str,
+    text: &str,
+    owner_uuid: &str,
+) -> DocumentDataPathOwnerProof {
+    let mut entries = BTreeMap::<String, DocumentDataPathOwnerEntry>::new();
+    let mut ambiguous = BTreeSet::<String>::new();
+    for (child, marker_start) in nested_headers_with_offsets_from_text(text, owner_uuid, |_| true) {
+        let Some((tag, parent)) = attribute_tabular_section_child_object_tag(
+            "Document",
+            owner_name,
+            owner_uuid,
+            text,
+            marker_start,
+            &child,
+        ) else {
+            continue;
+        };
+        let (reference, role) = match (tag, parent) {
+            ("Attribute", None) => (
+                format!("Document.{owner_name}.Attribute.{}", child.name),
+                DocumentDataPathOwnerRole::DirectAttribute,
+            ),
+            ("Attribute", Some(parent)) => (
+                format!(
+                    "Document.{owner_name}.TabularSection.{}.Attribute.{}",
+                    parent.name, child.name
+                ),
+                DocumentDataPathOwnerRole::TabularAttribute {
+                    parent_uuid: parent.uuid,
+                },
+            ),
+            ("TabularSection", None) => (
+                format!("Document.{owner_name}.TabularSection.{}", child.name),
+                DocumentDataPathOwnerRole::TabularSection,
+            ),
+            _ => continue,
+        };
+        if ambiguous.contains(&child.uuid) || entries.contains_key(&child.uuid) {
+            entries.remove(&child.uuid);
+            ambiguous.insert(child.uuid);
+            continue;
+        }
+        entries.insert(child.uuid, DocumentDataPathOwnerEntry { reference, role });
+    }
+    DocumentDataPathOwnerProof { entries, ambiguous }
+}
+
+fn parse_document_child_properties(
+    owner_name: &str,
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    expected_nested: bool,
+    value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    data_path_owner_proof: &DocumentDataPathOwnerProof,
+) -> Option<MetadataChildProperties> {
+    let candidates = metadata_object_field_candidates_around_header(text, marker_start, child_uuid);
+    let mut layouts = candidates
+        .iter()
+        .filter_map(|fields| parse_document_attribute_wrapper_fields(fields, Some(child_uuid)))
+        .collect::<Vec<_>>();
+    if layouts.len() != 1 {
+        return None;
+    }
+    let (payload, wrapper, wrapper_code, _) = layouts.pop()?;
+    let nested = wrapper_code == 8;
+    if nested != expected_nested
+        || candidates
+            .iter()
+            .filter(|fields| {
+                document_attribute_collection_is_closed(fields, child_uuid, wrapper_code)
+            })
+            .count()
+            != 1
+    {
+        return None;
+    }
+
+    let password_mode = information_register_bool(payload.get(2)?)?;
+    let format = parse_metadata_child_localized_value(payload.get(3)?)?;
+    let tooltip = parse_metadata_child_localized_value(payload.get(4)?)?;
+    let mark_negatives = information_register_bool(payload.get(5)?)?;
+    let mask = parse_1c_quoted_string(payload.get(6)?.trim())?;
+    let multi_line = information_register_bool(payload.get(7)?)?;
+    let min_value = parse_information_register_bound(payload.get(8)?)?;
+    let max_value = parse_information_register_bound(payload.get(9)?)?;
+    let choice_folders_and_items = catalog_choice_folders_and_items_xml(payload.get(10)?.trim())?;
+    let choice_form = parse_document_child_choice_form(payload.get(11)?, value_types, form_refs)?;
+    let quick_choice = catalog_quick_choice_xml(payload.get(12)?.trim())?;
+    let fill_checking = match payload.get(13)?.trim() {
+        "0" => "DontCheck",
+        "1" => "ShowError",
+        _ => return None,
+    };
+    let choice_parameter_links = parse_document_choice_parameter_links(
+        payload.get(14)?,
+        owner_name,
+        nested,
+        object_refs,
+        data_path_owner_proof,
+    )?;
+    let (link_by_type_empty, link_by_type) = parse_document_link_by_type(
+        payload.get(15)?,
+        owner_name,
+        object_refs,
+        data_path_owner_proof,
+    )?;
+    let choice_parameters = parse_information_register_choice_parameters(
+        payload.get(16)?,
+        type_index,
+        metadata_object_refs,
+    )?;
+    let extended_edit = information_register_bool(payload.get(17)?)?;
+    let edit_format = parse_metadata_child_localized_value(payload.get(18)?)?;
+    let fill_value = parse_document_fill_value(
+        payload.get(19)?,
+        value_types,
+        type_index,
+        metadata_object_refs,
+        form_refs,
+    )?;
+    let fill_from_filling_value = information_register_bool(payload.get(20)?)?;
+    if nested
+        && (fill_from_filling_value
+            || !matches!(&fill_value, MetadataChildFillValue::String(value) if value.is_empty()))
+    {
+        return None;
+    }
+    let create_on_input = catalog_create_on_input_xml(payload.get(21)?.trim())?;
+    let choice_history_on_input = catalog_choice_history_on_input_xml(payload.get(22)?.trim())?;
+
+    let indexing = metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?;
+    let full_text_search = register_child_full_text_search_xml(wrapper.get(3)?.trim())?;
+    let data_history = metadata_data_history_xml(wrapper.get(4)?.trim())?;
+
+    Some(MetadataChildProperties {
+        password_mode,
+        format,
+        edit_format,
+        tooltip,
+        mark_negatives,
+        mask,
+        multi_line,
+        extended_edit,
+        min_value,
+        max_value,
+        fill_from_filling_value,
+        emit_fill_from_filling_value: !nested,
+        fill_value: Some(fill_value),
+        emit_fill_value: !nested,
+        fill_checking,
+        choice_folders_and_items: Some(choice_folders_and_items),
+        choice_parameter_links: Some(choice_parameter_links),
+        choice_parameters: Some(choice_parameters),
+        self_close_empty_choice_parameter_refs: true,
+        quick_choice: Some(quick_choice),
+        create_on_input: Some(create_on_input),
+        choice_form: Some(choice_form),
+        link_by_type_empty,
+        link_by_type,
+        choice_history_on_input: Some(choice_history_on_input),
+        master: None,
+        main_filter: None,
+        balance: None,
+        accounting_flag: None,
+        ext_dimension_accounting_flag: None,
+        deny_incomplete_values: None,
+        use_mode: None,
+        indexing: Some(indexing),
+        full_text_search: Some(full_text_search),
+        data_history: Some(data_history),
+        type_reduction_mode: None,
+        update_data_history_immediately_after_write: None,
+        execute_after_write_data_history_version_processing: None,
+    })
+}
+
+fn parse_document_fill_value(
+    value: &str,
+    value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChildFillValue> {
+    if let Some(value) = parse_information_register_fill_value(value, type_index, object_refs) {
+        return Some(value);
+    }
+    let (owner_uuid, value_uuid) = parse_information_register_design_time_ref_ids(value)?;
+    if information_register_uuid_is_zero(&owner_uuid)
+        || information_register_uuid_is_zero(&value_uuid)
+    {
+        return None;
+    }
+    let owner_type = type_index.get(&owner_uuid)?;
+    let enum_name = owner_type.strip_prefix("cfg:EnumRef.")?;
+    if enum_name.is_empty() || enum_name.contains('.') {
+        return None;
+    }
+    if !matches!(
+        value_types,
+        [ConstantValueType::Reference { reference }] if reference == owner_type
+    ) {
+        return None;
+    }
+    if object_refs.contains_key(&owner_uuid)
+        || object_refs.contains_key(&value_uuid)
+        || object_refs.keys().any(|key| {
+            metadata_owner_value_reference_key_parts(key)
+                .is_some_and(|(_, candidate)| candidate == value_uuid)
+        })
+        || type_index.contains_key(&value_uuid)
+        || form_refs.contains_key(&value_uuid)
+    {
+        return None;
+    }
+    Some(MetadataChildFillValue::DesignTimeRef(format!(
+        "{owner_uuid}.{value_uuid}"
+    )))
+}
+
+fn parse_document_attribute_wrapper_fields<'a>(
+    fields: &[&'a str],
+    expected_child_uuid: Option<&str>,
+) -> Option<(Vec<&'a str>, Vec<&'a str>, u32, String)> {
+    let wrapper_code = fields.first()?.trim().parse::<u32>().ok()?;
+    let expected_len = match wrapper_code {
+        5 | 8 => 5,
+        6 => 7,
+        _ => return None,
+    };
+    if fields.len() != expected_len {
+        return None;
+    }
+    let (payload, child_uuid) = parse_metadata_code27_payload(fields.get(1)?.trim())?;
+    if expected_child_uuid.is_some_and(|expected| !child_uuid.eq_ignore_ascii_case(expected)) {
+        return None;
+    }
+    metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
+    register_child_full_text_search_xml(fields.get(3)?.trim())?;
+    metadata_data_history_xml(fields.get(4)?.trim())?;
+    if wrapper_code == 6
+        && (fields.get(5)?.trim() != "0" || !metadata_reserved_wrapper_tail(fields.get(6)?))
+    {
+        return None;
+    }
+    Some((payload, fields.to_vec(), wrapper_code, child_uuid))
+}
+
+fn document_attribute_collection_is_closed(
+    fields: &[&str],
+    child_uuid: &str,
+    expected_wrapper_code: u32,
+) -> bool {
+    let expected_marker = if expected_wrapper_code == 8 {
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID
+    } else if matches!(expected_wrapper_code, 5 | 6) {
+        DOCUMENT_ATTRIBUTE_GROUP_UUID
+    } else {
+        return false;
+    };
+    if fields.len() < 3
+        || !parse_uuid_field(fields[0].trim())
+            .is_some_and(|marker| marker.eq_ignore_ascii_case(expected_marker))
+    {
+        return false;
+    }
+    let Some(count) = fields[1].trim().parse::<usize>().ok() else {
+        return false;
+    };
+    if count == 0 || count.checked_add(2) != Some(fields.len()) {
+        return false;
+    }
+    let mut child_occurrences = 0usize;
+    for item_field in fields.iter().skip(2) {
+        let Some(item) = split_1c_braced_fields(item_field.trim(), 0) else {
+            return false;
+        };
+        if item.len() != 2 || item[1].trim() != "0" {
+            return false;
+        }
+        let Some(wrapper) = split_1c_braced_fields(item[0].trim(), 0) else {
+            return false;
+        };
+        let Some((_, _, wrapper_code, item_child_uuid)) =
+            parse_document_attribute_wrapper_fields(&wrapper, None)
+        else {
+            return false;
+        };
+        if wrapper_code != expected_wrapper_code {
+            return false;
+        }
+        if item_child_uuid.eq_ignore_ascii_case(child_uuid) {
+            child_occurrences += 1;
+        }
+    }
+    child_occurrences == 1
+}
+
+fn parse_document_child_choice_form(
+    value: &str,
+    value_types: &[ConstantValueType],
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChoiceForm> {
+    let uuid = parse_uuid_field(value.trim())?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(MetadataChoiceForm::Empty);
+    }
+    let reference = information_register_form_reference(&uuid, form_refs)?;
+    let (owner, form_name) = reference.split_once(".Form.")?;
+    if form_name.is_empty() || form_name.contains('.') {
+        return None;
+    }
+    let (owner_kind, owner_name) = owner.split_once('.')?;
+    if !matches!(owner_kind, "Catalog" | "Document")
+        || owner_name.is_empty()
+        || owner_name.contains('.')
+    {
+        return None;
+    }
+    let expected_type = format!("cfg:{owner_kind}Ref.{owner_name}");
+    (value_types
+        .iter()
+        .filter(|value_type| {
+            matches!(
+                value_type,
+                ConstantValueType::Reference { reference } if reference == &expected_type
+            )
+        })
+        .count()
+        == 1)
+        .then_some(MetadataChoiceForm::Reference(reference))
+}
+
+fn parse_document_choice_parameter_links(
+    value: &str,
+    owner_name: &str,
+    nested: bool,
+    object_refs: &BTreeMap<String, String>,
+    data_path_owner_proof: &DocumentDataPathOwnerProof,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.len() < 2 || fields.first()?.trim() != "5006" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let minimum_len = count.checked_mul(4)?.checked_add(2)?;
+    if fields.len() < minimum_len {
+        return None;
+    }
+    let mut links = Vec::with_capacity(count);
+    let mut index = 2usize;
+    for _ in 0..count {
+        let name = parse_1c_quoted_string(fields.get(index)?.trim())?;
+        index = index.checked_add(1)?;
+        let path_count = fields.get(index)?.trim().parse::<usize>().ok()?;
+        index = index.checked_add(1)?;
+        if if nested {
+            !matches!(path_count, 1 | 2)
+        } else {
+            path_count != 1
+        } {
+            return None;
+        }
+        let path_end = index.checked_add(path_count)?;
+        if path_end >= fields.len() {
+            return None;
+        }
+        let data_path = resolve_document_data_path(
+            fields.get(index..path_end)?,
+            owner_name,
+            object_refs,
+            data_path_owner_proof,
+            true,
+        )?;
+        index = path_end;
+        let value_change = match fields.get(index)?.trim() {
+            "0" => "Clear",
+            "1" => "DontChange",
+            _ => return None,
+        };
+        index = index.checked_add(1)?;
+        links.push(MetadataChoiceParameterLink {
+            name,
+            data_path,
+            value_change,
+        });
+    }
+    (index == fields.len()).then_some(links)
+}
+
+fn parse_document_link_by_type(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    data_path_owner_proof: &DocumentDataPathOwnerProof,
+) -> Option<(bool, Option<MetadataChildLinkByType>)> {
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.len() < 3 || fields.first()?.trim() != "3" {
+        return None;
+    }
+    let path_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if path_count.checked_add(3) != Some(fields.len()) {
+        return None;
+    }
+    let link_item = fields.last()?.trim().parse::<u32>().ok()?;
+    if link_item > 3 {
+        return None;
+    }
+    if path_count == 0 {
+        return (link_item == 0).then_some((true, None));
+    }
+    if !matches!(path_count, 1 | 2) {
+        return None;
+    }
+    let path_end = 2usize.checked_add(path_count)?;
+    let data_path = resolve_document_data_path(
+        fields.get(2..path_end)?,
+        owner_name,
+        object_refs,
+        data_path_owner_proof,
+        false,
+    )?;
+    Some((
+        false,
+        Some(MetadataChildLinkByType {
+            data_path,
+            link_item,
+        }),
+    ))
+}
+
+fn resolve_document_data_path(
+    fields: &[&str],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    data_path_owner_proof: &DocumentDataPathOwnerProof,
+    allow_raw_fallback: bool,
+) -> Option<String> {
+    match fields {
+        [field] => {
+            let segment = split_1c_braced_fields(field.trim(), 0)?;
+            match segment.as_slice() {
+                [code] if code.trim() == "-3" => {
+                    Some(format!("Document.{owner_name}.StandardAttribute.Date"))
+                }
+                [code] if code.trim() == "-5" => {
+                    Some(format!("Document.{owner_name}.StandardAttribute.Ref"))
+                }
+                [code] if allow_raw_fallback && matches!(code.trim(), "-8" | "0") => {
+                    Some(code.trim().to_string())
+                }
+                [kind, uuid] if kind.trim() == "0" => {
+                    let uuid = parse_uuid_field(uuid.trim())?;
+                    match (
+                        data_path_owner_proof.entries.get(&uuid),
+                        object_refs.get(&uuid),
+                    ) {
+                        (Some(entry), Some(reference))
+                            if entry.role == DocumentDataPathOwnerRole::DirectAttribute
+                                && reference == &entry.reference =>
+                        {
+                            Some(entry.reference.clone())
+                        }
+                        (None, reference)
+                            if allow_raw_fallback
+                                && !data_path_owner_proof.ambiguous.contains(&uuid)
+                                && reference.is_none_or(|reference| {
+                                    !document_data_path_reference_belongs_to_owner(
+                                        reference, owner_name,
+                                    )
+                                }) =>
+                        {
+                            Some(format!("0:{uuid}"))
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        }
+        [parent, child] => {
+            let parent = split_1c_braced_fields(parent.trim(), 0)?;
+            let child = split_1c_braced_fields(child.trim(), 0)?;
+            if allow_raw_fallback
+                && matches!(parent.as_slice(), [code] if code.trim() == "0")
+                && matches!(child.as_slice(), [code] if code.trim() == "0")
+            {
+                return Some("0/0".to_string());
+            }
+            let (parent_uuid, child_uuid) = match (parent.as_slice(), child.as_slice()) {
+                ([parent_kind, parent_uuid], [child_kind, child_uuid])
+                    if parent_kind.trim() == "0" && child_kind.trim() == "0" =>
+                {
+                    (
+                        parse_uuid_field(parent_uuid.trim())?,
+                        parse_uuid_field(child_uuid.trim())?,
+                    )
+                }
+                _ => return None,
+            };
+            match (
+                data_path_owner_proof.entries.get(&parent_uuid),
+                object_refs.get(&parent_uuid),
+                data_path_owner_proof.entries.get(&child_uuid),
+                object_refs.get(&child_uuid),
+            ) {
+                (
+                    Some(parent_entry),
+                    Some(parent_reference),
+                    Some(child_entry),
+                    Some(child_reference),
+                ) if parent_entry.role == DocumentDataPathOwnerRole::TabularSection
+                    && child_entry.role
+                        == (DocumentDataPathOwnerRole::TabularAttribute {
+                            parent_uuid: parent_uuid.clone(),
+                        })
+                    && parent_reference == &parent_entry.reference
+                    && child_reference == &child_entry.reference =>
+                {
+                    Some(child_entry.reference.clone())
+                }
+                (None, parent_reference, None, child_reference)
+                    if allow_raw_fallback
+                        && !data_path_owner_proof.ambiguous.contains(&parent_uuid)
+                        && !data_path_owner_proof.ambiguous.contains(&child_uuid)
+                        && [parent_reference, child_reference]
+                            .into_iter()
+                            .all(|reference| {
+                                reference.is_none_or(|reference| {
+                                    !document_data_path_reference_belongs_to_owner(
+                                        reference, owner_name,
+                                    )
+                                })
+                            }) =>
+                {
+                    Some(format!("0:{parent_uuid}/0:{child_uuid}"))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn document_data_path_reference_belongs_to_owner(reference: &str, owner_name: &str) -> bool {
+    let owner_reference = format!("Document.{owner_name}");
+    reference == owner_reference || reference.starts_with(&format!("{owner_reference}."))
+}
+
+fn parse_metadata_child_localized_value(value: &str) -> Option<Vec<(String, String)>> {
     let values = parse_information_register_localized_value(value)?;
     let mut languages = BTreeSet::new();
     values
@@ -8632,6 +9312,7 @@ fn parse_accounting_register_child_properties_from_fields(
         choice_folders_and_items: Some("Items"),
         choice_parameter_links: Some(Vec::new()),
         choice_parameters: Some(Vec::new()),
+        self_close_empty_choice_parameter_refs: false,
         quick_choice: Some("Auto"),
         create_on_input: Some("Auto"),
         choice_form: Some(MetadataChoiceForm::Empty),
@@ -8712,6 +9393,7 @@ fn parse_metadata_child_properties_from_fields(
             fields.get(header_index + 16).copied(),
             object_refs,
         ),
+        self_close_empty_choice_parameter_refs: false,
         quick_choice: fields
             .get(header_index + 17)
             .and_then(|field| metadata_quick_choice_xml(field.trim())),
@@ -8853,6 +9535,7 @@ fn parse_data_processor_wrapped_child_properties(
             fields.get(16).copied(),
             object_refs,
         ),
+        self_close_empty_choice_parameter_refs: false,
         quick_choice,
         create_on_input,
         choice_form: parse_metadata_child_choice_form(fields.get(12).copied(), object_refs),
@@ -9487,6 +10170,7 @@ fn parse_document_properties_from_text(
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DocumentProperties> {
@@ -9566,7 +10250,7 @@ fn parse_document_properties_from_text(
             None,
             type_index,
             object_refs,
-            &BTreeMap::new(),
+            metadata_object_refs,
             form_refs,
         ),
         child_forms: owned_document_form_names_in_text_order(text, &header.name, form_refs),
@@ -10755,7 +11439,12 @@ fn parse_metadata_choice_parameter_value(
         1 => Some(MetadataChoiceParameterValue::DesignTimeRef(
             value_refs.into_iter().next().unwrap(),
         )),
-        _ => Some(MetadataChoiceParameterValue::FixedArray(value_refs)),
+        _ => Some(MetadataChoiceParameterValue::FixedArray(
+            value_refs
+                .into_iter()
+                .map(MetadataChoiceParameterValue::DesignTimeRef)
+                .collect(),
+        )),
     }
 }
 
@@ -14327,7 +15016,11 @@ fn format_document_source_xml(
         || !document.child_templates.is_empty()
     {
         let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
-        for child in &document.child_metadata_objects {
+        for child in document
+            .child_metadata_objects
+            .iter()
+            .filter(|child| child.tag == "Attribute")
+        {
             push_metadata_child_object_xml(&mut child_objects, child);
         }
         for form in &document.child_forms {
@@ -14335,6 +15028,13 @@ fn format_document_source_xml(
                 "\t\t\t<Form>{}</Form>\r\n",
                 escape_xml_element_text(form)
             ));
+        }
+        for child in document
+            .child_metadata_objects
+            .iter()
+            .filter(|child| child.tag == "TabularSection")
+        {
+            push_metadata_child_object_xml(&mut child_objects, child);
         }
         for template in &document.child_templates {
             child_objects.push_str(&format!(
@@ -15536,7 +16236,12 @@ fn push_metadata_child_properties_xml(
     }
     push_metadata_child_choice_parameter_links_xml(xml, indent, &properties.choice_parameter_links);
     if let Some(choice_parameters) = &properties.choice_parameters {
-        push_metadata_child_choice_parameters_xml(xml, indent, choice_parameters);
+        push_metadata_child_choice_parameters_xml_with_style(
+            xml,
+            indent,
+            choice_parameters,
+            properties.self_close_empty_choice_parameter_refs,
+        );
     }
     if let Some(quick_choice) = properties.quick_choice {
         xml.push_str(&format!(
@@ -15685,10 +16390,20 @@ fn push_metadata_child_choice_parameter_links_xml(
     xml.push_str(&format!("{indent}</ChoiceParameterLinks>\r\n"));
 }
 
+#[cfg(test)]
 fn push_metadata_child_choice_parameters_xml(
     xml: &mut String,
     indent: &str,
     parameters: &[MetadataChoiceParameter],
+) {
+    push_metadata_child_choice_parameters_xml_with_style(xml, indent, parameters, false);
+}
+
+fn push_metadata_child_choice_parameters_xml_with_style(
+    xml: &mut String,
+    indent: &str,
+    parameters: &[MetadataChoiceParameter],
+    self_close_empty_refs: bool,
 ) {
     if parameters.is_empty() {
         xml.push_str(&format!("{indent}<ChoiceParameters/>\r\n"));
@@ -15701,74 +16416,94 @@ fn push_metadata_child_choice_parameters_xml(
             "{indent}\t<app:item name=\"{}\">\r\n",
             escape_xml_text(&parameter.name)
         ));
-        match &parameter.value {
-            MetadataChoiceParameterValue::Nil => {
-                xml.push_str(&format!("{indent}\t\t<app:value xsi:nil=\"true\"/>\r\n"));
-            }
-            MetadataChoiceParameterValue::Boolean(value) => {
-                xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"xs:boolean\">{}</app:value>\r\n",
-                    xml_bool(*value)
-                ));
-            }
-            MetadataChoiceParameterValue::Decimal(value) => {
-                xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"xs:decimal\">{}</app:value>\r\n",
-                    escape_xml_element_text(value)
-                ));
-            }
-            MetadataChoiceParameterValue::DateTime(value) => {
-                xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"xs:dateTime\">{}</app:value>\r\n",
-                    escape_xml_element_text(value)
-                ));
-            }
-            MetadataChoiceParameterValue::String(value) => {
-                if value.is_empty() {
-                    xml.push_str(&format!(
-                        "{indent}\t\t<app:value xsi:type=\"xs:string\"/>\r\n"
-                    ));
-                } else {
-                    xml.push_str(&format!(
-                        "{indent}\t\t<app:value xsi:type=\"xs:string\">{}</app:value>\r\n",
-                        escape_xml_element_text(value)
-                    ));
-                }
-            }
-            MetadataChoiceParameterValue::DesignTimeRef(value_ref) => {
-                if value_ref.is_empty() {
-                    xml.push_str(&format!(
-                        "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\"/>\r\n"
-                    ));
-                } else {
-                    xml.push_str(&format!(
-                        "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n",
-                        escape_xml_element_text(value_ref)
-                    ));
-                }
-            }
-            MetadataChoiceParameterValue::FixedArray(value_refs) => {
-                if value_refs.is_empty() {
-                    xml.push_str(&format!(
-                        "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\"/>\r\n"
-                    ));
-                } else {
-                    xml.push_str(&format!(
-                        "{indent}\t\t<app:value xsi:type=\"v8:FixedArray\">\r\n"
-                    ));
-                    for value_ref in value_refs {
-                        xml.push_str(&format!(
-                            "{indent}\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">{}</v8:Value>\r\n",
-                            escape_xml_element_text(value_ref)
-                        ));
-                    }
-                    xml.push_str(&format!("{indent}\t\t</app:value>\r\n"));
-                }
-            }
-        }
+        push_metadata_choice_parameter_value_xml(
+            xml,
+            &format!("{indent}\t\t"),
+            "app:value",
+            &parameter.value,
+            self_close_empty_refs,
+        );
         xml.push_str(&format!("{indent}\t</app:item>\r\n"));
     }
     xml.push_str(&format!("{indent}</ChoiceParameters>\r\n"));
+}
+
+fn push_metadata_choice_parameter_value_xml(
+    xml: &mut String,
+    indent: &str,
+    tag: &str,
+    value: &MetadataChoiceParameterValue,
+    self_close_empty_refs: bool,
+) {
+    match value {
+        MetadataChoiceParameterValue::Nil => {
+            xml.push_str(&format!("{indent}<{tag} xsi:nil=\"true\"/>\r\n"));
+        }
+        MetadataChoiceParameterValue::Boolean(value) => {
+            xml.push_str(&format!(
+                "{indent}<{tag} xsi:type=\"xs:boolean\">{}</{tag}>\r\n",
+                xml_bool(*value)
+            ));
+        }
+        MetadataChoiceParameterValue::Decimal(value) => {
+            xml.push_str(&format!(
+                "{indent}<{tag} xsi:type=\"xs:decimal\">{}</{tag}>\r\n",
+                escape_xml_element_text(value)
+            ));
+        }
+        MetadataChoiceParameterValue::DateTime(value) => {
+            xml.push_str(&format!(
+                "{indent}<{tag} xsi:type=\"xs:dateTime\">{}</{tag}>\r\n",
+                escape_xml_element_text(value)
+            ));
+        }
+        MetadataChoiceParameterValue::String(value) => {
+            if value.is_empty() {
+                xml.push_str(&format!("{indent}<{tag} xsi:type=\"xs:string\"/>\r\n"));
+            } else {
+                xml.push_str(&format!(
+                    "{indent}<{tag} xsi:type=\"xs:string\">{}</{tag}>\r\n",
+                    escape_xml_element_text(value)
+                ));
+            }
+        }
+        MetadataChoiceParameterValue::DesignTimeRef(value_ref) => {
+            if value_ref.is_empty() {
+                if tag == "v8:Value" && !self_close_empty_refs {
+                    xml.push_str(&format!(
+                        "{indent}<{tag} xsi:type=\"xr:DesignTimeRef\"></{tag}>\r\n"
+                    ));
+                } else {
+                    xml.push_str(&format!(
+                        "{indent}<{tag} xsi:type=\"xr:DesignTimeRef\"/>\r\n"
+                    ));
+                }
+            } else {
+                xml.push_str(&format!(
+                    "{indent}<{tag} xsi:type=\"xr:DesignTimeRef\">{}</{tag}>\r\n",
+                    escape_xml_element_text(value_ref)
+                ));
+            }
+        }
+        MetadataChoiceParameterValue::FixedArray(values) => {
+            if values.is_empty() {
+                xml.push_str(&format!("{indent}<{tag} xsi:type=\"v8:FixedArray\"/>\r\n"));
+            } else {
+                xml.push_str(&format!("{indent}<{tag} xsi:type=\"v8:FixedArray\">\r\n"));
+                let nested_indent = format!("{indent}\t");
+                for value in values {
+                    push_metadata_choice_parameter_value_xml(
+                        xml,
+                        &nested_indent,
+                        "v8:Value",
+                        value,
+                        self_close_empty_refs,
+                    );
+                }
+                xml.push_str(&format!("{indent}</{tag}>\r\n"));
+            }
+        }
+    }
 }
 
 fn push_metadata_tabular_section_properties_xml(

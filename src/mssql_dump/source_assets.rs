@@ -1932,6 +1932,7 @@ pub(super) fn build_predefined_item_reference_index(
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
     let mut index = BTreeMap::new();
+    let mut ambiguous_item_ids = BTreeSet::new();
 
     for (owner_uuid, owner) in body_owners {
         let Some(model) = predefined_data_source_model(&owner.kind) else {
@@ -1949,28 +1950,48 @@ pub(super) fn build_predefined_item_reference_index(
         let owner_reference = object_refs.get(owner_uuid).with_context(|| {
             format!("missing metadata reference for predefined data owner {owner_uuid}")
         })?;
-        insert_predefined_item_references(&mut index, owner_reference, &items)?;
+        insert_predefined_item_references(
+            &mut index,
+            &mut ambiguous_item_ids,
+            owner_reference,
+            &items,
+        )?;
     }
 
     Ok(index)
 }
 
-fn insert_predefined_item_references(
+pub(super) fn insert_predefined_item_references(
     index: &mut BTreeMap<String, String>,
+    ambiguous_item_ids: &mut BTreeSet<String>,
     owner_reference: &str,
     items: &[PredefinedItem],
 ) -> Result<()> {
     for item in items {
         let reference = format!("{owner_reference}.{}", item.name);
-        if let Some(previous) = index.insert(item.id.clone(), reference.clone())
+        let qualified_key = metadata_owner_value_reference_key(owner_reference, &item.id);
+        if let Some(previous) = index.insert(qualified_key, reference.clone())
             && previous != reference
         {
             bail!(
-                "predefined item {} resolves to both {previous} and {reference}",
-                item.id
+                "predefined item {} resolves to both {previous} and {reference} for owner {owner_reference}",
+                item.id,
             );
         }
-        insert_predefined_item_references(index, owner_reference, &item.children)?;
+        if !ambiguous_item_ids.contains(&item.id) {
+            if let Some(previous) = index.insert(item.id.clone(), reference.clone())
+                && previous != reference
+            {
+                index.remove(&item.id);
+                ambiguous_item_ids.insert(item.id.clone());
+            }
+        }
+        insert_predefined_item_references(
+            index,
+            ambiguous_item_ids,
+            owner_reference,
+            &item.children,
+        )?;
     }
     Ok(())
 }

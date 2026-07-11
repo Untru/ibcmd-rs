@@ -13504,10 +13504,14 @@ fn parses_and_formats_metadata_child_choice_parameter_values() {
     assert!(matches!(
         parameters[1].value,
         MetadataChoiceParameterValue::FixedArray(ref refs)
-            if refs == &vec![
-                "Enum.ФормыОплаты.EnumValue.Наличная".to_string(),
-                "Enum.ФормыОплаты.EnumValue.Безналичная".to_string()
-            ]
+            if matches!(
+                refs.as_slice(),
+                [
+                    MetadataChoiceParameterValue::DesignTimeRef(first),
+                    MetadataChoiceParameterValue::DesignTimeRef(second),
+                ] if first == "Enum.ФормыОплаты.EnumValue.Наличная"
+                    && second == "Enum.ФормыОплаты.EnumValue.Безналичная"
+            )
     ));
 
     let mut xml = String::new();
@@ -23076,7 +23080,14 @@ fn parses_information_register_variable_collections_without_partial_results() {
     assert!(matches!(
         parameters[4].value,
         MetadataChoiceParameterValue::FixedArray(ref values)
-            if values == &["Enum.Status.EnumValue.Active", "Enum.Status.EnumValue.Closed"]
+            if matches!(
+                values.as_slice(),
+                [
+                    MetadataChoiceParameterValue::DesignTimeRef(first),
+                    MetadataChoiceParameterValue::DesignTimeRef(second),
+                ] if first == "Enum.Status.EnumValue.Active"
+                    && second == "Enum.Status.EnumValue.Closed"
+            )
     ));
     assert!(matches!(
         parse_information_register_fill_value(
@@ -23289,6 +23300,97 @@ fn information_register_typed_envelopes_require_exact_platform_type_ids() {
             &object_refs,
         )
         .is_none()
+    );
+}
+
+#[test]
+fn information_register_fixed_array_values_are_heterogeneous_and_recursive() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let value_uuid = "22222222-2222-4222-8222-222222222222";
+    let type_index = BTreeMap::from([(owner_uuid.to_string(), "cfg:EnumRef.Status".to_string())]);
+    let object_refs = BTreeMap::from([(
+        value_uuid.to_string(),
+        "Enum.Status.EnumValue.Active".to_string(),
+    )]);
+    let reference =
+        format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{value_uuid}}}}}");
+    let nested = format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{2,{{\"B\",1}},{reference}}}}}");
+    let value = parse_information_register_choice_parameter_value(
+        &format!(
+            "{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{6,{{\"U\"}},{{\"S\",\"text\"}},{{\"N\",-2.50}},{{\"D\",20240203040506}},{reference},{nested}}}}}"
+        ),
+        &type_index,
+        &object_refs,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        &value,
+        MetadataChoiceParameterValue::FixedArray(values)
+            if matches!(values.as_slice(), [
+                MetadataChoiceParameterValue::Nil,
+                MetadataChoiceParameterValue::String(text),
+                MetadataChoiceParameterValue::Decimal(decimal),
+                MetadataChoiceParameterValue::DateTime(date_time),
+                MetadataChoiceParameterValue::DesignTimeRef(reference),
+                MetadataChoiceParameterValue::FixedArray(nested),
+            ] if text == "text"
+                && decimal == "-2.50"
+                && date_time == "2024-02-03T04:05:06"
+                && reference == "Enum.Status.EnumValue.Active"
+                && matches!(nested.as_slice(), [
+                    MetadataChoiceParameterValue::Boolean(true),
+                    MetadataChoiceParameterValue::DesignTimeRef(reference),
+                ] if reference == "Enum.Status.EnumValue.Active"))
+    ));
+
+    let parameters = vec![MetadataChoiceParameter {
+        name: "Mixed".to_string(),
+        value,
+    }];
+    let mut xml = String::new();
+    push_metadata_child_choice_parameters_xml(&mut xml, "\t", &parameters);
+    assert_eq!(
+        xml,
+        concat!(
+            "\t<ChoiceParameters>\r\n",
+            "\t\t<app:item name=\"Mixed\">\r\n",
+            "\t\t\t<app:value xsi:type=\"v8:FixedArray\">\r\n",
+            "\t\t\t\t<v8:Value xsi:nil=\"true\"/>\r\n",
+            "\t\t\t\t<v8:Value xsi:type=\"xs:string\">text</v8:Value>\r\n",
+            "\t\t\t\t<v8:Value xsi:type=\"xs:decimal\">-2.50</v8:Value>\r\n",
+            "\t\t\t\t<v8:Value xsi:type=\"xs:dateTime\">2024-02-03T04:05:06</v8:Value>\r\n",
+            "\t\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">Enum.Status.EnumValue.Active</v8:Value>\r\n",
+            "\t\t\t\t<v8:Value xsi:type=\"v8:FixedArray\">\r\n",
+            "\t\t\t\t\t<v8:Value xsi:type=\"xs:boolean\">true</v8:Value>\r\n",
+            "\t\t\t\t\t<v8:Value xsi:type=\"xr:DesignTimeRef\">Enum.Status.EnumValue.Active</v8:Value>\r\n",
+            "\t\t\t\t</v8:Value>\r\n",
+            "\t\t\t</app:value>\r\n",
+            "\t\t</app:item>\r\n",
+            "\t</ChoiceParameters>\r\n",
+        )
+    );
+
+    for malformed in [
+        format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{2,{{\"B\",1}}}}}}"),
+        format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{1,{{\"B\",1}},{{\"S\",\"extra\"}}}}}}"),
+    ] {
+        assert!(
+            parse_information_register_choice_parameter_value(
+                &malformed,
+                &type_index,
+                &object_refs,
+            )
+            .is_none()
+        );
+    }
+    let mut too_deep = r#"{"B",1}"#.to_string();
+    for _ in 0..=MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH {
+        too_deep = format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{1,{too_deep}}}}}");
+    }
+    assert!(
+        parse_information_register_choice_parameter_value(&too_deep, &type_index, &object_refs,)
+            .is_none()
     );
 }
 
@@ -28496,6 +28598,66 @@ fn direct_code14_forms_are_indexed_only_with_one_metadata_owner() {
 }
 
 #[test]
+fn eager_metadata_value_owner_selection_includes_documents() {
+    let row = |file_name: &str, kind: Option<&str>| MetadataTextRow {
+        file_name: file_name.to_string(),
+        text: String::new(),
+        object_code: None,
+        header: None,
+        kind: kind.map(str::to_string),
+        folder: None,
+    };
+    let rows = vec![
+        row("register", Some("InformationRegister")),
+        row("catalog", Some("Catalog")),
+        row("document", Some("Document")),
+        row("report", Some("Report")),
+        row("unknown", None),
+    ];
+
+    assert_eq!(
+        eager_metadata_value_owner_file_names(&rows),
+        BTreeSet::from([
+            "catalog".to_string(),
+            "document".to_string(),
+            "register".to_string(),
+        ])
+    );
+}
+
+#[test]
+fn streamed_metadata_value_owner_selection_filters_full_run_and_preserves_selection() {
+    let row = |file_name: &str, kind: Option<&str>| MetadataTextRow {
+        file_name: file_name.to_string(),
+        text: String::new(),
+        object_code: None,
+        header: None,
+        kind: kind.map(str::to_string),
+        folder: None,
+    };
+    let rows = vec![
+        row("register", Some("InformationRegister")),
+        row("catalog", Some("Catalog")),
+        row("document", Some("Document")),
+        row("report", Some("Report")),
+    ];
+
+    assert_eq!(
+        streamed_metadata_value_owner_file_names(&rows, &BTreeSet::new()),
+        BTreeSet::from([
+            "catalog".to_string(),
+            "document".to_string(),
+            "register".to_string(),
+        ])
+    );
+    let selected = BTreeSet::from(["document".to_string(), "report".to_string()]);
+    assert_eq!(
+        streamed_metadata_value_owner_file_names(&rows, &selected),
+        selected
+    );
+}
+
+#[test]
 fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let generated_ref_type_uuid = "22222222-2222-4222-8222-222222222222";
@@ -28526,7 +28688,7 @@ fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner(
         },
     )]);
 
-    for kind in ["InformationRegister", "Catalog"] {
+    for kind in ["InformationRegister", "Catalog", "Document"] {
         let row = row_for_kind(kind);
         assert_eq!(
             selected_metadata_predefined_owner_ids(
@@ -28539,7 +28701,60 @@ fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner(
             BTreeSet::from([metadata_owner_uuid.to_string()])
         );
     }
-    let unsupported = row_for_kind("Document");
+    let document = row_for_kind("Document");
+    let mut foreign_value_refs = object_refs.clone();
+    foreign_value_refs.insert(
+        value_uuid.to_string(),
+        "Catalog.OtherTypes.Foreign".to_string(),
+    );
+    assert_eq!(
+        selected_metadata_predefined_owner_ids(
+            std::slice::from_ref(&document),
+            &selected,
+            &type_index,
+            &foreign_value_refs,
+            &body_owners,
+        ),
+        BTreeSet::from([metadata_owner_uuid.to_string()])
+    );
+    let mut same_owner_child_refs = object_refs.clone();
+    same_owner_child_refs.insert(
+        value_uuid.to_string(),
+        "Catalog.Types.Attribute.Existing".to_string(),
+    );
+    assert_eq!(
+        selected_metadata_predefined_owner_ids(
+            std::slice::from_ref(&document),
+            &selected,
+            &type_index,
+            &same_owner_child_refs,
+            &body_owners,
+        ),
+        BTreeSet::from([metadata_owner_uuid.to_string()])
+    );
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &format!(
+                "{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{generated_ref_type_uuid},{value_uuid}}}}}"
+            ),
+            &type_index,
+            &same_owner_child_refs,
+        )
+        .is_none()
+    );
+    let mut same_owner_value_refs = object_refs.clone();
+    same_owner_value_refs.insert(value_uuid.to_string(), "Catalog.Types.Existing".to_string());
+    assert!(
+        selected_metadata_predefined_owner_ids(
+            &[document],
+            &selected,
+            &type_index,
+            &same_owner_value_refs,
+            &body_owners,
+        )
+        .is_empty()
+    );
+    let unsupported = row_for_kind("Report");
     assert!(
         selected_metadata_predefined_owner_ids(
             &[unsupported],
@@ -28574,6 +28789,265 @@ fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner(
             &ambiguous_body_owners,
         )
         .is_empty()
+    );
+}
+
+#[test]
+fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_collisions() {
+    let first_owner_type_uuid = "11111111-1111-4111-8111-111111111111";
+    let second_owner_type_uuid = "22222222-2222-4222-8222-222222222222";
+    let third_owner_type_uuid = "33333333-3333-4333-8333-333333333333";
+    let shared_value_uuid = "44444444-4444-4444-8444-444444444444";
+    let unique_value_uuid = "55555555-5555-4555-8555-555555555555";
+    let first_owner = "ChartOfCharacteristicTypes.Domestic";
+    let second_owner = "ChartOfCharacteristicTypes.International";
+    let first_item = PredefinedItem {
+        id: shared_value_uuid.to_string(),
+        name: "BankAccounts".to_string(),
+        code: String::new(),
+        description: String::new(),
+        data: PredefinedItemData::Generic {
+            value_types: Vec::new(),
+            is_folder: false,
+        },
+        children: vec![PredefinedItem {
+            id: unique_value_uuid.to_string(),
+            name: "Unique".to_string(),
+            code: String::new(),
+            description: String::new(),
+            data: PredefinedItemData::Generic {
+                value_types: Vec::new(),
+                is_folder: false,
+            },
+            children: Vec::new(),
+        }],
+    };
+    let second_item = PredefinedItem {
+        id: shared_value_uuid.to_string(),
+        name: "BankAccounts".to_string(),
+        code: String::new(),
+        description: String::new(),
+        data: PredefinedItemData::Generic {
+            value_types: Vec::new(),
+            is_folder: false,
+        },
+        children: Vec::new(),
+    };
+    let mut index = BTreeMap::new();
+    let mut ambiguous = BTreeSet::new();
+    insert_predefined_item_references(
+        &mut index,
+        &mut ambiguous,
+        first_owner,
+        &[first_item.clone()],
+    )
+    .unwrap();
+    assert_eq!(
+        index.get(shared_value_uuid).map(String::as_str),
+        Some("ChartOfCharacteristicTypes.Domestic.BankAccounts")
+    );
+    insert_predefined_item_references(&mut index, &mut ambiguous, second_owner, &[second_item])
+        .unwrap();
+    assert!(!index.contains_key(shared_value_uuid));
+    assert!(ambiguous.contains(shared_value_uuid));
+    assert_eq!(
+        index
+            .get(&metadata_owner_value_reference_key(
+                first_owner,
+                shared_value_uuid,
+            ))
+            .map(String::as_str),
+        Some("ChartOfCharacteristicTypes.Domestic.BankAccounts")
+    );
+    assert_eq!(
+        index
+            .get(&metadata_owner_value_reference_key(
+                second_owner,
+                shared_value_uuid,
+            ))
+            .map(String::as_str),
+        Some("ChartOfCharacteristicTypes.International.BankAccounts")
+    );
+    assert_eq!(
+        index.get(unique_value_uuid).map(String::as_str),
+        Some("ChartOfCharacteristicTypes.Domestic.Unique")
+    );
+
+    let type_index = BTreeMap::from([
+        (
+            first_owner_type_uuid.to_string(),
+            "cfg:ChartOfCharacteristicTypesRef.Domestic".to_string(),
+        ),
+        (
+            second_owner_type_uuid.to_string(),
+            "cfg:ChartOfCharacteristicTypesRef.International".to_string(),
+        ),
+        (
+            third_owner_type_uuid.to_string(),
+            "cfg:ChartOfCharacteristicTypesRef.Other".to_string(),
+        ),
+    ]);
+    let dtr = |owner_uuid: &str, value_uuid: &str| {
+        format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{value_uuid}}}}}")
+    };
+    let first_metadata_owner_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let second_metadata_owner_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let document_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    let selected_row = MetadataTextRow {
+        file_name: document_uuid.to_string(),
+        text: format!(
+            "{{{}, {}}}",
+            dtr(first_owner_type_uuid, shared_value_uuid),
+            dtr(second_owner_type_uuid, shared_value_uuid),
+        ),
+        object_code: Some(40),
+        header: None,
+        kind: Some("Document".to_string()),
+        folder: Some("Documents"),
+    };
+    let owner_object_refs = BTreeMap::from([
+        (
+            first_metadata_owner_uuid.to_string(),
+            first_owner.to_string(),
+        ),
+        (
+            second_metadata_owner_uuid.to_string(),
+            second_owner.to_string(),
+        ),
+    ]);
+    let body_owners = BTreeMap::from([
+        (
+            first_metadata_owner_uuid.to_string(),
+            BodyOwnerSourceReference {
+                kind: "ChartOfCharacteristicTypes".to_string(),
+                object_path: PathBuf::from("ChartsOfCharacteristicTypes/Domestic"),
+            },
+        ),
+        (
+            second_metadata_owner_uuid.to_string(),
+            BodyOwnerSourceReference {
+                kind: "ChartOfCharacteristicTypes".to_string(),
+                object_path: PathBuf::from("ChartsOfCharacteristicTypes/International"),
+            },
+        ),
+    ]);
+    assert_eq!(
+        selected_metadata_predefined_owner_ids(
+            &[selected_row],
+            &BTreeSet::from([document_uuid.to_string()]),
+            &type_index,
+            &owner_object_refs,
+            &body_owners,
+        ),
+        BTreeSet::from([
+            first_metadata_owner_uuid.to_string(),
+            second_metadata_owner_uuid.to_string(),
+        ])
+    );
+    assert!(matches!(
+        parse_information_register_choice_parameter_value(
+            &dtr(first_owner_type_uuid, shared_value_uuid),
+            &type_index,
+            &index,
+        ),
+        Some(MetadataChoiceParameterValue::DesignTimeRef(ref value))
+            if value == "ChartOfCharacteristicTypes.Domestic.BankAccounts"
+    ));
+    assert!(matches!(
+        parse_information_register_choice_parameter_value(
+            &dtr(second_owner_type_uuid, shared_value_uuid),
+            &type_index,
+            &index,
+        ),
+        Some(MetadataChoiceParameterValue::DesignTimeRef(ref value))
+            if value == "ChartOfCharacteristicTypes.International.BankAccounts"
+    ));
+    assert!(
+        parse_information_register_choice_parameter_value(
+            &dtr(third_owner_type_uuid, shared_value_uuid),
+            &type_index,
+            &index,
+        )
+        .is_none()
+    );
+    for same_owner_child in [
+        "ChartOfCharacteristicTypes.Domestic.Attribute.BankAccounts",
+        "ChartOfCharacteristicTypes.Domestic.Form.BankAccounts",
+    ] {
+        assert!(
+            parse_information_register_choice_parameter_value(
+                &dtr(first_owner_type_uuid, shared_value_uuid),
+                &type_index,
+                &BTreeMap::from([(shared_value_uuid.to_string(), same_owner_child.to_string(),)]),
+            )
+            .is_none()
+        );
+    }
+    assert!(matches!(
+        parse_information_register_choice_parameter_value(
+            &dtr(first_owner_type_uuid, unique_value_uuid),
+            &type_index,
+            &BTreeMap::from([(
+                unique_value_uuid.to_string(),
+                "ChartOfCharacteristicTypes.Domestic.Unique".to_string(),
+            )]),
+        ),
+        Some(MetadataChoiceParameterValue::DesignTimeRef(ref value))
+            if value == "ChartOfCharacteristicTypes.Domestic.Unique"
+    ));
+
+    let mut metadata_refs = BTreeMap::from([(
+        shared_value_uuid.to_string(),
+        "Catalog.Foreign.Existing".to_string(),
+    )]);
+    extend_metadata_owner_value_references(&mut metadata_refs, &index).unwrap();
+    assert_eq!(
+        metadata_refs.get(shared_value_uuid).map(String::as_str),
+        Some("Catalog.Foreign.Existing")
+    );
+    assert!(!metadata_refs.contains_key(unique_value_uuid));
+    assert!(
+        metadata_refs.contains_key(&metadata_owner_value_reference_key(
+            first_owner,
+            unique_value_uuid,
+        ))
+    );
+
+    let conflict_key = metadata_owner_value_reference_key(first_owner, shared_value_uuid);
+    let conflict = BTreeMap::from([(
+        conflict_key,
+        "ChartOfCharacteristicTypes.Domestic.OtherItem".to_string(),
+    )]);
+    assert!(extend_metadata_owner_value_references(&mut metadata_refs, &conflict).is_err());
+
+    let mut same_owner_index = BTreeMap::new();
+    let mut same_owner_ambiguous = BTreeSet::new();
+    insert_predefined_item_references(
+        &mut same_owner_index,
+        &mut same_owner_ambiguous,
+        first_owner,
+        &[first_item],
+    )
+    .unwrap();
+    let divergent = PredefinedItem {
+        id: shared_value_uuid.to_string(),
+        name: "OtherItem".to_string(),
+        code: String::new(),
+        description: String::new(),
+        data: PredefinedItemData::Generic {
+            value_types: Vec::new(),
+            is_folder: false,
+        },
+        children: Vec::new(),
+    };
+    assert!(
+        insert_predefined_item_references(
+            &mut same_owner_index,
+            &mut same_owner_ambiguous,
+            first_owner,
+            &[divergent],
+        )
+        .is_err()
     );
 }
 
@@ -30046,15 +30520,22 @@ fn extracts_document_child_attribute_data_history_tail() {
         zero_uuid, zero_uuid, zero_uuid, zero_uuid, zero_uuid, "0",
     ]
     .join(",");
+    let attribute_wrapper = document_attribute_wrapper_for_test(
+        6,
+        attribute_uuid,
+        r#"{"Pattern",{"B"}}"#,
+        r#"{"U"}"#,
+        "0",
+        "1",
+    );
+    let attribute_collection =
+        document_attribute_collection_for_test(DOCUMENT_ATTRIBUTE_GROUP_UUID, &[attribute_wrapper]);
     let document_blob = deflate_for_test(
         format!(
             "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n\
 {{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},\
 {owner_fields},{manager_type_id},{manager_value_id}}},\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
-{{3,\r\n{{1,0,{attribute_uuid}}},\"TrackChanges\",{{1,\"en\",\"Track changes\"}},\"\"}},\
-0,{{0}},{{0}},{{0}},0,\"\",0,0,{{0}},{{0}},0,{{0}},0,0,{{0}},{{0}},0,0,0,{{0}},0,1,0,1,1,0,0}}\r\n\
-}}\r\n}}"
+{attribute_collection}\r\n}}"
         )
         .as_bytes(),
     );
@@ -32127,6 +32608,962 @@ fn extracts_catalog_attribute_and_tabular_section_child_headers() {
     );
 }
 
+fn document_attribute_wrapper_for_test(
+    wrapper_code: u32,
+    attribute_uuid: &str,
+    pattern: &str,
+    fill_value: &str,
+    fill_from_filling_value: &str,
+    data_history: &str,
+) -> String {
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let payload = r##"{27,
+{2,
+{3,{1,0,$ATTRIBUTE},"TrackChanges",{1,"en","Track changes"},"" ,0,0,$ZERO,0},
+$PATTERN
+},
+0,{0},{0},0,"",0,
+{"U"},{"U"},0,$ZERO,2,0,
+{5006,0},
+{3,0,0},
+{0,0},
+0,{0},$FILL,$FILL_FROM,0,0
+}"##
+    .replace("$ATTRIBUTE", attribute_uuid)
+    .replace("$ZERO", zero_uuid)
+    .replace("$PATTERN", pattern)
+    .replace("$FILL_FROM", fill_from_filling_value)
+    .replace("$FILL", fill_value);
+    match wrapper_code {
+        5 => format!("{{5,{payload},2,1,{data_history}}}"),
+        6 => format!("{{6,{payload},2,1,{data_history},0,{{1,{zero_uuid}}}}}"),
+        8 => format!("{{8,{payload},2,1,{data_history}}}"),
+        _ => panic!("unsupported test wrapper code"),
+    }
+}
+
+fn document_attribute_collection_for_test(marker: &str, wrappers: &[String]) -> String {
+    let items = wrappers
+        .iter()
+        .map(|wrapper| format!("{{{wrapper},0}}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{{marker},{},{items}}}", wrappers.len())
+}
+
+fn document_data_path_owner_proof_for_test() -> DocumentDataPathOwnerProof {
+    let direct_uuid = "11111111-1111-4111-8111-111111111111";
+    let tabular_uuid = "22222222-2222-4222-8222-222222222222";
+    let nested_uuid = "33333333-3333-4333-8333-333333333333";
+    let other_nested_uuid = "44444444-4444-4444-8444-444444444444";
+    DocumentDataPathOwnerProof {
+        entries: BTreeMap::from([
+            (
+                direct_uuid.to_string(),
+                DocumentDataPathOwnerEntry {
+                    reference: "Document.Invoice.Attribute.Customer".to_string(),
+                    role: DocumentDataPathOwnerRole::DirectAttribute,
+                },
+            ),
+            (
+                tabular_uuid.to_string(),
+                DocumentDataPathOwnerEntry {
+                    reference: "Document.Invoice.TabularSection.Lines".to_string(),
+                    role: DocumentDataPathOwnerRole::TabularSection,
+                },
+            ),
+            (
+                nested_uuid.to_string(),
+                DocumentDataPathOwnerEntry {
+                    reference: "Document.Invoice.TabularSection.Lines.Attribute.Product"
+                        .to_string(),
+                    role: DocumentDataPathOwnerRole::TabularAttribute {
+                        parent_uuid: tabular_uuid.to_string(),
+                    },
+                },
+            ),
+            (
+                other_nested_uuid.to_string(),
+                DocumentDataPathOwnerEntry {
+                    reference: "Document.Invoice.TabularSection.Other.Attribute.Product"
+                        .to_string(),
+                    role: DocumentDataPathOwnerRole::TabularAttribute {
+                        parent_uuid: "55555555-5555-4555-8555-555555555555".to_string(),
+                    },
+                },
+            ),
+        ]),
+        ambiguous: BTreeSet::new(),
+    }
+}
+
+#[test]
+fn document_data_paths_are_owner_checked_with_cpl_only_structural_fallback() {
+    let direct_uuid = "11111111-1111-4111-8111-111111111111";
+    let tabular_uuid = "22222222-2222-4222-8222-222222222222";
+    let nested_uuid = "33333333-3333-4333-8333-333333333333";
+    let other_nested_uuid = "44444444-4444-4444-8444-444444444444";
+    let unknown_uuid = "66666666-6666-4666-8666-666666666666";
+    let second_unknown_uuid = "77777777-7777-4777-8777-777777777777";
+    let proof = document_data_path_owner_proof_for_test();
+    let object_refs = BTreeMap::from([
+        (
+            direct_uuid.to_string(),
+            "Document.Invoice.Attribute.Customer".to_string(),
+        ),
+        (
+            tabular_uuid.to_string(),
+            "Document.Invoice.TabularSection.Lines".to_string(),
+        ),
+        (
+            nested_uuid.to_string(),
+            "Document.Invoice.TabularSection.Lines.Attribute.Product".to_string(),
+        ),
+        (
+            other_nested_uuid.to_string(),
+            "Document.Invoice.TabularSection.Other.Attribute.Product".to_string(),
+        ),
+    ]);
+
+    assert_eq!(
+        resolve_document_data_path(&["{-3}"], "Invoice", &object_refs, &proof, false),
+        Some("Document.Invoice.StandardAttribute.Date".to_string())
+    );
+    assert_eq!(
+        resolve_document_data_path(&["{-5}"], "Invoice", &object_refs, &proof, false),
+        Some("Document.Invoice.StandardAttribute.Ref".to_string())
+    );
+    assert_eq!(
+        resolve_document_data_path(
+            &[&format!("{{0,{direct_uuid}}}")],
+            "Invoice",
+            &object_refs,
+            &proof,
+            true,
+        ),
+        Some("Document.Invoice.Attribute.Customer".to_string())
+    );
+    assert_eq!(
+        resolve_document_data_path(
+            &[
+                &format!("{{0,{tabular_uuid}}}"),
+                &format!("{{0,{nested_uuid}}}"),
+            ],
+            "Invoice",
+            &object_refs,
+            &proof,
+            true,
+        ),
+        Some("Document.Invoice.TabularSection.Lines.Attribute.Product".to_string())
+    );
+
+    assert_eq!(
+        resolve_document_data_path(&["{-8}"], "Invoice", &object_refs, &proof, true),
+        Some("-8".to_string())
+    );
+    assert_eq!(
+        resolve_document_data_path(&["{0}"], "Invoice", &object_refs, &proof, true),
+        Some("0".to_string())
+    );
+    assert_eq!(
+        resolve_document_data_path(&["{0}", "{0}"], "Invoice", &object_refs, &proof, true,),
+        Some("0/0".to_string())
+    );
+    assert_eq!(
+        resolve_document_data_path(
+            &[&format!("{{0,{unknown_uuid}}}")],
+            "Invoice",
+            &object_refs,
+            &proof,
+            true,
+        ),
+        Some(format!("0:{unknown_uuid}"))
+    );
+    assert_eq!(
+        resolve_document_data_path(
+            &[
+                &format!("{{0,{unknown_uuid}}}"),
+                &format!("{{0,{second_unknown_uuid}}}"),
+            ],
+            "Invoice",
+            &object_refs,
+            &proof,
+            true,
+        ),
+        Some(format!("0:{unknown_uuid}/0:{second_unknown_uuid}"))
+    );
+    assert!(
+        resolve_document_data_path(&["{-8}"], "Invoice", &object_refs, &proof, false).is_none()
+    );
+    assert!(resolve_document_data_path(&["{0}"], "Invoice", &object_refs, &proof, false).is_none());
+    assert!(
+        resolve_document_data_path(
+            &[&format!("{{0,{unknown_uuid}}}")],
+            "Invoice",
+            &object_refs,
+            &proof,
+            false,
+        )
+        .is_none()
+    );
+    let foreign_reference_without_owner_proof = BTreeMap::from([(
+        unknown_uuid.to_string(),
+        "Document.Other.Attribute.Unknown".to_string(),
+    )]);
+    assert_eq!(
+        resolve_document_data_path(
+            &[&format!("{{0,{unknown_uuid}}}")],
+            "Invoice",
+            &foreign_reference_without_owner_proof,
+            &proof,
+            true,
+        ),
+        Some(format!("0:{unknown_uuid}"))
+    );
+    let mut ambiguous_proof = document_data_path_owner_proof_for_test();
+    ambiguous_proof.ambiguous.insert(unknown_uuid.to_string());
+    assert!(
+        resolve_document_data_path(
+            &[&format!("{{0,{unknown_uuid}}}")],
+            "Invoice",
+            &foreign_reference_without_owner_proof,
+            &ambiguous_proof,
+            true,
+        )
+        .is_none()
+    );
+    let foreign_double_without_owner_proof = BTreeMap::from([
+        (
+            unknown_uuid.to_string(),
+            "Document.Other.TabularSection.Lines".to_string(),
+        ),
+        (
+            second_unknown_uuid.to_string(),
+            "Document.Other.TabularSection.Lines.Attribute.Product".to_string(),
+        ),
+    ]);
+    assert_eq!(
+        resolve_document_data_path(
+            &[
+                &format!("{{0,{unknown_uuid}}}"),
+                &format!("{{0,{second_unknown_uuid}}}"),
+            ],
+            "Invoice",
+            &foreign_double_without_owner_proof,
+            &proof,
+            true,
+        ),
+        Some(format!("0:{unknown_uuid}/0:{second_unknown_uuid}"))
+    );
+    assert!(
+        resolve_document_data_path(
+            &[
+                &format!("{{0,{tabular_uuid}}}"),
+                &format!("{{0,{unknown_uuid}}}"),
+            ],
+            "Invoice",
+            &object_refs,
+            &proof,
+            true,
+        )
+        .is_none()
+    );
+    assert!(
+        resolve_document_data_path(
+            &[
+                &format!("{{0,{unknown_uuid}}}"),
+                &format!("{{0,{nested_uuid}}}"),
+            ],
+            "Invoice",
+            &object_refs,
+            &proof,
+            true,
+        )
+        .is_none()
+    );
+    assert!(
+        resolve_document_data_path(
+            &[
+                &format!("{{0,{tabular_uuid}}}"),
+                &format!("{{0,{other_nested_uuid}}}"),
+            ],
+            "Invoice",
+            &object_refs,
+            &proof,
+            true,
+        )
+        .is_none()
+    );
+    let mut foreign_refs = object_refs.clone();
+    foreign_refs.insert(
+        direct_uuid.to_string(),
+        "Document.Other.Attribute.Customer".to_string(),
+    );
+    assert!(
+        resolve_document_data_path(
+            &[&format!("{{0,{direct_uuid}}}")],
+            "Invoice",
+            &foreign_refs,
+            &proof,
+            true,
+        )
+        .is_none()
+    );
+    let mut missing_known_ref = object_refs.clone();
+    missing_known_ref.remove(direct_uuid);
+    assert!(
+        resolve_document_data_path(
+            &[&format!("{{0,{direct_uuid}}}")],
+            "Invoice",
+            &missing_known_ref,
+            &proof,
+            true,
+        )
+        .is_none()
+    );
+    let mut reference_without_owner_proof = object_refs.clone();
+    reference_without_owner_proof.insert(
+        unknown_uuid.to_string(),
+        "Document.Invoice.Attribute.Unknown".to_string(),
+    );
+    assert!(
+        resolve_document_data_path(
+            &[&format!("{{0,{unknown_uuid}}}")],
+            "Invoice",
+            &reference_without_owner_proof,
+            &proof,
+            true,
+        )
+        .is_none()
+    );
+    assert!(resolve_document_data_path(&["{-4}"], "Invoice", &object_refs, &proof, true).is_none());
+
+    let semantic_lbt = format!("{{3,2,{{0,{tabular_uuid}}},{{0,{nested_uuid}}},3}}");
+    let parsed_lbt = parse_document_link_by_type(&semantic_lbt, "Invoice", &object_refs, &proof)
+        .unwrap()
+        .1
+        .unwrap();
+    assert_eq!(
+        parsed_lbt.data_path,
+        "Document.Invoice.TabularSection.Lines.Attribute.Product"
+    );
+    assert_eq!(parsed_lbt.link_item, 3);
+    assert!(
+        parse_document_link_by_type(
+            &format!("{{3,1,{{0,{unknown_uuid}}},1}}"),
+            "Invoice",
+            &object_refs,
+            &proof,
+        )
+        .is_none()
+    );
+    assert!(parse_document_link_by_type("{3,1,{-8},1}", "Invoice", &object_refs, &proof).is_none());
+
+    let nested_cpl = format!("{{5006,1,\"Filter\",2,{{0,{tabular_uuid}}},{{0,{nested_uuid}}},1}}");
+    assert!(
+        parse_document_choice_parameter_links(&nested_cpl, "Invoice", false, &object_refs, &proof,)
+            .is_none()
+    );
+    let links =
+        parse_document_choice_parameter_links(&nested_cpl, "Invoice", true, &object_refs, &proof)
+            .unwrap();
+    assert_eq!(
+        links[0].data_path,
+        "Document.Invoice.TabularSection.Lines.Attribute.Product"
+    );
+    let max = usize::MAX;
+    assert!(
+        parse_document_choice_parameter_links(
+            &format!("{{5006,{max}}}"),
+            "Invoice",
+            false,
+            &object_refs,
+            &proof,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
+    let first_uuid = "11111111-1111-4111-8111-111111111111";
+    let second_uuid = "22222222-2222-4222-8222-222222222222";
+    let pattern = r#"{"Pattern",{"B"}}"#;
+    let direct5 = document_attribute_wrapper_for_test(5, first_uuid, pattern, r#"{"U"}"#, "0", "1");
+    let direct6 = document_attribute_wrapper_for_test(6, first_uuid, pattern, r#"{"U"}"#, "0", "1");
+    let nested8 =
+        document_attribute_wrapper_for_test(8, first_uuid, pattern, r#"{"S",""}"#, "0", "1");
+    for (wrapper, code) in [(&direct5, 5), (&direct6, 6), (&nested8, 8)] {
+        let fields = split_1c_braced_fields(wrapper, 0).unwrap();
+        assert_eq!(
+            parse_document_attribute_wrapper_fields(&fields, Some(first_uuid))
+                .unwrap()
+                .2,
+            code
+        );
+    }
+
+    let mut malformed5 = split_1c_braced_fields(&direct5, 0).unwrap();
+    malformed5.push("0");
+    assert!(parse_document_attribute_wrapper_fields(&malformed5, Some(first_uuid)).is_none());
+    let mut malformed6 = split_1c_braced_fields(&direct6, 0).unwrap();
+    malformed6[5] = "1";
+    assert!(parse_document_attribute_wrapper_fields(&malformed6, Some(first_uuid)).is_none());
+    let mut malformed_tail6 = split_1c_braced_fields(&direct6, 0).unwrap();
+    malformed_tail6[6] = "{1,11111111-1111-4111-8111-111111111111}";
+    assert!(parse_document_attribute_wrapper_fields(&malformed_tail6, Some(first_uuid)).is_none());
+
+    let direct_collection = document_attribute_collection_for_test(
+        DOCUMENT_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&direct6),
+    );
+    let direct_fields = split_1c_braced_fields(&direct_collection, 0).unwrap();
+    assert!(document_attribute_collection_is_closed(
+        &direct_fields,
+        first_uuid,
+        6
+    ));
+    let wrong_marker = document_attribute_collection_for_test(
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&direct6),
+    );
+    assert!(!document_attribute_collection_is_closed(
+        &split_1c_braced_fields(&wrong_marker, 0).unwrap(),
+        first_uuid,
+        6
+    ));
+    let wrong_count = format!("{{{DOCUMENT_ATTRIBUTE_GROUP_UUID},2,{{{direct6},0}}}}");
+    assert!(!document_attribute_collection_is_closed(
+        &split_1c_braced_fields(&wrong_count, 0).unwrap(),
+        first_uuid,
+        6
+    ));
+    let wrong_item_tail = format!("{{{DOCUMENT_ATTRIBUTE_GROUP_UUID},1,{{{direct6},1}}}}");
+    assert!(!document_attribute_collection_is_closed(
+        &split_1c_braced_fields(&wrong_item_tail, 0).unwrap(),
+        first_uuid,
+        6
+    ));
+    let mixed = document_attribute_collection_for_test(
+        DOCUMENT_ATTRIBUTE_GROUP_UUID,
+        &[
+            direct6.clone(),
+            document_attribute_wrapper_for_test(5, second_uuid, pattern, r#"{"U"}"#, "0", "1"),
+        ],
+    );
+    assert!(!document_attribute_collection_is_closed(
+        &split_1c_braced_fields(&mixed, 0).unwrap(),
+        first_uuid,
+        6
+    ));
+    let duplicate = document_attribute_collection_for_test(
+        DOCUMENT_ATTRIBUTE_GROUP_UUID,
+        &[direct6.clone(), direct6.clone()],
+    );
+    assert!(!document_attribute_collection_is_closed(
+        &split_1c_braced_fields(&duplicate, 0).unwrap(),
+        first_uuid,
+        6
+    ));
+
+    let proof = DocumentDataPathOwnerProof {
+        entries: BTreeMap::new(),
+        ambiguous: BTreeSet::new(),
+    };
+    let value_types = [ConstantValueType::Boolean];
+    let direct = parse_document_child_properties(
+        "Invoice",
+        &direct_collection,
+        direct_collection.find(first_uuid).unwrap(),
+        first_uuid,
+        false,
+        &value_types,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &proof,
+    )
+    .unwrap();
+    assert!(direct.emit_fill_from_filling_value);
+    assert!(direct.emit_fill_value);
+    let direct5_collection = document_attribute_collection_for_test(
+        DOCUMENT_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&direct5),
+    );
+    assert!(
+        parse_document_child_properties(
+            "Invoice",
+            &direct5_collection,
+            direct5_collection.find(first_uuid).unwrap(),
+            first_uuid,
+            false,
+            &value_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &proof,
+        )
+        .is_some()
+    );
+
+    let nested_collection = document_attribute_collection_for_test(
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&nested8),
+    );
+    let nested = parse_document_child_properties(
+        "Invoice",
+        &nested_collection,
+        nested_collection.find(first_uuid).unwrap(),
+        first_uuid,
+        true,
+        &value_types,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &proof,
+    )
+    .unwrap();
+    assert!(!nested.emit_fill_from_filling_value);
+    assert!(!nested.emit_fill_value);
+    assert!(
+        parse_document_child_properties(
+            "Invoice",
+            &nested_collection,
+            nested_collection.find(first_uuid).unwrap(),
+            first_uuid,
+            false,
+            &value_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &proof,
+        )
+        .is_none()
+    );
+    let invalid_nested =
+        document_attribute_wrapper_for_test(8, first_uuid, pattern, r#"{"U"}"#, "0", "1");
+    let invalid_nested_collection = document_attribute_collection_for_test(
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        &[invalid_nested],
+    );
+    assert!(
+        parse_document_child_properties(
+            "Invoice",
+            &invalid_nested_collection,
+            invalid_nested_collection.find(first_uuid).unwrap(),
+            first_uuid,
+            true,
+            &value_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &proof,
+        )
+        .is_none()
+    );
+    let invalid_nested_fill_from =
+        document_attribute_wrapper_for_test(8, first_uuid, pattern, r#"{"S",""}"#, "1", "1");
+    let invalid_nested_fill_from_collection = document_attribute_collection_for_test(
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        &[invalid_nested_fill_from],
+    );
+    assert!(
+        parse_document_child_properties(
+            "Invoice",
+            &invalid_nested_fill_from_collection,
+            invalid_nested_fill_from_collection
+                .find(first_uuid)
+                .unwrap(),
+            first_uuid,
+            true,
+            &value_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &proof,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn document_choice_form_requires_one_matching_catalog_or_document_reference_type() {
+    let catalog_form_uuid = "11111111-1111-4111-8111-111111111111";
+    let document_form_uuid = "22222222-2222-4222-8222-222222222222";
+    let common_form_uuid = "33333333-3333-4333-8333-333333333333";
+    let foreign_form_uuid = "44444444-4444-4444-8444-444444444444";
+    let form_refs = BTreeMap::from([
+        (
+            catalog_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Catalogs/Customers/Forms/Choice.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            document_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Documents/Order/Forms/Choice.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            common_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("CommonForms/Choice.xml"),
+                kind: "CommonForm",
+            },
+        ),
+        (
+            foreign_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Catalogs/Other/Forms/Choice.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+    let catalog_type = ConstantValueType::Reference {
+        reference: "cfg:CatalogRef.Customers".to_string(),
+    };
+    let document_type = ConstantValueType::Reference {
+        reference: "cfg:DocumentRef.Order".to_string(),
+    };
+    assert!(matches!(
+        parse_document_child_choice_form(
+            catalog_form_uuid,
+            std::slice::from_ref(&catalog_type),
+            &form_refs,
+        ),
+        Some(MetadataChoiceForm::Reference(ref value))
+            if value == "Catalog.Customers.Form.Choice"
+    ));
+    assert!(matches!(
+        parse_document_child_choice_form(
+            document_form_uuid,
+            std::slice::from_ref(&document_type),
+            &form_refs,
+        ),
+        Some(MetadataChoiceForm::Reference(ref value))
+            if value == "Document.Order.Form.Choice"
+    ));
+    assert!(matches!(
+        parse_document_child_choice_form("00000000-0000-0000-0000-000000000000", &[], &form_refs,),
+        Some(MetadataChoiceForm::Empty)
+    ));
+    assert!(
+        parse_document_child_choice_form(
+            catalog_form_uuid,
+            &[catalog_type.clone(), catalog_type.clone()],
+            &form_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_document_child_choice_form(foreign_form_uuid, &[catalog_type], &form_refs).is_none()
+    );
+    assert!(
+        parse_document_child_choice_form(common_form_uuid, &[document_type], &form_refs).is_none()
+    );
+    assert!(
+        parse_document_child_choice_form("55555555-5555-4555-8555-555555555555", &[], &form_refs,)
+            .is_none()
+    );
+    assert!(
+        parse_document_child_choice_form(
+            &format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,0,{catalog_form_uuid}}}}}"),
+            &[],
+            &form_refs,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn document_fill_value_preserves_only_a_dangling_value_for_its_sole_enum_type() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let dangling_uuid = "22222222-2222-4222-8222-222222222222";
+    let known_uuid = "33333333-3333-4333-8333-333333333333";
+    let owner_type = "cfg:EnumRef.Status";
+    let raw = |value_uuid: &str| {
+        format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{value_uuid}}}}}")
+    };
+    let value_types = [ConstantValueType::Reference {
+        reference: owner_type.to_string(),
+    }];
+    let type_index = BTreeMap::from([(owner_uuid.to_string(), owner_type.to_string())]);
+    assert!(matches!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &value_types,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Some(MetadataChildFillValue::DesignTimeRef(ref value))
+            if value == &format!("{owner_uuid}.{dangling_uuid}")
+    ));
+
+    let known_refs = BTreeMap::from([(
+        known_uuid.to_string(),
+        "Enum.Status.EnumValue.Active".to_string(),
+    )]);
+    assert!(matches!(
+        parse_document_fill_value(
+            &raw(known_uuid),
+            &value_types,
+            &type_index,
+            &known_refs,
+            &BTreeMap::new(),
+        ),
+        Some(MetadataChildFillValue::DesignTimeRef(ref value))
+            if value == "Enum.Status.EnumValue.Active"
+    ));
+
+    let second_type = ConstantValueType::String {
+        length: None,
+        allowed_length_flag: 0,
+    };
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &[value_types[0].clone(), second_type],
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &[ConstantValueType::Reference {
+                reference: "cfg:EnumRef.Other".to_string(),
+            }],
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &[ConstantValueType::Reference {
+                reference: "cfg:CatalogRef.Status".to_string(),
+            }],
+            &BTreeMap::from([(owner_uuid.to_string(), "cfg:CatalogRef.Status".to_string(),)]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    for invalid in [
+        format!(
+            "{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,00000000-0000-0000-0000-000000000000,{dangling_uuid}}}}}"
+        ),
+        format!("{{\"#\",{FIXED_ARRAY_TYPE_UUID},{{0,{owner_uuid},{dangling_uuid}}}}}"),
+    ] {
+        assert!(
+            parse_document_fill_value(
+                &invalid,
+                &value_types,
+                &type_index,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_none()
+        );
+    }
+    assert!(matches!(
+        parse_document_fill_value(
+            &raw("00000000-0000-0000-0000-000000000000"),
+            &value_types,
+            &type_index,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Some(MetadataChildFillValue::DesignTimeRef(ref value))
+            if value == "Enum.Status.EmptyRef"
+    ));
+
+    let foreign_bare = BTreeMap::from([(
+        dangling_uuid.to_string(),
+        "Catalog.Foreign.Item".to_string(),
+    )]);
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &value_types,
+            &type_index,
+            &foreign_bare,
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let owner_collision =
+        BTreeMap::from([(owner_uuid.to_string(), "Catalog.Foreign.Owner".to_string())]);
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &value_types,
+            &type_index,
+            &owner_collision,
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let same_owner_wrong_kind =
+        BTreeMap::from([(dangling_uuid.to_string(), "Enum.Status.Foreign".to_string())]);
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &value_types,
+            &type_index,
+            &same_owner_wrong_kind,
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let foreign_qualified = BTreeMap::from([(
+        metadata_owner_value_reference_key("Enum.Other", dangling_uuid),
+        "Enum.Other.Value".to_string(),
+    )]);
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &value_types,
+            &type_index,
+            &foreign_qualified,
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let mut generated_collision = type_index.clone();
+    generated_collision.insert(
+        dangling_uuid.to_string(),
+        "cfg:CatalogRef.Collision".to_string(),
+    );
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &value_types,
+            &generated_collision,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let form_collision = BTreeMap::from([(
+        dangling_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Documents/Invoice/Forms/Choice.xml"),
+            kind: "Form",
+        },
+    )]);
+    assert!(
+        parse_document_fill_value(
+            &raw(dangling_uuid),
+            &value_types,
+            &type_index,
+            &BTreeMap::new(),
+            &form_collision,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn document_formatter_stably_orders_root_child_groups() {
+    let child = |tag, uuid: &str, name: &str| MetadataChildObject {
+        tag,
+        generated_types: Vec::new(),
+        value_types: Vec::new(),
+        emit_empty_type: tag == "Attribute",
+        properties: None,
+        tabular_section_properties: None,
+        header: MetadataHeader {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        },
+        child_objects: Vec::new(),
+    };
+    let document = DocumentProperties {
+        generated_types: Vec::new(),
+        use_standard_commands: true,
+        numbering: None,
+        standard_attributes: None,
+        default_object_form: None,
+        default_list_form: None,
+        default_choice_form: None,
+        auxiliary_object_form: None,
+        auxiliary_list_form: None,
+        auxiliary_choice_form: None,
+        include_help_in_contents: false,
+        child_metadata_objects: vec![
+            child(
+                "TabularSection",
+                "11111111-1111-4111-8111-111111111111",
+                "Lines1",
+            ),
+            child(
+                "Attribute",
+                "22222222-2222-4222-8222-222222222222",
+                "Field1",
+            ),
+            child(
+                "TabularSection",
+                "33333333-3333-4333-8333-333333333333",
+                "Lines2",
+            ),
+            child(
+                "Attribute",
+                "44444444-4444-4444-8444-444444444444",
+                "Field2",
+            ),
+        ],
+        child_forms: vec!["Main".to_string()],
+        child_templates: vec!["Print".to_string()],
+    };
+    let header = MetadataHeader {
+        uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+        name: "Invoice".to_string(),
+        synonyms: Vec::new(),
+        comment: String::new(),
+        template_type_code: None,
+    };
+    let mut xml =
+        format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21);
+    insert_metadata_child_commands_xml(
+        &mut xml,
+        "Document",
+        &[MetadataHeader {
+            uuid: "55555555-5555-4555-8555-555555555555".to_string(),
+            name: "Post".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }],
+    );
+    let field1 = xml.find("<Name>Field1</Name>").unwrap();
+    let field2 = xml.find("<Name>Field2</Name>").unwrap();
+    let form = xml.find("<Form>Main</Form>").unwrap();
+    let lines1 = xml.find("<Name>Lines1</Name>").unwrap();
+    let lines2 = xml.find("<Name>Lines2</Name>").unwrap();
+    let template = xml.find("<Template>Print</Template>").unwrap();
+    let command = xml.find("<Command uuid=").unwrap();
+    assert!(field1 < field2 && field2 < form && form < lines1 && lines1 < lines2);
+    assert!(lines2 < template && template < command, "{xml}");
+}
+
 fn catalog_attribute_wrapper_for_test(
     wrapper_code: u32,
     attribute_uuid: &str,
@@ -32500,7 +33937,8 @@ fn formats_every_metadata_choice_parameter_value_variant() {
         MetadataChoiceParameter {
             name: "Array".to_string(),
             value: MetadataChoiceParameterValue::FixedArray(vec![
-                "Catalog.Statuses.Open".to_string(),
+                MetadataChoiceParameterValue::DesignTimeRef("Catalog.Statuses.Open".to_string()),
+                MetadataChoiceParameterValue::DesignTimeRef(String::new()),
             ]),
         },
     ];
@@ -32520,6 +33958,17 @@ fn formats_every_metadata_choice_parameter_value_variant() {
     assert!(
         xml.contains(r#"<v8:Value xsi:type="xr:DesignTimeRef">Catalog.Statuses.Open</v8:Value>"#)
     );
+    assert!(xml.contains(r#"<v8:Value xsi:type="xr:DesignTimeRef"></v8:Value>"#));
+
+    let mut document_xml = String::new();
+    push_metadata_child_choice_parameters_xml_with_style(
+        &mut document_xml,
+        "\t",
+        &parameters,
+        true,
+    );
+    assert!(document_xml.contains(r#"<v8:Value xsi:type="xr:DesignTimeRef"/>"#));
+    assert!(!document_xml.contains(r#"<v8:Value xsi:type="xr:DesignTimeRef"></v8:Value>"#));
 }
 
 #[test]
