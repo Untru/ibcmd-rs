@@ -37851,6 +37851,7 @@ fn extracts_data_processor_child_attribute_choice_parameters() {
     );
 }
 
+#[derive(Clone)]
 struct CatalogDefaultPresentationFixture {
     owner_uuid: String,
     fields: Vec<String>,
@@ -37925,6 +37926,10 @@ fn catalog_default_presentation_fixture(
     for field in &mut fields[46..=50] {
         *field = "{0}".to_string();
     }
+    fields[51] = "1".to_string();
+    fields[52] = "0".to_string();
+    fields[53] = "1".to_string();
+    fields[57] = "0".to_string();
 
     CatalogDefaultPresentationFixture { owner_uuid, fields }
 }
@@ -37938,6 +37943,23 @@ fn catalog_default_presentation_xml(
     catalog_default_presentation_fixture(code, field_count, description_length, name)
         .extract()
         .map(|source| String::from_utf8(source.xml).unwrap())
+}
+
+fn catalog_input_history_fixture(
+    code: &str,
+    field_count: usize,
+    legacy_create: &str,
+    legacy_choice: &str,
+    exact_create: &str,
+    exact_choice: &str,
+    name: &str,
+) -> CatalogDefaultPresentationFixture {
+    let mut fixture = catalog_default_presentation_fixture(code, field_count, "150", name);
+    fixture.fields[51] = legacy_create.to_string();
+    fixture.fields[52] = legacy_choice.to_string();
+    fixture.fields[53] = exact_create.to_string();
+    fixture.fields[57] = exact_choice.to_string();
+    fixture
 }
 
 #[test]
@@ -38120,6 +38142,271 @@ fn catalog_default_presentation_production_has_no_fixture_literals() {
         "ЯзыкиПечатныхФорм",
         "UnresolvedNativeException",
         "ExtensionRevisionsRenamed",
+    ] {
+        assert!(
+            !production.contains(forbidden),
+            "production literal: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn catalog_input_history_tail_matches_114_joint_cases_and_saved_delta() {
+    let mut observed = 0;
+    let mut create_changed = 0;
+    let mut choice_changed = 0;
+    let mut overlap = 0;
+    let mut unique_changed = 0;
+    for (exact_create, exact_choice, legacy_create, count) in [
+        ("1", "0", "0", 1),
+        ("1", "0", "1", 18),
+        ("1", "1", "1", 2),
+        ("2", "0", "0", 11),
+        ("2", "0", "1", 80),
+        ("2", "1", "1", 2),
+    ] {
+        for index in 0..count {
+            let name =
+                format!("ObservedJoint{exact_create}_{exact_choice}_{legacy_create}_{index}");
+            let exact_fixture = catalog_input_history_fixture(
+                "56",
+                61,
+                legacy_create,
+                "{0,{0}}",
+                exact_create,
+                exact_choice,
+                &name,
+            );
+            let exact_xml = String::from_utf8(exact_fixture.extract().unwrap().xml).unwrap();
+            let expected_create = if exact_create == "1" {
+                "DontUse"
+            } else {
+                "Use"
+            };
+            let expected_choice = if exact_choice == "0" {
+                "Auto"
+            } else {
+                "DontUse"
+            };
+            let legacy_create_xml = if legacy_create == "0" {
+                "Auto"
+            } else {
+                "DontUse"
+            };
+            let this_create_changed = expected_create != legacy_create_xml;
+            let this_choice_changed = expected_choice != "Auto";
+
+            assert!(
+                exact_xml.contains(&format!("<CreateOnInput>{expected_create}</CreateOnInput>")),
+                "f53={exact_create} f51={legacy_create}: {exact_xml}"
+            );
+            assert!(
+                exact_xml.contains(&format!(
+                    "<ChoiceHistoryOnInput>{expected_choice}</ChoiceHistoryOnInput>"
+                )),
+                "f57={exact_choice}: {exact_xml}"
+            );
+
+            let legacy_xml = catalog_input_history_fixture(
+                "57",
+                61,
+                legacy_create,
+                "{0,{0}}",
+                exact_create,
+                exact_choice,
+                &name,
+            )
+            .extract()
+            .map(|source| String::from_utf8(source.xml).unwrap())
+            .unwrap();
+            assert_eq!(
+                exact_xml
+                    .replace(
+                        &format!("<CreateOnInput>{expected_create}</CreateOnInput>"),
+                        &format!("<CreateOnInput>{legacy_create_xml}</CreateOnInput>"),
+                    )
+                    .replace(
+                        &format!("<ChoiceHistoryOnInput>{expected_choice}</ChoiceHistoryOnInput>"),
+                        "<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>",
+                    ),
+                legacy_xml
+            );
+
+            observed += 1;
+            create_changed += usize::from(this_create_changed);
+            choice_changed += usize::from(this_choice_changed);
+            overlap += usize::from(this_create_changed && this_choice_changed);
+            unique_changed += usize::from(this_create_changed || this_choice_changed);
+        }
+    }
+
+    assert_eq!(observed, 114);
+    assert_eq!(create_changed, 94);
+    assert_eq!(choice_changed, 4);
+    assert_eq!(overlap, 2);
+    assert_eq!(unique_changed, 96);
+    assert_eq!(create_changed + choice_changed, 98);
+}
+
+#[test]
+fn catalog_input_history_tail_keeps_489_code57_controls_on_semantic_legacy() {
+    for index in 0..489 {
+        let legacy_create = if index < 68 { "0" } else { "1" };
+        let legacy_choice = if index < 415 {
+            "{0,{0}}"
+        } else {
+            "{0,{2,{0},{1}}}"
+        };
+        let exact_create = if index < 225 { "1" } else { "2" };
+        let exact_choice = if index < 37 { "1" } else { "0" };
+        let fixture = catalog_input_history_fixture(
+            "57",
+            61,
+            legacy_create,
+            legacy_choice,
+            exact_create,
+            exact_choice,
+            &format!("LegacyTail{index}"),
+        );
+        let xml = String::from_utf8(fixture.extract().unwrap().xml).unwrap();
+        let expected_create = if legacy_create == "0" {
+            "Auto"
+        } else {
+            "DontUse"
+        };
+        let expected_history = if exact_create == "1" {
+            "Use"
+        } else {
+            "DontUse"
+        };
+
+        assert!(xml.contains(&format!("<CreateOnInput>{expected_create}</CreateOnInput>")));
+        assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+        assert!(xml.contains(&format!("<DataHistory>{expected_history}</DataHistory>")));
+
+        let mut neutral_choice = fixture.clone();
+        neutral_choice.fields[57] = "0".to_string();
+        let neutral_xml = String::from_utf8(neutral_choice.extract().unwrap().xml).unwrap();
+        assert_eq!(xml, neutral_xml, "code57 consumed field57 at index {index}");
+    }
+}
+
+#[test]
+fn catalog_input_history_tail_keeps_non61_code56_properties_legacy() {
+    for field_count in [60, 62] {
+        let fixture = catalog_input_history_fixture(
+            "56",
+            field_count,
+            "0",
+            "{0,{0}}",
+            "2",
+            "1",
+            &format!("LegacyArity{field_count}"),
+        );
+        let xml = String::from_utf8(fixture.extract().unwrap().xml).unwrap();
+
+        assert!(xml.contains("<CreateOnInput>Auto</CreateOnInput>"));
+        assert!(xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
+
+        let mut neutral_choice = fixture.clone();
+        neutral_choice.fields[57] = "0".to_string();
+        assert_eq!(
+            xml,
+            String::from_utf8(neutral_choice.extract().unwrap().xml).unwrap()
+        );
+    }
+}
+
+#[test]
+fn catalog_input_history_tail_rejects_malformed_exact_create_atomically() {
+    for malformed in ["", "value", "-1", "4294967296", "{1}", "0", "3", "01"] {
+        let fixture = catalog_input_history_fixture(
+            "56",
+            61,
+            "1",
+            "0",
+            malformed,
+            "0",
+            "MalformedExactCreate",
+        );
+
+        assert!(
+            fixture.extract().is_none(),
+            "accepted exact field53={malformed:?}"
+        );
+    }
+}
+
+#[test]
+fn catalog_input_history_tail_rejects_malformed_exact_choice_atomically() {
+    for malformed in ["", "value", "-1", "4294967296", "{0}", "2", "00", "01"] {
+        let fixture = catalog_input_history_fixture(
+            "56",
+            61,
+            "1",
+            "0",
+            "1",
+            malformed,
+            "MalformedExactChoice",
+        );
+
+        assert!(
+            fixture.extract().is_none(),
+            "accepted exact field57={malformed:?}"
+        );
+    }
+}
+
+#[test]
+fn catalog_input_history_tail_changes_only_two_properties_in_schema_order() {
+    let exact = catalog_input_history_fixture("56", 61, "1", "{0,{0}}", "2", "1", "PropertyDelta")
+        .extract()
+        .map(|source| String::from_utf8(source.xml).unwrap())
+        .unwrap();
+    let legacy = catalog_input_history_fixture("57", 61, "1", "{0,{0}}", "2", "1", "PropertyDelta")
+        .extract()
+        .map(|source| String::from_utf8(source.xml).unwrap())
+        .unwrap();
+
+    assert_eq!(
+        exact
+            .replace(
+                "<CreateOnInput>Use</CreateOnInput>",
+                "<CreateOnInput>DontUse</CreateOnInput>"
+            )
+            .replace(
+                "<ChoiceHistoryOnInput>DontUse</ChoiceHistoryOnInput>",
+                "<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>",
+            ),
+        legacy
+    );
+    assert!(exact.find("<Explanation/>").unwrap() < exact.find("<CreateOnInput>").unwrap());
+    assert!(exact.find("<CreateOnInput>").unwrap() < exact.find("<ChoiceHistoryOnInput>").unwrap());
+    assert!(exact.find("<ChoiceHistoryOnInput>").unwrap() < exact.find("<DataHistory>").unwrap());
+}
+
+#[test]
+fn catalog_input_history_tail_production_has_no_corpus_literals() {
+    let production = include_str!("mod.rs");
+    let implementation_start = production
+        .find("fn parse_catalog_input_history_tail")
+        .unwrap();
+    let implementation_end = production[implementation_start..]
+        .find("fn parse_report_properties_from_text")
+        .map(|offset| implementation_start + offset)
+        .unwrap();
+    let implementation = &production[implementation_start..implementation_end];
+
+    assert!(!implementation.contains("uuid"));
+    assert!(!implementation.contains("name"));
+    for forbidden in [
+        "ПроизводственныеКалендари",
+        "ТомаХраненияФайлов",
+        "РолиИсполнителей",
+        "СертификатыКлючейЭлектроннойПодписиИШифрования",
+        "ObservedJoint",
+        "LegacyTail",
+        "PropertyDelta",
     ] {
         assert!(
             !production.contains(forbidden),

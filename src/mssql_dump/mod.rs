@@ -11976,7 +11976,10 @@ fn parse_catalog_properties_from_text(
         catalog_code_allowed_length_xml(parse_1c_u32_field(fields.get(20).copied()).unwrap_or(1));
     let use_standard_commands = parse_1c_bool_field(fields.get(33).copied()).unwrap_or(true);
     let include_help_in_contents = parse_1c_bool_field(fields.get(31).copied()).unwrap_or(false);
-    let default_presentation = parse_catalog_default_presentation(&fields, &header)?;
+    let exact_code56_layout = validate_exact_catalog_code56_layout(&fields, &header)?;
+    let default_presentation = parse_catalog_default_presentation(&fields, exact_code56_layout)?;
+    let (create_on_input, choice_history_on_input) =
+        parse_catalog_input_history_tail(&fields, exact_code56_layout)?;
 
     Some(CatalogProperties {
         generated_types,
@@ -12016,14 +12019,8 @@ fn parse_catalog_properties_from_text(
         list_presentation: parse_1c_synonyms(fields.get(48).copied().unwrap_or("{0}")),
         extended_list_presentation: parse_1c_synonyms(fields.get(49).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
-        create_on_input: fields
-            .get(51)
-            .and_then(|field| metadata_create_on_input_xml(field.trim()))
-            .unwrap_or("DontUse"),
-        choice_history_on_input: fields
-            .get(52)
-            .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
-            .unwrap_or("Auto"),
+        create_on_input,
+        choice_history_on_input,
         data_history: fields
             .get(53)
             .and_then(|field| metadata_data_history_xml(field.trim()))
@@ -12061,12 +12058,12 @@ fn parse_catalog_properties_from_text(
     })
 }
 
-fn parse_catalog_default_presentation(
+fn validate_exact_catalog_code56_layout(
     fields: &[&str],
     expected_header: &MetadataHeader,
-) -> Option<&'static str> {
+) -> Option<bool> {
     if fields.first().map(|field| field.trim()) != Some("56") || fields.len() != 61 {
-        return Some("AsDescription");
+        return Some(false);
     }
 
     let header_wrapper = split_information_register_braced_fields(fields.get(9)?)?;
@@ -12088,11 +12085,52 @@ fn parse_catalog_default_presentation(
         return None;
     }
 
+    Some(true)
+}
+
+fn parse_catalog_default_presentation(
+    fields: &[&str],
+    exact_code56_layout: bool,
+) -> Option<&'static str> {
+    if !exact_code56_layout {
+        return Some("AsDescription");
+    }
+
     Some(if parse_1c_u32_field(fields.get(19).copied())? == 0 {
         "AsCode"
     } else {
         "AsDescription"
     })
+}
+
+fn parse_catalog_input_history_tail(
+    fields: &[&str],
+    exact_code56_layout: bool,
+) -> Option<(&'static str, &'static str)> {
+    if exact_code56_layout {
+        let create_on_input = match fields.get(53)?.trim() {
+            "1" => "DontUse",
+            "2" => "Use",
+            _ => return None,
+        };
+        let choice_history_on_input = match fields.get(57)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            _ => return None,
+        };
+        return Some((create_on_input, choice_history_on_input));
+    }
+
+    Some((
+        fields
+            .get(51)
+            .and_then(|field| metadata_create_on_input_xml(field.trim()))
+            .unwrap_or("DontUse"),
+        fields
+            .get(52)
+            .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
+            .unwrap_or("Auto"),
+    ))
 }
 
 fn parse_report_properties_from_text(
