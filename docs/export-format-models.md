@@ -1757,6 +1757,41 @@ The expected future permitted native gate is `+0/-0`, but exactness is not
 claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## Catalog bounded default presentation
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The admitted model is local to the exact BSP Catalog source layout with raw
+object code `56` and 61 fields. Among 114 such owners, all six records whose
+strict unsigned-integer slot 19 is zero have native `DefaultPresentation` equal
+to `AsCode`. Of the 108 records with a positive slot 19, 107 have native
+`AsDescription`; the remaining `AsCode` record has value 150 and is an
+unexplained HOLD. It is not encoded as an owner-name or UUID exception.
+
+The full metadata-object header must occur exactly once at field 9. Wrong,
+missing, duplicate, or malformed headers and malformed slot-19 values fail
+closed. Exact code-56/length-61 records map zero to `AsCode` and a positive
+value to `AsDescription`. Other shapes retain the previous
+`AsDescription` behavior. In particular, all 489 exact code-57/length-61
+Catalog controls remain unchanged, including 26 whose slot 19 is zero. The
+mapping is therefore not a platform-global Catalog semantic and is not shared
+with the independently encoded UT and SFC layouts.
+
+Integrated commit `727d180` passes 12 positive, control, malformed-header,
+wrong-family, and native-exception tests. The full suite changed from
+`1313 passed / 74 failed / 6 ignored` to
+`1325 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 12,637-byte diff with SHA-256
+`2FA6986B9632F1AA28A299FF264F38740F4AD63545B0D1672ABCCB49E6423002`.
+Production contains no Catalog name, object UUID, database identity, path,
+field-43 branch, or exception table.
+
+The saved normalized isolated residual is six Catalog roots totaling `+6/-6`.
+The expected future permitted native gate is `+0/-0`, but exactness is not
+claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
