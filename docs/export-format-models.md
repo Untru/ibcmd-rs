@@ -1413,6 +1413,48 @@ roots, but exactness is not claimed without that gate. The full Sequence root
 and Dimension serializer remains outside this scope. No database access,
 ConfigDump, configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## SettingsStorage default forms
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The SettingsStorage root has five fields: tag `1`, an eight-field code-`2`
+owner, declared child-collection count `2`, an empty template collection, and
+the owner form collection. The owner fields at slots 4 and 5 are respectively
+`DefaultLoadForm` and `DefaultSaveForm`; slots 6 and 7 are zero in the available
+evidence and are therefore rejected when nonzero rather than interpreted as
+unproven auxiliary-form references.
+
+The parser consumes the complete root value and validates the exact owner and
+header wrappers. Both child collections require their platform collection
+UUID, a digits-only count, exact cardinality, and strict UUID syntax. Available
+raw evidence supports only an empty template collection. Form UUIDs must be
+unique case-insensitively. A nonzero default must occur in that owner collection
+and resolve uniquely through the current form index to
+`SettingsStorages/<owner>/Forms/<name>.xml`; missing, ambiguous, CommonForm, and
+cross-owner matches fail atomically. Object, form, and database UUIDs are not
+production literals.
+
+The formatter always emits `DefaultSaveForm`, `DefaultLoadForm`,
+`AuxiliarySaveForm`, and `AuxiliaryLoadForm` immediately after `Comment`, in
+that native order. Version 2.20 retains the shared namespace set. Version 2.21
+adds exactly one palette namespace immediately before the style namespace, as
+observed in the native SettingsStorage schema.
+
+Integrated commit `5501111` passes all 9 focused SettingsStorage tests. The
+full suite changed from `1268 passed / 74 failed / 6 ignored` to
+`1273 passed / 74 failed / 6 ignored`; the exact 74 failure names are unchanged.
+Independent live review approved frozen diff SHA-256
+`EA2723C7303B3C1BC171CA90693B48C431D9FD08CDBE8AB49FDF67A93F9BB28D`.
+The only new production UUID literals are the two platform collection IDs,
+both taken from the saved raw envelope; no corpus object name, UUID, or path is
+embedded.
+
+The saved normalized residual is the single SettingsStorage root at `+0/-4`.
+The expected future permitted native gate is `+0/-0`, but exactness is not
+claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
