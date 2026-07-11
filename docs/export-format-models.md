@@ -1332,6 +1332,48 @@ layouts 68 and 76. Neither occurs anywhere in the 12,198-file exported BSP
 tree, which includes the metadata inventory. `ConfigDumpInfo.xml` remained
 outside scope and retained its SHA-256 content after every gate.
 
+## AccountingRegister RecordType presence
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+AccountingRegister standard-attribute definitions use an exact triplet
+collection. Each item contains a marker, the platform standard-attribute
+section UUID, and a legacy `13/24` or modern `14/25` property bag. Marker
+`-9` denotes `RecordType`. It is present for a register without
+correspondence and absent from the paired register with correspondence, but
+the marker itself is the serialization source of truth. Object names,
+database UUIDs, and the `Correspondence` property are not used as fallbacks.
+
+The collection parser is atomic. It validates the complete envelope, declared
+count and cardinality, scalar and indexed marker shapes, the existing platform
+section UUID, every property bag, and one uniform legacy/modern bag shape.
+Tooltip and synonym overrides are decoded during the validation phase. Only
+after all triplets are valid are presence and overrides retained. A malformed
+member therefore leaves the existing 11 AccountingRegister standard
+attributes unchanged and cannot emit a partial `RecordType`.
+
+When marker `-9` is present, the shared standard-attribute formatter emits the
+native default payload after `Account` and before `Active`. Captured positive
+and negative raw records also confirm the existing indexed ExtDimension marker
+families and an unknown negative singleton marker, so validation is structural
+rather than restricted to the current named set.
+
+Integrated commit `449b771` passes 3 direct RecordType tests, 6
+AccountingRegister tests, and 13 shared register-standard-attribute tests. The
+full suite changed from `1260 passed / 74 failed / 6 ignored` to
+`1264 passed / 74 failed / 6 ignored`; the exact 74 failure names are
+unchanged. Two independent reviews approved frozen diff SHA-256
+`583B30BBD0612EAD3D53CF6697C595689730A8C67863558B96DFC08540FE5CFB`.
+The patch adds no production UUID literal and contains no database object name,
+UUID, path, or corpus branch.
+
+The saved normalized residual is one root XML at `+0/-27`; the paired
+`Correspondence=true` root is already exact. The expected residual after a
+future permitted native gate is `+0/-0`, but this has not been claimed without
+that gate. No database access, ConfigDump, configuration export, or
+`ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
