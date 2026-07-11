@@ -88,3 +88,12 @@ Classification:
   current `object_refs`; no role name or application object UUID is embedded.
   Neither marker occurs in the accepted 12,198-file BSP export, including its
   complete metadata inventory.
+- The InformationRegister payload gate adds only the zero UUID, exact
+  `DesignTimeRef`/`FixedArray`/`EnumRef` and application-purpose TypeIds, and
+  two IR-scoped standard-picture IDs. Their intersection with 10,080 current
+  BSP metadata identity UUIDs is empty. Added production string literals also
+  have zero intersection with 3,326 root metadata object names; there are no
+  Cyrillic object names or absolute paths. The existing
+  `FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID` remains an exact typed source marker:
+  it has no BSP metadata-object hit and was independently observed in 35 form
+  blobs from another infobase.

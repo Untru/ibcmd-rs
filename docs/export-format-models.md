@@ -846,6 +846,32 @@ Confirmed by export:
   `1914 files, +32603/-230412` to `1902 files, +32596/-230391`, with zero added
   Attribute, Dimension, Resource, or Command reference lines.
 
+The accepted payload gate completes the properties of all 1,595 data children
+(515 Dimensions, 726 Resources, and 354 Attributes) plus 20 Commands. Child
+wrappers, collection counts, and typed envelopes are exact and fail closed.
+`DesignTimeRef` and `FixedArray` use platform TypeIds; references must resolve
+through the current metadata/predefined indexes and remain under the same
+logical owner. `Type` and `TypeSet` retain native stable partition order.
+Command pictures distinguish empty descriptors, current CommonPictures,
+IR-scoped standard pictures, and the platform Print descriptor.
+
+Direct code-14 forms are admitted only by their exact form record shape and a
+single metadata owner. The complete form index is shared by streamed,
+non-streamed, and module-path routing; FilterCriterion-shaped code-14 rows are
+negative controls. Selected predefined dependencies are index-only and do not
+leak extra output files.
+
+The integrated gate changed exactly 259 root InformationRegister XML files.
+All 1,615 target child/command subtrees are native-exact for count, identity,
+order, Properties, and complete XML. The full diff moved from
+`1559/+31284/-187135` to `1559/+31268/-142685`; the 12,198-file manifest had no
+additions, removals, or changes outside InformationRegisters. A second SFC
+gate covered 309 registers and 3,566 payloads with zero canonical mismatch.
+Seven added production UUID literals had zero intersection with 10,080 BSP
+metadata identity UUIDs; no database object names or absolute paths were
+added. `Configuration.xml`, all Form/DCS files, and `ConfigDumpInfo.xml`
+retained their accepted SHA-256 content.
+
 ## Subsystem properties and content
 
 Status: confirmed across all 244 raw Subsystem records and by serialized export.
