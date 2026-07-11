@@ -2094,6 +2094,57 @@ totaling `+0/-1`. The expected future permitted native gate is `+0/-0`, but
 exactness is not claimed without that gate. No database access, ConfigDump,
 configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## CalculationRegister bounded owner form pair
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The exact code-21/33-field CalculationRegister root stores a nonzero form UUID
+in field 23 and the zero UUID in field 29. The nonzero UUID resolves to its
+actual same-owner Form source. Native emits the qualified `DefaultListForm`
+followed by mandatory empty `AuxiliaryListForm`; the previous generated root
+omitted both. Native-only SFC has two CalculationRegister roots whose two form
+nodes are mandatory and empty, but paired SFC raw is unavailable and therefore
+does not widen the admitted nonzero form case.
+
+The dedicated resolver deliberately bypasses the existing preferred-name
+fallback and unchecked generic form resolver. It strictly parses field 23 as a
+nonzero UUID, requires exactly one case-insensitive key match, verifies kind
+`Form`, lowercase `.xml`, exact path
+`CalculationRegisters/<owner>/Forms/<name>.xml`, and a single-segment qualified
+name `CalculationRegister.<owner>.Form.<name>`. Field 29 must be the zero UUID.
+
+Zero, unknown, cross-owner, CommonForm, wrong-kind, invalid-extension, nested
+path, multi-segment name, case-collision, and nonzero or malformed auxiliary
+alternatives all remain accepted omissions. A malformed exact owner boundary
+still rejects atomically through the shared validator. An explicit form-pair
+state distinguishes mandatory empty Auxiliary from unsupported omission.
+
+The `form_refs` map can detect case-variant key collisions but cannot recover
+exact duplicate UUID rows already collapsed during index construction. The
+saved BSP candidate has one matching source row; no global collision-freedom
+claim is made. Formatting emits the pair only in CalculationRegister, after
+`UseStandardCommands` and before the fixed period vector. Accounting and
+Accumulation form routing remain unchanged.
+
+Integrated commit `0613cf9` passes eight exact, resolver-alternative, auxiliary,
+boundary, nonexact, family-control, property-only, and literal tests, plus 39
+issue-77-through-81 and existing form regressions. The full suite changed from
+`1370 passed / 74 failed / 6 ignored` to
+`1378 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 23,461-byte diff with SHA-256
+`1BB52202826B88D87B3EBBF05E509A140DE316059DE7B49402B7127FCB60C02E`.
+Production contains no register name, form UUID, database identity, path, or
+corpus-specific branch.
+
+Field-23 zero/default-empty semantics, exact duplicate UUID rows collapsed by
+the current index, Schedule and Chart references, StandardAttributes,
+DataLockControlMode and FullTextSearch, alternate layouts, and global offsets
+remain HOLD. The saved normalized isolated residual is one root totaling
+`+0/-2`. The expected future permitted native gate is `+0/-0`, but exactness is
+not claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
