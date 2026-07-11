@@ -1949,6 +1949,55 @@ expected future permitted native gate is `+0/-0`, but exactness is not claimed
 without that gate. No database access, ConfigDump, configuration export, or
 `ConfigDumpInfo.xml` change was performed.
 
+## CalculationRegister bounded empty presentation tail
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The complete BSP raw corpus contains one CalculationRegister root with object
+code `21`, 33 fields, and a unique fully parsed routed owner header at field 15.
+Its final fields 30, 31, and 32 are exactly `{0}`. Native emits mandatory
+self-closing `ListPresentation`, `ExtendedListPresentation`, and `Explanation`
+nodes, while the previous generated root omitted all three. Their order follows
+`DataLockControlMode` and `FullTextSearch`; CalculationRegister does not emit
+`EnableTotalsSplitting`.
+
+The saved UT/direct corpus contains 20,067 primary roots and no top-level
+code-21 owner root, so it supplies no paired CalculationRegister breadth.
+Native-only SFC has two CalculationRegister roots; both contain all three empty
+nodes in the same order. This confirms native presence and order but does not
+prove nonempty raw semantics.
+
+The admitted model is therefore deliberately empty-only. A shared
+parameterized wrapped-owner validator checks code `21`, arity 33, unique routed
+marker at field 15, and complete UUID/name/synonym/comment identity. Exact
+fields 30 through 32 must each equal `{0}` after outer whitespace trimming.
+Malformed values and valid nonempty localized values reject the whole exact
+source atomically. Arity-32 and arity-34 controls preserve legacy omission and
+do not consume tail-shaped values.
+
+The same raw code is not a global discriminator. AccountingRegister uses
+code 21 with 30 fields, presentation fields 26 through 28, and a distinct order
+that includes totals splitting before full-text search. AccumulationRegister
+uses code 28 with 26 fields and presentation fields 23 through 25. Both
+families retain their existing parsing and formatting.
+
+Integrated commit `4ac0aed` passes six empty-tail, boundary, nonempty/malformed,
+nonexact, property-only, and literal tests, plus all eight AccumulationRegister
+presentation and ten totals-splitting regressions. The full suite changed from
+`1350 passed / 74 failed / 6 ignored` to
+`1356 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Independent frozen review approved the 16,169-byte diff with SHA-256
+`3860BA29A0EF0A9AC3E19E5B33576DD3D95687CA55030B75C3F9141A868C8AB7`.
+Production contains no register name, owner UUID, database identity, path, or
+corpus-specific branch.
+
+Nonempty CalculationRegister presentation semantics, alternate arities and
+layouts, and global register offsets remain HOLD. The saved normalized isolated
+residual is one root totaling `+0/-3`. The expected future permitted native gate
+is `+0/-0`, but exactness is not claimed without that gate. No database access,
+ConfigDump, configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
