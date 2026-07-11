@@ -1838,6 +1838,57 @@ totaling `+98/-98`. The expected future permitted native gate is `+0/-0`, but
 exactness is not claimed without that gate. No database access, ConfigDump,
 configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## AccumulationRegister bounded totals splitting
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The saved BSP corpus contains exactly two AccumulationRegister root streams
+with object code `28`, 26 fields, and one owner-header marker at field 13. The
+field-13 wrapper and header must parse completely and match the routed owner
+UUID, name, synonyms, and comment. Field 20 is `1` for the native
+`EnableTotalsSplitting=true` root and `0` for the native false root. Both
+generated roots previously omitted the property.
+
+The parser uses a three-state contract. An exact code-28/26-field candidate
+with a malformed, moved, duplicate, partial, or wrong-owner header, or a field
+20 value outside the strict `0|1` domain, rejects the whole source. A nonexact
+AccumulationRegister layout returns a legacy omission, while a valid exact
+candidate returns the parsed boolean. A plain UUID outside an owner-header
+marker is not treated as another header. Code-28 arities 21, 25, and 27 remain
+explicit omission controls.
+
+Formatting is family-specific. AccumulationRegister emits the property after
+`FullTextSearch`, so its order is `DataLockControlMode`, `FullTextSearch`, then
+`EnableTotalsSplitting`. The two BSP AccountingRegister controls use code 21,
+30 fields, and header 15; their header+7 field is zero while header+8 is one.
+They retain their existing true value and the separate order
+`DataLockControlMode`, `EnableTotalsSplitting`, `FullTextSearch` byte-for-byte.
+A CalculationRegister code-21/33-field control has a UUID at header+7 and
+continues to omit the property.
+
+Native-only SFC evidence contains 252 AccumulationRegister roots: 209 true and
+43 false, all with the same XML order and none without the property. Because
+paired SFC raw data is unavailable, this breadth does not widen the admitted
+raw layout beyond the exact BSP shape.
+
+Integrated commit `a926e19` passes ten exact, malformed, marker, nonexact,
+family-control, property-only, ordering, and literal tests plus the existing
+code-28/21-field control. The full suite changed from
+`1332 passed / 74 failed / 6 ignored` to
+`1342 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 15,354-byte diff with SHA-256
+`D590346CBEB45A669A576C98A7AEC5FD7CED64DE85ECA89E6333212DD83C83DA`.
+Production contains no register name, owner UUID, database identity, path, or
+corpus-specific branch.
+
+Adjacent empty presentation and explanation properties, other code-28 raw
+layouts, global register offsets, RegisterType, and child-object residuals
+remain HOLD. The saved normalized isolated residual is two roots totaling
+`+0/-2`. The expected future permitted native gate is `+0/-0`, but exactness is
+not claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
