@@ -2047,6 +2047,53 @@ permitted native gate is `+0/-0`, but exactness is not claimed without that gate
 No database access, ConfigDump, configuration export, or `ConfigDumpInfo.xml`
 change was performed.
 
+## CalculationRegister bounded include-help flag
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+In the exact code-21/33-field CalculationRegister owner layout, absolute field
+25 is zero. Native emits `IncludeHelpInContents=false`; the previous generated
+root omitted the property. Native-only SFC has two CalculationRegister roots
+and both emit false. The saved UT/direct corpus has no code-21 owner root and
+therefore supplies no paired true alternative.
+
+The parser independently invokes the shared full header-15 owner validator.
+Only field 25 equal to `0` after outer whitespace trimming returns an explicit
+false value. Field 25 equal to `1`, other numeric or textual atoms, braced
+values, UUIDs, and every other alternative remain accepted legacy omissions;
+the implementation neither infers true nor rejects the source. A malformed
+exact owner boundary remains atomic failure, while nonexact arities do not
+consume field 25.
+
+Fields 26 and 27 are intentionally outside this model. Exhaustive mutation
+tests keep their XML byte-identical, preserving the unresolved Calculation
+DataLockControlMode and FullTextSearch polarity. Formatting reuses the existing
+optional include-help position after the fixed period vector and before the
+bounded presentation tail.
+
+The same raw code is not a global discriminator. AccountingRegister uses a
+30-field layout whose include-help field is 17 and whose paired value is true.
+AccumulationRegister uses code 28 and retains its separately proven false
+value. Both family controls remain unchanged.
+
+Integrated commit `71438cf` passes eight exact, alternative-omission, neighbor,
+boundary, nonexact, family-control, property-only, and literal tests, plus all
+30 Calculation and Accumulation regressions from issues 77 through 80. The full
+suite changed from `1362 passed / 74 failed / 6 ignored` to
+`1370 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 10,867-byte diff with SHA-256
+`257FB8AF33681BCE7B99733D296DA4DB15E61CBC64AFDE6D0BC4DA466C7633DB`.
+Production contains no register name, owner UUID, database identity, path, or
+corpus-specific branch.
+
+The raw mapping for Calculation include-help true, fields 26 and 27, forms,
+Schedule and Chart references, StandardAttributes, alternate layouts, and
+global offsets remain HOLD. The saved normalized isolated residual is one root
+totaling `+0/-1`. The expected future permitted native gate is `+0/-0`, but
+exactness is not claimed without that gate. No database access, ConfigDump,
+configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
