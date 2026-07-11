@@ -1540,6 +1540,38 @@ The expected future permitted native gate is `+0/-0`, but exactness is not
 claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## Metadata child-command shortcut modifiers
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The saved native tree has exactly four nonempty shortcuts in direct metadata
+root command objects. Their native/raw pairs are `F3` / `{0,114,0}`, `F2` /
+`{0,113,0}`, `Ctrl+Alt+F` / `{0,70,24}`, and `Ctrl+Shift+S` / `{0,83,12}`
+across Catalog, DataProcessor, and DocumentJournal owners. Empty shortcuts use
+`{0,0,0}`.
+
+The shared child-command decoder now requires an exact three-field tag-zero
+tuple. It accepts only uppercase ASCII key codes 65 through 90 and F1 through
+F12 key codes 112 through 123. The only modifier bits are `Shift=4`, `Ctrl=8`,
+and `Alt=16`; output order is Ctrl, Alt, Shift, then the key. Zero keys,
+unsupported key codes, unknown bits, wrong tags, missing fields, and trailing
+fields are rejected. The separately proven strict InformationRegister command
+parser is unchanged.
+
+Integrated commit `467fae0` passes the strict decoder matrix, the legacy
+F-key/empty control, and the DataProcessor raw-to-XML end-to-end test. The full
+suite changed from `1284 passed / 74 failed / 6 ignored` to
+`1285 passed / 74 failed / 6 ignored`; the exact 74 failure names are unchanged.
+Independent frozen review approved the 4,296-byte diff with SHA-256
+`64657058A390BCF936DCC67D792FDC7673E4AF727229A30776D3F05522DBC197`.
+Production adds no UUID, metadata name, database identity, or path literal.
+
+The saved normalized isolated residual is one DataProcessor root at `+1/-1`.
+The expected future permitted native gate is `+0/-0`, but exactness is not
+claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
