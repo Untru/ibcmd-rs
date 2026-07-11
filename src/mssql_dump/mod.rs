@@ -3840,11 +3840,55 @@ struct SubsystemProperties {
 }
 
 struct ExchangePlanProperties {
-    this_node: Option<String>,
+    this_node: String,
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    code_length: u32,
+    code_allowed_length: &'static str,
+    description_length: u32,
+    default_presentation: &'static str,
+    edit_type: &'static str,
+    quick_choice: bool,
+    choice_mode: &'static str,
+    input_by_string: Vec<String>,
+    search_string_mode_on_input_by_string: &'static str,
+    full_text_search_on_input_by_string: &'static str,
+    choice_data_get_mode_on_input_by_string: &'static str,
+    default_object_form: Option<String>,
     default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    auxiliary_object_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
+    standard_attributes: Vec<RegisterStandardAttribute>,
+    based_on: Option<String>,
+    distributed_infobase: bool,
+    include_configuration_extensions: bool,
+    create_on_input: &'static str,
+    choice_history_on_input: &'static str,
+    include_help_in_contents: bool,
+    data_lock_fields: Vec<String>,
+    data_lock_control_mode: &'static str,
+    full_text_search: &'static str,
+    object_presentation: Vec<(String, String)>,
+    extended_object_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    data_history: &'static str,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
     child_objects: Vec<MetadataChildObject>,
+}
+
+struct ExchangePlanOwnerFields<'a> {
+    physical: Vec<&'a str>,
+}
+
+impl<'a> ExchangePlanOwnerFields<'a> {
+    fn get(&self, index: usize) -> Option<&'a str> {
+        self.physical.get(index).copied()
+    }
 }
 
 struct RegisterProperties {
@@ -5767,8 +5811,13 @@ fn extract_metadata_source_xml_from_text_row(
             parse_subsystem_properties_from_text(text, uuid, object_refs, subsystem_refs)?;
         format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
-        let exchange_plan =
-            parse_exchange_plan_properties_from_text(text, uuid, type_index, form_refs)?;
+        let exchange_plan = parse_exchange_plan_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            object_refs,
+            form_refs,
+        )?;
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
         let register_object_refs = if kind == "InformationRegister" {
@@ -6104,88 +6153,415 @@ fn parse_subsystem_child_references(
         .collect()
 }
 
+// Platform collection and field-reference type IDs confirmed across independent BSP and UT roots.
+const EXCHANGE_PLAN_ROOT_COLLECTION_TYPE_UUIDS: [&str; 5] = [
+    "1a1b4fea-e093-470d-94ff-1d2f16cda2ab",
+    "3daea016-69b7-4ed4-9453-127911372fe6",
+    "52293f4b-f98c-43ea-a80f-41047ae7ab58",
+    "87c509ab-3d38-4d67-b379-aca796298578",
+    "d5207c64-11d5-4d46-bba2-55b7b07ff4eb",
+];
+const EXCHANGE_PLAN_FIELD_REF_TYPE_UUID: &str = "60ea359f-3a6e-48bb-8e71-d2a457572918";
+
+fn exchange_plan_root_collection_is_valid(
+    value: &str,
+    expected_type_uuid: &str,
+    direct_uuid_items: bool,
+) -> bool {
+    let Some(fields) = split_information_register_braced_fields(value) else {
+        return false;
+    };
+    if fields.len() < 2 || !information_register_uuid_matches(fields[0], expected_type_uuid) {
+        return false;
+    }
+    let Some(count) = parse_information_register_usize(fields[1]) else {
+        return false;
+    };
+    if fields.len() != count.checked_add(2).unwrap_or(usize::MAX) {
+        return false;
+    }
+    if direct_uuid_items {
+        let values = fields[2..]
+            .iter()
+            .map(|value| {
+                parse_information_register_non_zero_uuid(value)
+                    .map(|uuid| uuid.to_ascii_lowercase())
+            })
+            .collect::<Option<BTreeSet<_>>>();
+        return values.is_some_and(|values| values.len() == count);
+    }
+    fields[2..].iter().all(|value| {
+        split_information_register_braced_fields(value).is_some_and(|nested| !nested.is_empty())
+    })
+}
+
+fn parse_exchange_plan_owner_fields<'a>(
+    text: &'a str,
+    expected_header: &MetadataHeader,
+) -> Option<ExchangePlanOwnerFields<'a>> {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
+        return None;
+    }
+    for (index, (field, expected_type_uuid)) in root[3..]
+        .iter()
+        .zip(EXCHANGE_PLAN_ROOT_COLLECTION_TYPE_UUIDS)
+        .enumerate()
+    {
+        if !exchange_plan_root_collection_is_valid(
+            field,
+            expected_type_uuid,
+            matches!(index, 1 | 3),
+        ) {
+            return None;
+        }
+    }
+
+    let owner = split_information_register_braced_fields(root.get(1)?)?;
+    match (owner.first().map(|field| field.trim()), owner.len()) {
+        (Some("36"), 50) => {}
+        (Some("37"), 51) if owner.get(50)?.trim() == "1" => {}
+        _ => return None,
+    }
+    let owner_ids = owner[1..12]
+        .iter()
+        .map(|field| {
+            parse_information_register_non_zero_uuid(field).map(|uuid| uuid.to_ascii_lowercase())
+        })
+        .collect::<Option<BTreeSet<_>>>()?;
+    if owner_ids.len() != 11 {
+        return None;
+    }
+
+    let parsed_header = parse_information_register_owner_header(owner.get(12)?)?;
+    if !parsed_header
+        .uuid
+        .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return None;
+    }
+    Some(ExchangePlanOwnerFields { physical: owner })
+}
+
+fn parse_exchange_plan_generated_types(
+    fields: &ExchangePlanOwnerFields<'_>,
+    owner_name: &str,
+) -> Option<Vec<GeneratedTypeEntry>> {
+    let definitions = [
+        (1, 2, "ExchangePlanObject", "Object"),
+        (3, 4, "ExchangePlanRef", "Ref"),
+        (5, 6, "ExchangePlanSelection", "Selection"),
+        (7, 8, "ExchangePlanList", "List"),
+        (9, 10, "ExchangePlanManager", "Manager"),
+    ];
+    definitions
+        .into_iter()
+        .map(|(type_index, value_index, prefix, category)| {
+            Some(GeneratedTypeEntry {
+                name: format!("{prefix}.{owner_name}"),
+                category,
+                type_id: parse_information_register_non_zero_uuid(fields.get(type_index)?)?,
+                value_id: parse_information_register_non_zero_uuid(fields.get(value_index)?)?,
+            })
+        })
+        .collect()
+}
+
+fn parse_exchange_plan_u32(value: &str) -> Option<u32> {
+    u32::try_from(parse_information_register_usize(value)?).ok()
+}
+
+fn parse_exchange_plan_owned_form_ref(
+    value: &str,
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    let mut matches = form_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
+    let (_, form) = matches.next()?;
+    if matches.next().is_some()
+        || form.kind != "Form"
+        || !is_owned_metadata_child_path(&form.relative_path, "ExchangePlans", owner_name, "Forms")
+    {
+        return None;
+    }
+    let reference = form_source_reference_name(form)?;
+    let prefix = format!("ExchangePlan.{owner_name}.Form.");
+    reference
+        .strip_prefix(&prefix)
+        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+        .then_some(Some(reference))
+}
+
+fn resolve_exchange_plan_index_reference(
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut matches = object_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+    let (_, reference) = matches.next()?;
+    (matches.next().is_none() && !reference.is_empty()).then_some(reference.clone())
+}
+
+fn parse_exchange_plan_based_on(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    match fields.as_slice() {
+        [kind, count] if kind.trim() == "0" && count.trim() == "0" => Some(None),
+        [kind, count, item] if kind.trim() == "0" && count.trim() == "1" => {
+            let typed = split_information_register_braced_fields(item)?;
+            if typed.len() != 3
+                || typed.first()?.trim() != r##""#""##
+                || !information_register_uuid_matches(typed.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
+            {
+                return None;
+            }
+            let reference = split_information_register_braced_fields(typed.get(2)?)?;
+            if reference.len() != 2 || reference.first()?.trim() != "1" {
+                return None;
+            }
+            let uuid = parse_information_register_non_zero_uuid(reference.get(1)?)?;
+            Some(Some(resolve_exchange_plan_index_reference(
+                &uuid,
+                object_refs,
+            )?))
+        }
+        _ => None,
+    }
+}
+
+fn parse_exchange_plan_field_ref_payload(value: &str) -> Option<Vec<&str>> {
+    let typed = split_information_register_braced_fields(value)?;
+    if typed.len() != 3
+        || typed.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(typed.get(1)?, EXCHANGE_PLAN_FIELD_REF_TYPE_UUID)
+    {
+        return None;
+    }
+    split_information_register_braced_fields(typed.get(2)?)
+}
+
+fn parse_exchange_plan_field_ref_collection(value: &str) -> Option<Vec<&str>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.len() < 2 || payload.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(payload.get(1)?)?;
+    (payload.len() == count.checked_add(2)?).then(|| payload[2..].to_vec())
+}
+
+fn parse_exchange_plan_input_by_string(value: &str, owner_name: &str) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    let fields = parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|value| {
+            let payload = parse_exchange_plan_field_ref_payload(value)?;
+            let marker = match payload.as_slice() {
+                [marker] => marker.trim(),
+                _ => return None,
+            };
+            let name = match marker {
+                "-3" => "Description",
+                "-2" => "Code",
+                _ => return None,
+            };
+            seen.insert(marker)
+                .then(|| format!("ExchangePlan.{owner_name}.StandardAttribute.{name}"))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let suffixes = fields
+        .iter()
+        .filter_map(|field| field.rsplit('.').next())
+        .collect::<Vec<_>>();
+    matches!(
+        suffixes.as_slice(),
+        ["Description", "Code"] | ["Code", "Description"] | ["Description"]
+    )
+    .then_some(fields)
+}
+
+fn parse_exchange_plan_data_lock_fields(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|value| {
+            let payload = parse_exchange_plan_field_ref_payload(value)?;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    if marker.trim() != "-2" {
+                        return None;
+                    }
+                    format!("ExchangePlan.{owner_name}.StandardAttribute.Code")
+                }
+                [kind, uuid] if kind.trim() == "0" => {
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
+                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+                    let prefix = format!("ExchangePlan.{owner_name}.Attribute.");
+                    if !reference
+                        .strip_prefix(&prefix)
+                        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+                    {
+                        return None;
+                    }
+                    reference
+                }
+                _ => return None,
+            };
+            seen.insert(reference.clone()).then_some(reference)
+        })
+        .collect()
+}
+
+fn exchange_plan_characteristics_is_empty(value: &str) -> bool {
+    split_information_register_braced_fields(value).is_some_and(|fields| {
+        fields.len() == 2
+            && fields[0].trim() == "0"
+            && split_information_register_braced_fields(fields[1])
+                .is_some_and(|nested| nested.len() == 1 && nested[0].trim() == "0")
+    })
+}
+
+fn exchange_plan_choice_data_get_mode_is_direct(value: &str) -> bool {
+    split_information_register_braced_fields(value).is_some_and(|fields| {
+        fields.len() == 3
+            && fields[0].trim() == "1"
+            && fields[1].trim() == "2"
+            && fields[2].trim() == "0"
+    })
+}
+
 fn parse_exchange_plan_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<ExchangePlanProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let fields = metadata_object_fields(text)?;
-    if !matches!(fields.first().map(|value| value.trim()), Some("36" | "37")) {
+    let fields = parse_exchange_plan_owner_fields(text, &header)?;
+    if fields.get(16)?.trim() != "0"
+        || fields.get(21)?.trim() != "1"
+        || fields.get(22)?.trim() != "2"
+        || fields.get(25)?.trim() != "1"
+        || !exchange_plan_characteristics_is_empty(fields.get(40)?)
+        || fields.get(41)?.trim() != "1"
+        || !exchange_plan_choice_data_get_mode_is_direct(fields.get(43)?)
+        || fields.get(46)?.trim() != "0"
+        || fields.get(47)?.trim() != "0"
+        || fields.get(48)?.trim() != "0"
+        || fields.get(49)?.trim() != "0"
+    {
         return None;
     }
-    let header_index = metadata_header_field_index(&fields, uuid)?;
-
-    let mut generated_types = Vec::new();
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        1,
-        2,
-        &format!("ExchangePlanObject.{}", header.name),
-        "Object",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        3,
-        4,
-        &format!("ExchangePlanRef.{}", header.name),
-        "Ref",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        5,
-        6,
-        &format!("ExchangePlanSelection.{}", header.name),
-        "Selection",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        7,
-        8,
-        &format!("ExchangePlanList.{}", header.name),
-        "List",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        9,
-        10,
-        &format!("ExchangePlanManager.{}", header.name),
-        "Manager",
-    );
-
-    let this_node = parse_exchange_plan_this_node(&fields, header_index);
-    let use_standard_commands =
-        parse_1c_bool_field(fields.get(header_index + 1).copied()).unwrap_or(true);
 
     Some(ExchangePlanProperties {
-        this_node,
-        generated_types,
-        use_standard_commands,
-        default_list_form: parse_default_list_form_ref(
-            &fields,
-            &[header_index + 9],
-            form_refs,
-            "ExchangePlans",
+        this_node: parse_information_register_non_zero_uuid(fields.get(11)?)?,
+        generated_types: parse_exchange_plan_generated_types(&fields, &header.name)?,
+        use_standard_commands: information_register_bool(fields.get(13)?)?,
+        code_length: parse_exchange_plan_u32(fields.get(15)?)?,
+        code_allowed_length: match fields.get(39)?.trim() {
+            "0" => "Fixed",
+            "1" => "Variable",
+            _ => return None,
+        },
+        description_length: parse_exchange_plan_u32(fields.get(17)?)?,
+        default_presentation: "AsDescription",
+        edit_type: "InDialog",
+        quick_choice: information_register_bool(fields.get(23)?)?,
+        choice_mode: "BothWays",
+        input_by_string: parse_exchange_plan_input_by_string(fields.get(27)?, &header.name)?,
+        search_string_mode_on_input_by_string: "Begin",
+        full_text_search_on_input_by_string: "DontUse",
+        choice_data_get_mode_on_input_by_string: "Directly",
+        default_object_form: parse_exchange_plan_owned_form_ref(
+            fields.get(14)?,
             &header.name,
-        ),
+            form_refs,
+        )?,
+        default_list_form: parse_exchange_plan_owned_form_ref(
+            fields.get(19)?,
+            &header.name,
+            form_refs,
+        )?,
+        default_choice_form: parse_exchange_plan_owned_form_ref(
+            fields.get(20)?,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_object_form: parse_exchange_plan_owned_form_ref(
+            fields.get(31)?,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: parse_exchange_plan_owned_form_ref(
+            fields.get(32)?,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_choice_form: parse_exchange_plan_owned_form_ref(
+            fields.get(33)?,
+            &header.name,
+            form_refs,
+        )?,
+        standard_attributes: parse_exchange_plan_standard_attributes(fields.get(30)?)?,
+        based_on: parse_exchange_plan_based_on(fields.get(24)?, object_refs)?,
+        distributed_infobase: information_register_bool(fields.get(26)?)?,
+        include_configuration_extensions: information_register_bool(fields.get(45)?)?,
+        create_on_input: "DontUse",
+        choice_history_on_input: match fields.get(44)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            _ => return None,
+        },
+        include_help_in_contents: information_register_bool(fields.get(18)?)?,
+        data_lock_fields: parse_exchange_plan_data_lock_fields(
+            fields.get(42)?,
+            &header.name,
+            object_refs,
+        )?,
+        data_lock_control_mode: match fields.get(28)?.trim() {
+            "0" => "Automatic",
+            "1" => "Managed",
+            _ => return None,
+        },
+        full_text_search: match fields.get(29)?.trim() {
+            "0" => "DontUse",
+            "1" => "Use",
+            _ => return None,
+        },
+        object_presentation: parse_information_register_owner_localized_value(fields.get(34)?)?,
+        extended_object_presentation: parse_information_register_owner_localized_value(
+            fields.get(35)?,
+        )?,
+        list_presentation: parse_information_register_owner_localized_value(fields.get(36)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            fields.get(37)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(fields.get(38)?)?,
+        data_history: "DontUse",
+        update_data_history_immediately_after_write: false,
+        execute_after_write_data_history_version_processing: false,
         child_objects: parse_exchange_plan_child_objects(text, uuid, type_index),
     })
-}
-
-fn parse_exchange_plan_this_node(fields: &[&str], header_index: usize) -> Option<String> {
-    if header_index <= 11 {
-        return None;
-    }
-    header_index
-        .checked_sub(1)
-        .and_then(|index| fields.get(index).copied())
-        .and_then(parse_non_zero_uuid)
 }
 
 fn parse_exchange_plan_child_objects(
@@ -6976,9 +7352,10 @@ fn parse_information_register_standard_attribute_fill_value(
     }
 }
 
-fn parse_information_register_standard_attribute<'a>(
+fn parse_register_standard_attribute<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
+    fill_value: MetadataChildFillValue,
 ) -> Option<RegisterStandardAttribute> {
     let link_by_type =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
@@ -7017,7 +7394,7 @@ fn parse_information_register_standard_attribute<'a>(
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID)?;
     let choice_parameter_links =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID)?;
-    let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
     let mask = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID)?;
     let choice_parameters =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID)?;
@@ -7102,9 +7479,70 @@ fn parse_information_register_standard_attribute<'a>(
         synonym: parse_information_register_standard_attribute_localized(synonym)?,
         data_history,
         full_text_search,
-        fill_value: parse_information_register_standard_attribute_fill_value(fill_value, name)?,
+        fill_value,
         link_by_type: None,
     })
+}
+
+fn parse_information_register_standard_attribute<'a>(
+    name: &'static str,
+    bag: &InformationRegisterStandardAttributeBag<'a>,
+) -> Option<RegisterStandardAttribute> {
+    let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    parse_register_standard_attribute(
+        name,
+        bag,
+        parse_information_register_standard_attribute_fill_value(fill_value, name)?,
+    )
+}
+
+fn parse_exchange_plan_standard_attribute_fill_value(
+    value: &str,
+    marker: &str,
+) -> Option<MetadataChildFillValue> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() == 1 && fields.first()?.trim() == r#""U""# {
+        return Some(MetadataChildFillValue::Nil);
+    }
+    match (marker, fields.first()?.trim(), fields.len()) {
+        ("-3", r#""S""#, 2) => {
+            let value = parse_information_register_quoted_string(fields.get(1)?)?;
+            value
+                .is_empty()
+                .then_some(MetadataChildFillValue::String(value))
+        }
+        ("-2", r#""S""#, 2) => {
+            let value = parse_information_register_quoted_string(fields.get(1)?)?;
+            (value == "   ").then_some(MetadataChildFillValue::String(value))
+        }
+        _ => None,
+    }
+}
+
+fn parse_exchange_plan_standard_attribute<'a>(
+    marker: &str,
+    name: &'static str,
+    bag: &InformationRegisterStandardAttributeBag<'a>,
+) -> Option<RegisterStandardAttribute> {
+    let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    let attribute = parse_register_standard_attribute(
+        name,
+        bag,
+        parse_exchange_plan_standard_attribute_fill_value(fill_value, marker)?,
+    )?;
+    if attribute.fill_from_filling_value
+        || attribute.data_history != "Use"
+        || !attribute.format.is_empty()
+        || !attribute.edit_format.is_empty()
+        || (matches!(marker, "-14" | "-13" | "-10" | "-9" | "-6" | "-4")
+            && (attribute.fill_checking != "DontCheck"
+                || !attribute.tooltip.is_empty()
+                || !attribute.synonym.is_empty()))
+        || (marker == "-3" && attribute.full_text_search != "Use")
+    {
+        return None;
+    }
+    Some(attribute)
 }
 
 fn parse_information_register_standard_attributes(
@@ -7146,6 +7584,51 @@ fn parse_information_register_standard_attributes(
         }
         bag_shape = Some(bag.has_type_reduction_mode);
         attributes.push(parse_information_register_standard_attribute(name, &bag)?);
+    }
+    Some(attributes)
+}
+
+fn parse_exchange_plan_standard_attributes(value: &str) -> Option<Vec<RegisterStandardAttribute>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(Vec::new());
+    }
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.len() != 26 || payload.first()?.trim() != "1" || payload.get(1)?.trim() != "8" {
+        return None;
+    }
+    let definitions = [
+        ("-14", "ExchangeDate"),
+        ("-13", "ThisNode"),
+        ("-10", "ReceivedNo"),
+        ("-9", "SentNo"),
+        ("-6", "Ref"),
+        ("-4", "DeletionMark"),
+        ("-3", "Description"),
+        ("-2", "Code"),
+    ];
+    let mut attributes = Vec::with_capacity(definitions.len());
+    let mut bag_shape = None;
+    for ((marker, name), fields) in definitions.into_iter().zip(payload[2..].chunks_exact(3)) {
+        let marker_fields = split_information_register_braced_fields(fields[0])?;
+        if marker_fields.len() != 1
+            || marker_fields.first()?.trim() != marker
+            || !information_register_uuid_matches(
+                fields[1],
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+            )
+        {
+            return None;
+        }
+        let bag = parse_information_register_standard_attribute_bag(fields[2])?;
+        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
+            return None;
+        }
+        bag_shape = Some(bag.has_type_reduction_mode);
+        attributes.push(parse_exchange_plan_standard_attribute(marker, name, &bag)?);
     }
     Some(attributes)
 }
@@ -15549,21 +16032,142 @@ fn format_exchange_plan_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("ExchangePlan", header, source_version);
+    // V2.21 palette namespace placement follows the shared metadata-source formatter branch;
+    // an ExchangePlan-specific native V2.21 byte gate is still pending.
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        const STYLE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
+        const PALETTE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
+        if let Some(style_index) = xml.find(STYLE_NAMESPACE_ATTRIBUTE) {
+            xml.insert_str(style_index, PALETTE_NAMESPACE_ATTRIBUTE);
+        }
+    }
     let internal_info = format_exchange_plan_internal_info_xml(exchange_plan);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
         let mut properties = format!(
-            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-            xml_bool(exchange_plan.use_standard_commands)
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n\
+\t\t\t<CodeLength>{}</CodeLength>\r\n\
+\t\t\t<CodeAllowedLength>{}</CodeAllowedLength>\r\n\
+\t\t\t<DescriptionLength>{}</DescriptionLength>\r\n\
+\t\t\t<DefaultPresentation>{}</DefaultPresentation>\r\n\
+\t\t\t<EditType>{}</EditType>\r\n\
+\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
+\t\t\t<ChoiceMode>{}</ChoiceMode>\r\n",
+            xml_bool(exchange_plan.use_standard_commands),
+            exchange_plan.code_length,
+            exchange_plan.code_allowed_length,
+            exchange_plan.description_length,
+            exchange_plan.default_presentation,
+            exchange_plan.edit_type,
+            xml_bool(exchange_plan.quick_choice),
+            exchange_plan.choice_mode,
         );
-        push_optional_text_element(
+        push_catalog_input_by_string_xml(&mut properties, &exchange_plan.input_by_string);
+        properties.push_str(&format!(
+            "\t\t\t<SearchStringModeOnInputByString>{}</SearchStringModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>{}</FullTextSearchOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>{}</ChoiceDataGetModeOnInputByString>\r\n",
+            exchange_plan.search_string_mode_on_input_by_string,
+            exchange_plan.full_text_search_on_input_by_string,
+            exchange_plan.choice_data_get_mode_on_input_by_string,
+        ));
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
+            "DefaultObjectForm",
+            exchange_plan.default_object_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
             "DefaultListForm",
             exchange_plan.default_list_form.as_deref(),
         );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "DefaultChoiceForm",
+            exchange_plan.default_choice_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryObjectForm",
+            exchange_plan.auxiliary_object_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryListForm",
+            exchange_plan.auxiliary_list_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryChoiceForm",
+            exchange_plan.auxiliary_choice_form.as_deref(),
+        );
+        push_register_standard_attributes_xml(&mut properties, &exchange_plan.standard_attributes);
+        properties.push_str("\t\t\t<Characteristics/>\r\n");
+        push_exchange_plan_based_on_xml(&mut properties, exchange_plan.based_on.as_deref());
+        properties.push_str(&format!(
+            "\t\t\t<DistributedInfoBase>{}</DistributedInfoBase>\r\n\
+\t\t\t<IncludeConfigurationExtensions>{}</IncludeConfigurationExtensions>\r\n\
+\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
+\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
+\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+            xml_bool(exchange_plan.distributed_infobase),
+            xml_bool(exchange_plan.include_configuration_extensions),
+            exchange_plan.create_on_input,
+            exchange_plan.choice_history_on_input,
+            xml_bool(exchange_plan.include_help_in_contents),
+        ));
+        push_exchange_plan_field_collection_xml(
+            &mut properties,
+            "DataLockFields",
+            &exchange_plan.data_lock_fields,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n",
+            exchange_plan.data_lock_control_mode, exchange_plan.full_text_search,
+        ));
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ObjectPresentation",
+            &exchange_plan.object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedObjectPresentation",
+            &exchange_plan.extended_object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ListPresentation",
+            &exchange_plan.list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedListPresentation",
+            &exchange_plan.extended_list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "Explanation",
+            &exchange_plan.explanation,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<DataHistory>{}</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+            exchange_plan.data_history,
+            xml_bool(exchange_plan.update_data_history_immediately_after_write),
+            xml_bool(exchange_plan.execute_after_write_data_history_version_processing),
+        ));
         xml.insert_str(index, &properties);
     }
     if !exchange_plan.child_objects.is_empty() {
@@ -15576,17 +16180,51 @@ fn format_exchange_plan_source_xml(
     xml
 }
 
-fn format_exchange_plan_internal_info_xml(exchange_plan: &ExchangePlanProperties) -> String {
-    if exchange_plan.this_node.is_none() && exchange_plan.generated_types.is_empty() {
-        return String::new();
-    }
-    let mut xml = "\t\t<InternalInfo>\r\n".to_string();
-    if let Some(this_node) = &exchange_plan.this_node {
+fn push_exchange_plan_form_xml(xml: &mut String, name: &str, value: Option<&str>) {
+    if let Some(value) = value {
         xml.push_str(&format!(
-            "\t\t\t<xr:ThisNode>{}</xr:ThisNode>\r\n",
-            escape_xml_text(this_node)
+            "\t\t\t<{name}>{}</{name}>\r\n",
+            escape_xml_element_text(value)
+        ));
+    } else {
+        xml.push_str(&format!("\t\t\t<{name}/>\r\n"));
+    }
+}
+
+fn push_exchange_plan_based_on_xml(xml: &mut String, value: Option<&str>) {
+    if let Some(value) = value {
+        xml.push_str("\t\t\t<BasedOn>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+            escape_xml_element_text(value)
+        ));
+        xml.push_str("\t\t\t</BasedOn>\r\n");
+    } else {
+        xml.push_str("\t\t\t<BasedOn/>\r\n");
+    }
+}
+
+fn push_exchange_plan_field_collection_xml(xml: &mut String, name: &str, fields: &[String]) {
+    if fields.is_empty() {
+        xml.push_str(&format!("\t\t\t<{name}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("\t\t\t<{name}>\r\n"));
+    for field in fields {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Field>{}</xr:Field>\r\n",
+            escape_xml_element_text(field)
         ));
     }
+    xml.push_str(&format!("\t\t\t</{name}>\r\n"));
+}
+
+fn format_exchange_plan_internal_info_xml(exchange_plan: &ExchangePlanProperties) -> String {
+    let mut xml = "\t\t<InternalInfo>\r\n".to_string();
+    xml.push_str(&format!(
+        "\t\t\t<xr:ThisNode>{}</xr:ThisNode>\r\n",
+        escape_xml_element_text(&exchange_plan.this_node)
+    ));
     for generated_type in &exchange_plan.generated_types {
         xml.push_str(&format!(
             "\t\t\t<xr:GeneratedType name=\"{}\" category=\"{}\">\r\n\
