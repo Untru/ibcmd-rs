@@ -1998,6 +1998,55 @@ residual is one root totaling `+0/-3`. The expected future permitted native gate
 is `+0/-0`, but exactness is not claimed without that gate. No database access,
 ConfigDump, configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## CalculationRegister bounded period vector
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The sole paired BSP CalculationRegister root uses the exact code-21/33-field
+owner layout and stores fields 16, 17, and 18 as `2/1/1`. Native emits
+`Periodicity=Month`, `ActionPeriod=true`, and `BasePeriod=true`; the previous
+generated root omitted the trio. Schema order places it after default and
+auxiliary list forms and before Schedule. On the currently supported surface it
+appears after `UseStandardCommands` and before the bounded presentation tail.
+
+Native-only SFC contains two CalculationRegister roots. Both use Month and
+`BasePeriod=true`, while one has `ActionPeriod=true` and the other false. The
+saved UT/direct corpus has no top-level code-21 root, so the false raw encoding
+is not paired. The admitted parser therefore recognizes only the exact fixed
+vector `2/1/1`. Every other structurally valid scalar vector, including
+`2/0/1`, remains an accepted legacy omission rather than a source error.
+
+The parser independently calls the shared full code-21/33-field/header-15
+validator and returns an optional fixed state. A malformed owner boundary still
+rejects the exact source atomically. Alternative scalar values and nonexact
+arities return no period state and are not consumed. Field 16 remains visible
+to the pre-existing generic `UseStandardCommands` parser; tests distinguish
+that neighboring behavior from the new fixed-vector state.
+
+Formatting emits the three fixed values only in the CalculationRegister branch.
+AccountingRegister roots with code 21 and 30 fields, and AccumulationRegister
+roots with code 28 and 26 fields, retain their independent behavior and order.
+
+Integrated commit `e975719` passes six fixed-vector, alternative-omission,
+boundary, nonexact, property-only, and literal tests, plus the six Calculation
+presentation, eight Accumulation presentation, and ten totals-splitting
+regressions. The full suite changed from
+`1356 passed / 74 failed / 6 ignored` to
+`1362 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Independent frozen review approved the 12,732-byte diff with SHA-256
+`4CF630ECEEAA2C727B11F7CB809165871F5F12781B88FA7342C4AA0A241AB367`.
+Production contains no register name, owner UUID, database identity, path, or
+corpus-specific branch.
+
+The raw mapping for `ActionPeriod=false`, other Periodicity and BasePeriod
+values, default and auxiliary forms, Schedule, Calculation DataLockControlMode
+and FullTextSearch, alternate layouts, and global offsets remain HOLD. The saved
+normalized isolated residual is one root totaling `+0/-3`. The expected future
+permitted native gate is `+0/-0`, but exactness is not claimed without that gate.
+No database access, ConfigDump, configuration export, or `ConfigDumpInfo.xml`
+change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
