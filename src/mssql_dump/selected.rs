@@ -204,6 +204,8 @@ pub(super) fn selected_metadata_source_reference_index_needs(
                 if kind == "ExchangePlan" {
                     needs.object_refs = true;
                     needs.metadata_order = true;
+                } else if kind == "CalculationRegister" {
+                    needs.object_refs = true;
                 }
             }
             _ => return None,

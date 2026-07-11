@@ -42047,8 +42047,11 @@ fn rejects_web_service_global_uuid_qname_package_and_reuse_session_violations() 
 const ACCUMULATION_TOTALS_TEST_UUID: &str = "11111111-1111-4111-8111-111111111111";
 const ACCUMULATION_TOTALS_ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const CALCULATION_PRESENTATIONS_TEST_UUID: &str = "44444444-4444-4444-8444-444444444444";
-const CALCULATION_PRESENTATIONS_TYPE_UUID: &str = "55555555-5555-4555-8555-555555555555";
+const CALCULATION_PRESENTATIONS_TYPE_UUID: &str = "d5555555-5555-4555-8555-555555555555";
 const CALCULATION_DEFAULT_FORM_TEST_UUID: &str = "abcdefab-cdef-4abc-8def-abcdefabcdef";
+const CALCULATION_SCHEDULE_TEST_UUID: &str = "a1111111-1111-4111-8111-111111111111";
+const CALCULATION_SCHEDULE_VALUE_TEST_UUID: &str = "b2222222-2222-4222-8222-222222222222";
+const CALCULATION_SCHEDULE_DATE_TEST_UUID: &str = "c3333333-3333-4333-8333-333333333333";
 
 fn register_generated_type_fields(count: usize) -> Vec<String> {
     (1..=count)
@@ -42088,12 +42091,21 @@ fn extract_register_fields_with_form_refs(
     uuid: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<ExtractedMetadataSourceXml> {
+    extract_register_fields_with_object_and_form_refs(fields, uuid, &BTreeMap::new(), form_refs)
+}
+
+fn extract_register_fields_with_object_and_form_refs(
+    fields: &[String],
+    uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<ExtractedMetadataSourceXml> {
     let raw = format!("{{1,{{{}}}}}", fields.join(","));
     extract_metadata_source_xml_with_refs(
         &deflate_for_test(raw.as_bytes()),
         uuid,
         &BTreeMap::new(),
-        &BTreeMap::new(),
+        object_refs,
         &BTreeMap::new(),
         form_refs,
         &BTreeMap::new(),
@@ -42122,6 +42134,27 @@ fn calculation_form_refs_for_test() -> BTreeMap<String, FormSourceReference> {
         "CalculationRegisters/Payroll/Forms/List.xml",
         "Form",
     )
+}
+
+fn calculation_schedule_object_refs_for_test() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            CALCULATION_SCHEDULE_TEST_UUID.to_string(),
+            "InformationRegister.WorkSchedule".to_string(),
+        ),
+        (
+            CALCULATION_SCHEDULE_VALUE_TEST_UUID.to_string(),
+            "InformationRegister.WorkSchedule.Resource.Hours".to_string(),
+        ),
+        (
+            CALCULATION_SCHEDULE_DATE_TEST_UUID.to_string(),
+            "InformationRegister.WorkSchedule.Dimension.Date".to_string(),
+        ),
+        (
+            CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
+            "ChartOfCalculationTypes.Accruals".to_string(),
+        ),
+    ])
 }
 
 #[derive(Clone)]
@@ -42221,6 +42254,30 @@ impl CalculationRegisterPresentationsFixture {
         form_refs: &BTreeMap<String, FormSourceReference>,
     ) -> Option<String> {
         self.extract_with_form_refs(form_refs)
+            .and_then(|source| String::from_utf8(source.xml).ok())
+    }
+
+    fn with_schedule(mut self) -> Self {
+        self.fields[19] = CALCULATION_SCHEDULE_TEST_UUID.to_string();
+        self.fields[20] = CALCULATION_SCHEDULE_VALUE_TEST_UUID.to_string();
+        self.fields[21] = CALCULATION_SCHEDULE_DATE_TEST_UUID.to_string();
+        self
+    }
+
+    fn extract_with_object_refs(
+        &self,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Option<ExtractedMetadataSourceXml> {
+        extract_register_fields_with_object_and_form_refs(
+            &self.fields,
+            CALCULATION_PRESENTATIONS_TEST_UUID,
+            object_refs,
+            &BTreeMap::new(),
+        )
+    }
+
+    fn xml_with_object_refs(&self, object_refs: &BTreeMap<String, String>) -> Option<String> {
+        self.extract_with_object_refs(object_refs)
             .and_then(|source| String::from_utf8(source.xml).ok())
     }
 }
@@ -43871,6 +43928,448 @@ fn calculation_form_pair_has_no_production_corpus_literals() {
         "dafd4131-f955-4461-b7c2-726df6d62fbb",
         "_ДемоОсновныеНачисления",
         "ФормаСписка",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+fn assert_calculation_schedule_omitted(xml: &str, label: &str) {
+    for property in ["<Schedule", "<ChartOfCalculationTypes"] {
+        assert!(
+            !xml.contains(property),
+            "partial tuple for {label}: {property}"
+        );
+    }
+}
+
+#[test]
+fn calculation_schedule_emits_atomic_qualified_tuple_in_native_order() {
+    let refs = calculation_schedule_object_refs_for_test();
+    let fixture = CalculationRegisterPresentationsFixture::exact().with_schedule();
+    let source = fixture
+        .extract_with_object_refs(&refs)
+        .expect("exact calculation schedule tuple");
+    let xml = String::from_utf8(source.xml).unwrap();
+    let expected = [
+        "<Schedule>InformationRegister.WorkSchedule</Schedule>",
+        "<ScheduleValue>InformationRegister.WorkSchedule.Resource.Hours</ScheduleValue>",
+        "<ScheduleDate>InformationRegister.WorkSchedule.Dimension.Date</ScheduleDate>",
+        "<ChartOfCalculationTypes>ChartOfCalculationTypes.Accruals</ChartOfCalculationTypes>",
+    ];
+
+    assert_eq!(
+        source.relative_path,
+        PathBuf::from("CalculationRegisters/Payroll.xml")
+    );
+    for property in expected {
+        assert_eq!(xml.matches(property).count(), 1, "{property}");
+    }
+    let mut positions = expected
+        .map(|property| xml.find(property).unwrap())
+        .into_iter();
+    let mut previous = xml.find("<BasePeriod>true</BasePeriod>").unwrap();
+    for position in positions.by_ref() {
+        assert!(previous < position);
+        previous = position;
+    }
+    assert!(
+        previous
+            < xml
+                .find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                .unwrap()
+    );
+
+    let mut padded = fixture;
+    for field in &mut padded.fields[19..=22] {
+        *field = format!(" \r\n{}\t", field.to_uppercase());
+    }
+    assert_eq!(padded.xml_with_object_refs(&refs).unwrap(), xml);
+}
+
+#[test]
+fn calculation_schedule_resolver_alternatives_omit_the_whole_tuple() {
+    let valid_refs = calculation_schedule_object_refs_for_test();
+    let mut cases = Vec::<(
+        String,
+        CalculationRegisterPresentationsFixture,
+        BTreeMap<String, String>,
+    )>::new();
+
+    for slot in 19..=22 {
+        for (name, value) in [
+            ("zero", ACCUMULATION_TOTALS_ZERO_UUID),
+            ("malformed", "0"),
+            ("unknown", "e6666666-6666-4666-8666-666666666666"),
+        ] {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact().with_schedule();
+            fixture.fields[slot] = value.to_string();
+            cases.push((format!("{name} F{slot}"), fixture, valid_refs.clone()));
+        }
+    }
+
+    for uuid in [
+        CALCULATION_SCHEDULE_TEST_UUID,
+        CALCULATION_SCHEDULE_VALUE_TEST_UUID,
+        CALCULATION_SCHEDULE_DATE_TEST_UUID,
+        CALCULATION_PRESENTATIONS_TYPE_UUID,
+    ] {
+        let mut refs = valid_refs.clone();
+        let value = refs.get(uuid).unwrap().clone();
+        refs.insert(uuid.to_uppercase(), value);
+        cases.push((
+            format!("case-insensitive collision {uuid}"),
+            CalculationRegisterPresentationsFixture::exact().with_schedule(),
+            refs,
+        ));
+    }
+
+    for (label, uuid, reference) in [
+        (
+            "schedule wrong family",
+            CALCULATION_SCHEDULE_TEST_UUID,
+            "Catalog.WorkSchedule",
+        ),
+        (
+            "schedule extra segment",
+            CALCULATION_SCHEDULE_TEST_UUID,
+            "InformationRegister.WorkSchedule.Extra",
+        ),
+        (
+            "schedule empty owner",
+            CALCULATION_SCHEDULE_TEST_UUID,
+            "InformationRegister.",
+        ),
+        (
+            "value wrong family",
+            CALCULATION_SCHEDULE_VALUE_TEST_UUID,
+            "Catalog.WorkSchedule.Resource.Hours",
+        ),
+        (
+            "value wrong role",
+            CALCULATION_SCHEDULE_VALUE_TEST_UUID,
+            "InformationRegister.WorkSchedule.Dimension.Hours",
+        ),
+        (
+            "value cross owner",
+            CALCULATION_SCHEDULE_VALUE_TEST_UUID,
+            "InformationRegister.Other.Resource.Hours",
+        ),
+        (
+            "value extra segment",
+            CALCULATION_SCHEDULE_VALUE_TEST_UUID,
+            "InformationRegister.WorkSchedule.Resource.Hours.Extra",
+        ),
+        (
+            "value empty child",
+            CALCULATION_SCHEDULE_VALUE_TEST_UUID,
+            "InformationRegister.WorkSchedule.Resource.",
+        ),
+        (
+            "date wrong role",
+            CALCULATION_SCHEDULE_DATE_TEST_UUID,
+            "InformationRegister.WorkSchedule.Resource.Date",
+        ),
+        (
+            "date cross owner",
+            CALCULATION_SCHEDULE_DATE_TEST_UUID,
+            "InformationRegister.Other.Dimension.Date",
+        ),
+        (
+            "date extra segment",
+            CALCULATION_SCHEDULE_DATE_TEST_UUID,
+            "InformationRegister.WorkSchedule.Dimension.Date.Extra",
+        ),
+        (
+            "date empty child",
+            CALCULATION_SCHEDULE_DATE_TEST_UUID,
+            "InformationRegister.WorkSchedule.Dimension.",
+        ),
+        (
+            "chart wrong family",
+            CALCULATION_PRESENTATIONS_TYPE_UUID,
+            "ChartOfAccounts.Accruals",
+        ),
+        (
+            "chart extra segment",
+            CALCULATION_PRESENTATIONS_TYPE_UUID,
+            "ChartOfCalculationTypes.Accruals.Extra",
+        ),
+        (
+            "chart empty name",
+            CALCULATION_PRESENTATIONS_TYPE_UUID,
+            "ChartOfCalculationTypes.",
+        ),
+    ] {
+        let mut refs = valid_refs.clone();
+        refs.insert(uuid.to_string(), reference.to_string());
+        cases.push((
+            label.to_string(),
+            CalculationRegisterPresentationsFixture::exact().with_schedule(),
+            refs,
+        ));
+    }
+
+    for (label, fixture, refs) in cases {
+        let raw = fixture.raw();
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let header =
+            parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+        assert!(
+            matches!(
+                parse_calculation_register_fixed_schedule(
+                    "CalculationRegister",
+                    &fields,
+                    &header,
+                    &refs,
+                ),
+                Some(None)
+            ),
+            "{label}"
+        );
+
+        let xml = fixture
+            .xml_with_object_refs(&refs)
+            .unwrap_or_else(|| panic!("rejected accepted omission: {label}"));
+        assert_calculation_schedule_omitted(&xml, &label);
+        let mut baseline = fixture;
+        for field in &mut baseline.fields[19..=22] {
+            *field = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+        }
+        assert_eq!(
+            xml,
+            baseline.xml_with_object_refs(&refs).unwrap(),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn calculation_schedule_chart_only_and_partial_values_remain_accepted_omissions() {
+    let refs = calculation_schedule_object_refs_for_test();
+    for enabled in [0b0001u8, 0b0010, 0b0100, 0b1000, 0b0011, 0b1100, 0b1110] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact().with_schedule();
+        let values = [
+            CALCULATION_SCHEDULE_TEST_UUID,
+            CALCULATION_SCHEDULE_VALUE_TEST_UUID,
+            CALCULATION_SCHEDULE_DATE_TEST_UUID,
+            CALCULATION_PRESENTATIONS_TYPE_UUID,
+        ];
+        for (offset, value) in values.into_iter().enumerate() {
+            if enabled & (1 << offset) == 0 {
+                fixture.fields[19 + offset] = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+            } else {
+                fixture.fields[19 + offset] = value.to_string();
+            }
+        }
+        let xml = fixture.xml_with_object_refs(&refs).unwrap();
+        assert_calculation_schedule_omitted(&xml, &format!("partial mask {enabled:04b}"));
+    }
+}
+
+#[test]
+fn calculation_schedule_direct_seam_requires_full_exact_owner_boundary() {
+    let original = CalculationRegisterPresentationsFixture::exact().with_schedule();
+    let raw = original.raw();
+    let expected =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let refs = calculation_schedule_object_refs_for_test();
+    let fields = original
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        parse_calculation_register_fixed_schedule("CalculationRegister", &fields, &expected, &refs,),
+        Some(Some(_))
+    ));
+    let valid_header = original.fields[15].clone();
+
+    let mut short = original.clone();
+    short.fields[15] = format!(
+        "{{0,{{3,{{1,0,{CALCULATION_PRESENTATIONS_TEST_UUID}}},\"Payroll\",{{1,\"en\",\"Payroll\"}},\"\"}}}}"
+    );
+    let mut moved = original.clone();
+    moved.fields[14] = valid_header.clone();
+    moved.fields[15] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[29] = valid_header.clone();
+    let mut wrong_then_valid = original.clone();
+    wrong_then_valid.fields[15] = wrong_then_valid.fields[15].replace(
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        "99999999-9999-4999-8999-999999999999",
+    );
+    wrong_then_valid.fields[29] = valid_header;
+
+    for fixture in [short, moved, duplicate, wrong_then_valid] {
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            parse_calculation_register_fixed_schedule(
+                "CalculationRegister",
+                &fields,
+                &expected,
+                &refs,
+            )
+            .is_none()
+        );
+    }
+
+    let mut mismatch = expected;
+    mismatch.name = "Other".to_string();
+    assert!(parse_calculation_register_fixed_schedule(
+        "CalculationRegister",
+        &fields,
+        &mismatch,
+        &refs,
+    ).is_none());
+}
+
+#[test]
+fn calculation_schedule_keeps_nonexact_arities_unconsumed_and_omitted() {
+    let refs = calculation_schedule_object_refs_for_test();
+    for field_count in [32, 34] {
+        let mut slot_like = CalculationRegisterPresentationsFixture::exact().with_schedule();
+        slot_like.fields.truncate(field_count.min(33));
+        while slot_like.fields.len() < field_count {
+            slot_like.fields.push("0".to_string());
+        }
+        let mut omitted = slot_like.clone();
+        for field in &mut omitted.fields[19..=22] {
+            *field = ACCUMULATION_TOTALS_ZERO_UUID.to_string();
+        }
+
+        let slot_like_xml = slot_like.xml_with_object_refs(&refs).unwrap();
+        assert_calculation_schedule_omitted(&slot_like_xml, &format!("len {field_count}"));
+        assert_eq!(slot_like_xml, omitted.xml_with_object_refs(&refs).unwrap());
+    }
+}
+
+#[test]
+fn calculation_schedule_preserves_accounting_and_accumulation_families() {
+    let refs = calculation_schedule_object_refs_for_test();
+    let accounting_uuid = "33333333-3333-4333-8333-333333333333";
+    let mut accounting_fields = vec!["21".to_string()];
+    accounting_fields.extend(register_generated_type_fields(14));
+    accounting_fields.push(register_owner_header(accounting_uuid, "Ledger"));
+    accounting_fields.extend([
+        "1".to_string(),
+        "1".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        CALCULATION_SCHEDULE_TEST_UUID.to_string(),
+        CALCULATION_SCHEDULE_VALUE_TEST_UUID.to_string(),
+        CALCULATION_SCHEDULE_DATE_TEST_UUID.to_string(),
+        CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+    ]);
+    assert_eq!(accounting_fields.len(), 30);
+    let accounting = extract_register_fields_with_object_and_form_refs(
+        &accounting_fields,
+        accounting_uuid,
+        &refs,
+        &BTreeMap::new(),
+    )
+    .and_then(|source| String::from_utf8(source.xml).ok())
+    .unwrap();
+    assert_calculation_schedule_omitted(&accounting, "AccountingRegister code21/len30");
+
+    let accumulation = extract_register_fields_with_object_and_form_refs(
+        &AccumulationRegisterTotalsFixture::exact("1").fields,
+        ACCUMULATION_TOTALS_TEST_UUID,
+        &refs,
+        &BTreeMap::new(),
+    )
+    .and_then(|source| String::from_utf8(source.xml).ok())
+    .unwrap();
+    assert_calculation_schedule_omitted(&accumulation, "AccumulationRegister code28");
+}
+
+#[test]
+fn calculation_schedule_changes_only_the_four_tuple_lines() {
+    let fixture = CalculationRegisterPresentationsFixture::exact().with_schedule();
+    let raw = fixture.raw();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let refs = calculation_schedule_object_refs_for_test();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &raw,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let with_schedule = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    register.calculation_schedule = None;
+    let without_schedule = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    let stripped = with_schedule
+        .replace("\t\t\t<Schedule>InformationRegister.WorkSchedule</Schedule>\r\n", "")
+        .replace("\t\t\t<ScheduleValue>InformationRegister.WorkSchedule.Resource.Hours</ScheduleValue>\r\n", "")
+        .replace("\t\t\t<ScheduleDate>InformationRegister.WorkSchedule.Dimension.Date</ScheduleDate>\r\n", "")
+        .replace("\t\t\t<ChartOfCalculationTypes>ChartOfCalculationTypes.Accruals</ChartOfCalculationTypes>\r\n", "");
+
+    assert_eq!(stripped, without_schedule);
+}
+
+#[test]
+fn selected_calculation_metadata_requests_object_reference_index() {
+    let calculation = MetadataTextRow {
+        file_name: CALCULATION_PRESENTATIONS_TEST_UUID.to_string(),
+        text: String::new(),
+        object_code: Some(21),
+        header: Some(MetadataHeader {
+            uuid: CALCULATION_PRESENTATIONS_TEST_UUID.to_string(),
+            name: "Payroll".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("CalculationRegister".to_string()),
+        folder: Some("CalculationRegisters"),
+    };
+    let needs = selected_metadata_source_reference_index_needs(&[calculation])
+        .expect("calculation register selected metadata needs");
+
+    assert!(needs.object_refs);
+    assert!(needs.form_refs);
+    assert!(needs.template_refs);
+    assert!(needs.type_index);
+}
+
+#[test]
+fn calculation_schedule_has_no_production_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "6669f240-717a-464b-b0c0-5ce915ef0e1f",
+        "7750e305-f705-4e69-abb3-9a0c285896bc",
+        "b8c6245a-6715-4804-bc90-1d467ec9cd5b",
+        "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9",
+        "_ДемоГрафикиРаботы",
+        "_ДемоОсновныеНачисления",
     ] {
         assert!(!source.contains(forbidden));
     }

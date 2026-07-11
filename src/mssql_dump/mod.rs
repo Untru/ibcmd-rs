@@ -3924,6 +3924,7 @@ struct RegisterProperties {
     auxiliary_list_form: Option<String>,
     calculation_form_pair: Option<CalculationRegisterFormPair>,
     calculation_period: Option<CalculationRegisterPeriodProperties>,
+    calculation_schedule: Option<CalculationRegisterScheduleProperties>,
     emit_accumulation_presentations: bool,
     emit_calculation_presentations: bool,
     list_presentation: Vec<(String, String)>,
@@ -3941,6 +3942,13 @@ struct CalculationRegisterPeriodProperties {
     periodicity: &'static str,
     action_period: bool,
     base_period: bool,
+}
+
+struct CalculationRegisterScheduleProperties {
+    schedule: String,
+    schedule_value: String,
+    schedule_date: String,
+    chart_of_calculation_types: String,
 }
 
 struct InformationRegisterOwnerFields<'a> {
@@ -7957,6 +7965,8 @@ fn parse_register_properties_from_text(
     let calculation_form_pair =
         parse_calculation_register_fixed_form_pair(kind, &fields, &header, form_refs)?;
     let calculation_period = parse_calculation_register_fixed_period(kind, &fields, &header)?;
+    let calculation_schedule =
+        parse_calculation_register_fixed_schedule(kind, &fields, &header, object_refs)?;
     let standard_attributes = if kind == "InformationRegister" {
         Vec::new()
     } else {
@@ -8058,6 +8068,7 @@ fn parse_register_properties_from_text(
         auxiliary_list_form: register_form_refs.1,
         calculation_form_pair,
         calculation_period,
+        calculation_schedule,
         emit_accumulation_presentations,
         emit_calculation_presentations,
         list_presentation,
@@ -8557,6 +8568,84 @@ fn parse_calculation_register_fixed_period(
         action_period: true,
         base_period: true,
     }))
+}
+
+fn parse_calculation_register_fixed_schedule(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<CalculationRegisterScheduleProperties>> {
+    if kind != "CalculationRegister"
+        || !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)?
+    {
+        return Some(None);
+    }
+
+    let resolved = (|| {
+        let schedule_uuid = parse_information_register_non_zero_uuid(fields.get(19)?)?;
+        let schedule_value_uuid = parse_information_register_non_zero_uuid(fields.get(20)?)?;
+        let schedule_date_uuid = parse_information_register_non_zero_uuid(fields.get(21)?)?;
+        let chart_uuid = parse_information_register_non_zero_uuid(fields.get(22)?)?;
+
+        let schedule = unique_case_insensitive_object_reference(&schedule_uuid, object_refs)?;
+        let schedule_value =
+            unique_case_insensitive_object_reference(&schedule_value_uuid, object_refs)?;
+        let schedule_date =
+            unique_case_insensitive_object_reference(&schedule_date_uuid, object_refs)?;
+        let chart_of_calculation_types =
+            unique_case_insensitive_object_reference(&chart_uuid, object_refs)?;
+
+        let schedule_parts = schedule.split('.').collect::<Vec<_>>();
+        let schedule_value_parts = schedule_value.split('.').collect::<Vec<_>>();
+        let schedule_date_parts = schedule_date.split('.').collect::<Vec<_>>();
+        let chart_parts = chart_of_calculation_types.split('.').collect::<Vec<_>>();
+        let ["InformationRegister", owner] = schedule_parts.as_slice() else {
+            return None;
+        };
+        let ["InformationRegister", value_owner, "Resource", value_name] =
+            schedule_value_parts.as_slice()
+        else {
+            return None;
+        };
+        let ["InformationRegister", date_owner, "Dimension", date_name] =
+            schedule_date_parts.as_slice()
+        else {
+            return None;
+        };
+        let ["ChartOfCalculationTypes", chart_name] = chart_parts.as_slice() else {
+            return None;
+        };
+        if owner.is_empty()
+            || value_name.is_empty()
+            || date_name.is_empty()
+            || chart_name.is_empty()
+            || owner != value_owner
+            || owner != date_owner
+        {
+            return None;
+        }
+
+        Some(CalculationRegisterScheduleProperties {
+            schedule: schedule.to_string(),
+            schedule_value: schedule_value.to_string(),
+            schedule_date: schedule_date.to_string(),
+            chart_of_calculation_types: chart_of_calculation_types.to_string(),
+        })
+    })();
+
+    Some(resolved)
+}
+
+fn unique_case_insensitive_object_reference<'a>(
+    uuid: &str,
+    object_refs: &'a BTreeMap<String, String>,
+) -> Option<&'a str> {
+    let mut matches = object_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+    let (_, reference) = matches.next()?;
+    matches.next().is_none().then_some(reference.as_str())
 }
 
 fn parse_calculation_register_fixed_form_pair(
@@ -17842,6 +17931,34 @@ fn format_register_source_xml(
                     xml_bool(period.action_period),
                     xml_bool(period.base_period),
                 ));
+            }
+            if kind == "CalculationRegister"
+                && let Some(schedule) = register.calculation_schedule.as_ref()
+            {
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "Schedule",
+                    Some(schedule.schedule.as_str()),
+                );
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "ScheduleValue",
+                    Some(schedule.schedule_value.as_str()),
+                );
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "ScheduleDate",
+                    Some(schedule.schedule_date.as_str()),
+                );
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "ChartOfCalculationTypes",
+                    Some(schedule.chart_of_calculation_types.as_str()),
+                );
             }
             if let Some(register_type) = register.register_type {
                 properties.push_str(&format!(
