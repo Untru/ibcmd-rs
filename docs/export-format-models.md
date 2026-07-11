@@ -961,6 +961,48 @@ was not generated or modified; its SHA-256 remained
 Production adds only the two platform collection marker UUIDs and contains no
 database object names, absolute paths, or source-version data-shape branches.
 
+## WebService properties, Operations, and Parameters
+
+Status: confirmed by complete BSP, UT, and SFC corpora, serialized selected
+exports, two independent reviews, and an integrated native-tree gate.
+
+WebService roots use the exact shape
+`{1,{4,Namespace,Header,MetadataPackages,DescriptorFileName,NamespacePackages,ReuseSessions,SessionMaxAge},1,Operations}`.
+Metadata package references use the platform metadata-object-reference TypeId;
+literal namespace packages follow them in native order. Operations use the
+platform operation collection marker and exact code-1/length-7 payload;
+Parameters use the platform parameter collection marker and exact
+code-0/length-5 payload. Every wrapper, declared count, item tail, quoted or
+localized value, and UUID is consumed completely. Owner, package, operation,
+and parameter UUIDs form one case-normalized uniqueness set. Child names are
+nonempty, dot-free, and case-insensitively unique in their native scope.
+
+Raw `ReuseSessions` values map as `0=DontUse`, `1=Use`, and `2=AutoUse`;
+unknown values fail. Operation lock mode maps `0=Automatic`, `1=Managed`;
+parameter direction maps `0=In`, `1=Out`, `2=InOut`. QName local names follow
+the XML 1.0 Fifth Edition NCName grammar. XML Schema and 1C core namespaces use
+the existing `xs` and `v8` prefixes; custom operation and parameter namespaces
+use inline `d6p1` and `d8p1` declarations. XML/XMLNS reserved namespace URIs,
+invalid XML 1.0 characters, malformed UUIDs, unresolved XDTOPackages, and
+ambiguous identity paths fail closed. Source 2.21 adds `xmlns:pal` locally for
+WebService roots between `lf` and `style`; source 2.20 does not.
+
+The selected gates matched native XML byte-for-byte for all 13 BSP, 18 UT, and
+20 SFC services: 559 Operations, 1,476 Parameters, and 52 XDTO package items in
+total. Output allowlists contained only the requested root XML files and each
+manifest. Paired `.0` rows were read for reference preparation but emitted no
+module files; native module SHA-256 manifests had zero delta. No gate generated
+or referenced `ConfigDumpInfo.xml`, and the existing native files retained
+their SHA-256 content.
+
+Shared integration changed exactly 13 `WebServices/*.xml` roots in the
+12,198-file BSP tree. The full diff moved from `1559/+15818/-69978` to
+`1546/+15779/-61205`, removing 8,812 differing lines; the WebServices subtree
+now has zero diff. Added production literals are limited to three independently
+proven platform protocol UUIDs, canonical XML/XDTO namespace URIs, and the zero
+UUID. There are no database or configuration object names, absolute paths,
+corpus identities, raw fallbacks, or source-data-specific branches.
+
 ## Subsystem properties and content
 
 Status: confirmed across all 244 raw Subsystem records and by serialized export.
