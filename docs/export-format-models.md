@@ -1499,6 +1499,47 @@ The expected future permitted native gate is `+0/-0` for those roots, but
 exactness is not claimed without that gate. No database access, ConfigDump,
 configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## FilterCriterion strict V2.20 metadata
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+Code-14 FilterCriterion metadata is admitted in three fully consumed forms.
+Two root-length-3 legacy envelopes retain the existing minimal XML behavior.
+The strict V2.20 form has root length 5 and an owner with 13 fields. It emits
+the four generated forms from owner slots 1 through 4, a nonempty `Pattern`
+type from slot 5, a counted `Content` reference list from slot 6, and
+`UseStandardCommands` from the boolean in slot 7. Slots 8 and 9 must be zero,
+slots 10 through 12 must be exact empty envelopes, and the two root-tail
+collections must be distinct strict nonzero empty envelopes. Any other or
+partially malformed code-14 shape is suppressed rather than falling back to a
+legacy partial document.
+
+Generated type names are resolved through the shared type index. Pattern type
+qualified names must have the generic `cfg:<family ending Ref>.<name>` shape.
+Content UUIDs resolve uniquely and case-insensitively through the base object
+reference index to either an owner attribute or a tabular-section attribute.
+Resolved paths and names must be nonempty and exact; Unicode-lowercase
+reference collisions reject the complete object. The saved positive row has
+`UseStandardCommands=false`. Its observed tail collection UUIDs, metadata UUIDs,
+object names, and paths are deliberately absent from production literals.
+
+Only the full V2.20 namespace/version envelope is enabled. A strict full V2.21
+form remains on hold because no native FilterCriterion sample proves its
+namespace shape. The two exact legacy envelopes remain version-neutral for
+compatibility.
+
+Integrated commit `a572554` passes 11 focused FilterCriterion tests. The full
+suite changed from `1277 passed / 74 failed / 6 ignored` to
+`1284 passed / 74 failed / 6 ignored`; the exact 74 failure names are unchanged.
+Independent frozen review approved diff SHA-256
+`5A0B1AEED2C26632B2F002CCC19ACEE0644317A052A7BD78D9BAAB2ADCD158E4`.
+
+The saved normalized residual is the single FilterCriterion root at `+1/-30`.
+The expected future permitted native gate is `+0/-0`, but exactness is not
+claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
