@@ -1455,6 +1455,50 @@ The expected future permitted native gate is `+0/-0`, but exactness is not
 claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## Report child template collections
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+Code-19 Report roots contain exactly five counted child collections. The root
+has eight fields: tag `1`, the Report owner, declared collection count `5`, and
+the five collections. The first collection uses the shared platform template
+collection UUID. Its members are strict, unique nonzero template UUIDs in
+native `ChildObjects/Template` order. The remaining four collections retain
+opaque members, but their outer UUID/count/cardinality envelopes are validated
+and all five collection UUIDs must be unique.
+
+The saved corpus contains 52 code-19 Reports with this envelope. Template
+collection counts range from 1 to 7; every inventory resolves to same-owner
+template paths in native order. Five otherwise-exact roots expose the isolated
+residual with counts 4, 3, 2, 2, and 2. One of them places its main data
+composition schema second in the raw collection, proving that neither
+`MainDataCompositionSchema`, alphabetical sorting, nor a name scan defines the
+child order. Code-20 Reports remain on their established legacy path.
+
+Every template member must resolve uniquely, case-insensitively by UUID,
+through the current template index. The resolved entry must be a `Template` at
+`Reports/<owner>/Templates/<name>.xml`. Distinct UUIDs that resolve to the same
+Unicode-lowercased name are rejected. Any malformed envelope, UUID,
+resolution, kind, owner, path, or name collision empties the complete Report
+child-template cohort without suppressing independently parsed Report
+properties, forms, or commands. Selected Report exports continue to request
+the broad metadata index needed to resolve child templates.
+
+Integrated commit `e014863` passes 3 atomic parser/resolution tests, the
+selected-index routing test, and the existing Report XML end-to-end test. The
+full suite changed from `1273 passed / 74 failed / 6 ignored` to
+`1277 passed / 74 failed / 6 ignored`; the exact 74 failure names are unchanged.
+Independent frozen review approved diff SHA-256
+`8A5025004224F1C82571A26792F8579EEAE9ADBB3F044176BB3D0C8218DDC589`.
+Production reuses the existing platform collection UUID and adds no Report,
+template, database, or path identity.
+
+The saved normalized isolated residual is five Report roots totaling `+0/-8`.
+The expected future permitted native gate is `+0/-0` for those roots, but
+exactness is not claimed without that gate. No database access, ConfigDump,
+configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
