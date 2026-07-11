@@ -28496,19 +28496,19 @@ fn direct_code14_forms_are_indexed_only_with_one_metadata_owner() {
 }
 
 #[test]
-fn selected_information_register_predefined_owner_resolves_generated_type_to_metadata_owner() {
+fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let generated_ref_type_uuid = "22222222-2222-4222-8222-222222222222";
     let metadata_owner_uuid = "33333333-3333-4333-8333-333333333333";
     let value_uuid = "44444444-4444-4444-8444-444444444444";
-    let row = MetadataTextRow {
+    let row_for_kind = |kind: &str| MetadataTextRow {
         file_name: register_uuid.to_string(),
         text: format!(
             "{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{generated_ref_type_uuid},{value_uuid}}}}}"
         ),
         object_code: Some(33),
         header: None,
-        kind: Some("InformationRegister".to_string()),
+        kind: Some(kind.to_string()),
         folder: Some("InformationRegisters"),
     };
     let selected = BTreeSet::from([register_uuid.to_string()]);
@@ -28526,15 +28526,29 @@ fn selected_information_register_predefined_owner_resolves_generated_type_to_met
         },
     )]);
 
-    assert_eq!(
-        selected_information_register_predefined_owner_ids(
-            std::slice::from_ref(&row),
+    for kind in ["InformationRegister", "Catalog"] {
+        let row = row_for_kind(kind);
+        assert_eq!(
+            selected_metadata_predefined_owner_ids(
+                std::slice::from_ref(&row),
+                &selected,
+                &type_index,
+                &object_refs,
+                &body_owners,
+            ),
+            BTreeSet::from([metadata_owner_uuid.to_string()])
+        );
+    }
+    let unsupported = row_for_kind("Document");
+    assert!(
+        selected_metadata_predefined_owner_ids(
+            &[unsupported],
             &selected,
             &type_index,
             &object_refs,
             &body_owners,
-        ),
-        BTreeSet::from([metadata_owner_uuid.to_string()])
+        )
+        .is_empty()
     );
     let duplicate_owner_uuid = "55555555-5555-4555-8555-555555555555";
     let mut ambiguous_object_refs = object_refs.clone();
@@ -28550,8 +28564,9 @@ fn selected_information_register_predefined_owner_resolves_generated_type_to_met
             object_path: PathBuf::from("Catalogs/OtherTypes"),
         },
     );
+    let row = row_for_kind("Catalog");
     assert!(
-        selected_information_register_predefined_owner_ids(
+        selected_metadata_predefined_owner_ids(
             &[row],
             &selected,
             &type_index,
@@ -30698,7 +30713,7 @@ fn extracts_data_processor_attribute_and_tabular_section_child_headers() {
 00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
 {{27,\r\n{{3,\r\n{{1,0,{attribute_uuid}}},\"FileName\",{{1,\"en\",\"File name\"}},\"file comment\"}}\r\n}},\
 {{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Rows\",{{1,\"en\",\"Rows\"}},\"\"}},\
-{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
+{{888744e1-b616-11d4-9436-004095e12fc7,1,\
 {{27,\r\n{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Value\",{{1,\"en\",\"Value\"}},\"\"}}\r\n}}\
 }}}}\r\n}}"
             )
@@ -31311,6 +31326,7 @@ fn parses_data_processor_tabular_section_child_attribute_property_tail_from_wrap
         Some(MetadataChoiceForm::Empty)
     ));
     assert!(properties.link_by_type_empty);
+    assert!(properties.link_by_type.is_none());
     assert_eq!(properties.choice_history_on_input, Some("Auto"));
     assert!(matches!(
         properties.choice_parameter_links,
@@ -32111,20 +32127,439 @@ fn extracts_catalog_attribute_and_tabular_section_child_headers() {
     );
 }
 
+fn catalog_attribute_wrapper_for_test(
+    wrapper_code: u32,
+    attribute_uuid: &str,
+    pattern: &str,
+    fill_value: &str,
+    fill_from_filling_value: &str,
+) -> String {
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let payload = r##"{27,
+{2,
+{3,{1,0,$ATTRIBUTE},"Field",{0},"",0,0,$ZERO,0},
+$PATTERN
+},
+0,{0},{0},0,"",0,
+{"U"},{"U"},0,$ZERO,2,0,
+{5006,0},
+{3,0,0},
+{0,0},
+0,{0},$FILL,$FILL_FROM,0,0
+}"##
+    .replace("$ATTRIBUTE", attribute_uuid)
+    .replace("$ZERO", zero_uuid)
+    .replace("$PATTERN", pattern)
+    .replace("$FILL_FROM", fill_from_filling_value)
+    .replace("$FILL", fill_value);
+    match wrapper_code {
+        5 => format!("{{5,{payload},2,2,1,1}}"),
+        6 => format!("{{6,{payload},2,2,1,1,0,{{1,{zero_uuid}}}}}"),
+        8 => format!("{{8,{payload},2,1,1}}"),
+        _ => panic!("unsupported test wrapper code"),
+    }
+}
+
+fn catalog_attribute_collection_for_test(marker: &str, wrappers: &[String]) -> String {
+    let items = wrappers
+        .iter()
+        .map(|wrapper| format!("{{{wrapper},0}}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{{marker},{},{items}}}", wrappers.len())
+}
+
+#[test]
+fn catalog_attribute_layouts_and_nested_omissions_fail_closed() {
+    let first_uuid = "11111111-1111-4111-8111-111111111111";
+    let second_uuid = "22222222-2222-4222-8222-222222222222";
+    let value_types = [ConstantValueType::String {
+        length: None,
+        allowed_length_flag: 0,
+    }];
+    let parse = |text: &str, child_uuid: &str, expected_wrapper_code| {
+        parse_catalog_child_properties(
+            "Products",
+            text,
+            text.find(child_uuid).unwrap(),
+            child_uuid,
+            expected_wrapper_code,
+            &value_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+    };
+
+    let wrapper5 = catalog_attribute_wrapper_for_test(
+        5,
+        first_uuid,
+        r#"{"Pattern",{"S"}}"#,
+        r#"{"S",""}"#,
+        "0",
+    );
+    let direct5 = catalog_attribute_collection_for_test(
+        CATALOG_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&wrapper5),
+    );
+    assert_eq!(catalog_direct_attribute_wrapper_code("56"), Some(5));
+    assert!(parse(&direct5, first_uuid, 5).is_some());
+    assert!(parse(&direct5, first_uuid, 6).is_none());
+
+    let wrapper6 = catalog_attribute_wrapper_for_test(
+        6,
+        first_uuid,
+        r#"{"Pattern",{"S"}}"#,
+        r#"{"S",""}"#,
+        "0",
+    );
+    let direct6 = catalog_attribute_collection_for_test(
+        CATALOG_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&wrapper6),
+    );
+    assert_eq!(catalog_direct_attribute_wrapper_code("57"), Some(6));
+    assert!(parse(&direct6, first_uuid, 6).is_some());
+    assert!(parse(&direct6, first_uuid, 5).is_none());
+
+    let pattern8 = format!(
+        "{{\"Pattern\",{}}}",
+        std::iter::repeat(r#"{"S"}"#)
+            .take(8)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let wrapper_with_unresolved_types =
+        catalog_attribute_wrapper_for_test(5, first_uuid, &pattern8, r#"{"S",""}"#, "0");
+    let unresolved_types = catalog_attribute_collection_for_test(
+        CATALOG_ATTRIBUTE_GROUP_UUID,
+        &[wrapper_with_unresolved_types],
+    );
+    assert!(
+        parse_catalog_child_properties(
+            "Products",
+            &unresolved_types,
+            unresolved_types.find(first_uuid).unwrap(),
+            first_uuid,
+            5,
+            &[],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_some()
+    );
+
+    let mixed = catalog_attribute_collection_for_test(
+        CATALOG_ATTRIBUTE_GROUP_UUID,
+        &[
+            wrapper5,
+            catalog_attribute_wrapper_for_test(
+                6,
+                second_uuid,
+                r#"{"Pattern",{"S"}}"#,
+                r#"{"S",""}"#,
+                "0",
+            ),
+        ],
+    );
+    assert!(parse(&mixed, first_uuid, 5).is_none());
+
+    let nested = |fill_value: &str, fill_from: &str| {
+        let wrapper = catalog_attribute_wrapper_for_test(
+            8,
+            first_uuid,
+            r#"{"Pattern",{"S"}}"#,
+            fill_value,
+            fill_from,
+        );
+        catalog_attribute_collection_for_test(CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID, &[wrapper])
+    };
+    let nested_default = nested(r#"{"S",""}"#, "0");
+    assert!(parse(&nested_default, first_uuid, 8).is_some());
+    let nested_fill = nested(r#"{"S","hidden"}"#, "0");
+    assert!(parse(&nested_fill, first_uuid, 8).is_none());
+    let nested_fill_from = nested(r#"{"S",""}"#, "1");
+    assert!(parse(&nested_fill_from, first_uuid, 8).is_none());
+}
+
+#[test]
+fn catalog_attribute_counts_markers_and_value_lexemes_fail_closed() {
+    let attribute_uuid = "11111111-1111-4111-8111-111111111111";
+    let empty_pattern =
+        catalog_attribute_wrapper_for_test(5, attribute_uuid, r#"{"Pattern"}"#, r#"{"S",""}"#, "0");
+    let empty_pattern_fields = split_1c_braced_fields(&empty_pattern, 0).unwrap();
+    assert!(
+        parse_catalog_attribute_wrapper_fields(&empty_pattern_fields, Some(attribute_uuid))
+            .is_none()
+    );
+
+    let wrapper = catalog_attribute_wrapper_for_test(
+        5,
+        attribute_uuid,
+        r#"{"Pattern",{"S"}}"#,
+        r#"{"S",""}"#,
+        "0",
+    );
+    let wrong_marker = catalog_attribute_collection_for_test(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        std::slice::from_ref(&wrapper),
+    );
+    let wrong_marker_fields = split_1c_braced_fields(&wrong_marker, 0).unwrap();
+    assert!(!catalog_attribute_collection_is_closed(
+        &wrong_marker_fields,
+        attribute_uuid,
+        5,
+    ));
+    let overflow = format!(
+        "{{{CATALOG_ATTRIBUTE_GROUP_UUID},{},{{{wrapper},0}}}}",
+        usize::MAX
+    );
+    let overflow_fields = split_1c_braced_fields(&overflow, 0).unwrap();
+    assert!(!catalog_attribute_collection_is_closed(
+        &overflow_fields,
+        attribute_uuid,
+        5,
+    ));
+    assert!(
+        parse_catalog_choice_parameter_links(
+            &format!("{{5006,{}}}", usize::MAX),
+            "Products",
+            false,
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(parse_catalog_link_by_type("{3,0,4}", "Products", &BTreeMap::new()).is_none());
+    assert!(
+        parse_information_register_choice_parameters(
+            r#"{0,1,"Amount",{"N",1e2}}"#,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn catalog_nonempty_paths_and_typed_values_resolve_fail_closed() {
+    let direct_uuid = "11111111-1111-4111-8111-111111111111";
+    let tabular_uuid = "22222222-2222-4222-8222-222222222222";
+    let nested_uuid = "33333333-3333-4333-8333-333333333333";
+    let foreign_uuid = "44444444-4444-4444-8444-444444444444";
+    let object_refs = BTreeMap::from([
+        (
+            direct_uuid.to_string(),
+            "Catalog.Products.Attribute.Owner".to_string(),
+        ),
+        (
+            tabular_uuid.to_string(),
+            "Catalog.Products.TabularSection.Lines".to_string(),
+        ),
+        (
+            nested_uuid.to_string(),
+            "Catalog.Products.TabularSection.Lines.Attribute.Owner".to_string(),
+        ),
+        (
+            foreign_uuid.to_string(),
+            "Catalog.Other.Attribute.Owner".to_string(),
+        ),
+    ]);
+
+    let direct = format!("{{5006,2,\"Direct\",1,{{0,{direct_uuid}}},0,\"Ref\",1,{{-8}},1}}");
+    let direct_links =
+        parse_catalog_choice_parameter_links(&direct, "Products", false, &object_refs).unwrap();
+    assert_eq!(direct_links.len(), 2);
+    assert_eq!(
+        direct_links[0].data_path,
+        "Catalog.Products.Attribute.Owner"
+    );
+    assert_eq!(direct_links[0].value_change, "Clear");
+    assert_eq!(
+        direct_links[1].data_path,
+        "Catalog.Products.StandardAttribute.Ref"
+    );
+    assert_eq!(direct_links[1].value_change, "DontChange");
+
+    let nested_direct = format!("{{5006,1,\"Direct\",1,{{0,{direct_uuid}}},0}}");
+    assert!(
+        parse_catalog_choice_parameter_links(&nested_direct, "Products", true, &object_refs)
+            .is_some()
+    );
+    let nested_path = format!("{{5006,1,\"Nested\",2,{{0,{tabular_uuid}}},{{0,{nested_uuid}}},1}}");
+    let nested_links =
+        parse_catalog_choice_parameter_links(&nested_path, "Products", true, &object_refs).unwrap();
+    assert_eq!(
+        nested_links[0].data_path,
+        "Catalog.Products.TabularSection.Lines.Attribute.Owner"
+    );
+    assert_eq!(nested_links[0].value_change, "DontChange");
+    let path3 = format!(
+        "{{5006,1,\"Nested\",3,{{0,{tabular_uuid}}},{{0,{nested_uuid}}},{{0,{nested_uuid}}},0}}"
+    );
+    assert!(parse_catalog_choice_parameter_links(&path3, "Products", true, &object_refs).is_none());
+    let foreign = format!("{{5006,1,\"Foreign\",1,{{0,{foreign_uuid}}},0}}");
+    assert!(
+        parse_catalog_choice_parameter_links(&foreign, "Products", false, &object_refs).is_none()
+    );
+    let wrong_count = format!("{{5006,2,\"Direct\",1,{{0,{direct_uuid}}},0}}");
+    assert!(
+        parse_catalog_choice_parameter_links(&wrong_count, "Products", false, &object_refs)
+            .is_none()
+    );
+
+    let link_by_type = format!("{{3,1,{{0,{direct_uuid}}},3}}");
+    let (empty, link) =
+        parse_catalog_link_by_type(&link_by_type, "Products", &object_refs).unwrap();
+    assert!(!empty);
+    let link = link.unwrap();
+    assert_eq!(link.data_path, "Catalog.Products.Attribute.Owner");
+    assert_eq!(link.link_item, 3);
+    let foreign_link = format!("{{3,1,{{0,{foreign_uuid}}},0}}");
+    assert!(parse_catalog_link_by_type(&foreign_link, "Products", &object_refs).is_none());
+
+    let values = parse_information_register_choice_parameters(
+        r#"{0,2,"Amount",{"N",-12.50},"Moment",{"D",20240203040506}}"#,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(matches!(
+        &values[0].value,
+        MetadataChoiceParameterValue::Decimal(value) if value == "-12.50"
+    ));
+    assert!(matches!(
+        &values[1].value,
+        MetadataChoiceParameterValue::DateTime(value) if value == "2024-02-03T04:05:06"
+    ));
+}
+
+#[test]
+fn catalog_choice_form_requires_bare_uuid_and_pattern_owner() {
+    let form_uuid = "11111111-1111-4111-8111-111111111111";
+    let owner_uuid = "22222222-2222-4222-8222-222222222222";
+    let form_refs = BTreeMap::from([(
+        form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Statuses/Forms/Choice.xml"),
+            kind: "Form",
+        },
+    )]);
+    let matching_types = [ConstantValueType::Reference {
+        reference: "cfg:CatalogRef.Statuses".to_string(),
+    }];
+    assert!(matches!(
+        parse_catalog_child_choice_form(form_uuid, &matching_types, &form_refs),
+        Some(MetadataChoiceForm::Reference(reference))
+            if reference == "Catalog.Statuses.Form.Choice"
+    ));
+    let foreign_types = [ConstantValueType::Reference {
+        reference: "cfg:CatalogRef.Products".to_string(),
+    }];
+    assert!(parse_catalog_child_choice_form(form_uuid, &foreign_types, &form_refs).is_none());
+    let typed = format!("{{\"#\",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{form_uuid}}}}}");
+    assert!(parse_catalog_child_choice_form(&typed, &matching_types, &form_refs).is_none());
+}
+
+#[test]
+fn formats_every_metadata_choice_parameter_value_variant() {
+    let parameters = vec![
+        MetadataChoiceParameter {
+            name: "Nil".to_string(),
+            value: MetadataChoiceParameterValue::Nil,
+        },
+        MetadataChoiceParameter {
+            name: "Boolean".to_string(),
+            value: MetadataChoiceParameterValue::Boolean(true),
+        },
+        MetadataChoiceParameter {
+            name: "Decimal".to_string(),
+            value: MetadataChoiceParameterValue::Decimal("-12.50".to_string()),
+        },
+        MetadataChoiceParameter {
+            name: "DateTime".to_string(),
+            value: MetadataChoiceParameterValue::DateTime("2024-02-03T04:05:06".to_string()),
+        },
+        MetadataChoiceParameter {
+            name: "String".to_string(),
+            value: MetadataChoiceParameterValue::String("a<&b".to_string()),
+        },
+        MetadataChoiceParameter {
+            name: "EmptyRef".to_string(),
+            value: MetadataChoiceParameterValue::DesignTimeRef(String::new()),
+        },
+        MetadataChoiceParameter {
+            name: "Ref".to_string(),
+            value: MetadataChoiceParameterValue::DesignTimeRef("Catalog.Statuses.Open".to_string()),
+        },
+        MetadataChoiceParameter {
+            name: "EmptyArray".to_string(),
+            value: MetadataChoiceParameterValue::FixedArray(Vec::new()),
+        },
+        MetadataChoiceParameter {
+            name: "Array".to_string(),
+            value: MetadataChoiceParameterValue::FixedArray(vec![
+                "Catalog.Statuses.Open".to_string(),
+            ]),
+        },
+    ];
+    let mut xml = String::new();
+    push_metadata_child_choice_parameters_xml(&mut xml, "\t", &parameters);
+
+    assert!(xml.contains(r#"<app:value xsi:nil="true"/>"#));
+    assert!(xml.contains(r#"<app:value xsi:type="xs:boolean">true</app:value>"#));
+    assert!(xml.contains(r#"<app:value xsi:type="xs:decimal">-12.50</app:value>"#));
+    assert!(xml.contains(r#"<app:value xsi:type="xs:dateTime">2024-02-03T04:05:06</app:value>"#));
+    assert!(xml.contains(r#"<app:value xsi:type="xs:string">a&lt;&amp;b</app:value>"#));
+    assert!(xml.contains(r#"<app:value xsi:type="xr:DesignTimeRef"/>"#));
+    assert!(
+        xml.contains(r#"<app:value xsi:type="xr:DesignTimeRef">Catalog.Statuses.Open</app:value>"#)
+    );
+    assert!(xml.contains(r#"<app:value xsi:type="v8:FixedArray"/>"#));
+    assert!(
+        xml.contains(r#"<v8:Value xsi:type="xr:DesignTimeRef">Catalog.Statuses.Open</v8:Value>"#)
+    );
+}
+
 #[test]
 fn extracts_catalog_child_attribute_property_tail_and_choice_parameters() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     let status_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
     let choice_form_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
+    let status_owner_type_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc3";
+    let choice_owner_type_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc4";
+    let type_set_uuid = "cccccccc-cccc-4ccc-8ccc-ccccccccccc5";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let single_parameter_value = [
-        r##"{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{0,"##,
-        status_uuid,
-        "}}",
-    ]
-    .concat();
+    let single_parameter_value = format!(
+        r##"{{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{{0,{status_owner_type_uuid},{status_uuid}}}}}"##
+    );
     let choice_parameters = [r#"{0,1,"Filter.Status","#, &single_parameter_value, "}"].concat();
+    let attribute_collection = r##"{cf4abea7-37b2-11d4-940f-008048da11f9,1,
+{
+{6,
+{27,
+{2,
+{3,
+{1,0,$ATTRIBUTE},"RequiredFlag",{1,"en","Required flag"},"",0,0,$ZERO,0},
+{"Pattern",{"B"},{"#",$CHOICE_OWNER_TYPE},{"#",$TYPE_SET}}
+},
+0,{1,"en","Flag format"},{1,"en","Flag tooltip"},0,"",0,
+{"U"},{"U"},0,$CHOICE_FORM,1,1,
+{5006,0},
+{3,0,0},
+$CHOICE_PARAMETERS,
+0,{0},{"B",0},0,2,0
+},2,2,1,1,0,{1,$ZERO}
+},0}
+}"##
+    .replace("$ATTRIBUTE", attribute_uuid)
+    .replace("$ZERO", zero_uuid)
+    .replace("$CHOICE_OWNER_TYPE", choice_owner_type_uuid)
+    .replace("$TYPE_SET", type_set_uuid)
+    .replace("$CHOICE_FORM", choice_form_uuid)
+    .replace("$CHOICE_PARAMETERS", &choice_parameters);
     let catalog_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
@@ -32136,33 +32571,44 @@ fn extracts_catalog_child_attribute_property_tail_and_choice_parameters() {
 {zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
 55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
 0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"B\"}}}}}},\
-{{3,\r\n{{1,0,{attribute_uuid}}},\"RequiredFlag\",{{1,\"en\",\"Required flag\"}},\"\"}},\
-0,{{1,\"en\",\"Flag format\"}},{{0}},{{1,\"en\",\"Flag tooltip\"}},0,\"\",0,0,{{0}},{{0}},0,0,1,0,{{0}},\
-{choice_parameters},\
-1,2,{choice_form_uuid},{{0}},0,2,2,0,1,0,0}}\r\n\
+{attribute_collection}\r\n\
 }}\r\n}}"
             )
             .as_bytes(),
         );
-    let object_refs = BTreeMap::from([
+    let object_refs = BTreeMap::from([(
+        status_uuid.to_string(),
+        "Enum.Statuses.EnumValue.Open".to_string(),
+    )]);
+    let type_index = BTreeMap::from([
         (
-            status_uuid.to_string(),
-            "Enum.Statuses.EnumValue.Open".to_string(),
+            status_owner_type_uuid.to_string(),
+            "cfg:EnumRef.Statuses".to_string(),
         ),
         (
-            choice_form_uuid.to_string(),
-            "Catalog.Products.Form.ChoiceForm".to_string(),
+            choice_owner_type_uuid.to_string(),
+            "cfg:CatalogRef.Statuses".to_string(),
+        ),
+        (
+            type_set_uuid.to_string(),
+            "cfg:DefinedType.FilterValue".to_string(),
         ),
     ]);
+    let form_refs = BTreeMap::from([(
+        choice_form_uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Statuses/Forms/ChoiceForm.xml"),
+            kind: "Form",
+        },
+    )]);
 
     let extracted = extract_metadata_source_xml_with_refs(
         &catalog_blob,
         catalog_uuid,
-        &BTreeMap::new(),
+        &type_index,
         &object_refs,
         &BTreeMap::new(),
-        &BTreeMap::new(),
+        &form_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
@@ -32179,6 +32625,8 @@ fn extracts_catalog_child_attribute_property_tail_and_choice_parameters() {
         attribute_xml.contains("<v8:Type>xs:boolean</v8:Type>"),
         "{xml}"
     );
+    assert!(attribute_xml.contains("<v8:Type>cfg:CatalogRef.Statuses</v8:Type>"));
+    assert!(attribute_xml.contains("<v8:TypeSet>cfg:DefinedType.FilterValue</v8:TypeSet>"));
     assert!(attribute_xml.contains("<PasswordMode>false</PasswordMode>"));
     assert!(attribute_xml.contains("<Format>"));
     assert!(attribute_xml.contains("<v8:content>Flag format</v8:content>"));
@@ -32194,23 +32642,24 @@ fn extracts_catalog_child_attribute_property_tail_and_choice_parameters() {
     ));
     assert!(attribute_xml.contains("<QuickChoice>Use</QuickChoice>"));
     assert!(attribute_xml.contains("<CreateOnInput>Use</CreateOnInput>"));
-    assert!(attribute_xml.contains("<ChoiceForm>Catalog.Products.Form.ChoiceForm</ChoiceForm>"));
+    assert!(attribute_xml.contains("<ChoiceForm>Catalog.Statuses.Form.ChoiceForm</ChoiceForm>"));
     assert!(attribute_xml.contains("<LinkByType/>"));
     assert!(attribute_xml.contains("<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>"));
     assert!(attribute_xml.contains("<Use>ForFolderAndItem</Use>"));
     assert!(attribute_xml.contains("<Indexing>IndexWithAdditionalOrder</Indexing>"));
     assert!(attribute_xml.contains("<FullTextSearch>Use</FullTextSearch>"));
     assert!(attribute_xml.contains("<DataHistory>Use</DataHistory>"));
-    assert!(attribute_xml.contains(
-        "<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>"
-    ));
-    assert!(attribute_xml.contains(
-            "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
-        ));
-    assert!(
-        attribute_xml.find("<Type>").unwrap() < attribute_xml.find("<PasswordMode>").unwrap(),
-        "{xml}"
-    );
+    assert!(!attribute_xml.contains("<UpdateDataHistoryImmediatelyAfterWrite>"));
+    assert!(!attribute_xml.contains("<ExecuteAfterWriteDataHistoryVersionProcessing>"));
+    let boolean_type = attribute_xml.find("<v8:Type>xs:boolean</v8:Type>").unwrap();
+    let catalog_type = attribute_xml
+        .find("<v8:Type>cfg:CatalogRef.Statuses</v8:Type>")
+        .unwrap();
+    let type_set = attribute_xml
+        .find("<v8:TypeSet>cfg:DefinedType.FilterValue</v8:TypeSet>")
+        .unwrap();
+    let password_mode = attribute_xml.find("<PasswordMode>").unwrap();
+    assert!(boolean_type < catalog_type && catalog_type < type_set && type_set < password_mode);
     assert!(
         attribute_xml.find("<FillValue").unwrap() < attribute_xml.find("<FillChecking>").unwrap(),
         "{xml}"
@@ -32242,6 +32691,26 @@ fn extracts_catalog_nested_tabular_section_attribute_tail_scalars() {
     let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let nested_collection = r#"{888744e1-b616-11d4-9436-004095e12fc7,1,
+{
+{8,
+{27,
+{2,
+{3,
+{1,0,$ATTRIBUTE},"PriceCode",{1,"en","Price code"},"",0,0,$ZERO,0},
+{"Pattern",{"S",20,1}}
+},
+0,{0},{1,"en","Price code tooltip"},0,"",0,
+{"U"},{"U"},0,$ZERO,1,1,
+{5006,0},
+{3,0,0},
+{0,0},
+0,{0},{"S",""},0,1,0
+},2,1,1
+},0}
+}"#
+    .replace("$ATTRIBUTE", tabular_attribute_uuid)
+    .replace("$ZERO", zero_uuid);
     let catalog_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
@@ -32254,11 +32723,7 @@ fn extracts_catalog_nested_tabular_section_attribute_tail_scalars() {
 55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
 0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
 {{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
-{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,1}}}}}},\
-{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"PriceCode\",{{1,\"en\",\"Price code\"}},\"\"}},\
-0,{{0}},{{0}},{{1,\"en\",\"Price code tooltip\"}},0,\"\",0,0,{{0}},{{0}},0,{{0}},1,0,{{0}},{{0}},1,1,0,0,0,0,2,0,1,0,0}}\r\n}}\
-}}}}\r\n}}"
+{nested_collection}\r\n}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -32288,16 +32753,14 @@ fn extracts_catalog_nested_tabular_section_attribute_tail_scalars() {
     assert!(attribute_xml.contains("<QuickChoice>Use</QuickChoice>"));
     assert!(attribute_xml.contains("<CreateOnInput>DontUse</CreateOnInput>"));
     assert!(attribute_xml.contains("<ChoiceForm/>"));
-    assert!(attribute_xml.contains("<Use>ForItem</Use>"));
+    assert!(!attribute_xml.contains("<Use>"));
     assert!(attribute_xml.contains("<Indexing>IndexWithAdditionalOrder</Indexing>"));
     assert!(attribute_xml.contains("<FullTextSearch>Use</FullTextSearch>"));
     assert!(attribute_xml.contains("<DataHistory>Use</DataHistory>"));
-    assert!(attribute_xml.contains(
-        "<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>"
-    ));
-    assert!(attribute_xml.contains(
-            "<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>"
-        ));
+    assert!(!attribute_xml.contains("<FillFromFillingValue>"));
+    assert!(!attribute_xml.contains("<FillValue"));
+    assert!(!attribute_xml.contains("<UpdateDataHistoryImmediatelyAfterWrite>"));
+    assert!(!attribute_xml.contains("<ExecuteAfterWriteDataHistoryVersionProcessing>"));
     assert!(
         attribute_xml.find("<FillChecking>").unwrap()
             < attribute_xml.find("<ChoiceFoldersAndItems>").unwrap(),
@@ -32329,7 +32792,7 @@ fn extracts_catalog_tabular_section_property_tail() {
 0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
 {{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
 {{1,\"en\",\"Price rows\"}},1,{{0}},2,7,\
-{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
+{{888744e1-b616-11d4-9436-004095e12fc7,1,\
 {{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,1}}}}}},\
 {{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"PriceCode\",{{1,\"en\",\"Price code\"}},\"\"}}\r\n}}\
 }}}}\r\n}}"

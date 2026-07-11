@@ -77,10 +77,13 @@ const STD_PICTURE_LOAD_REPORT_SETTINGS_UUID: &str = "283ecabd-aaed-41d1-ad46-6cc
 const STD_PICTURE_INFORMATION_REGISTER_UUID: &str = "5b87ad1b-d8cc-43c1-b5c4-dc43613c518c";
 const STD_PICTURE_SHOW_DATA_UUID: &str = "a064544f-6037-48ca-b19f-8ad63e43af23";
 const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013c85";
-
-// Platform protocol type IDs used by serialized metadata values.
+// Platform serialized-value type IDs, independent of metadata in any infobase.
 const DESIGN_TIME_REF_TYPE_UUID: &str = "5c14e26f-099b-4d37-84a6-b433d87400da";
 const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
+// Platform collection type IDs, stable across independent infobases.
+const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
+const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
+
 const FORM_APPLICATION_USE_PURPOSE_TYPE_UUID: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
 // Platform picture descriptor code for StdPicture.Print.
 const STD_PICTURE_PRINT_DESCRIPTOR_CODE: &str = "-13";
@@ -564,32 +567,32 @@ fn dump_table_rows_with_options(
     } else {
         BTreeMap::new()
     };
-    let information_register_file_names = metadata_texts
+    let metadata_value_owner_file_names = metadata_texts
         .iter()
-        .filter(|row| row.kind.as_deref() == Some("InformationRegister"))
+        .filter(|row| matches!(row.kind.as_deref(), Some("InformationRegister" | "Catalog")))
         .map(|row| row.file_name.clone())
         .collect::<BTreeSet<_>>();
-    let information_register_owner_ids = selected_information_register_predefined_owner_ids(
+    let metadata_value_owner_ids = selected_metadata_predefined_owner_ids(
         &metadata_texts,
-        &information_register_file_names,
+        &metadata_value_owner_file_names,
         &type_index,
         &object_refs,
         &body_owners,
     );
-    let information_register_body_owners = body_owners
+    let metadata_value_body_owners = body_owners
         .iter()
-        .filter(|(uuid, _)| information_register_owner_ids.contains(*uuid))
+        .filter(|(uuid, _)| metadata_value_owner_ids.contains(*uuid))
         .map(|(uuid, owner)| (uuid.clone(), owner.clone()))
         .collect::<BTreeMap<_, _>>();
-    let information_register_predefined_item_refs = build_predefined_item_reference_index(
+    let metadata_value_predefined_item_refs = build_predefined_item_reference_index(
         &rows,
-        &information_register_body_owners,
+        &metadata_value_body_owners,
         &type_index,
         &object_refs,
     )?;
     let mut metadata_object_refs = object_refs.clone();
     metadata_object_refs.extend(predefined_item_refs.clone());
-    metadata_object_refs.extend(information_register_predefined_item_refs);
+    metadata_object_refs.extend(metadata_value_predefined_item_refs);
     let configuration_module_groups = configuration_module_groups(&file_names_owned);
     ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
 
@@ -1385,18 +1388,18 @@ fn dump_table_rows_streamed(
     } else {
         BTreeMap::new()
     };
-    let information_register_file_names = if selected_file_names.is_empty() {
+    let metadata_value_owner_file_names = if selected_file_names.is_empty() {
         index_metadata_texts
             .iter()
-            .filter(|row| row.kind.as_deref() == Some("InformationRegister"))
+            .filter(|row| matches!(row.kind.as_deref(), Some("InformationRegister" | "Catalog")))
             .map(|row| row.file_name.clone())
             .collect::<BTreeSet<_>>()
     } else {
         selected_file_names.clone()
     };
-    let owner_ids = selected_information_register_predefined_owner_ids(
+    let owner_ids = selected_metadata_predefined_owner_ids(
         &index_metadata_texts,
-        &information_register_file_names,
+        &metadata_value_owner_file_names,
         &type_index,
         &object_refs,
         &body_owners,
@@ -1426,7 +1429,7 @@ fn dump_table_rows_streamed(
     if !body_file_names.is_empty() {
         timings.prepare_metadata_fetch_bcp_ms += elapsed;
     }
-    let information_register_predefined_item_refs = build_predefined_item_reference_index(
+    let metadata_value_predefined_item_refs = build_predefined_item_reference_index(
         &rows,
         &required_body_owners,
         &type_index,
@@ -1434,7 +1437,7 @@ fn dump_table_rows_streamed(
     )?;
     let mut metadata_object_refs = object_refs.clone();
     metadata_object_refs.extend(predefined_item_refs.clone());
-    metadata_object_refs.extend(information_register_predefined_item_refs);
+    metadata_object_refs.extend(metadata_value_predefined_item_refs);
     let configuration_module_groups = configuration_module_groups(&file_names);
     ensure_unique_source_asset_paths(&source_assets, &source_asset_diagnostics)?;
     timings.prepare_reference_indexes_ms += elapsed_ms(reference_indexes_started);
@@ -1822,7 +1825,7 @@ fn selected_form_owner_metadata_rows(
         .collect()
 }
 
-fn selected_information_register_predefined_owner_ids(
+fn selected_metadata_predefined_owner_ids(
     rows: &[MetadataTextRow],
     selected_file_names: &BTreeSet<String>,
     type_index: &BTreeMap<String, String>,
@@ -1831,7 +1834,7 @@ fn selected_information_register_predefined_owner_ids(
 ) -> BTreeSet<String> {
     let mut owners = BTreeSet::new();
     for row in rows {
-        if row.kind.as_deref() != Some("InformationRegister")
+        if !matches!(row.kind.as_deref(), Some("InformationRegister" | "Catalog"))
             || !selected_file_names.contains(&row.file_name)
         {
             continue;
@@ -3911,10 +3914,12 @@ struct MetadataChoiceParameter {
 
 #[derive(Clone)]
 enum MetadataChoiceParameterValue {
+    Nil,
     Boolean(bool),
+    Decimal(String),
+    DateTime(String),
     DesignTimeRef(String),
     FixedArray(Vec<String>),
-    Nil,
     String(String),
 }
 
@@ -5312,7 +5317,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-    information_register_object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
@@ -5329,7 +5334,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
         &row,
         type_index,
         object_refs,
-        information_register_object_refs,
+        metadata_object_refs,
         configuration_root_object_refs,
         recalculation_refs,
         functional_option_refs,
@@ -5344,7 +5349,7 @@ fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-    information_register_object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
     functional_option_refs: &BTreeMap<String, String>,
@@ -5587,6 +5592,7 @@ fn extract_metadata_source_xml_from_text_row(
             uuid,
             type_index,
             object_refs,
+            metadata_object_refs,
             form_refs,
             template_refs,
         )?;
@@ -5648,7 +5654,7 @@ fn extract_metadata_source_xml_from_text_row(
         format_exchange_plan_source_xml(&header, &exchange_plan, source_version).into_bytes()
     } else if metadata_kind_uses_register_resources(kind) {
         let register_object_refs = if kind == "InformationRegister" {
-            information_register_object_refs
+            metadata_object_refs
         } else {
             object_refs
         };
@@ -7071,8 +7077,11 @@ fn parse_attribute_tabular_section_child_objects(
     owner_name: &str,
     text: &str,
     owner_uuid: &str,
+    catalog_direct_wrapper_code: Option<u32>,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Vec<MetadataChildObject> {
     let mut roots = Vec::<MetadataChildObject>::new();
     let mut tabular_section_indexes = BTreeMap::<String, usize>::new();
@@ -7095,7 +7104,28 @@ fn parse_attribute_tabular_section_child_objects(
         } else {
             Vec::new()
         };
-        let properties = if tag == "Attribute" {
+        let properties = if tag == "Attribute" && owner_kind == "Catalog" {
+            let expected_wrapper_code = if parent_tabular_section.is_some() {
+                8
+            } else {
+                let Some(wrapper_code) = catalog_direct_wrapper_code else {
+                    continue;
+                };
+                wrapper_code
+            };
+            parse_catalog_child_properties(
+                owner_name,
+                text,
+                marker_start,
+                &header.uuid,
+                expected_wrapper_code,
+                &value_types,
+                type_index,
+                object_refs,
+                metadata_object_refs,
+                form_refs,
+            )
+        } else if tag == "Attribute" {
             parse_metadata_child_properties(
                 owner_kind,
                 text,
@@ -8041,6 +8071,14 @@ fn parse_information_register_choice_parameter_value(
         r#""B""# if fields.len() == 2 => {
             information_register_bool(fields.get(1)?).map(MetadataChoiceParameterValue::Boolean)
         }
+        r#""N""# if fields.len() == 2 => {
+            let value = fields.get(1)?.trim();
+            information_register_decimal_is_valid(value)
+                .then(|| MetadataChoiceParameterValue::Decimal(value.to_string()))
+        }
+        r#""D""# if fields.len() == 2 => {
+            format_1c_date_time(fields.get(1)?.trim()).map(MetadataChoiceParameterValue::DateTime)
+        }
         r##""#""## if fields.len() == 3 => {
             let type_id = fields.get(1)?.trim();
             if type_id.eq_ignore_ascii_case(DESIGN_TIME_REF_TYPE_UUID) {
@@ -8065,6 +8103,499 @@ fn parse_information_register_choice_parameter_value(
                 .collect::<Option<Vec<_>>>()
                 .map(MetadataChoiceParameterValue::FixedArray)
         }
+        _ => None,
+    }
+}
+
+fn parse_catalog_child_properties(
+    owner_name: &str,
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    expected_wrapper_code: u32,
+    value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChildProperties> {
+    let candidates = metadata_object_field_candidates_around_header(text, marker_start, child_uuid);
+    let mut layouts = candidates
+        .iter()
+        .filter_map(|fields| parse_catalog_attribute_wrapper_fields(fields, Some(child_uuid)))
+        .collect::<Vec<_>>();
+    if layouts.len() != 1 {
+        return None;
+    }
+    let (payload, wrapper, wrapper_code, _) = layouts.pop()?;
+    let nested = wrapper_code == 8;
+    if wrapper_code != expected_wrapper_code
+        || candidates
+            .iter()
+            .filter(|fields| {
+                catalog_attribute_collection_is_closed(fields, child_uuid, wrapper_code)
+            })
+            .count()
+            != 1
+    {
+        return None;
+    }
+
+    let password_mode = information_register_bool(payload.get(2)?)?;
+    let format = parse_catalog_localized_value(payload.get(3)?)?;
+    let tooltip = parse_catalog_localized_value(payload.get(4)?)?;
+    let mark_negatives = information_register_bool(payload.get(5)?)?;
+    let mask = parse_1c_quoted_string(payload.get(6)?.trim())?;
+    let multi_line = information_register_bool(payload.get(7)?)?;
+    let min_value = parse_information_register_bound(payload.get(8)?)?;
+    let max_value = parse_information_register_bound(payload.get(9)?)?;
+    let choice_folders_and_items = catalog_choice_folders_and_items_xml(payload.get(10)?.trim())?;
+    let choice_form = parse_catalog_child_choice_form(payload.get(11)?, value_types, form_refs)?;
+    let quick_choice = catalog_quick_choice_xml(payload.get(12)?.trim())?;
+    let fill_checking = match payload.get(13)?.trim() {
+        "0" => "DontCheck",
+        "1" => "ShowError",
+        _ => return None,
+    };
+    let choice_parameter_links =
+        parse_catalog_choice_parameter_links(payload.get(14)?, owner_name, nested, object_refs)?;
+    let (link_by_type_empty, link_by_type) =
+        parse_catalog_link_by_type(payload.get(15)?, owner_name, object_refs)?;
+    let choice_parameters = parse_information_register_choice_parameters(
+        payload.get(16)?,
+        type_index,
+        metadata_object_refs,
+    )?;
+    let extended_edit = information_register_bool(payload.get(17)?)?;
+    let edit_format = parse_catalog_localized_value(payload.get(18)?)?;
+    let fill_value =
+        parse_information_register_fill_value(payload.get(19)?, type_index, metadata_object_refs)?;
+    let fill_from_filling_value = information_register_bool(payload.get(20)?)?;
+    if nested
+        && (fill_from_filling_value
+            || !matches!(&fill_value, MetadataChildFillValue::String(value) if value.is_empty()))
+    {
+        return None;
+    }
+    let create_on_input = catalog_create_on_input_xml(payload.get(21)?.trim())?;
+    let choice_history_on_input = catalog_choice_history_on_input_xml(payload.get(22)?.trim())?;
+
+    let indexing = metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?;
+    let (use_mode, full_text_search_index, data_history_index) = match wrapper_code {
+        5 | 6 => (
+            Some(catalog_attribute_use_mode_xml(wrapper.get(3)?.trim())?),
+            4,
+            5,
+        ),
+        8 => (None, 3, 4),
+        _ => return None,
+    };
+    let full_text_search =
+        catalog_attribute_full_text_search_xml(wrapper.get(full_text_search_index)?.trim())?;
+    let data_history = metadata_data_history_xml(wrapper.get(data_history_index)?.trim())?;
+
+    Some(MetadataChildProperties {
+        password_mode,
+        format,
+        edit_format,
+        tooltip,
+        mark_negatives,
+        mask,
+        multi_line,
+        extended_edit,
+        min_value,
+        max_value,
+        fill_from_filling_value,
+        emit_fill_from_filling_value: !nested,
+        fill_value: Some(fill_value),
+        emit_fill_value: !nested,
+        fill_checking,
+        choice_folders_and_items: Some(choice_folders_and_items),
+        choice_parameter_links: Some(choice_parameter_links),
+        choice_parameters: Some(choice_parameters),
+        quick_choice: Some(quick_choice),
+        create_on_input: Some(create_on_input),
+        choice_form: Some(choice_form),
+        link_by_type_empty,
+        link_by_type,
+        choice_history_on_input: Some(choice_history_on_input),
+        master: None,
+        main_filter: None,
+        balance: None,
+        accounting_flag: None,
+        ext_dimension_accounting_flag: None,
+        deny_incomplete_values: None,
+        use_mode,
+        indexing: Some(indexing),
+        full_text_search: Some(full_text_search),
+        data_history: Some(data_history),
+        type_reduction_mode: None,
+        update_data_history_immediately_after_write: None,
+        execute_after_write_data_history_version_processing: None,
+    })
+}
+
+fn parse_catalog_attribute_wrapper_fields<'a>(
+    fields: &[&'a str],
+    expected_child_uuid: Option<&str>,
+) -> Option<(Vec<&'a str>, Vec<&'a str>, u32, String)> {
+    let wrapper_code = fields.first()?.trim().parse::<u32>().ok()?;
+    let expected_len = match wrapper_code {
+        5 => 6,
+        6 => 8,
+        8 => 5,
+        _ => return None,
+    };
+    if fields.len() != expected_len {
+        return None;
+    }
+    let (payload, child_uuid) = parse_catalog_code27_payload(fields.get(1)?.trim())?;
+    if expected_child_uuid.is_some_and(|expected| expected != child_uuid) {
+        return None;
+    }
+    metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
+    match wrapper_code {
+        5 => {
+            catalog_attribute_use_mode_xml(fields.get(3)?.trim())?;
+            catalog_attribute_full_text_search_xml(fields.get(4)?.trim())?;
+            metadata_data_history_xml(fields.get(5)?.trim())?;
+        }
+        6 => {
+            catalog_attribute_use_mode_xml(fields.get(3)?.trim())?;
+            catalog_attribute_full_text_search_xml(fields.get(4)?.trim())?;
+            metadata_data_history_xml(fields.get(5)?.trim())?;
+            if fields.get(6)?.trim() != "0" || !catalog_reserved_wrapper_tail(fields.get(7)?) {
+                return None;
+            }
+        }
+        8 => {
+            catalog_attribute_full_text_search_xml(fields.get(3)?.trim())?;
+            metadata_data_history_xml(fields.get(4)?.trim())?;
+        }
+        _ => return None,
+    }
+    Some((payload, fields.to_vec(), wrapper_code, child_uuid))
+}
+
+fn parse_catalog_code27_payload(field: &str) -> Option<(Vec<&str>, String)> {
+    let payload = split_1c_braced_fields(field, 0)?;
+    if payload.len() != 23 || payload.first()?.trim() != "27" {
+        return None;
+    }
+    let detail = split_1c_braced_fields(payload.get(1)?.trim(), 0)?;
+    if detail.len() != 3 || detail.first()?.trim() != "2" {
+        return None;
+    }
+    let header = split_1c_braced_fields(detail.get(1)?.trim(), 0)?;
+    if header.len() != 9 || header.first()?.trim() != "3" {
+        return None;
+    }
+    let identity = split_1c_braced_fields(header.get(1)?.trim(), 0)?;
+    if identity.len() != 3 || identity[0].trim() != "1" || identity[1].trim() != "0" {
+        return None;
+    }
+    let child_uuid = parse_uuid_field(identity[2].trim())?;
+    let parsed_header = parse_metadata_header_from_text(detail.get(1)?, &child_uuid)?;
+    if parsed_header.uuid != child_uuid {
+        return None;
+    }
+    let pattern = split_1c_braced_fields(detail.get(2)?.trim(), 0)?;
+    if pattern.len() < 2 || pattern.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    Some((payload, child_uuid))
+}
+
+fn catalog_reserved_wrapper_tail(field: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return false;
+    };
+    fields.len() == 2
+        && fields[0].trim() == "1"
+        && fields[1].trim() == "00000000-0000-0000-0000-000000000000"
+}
+
+fn catalog_attribute_collection_is_closed(
+    fields: &[&str],
+    child_uuid: &str,
+    expected_wrapper_code: u32,
+) -> bool {
+    let expected_marker = if expected_wrapper_code == 8 {
+        CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID
+    } else {
+        CATALOG_ATTRIBUTE_GROUP_UUID
+    };
+    if fields.len() < 3
+        || !parse_uuid_field(fields[0].trim())
+            .is_some_and(|marker| marker.eq_ignore_ascii_case(expected_marker))
+    {
+        return false;
+    }
+    let Some(count) = fields[1].trim().parse::<usize>().ok() else {
+        return false;
+    };
+    if count == 0 || count.checked_add(2) != Some(fields.len()) {
+        return false;
+    }
+    let mut child_occurrences = 0usize;
+    for item_field in fields.iter().skip(2) {
+        let Some(item) = split_1c_braced_fields(item_field.trim(), 0) else {
+            return false;
+        };
+        if item.len() != 2 || item[1].trim() != "0" {
+            return false;
+        }
+        let Some(wrapper) = split_1c_braced_fields(item[0].trim(), 0) else {
+            return false;
+        };
+        let Some((_, _, wrapper_code, item_child_uuid)) =
+            parse_catalog_attribute_wrapper_fields(&wrapper, None)
+        else {
+            return false;
+        };
+        if wrapper_code != expected_wrapper_code {
+            return false;
+        }
+        if item_child_uuid == child_uuid {
+            child_occurrences += 1;
+        }
+    }
+    child_occurrences == 1
+}
+
+fn parse_catalog_localized_value(value: &str) -> Option<Vec<(String, String)>> {
+    let values = parse_information_register_localized_value(value)?;
+    let mut languages = BTreeSet::new();
+    values
+        .iter()
+        .all(|(language, _)| languages.insert(language))
+        .then_some(values)
+}
+
+fn parse_catalog_child_choice_form(
+    value: &str,
+    value_types: &[ConstantValueType],
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChoiceForm> {
+    let uuid = parse_uuid_field(value.trim())?;
+    let choice_form = if information_register_uuid_is_zero(&uuid) {
+        MetadataChoiceForm::Empty
+    } else {
+        MetadataChoiceForm::Reference(information_register_form_reference(&uuid, form_refs)?)
+    };
+    let MetadataChoiceForm::Reference(reference) = &choice_form else {
+        return Some(choice_form);
+    };
+    let owner_name = catalog_choice_form_owner_name(reference)?;
+    let expected_type = format!("cfg:CatalogRef.{owner_name}");
+    (value_types
+        .iter()
+        .filter(|value_type| {
+            matches!(
+                value_type,
+                ConstantValueType::Reference { reference } if reference == &expected_type
+            )
+        })
+        .count()
+        == 1)
+        .then_some(choice_form)
+}
+
+fn catalog_choice_form_owner_name(reference: &str) -> Option<&str> {
+    let (owner_name, form_name) = reference.strip_prefix("Catalog.")?.split_once(".Form.")?;
+    (!owner_name.is_empty()
+        && !owner_name.contains('.')
+        && !form_name.is_empty()
+        && !form_name.contains('.'))
+    .then_some(owner_name)
+}
+
+fn parse_catalog_choice_parameter_links(
+    value: &str,
+    owner_name: &str,
+    nested: bool,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.len() < 2 || fields.first()?.trim() != "5006" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let minimum_len = count.checked_mul(4)?.checked_add(2)?;
+    if fields.len() < minimum_len {
+        return None;
+    }
+    let mut links = Vec::with_capacity(count);
+    let mut index = 2usize;
+    for _ in 0..count {
+        let name = parse_1c_quoted_string(fields.get(index)?.trim())?;
+        index = index.checked_add(1)?;
+        let path_count = fields.get(index)?.trim().parse::<usize>().ok()?;
+        index = index.checked_add(1)?;
+        if if nested {
+            !matches!(path_count, 1 | 2)
+        } else {
+            path_count != 1
+        } {
+            return None;
+        }
+        let path_end = index.checked_add(path_count)?;
+        if path_end >= fields.len() {
+            return None;
+        }
+        let data_path =
+            resolve_catalog_data_path(&fields[index..path_end], owner_name, object_refs)?;
+        index = path_end;
+        let value_change = match fields.get(index)?.trim() {
+            "0" => "Clear",
+            "1" => "DontChange",
+            _ => return None,
+        };
+        index = index.checked_add(1)?;
+        links.push(MetadataChoiceParameterLink {
+            name,
+            data_path,
+            value_change,
+        });
+    }
+    (index == fields.len()).then_some(links)
+}
+
+fn parse_catalog_link_by_type(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(bool, Option<MetadataChildLinkByType>)> {
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    if fields.len() < 3 || fields.first()?.trim() != "3" {
+        return None;
+    }
+    let path_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if path_count.checked_add(3) != Some(fields.len()) {
+        return None;
+    }
+    let link_item = fields.last()?.trim().parse::<u32>().ok()?;
+    if link_item > 3 {
+        return None;
+    }
+    if path_count == 0 {
+        return (link_item == 0).then_some((true, None));
+    }
+    let path_end = 2usize.checked_add(path_count)?;
+    let data_path = resolve_catalog_data_path(&fields[2..path_end], owner_name, object_refs)?;
+    Some((
+        false,
+        Some(MetadataChildLinkByType {
+            data_path,
+            link_item,
+        }),
+    ))
+}
+
+fn resolve_catalog_data_path(
+    fields: &[&str],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let owner_prefix = format!("Catalog.{owner_name}.");
+    let mut resolved = Vec::with_capacity(fields.len());
+    for field in fields {
+        let path = resolve_catalog_data_path_segment(field, owner_name, object_refs)?;
+        if !path.starts_with(&owner_prefix) {
+            return None;
+        }
+        if let Some(parent) = resolved.last()
+            && !path.starts_with(&format!("{parent}."))
+        {
+            return None;
+        }
+        resolved.push(path);
+    }
+    resolved.pop()
+}
+
+fn resolve_catalog_data_path_segment(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value.trim(), 0)?;
+    match fields.as_slice() {
+        [code] => {
+            let standard_attribute = match code.trim() {
+                "-3" => "Description",
+                "-5" => "Owner",
+                "-8" => "Ref",
+                _ => return None,
+            };
+            Some(format!(
+                "Catalog.{owner_name}.StandardAttribute.{standard_attribute}"
+            ))
+        }
+        [kind, uuid] if kind.trim() == "0" => {
+            let uuid = parse_uuid_field(uuid.trim())?;
+            object_refs.get(&uuid).cloned()
+        }
+        _ => None,
+    }
+}
+
+fn catalog_choice_folders_and_items_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Items"),
+        "1" => Some("Folders"),
+        "2" => Some("FoldersAndItems"),
+        _ => None,
+    }
+}
+
+fn catalog_quick_choice_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        "2" => Some("Auto"),
+        _ => None,
+    }
+}
+
+fn catalog_create_on_input_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Auto"),
+        "1" => Some("DontUse"),
+        "2" => Some("Use"),
+        _ => None,
+    }
+}
+
+fn catalog_choice_history_on_input_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Auto"),
+        "1" => Some("DontUse"),
+        _ => None,
+    }
+}
+
+fn catalog_attribute_use_mode_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("ForItem"),
+        "1" => Some("ForFolder"),
+        "2" => Some("ForFolderAndItem"),
+        _ => None,
+    }
+}
+
+fn catalog_attribute_full_text_search_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("DontUse"),
+        "1" => Some("Use"),
+        _ => None,
+    }
+}
+
+fn catalog_direct_attribute_wrapper_code(root_code: &str) -> Option<u32> {
+    match root_code {
+        "56" => Some(5),
+        "57" => Some(6),
         _ => None,
     }
 }
@@ -8736,6 +9267,7 @@ fn parse_catalog_properties_from_text(
     uuid: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<CatalogProperties> {
@@ -8869,8 +9401,13 @@ fn parse_catalog_properties_from_text(
             &header.name,
             text,
             uuid,
+            Some(catalog_direct_attribute_wrapper_code(
+                fields.first()?.trim(),
+            )?),
             type_index,
             object_refs,
+            metadata_object_refs,
+            form_refs,
         ),
         child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_catalog_template_names_in_text_order(
@@ -8933,8 +9470,11 @@ fn parse_report_properties_from_text(
             &header.name,
             text,
             uuid,
+            None,
             type_index,
             object_refs,
+            &BTreeMap::new(),
+            form_refs,
         ),
         child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: parse_report_child_templates_from_text(text, template_refs),
@@ -9023,8 +9563,11 @@ fn parse_document_properties_from_text(
             &header.name,
             text,
             uuid,
+            None,
             type_index,
             object_refs,
+            &BTreeMap::new(),
+            form_refs,
         ),
         child_forms: owned_document_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_document_template_names_in_text_order(
@@ -9252,8 +9795,11 @@ fn parse_data_processor_properties_from_text(
             &header.name,
             text,
             uuid,
+            None,
             type_index,
             object_refs,
+            &BTreeMap::new(),
+            form_refs,
         ),
         child_forms: owned_data_processor_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_data_processor_template_names_in_text_order(
@@ -15156,22 +15702,50 @@ fn push_metadata_child_choice_parameters_xml(
             escape_xml_text(&parameter.name)
         ));
         match &parameter.value {
+            MetadataChoiceParameterValue::Nil => {
+                xml.push_str(&format!("{indent}\t\t<app:value xsi:nil=\"true\"/>\r\n"));
+            }
             MetadataChoiceParameterValue::Boolean(value) => {
                 xml.push_str(&format!(
                     "{indent}\t\t<app:value xsi:type=\"xs:boolean\">{}</app:value>\r\n",
                     xml_bool(*value)
                 ));
             }
-            MetadataChoiceParameterValue::DesignTimeRef(value_ref) if value_ref.is_empty() => {
+            MetadataChoiceParameterValue::Decimal(value) => {
                 xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\"/>\r\n"
+                    "{indent}\t\t<app:value xsi:type=\"xs:decimal\">{}</app:value>\r\n",
+                    escape_xml_element_text(value)
                 ));
             }
-            MetadataChoiceParameterValue::DesignTimeRef(value_ref) => {
+            MetadataChoiceParameterValue::DateTime(value) => {
                 xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n",
-                    escape_xml_element_text(value_ref)
+                    "{indent}\t\t<app:value xsi:type=\"xs:dateTime\">{}</app:value>\r\n",
+                    escape_xml_element_text(value)
                 ));
+            }
+            MetadataChoiceParameterValue::String(value) => {
+                if value.is_empty() {
+                    xml.push_str(&format!(
+                        "{indent}\t\t<app:value xsi:type=\"xs:string\"/>\r\n"
+                    ));
+                } else {
+                    xml.push_str(&format!(
+                        "{indent}\t\t<app:value xsi:type=\"xs:string\">{}</app:value>\r\n",
+                        escape_xml_element_text(value)
+                    ));
+                }
+            }
+            MetadataChoiceParameterValue::DesignTimeRef(value_ref) => {
+                if value_ref.is_empty() {
+                    xml.push_str(&format!(
+                        "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\"/>\r\n"
+                    ));
+                } else {
+                    xml.push_str(&format!(
+                        "{indent}\t\t<app:value xsi:type=\"xr:DesignTimeRef\">{}</app:value>\r\n",
+                        escape_xml_element_text(value_ref)
+                    ));
+                }
             }
             MetadataChoiceParameterValue::FixedArray(value_refs) => {
                 if value_refs.is_empty() {
@@ -15190,20 +15764,6 @@ fn push_metadata_child_choice_parameters_xml(
                     }
                     xml.push_str(&format!("{indent}\t\t</app:value>\r\n"));
                 }
-            }
-            MetadataChoiceParameterValue::Nil => {
-                xml.push_str(&format!("{indent}\t\t<app:value xsi:nil=\"true\"/>\r\n"));
-            }
-            MetadataChoiceParameterValue::String(value) if value.is_empty() => {
-                xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"xs:string\"/>\r\n"
-                ));
-            }
-            MetadataChoiceParameterValue::String(value) => {
-                xml.push_str(&format!(
-                    "{indent}\t\t<app:value xsi:type=\"xs:string\">{}</app:value>\r\n",
-                    escape_xml_element_text(value)
-                ));
             }
         }
         xml.push_str(&format!("{indent}\t</app:item>\r\n"));
