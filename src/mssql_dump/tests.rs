@@ -21515,6 +21515,945 @@ fn extracts_exchange_plan_child_attributes_to_metadata_xml() {
     assert!(xml.find("\t\t</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
 }
 
+fn information_register_owner_object_for_test(register_uuid: &str, tail: &str) -> String {
+    format!(
+        "{{33,22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
+33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
+44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
+55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\
+88888888-8888-4888-8888-888888888881,88888888-8888-4888-8888-888888888882,\
+{{0,{{3,{{1,0,{register_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"owner comment\",0,0,00000000-0000-0000-0000-000000000000,0}}}},{tail}}}"
+    )
+}
+
+fn exact_information_register_root_for_test(register_uuid: &str, tail: &str) -> String {
+    let owner = information_register_owner_object_for_test(register_uuid, tail);
+    format!(
+        "{{1,{owner},6,\
+{{11111111-1111-4111-8111-111111111111,0}},\
+{{11111111-1111-4111-8111-111111111112,0}},\
+{{11111111-1111-4111-8111-111111111113,0}},\
+{{11111111-1111-4111-8111-111111111114,0}},\
+{{11111111-1111-4111-8111-111111111115,0}},\
+{{11111111-1111-4111-8111-111111111116,0}}}}"
+    )
+}
+
+fn information_register_default_owner_tail_for_test() -> &'static str {
+    "00000000-0000-0000-0000-000000000000,\
+00000000-0000-0000-0000-000000000000,0,0,1,1,0,0,1,0,\
+{0},00000000-0000-0000-0000-000000000000,\
+00000000-0000-0000-0000-000000000000,\
+{0},{0},{0},{0},{0},0,0,0,0,0"
+}
+
+fn information_register_standard_attribute_direct_enum_for_test(
+    type_uuid: &str,
+    code: &str,
+) -> String {
+    format!("{{\"#\",{type_uuid},{code}}}")
+}
+
+fn information_register_standard_attribute_nested_enum_for_test(
+    type_uuid: &str,
+    code: &str,
+) -> String {
+    format!("{{\"#\",{type_uuid},{{{type_uuid},{code}}}}}")
+}
+
+fn information_register_standard_attribute_localized_for_test(content: Option<&str>) -> String {
+    let value = content
+        .map(|content| format!("{{1,\"en\",\"{content}\"}}"))
+        .unwrap_or_else(|| "{0}".to_string());
+    format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{value}}}")
+}
+
+fn information_register_standard_attribute_values_for_test(
+    name: &str,
+    non_modal: bool,
+) -> Vec<String> {
+    let fill_value = match name {
+        "Active" if non_modal => "{\"B\",1}",
+        "LineNumber" => "{\"N\",0}",
+        "Period" if non_modal => "{\"D\",20130101000000}",
+        _ => "{\"U\"}",
+    };
+    vec![
+        format!("{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,0}}}}"),
+        information_register_standard_attribute_direct_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+            if non_modal { "1" } else { "0" },
+        ),
+        "{\"B\",0}".to_string(),
+        format!("{{\"B\",{}}}", u8::from(non_modal)),
+        information_register_standard_attribute_nested_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
+            "0",
+        ),
+        information_register_standard_attribute_nested_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
+            "0",
+        ),
+        "{\"U\"}".to_string(),
+        information_register_standard_attribute_localized_for_test(non_modal.then_some("Tooltip")),
+        "{\"B\",0}".to_string(),
+        information_register_standard_attribute_localized_for_test(non_modal.then_some("Format")),
+        format!(
+            "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{1,00000000-0000-0000-0000-000000000000}}}}"
+        ),
+        information_register_standard_attribute_nested_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
+            "2",
+        ),
+        information_register_standard_attribute_direct_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+            "0",
+        ),
+        information_register_standard_attribute_localized_for_test(
+            non_modal.then_some("Edit format"),
+        ),
+        "{\"B\",0}".to_string(),
+        information_register_standard_attribute_nested_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+            if non_modal { "0" } else { "1" },
+        ),
+        "{\"B\",0}".to_string(),
+        "{\"U\"}".to_string(),
+        information_register_standard_attribute_localized_for_test(non_modal.then_some("Caption")),
+        "{\"S\",\"\"}".to_string(),
+        information_register_standard_attribute_nested_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+            if non_modal { "0" } else { "1" },
+        ),
+        format!(
+            "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,0}}}}"
+        ),
+        fill_value.to_string(),
+        "{\"S\",\"\"}".to_string(),
+        format!(
+            "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,0}}}}"
+        ),
+    ]
+}
+
+fn information_register_standard_attribute_bag_for_test(
+    name: &str,
+    modern: bool,
+    non_modal: bool,
+) -> String {
+    let values = information_register_standard_attribute_values_for_test(name, non_modal);
+    information_register_standard_attribute_bag_from_values_for_test(&values, modern)
+}
+
+fn information_register_standard_attribute_bag_from_values_for_test(
+    values: &[String],
+    modern: bool,
+) -> String {
+    let mut fields = vec![
+        if modern { "14" } else { "13" }.to_string(),
+        if modern { "25" } else { "24" }.to_string(),
+    ];
+    for (index, key) in INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| modern || *index != 5)
+    {
+        fields.push((*key).to_string());
+        fields.push(values[index].clone());
+    }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn information_register_standard_attributes_for_test(modern: bool) -> String {
+    let definitions = [
+        ("-5", "Active", true),
+        ("-4", "LineNumber", false),
+        ("-3", "Recorder", false),
+        ("-2", "Period", true),
+    ];
+    let mut payload = vec!["1".to_string(), "4".to_string()];
+    for (marker, name, non_modal) in definitions {
+        payload.push(format!("{{{marker}}}"));
+        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        payload.push(information_register_standard_attribute_bag_for_test(
+            name, modern, non_modal,
+        ));
+    }
+    format!("{{1,{{{}}}}}", payload.join(","))
+}
+
+fn information_register_owner_tail_with_standard_attributes_for_test(
+    standard_attributes: &str,
+) -> String {
+    format!(
+        "00000000-0000-0000-0000-000000000000,\
+00000000-0000-0000-0000-000000000000,0,0,1,1,0,0,1,0,\
+{standard_attributes},00000000-0000-0000-0000-000000000000,\
+00000000-0000-0000-0000-000000000000,\
+{{0}},{{0}},{{0}},{{0}},{{0}},0,0,0,0,0"
+    )
+}
+
+#[test]
+fn parses_only_exact_information_register_physical_owner_shape() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let raw = exact_information_register_root_for_test(
+        register_uuid,
+        information_register_default_owner_tail_for_test(),
+    );
+    let header = parse_metadata_header_from_text(&raw, register_uuid).unwrap();
+    let owner = parse_information_register_owner_fields(&raw, &header).unwrap();
+
+    assert_eq!(owner.get(0), Some("0"));
+    assert_eq!(owner.get(4), Some("0"));
+    assert_eq!(owner.get(7), Some("1"));
+    assert_eq!(owner.get(10), Some("1"));
+    assert_eq!(owner.get(24), Some("0"));
+
+    let mut uppercase_header = header.clone();
+    uppercase_header.uuid = uppercase_header.uuid.to_ascii_uppercase();
+    assert!(parse_information_register_owner_fields(&raw, &uppercase_header).is_some());
+
+    let direct_uuid_collection = raw.replacen(
+        "{11111111-1111-4111-8111-111111111111,0}",
+        "{11111111-1111-4111-8111-111111111111,2,\
+aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb}",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&direct_uuid_collection, &header).is_some());
+    let nested_object_collection = raw.replacen(
+        "{11111111-1111-4111-8111-111111111112,0}",
+        "{11111111-1111-4111-8111-111111111112,2,{{9,0},{9,1}}}",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&nested_object_collection, &header).is_some());
+
+    let short_root = format!(
+        "{{1,{}}}",
+        information_register_owner_object_for_test(
+            register_uuid,
+            information_register_default_owner_tail_for_test(),
+        )
+    );
+    assert!(parse_information_register_owner_fields(&short_root, &header).is_none());
+    assert!(parse_information_register_owner_fields(&format!("{raw} trailing"), &header).is_none());
+
+    let wrong_hyphens = raw.replacen(
+        "22222222-2222-4222-8222-222222222221",
+        "222222222222-4222-8222-222222222221",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&wrong_hyphens, &header).is_none());
+    let too_long_uuid = raw.replacen(
+        "22222222-2222-4222-8222-222222222221",
+        "22222222-2222-4222-8222-2222222222210",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&too_long_uuid, &header).is_none());
+    let duplicate_generated_uuid = raw.replacen(
+        "22222222-2222-4222-8222-222222222222",
+        "22222222-2222-4222-8222-222222222221",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&duplicate_generated_uuid, &header).is_none());
+    let duplicate_collection_uuid = raw.replacen(
+        "11111111-1111-4111-8111-111111111112",
+        "11111111-1111-4111-8111-111111111111",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&duplicate_collection_uuid, &header).is_none());
+    let wrong_collection_count = raw.replacen(
+        "{11111111-1111-4111-8111-111111111111,0}",
+        "{11111111-1111-4111-8111-111111111111,1}",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&wrong_collection_count, &header).is_none());
+    let duplicate_direct_uuid = direct_uuid_collection.replacen(
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&duplicate_direct_uuid, &header).is_none());
+    let scalar_nested_item = raw.replacen(
+        "{11111111-1111-4111-8111-111111111112,0}",
+        "{11111111-1111-4111-8111-111111111112,1,{junk}}",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&scalar_nested_item, &header).is_none());
+    let mixed_collection = raw.replacen(
+        "{11111111-1111-4111-8111-111111111112,0}",
+        "{11111111-1111-4111-8111-111111111112,2,\
+aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{9,1}}",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&mixed_collection, &header).is_none());
+    let wrong_collection_section_count = raw.replacen(
+        ",6,{11111111-1111-4111-8111-111111111111,0}",
+        ",7,{11111111-1111-4111-8111-111111111111,0}",
+        1,
+    );
+    assert!(
+        parse_information_register_owner_fields(&wrong_collection_section_count, &header).is_none()
+    );
+    let synonym_trailing_junk =
+        raw.replacen("{1,\"en\",\"Prices\"}", "{1,\"en\",\"Prices\",junk}", 1);
+    assert!(parse_information_register_owner_fields(&synonym_trailing_junk, &header).is_none());
+    let comment_trailing_junk =
+        raw.replacen("\"owner comment\",0,0", "\"owner comment\"junk,0,0", 1);
+    assert!(parse_information_register_owner_fields(&comment_trailing_junk, &header).is_none());
+
+    let mut wrong_header = header.clone();
+    wrong_header.name = "OtherPrices".to_string();
+    assert!(parse_information_register_owner_fields(&raw, &wrong_header).is_none());
+    wrong_header = header.clone();
+    wrong_header.synonyms = vec![("en".to_string(), "Other prices".to_string())];
+    assert!(parse_information_register_owner_fields(&raw, &wrong_header).is_none());
+    wrong_header = header.clone();
+    wrong_header.comment = "other comment".to_string();
+    assert!(parse_information_register_owner_fields(&raw, &wrong_header).is_none());
+}
+
+#[test]
+fn covers_information_register_owner_scalar_protocol_domains() {
+    for (raw, expected) in [
+        ("0", "Nonperiodical"),
+        ("1", "Year"),
+        ("2", "Quarter"),
+        ("3", "Month"),
+        ("4", "Day"),
+        ("5", "Second"),
+        ("6", "RecorderPosition"),
+    ] {
+        assert_eq!(information_register_periodicity_xml(raw), Some(expected));
+    }
+    for (raw, expected) in [("0", "Independent"), ("1", "RecorderSubordinate")] {
+        assert_eq!(information_register_write_mode_xml(raw), Some(expected));
+    }
+    for (raw, expected) in [("0", "InList"), ("1", "InDialog"), ("2", "BothWays")] {
+        assert_eq!(information_register_edit_type_xml(raw), Some(expected));
+    }
+    for (raw, expected) in [("0", "Automatic"), ("1", "Managed")] {
+        assert_eq!(
+            information_register_data_lock_control_mode_xml(raw),
+            Some(expected)
+        );
+    }
+    for (raw, expected) in [("0", "DontUse"), ("1", "Use")] {
+        assert_eq!(information_register_full_text_search(raw), Some(expected));
+    }
+    assert_eq!(information_register_bool("0"), Some(false));
+    assert_eq!(information_register_bool("1"), Some(true));
+
+    for invalid in ["-1", "7", "1 trailing", "{1}", ""] {
+        assert!(information_register_periodicity_xml(invalid).is_none());
+        assert!(information_register_write_mode_xml(invalid).is_none());
+        assert!(information_register_edit_type_xml(invalid).is_none());
+        assert!(information_register_data_lock_control_mode_xml(invalid).is_none());
+        assert!(information_register_full_text_search(invalid).is_none());
+        assert!(information_register_bool(invalid).is_none());
+    }
+}
+
+#[test]
+fn parses_information_register_owner_localized_values_exactly_and_in_order() {
+    assert_eq!(
+        parse_information_register_owner_localized_value(r#"{2,"en","English","ru","Russian"}"#),
+        Some(vec![
+            ("en".to_string(), "English".to_string()),
+            ("ru".to_string(), "Russian".to_string()),
+        ])
+    );
+    for invalid in [
+        r#"{1,"en","English","ru","Russian"}"#,
+        r#"{2,"en","English"}"#,
+        r#"{1,"en"junk,"English"}"#,
+        r#"{1,"en","English",junk}"#,
+        r#"{2,"en","English","en","Duplicate"}"#,
+        r##"{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}}"##,
+        "{18446744073709551615}",
+    ] {
+        assert!(
+            parse_information_register_owner_localized_value(invalid).is_none(),
+            "localized value was accepted: {invalid}"
+        );
+    }
+}
+
+#[test]
+fn resolves_only_unambiguous_same_owner_information_register_forms() {
+    let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    let valid = BTreeMap::from([(
+        uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("InformationRegisters/Prices/Forms/Record.xml"),
+            kind: "Form",
+        },
+    )]);
+    assert_eq!(
+        parse_information_register_owned_form_ref(uuid, "Prices", &valid),
+        Some(Some("InformationRegister.Prices.Form.Record".to_string()))
+    );
+    assert_eq!(
+        parse_information_register_owned_form_ref(
+            "00000000-0000-0000-0000-000000000000",
+            "Prices",
+            &BTreeMap::new(),
+        ),
+        Some(None)
+    );
+    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &BTreeMap::new()).is_none());
+    assert!(
+        parse_information_register_owned_form_ref(
+            "99999999-9999-4999-8999-99999999999",
+            "Prices",
+            &valid,
+        )
+        .is_none()
+    );
+
+    let ambiguous = BTreeMap::from([
+        (
+            uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("InformationRegisters/Prices/Forms/Record.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            uuid.to_ascii_uppercase(),
+            FormSourceReference {
+                relative_path: PathBuf::from("InformationRegisters/Prices/Forms/Other.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &ambiguous).is_none());
+    let foreign = BTreeMap::from([(
+        uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("InformationRegisters/Other/Forms/Record.xml"),
+            kind: "Form",
+        },
+    )]);
+    assert!(parse_information_register_owned_form_ref(uuid, "Prices", &foreign).is_none());
+}
+
+#[test]
+fn rejects_task_code33_as_information_register_owner_shape() {
+    let task_uuid = "11111111-1111-4111-8111-111111111111";
+    let task = format!(
+        "{{1,{{33,{{3,{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},\
+6,{{11111111-1111-4111-8111-111111111112,0}},{{11111111-1111-4111-8111-111111111113,0}},\
+{{11111111-1111-4111-8111-111111111114,0}},{{11111111-1111-4111-8111-111111111115,0}},\
+{{11111111-1111-4111-8111-111111111116,0}},{{11111111-1111-4111-8111-111111111117,0}}}}"
+    );
+    let header = parse_metadata_header_from_text(&task, task_uuid).unwrap();
+
+    assert!(parse_information_register_owner_fields(&task, &header).is_none());
+}
+
+#[test]
+fn parses_information_register_standard_attribute_legacy_and_modern_bags() {
+    for modern in [false, true] {
+        let raw = information_register_standard_attributes_for_test(modern);
+        let attributes = parse_information_register_standard_attributes(&raw).unwrap();
+
+        assert_eq!(
+            attributes
+                .iter()
+                .map(|attribute| attribute.name)
+                .collect::<Vec<_>>(),
+            ["Active", "LineNumber", "Recorder", "Period"]
+        );
+        let active = &attributes[0];
+        assert_eq!(active.fill_checking, "ShowError");
+        assert!(active.fill_from_filling_value);
+        assert_eq!(active.tooltip, [("en".to_string(), "Tooltip".to_string())]);
+        assert_eq!(active.format, [("en".to_string(), "Format".to_string())]);
+        assert_eq!(
+            active.edit_format,
+            [("en".to_string(), "Edit format".to_string())]
+        );
+        assert_eq!(active.synonym, [("en".to_string(), "Caption".to_string())]);
+        assert_eq!(active.data_history, "DontUse");
+        assert_eq!(active.full_text_search, "DontUse");
+        assert!(matches!(
+            active.fill_value,
+            MetadataChildFillValue::Boolean(true)
+        ));
+        assert!(matches!(
+            attributes[1].fill_value,
+            MetadataChildFillValue::Decimal(ref value) if value == "0"
+        ));
+        assert!(matches!(
+            attributes[2].fill_value,
+            MetadataChildFillValue::Nil
+        ));
+        assert!(matches!(
+            attributes[3].fill_value,
+            MetadataChildFillValue::DateTime(ref value) if value == "2013-01-01T00:00:00"
+        ));
+
+        let mut xml = String::new();
+        push_register_standard_attributes_xml(&mut xml, &attributes);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 4);
+        assert!(xml.contains("<xr:FillFromFillingValue>true</xr:FillFromFillingValue>"));
+        assert!(xml.contains("<xr:DataHistory>DontUse</xr:DataHistory>"));
+        assert!(xml.contains("<xr:FullTextSearch>DontUse</xr:FullTextSearch>"));
+        assert!(xml.contains("<xr:FillValue xsi:type=\"xs:boolean\">true</xr:FillValue>"));
+        assert!(
+            xml.contains(
+                "<xr:FillValue xsi:type=\"xs:dateTime\">2013-01-01T00:00:00</xr:FillValue>"
+            )
+        );
+        assert_eq!(
+            xml.matches("<xr:TypeReductionMode>TransformValues").count(),
+            4
+        );
+    }
+}
+
+#[test]
+fn accepts_independent_captured_information_register_standard_attribute_bags() {
+    let legacy = r##"{13,24,1183c14f-f814-49c6-9233-a3c26b3f64cf,{"#",9ad557b1-249e-48dc-824b-3e149ecf10a6,{3,0,0}},2723eb98-b4c1-498a-a6f3-70444757902f,{"#",98ea8e5a-b586-442b-b944-6e3447734aa7,0},2bbba66b-fabf-4863-8ba3-54b3c64c896e,{"B",0},2c8143d5-4248-4c43-8bfb-307c0be2e415,{"B",0},33c74a4d-561f-4bc0-9eaa-8d21c893c0a9,{"#",ad3615c5-aae6-4725-89be-91827523abd9,{ad3615c5-aae6-4725-89be-91827523abd9,0}},3eaf5a8b-06d6-47b0-ac7d-a9698247f499,{"U"},4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},4de03908-56f4-4396-a61e-17253afca9ac,{"B",0},580c29e2-8af4-4258-882a-7cf8073e61c8,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},6c4f7074-e7d4-48eb-b31b-132873666262,{"#",157fa490-4ce9-11d4-9415-008048da11f9,{1,00000000-0000-0000-0000-000000000000}},6e3a1131-37a3-4da5-8895-572d9d0c9db6,{"#",ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,{ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,2}},7ba608f2-e654-42a3-8885-334fe88ca910,{"#",12ca4003-ac70-450e-b897-37faf86bd313,0},88149a78-9448-4767-867b-0e650d165d2e,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},90ae4b5d-e0fd-49ef-a008-d67c1e75038c,{"B",0},9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},b02800e9-a8d1-42ab-9a12-f673e92be968,{"B",0},c65a541f-0b91-4f33-bc88-fbaaa57f9992,{"U"},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},cf4abea4-37b2-11d4-940f-008048da11f9,{"S",""},d4232326-022b-421e-b6d3-88e418f74327,{"#",3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,{3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,1}},e3da683b-c54a-457a-a243-b9b4f9bf76dd,{"#",b76a58b9-2a56-4e46-bb31-8e04ad9f31ae,{5006,0}},e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208,{"U"},f49e4ced-4033-4e6c-8755-9fbaaccd6078,{"S",""},fcf503b8-1c06-454a-970c-06413e64aee5,{"#",f2eaae14-91a7-47b9-9d69-097877f41580,{0,0}}}"##;
+    let modern = r##"{14,25,1183c14f-f814-49c6-9233-a3c26b3f64cf,{"#",9ad557b1-249e-48dc-824b-3e149ecf10a6,{3,0,0}},2723eb98-b4c1-498a-a6f3-70444757902f,{"#",98ea8e5a-b586-442b-b944-6e3447734aa7,0},2bbba66b-fabf-4863-8ba3-54b3c64c896e,{"B",0},2c8143d5-4248-4c43-8bfb-307c0be2e415,{"B",0},33c74a4d-561f-4bc0-9eaa-8d21c893c0a9,{"#",ad3615c5-aae6-4725-89be-91827523abd9,{ad3615c5-aae6-4725-89be-91827523abd9,0}},3b10624f-1e3d-495d-8093-25225efc5313,{"#",502b7765-f89c-4fd0-924f-0a28d3dc09b7,{502b7765-f89c-4fd0-924f-0a28d3dc09b7,0}},3eaf5a8b-06d6-47b0-ac7d-a9698247f499,{"U"},4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},4de03908-56f4-4396-a61e-17253afca9ac,{"B",0},580c29e2-8af4-4258-882a-7cf8073e61c8,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},6c4f7074-e7d4-48eb-b31b-132873666262,{"#",157fa490-4ce9-11d4-9415-008048da11f9,{1,00000000-0000-0000-0000-000000000000}},6e3a1131-37a3-4da5-8895-572d9d0c9db6,{"#",ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,{ace3fd07-11b2-477e-ab7f-36f0ea37c8dd,2}},7ba608f2-e654-42a3-8885-334fe88ca910,{"#",12ca4003-ac70-450e-b897-37faf86bd313,0},88149a78-9448-4767-867b-0e650d165d2e,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},90ae4b5d-e0fd-49ef-a008-d67c1e75038c,{"B",0},9288a8ed-b259-46d0-a8e3-70d87956ff2d,{"#",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}},b02800e9-a8d1-42ab-9a12-f673e92be968,{"B",0},c65a541f-0b91-4f33-bc88-fbaaa57f9992,{"U"},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{0}},cf4abea4-37b2-11d4-940f-008048da11f9,{"S",""},d4232326-022b-421e-b6d3-88e418f74327,{"#",3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,{3b8e6bdd-d648-49d5-af2f-d46d84f87dd5,1}},e3da683b-c54a-457a-a243-b9b4f9bf76dd,{"#",b76a58b9-2a56-4e46-bb31-8e04ad9f31ae,{5006,0}},e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208,{"U"},f49e4ced-4033-4e6c-8755-9fbaaccd6078,{"S",""},fcf503b8-1c06-454a-970c-06413e64aee5,{"#",f2eaae14-91a7-47b9-9d69-097877f41580,{0,0}}}"##;
+
+    for (raw, modern) in [(legacy, false), (modern, true)] {
+        let bag = parse_information_register_standard_attribute_bag(raw).unwrap();
+        assert_eq!(bag.has_type_reduction_mode, modern);
+        let attribute = parse_information_register_standard_attribute("Active", &bag).unwrap();
+        assert_eq!(attribute.fill_checking, "DontCheck");
+        assert!(matches!(attribute.fill_value, MetadataChildFillValue::Nil));
+    }
+}
+
+#[test]
+fn rejects_malformed_information_register_standard_attribute_envelopes_and_bags() {
+    let valid = information_register_standard_attributes_for_test(true);
+    assert!(parse_information_register_standard_attributes("{0}").is_some());
+    assert!(parse_information_register_standard_attributes(&format!("{valid} trailing")).is_none());
+    assert!(
+        parse_information_register_standard_attributes(&valid.replacen("{1,{1,4,", "{1,{1,5,", 1))
+            .is_none()
+    );
+    assert!(
+        parse_information_register_standard_attributes(&valid.replacen("{-5}", "{-4}", 1))
+            .is_none()
+    );
+    assert!(
+        parse_information_register_standard_attributes(&valid.replacen(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+            "510405d3-2a0c-4fea-960a-7fee59b32f9c",
+            1,
+        ))
+        .is_none()
+    );
+    let modern_bag = information_register_standard_attribute_bag_for_test("Active", true, true);
+    let legacy_bag = information_register_standard_attribute_bag_for_test("Active", false, true);
+    assert!(
+        parse_information_register_standard_attributes(&valid.replacen(
+            &modern_bag,
+            &legacy_bag,
+            1,
+        ))
+        .is_none()
+    );
+    let wrong_typed_wrapper = valid.replacen(
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        "98ea8e5a-b586-442b-b944-6e3447734aa8",
+        1,
+    );
+    assert!(parse_information_register_standard_attributes(&wrong_typed_wrapper).is_none());
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let tail =
+        information_register_owner_tail_with_standard_attributes_for_test(&wrong_typed_wrapper);
+    let root = exact_information_register_root_for_test(register_uuid, &tail);
+    let header = parse_metadata_header_from_text(&root, register_uuid).unwrap();
+    let owner = parse_information_register_owner_fields(&root, &header).unwrap();
+    assert!(
+        parse_information_register_owner_properties(&owner, &header, &BTreeMap::new()).is_none()
+    );
+
+    let fields = split_information_register_braced_fields(&modern_bag).unwrap();
+    let rebuild = |fields: &[&str]| format!("{{{}}}", fields.join(","));
+    let mut reordered = fields.clone();
+    reordered.swap(2, 4);
+    assert!(parse_information_register_standard_attribute_bag(&rebuild(&reordered)).is_none());
+    let mut duplicate = fields.clone();
+    duplicate[4] = duplicate[2];
+    assert!(parse_information_register_standard_attribute_bag(&rebuild(&duplicate)).is_none());
+    let mut unknown = fields.clone();
+    unknown[2] = "1183c14f-f814-49c6-9233-a3c26b3f64ce";
+    assert!(parse_information_register_standard_attribute_bag(&rebuild(&unknown)).is_none());
+    let wrong_tag = modern_bag.replacen("{14,25,", "{13,25,", 1);
+    assert!(parse_information_register_standard_attribute_bag(&wrong_tag).is_none());
+    let wrong_count = modern_bag.replacen("{14,25,", "{14,24,", 1);
+    assert!(parse_information_register_standard_attribute_bag(&wrong_count).is_none());
+}
+
+#[test]
+fn rejects_non_modal_information_register_standard_attribute_immutable_values() {
+    let invalid_values = [
+        (
+            0,
+            format!(
+                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID},{{3,0,1}}}}"
+            ),
+        ),
+        (2, "{\"B\",1}".to_string()),
+        (
+            4,
+            information_register_standard_attribute_nested_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
+                "1",
+            ),
+        ),
+        (
+            5,
+            information_register_standard_attribute_nested_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
+                "1",
+            ),
+        ),
+        (6, "{\"S\",\"\"}".to_string()),
+        (8, "{\"B\",1}".to_string()),
+        (
+            10,
+            format!(
+                "{{\"#\",{METADATA_OBJECT_REF_TYPE_UUID},{{2,00000000-0000-0000-0000-000000000000}}}}"
+            ),
+        ),
+        (
+            11,
+            information_register_standard_attribute_nested_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
+                "1",
+            ),
+        ),
+        (
+            12,
+            information_register_standard_attribute_direct_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+                "1",
+            ),
+        ),
+        (14, "{\"B\",1}".to_string()),
+        (16, "{\"B\",1}".to_string()),
+        (17, "{\"N\",0}".to_string()),
+        (19, "{\"S\",\"comment\"}".to_string()),
+        (
+            21,
+            format!(
+                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID},{{5006,1}}}}"
+            ),
+        ),
+        (23, "{\"S\",\"mask\"}".to_string()),
+        (
+            24,
+            format!(
+                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID},{{0,1}}}}"
+            ),
+        ),
+    ];
+    for (index, invalid) in invalid_values {
+        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        values[index] = invalid;
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert!(
+            parse_information_register_standard_attribute("Active", &bag).is_none(),
+            "immutable property {index} was accepted"
+        );
+    }
+}
+
+#[test]
+fn enforces_information_register_standard_attribute_dynamic_domains() {
+    for name in ["Active", "LineNumber", "Recorder", "Period"] {
+        let values = information_register_standard_attribute_values_for_test(name, true);
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert!(parse_information_register_standard_attribute(name, &bag).is_some());
+    }
+
+    let dynamic_invalid_values = [
+        (
+            1,
+            information_register_standard_attribute_direct_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+                "2",
+            ),
+        ),
+        (
+            1,
+            information_register_standard_attribute_direct_enum_for_test(
+                "98ea8e5a-b586-442b-b944-6e3447734aa8",
+                "0",
+            ),
+        ),
+        (3, "{\"B\",2}".to_string()),
+        (
+            7,
+            format!(
+                "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"en\",\"tip\",junk}}}}"
+            ),
+        ),
+        (
+            7,
+            "{\"#\",87024738-fc2a-4436-ada1-df79d395c425,{0}}".to_string(),
+        ),
+        (
+            15,
+            information_register_standard_attribute_nested_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+                "2",
+            ),
+        ),
+        (
+            20,
+            information_register_standard_attribute_nested_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+                "2",
+            ),
+        ),
+    ];
+    for (index, invalid) in dynamic_invalid_values {
+        let mut values = information_register_standard_attribute_values_for_test("Active", true);
+        values[index] = invalid;
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert!(parse_information_register_standard_attribute("Active", &bag).is_none());
+    }
+
+    let fill_value_cases = [
+        ("Active", "{\"U\"}", true),
+        ("Active", "{\"B\",0}", true),
+        ("Active", "{\"N\",0}", false),
+        ("LineNumber", "{\"U\"}", true),
+        ("LineNumber", "{\"N\",0}", true),
+        ("LineNumber", "{\"N\",00}", false),
+        ("Recorder", "{\"U\"}", true),
+        ("Recorder", "{\"B\",0}", false),
+        ("Period", "{\"U\"}", true),
+        ("Period", "{\"D\",20130101000000}", true),
+        ("Period", "{\"D\",2013010100000}", false),
+        ("Period", "{\"S\",\"20130101000000\"}", false),
+    ];
+    for (name, fill_value, expected) in fill_value_cases {
+        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        values[22] = fill_value.to_string();
+        let raw = information_register_standard_attribute_bag_from_values_for_test(&values, true);
+        let bag = parse_information_register_standard_attribute_bag(&raw).unwrap();
+        assert_eq!(
+            parse_information_register_standard_attribute(name, &bag).is_some(),
+            expected,
+            "{name} fill value {fill_value}"
+        );
+    }
+
+    for (raw, expected) in [
+        ("00010101000000", "0001-01-01T00:00:00"),
+        ("18991231000000", "1899-12-31T00:00:00"),
+        ("19000101000000", "1900-01-01T00:00:00"),
+        ("20130101000000", "2013-01-01T00:00:00"),
+    ] {
+        let value = parse_information_register_standard_attribute_fill_value(
+            &format!("{{\"D\",{raw}}}"),
+            "Period",
+        )
+        .unwrap();
+        assert!(matches!(value, MetadataChildFillValue::DateTime(value) if value == expected));
+    }
+}
+
+#[test]
+fn emits_information_register_standard_attributes_from_exact_owner_root() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    for modern in [false, true] {
+        let standard_attributes = information_register_standard_attributes_for_test(modern);
+        let tail =
+            information_register_owner_tail_with_standard_attributes_for_test(&standard_attributes);
+        let raw = exact_information_register_root_for_test(register_uuid, &tail);
+        let extracted = extract_metadata_source_xml_with_refs(
+            &deflate_for_test(raw.as_bytes()),
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            InfobaseConfigSourceVersion::V2_21,
+        )
+        .unwrap();
+        let xml = String::from_utf8(extracted.xml).unwrap();
+
+        assert_eq!(xml.matches("<StandardAttributes>").count(), 1);
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 4);
+        assert!(
+            xml.find("<AuxiliaryListForm/>").unwrap() < xml.find("<StandardAttributes>").unwrap()
+        );
+        assert!(
+            xml.find("</StandardAttributes>").unwrap()
+                < xml.find("<InformationRegisterPeriodicity>").unwrap()
+        );
+    }
+}
+
+#[test]
+fn extracts_exact_information_register_owner_properties_in_native_order() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let record_form_uuid = "99999999-9999-4999-8999-999999999991";
+    let list_form_uuid = "99999999-9999-4999-8999-999999999992";
+    // Corpus roots use zero in history slots 22..24; ones exercise the established
+    // DataHistory/bool protocol domains without claiming an observed corpus sample.
+    let tail = format!(
+        "{record_form_uuid},{list_form_uuid},6,1,2,0,1,0,0,1,\
+{{0}},{record_form_uuid},{list_form_uuid},\
+{{2,\"en\",\"Record\",\"ru\",\"Record RU\"}},\
+{{1,\"en\",\"Extended record\"}},{{1,\"en\",\"List\"}},\
+{{1,\"en\",\"Extended list\"}},{{1,\"en\",\"Explanation\"}},1,0,1,1,1"
+    );
+    let raw = exact_information_register_root_for_test(register_uuid, &tail);
+    let blob = deflate_for_test(raw.as_bytes());
+    let form_refs = BTreeMap::from([
+        (
+            record_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("InformationRegisters/Prices/Forms/Record.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            list_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("InformationRegisters/Prices/Forms/List.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+
+    let mut version_xml = Vec::new();
+    for source_version in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let extracted = extract_metadata_source_xml_with_refs(
+            &blob,
+            register_uuid,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &form_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            source_version,
+        )
+        .unwrap();
+        version_xml.push(String::from_utf8(extracted.xml).unwrap());
+    }
+    let xml = &version_xml[1];
+
+    assert!(!version_xml[0].contains("xmlns:pal="));
+    assert_eq!(xml.matches("xmlns:pal=").count(), 1);
+    assert!(xml.contains(
+        "xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\""
+    ));
+    assert_eq!(xml.matches("<UseStandardCommands>").count(), 1);
+    assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+    assert!(xml.contains("<EditType>BothWays</EditType>"));
+    assert!(
+        xml.contains(
+            "<DefaultRecordForm>InformationRegister.Prices.Form.Record</DefaultRecordForm>"
+        )
+    );
+    assert!(
+        xml.contains("<AuxiliaryListForm>InformationRegister.Prices.Form.List</AuxiliaryListForm>")
+    );
+    assert!(!xml.contains("<StandardAttributes>"));
+    assert!(xml.contains(
+        "<InformationRegisterPeriodicity>RecorderPosition</InformationRegisterPeriodicity>"
+    ));
+    assert!(xml.contains("<WriteMode>RecorderSubordinate</WriteMode>"));
+    assert!(xml.contains("<MainFilterOnPeriod>false</MainFilterOnPeriod>"));
+    assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+    assert!(xml.contains("<DataLockControlMode>Automatic</DataLockControlMode>"));
+    assert!(xml.contains("<FullTextSearch>Use</FullTextSearch>"));
+    assert!(xml.contains("<EnableTotalsSliceFirst>false</EnableTotalsSliceFirst>"));
+    assert!(xml.contains("<EnableTotalsSliceLast>true</EnableTotalsSliceLast>"));
+    assert!(xml.contains("<DataHistory>Use</DataHistory>"));
+    assert!(xml.contains("<UpdateDataHistoryImmediatelyAfterWrite>true"));
+    assert!(xml.contains("<ExecuteAfterWriteDataHistoryVersionProcessing>true"));
+    assert!(xml.contains("<v8:lang>ru</v8:lang>"));
+
+    let ordered_properties = [
+        "<UseStandardCommands>",
+        "<EditType>",
+        "<DefaultRecordForm>",
+        "<DefaultListForm>",
+        "<AuxiliaryRecordForm>",
+        "<AuxiliaryListForm>",
+        "<InformationRegisterPeriodicity>",
+        "<WriteMode>",
+        "<MainFilterOnPeriod>",
+        "<IncludeHelpInContents>",
+        "<DataLockControlMode>",
+        "<FullTextSearch>",
+        "<EnableTotalsSliceFirst>",
+        "<EnableTotalsSliceLast>",
+        "<RecordPresentation>",
+        "<ExtendedRecordPresentation>",
+        "<ListPresentation>",
+        "<ExtendedListPresentation>",
+        "<Explanation>",
+        "<DataHistory>",
+        "<UpdateDataHistoryImmediatelyAfterWrite>",
+        "<ExecuteAfterWriteDataHistoryVersionProcessing>",
+    ];
+    let positions = ordered_properties
+        .iter()
+        .map(|property| xml.find(property).unwrap())
+        .collect::<Vec<_>>();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+
+    let foreign_form_refs = BTreeMap::from([
+        (
+            record_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("InformationRegisters/Other/Forms/Record.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            list_form_uuid.to_string(),
+            FormSourceReference {
+                relative_path: PathBuf::from("InformationRegisters/Prices/Forms/List.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+    let rejected = extract_metadata_source_xml_with_refs(
+        &blob,
+        register_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &foreign_form_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let rejected_xml = String::from_utf8(rejected.xml).unwrap();
+    assert!(!rejected_xml.contains("<UseStandardCommands>"));
+    assert!(!rejected_xml.contains("<EditType>"));
+    assert!(!rejected_xml.contains("<DefaultRecordForm>"));
+    assert!(!rejected_xml.contains("<DataHistory>"));
+}
+
 #[test]
 fn extracts_information_register_generated_types_internal_info() {
     let info_register_uuid = "11111111-1111-4111-8111-111111111111";
@@ -21599,7 +22538,7 @@ fn extracts_information_register_generated_types_internal_info() {
 }
 
 #[test]
-fn extracts_information_register_standard_attributes() {
+fn rejects_legacy_short_information_register_standard_attributes() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let standard_attribute_details = "{1,{0}}";
     let blob = deflate_for_test(
@@ -21634,33 +22573,15 @@ fn extracts_information_register_standard_attributes() {
         extracted.relative_path,
         PathBuf::from("InformationRegisters/Prices.xml")
     );
-    assert_eq!(xml.matches("<xr:StandardAttribute").count(), 4);
+    // The historical short envelope is deliberately rejected by the exact owner decoder.
+    assert_eq!(xml.matches("<xr:StandardAttribute").count(), 0);
     assert!(!xml.contains(r#"<xr:StandardAttribute name="RecordType">"#));
-    assert!(xml.contains(r#"<xr:StandardAttribute name="Active">"#));
-    assert!(xml.contains(r#"<xr:StandardAttribute name="LineNumber">"#));
-    assert!(xml.contains(r#"<xr:StandardAttribute name="Recorder">"#));
-    assert!(xml.contains(r#"<xr:StandardAttribute name="Period">"#));
-    assert!(
-        xml.find(r#"<xr:StandardAttribute name="Active">"#).unwrap()
-            < xml
-                .find(r#"<xr:StandardAttribute name="LineNumber">"#)
-                .unwrap()
-    );
-    assert!(
-        xml.find(r#"<xr:StandardAttribute name="Period">"#).unwrap()
-            < xml
-                .find("<xr:FillChecking>ShowError</xr:FillChecking>")
-                .unwrap()
-    );
-    assert!(
-        xml.find("<UseStandardCommands>true</UseStandardCommands>")
-            .unwrap()
-            < xml.find("<StandardAttributes>").unwrap()
-    );
+    assert!(!xml.contains(r#"<xr:StandardAttribute name="Active">"#));
+    assert!(!xml.contains("<UseStandardCommands>"));
 }
 
 #[test]
-fn extracts_information_register_use_standard_commands_to_metadata_xml() {
+fn rejects_legacy_short_information_register_use_standard_commands() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let blob = deflate_for_test(
             format!(
@@ -21695,17 +22616,11 @@ fn extracts_information_register_use_standard_commands_to_metadata_xml() {
         PathBuf::from("InformationRegisters/Prices.xml")
     );
     assert!(xml.contains("<Comment>register comment</Comment>"));
-    assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
-    assert!(
-        xml.find("<Comment>register comment</Comment>").unwrap()
-            < xml
-                .find("<UseStandardCommands>false</UseStandardCommands>")
-                .unwrap()
-    );
+    assert!(!xml.contains("<UseStandardCommands>"));
 }
 
 #[test]
-fn extracts_information_register_use_standard_commands_from_extended_owner_fields() {
+fn rejects_legacy_short_information_register_extended_owner_fields() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let record_form_uuid = "99999999-9999-4999-8999-999999999999";
     let blob = deflate_for_test(
@@ -21743,12 +22658,12 @@ fn extracts_information_register_use_standard_commands_from_extended_owner_field
         extracted.relative_path,
         PathBuf::from("InformationRegisters/FreshAuth.xml")
     );
-    assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
+    assert!(!xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
     assert!(!xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
 }
 
 #[test]
-fn extracts_information_register_data_lock_control_mode_from_extended_owner_fields() {
+fn rejects_legacy_short_information_register_data_lock_control_mode() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
     let blob = deflate_for_test(
@@ -21785,18 +22700,12 @@ fn extracts_information_register_data_lock_control_mode_from_extended_owner_fiel
         extracted.relative_path,
         PathBuf::from("InformationRegisters/Prices.xml")
     );
-    assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
-    assert!(xml.contains("<DataLockControlMode>Managed</DataLockControlMode>"));
-    assert!(
-        xml.find("<StandardAttributes>").unwrap()
-            < xml
-                .find("<DataLockControlMode>Managed</DataLockControlMode>")
-                .unwrap()
-    );
+    assert!(!xml.contains("<UseStandardCommands>"));
+    assert!(!xml.contains("<DataLockControlMode>"));
 }
 
 #[test]
-fn extracts_information_register_default_forms_to_metadata_xml() {
+fn rejects_legacy_short_information_register_default_forms() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
     let record_form_uuid = "99999999-9999-4999-8999-999999999991";
     let list_form_uuid = "99999999-9999-4999-8999-999999999992";
@@ -21851,22 +22760,10 @@ fn extracts_information_register_default_forms_to_metadata_xml() {
         extracted.relative_path,
         PathBuf::from("InformationRegisters/Prices.xml")
     );
-    assert!(
-        xml.contains(
-            "<DefaultRecordForm>InformationRegister.Prices.Form.Record</DefaultRecordForm>"
-        )
-    );
-    assert!(
-        xml.contains("<DefaultListForm>InformationRegister.Prices.Form.List</DefaultListForm>")
-    );
-    assert!(xml.contains("<AuxiliaryRecordForm/>"));
-    assert!(xml.contains("<AuxiliaryListForm/>"));
-    assert!(
-        xml.find("<UseStandardCommands>false</UseStandardCommands>")
-            .unwrap()
-            < xml.find("<DefaultRecordForm>").unwrap()
-    );
-    assert!(xml.find("<DefaultListForm>").unwrap() < xml.find("<AuxiliaryRecordForm/>").unwrap());
+    assert!(!xml.contains("<DefaultRecordForm"));
+    assert!(!xml.contains("<DefaultListForm"));
+    assert!(!xml.contains("<AuxiliaryRecordForm"));
+    assert!(!xml.contains("<AuxiliaryListForm"));
 }
 
 #[test]
@@ -22057,6 +22954,72 @@ fn extracts_accumulation_register_standard_attributes() {
                 .find("<DataLockControlMode>Managed</DataLockControlMode>")
                 .unwrap()
     );
+}
+
+#[test]
+fn formats_register_standard_attribute_modal_block_stably() {
+    let attribute = register_standard_attribute("Period", "ShowError", &BTreeMap::new(), None);
+    let mut xml = String::new();
+    push_register_standard_attributes_xml(&mut xml, &[attribute]);
+
+    assert_eq!(
+        xml,
+        "\t\t\t<StandardAttributes>\r\n\
+\t\t\t\t<xr:StandardAttribute name=\"Period\">\r\n\
+\t\t\t\t\t<xr:LinkByType/>\r\n\
+\t\t\t\t\t<xr:FillChecking>ShowError</xr:FillChecking>\r\n\
+\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:ToolTip/>\r\n\
+\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
+\t\t\t\t\t<xr:Format/>\r\n\
+\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
+\t\t\t\t\t<xr:EditFormat/>\r\n\
+\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Synonym/>\r\n\
+\t\t\t\t\t<xr:Comment/>\r\n\
+\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
+\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
+\t\t\t\t\t<xr:Mask/>\r\n\
+\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
+\t\t\t\t</xr:StandardAttribute>\r\n\
+\t\t\t</StandardAttributes>\r\n"
+    );
+}
+
+#[test]
+fn formats_accounting_register_standard_attribute_link_stably() {
+    let attribute = register_standard_attribute(
+        "ExtDimension1",
+        "DontCheck",
+        &BTreeMap::new(),
+        Some(RegisterStandardAttributeLinkByType {
+            data_path: "AccountingRegister.Ledger.StandardAttribute.Account".to_string(),
+            link_item: 1,
+        }),
+    );
+    let mut xml = String::new();
+    push_register_standard_attributes_xml(&mut xml, &[attribute]);
+
+    assert!(xml.starts_with(
+        "\t\t\t<StandardAttributes>\r\n\
+\t\t\t\t<xr:StandardAttribute name=\"ExtDimension1\">\r\n\
+\t\t\t\t\t<xr:LinkByType>\r\n\
+\t\t\t\t\t\t<xr:DataPath>AccountingRegister.Ledger.StandardAttribute.Account</xr:DataPath>\r\n\
+\t\t\t\t\t\t<xr:LinkItem>1</xr:LinkItem>\r\n\
+\t\t\t\t\t</xr:LinkByType>\r\n"
+    ));
+    assert!(xml.contains("<xr:FillChecking>DontCheck</xr:FillChecking>"));
+    assert!(xml.ends_with("\t\t\t\t</xr:StandardAttribute>\r\n\t\t\t</StandardAttributes>\r\n"));
 }
 
 #[test]

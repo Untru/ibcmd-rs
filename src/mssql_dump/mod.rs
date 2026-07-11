@@ -3850,6 +3850,7 @@ struct ExchangePlanProperties {
 struct RegisterProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    information_register: Option<InformationRegisterOwnerProperties>,
     register_type: Option<&'static str>,
     include_help_in_contents: Option<bool>,
     chart_of_accounts: Option<String>,
@@ -3858,15 +3859,49 @@ struct RegisterProperties {
     data_lock_control_mode: Option<&'static str>,
     enable_totals_splitting: Option<bool>,
     full_text_search: Option<&'static str>,
-    default_record_form: Option<String>,
     default_list_form: Option<String>,
-    auxiliary_record_form: Option<String>,
     auxiliary_list_form: Option<String>,
     list_presentation: Vec<(String, String)>,
     extended_list_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
     standard_attributes: Vec<RegisterStandardAttribute>,
     child_objects: Vec<MetadataChildObject>,
+}
+
+struct InformationRegisterOwnerFields<'a> {
+    logical: [&'a str; 25],
+}
+
+impl<'a> InformationRegisterOwnerFields<'a> {
+    fn get(&self, index: usize) -> Option<&'a str> {
+        self.logical.get(index).copied()
+    }
+}
+
+struct InformationRegisterOwnerProperties {
+    default_record_form: Option<String>,
+    default_list_form: Option<String>,
+    periodicity: &'static str,
+    write_mode: &'static str,
+    edit_type: &'static str,
+    use_standard_commands: bool,
+    include_help_in_contents: bool,
+    main_filter_on_period: bool,
+    data_lock_control_mode: &'static str,
+    full_text_search: &'static str,
+    standard_attributes: Vec<RegisterStandardAttribute>,
+    auxiliary_record_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    record_presentation: Vec<(String, String)>,
+    extended_record_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    enable_totals_slice_last: bool,
+    enable_totals_slice_first: bool,
+    data_history: &'static str,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
 }
 
 struct RecalculationProperties {
@@ -3992,8 +4027,14 @@ enum MetadataChildFillValue {
 struct RegisterStandardAttribute {
     name: &'static str,
     fill_checking: &'static str,
+    fill_from_filling_value: bool,
     tooltip: Vec<(String, String)>,
+    format: Vec<(String, String)>,
+    edit_format: Vec<(String, String)>,
     synonym: Vec<(String, String)>,
+    data_history: &'static str,
+    full_text_search: &'static str,
+    fill_value: MetadataChildFillValue,
     link_by_type: Option<RegisterStandardAttributeLinkByType>,
 }
 
@@ -6365,6 +6406,804 @@ fn parse_recalculation_dimension(
     })
 }
 
+fn split_information_register_braced_fields(value: &str) -> Option<Vec<&str>> {
+    let value = value.trim();
+    if scan_1c_braced_value(value, 0)? != value.len() {
+        return None;
+    }
+    split_1c_braced_fields(value, 0)
+}
+
+fn parse_information_register_usize(value: &str) -> Option<usize> {
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
+
+fn parse_information_register_uuid(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.len() != 36
+        || value.bytes().enumerate().any(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte != b'-',
+            _ => !byte.is_ascii_hexdigit(),
+        })
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn parse_information_register_non_zero_uuid(value: &str) -> Option<String> {
+    let value = parse_information_register_uuid(value)?;
+    (!information_register_uuid_is_zero(&value)).then_some(value)
+}
+
+fn parse_information_register_quoted_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    let (parsed, consumed) = parse_1c_quoted_string_with_len(value)?;
+    (consumed == value.len() && parsed.chars().all(is_xml_1_0_char)).then_some(parsed)
+}
+
+fn parse_information_register_owner_localized_value(value: &str) -> Option<Vec<(String, String)>> {
+    let fields = split_information_register_braced_fields(value)?;
+    let count = parse_information_register_usize(fields.first()?)?;
+    if fields.len() != count.checked_mul(2)?.checked_add(1)? {
+        return None;
+    }
+    let mut languages = BTreeSet::new();
+    let mut values = Vec::with_capacity(count);
+    for pair in fields[1..].chunks_exact(2) {
+        let language = parse_information_register_quoted_string(pair[0])?;
+        let content = parse_information_register_quoted_string(pair[1])?;
+        if !languages.insert(language.clone()) {
+            return None;
+        }
+        values.push((language, content));
+    }
+    Some(values)
+}
+
+fn parse_information_register_owner_header(value: &str) -> Option<MetadataHeader> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 9
+        || fields.first()?.trim() != "3"
+        || fields.get(5)?.trim() != "0"
+        || fields.get(6)?.trim() != "0"
+        || !parse_information_register_uuid(fields.get(7)?)
+            .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
+        || fields.get(8)?.trim() != "0"
+    {
+        return None;
+    }
+    let identity = split_information_register_braced_fields(fields.get(1)?)?;
+    if identity.len() != 3 || identity.first()?.trim() != "1" || identity.get(1)?.trim() != "0" {
+        return None;
+    }
+    Some(MetadataHeader {
+        uuid: parse_information_register_non_zero_uuid(identity.get(2)?)?,
+        name: parse_information_register_quoted_string(fields.get(2)?)?,
+        synonyms: parse_information_register_owner_localized_value(fields.get(3)?)?,
+        comment: parse_information_register_quoted_string(fields.get(4)?)?,
+        template_type_code: None,
+    })
+}
+
+fn information_register_root_collection_is_valid(value: &str) -> bool {
+    let Some(fields) = split_information_register_braced_fields(value) else {
+        return false;
+    };
+    if fields.len() < 2 || parse_information_register_non_zero_uuid(fields[0]).is_none() {
+        return false;
+    }
+    let Some(count) = fields
+        .get(1)
+        .and_then(|value| parse_information_register_usize(value))
+    else {
+        return false;
+    };
+    if count == 0 {
+        return fields.len() == 2;
+    }
+    if let [_, _, values] = fields.as_slice()
+        && values.trim_start().starts_with('{')
+    {
+        return split_information_register_braced_fields(values).is_some_and(|values| {
+            values.len() == count
+                && values
+                    .iter()
+                    .all(|value| split_information_register_braced_fields(value).is_some())
+        });
+    }
+    if fields.len() != count.checked_add(2).unwrap_or(usize::MAX) {
+        return false;
+    }
+    let values = fields[2..]
+        .iter()
+        .map(|value| {
+            parse_information_register_non_zero_uuid(value).map(|uuid| uuid.to_ascii_lowercase())
+        })
+        .collect::<Option<BTreeSet<_>>>();
+    values.is_some_and(|values| values.len() == count)
+}
+
+fn parse_information_register_owner_fields<'a>(
+    text: &'a str,
+    expected_header: &MetadataHeader,
+) -> Option<InformationRegisterOwnerFields<'a>> {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 9
+        || root.first()?.trim() != "1"
+        || root.get(2)?.trim() != "6"
+        || !root[3..]
+            .iter()
+            .all(|field| information_register_root_collection_is_valid(field))
+    {
+        return None;
+    }
+    let collection_type_ids = root[3..]
+        .iter()
+        .map(|field| {
+            split_information_register_braced_fields(field)
+                .and_then(|fields| parse_information_register_non_zero_uuid(fields.first()?))
+                .map(|uuid| uuid.to_ascii_lowercase())
+        })
+        .collect::<Option<BTreeSet<_>>>()?;
+    if collection_type_ids.len() != 6 {
+        return None;
+    }
+
+    let owner = split_information_register_braced_fields(root.get(1)?)?;
+    if owner.len() != 39 || owner.first()?.trim() != "33" {
+        return None;
+    }
+    let generated_type_ids = owner[1..15]
+        .iter()
+        .map(|field| {
+            parse_information_register_non_zero_uuid(field).map(|uuid| uuid.to_ascii_lowercase())
+        })
+        .collect::<Option<BTreeSet<_>>>()?;
+    if generated_type_ids.len() != 14 {
+        return None;
+    }
+
+    let header_wrapper = split_information_register_braced_fields(owner.get(15)?)?;
+    if header_wrapper.len() != 2 || header_wrapper.first()?.trim() != "0" {
+        return None;
+    }
+    let header_field = header_wrapper.get(1)?;
+    let parsed_header = parse_information_register_owner_header(header_field)?;
+    if !parsed_header
+        .uuid
+        .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return None;
+    }
+
+    let matching_headers = owner
+        .iter()
+        .filter(|field| {
+            let Some(wrapper) = split_information_register_braced_fields(field) else {
+                return false;
+            };
+            if wrapper.len() != 2 || wrapper.first().map(|value| value.trim()) != Some("0") {
+                return false;
+            }
+            let Some(header) = wrapper
+                .get(1)
+                .and_then(|value| parse_information_register_owner_header(value))
+            else {
+                return false;
+            };
+            header.uuid.eq_ignore_ascii_case(&expected_header.uuid)
+        })
+        .count();
+    if matching_headers != 1 {
+        return None;
+    }
+
+    let mut logical = Vec::with_capacity(25);
+    logical.extend(header_wrapper);
+    logical.extend(owner[16..].iter().copied());
+    Some(InformationRegisterOwnerFields {
+        logical: logical.try_into().ok()?,
+    })
+}
+
+fn information_register_periodicity_xml(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("Nonperiodical"),
+        "1" => Some("Year"),
+        "2" => Some("Quarter"),
+        "3" => Some("Month"),
+        "4" => Some("Day"),
+        "5" => Some("Second"),
+        "6" => Some("RecorderPosition"),
+        _ => None,
+    }
+}
+
+fn information_register_write_mode_xml(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("Independent"),
+        "1" => Some("RecorderSubordinate"),
+        _ => None,
+    }
+}
+
+fn information_register_edit_type_xml(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("InList"),
+        "1" => Some("InDialog"),
+        "2" => Some("BothWays"),
+        _ => None,
+    }
+}
+
+fn information_register_data_lock_control_mode_xml(value: &str) -> Option<&'static str> {
+    match value.trim() {
+        "0" => Some("Automatic"),
+        "1" => Some("Managed"),
+        _ => None,
+    }
+}
+
+fn parse_information_register_owned_form_ref(
+    value: &str,
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    let mut matches = form_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
+    let (_, form) = matches.next()?;
+    if matches.next().is_some()
+        || form.kind != "Form"
+        || !is_owned_metadata_child_path(
+            &form.relative_path,
+            "InformationRegisters",
+            owner_name,
+            "Forms",
+        )
+    {
+        return None;
+    }
+    let reference = form_source_reference_name(form)?;
+    let prefix = format!("InformationRegister.{owner_name}.Form.");
+    reference
+        .strip_prefix(&prefix)
+        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+        .then_some(Some(reference))
+}
+
+// Platform serialization IDs shared by the BSP, UT, and SFC cohorts; these are not
+// identities of metadata objects from the information base being decoded.
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID: &str =
+    "510405d3-2a0c-4fea-960a-7fee59b32f9b";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID: &str =
+    "87024738-fc2a-4436-ada1-df79d395c424";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID: &str =
+    "9ad557b1-249e-48dc-824b-3e149ecf10a6";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID: &str =
+    "98ea8e5a-b586-442b-b944-6e3447734aa7";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID: &str =
+    "ad3615c5-aae6-4725-89be-91827523abd9";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID: &str =
+    "502b7765-f89c-4fd0-924f-0a28d3dc09b7";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID: &str =
+    "ace3fd07-11b2-477e-ab7f-36f0ea37c8dd";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID: &str =
+    "12ca4003-ac70-450e-b897-37faf86bd313";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID: &str =
+    "d46ea122-3201-4e5e-bed4-e669c6e463c8";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID: &str =
+    "3b8e6bdd-d648-49d5-af2f-d46d84f87dd5";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID: &str =
+    "b76a58b9-2a56-4e46-bb31-8e04ad9f31ae";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID: &str =
+    "f2eaae14-91a7-47b9-9d69-097877f41580";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID: &str =
+    "1183c14f-f814-49c6-9233-a3c26b3f64cf";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID: &str =
+    "2723eb98-b4c1-498a-a6f3-70444757902f";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID: &str =
+    "2bbba66b-fabf-4863-8ba3-54b3c64c896e";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID: &str =
+    "2c8143d5-4248-4c43-8bfb-307c0be2e415";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID: &str =
+    "33c74a4d-561f-4bc0-9eaa-8d21c893c0a9";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID: &str =
+    "3b10624f-1e3d-495d-8093-25225efc5313";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID: &str =
+    "3eaf5a8b-06d6-47b0-ac7d-a9698247f499";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID: &str =
+    "4690ff70-e3fa-4914-9127-6a9acc5fc949";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID: &str =
+    "4de03908-56f4-4396-a61e-17253afca9ac";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID: &str =
+    "580c29e2-8af4-4258-882a-7cf8073e61c8";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID: &str =
+    "6c4f7074-e7d4-48eb-b31b-132873666262";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID: &str =
+    "6e3a1131-37a3-4da5-8895-572d9d0c9db6";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID: &str =
+    "7ba608f2-e654-42a3-8885-334fe88ca910";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID: &str =
+    "88149a78-9448-4767-867b-0e650d165d2e";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID: &str =
+    "90ae4b5d-e0fd-49ef-a008-d67c1e75038c";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID: &str =
+    "9288a8ed-b259-46d0-a8e3-70d87956ff2d";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID: &str =
+    "b02800e9-a8d1-42ab-9a12-f673e92be968";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID: &str =
+    "c65a541f-0b91-4f33-bc88-fbaaa57f9992";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID: &str =
+    "cf4abea3-37b2-11d4-940f-008048da11f9";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID: &str =
+    "cf4abea4-37b2-11d4-940f-008048da11f9";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID: &str =
+    "d4232326-022b-421e-b6d3-88e418f74327";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID: &str =
+    "e3da683b-c54a-457a-a243-b9b4f9bf76dd";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID: &str =
+    "e6b3f5f3-bdf3-4ad0-bc60-7323b3feb208";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID: &str =
+    "f49e4ced-4033-4e6c-8755-9fbaaccd6078";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID: &str =
+    "fcf503b8-1c06-454a-970c-06413e64aee5";
+const INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS: [&str; 25] = [
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID,
+    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID,
+];
+
+struct InformationRegisterStandardAttributeBag<'a> {
+    values: BTreeMap<String, &'a str>,
+    has_type_reduction_mode: bool,
+}
+
+impl<'a> InformationRegisterStandardAttributeBag<'a> {
+    fn get(&self, key: &str) -> Option<&'a str> {
+        self.values.get(key).copied()
+    }
+}
+
+fn information_register_uuid_matches(value: &str, expected: &str) -> bool {
+    parse_information_register_uuid(value).is_some_and(|value| value.eq_ignore_ascii_case(expected))
+}
+
+fn parse_information_register_standard_attribute_bag(
+    value: &str,
+) -> Option<InformationRegisterStandardAttributeBag<'_>> {
+    let fields = split_information_register_braced_fields(value)?;
+    let has_type_reduction_mode = match (
+        fields.first().map(|field| field.trim()),
+        fields.get(1).map(|field| field.trim()),
+        fields.len(),
+    ) {
+        (Some("13"), Some("24"), 50) => false,
+        (Some("14"), Some("25"), 52) => true,
+        _ => return None,
+    };
+    let expected_keys = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+        .iter()
+        .enumerate()
+        .filter_map(|(index, key)| (has_type_reduction_mode || index != 5).then_some(*key));
+    let mut values = BTreeMap::new();
+    for (pair, expected_key) in fields[2..].chunks_exact(2).zip(expected_keys) {
+        if !information_register_uuid_matches(pair[0], expected_key)
+            || values.insert(expected_key.to_string(), pair[1]).is_some()
+        {
+            return None;
+        }
+    }
+    let expected_count = if has_type_reduction_mode { 25 } else { 24 };
+    (values.len() == expected_count).then_some(InformationRegisterStandardAttributeBag {
+        values,
+        has_type_reduction_mode,
+    })
+}
+
+fn parse_information_register_standard_attribute_direct_enum<'a>(
+    value: &'a str,
+    type_uuid: &str,
+) -> Option<&'a str> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(fields.get(1)?, type_uuid)
+    {
+        return None;
+    }
+    Some(fields.get(2)?.trim())
+}
+
+fn parse_information_register_standard_attribute_nested_enum<'a>(
+    value: &'a str,
+    type_uuid: &str,
+) -> Option<&'a str> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(fields.get(1)?, type_uuid)
+    {
+        return None;
+    }
+    let nested = split_information_register_braced_fields(fields.get(2)?)?;
+    if nested.len() != 2 || !information_register_uuid_matches(nested.first()?, type_uuid) {
+        return None;
+    }
+    Some(nested.get(1)?.trim())
+}
+
+fn parse_information_register_standard_attribute_bool(value: &str) -> Option<bool> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 2 || fields.first()?.trim() != r#""B""# {
+        return None;
+    }
+    information_register_bool(fields.get(1)?)
+}
+
+fn information_register_standard_attribute_nil_is_valid(value: &str) -> bool {
+    split_information_register_braced_fields(value)
+        .is_some_and(|fields| fields.len() == 1 && fields[0].trim() == r#""U""#)
+}
+
+fn parse_information_register_standard_attribute_string(value: &str) -> Option<String> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 2 || fields.first()?.trim() != r#""S""# {
+        return None;
+    }
+    parse_information_register_quoted_string(fields.get(1)?)
+}
+
+fn parse_information_register_standard_attribute_localized(
+    value: &str,
+) -> Option<Vec<(String, String)>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(
+            fields.get(1)?,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID,
+        )
+    {
+        return None;
+    }
+    parse_information_register_owner_localized_value(fields.get(2)?)
+}
+
+fn information_register_standard_attribute_nested_values_are(
+    value: &str,
+    type_uuid: &str,
+    expected: &[&str],
+) -> bool {
+    let Some(fields) = split_information_register_braced_fields(value) else {
+        return false;
+    };
+    if fields.len() != 3
+        || fields.first().map(|field| field.trim()) != Some(r##""#""##)
+        || !fields
+            .get(1)
+            .is_some_and(|field| information_register_uuid_matches(field, type_uuid))
+    {
+        return false;
+    }
+    split_information_register_braced_fields(fields[2]).is_some_and(|nested| {
+        nested.len() == expected.len()
+            && nested
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| actual.trim() == *expected)
+    })
+}
+
+fn information_register_standard_attribute_choice_form_is_valid(value: &str) -> bool {
+    let Some(fields) = split_information_register_braced_fields(value) else {
+        return false;
+    };
+    if fields.len() != 3
+        || fields.first().map(|field| field.trim()) != Some(r##""#""##)
+        || !fields.get(1).is_some_and(|field| {
+            information_register_uuid_matches(field, METADATA_OBJECT_REF_TYPE_UUID)
+        })
+    {
+        return false;
+    }
+    split_information_register_braced_fields(fields[2]).is_some_and(|nested| {
+        nested.len() == 2
+            && nested[0].trim() == "1"
+            && parse_information_register_uuid(nested[1])
+                .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
+    })
+}
+
+fn parse_information_register_standard_attribute_fill_value(
+    value: &str,
+    name: &str,
+) -> Option<MetadataChildFillValue> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() == 1 && fields.first()?.trim() == r#""U""# {
+        return Some(MetadataChildFillValue::Nil);
+    }
+    match (name, fields.first()?.trim(), fields.len()) {
+        ("Active", r#""B""#, 2) => {
+            information_register_bool(fields.get(1)?).map(MetadataChildFillValue::Boolean)
+        }
+        ("LineNumber", r#""N""#, 2) if fields.get(1)?.trim() == "0" => {
+            Some(MetadataChildFillValue::Decimal("0".to_string()))
+        }
+        ("Recorder", _, _) => None,
+        ("Period", r#""D""#, 2) => {
+            let raw = fields.get(1)?.trim();
+            if raw.len() != 14 || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            format_1c_date_time(raw).map(MetadataChildFillValue::DateTime)
+        }
+        _ => None,
+    }
+}
+
+fn parse_information_register_standard_attribute<'a>(
+    name: &'static str,
+    bag: &InformationRegisterStandardAttributeBag<'a>,
+) -> Option<RegisterStandardAttribute> {
+    let link_by_type =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
+    let fill_checking =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_PROPERTY_UUID)?;
+    let multi_line = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MULTI_LINE_PROPERTY_UUID)?;
+    let fill_from_filling_value =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_FROM_FILLING_VALUE_PROPERTY_UUID)?;
+    let create_on_input =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_PROPERTY_UUID)?;
+    let type_reduction_mode = bag
+        .has_type_reduction_mode
+        .then(|| bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_PROPERTY_UUID))
+        .flatten();
+    let max_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MAX_VALUE_PROPERTY_UUID)?;
+    let tooltip = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?;
+    let extended_edit =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EXTENDED_EDIT_PROPERTY_UUID)?;
+    let format = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FORMAT_PROPERTY_UUID)?;
+    let choice_form = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_FORM_PROPERTY_UUID)?;
+    let quick_choice =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_PROPERTY_UUID)?;
+    let choice_history =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_PROPERTY_UUID)?;
+    let edit_format = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_EDIT_FORMAT_PROPERTY_UUID)?;
+    let password_mode =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_PASSWORD_MODE_PROPERTY_UUID)?;
+    let data_history =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_PROPERTY_UUID)?;
+    let mark_negatives =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MARK_NEGATIVES_PROPERTY_UUID)?;
+    let min_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MIN_VALUE_PROPERTY_UUID)?;
+    let synonym = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?;
+    let comment = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_COMMENT_PROPERTY_UUID)?;
+    let full_text_search =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_PROPERTY_UUID)?;
+    let choice_parameter_links =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_PROPERTY_UUID)?;
+    let fill_value = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+    let mask = bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_MASK_PROPERTY_UUID)?;
+    let choice_parameters =
+        bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_PROPERTY_UUID)?;
+
+    if !information_register_standard_attribute_nested_values_are(
+        link_by_type,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_UUID,
+        &["3", "0", "0"],
+    ) || parse_information_register_standard_attribute_bool(multi_line)?
+        || parse_information_register_standard_attribute_nested_enum(
+            create_on_input,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CREATE_ON_INPUT_UUID,
+        )? != "0"
+        || (bag.has_type_reduction_mode
+            && parse_information_register_standard_attribute_nested_enum(
+                type_reduction_mode?,
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
+            )? != "0")
+        || !information_register_standard_attribute_nil_is_valid(max_value)
+        || parse_information_register_standard_attribute_bool(extended_edit)?
+        || !information_register_standard_attribute_choice_form_is_valid(choice_form)
+        || parse_information_register_standard_attribute_nested_enum(
+            quick_choice,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_QUICK_CHOICE_UUID,
+        )? != "2"
+        || parse_information_register_standard_attribute_direct_enum(
+            choice_history,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_HISTORY_UUID,
+        )? != "0"
+        || parse_information_register_standard_attribute_bool(password_mode)?
+        || parse_information_register_standard_attribute_bool(mark_negatives)?
+        || !information_register_standard_attribute_nil_is_valid(min_value)
+        || !parse_information_register_standard_attribute_string(comment)?.is_empty()
+        || !information_register_standard_attribute_nested_values_are(
+            choice_parameter_links,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+            &["5006", "0"],
+        )
+        || !parse_information_register_standard_attribute_string(mask)?.is_empty()
+        || !information_register_standard_attribute_nested_values_are(
+            choice_parameters,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETERS_UUID,
+            &["0", "0"],
+        )
+    {
+        return None;
+    }
+
+    let fill_checking = match parse_information_register_standard_attribute_direct_enum(
+        fill_checking,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+    )? {
+        "0" => "DontCheck",
+        "1" => "ShowError",
+        _ => return None,
+    };
+    let data_history = match parse_information_register_standard_attribute_nested_enum(
+        data_history,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_DATA_HISTORY_UUID,
+    )? {
+        "0" => "DontUse",
+        "1" => "Use",
+        _ => return None,
+    };
+    let full_text_search = match parse_information_register_standard_attribute_nested_enum(
+        full_text_search,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FULL_TEXT_SEARCH_UUID,
+    )? {
+        "0" => "DontUse",
+        "1" => "Use",
+        _ => return None,
+    };
+    Some(RegisterStandardAttribute {
+        name,
+        fill_checking,
+        fill_from_filling_value: parse_information_register_standard_attribute_bool(
+            fill_from_filling_value,
+        )?,
+        tooltip: parse_information_register_standard_attribute_localized(tooltip)?,
+        format: parse_information_register_standard_attribute_localized(format)?,
+        edit_format: parse_information_register_standard_attribute_localized(edit_format)?,
+        synonym: parse_information_register_standard_attribute_localized(synonym)?,
+        data_history,
+        full_text_search,
+        fill_value: parse_information_register_standard_attribute_fill_value(fill_value, name)?,
+        link_by_type: None,
+    })
+}
+
+fn parse_information_register_standard_attributes(
+    value: &str,
+) -> Option<Vec<RegisterStandardAttribute>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(Vec::new());
+    }
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.len() != 14 || payload.first()?.trim() != "1" || payload.get(1)?.trim() != "4" {
+        return None;
+    }
+    let definitions = [
+        ("-5", "Active"),
+        ("-4", "LineNumber"),
+        ("-3", "Recorder"),
+        ("-2", "Period"),
+    ];
+    let mut attributes = Vec::with_capacity(definitions.len());
+    let mut bag_shape = None;
+    for ((marker, name), fields) in definitions.into_iter().zip(payload[2..].chunks_exact(3)) {
+        let marker_fields = split_information_register_braced_fields(fields[0])?;
+        if marker_fields.len() != 1
+            || marker_fields.first()?.trim() != marker
+            || !information_register_uuid_matches(
+                fields[1],
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+            )
+        {
+            return None;
+        }
+        let bag = parse_information_register_standard_attribute_bag(fields[2])?;
+        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
+            return None;
+        }
+        bag_shape = Some(bag.has_type_reduction_mode);
+        attributes.push(parse_information_register_standard_attribute(name, &bag)?);
+    }
+    Some(attributes)
+}
+
+fn parse_information_register_owner_properties(
+    fields: &InformationRegisterOwnerFields<'_>,
+    header: &MetadataHeader,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<InformationRegisterOwnerProperties> {
+    Some(InformationRegisterOwnerProperties {
+        default_record_form: parse_information_register_owned_form_ref(
+            fields.get(2)?,
+            &header.name,
+            form_refs,
+        )?,
+        default_list_form: parse_information_register_owned_form_ref(
+            fields.get(3)?,
+            &header.name,
+            form_refs,
+        )?,
+        periodicity: information_register_periodicity_xml(fields.get(4)?)?,
+        write_mode: information_register_write_mode_xml(fields.get(5)?)?,
+        edit_type: information_register_edit_type_xml(fields.get(6)?)?,
+        use_standard_commands: information_register_bool(fields.get(7)?)?,
+        include_help_in_contents: information_register_bool(fields.get(8)?)?,
+        main_filter_on_period: information_register_bool(fields.get(9)?)?,
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(10)?)?,
+        full_text_search: information_register_full_text_search(fields.get(11)?)?,
+        standard_attributes: parse_information_register_standard_attributes(fields.get(12)?)?,
+        auxiliary_record_form: parse_information_register_owned_form_ref(
+            fields.get(13)?,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: parse_information_register_owned_form_ref(
+            fields.get(14)?,
+            &header.name,
+            form_refs,
+        )?,
+        record_presentation: parse_information_register_owner_localized_value(fields.get(15)?)?,
+        extended_record_presentation: parse_information_register_owner_localized_value(
+            fields.get(16)?,
+        )?,
+        list_presentation: parse_information_register_owner_localized_value(fields.get(17)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            fields.get(18)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(fields.get(19)?)?,
+        enable_totals_slice_last: information_register_bool(fields.get(20)?)?,
+        enable_totals_slice_first: information_register_bool(fields.get(21)?)?,
+        data_history: metadata_data_history_xml(fields.get(22)?.trim())?,
+        update_data_history_immediately_after_write: information_register_bool(fields.get(23)?)?,
+        execute_after_write_data_history_version_processing: information_register_bool(
+            fields.get(24)?,
+        )?,
+    })
+}
+
 fn parse_register_properties_from_text(
     kind: &str,
     text: &str,
@@ -6457,20 +7296,63 @@ fn parse_register_properties_from_text(
             "RecordManager",
         );
     }
-    let use_standard_commands = parse_register_use_standard_commands(kind, &fields, uuid);
+    let information_register = if kind == "InformationRegister" {
+        parse_information_register_owner_fields(text, &header).and_then(|fields| {
+            parse_information_register_owner_properties(&fields, &header, form_refs)
+        })
+    } else {
+        None
+    };
+    let use_standard_commands = if kind == "InformationRegister" {
+        information_register
+            .as_ref()
+            .map(|properties| properties.use_standard_commands)
+            .unwrap_or(true)
+    } else {
+        parse_register_use_standard_commands(&fields, uuid)
+    };
     let register_type = parse_register_type(kind, &fields, uuid);
-    let include_help_in_contents = parse_register_include_help_in_contents(kind, &fields, uuid);
+    let include_help_in_contents = if kind == "InformationRegister" {
+        information_register
+            .as_ref()
+            .map(|properties| properties.include_help_in_contents)
+    } else {
+        parse_register_include_help_in_contents(kind, &fields, uuid)
+    };
     let chart_of_accounts = parse_register_chart_of_accounts(kind, &fields, uuid, object_refs);
     let correspondence = parse_register_correspondence(kind, &fields, uuid);
     let period_adjustment_length = parse_register_period_adjustment_length(kind, &fields, uuid);
-    let data_lock_control_mode = parse_register_data_lock_control_mode(kind, &fields, uuid);
+    let data_lock_control_mode = if kind == "InformationRegister" {
+        information_register
+            .as_ref()
+            .map(|properties| properties.data_lock_control_mode)
+    } else {
+        parse_register_data_lock_control_mode(kind, &fields, uuid)
+    };
     let enable_totals_splitting = parse_register_enable_totals_splitting(kind, &fields, uuid);
-    let full_text_search = parse_register_full_text_search(kind, &fields, uuid);
-    let register_form_refs = parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs);
-    let standard_attributes =
-        register_standard_attributes(kind, &header.name, register_type, &fields, uuid);
+    let full_text_search = if kind == "InformationRegister" {
+        information_register
+            .as_ref()
+            .map(|properties| properties.full_text_search)
+    } else {
+        parse_register_full_text_search(kind, &fields, uuid)
+    };
+    let register_form_refs = if kind == "InformationRegister" {
+        (None, None)
+    } else {
+        parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs)
+    };
+    let standard_attributes = if kind == "InformationRegister" {
+        Vec::new()
+    } else {
+        register_standard_attributes(kind, &header.name, register_type, &fields, uuid)
+    };
     let (list_presentation, extended_list_presentation, explanation) =
-        parse_register_presentations(kind, &fields, uuid);
+        if kind == "InformationRegister" {
+            (Vec::new(), Vec::new(), Vec::new())
+        } else {
+            parse_register_presentations(kind, &fields, uuid)
+        };
     let owner_name = header.name.clone();
     let mut child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
@@ -6541,6 +7423,7 @@ fn parse_register_properties_from_text(
     Some(RegisterProperties {
         generated_types,
         use_standard_commands,
+        information_register,
         register_type,
         include_help_in_contents,
         chart_of_accounts,
@@ -6549,10 +7432,8 @@ fn parse_register_properties_from_text(
         data_lock_control_mode,
         enable_totals_splitting,
         full_text_search,
-        default_record_form: register_form_refs.0,
-        default_list_form: register_form_refs.1,
-        auxiliary_record_form: register_form_refs.2,
-        auxiliary_list_form: register_form_refs.3,
+        default_list_form: register_form_refs.0,
+        auxiliary_list_form: register_form_refs.1,
         list_presentation,
         extended_list_presentation,
         explanation,
@@ -6567,14 +7448,9 @@ fn parse_register_form_refs(
     uuid: &str,
     owner_name: &str,
     form_refs: &BTreeMap<String, FormSourceReference>,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-) {
+) -> (Option<String>, Option<String>) {
     let Some(header_index) = metadata_header_field_index(fields, uuid) else {
-        return (None, None, None, None);
+        return (None, None);
     };
     let owner_folder = metadata_source_folder_for_kind(kind);
     let default_list_form_ref = |offset| {
@@ -6589,25 +7465,15 @@ fn parse_register_form_refs(
         })
     };
     match kind {
-        "InformationRegister" => (
-            parse_catalog_form_ref(fields.get(header_index + 1).copied(), form_refs),
-            default_list_form_ref(2),
-            None,
-            None,
-        ),
         "AccountingRegister" => (
-            None,
             default_list_form_ref(4),
-            None,
             parse_catalog_form_ref(fields.get(header_index + 10).copied(), form_refs),
         ),
         "AccumulationRegister" => (
-            None,
             default_list_form_ref(2),
-            None,
             parse_catalog_form_ref(fields.get(header_index + 3).copied(), form_refs),
         ),
-        _ => (None, None, None, None),
+        _ => (None, None),
     }
 }
 
@@ -6702,12 +7568,7 @@ fn register_standard_attributes(
         ]);
         return attributes;
     }
-    if matches!(kind, "AccumulationRegister" | "InformationRegister") {
-        if kind == "InformationRegister"
-            && !has_information_register_standard_attributes(fields, uuid)
-        {
-            return attributes;
-        }
+    if kind == "AccumulationRegister" {
         attributes.extend([
             register_standard_attribute("Active", "DontCheck", &BTreeMap::new(), None),
             register_standard_attribute("LineNumber", "DontCheck", &BTreeMap::new(), None),
@@ -6716,13 +7577,6 @@ fn register_standard_attributes(
         ]);
     }
     attributes
-}
-
-fn has_information_register_standard_attributes(fields: &[&str], uuid: &str) -> bool {
-    let Some(header_index) = metadata_header_field_index(fields, uuid) else {
-        return true;
-    };
-    braced_field_has_entries(fields.get(header_index + 11).copied())
 }
 
 #[derive(Default)]
@@ -6741,12 +7595,18 @@ fn register_standard_attribute(
     RegisterStandardAttribute {
         name,
         fill_checking,
+        fill_from_filling_value: false,
         tooltip: override_values
             .map(|values| values.tooltip.clone())
             .unwrap_or_default(),
+        format: Vec::new(),
+        edit_format: Vec::new(),
         synonym: override_values
             .map(|values| values.synonym.clone())
             .unwrap_or_default(),
+        data_history: "Use",
+        full_text_search: "Use",
+        fill_value: MetadataChildFillValue::Nil,
         link_by_type,
     }
 }
@@ -6893,7 +7753,7 @@ fn parse_register_data_lock_control_mode(
     let header_index = metadata_header_field_index(fields, uuid)?;
     let field_offset = match kind {
         "AccountingRegister" => 7,
-        "AccumulationRegister" | "InformationRegister" => 5,
+        "AccumulationRegister" => 5,
         _ => return None,
     };
     match fields
@@ -6935,17 +7795,10 @@ fn parse_register_full_text_search(
     }
 }
 
-fn parse_register_use_standard_commands(kind: &str, fields: &[&str], uuid: &str) -> bool {
+fn parse_register_use_standard_commands(fields: &[&str], uuid: &str) -> bool {
     let Some(header_index) = metadata_header_field_index(fields, uuid) else {
         return true;
     };
-    if kind == "InformationRegister"
-        && let Some(value) = fields
-            .get(header_index + 6)
-            .and_then(|field| parse_1c_bool_field(Some(*field)))
-    {
-        return value;
-    }
     fields
         .get(header_index + 1)
         .and_then(|field| parse_1c_bool_field(Some(*field)))
@@ -14812,6 +15665,94 @@ fn push_recalculation_dimension_xml(xml: &mut String, dimension: &RecalculationD
     ));
 }
 
+fn push_information_register_owner_properties_xml(
+    xml: &mut String,
+    register: &InformationRegisterOwnerProperties,
+) {
+    xml.push_str(&format!(
+        "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n\
+\t\t\t<EditType>{}</EditType>\r\n",
+        xml_bool(register.use_standard_commands),
+        register.edit_type,
+    ));
+    push_optional_text_element(
+        xml,
+        "\t\t\t",
+        "DefaultRecordForm",
+        register.default_record_form.as_deref(),
+    );
+    push_optional_text_element(
+        xml,
+        "\t\t\t",
+        "DefaultListForm",
+        register.default_list_form.as_deref(),
+    );
+    push_optional_text_element(
+        xml,
+        "\t\t\t",
+        "AuxiliaryRecordForm",
+        register.auxiliary_record_form.as_deref(),
+    );
+    push_optional_text_element(
+        xml,
+        "\t\t\t",
+        "AuxiliaryListForm",
+        register.auxiliary_list_form.as_deref(),
+    );
+    push_register_standard_attributes_xml(xml, &register.standard_attributes);
+    xml.push_str(&format!(
+        "\t\t\t<InformationRegisterPeriodicity>{}</InformationRegisterPeriodicity>\r\n\
+\t\t\t<WriteMode>{}</WriteMode>\r\n\
+\t\t\t<MainFilterOnPeriod>{}</MainFilterOnPeriod>\r\n\
+\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
+\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n\
+\t\t\t<EnableTotalsSliceFirst>{}</EnableTotalsSliceFirst>\r\n\
+\t\t\t<EnableTotalsSliceLast>{}</EnableTotalsSliceLast>\r\n",
+        register.periodicity,
+        register.write_mode,
+        xml_bool(register.main_filter_on_period),
+        xml_bool(register.include_help_in_contents),
+        register.data_lock_control_mode,
+        register.full_text_search,
+        xml_bool(register.enable_totals_slice_first),
+        xml_bool(register.enable_totals_slice_last),
+    ));
+    push_localized_property(
+        xml,
+        "\t\t\t",
+        "RecordPresentation",
+        &register.record_presentation,
+    );
+    push_localized_property(
+        xml,
+        "\t\t\t",
+        "ExtendedRecordPresentation",
+        &register.extended_record_presentation,
+    );
+    push_localized_property(
+        xml,
+        "\t\t\t",
+        "ListPresentation",
+        &register.list_presentation,
+    );
+    push_localized_property(
+        xml,
+        "\t\t\t",
+        "ExtendedListPresentation",
+        &register.extended_list_presentation,
+    );
+    push_localized_property(xml, "\t\t\t", "Explanation", &register.explanation);
+    xml.push_str(&format!(
+        "\t\t\t<DataHistory>{}</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+        register.data_history,
+        xml_bool(register.update_data_history_immediately_after_write),
+        xml_bool(register.execute_after_write_data_history_version_processing),
+    ));
+}
+
 fn format_register_source_xml(
     kind: &str,
     header: &MetadataHeader,
@@ -14819,165 +15760,158 @@ fn format_register_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml(kind, header, source_version);
+    if kind == "InformationRegister" && source_version == InfobaseConfigSourceVersion::V2_21 {
+        const STYLE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
+        const PALETTE_NAMESPACE_ATTRIBUTE: &str =
+            " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
+        if let Some(style_index) = xml.find(STYLE_NAMESPACE_ATTRIBUTE) {
+            xml.insert_str(style_index, PALETTE_NAMESPACE_ATTRIBUTE);
+        }
+    }
     let internal_info = format_generated_types_internal_info_xml(&register.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
-        let mut properties = format!(
-            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-            xml_bool(register.use_standard_commands)
-        );
-        if kind == "AccountingRegister" {
+        let mut properties = String::new();
+        if kind == "InformationRegister" {
+            if let Some(information_register) = &register.information_register {
+                push_information_register_owner_properties_xml(
+                    &mut properties,
+                    information_register,
+                );
+            }
+            xml.insert_str(index, &properties);
+        } else {
+            properties.push_str(&format!(
+                "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+                xml_bool(register.use_standard_commands)
+            ));
+            if kind == "AccountingRegister" {
+                if let Some(include_help_in_contents) = register.include_help_in_contents {
+                    properties.push_str(&format!(
+                        "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+                        xml_bool(include_help_in_contents)
+                    ));
+                }
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "ChartOfAccounts",
+                    register.chart_of_accounts.as_deref(),
+                );
+                if let Some(correspondence) = register.correspondence {
+                    properties.push_str(&format!(
+                        "\t\t\t<Correspondence>{}</Correspondence>\r\n",
+                        xml_bool(correspondence)
+                    ));
+                }
+                if let Some(period_adjustment_length) = register.period_adjustment_length {
+                    properties.push_str(&format!(
+                        "\t\t\t<PeriodAdjustmentLength>{period_adjustment_length}</PeriodAdjustmentLength>\r\n"
+                    ));
+                }
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "DefaultListForm",
+                    register.default_list_form.as_deref(),
+                );
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "AuxiliaryListForm",
+                    register.auxiliary_list_form.as_deref(),
+                );
+                push_register_standard_attributes_xml(
+                    &mut properties,
+                    &register.standard_attributes,
+                );
+                push_optional_simple_property_xml(
+                    &mut properties,
+                    "DataLockControlMode",
+                    register.data_lock_control_mode,
+                );
+                if let Some(enable_totals_splitting) = register.enable_totals_splitting {
+                    properties.push_str(&format!(
+                        "\t\t\t<EnableTotalsSplitting>{}</EnableTotalsSplitting>\r\n",
+                        xml_bool(enable_totals_splitting)
+                    ));
+                }
+                push_optional_simple_property_xml(
+                    &mut properties,
+                    "FullTextSearch",
+                    register.full_text_search,
+                );
+                push_localized_property(
+                    &mut properties,
+                    "\t\t\t",
+                    "ListPresentation",
+                    &register.list_presentation,
+                );
+                push_localized_property(
+                    &mut properties,
+                    "\t\t\t",
+                    "ExtendedListPresentation",
+                    &register.extended_list_presentation,
+                );
+                push_localized_property(
+                    &mut properties,
+                    "\t\t\t",
+                    "Explanation",
+                    &register.explanation,
+                );
+                xml.insert_str(index, &properties);
+                return if register.child_objects.is_empty() {
+                    xml
+                } else {
+                    let mut child_objects = String::new();
+                    for child in &register.child_objects {
+                        push_metadata_child_object_xml(&mut child_objects, child);
+                    }
+                    insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
+                    xml
+                };
+            }
+            if kind == "AccumulationRegister" {
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "DefaultListForm",
+                    register.default_list_form.as_deref(),
+                );
+                push_optional_text_element(
+                    &mut properties,
+                    "\t\t\t",
+                    "AuxiliaryListForm",
+                    register.auxiliary_list_form.as_deref(),
+                );
+            }
+            if let Some(register_type) = register.register_type {
+                properties.push_str(&format!(
+                    "\t\t\t<RegisterType>{register_type}</RegisterType>\r\n"
+                ));
+            }
             if let Some(include_help_in_contents) = register.include_help_in_contents {
                 properties.push_str(&format!(
                     "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
                     xml_bool(include_help_in_contents)
                 ));
             }
-            push_optional_text_element(
-                &mut properties,
-                "\t\t\t",
-                "ChartOfAccounts",
-                register.chart_of_accounts.as_deref(),
-            );
-            if let Some(correspondence) = register.correspondence {
-                properties.push_str(&format!(
-                    "\t\t\t<Correspondence>{}</Correspondence>\r\n",
-                    xml_bool(correspondence)
-                ));
-            }
-            if let Some(period_adjustment_length) = register.period_adjustment_length {
-                properties.push_str(&format!(
-                    "\t\t\t<PeriodAdjustmentLength>{period_adjustment_length}</PeriodAdjustmentLength>\r\n"
-                ));
-            }
-            push_optional_text_element(
-                &mut properties,
-                "\t\t\t",
-                "DefaultListForm",
-                register.default_list_form.as_deref(),
-            );
-            push_optional_text_element(
-                &mut properties,
-                "\t\t\t",
-                "AuxiliaryListForm",
-                register.auxiliary_list_form.as_deref(),
-            );
             push_register_standard_attributes_xml(&mut properties, &register.standard_attributes);
             push_optional_simple_property_xml(
                 &mut properties,
                 "DataLockControlMode",
                 register.data_lock_control_mode,
             );
-            if let Some(enable_totals_splitting) = register.enable_totals_splitting {
-                properties.push_str(&format!(
-                    "\t\t\t<EnableTotalsSplitting>{}</EnableTotalsSplitting>\r\n",
-                    xml_bool(enable_totals_splitting)
-                ));
-            }
             push_optional_simple_property_xml(
                 &mut properties,
                 "FullTextSearch",
                 register.full_text_search,
             );
-            push_localized_property(
-                &mut properties,
-                "\t\t\t",
-                "ListPresentation",
-                &register.list_presentation,
-            );
-            push_localized_property(
-                &mut properties,
-                "\t\t\t",
-                "ExtendedListPresentation",
-                &register.extended_list_presentation,
-            );
-            push_localized_property(
-                &mut properties,
-                "\t\t\t",
-                "Explanation",
-                &register.explanation,
-            );
             xml.insert_str(index, &properties);
-            return if register.child_objects.is_empty() {
-                xml
-            } else {
-                let mut child_objects = String::new();
-                for child in &register.child_objects {
-                    push_metadata_child_object_xml(&mut child_objects, child);
-                }
-                insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
-                xml
-            };
         }
-        if kind == "AccumulationRegister" {
-            push_optional_text_element(
-                &mut properties,
-                "\t\t\t",
-                "DefaultListForm",
-                register.default_list_form.as_deref(),
-            );
-            push_optional_text_element(
-                &mut properties,
-                "\t\t\t",
-                "AuxiliaryListForm",
-                register.auxiliary_list_form.as_deref(),
-            );
-        }
-        if let Some(register_type) = register.register_type {
-            properties.push_str(&format!(
-                "\t\t\t<RegisterType>{register_type}</RegisterType>\r\n"
-            ));
-        }
-        if let Some(include_help_in_contents) = register.include_help_in_contents {
-            properties.push_str(&format!(
-                "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
-                xml_bool(include_help_in_contents)
-            ));
-        }
-        push_register_standard_attributes_xml(&mut properties, &register.standard_attributes);
-        push_optional_simple_property_xml(
-            &mut properties,
-            "DataLockControlMode",
-            register.data_lock_control_mode,
-        );
-        push_optional_simple_property_xml(
-            &mut properties,
-            "FullTextSearch",
-            register.full_text_search,
-        );
-        xml.insert_str(index, &properties);
-    }
-    if kind == "InformationRegister"
-        && let Some(index) = xml.find("\t\t</Properties>")
-    {
-        let mut form_refs_xml = String::new();
-        push_optional_text_element(
-            &mut form_refs_xml,
-            "\t\t\t",
-            "DefaultRecordForm",
-            register.default_record_form.as_deref(),
-        );
-        push_optional_text_element(
-            &mut form_refs_xml,
-            "\t\t\t",
-            "DefaultListForm",
-            register.default_list_form.as_deref(),
-        );
-        push_optional_text_element(
-            &mut form_refs_xml,
-            "\t\t\t",
-            "AuxiliaryRecordForm",
-            register.auxiliary_record_form.as_deref(),
-        );
-        push_optional_text_element(
-            &mut form_refs_xml,
-            "\t\t\t",
-            "AuxiliaryListForm",
-            register.auxiliary_list_form.as_deref(),
-        );
-        xml.insert_str(index, &form_refs_xml);
     }
     if register.child_objects.is_empty() {
         return xml;
@@ -15879,37 +16813,81 @@ fn push_register_standard_attributes_xml(
         xml.push_str(&format!(
             "\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
 \t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
-\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
 \t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
 \t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
 \t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
             attribute.fill_checking,
+            xml_bool(attribute.fill_from_filling_value),
         ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
+        xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Format", &attribute.format);
         xml.push_str(
-            "\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
-\t\t\t\t\t<xr:Format/>\r\n\
-\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+            "\t\t\t\t\t<xr:ChoiceForm/>\r\n\
 \t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
-\t\t\t\t\t<xr:EditFormat/>\r\n\
-\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
-\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n",
+        );
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "EditFormat", &attribute.edit_format);
+        xml.push_str(&format!(
+            "\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>{}</xr:DataHistory>\r\n\
 \t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
 \t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
-        );
+            attribute.data_history,
+        ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Synonym", &attribute.synonym);
-        xml.push_str(
+        xml.push_str(&format!(
             "\t\t\t\t\t<xr:Comment/>\r\n\
-\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n\
 \t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
-\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
+",
+            attribute.full_text_search,
+        ));
+        xml.push_str("\t\t\t\t\t");
+        xml.push_str(&format_register_standard_attribute_fill_value_xml(
+            &attribute.fill_value,
+        ));
+        xml.push_str(
+            "\r\n\
 \t\t\t\t\t<xr:Mask/>\r\n\
 \t\t\t\t\t<xr:ChoiceParameters/>\r\n\
 \t\t\t\t</xr:StandardAttribute>\r\n",
         );
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+fn format_register_standard_attribute_fill_value_xml(value: &MetadataChildFillValue) -> String {
+    match value {
+        MetadataChildFillValue::Nil => "<xr:FillValue xsi:nil=\"true\"/>".to_string(),
+        MetadataChildFillValue::Boolean(value) => format!(
+            "<xr:FillValue xsi:type=\"xs:boolean\">{}</xr:FillValue>",
+            xml_bool(*value)
+        ),
+        MetadataChildFillValue::Decimal(value) => format!(
+            "<xr:FillValue xsi:type=\"xs:decimal\">{}</xr:FillValue>",
+            escape_xml_element_text(value)
+        ),
+        MetadataChildFillValue::DateTime(value) => format!(
+            "<xr:FillValue xsi:type=\"xs:dateTime\">{}</xr:FillValue>",
+            escape_xml_element_text(value)
+        ),
+        MetadataChildFillValue::DesignTimeRef(value) if value.is_empty() => {
+            "<xr:FillValue xsi:type=\"xr:DesignTimeRef\"/>".to_string()
+        }
+        MetadataChildFillValue::DesignTimeRef(value) => format!(
+            "<xr:FillValue xsi:type=\"xr:DesignTimeRef\">{}</xr:FillValue>",
+            escape_xml_element_text(value)
+        ),
+        MetadataChildFillValue::String(value) if value.is_empty() => {
+            "<xr:FillValue xsi:type=\"xs:string\"/>".to_string()
+        }
+        MetadataChildFillValue::String(value) => format!(
+            "<xr:FillValue xsi:type=\"xs:string\">{}</xr:FillValue>",
+            escape_xml_element_text(value)
+        ),
+    }
 }
 
 fn push_xr_localized_property_xml(
