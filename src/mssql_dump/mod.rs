@@ -7985,7 +7985,8 @@ fn register_standard_attributes(
     uuid: &str,
 ) -> Vec<RegisterStandardAttribute> {
     let mut attributes = Vec::new();
-    let accounting_overrides = accounting_register_standard_attribute_overrides(kind, fields, uuid);
+    let accounting_attributes = parse_accounting_register_standard_attributes(kind, fields, uuid);
+    let accounting_overrides = &accounting_attributes.overrides;
     if kind == "AccumulationRegister" && register_type == Some("Balance") {
         attributes.push(register_standard_attribute(
             "RecordType",
@@ -7997,16 +7998,29 @@ fn register_standard_attributes(
     if kind == "AccountingRegister" {
         let account_data_path =
             format!("AccountingRegister.{owner_name}.StandardAttribute.Account");
+        attributes.push(register_standard_attribute(
+            "Account",
+            "DontCheck",
+            accounting_overrides,
+            None,
+        ));
+        if accounting_attributes.present.contains("RecordType") {
+            attributes.push(register_standard_attribute(
+                "RecordType",
+                "DontCheck",
+                accounting_overrides,
+                None,
+            ));
+        }
         attributes.extend([
-            register_standard_attribute("Account", "DontCheck", &accounting_overrides, None),
-            register_standard_attribute("Active", "DontCheck", &accounting_overrides, None),
-            register_standard_attribute("LineNumber", "DontCheck", &accounting_overrides, None),
-            register_standard_attribute("Recorder", "DontCheck", &accounting_overrides, None),
-            register_standard_attribute("Period", "ShowError", &accounting_overrides, None),
+            register_standard_attribute("Active", "DontCheck", accounting_overrides, None),
+            register_standard_attribute("LineNumber", "DontCheck", accounting_overrides, None),
+            register_standard_attribute("Recorder", "DontCheck", accounting_overrides, None),
+            register_standard_attribute("Period", "ShowError", accounting_overrides, None),
             register_standard_attribute(
                 "ExtDimension1",
                 "DontCheck",
-                &accounting_overrides,
+                accounting_overrides,
                 Some(RegisterStandardAttributeLinkByType {
                     data_path: account_data_path.clone(),
                     link_item: 1,
@@ -8015,13 +8029,13 @@ fn register_standard_attributes(
             register_standard_attribute(
                 "ExtDimensionType1",
                 "DontCheck",
-                &accounting_overrides,
+                accounting_overrides,
                 None,
             ),
             register_standard_attribute(
                 "ExtDimension2",
                 "DontCheck",
-                &accounting_overrides,
+                accounting_overrides,
                 Some(RegisterStandardAttributeLinkByType {
                     data_path: account_data_path.clone(),
                     link_item: 2,
@@ -8030,13 +8044,13 @@ fn register_standard_attributes(
             register_standard_attribute(
                 "ExtDimensionType2",
                 "DontCheck",
-                &accounting_overrides,
+                accounting_overrides,
                 None,
             ),
             register_standard_attribute(
                 "ExtDimension3",
                 "DontCheck",
-                &accounting_overrides,
+                accounting_overrides,
                 Some(RegisterStandardAttributeLinkByType {
                     data_path: account_data_path,
                     link_item: 3,
@@ -8045,7 +8059,7 @@ fn register_standard_attributes(
             register_standard_attribute(
                 "ExtDimensionType3",
                 "DontCheck",
-                &accounting_overrides,
+                accounting_overrides,
                 None,
             ),
         ]);
@@ -8066,6 +8080,12 @@ fn register_standard_attributes(
 struct RegisterStandardAttributeOverrides {
     tooltip: Vec<(String, String)>,
     synonym: Vec<(String, String)>,
+}
+
+#[derive(Default)]
+struct AccountingRegisterStandardAttributes {
+    present: BTreeSet<&'static str>,
+    overrides: BTreeMap<&'static str, RegisterStandardAttributeOverrides>,
 }
 
 fn register_standard_attribute(
@@ -8094,83 +8114,115 @@ fn register_standard_attribute(
     }
 }
 
-fn accounting_register_standard_attribute_overrides(
+fn parse_accounting_register_standard_attributes(
     kind: &str,
     fields: &[&str],
     uuid: &str,
-) -> BTreeMap<&'static str, RegisterStandardAttributeOverrides> {
-    let mut overrides = BTreeMap::new();
+) -> AccountingRegisterStandardAttributes {
     if kind != "AccountingRegister" {
-        return overrides;
+        return AccountingRegisterStandardAttributes::default();
     }
     let Some(header_index) = metadata_header_field_index(fields, uuid) else {
-        return overrides;
+        return AccountingRegisterStandardAttributes::default();
     };
-    let Some(outer) = fields
+    fields
         .get(header_index + 9)
-        .and_then(|field| split_1c_braced_fields(field, 0))
-    else {
-        return overrides;
-    };
-    let Some(items) = outer
-        .get(1)
-        .and_then(|field| split_1c_braced_fields(field, 0))
-    else {
-        return overrides;
-    };
-    let count = items
-        .get(1)
-        .and_then(|field| field.trim().parse::<usize>().ok())
-        .unwrap_or(0);
-    let mut index = 2usize;
-    for _ in 0..count {
-        let Some(marker) = items.get(index).copied() else {
-            break;
-        };
-        let Some(name) = accounting_register_standard_attribute_name(marker) else {
-            index += 3;
-            continue;
-        };
-        if let Some(property_bag) = items.get(index + 2).copied() {
-            let bag_fields = split_1c_braced_fields(property_bag, 0).unwrap_or_default();
-            let tooltip = bag_fields
-                .get(15)
-                .map(|field| parse_wrapped_localized_values(field))
-                .unwrap_or_default();
-            let synonym = bag_fields
-                .get(37)
-                .map(|field| parse_wrapped_localized_values(field))
-                .unwrap_or_default();
-            if !tooltip.is_empty() || !synonym.is_empty() {
-                overrides.insert(
-                    name,
-                    RegisterStandardAttributeOverrides { tooltip, synonym },
-                );
-            }
-        }
-        index += 3;
-    }
-    overrides
+        .and_then(|field| parse_accounting_register_standard_attribute_collection(field))
+        .unwrap_or_default()
 }
 
-fn accounting_register_standard_attribute_name(marker: &str) -> Option<&'static str> {
-    let marker_fields = split_1c_braced_fields(marker, 0)?;
-    match marker_fields.first()?.trim() {
-        "-10" => Some("Account"),
-        "-5" => Some("Active"),
-        "-4" => Some("LineNumber"),
-        "-3" => Some("Recorder"),
-        "-2" => Some("Period"),
-        "0" | "1" | "2" => {
-            let item = marker_fields.first()?.trim().parse::<u32>().ok()? + 1;
-            match marker_fields.get(1).map(|field| field.trim()) {
-                Some("91162600-3161-4326-89a0-4a7cecd5092a") => match item {
+fn parse_accounting_register_standard_attribute_collection(
+    value: &str,
+) -> Option<AccountingRegisterStandardAttributes> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let items = split_information_register_braced_fields(outer.get(1)?)?;
+    if items.len() < 2 || items.first()?.trim() != "1" {
+        return None;
+    }
+    let count = parse_information_register_usize(items.get(1)?)?;
+    if items.len() != count.checked_mul(3)?.checked_add(2)? {
+        return None;
+    }
+
+    let mut validated = Vec::with_capacity(count);
+    let mut expected_type_reduction_mode = None;
+    for triplet in items[2..].chunks_exact(3) {
+        let marker = triplet.first()?.trim();
+        let marker_fields = split_information_register_braced_fields(marker)?;
+        let name = accounting_register_standard_attribute_name(&marker_fields);
+        let marker_is_valid = match marker_fields.as_slice() {
+            [marker] => marker.trim().strip_prefix('-').is_some_and(|value| {
+                !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+            }),
+            [_, _] => name.is_some(),
+            _ => false,
+        };
+        if !marker_is_valid
+            || !information_register_uuid_matches(
+                triplet.get(1)?,
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+            )
+        {
+            return None;
+        }
+        let bag = parse_information_register_standard_attribute_bag(triplet.get(2)?)?;
+        match expected_type_reduction_mode {
+            Some(expected) if expected != bag.has_type_reduction_mode => return None,
+            None => expected_type_reduction_mode = Some(bag.has_type_reduction_mode),
+            _ => {}
+        }
+        let (tooltip, synonym) = if name.is_some() {
+            (
+                parse_information_register_standard_attribute_localized(
+                    bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID)?,
+                )?,
+                parse_information_register_standard_attribute_localized(
+                    bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
+                )?,
+            )
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        validated.push((name, tooltip, synonym));
+    }
+
+    let mut attributes = AccountingRegisterStandardAttributes::default();
+    for (name, tooltip, synonym) in validated {
+        let Some(name) = name else {
+            continue;
+        };
+        attributes.present.insert(name);
+        if !tooltip.is_empty() || !synonym.is_empty() {
+            attributes.overrides.insert(
+                name,
+                RegisterStandardAttributeOverrides { tooltip, synonym },
+            );
+        }
+    }
+    Some(attributes)
+}
+
+fn accounting_register_standard_attribute_name(marker_fields: &[&str]) -> Option<&'static str> {
+    match marker_fields {
+        ["-10"] => Some("Account"),
+        ["-9"] => Some("RecordType"),
+        ["-5"] => Some("Active"),
+        ["-4"] => Some("LineNumber"),
+        ["-3"] => Some("Recorder"),
+        ["-2"] => Some("Period"),
+        [marker, family] if matches!(marker.trim(), "0" | "1" | "2") => {
+            let item = marker.trim().parse::<u32>().ok()? + 1;
+            match family.trim() {
+                "91162600-3161-4326-89a0-4a7cecd5092a" => match item {
                     1 => Some("ExtDimension1"),
                     2 => Some("ExtDimension2"),
                     3 => Some("ExtDimension3"),
                     _ => None,
                 },
-                Some("b3b48b29-d652-47ab-9d21-7e06768c31b5") => match item {
+                "b3b48b29-d652-47ab-9d21-7e06768c31b5" => match item {
                     1 => Some("ExtDimensionType1"),
                     2 => Some("ExtDimensionType2"),
                     3 => Some("ExtDimensionType3"),
@@ -8181,22 +8233,6 @@ fn accounting_register_standard_attribute_name(marker: &str) -> Option<&'static 
         }
         _ => None,
     }
-}
-
-fn parse_wrapped_localized_values(field: &str) -> Vec<(String, String)> {
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return Vec::new();
-    };
-    for nested in fields.iter().rev() {
-        if !nested.trim_start().starts_with('{') {
-            continue;
-        }
-        let values = parse_1c_synonyms(nested);
-        if !values.is_empty() && values.iter().all(|(lang, _)| lang != "#") {
-            return values;
-        }
-    }
-    Vec::new()
 }
 
 fn parse_register_chart_of_accounts(

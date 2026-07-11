@@ -23817,6 +23817,224 @@ fn extracts_accumulation_register_include_help_in_contents() {
     );
 }
 
+fn accounting_register_standard_attribute_bag_for_test(
+    with_overrides: bool,
+    modern: bool,
+) -> String {
+    let mut values = information_register_standard_attribute_values_for_test("Recorder", false);
+    if with_overrides {
+        values[7] =
+            information_register_standard_attribute_localized_for_test(Some("Record type tip"));
+        values[18] =
+            information_register_standard_attribute_localized_for_test(Some("Record type"));
+    }
+    information_register_standard_attribute_bag_from_values_for_test(&values, modern)
+}
+
+fn accounting_register_standard_attributes_for_test(definitions: &[(&str, bool)]) -> String {
+    let mut payload = vec!["1".to_string(), definitions.len().to_string()];
+    for (marker, with_overrides) in definitions {
+        payload.push(format!("{{{marker}}}"));
+        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        payload.push(accounting_register_standard_attribute_bag_for_test(
+            *with_overrides,
+            false,
+        ));
+    }
+    format!("{{1,{{{}}}}}", payload.join(","))
+}
+
+fn accounting_register_root_for_test(
+    register_uuid: &str,
+    correspondence: bool,
+    standard_attributes: &str,
+) -> String {
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let generated_types = [zero_uuid; 14].join(",");
+    format!(
+        "{{1,{{21,{generated_types},\
+{{0,{{3,{{1,0,{register_uuid}}},\"Ledger\",{{1,\"en\",\"Ledger\"}},\"\",0,0,{zero_uuid},0}}}},\
+1,1,{zero_uuid},{zero_uuid},{},0,0,1,{standard_attributes}}}}}",
+        u8::from(correspondence),
+    )
+}
+
+fn extract_accounting_register_xml_for_test(
+    raw: &str,
+    register_uuid: &str,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let extracted = extract_metadata_source_xml_with_refs(
+        &deflate_for_test(raw.as_bytes()),
+        register_uuid,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        source_version,
+    )
+    .unwrap();
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("AccountingRegisters/Ledger.xml")
+    );
+    String::from_utf8(extracted.xml).unwrap()
+}
+
+fn accounting_register_standard_attribute_block<'a>(xml: &'a str, name: &str) -> &'a str {
+    let marker = format!(r#"<xr:StandardAttribute name="{name}">"#);
+    let start = xml.find(&marker).unwrap();
+    let end = xml[start..]
+        .find("</xr:StandardAttribute>")
+        .map(|offset| start + offset + "</xr:StandardAttribute>".len())
+        .unwrap();
+    &xml[start..end]
+}
+
+#[test]
+fn emits_accounting_register_record_type_from_complete_raw_triplet() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let standard_attributes = accounting_register_standard_attributes_for_test(&[("-9", false)]);
+    let raw = accounting_register_root_for_test(register_uuid, true, &standard_attributes);
+
+    for source_version in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
+        let record_type = accounting_register_standard_attribute_block(&xml, "RecordType");
+
+        assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 12);
+        assert_eq!(
+            xml.matches(r#"<xr:StandardAttribute name="RecordType">"#)
+                .count(),
+            1
+        );
+        assert!(
+            xml.find(r#"<xr:StandardAttribute name="Account">"#)
+                .unwrap()
+                < xml
+                    .find(r#"<xr:StandardAttribute name="RecordType">"#)
+                    .unwrap()
+        );
+        assert!(
+            xml.find(r#"<xr:StandardAttribute name="RecordType">"#)
+                .unwrap()
+                < xml.find(r#"<xr:StandardAttribute name="Active">"#).unwrap()
+        );
+        assert!(record_type.contains("<xr:FillChecking>DontCheck</xr:FillChecking>"));
+        assert!(record_type.contains("<xr:ToolTip/>"));
+        assert!(record_type.contains("<xr:Synonym/>"));
+        assert!(record_type.contains("<xr:FillValue xsi:nil=\"true\"/>"));
+    }
+}
+
+#[test]
+fn preserves_accounting_register_record_type_tooltip_and_synonym() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let standard_attributes = accounting_register_standard_attributes_for_test(&[("-9", true)]);
+    let raw = accounting_register_root_for_test(register_uuid, false, &standard_attributes);
+
+    for source_version in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
+        let record_type = accounting_register_standard_attribute_block(&xml, "RecordType");
+
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 12);
+        assert!(record_type.contains("<xr:ToolTip>"));
+        assert!(record_type.contains("<v8:content>Record type tip</v8:content>"));
+        assert!(record_type.contains("<xr:Synonym>"));
+        assert!(record_type.contains("<v8:content>Record type</v8:content>"));
+    }
+}
+
+#[test]
+fn omits_accounting_register_record_type_without_raw_marker() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let standard_attributes = accounting_register_standard_attributes_for_test(&[("-10", false)]);
+    let raw = accounting_register_root_for_test(register_uuid, false, &standard_attributes);
+
+    for source_version in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
+
+        assert_eq!(xml.matches("<xr:StandardAttribute").count(), 11);
+        assert!(!xml.contains(r#"<xr:StandardAttribute name="RecordType">"#));
+    }
+}
+
+#[test]
+fn rejects_malformed_accounting_register_standard_attribute_collections_atomically() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111";
+    let property_bag = accounting_register_standard_attribute_bag_for_test(false, false);
+    let modern_property_bag = accounting_register_standard_attribute_bag_for_test(false, true);
+    let valid = accounting_register_standard_attributes_for_test(&[("-9", false)]);
+    let missing_bag = valid.replacen(&format!(",{property_bag}"), "", 1);
+    let garbage_bag = valid.replacen(&property_bag, "garbage", 1);
+    let count_too_small = valid.replacen("{1,{1,1,", "{1,{1,0,", 1);
+    let count_too_large = valid.replacen("{1,{1,1,", "{1,{1,2,", 1);
+    let payload_trailing = format!("{},trailing}}}}", valid.strip_suffix("}}").unwrap());
+    let outer_trailing = format!("{},trailing}}", valid.strip_suffix('}').unwrap());
+    let mixed_payload = [
+        "1".to_string(),
+        "2".to_string(),
+        "{-9}".to_string(),
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
+        property_bag.clone(),
+        "{-10}".to_string(),
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string(),
+        modern_property_bag,
+    ];
+    let mixed_bag_shapes = format!("{{1,{{{}}}}}", mixed_payload.join(","));
+    let mutations = [
+        (
+            "wrong section UUID",
+            valid.replacen(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+                register_uuid,
+                1,
+            ),
+        ),
+        ("missing property bag", missing_bag),
+        ("garbage property bag", garbage_bag),
+        ("count too small", count_too_small),
+        ("count too large", count_too_large),
+        ("payload trailing field", payload_trailing),
+        ("outer trailing field", outer_trailing),
+        ("extra marker field", valid.replacen("{-9}", "{-9,junk}", 1)),
+        ("mixed property bag shapes", mixed_bag_shapes),
+    ];
+
+    for (case, standard_attributes) in mutations {
+        let raw = accounting_register_root_for_test(register_uuid, false, &standard_attributes);
+        for source_version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let xml = extract_accounting_register_xml_for_test(&raw, register_uuid, source_version);
+
+            assert_eq!(
+                xml.matches("<xr:StandardAttribute").count(),
+                11,
+                "{case} in {}",
+                source_version.as_str()
+            );
+            assert!(
+                !xml.contains(r#"<xr:StandardAttribute name="RecordType">"#),
+                "{case} in {}",
+                source_version.as_str()
+            );
+        }
+    }
+}
+
 #[test]
 fn extracts_accumulation_register_standard_attributes() {
     let register_uuid = "11111111-1111-4111-8111-111111111111";
