@@ -1792,6 +1792,52 @@ The expected future permitted native gate is `+0/-0`, but exactness is not
 claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## Catalog bounded input and history tail
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+This model reuses the exact code-56/61-field Catalog boundary and full owner
+header validation used by the bounded default-presentation model. All 114 BSP
+owners have exactly one matching fully parsed owner header at field 9. Within
+that cohort, field 53 maps `1` to `CreateOnInput=DontUse` for 21 owners and `2`
+to `CreateOnInput=Use` for 93. Field 57 maps `0` to
+`ChoiceHistoryOnInput=Auto` for 110 owners and `1` to
+`ChoiceHistoryOnInput=DontUse` for four. There are no exceptions.
+
+The six observed `(field53, field57, legacy field51)` cells are
+`(1,0,0)=1`, `(1,0,1)=18`, `(1,1,1)=2`, `(2,0,0)=11`, `(2,0,1)=80`, and
+`(2,1,1)=2`. They prove 94 CreateOnInput changes and four
+ChoiceHistoryOnInput changes with two overlapping owners: 96 roots and 98 line
+replacements. The previous field 51 is not a valid discriminator: its zero
+partition contains 11 native Use and one native DontUse value, while its one
+partition contains 82 Use and 20 DontUse values.
+
+Exact candidates accept only field-53 values `1|2` and field-57 values `0|1`.
+Missing, empty, textual, negative, overflow, wrapped, or out-of-domain values
+reject the whole source atomically. A malformed, moved, duplicate, or
+wrong-owner header is likewise fatal. Other codes and arities retain the prior
+field-51/field-52 expressions and defaults byte-for-byte. In particular, 489
+exact code-57/61-field UT controls keep their legacy semantics even though
+their field-53 distribution is 225/264 and their field-57 distribution is
+452/37. Their complex field-52 envelopes remain fallback controls.
+
+Integrated commit `6279413` passes seven joint-matrix, semantic-legacy,
+nonexact-arity, malformed-slot, property-only, ordering, and literal tests.
+The full suite changed from `1325 passed / 74 failed / 6 ignored` to
+`1332 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 14,939-byte diff with SHA-256
+`20058BEBE493303741DD78A94032800D32EDAF99CF257F937DE3F295E5F9EA0B`.
+Production contains no Catalog name, object UUID, database identity, path, or
+corpus-specific branch.
+
+`CreateOnInput=Auto` for exact code 56, `DataHistory`, the two data-history
+processing flags, fields 54, 56, and 58 through 60, and every code-57/global
+remap remain HOLD. The saved normalized isolated residual is 96 Catalog roots
+totaling `+98/-98`. The expected future permitted native gate is `+0/-0`, but
+exactness is not claimed without that gate. No database access, ConfigDump,
+configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
