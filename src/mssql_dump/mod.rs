@@ -7954,6 +7954,8 @@ fn parse_register_properties_from_text(
         information_register
             .as_ref()
             .map(|properties| properties.full_text_search)
+    } else if kind == "CalculationRegister" {
+        parse_calculation_register_fixed_full_text_search(kind, &fields, &header)?
     } else {
         parse_register_full_text_search(kind, &fields, uuid)
     };
@@ -8727,6 +8729,22 @@ fn parse_calculation_register_fixed_include_help(
         return Some(None);
     }
     Some(Some(false))
+}
+
+fn parse_calculation_register_fixed_full_text_search(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<Option<&'static str>> {
+    if kind != "CalculationRegister"
+        || !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)?
+    {
+        return Some(None);
+    }
+    if fields.get(27)?.trim() != "0" {
+        return Some(None);
+    }
+    Some(Some("DontUse"))
 }
 
 fn parse_register_full_text_search(

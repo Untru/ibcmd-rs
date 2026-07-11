@@ -43310,7 +43310,7 @@ fn calculation_include_help_does_not_consume_hold_neighbors() {
         .xml()
         .unwrap();
 
-    for slot in [26, 27] {
+    for slot in [26] {
         for value in ["0", "1", "2", "-1", "value", "{0}"] {
             let mut fixture = CalculationRegisterPresentationsFixture::exact();
             fixture.fields[slot] = value.to_string();
@@ -44370,6 +44370,274 @@ fn calculation_schedule_has_no_production_corpus_literals() {
         "a1c76fb2-6237-41a1-8b2f-66d8c1ed2fd9",
         "_ДемоГрафикиРаботы",
         "_ДемоОсновныеНачисления",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+#[test]
+fn calculation_full_text_search_emits_fixed_dont_use_once_in_native_order() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let xml = fixture.xml().expect("exact calculation full-text-search");
+    let property = "<FullTextSearch>DontUse</FullTextSearch>";
+
+    assert_eq!(xml.matches(property).count(), 1);
+    assert!(
+        xml.find("<IncludeHelpInContents>false</IncludeHelpInContents>")
+            .unwrap()
+            < xml.find(property).unwrap()
+    );
+    assert!(xml.find(property).unwrap() < xml.find("<ListPresentation/>").unwrap());
+
+    let mut padded = fixture;
+    padded.fields[27] = " \r\n0\t".to_string();
+    assert_eq!(padded.xml().unwrap(), xml);
+}
+
+#[test]
+fn calculation_full_text_search_alternatives_are_accepted_omissions() {
+    let mut omitted = CalculationRegisterPresentationsFixture::exact();
+    omitted.fields[27] = "1".to_string();
+    let expected_omission = omitted.xml().unwrap();
+    assert!(!expected_omission.contains("<FullTextSearch>"));
+
+    for value in [
+        "1",
+        "2",
+        "-1",
+        "00",
+        "0.0",
+        "value",
+        "{0}",
+        ACCUMULATION_TOTALS_ZERO_UUID,
+        CALCULATION_PRESENTATIONS_TYPE_UUID,
+    ] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[27] = value.to_string();
+        let raw = fixture.raw();
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let header =
+            parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+
+        assert!(matches!(
+            parse_calculation_register_fixed_full_text_search(
+                "CalculationRegister",
+                &fields,
+                &header,
+            ),
+            Some(None)
+        ));
+        let xml = fixture
+            .xml()
+            .unwrap_or_else(|| panic!("rejected accepted F27 omission {value}"));
+        assert!(!xml.contains("<FullTextSearch>"), "F27 {value}");
+        assert_eq!(xml, expected_omission, "consumed F27 {value}");
+    }
+}
+
+#[test]
+fn calculation_full_text_search_does_not_consume_f26_or_f28() {
+    let expected = CalculationRegisterPresentationsFixture::exact()
+        .xml()
+        .unwrap();
+    assert!(expected.contains("<FullTextSearch>DontUse</FullTextSearch>"));
+
+    for slot in [26, 28] {
+        for value in [
+            "0",
+            "1",
+            "2",
+            "-1",
+            "value",
+            "{0}",
+            ACCUMULATION_TOTALS_ZERO_UUID,
+        ] {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact();
+            fixture.fields[slot] = value.to_string();
+            let xml = fixture.xml().expect("HOLD neighbor must remain accepted");
+
+            assert_eq!(xml, expected, "consumed F{slot} value {value}");
+        }
+    }
+}
+
+#[test]
+fn calculation_full_text_search_direct_seam_requires_full_exact_owner_boundary() {
+    let original = CalculationRegisterPresentationsFixture::exact();
+    let raw = original.raw();
+    let expected =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let fields = original
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        parse_calculation_register_fixed_full_text_search(
+            "CalculationRegister",
+            &fields,
+            &expected,
+        ),
+        Some(Some("DontUse"))
+    ));
+    let valid_header = original.fields[15].clone();
+
+    let mut short = original.clone();
+    short.fields[15] = format!(
+        "{{0,{{3,{{1,0,{CALCULATION_PRESENTATIONS_TEST_UUID}}},\"Payroll\",{{1,\"en\",\"Payroll\"}},\"\"}}}}"
+    );
+    let mut moved = original.clone();
+    moved.fields[14] = valid_header.clone();
+    moved.fields[15] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[29] = valid_header.clone();
+    let mut wrong_then_valid = original.clone();
+    wrong_then_valid.fields[15] = wrong_then_valid.fields[15].replace(
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        "99999999-9999-4999-8999-999999999999",
+    );
+    wrong_then_valid.fields[29] = valid_header;
+
+    for fixture in [short, moved, duplicate, wrong_then_valid] {
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert!(
+            parse_calculation_register_fixed_full_text_search(
+                "CalculationRegister",
+                &fields,
+                &expected,
+            )
+            .is_none()
+        );
+    }
+
+    let mut mismatch = expected;
+    mismatch.name = "Other".to_string();
+    assert!(
+        parse_calculation_register_fixed_full_text_search(
+            "CalculationRegister",
+            &fields,
+            &mismatch,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn calculation_full_text_search_keeps_nonexact_arities_unconsumed_and_omitted() {
+    for field_count in [32, 34] {
+        let mut slot_like = CalculationRegisterPresentationsFixture::exact();
+        slot_like.fields.truncate(field_count.min(33));
+        while slot_like.fields.len() < field_count {
+            slot_like.fields.push("0".to_string());
+        }
+        let mut omitted = slot_like.clone();
+        omitted.fields[27] = "1".to_string();
+
+        let slot_like_xml = slot_like.xml().expect("nonexact F27 slot-like value");
+        let omitted_xml = omitted.xml().expect("nonexact F27 omission baseline");
+        assert!(!slot_like_xml.contains("<FullTextSearch>"));
+        assert_eq!(
+            slot_like_xml, omitted_xml,
+            "consumed F27 at len {field_count}"
+        );
+    }
+}
+
+#[test]
+fn calculation_full_text_search_preserves_accounting_and_accumulation_families() {
+    let accounting_uuid = "33333333-3333-4333-8333-333333333333";
+    let mut accounting_fields = vec!["21".to_string()];
+    accounting_fields.extend(register_generated_type_fields(14));
+    accounting_fields.push(register_owner_header(accounting_uuid, "Ledger"));
+    accounting_fields.extend([
+        "1".to_string(),
+        "1".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+    ]);
+    assert_eq!(accounting_fields.len(), 30);
+    let accounting = extract_register_fields(&accounting_fields, accounting_uuid)
+        .and_then(|source| String::from_utf8(source.xml).ok())
+        .expect("accounting full-text-search control");
+    assert_eq!(
+        accounting
+            .matches("<FullTextSearch>DontUse</FullTextSearch>")
+            .count(),
+        1
+    );
+
+    let accumulation = AccumulationRegisterTotalsFixture::exact("1")
+        .xml()
+        .expect("accumulation full-text-search control");
+    assert_eq!(
+        accumulation
+            .matches("<FullTextSearch>DontUse</FullTextSearch>")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn calculation_full_text_search_changes_only_the_fixed_line() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let raw = fixture.raw();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &raw,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
+    )
+    .unwrap();
+    let with_full_text_search = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    register.full_text_search = None;
+    let without_full_text_search = format_register_source_xml(
+        "CalculationRegister",
+        &header,
+        &register,
+        InfobaseConfigSourceVersion::V2_21,
+    );
+    let stripped =
+        with_full_text_search.replace("\t\t\t<FullTextSearch>DontUse</FullTextSearch>\r\n", "");
+
+    assert_eq!(stripped, without_full_text_search);
+}
+
+#[test]
+fn calculation_full_text_search_has_no_production_corpus_literals() {
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "a6756af4-964f-400d-97d4-0bd3f5916693",
+        "_ДемоОсновныеНачисления",
+        "Начисления.xml",
+        "Удержания.xml",
     ] {
         assert!(!source.contains(forbidden));
     }
