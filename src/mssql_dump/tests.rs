@@ -4690,7 +4690,7 @@ fn document_field_record_with_options_for_test(
     title: &str,
     options: String,
 ) -> String {
-    let mut fields = vec!["0".to_string(); 53];
+    let mut fields = vec!["0".to_string(); 59];
     fields[0] = "37".to_string();
     fields[1] = "{101,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
     fields[5] = discriminator.to_string();
@@ -4891,6 +4891,276 @@ fn parses_calendar_tooltip_and_extended_tooltip() {
     assert!(xml.contains("<ToolTipRepresentation>ShowBottom</ToolTipRepresentation>"));
     assert!(!xml.contains("<InputHint>"));
     assert!(xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+}
+
+fn tooltip_representation_field_record_for_test(
+    wrapper: &str,
+    kind: &str,
+    field_count: usize,
+    raw_representation: &str,
+    tooltip: &str,
+) -> String {
+    let mut fields = vec!["0".to_string(); field_count];
+    fields[0] = wrapper.to_string();
+    fields[1] = "{101,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
+    fields[5] = kind.to_string();
+    fields[6] = format!("\"Field{kind}\"");
+    fields[7] = "4".to_string();
+    fields[9] = "{1,0}".to_string();
+    fields[10] = tooltip.to_string();
+    fields[11] = "{1,{5}}".to_string();
+    fields[50] = raw_representation.to_string();
+    format!("{{{}}}", fields.join(","))
+}
+
+fn parse_tooltip_representation_field_for_test(raw: &str) -> FormChildItem {
+    parse_form_child_item(
+        raw,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn parses_and_formats_all_exact_tooltip_representation_values() {
+    for (raw, expected) in [
+        ("1", "None"),
+        ("2", "Balloon"),
+        ("3", "Button"),
+        ("4", "ShowAuto"),
+        ("5", "ShowTop"),
+        ("7", "ShowBottom"),
+        ("8", "ShowRight"),
+    ] {
+        let item = parse_tooltip_representation_field_for_test(
+            &tooltip_representation_field_record_for_test(
+                "37",
+                "2",
+                59,
+                raw,
+                r#"{1,1,{"en","Tip"}}"#,
+            ),
+        );
+        assert_eq!(item.tooltip_representation, Some(expected));
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        assert_eq!(xml.matches("<ToolTipRepresentation>").count(), 1);
+        assert!(
+            xml.contains(&format!(
+                "<ToolTipRepresentation>{expected}</ToolTipRepresentation>"
+            )),
+            "raw={raw}: {xml}"
+        );
+    }
+}
+
+#[test]
+fn emits_exact_tooltip_representation_for_all_six_field_tags_in_native_order() {
+    for (kind, expected_tag, raw, expected) in [
+        ("1", "LabelField", "1", "None"),
+        ("2", "InputField", "2", "Balloon"),
+        ("3", "CheckBoxField", "3", "Button"),
+        ("4", "PictureField", "4", "ShowAuto"),
+        ("5", "RadioButtonField", "5", "ShowTop"),
+        ("8", "CalendarField", "7", "ShowBottom"),
+    ] {
+        let mut item = parse_tooltip_representation_field_for_test(
+            &tooltip_representation_field_record_for_test(
+                "37",
+                kind,
+                59,
+                raw,
+                r#"{1,1,{"en","Tip"}}"#,
+            ),
+        );
+        assert_eq!(item.tag, expected_tag);
+        assert_eq!(item.tooltip_representation, Some(expected));
+        item.horizontal_align = Some("Right");
+
+        let xml = format_form_child_items_xml(&[item], 1);
+        let title_location_at = xml.find("<TitleLocation>").unwrap();
+        let representation_at = xml.find("<ToolTipRepresentation>").unwrap();
+        let horizontal_align_at = xml.find("<HorizontalAlign>").unwrap();
+        assert!(
+            title_location_at < representation_at,
+            "{expected_tag}: {xml}"
+        );
+        assert!(
+            representation_at < horizontal_align_at,
+            "{expected_tag}: {xml}"
+        );
+        if matches!(
+            expected_tag,
+            "InputField" | "PictureField" | "CalendarField"
+        ) {
+            assert!(xml.find("<ToolTip>").unwrap() < representation_at, "{xml}");
+        }
+
+        let mut zero_item = parse_tooltip_representation_field_for_test(
+            &tooltip_representation_field_record_for_test(
+                "37",
+                kind,
+                59,
+                "0",
+                r#"{1,1,{"en","Tip"}}"#,
+            ),
+        );
+        zero_item.horizontal_align = Some("Right");
+        let zero_xml = format_form_child_items_xml(&[zero_item], 1);
+        let representation_line = xml
+            .lines()
+            .find(|line| line.contains("<ToolTipRepresentation>"))
+            .unwrap();
+        assert_eq!(
+            xml.replace(&format!("{representation_line}\r\n"), ""),
+            zero_xml,
+            "{expected_tag} changed more than ToolTipRepresentation"
+        );
+    }
+}
+
+#[test]
+fn zero_tooltip_representation_ignores_input_hint_and_list_choice_inference() {
+    let raw =
+        tooltip_representation_field_record_for_test("37", "2", 59, "0", r#"{1,1,{"en","Tip"}}"#);
+    let mut fields = split_1c_braced_fields(&raw, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut options = vec!["0".to_string(); 54];
+    options[0] = "36".to_string();
+    options[19] = "1".to_string();
+    options[44] = r#"{1,1,{"en","Hint"}}"#.to_string();
+    fields[39] = format!("{{{}}}", options.join(","));
+
+    let item = parse_tooltip_representation_field_for_test(&format!("{{{}}}", fields.join(",")));
+    assert_eq!(item.list_choice_mode, Some(true));
+    assert_eq!(
+        item.input_hint,
+        vec![("en".to_string(), "Hint".to_string())]
+    );
+    assert_eq!(item.tooltip_representation, None);
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains("<ListChoiceMode>true</ListChoiceMode>"));
+    assert!(xml.contains("<InputHint>"));
+    assert!(!xml.contains("<ToolTipRepresentation>"));
+}
+
+#[test]
+fn tooltip_representation_follows_f50_when_tooltip_is_empty() {
+    let item = parse_tooltip_representation_field_for_test(
+        &tooltip_representation_field_record_for_test("37", "4", 59, "8", "{1,0}"),
+    );
+    assert!(item.tooltip.is_empty());
+    assert_eq!(item.tooltip_representation, Some("ShowRight"));
+
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(!xml.contains("<ToolTip>"));
+    assert!(xml.contains("<ToolTipRepresentation>ShowRight</ToolTipRepresentation>"));
+}
+
+#[test]
+fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
+    for (wrapper, kind, field_count, raw) in [
+        ("48", "2", 59, "3"),
+        ("37", "6", 59, "3"),
+        ("37", "2", 58, "3"),
+        ("37", "2", 60, "3"),
+        ("37", "2", 59, ""),
+        ("37", "2", 59, "\"3\""),
+        ("37", "2", 59, "{3}"),
+        ("37", "2", 59, "03"),
+        ("37", "2", 59, "3suffix"),
+        ("37", "2", 59, "6"),
+        ("37", "2", 59, "9"),
+        ("37", "2", 59, "-1"),
+    ] {
+        let item = parse_tooltip_representation_field_for_test(
+            &tooltip_representation_field_record_for_test(
+                wrapper,
+                kind,
+                field_count,
+                raw,
+                r#"{1,1,{"en","Tip"}}"#,
+            ),
+        );
+        assert_eq!(
+            item.tooltip_representation, None,
+            "wrapper={wrapper}, kind={kind}, len={field_count}, raw={raw:?}"
+        );
+        assert!(!format_form_child_items_xml(&[item], 1).contains("<ToolTipRepresentation>"));
+    }
+
+    let raw =
+        tooltip_representation_field_record_for_test("37", "2", 59, "3", r#"{1,1,{"en","Tip"}}"#);
+    let mut fields = split_1c_braced_fields(&raw, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    fields[5] = "0".to_string();
+    fields[6] = "2".to_string();
+    fields[7] = "\"ShiftedField\"".to_string();
+    let item = parse_tooltip_representation_field_for_test(&format!("{{{}}}", fields.join(",")));
+    assert_eq!(item.tag, "InputField");
+    assert_eq!(item.tooltip_representation, None);
+    assert!(!format_form_child_items_xml(&[item], 1).contains("<ToolTipRepresentation>"));
+}
+
+#[test]
+fn direct_formatter_does_not_emit_tooltip_representation_for_unadmitted_tags() {
+    let mut item = parse_tooltip_representation_field_for_test(
+        &tooltip_representation_field_record_for_test("37", "2", 59, "3", "{1,0}"),
+    );
+    item.tag = "TextDocumentField";
+    item.tooltip_representation = Some("Button");
+
+    assert!(!format_form_child_item_xml(&item, 1, false).contains("ToolTipRepresentation"));
+}
+
+#[test]
+fn tooltip_representation_matches_saved_scoped_target_accounting() {
+    const LEGACY_SPURIOUS_ADDITIONS: usize = 34;
+    const EXACT_MISSING_LINES: usize = 358;
+    const FIXED_SPURIOUS_ADDITIONS: usize = LEGACY_SPURIOUS_ADDITIONS - 34;
+    const FIXED_MISSING_LINES: usize = EXACT_MISSING_LINES - 358;
+
+    assert_eq!((LEGACY_SPURIOUS_ADDITIONS, EXACT_MISSING_LINES), (34, 358));
+    assert_eq!((FIXED_SPURIOUS_ADDITIONS, FIXED_MISSING_LINES), (0, 0));
+}
+
+#[test]
+fn tooltip_representation_production_has_no_corpus_literals() {
+    let production = include_str!("form_body.rs");
+    let start = production
+        .find("pub(super) fn parse_form_field_tooltip_representation")
+        .unwrap();
+    let end = production[start..]
+        .find("pub(super) fn parse_form_child_item_input_hint")
+        .map(|offset| start + offset)
+        .unwrap();
+    let implementation = &production[start..end];
+
+    for forbidden in [
+        "02023637-7868-4a5f-8576-835a76e0c9ba",
+        "bsp_test",
+        "ConfigDump",
+        "InputHint",
+        "ListChoiceMode",
+        "uuid",
+        "path",
+    ] {
+        assert!(
+            !implementation.contains(forbidden),
+            "production literal: {forbidden}"
+        );
+    }
 }
 
 #[test]

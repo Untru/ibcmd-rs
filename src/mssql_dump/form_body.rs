@@ -4098,6 +4098,7 @@ pub(super) fn parse_form_child_item_with_context(
         input_hint
     };
     let tooltip = parse_form_child_item_tooltip(wrapper, &fields);
+    let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
     Some(FormChildItem {
         tag,
         id: id.to_string(),
@@ -4548,23 +4549,7 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        tooltip_representation: if tag == "InputField"
-            && !tooltip.is_empty()
-            && ((!input_hint.is_empty()
-                && input_hint
-                    == parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
-                || parse_form_input_field_list_choice_mode(input_field_extended_options.as_deref())
-                    == Some(true))
-        {
-            Some("Button")
-        } else if tag == "CalendarField"
-            && !tooltip.is_empty()
-            && fields.get(50).map(|field| field.trim()) == Some("7")
-        {
-            Some("ShowBottom")
-        } else {
-            None
-        },
+        tooltip_representation,
         edit_mode: if matches!(
             tag,
             "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
@@ -7702,6 +7687,39 @@ pub(super) fn parse_form_child_item_tooltip(
         .unwrap_or_default()
 }
 
+pub(super) fn parse_form_field_tooltip_representation(
+    wrapper: &str,
+    tag: &str,
+    fields: &[&str],
+) -> Option<&'static str> {
+    if wrapper != "37"
+        || fields.len() != 59
+        || !matches!(
+            (fields.get(5).map(|field| field.trim()), tag),
+            (Some("1"), "LabelField")
+                | (Some("2"), "InputField")
+                | (Some("3"), "CheckBoxField")
+                | (Some("4"), "PictureField")
+                | (Some("5"), "RadioButtonField")
+                | (Some("8"), "CalendarField")
+        )
+    {
+        return None;
+    }
+
+    match fields.get(50)?.trim() {
+        "0" => None,
+        "1" => Some("None"),
+        "2" => Some("Balloon"),
+        "3" => Some("Button"),
+        "4" => Some("ShowAuto"),
+        "5" => Some("ShowTop"),
+        "7" => Some("ShowBottom"),
+        "8" => Some("ShowRight"),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_form_child_item_input_hint(
     wrapper: &str,
     fields: &[&str],
@@ -9813,6 +9831,16 @@ pub(super) fn format_form_child_item_xml(
             &item.tooltip,
             indent + 1,
         ));
+    }
+    if matches!(
+        item.tag,
+        "LabelField"
+            | "InputField"
+            | "CheckBoxField"
+            | "PictureField"
+            | "RadioButtonField"
+            | "CalendarField"
+    ) {
         if let Some(tooltip_representation) = item.tooltip_representation {
             xml.push_str(&format!(
                 "{tab}\t<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
