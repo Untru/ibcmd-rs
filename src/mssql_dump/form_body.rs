@@ -9709,7 +9709,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
-    if matches!(item.tag, "Button" | "LabelDecoration")
+    if item.tag == "Button"
         && let Some(group_horizontal_align) = item.group_horizontal_align
     {
         xml.push_str(&format!(
@@ -10198,8 +10198,8 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if !early_title_for_field && !usual_group_title_first && item.tag != "Table" {
-        if item.tag == "PictureDecoration" {
-            xml.push_str(&format_form_picture_decoration_header_xml(item, indent + 1));
+        if matches!(item.tag, "LabelDecoration" | "PictureDecoration") {
+            xml.push_str(&format_form_decoration_header_xml(item, indent + 1));
         } else {
             xml.push_str(&format_form_title_section(item, indent + 1));
         }
@@ -10304,6 +10304,7 @@ pub(super) fn format_form_child_item_xml(
         "InputField"
             | "PictureField"
             | "CalendarField"
+            | "LabelDecoration"
             | "PictureDecoration"
             | "UsualGroup"
             | "ButtonGroup"
@@ -10422,10 +10423,11 @@ pub(super) fn format_form_child_item_xml(
     xml
 }
 
-fn format_form_picture_decoration_header_xml(item: &FormChildItem, indent: usize) -> String {
-    if item.tag != "PictureDecoration" {
+fn format_form_decoration_header_xml(item: &FormChildItem, indent: usize) -> String {
+    if !matches!(item.tag, "LabelDecoration" | "PictureDecoration") {
         return String::new();
     }
+    let tab = "\t".repeat(indent);
     let mut xml = String::new();
     for property in FORM_DECORATION_HEADER_XML_ORDER {
         match property {
@@ -10445,6 +10447,14 @@ fn format_form_picture_decoration_header_xml(item: &FormChildItem, indent: usize
                     FormTooltipRepresentationXmlOrder::DecorationHeader,
                     indent,
                 ));
+            }
+            FormDecorationHeaderXmlProperty::GroupHorizontalAlign => {
+                if let Some(group_horizontal_align) = item.group_horizontal_align {
+                    xml.push_str(&format!(
+                        "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                        escape_xml_text(group_horizontal_align)
+                    ));
+                }
             }
         }
     }

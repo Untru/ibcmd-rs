@@ -63,12 +63,14 @@ pub(crate) enum FormDecorationHeaderXmlProperty {
     Title,
     ToolTip,
     ToolTipRepresentation,
+    GroupHorizontalAlign,
 }
 
 pub(crate) const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProperty] = &[
     FormDecorationHeaderXmlProperty::Title,
     FormDecorationHeaderXmlProperty::ToolTip,
     FormDecorationHeaderXmlProperty::ToolTipRepresentation,
+    FormDecorationHeaderXmlProperty::GroupHorizontalAlign,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -85,7 +87,8 @@ impl FormDecorationHeaderSchema {
         direct_discriminator: Option<&str>,
     ) -> Option<Self> {
         match (wrapper, field_count, item_tag, direct_discriminator) {
-            ("12", 36, "PictureDecoration", Some("1")) => Some(Self {
+            ("12", 36, "LabelDecoration", Some("0"))
+            | ("12", 36, "PictureDecoration", Some("1")) => Some(Self {
                 tooltip_slot: 8,
                 tooltip_representation_slot: 24,
             }),
@@ -105,6 +108,7 @@ impl FormDecorationHeaderSchema {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {
     UsualGroup,
+    LabelDecoration,
     PictureDecoration,
     LabelField,
     InputField,
@@ -120,6 +124,7 @@ impl FormTooltipRepresentationItemKind {
     fn from_xml_tag(tag: &str) -> Self {
         match tag {
             "UsualGroup" => Self::UsualGroup,
+            "LabelDecoration" => Self::LabelDecoration,
             "PictureDecoration" => Self::PictureDecoration,
             "LabelField" => Self::LabelField,
             "InputField" => Self::InputField,
@@ -193,7 +198,8 @@ pub(crate) fn form_tooltip_representation_xml_order(
         FormTooltipRepresentationItemKind::UsualGroup => {
             Some(FormTooltipRepresentationXmlOrder::UsualGroupHeader)
         }
-        FormTooltipRepresentationItemKind::PictureDecoration => {
+        FormTooltipRepresentationItemKind::LabelDecoration
+        | FormTooltipRepresentationItemKind::PictureDecoration => {
             Some(FormTooltipRepresentationXmlOrder::DecorationHeader)
         }
         FormTooltipRepresentationItemKind::LabelField
