@@ -333,6 +333,7 @@ struct DumpRowContext<'a> {
     metadata_object_refs: &'a BTreeMap<String, String>,
     configuration_root_object_refs: &'a BTreeMap<String, String>,
     recalculation_refs: &'a BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &'a CalculationRootRecalculationReferences,
     predefined_item_refs: &'a BTreeMap<String, String>,
     role_rights_object_refs: &'a BTreeMap<String, String>,
     metadata_order: &'a BTreeMap<String, usize>,
@@ -443,6 +444,11 @@ fn dump_table_rows_with_options(
         .collect::<BTreeMap<_, _>>();
     let recalculation_refs = if extract_metadata_xml {
         build_calculation_recalculation_reference_index(&metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
+    let root_recalculation_refs = if extract_metadata_xml {
+        build_calculation_root_recalculation_reference_index(&metadata_texts)
     } else {
         BTreeMap::new()
     };
@@ -633,6 +639,7 @@ fn dump_table_rows_with_options(
         metadata_object_refs: &metadata_object_refs,
         configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
+        root_recalculation_refs: &root_recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
@@ -1187,6 +1194,11 @@ fn dump_table_rows_streamed(
     } else {
         BTreeMap::new()
     };
+    let root_recalculation_refs = if extract_metadata_xml {
+        build_calculation_root_recalculation_reference_index(&index_metadata_texts)
+    } else {
+        BTreeMap::new()
+    };
 
     let module_text_paths = if extract_module_text {
         module_body_paths_from_texts(&write_index_rows, &index_metadata_texts)
@@ -1478,6 +1490,7 @@ fn dump_table_rows_streamed(
         metadata_object_refs: &metadata_object_refs,
         configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
+        root_recalculation_refs: &root_recalculation_refs,
         predefined_item_refs: &predefined_item_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
@@ -2072,6 +2085,7 @@ fn dump_table_row_bytes(
                 context.metadata_object_refs,
                 context.configuration_root_object_refs,
                 context.recalculation_refs,
+                context.root_recalculation_refs,
                 context.functional_option_refs,
                 context.form_refs,
                 context.template_refs,
@@ -2088,6 +2102,7 @@ fn dump_table_row_bytes(
                 context.metadata_object_refs,
                 context.configuration_root_object_refs,
                 context.recalculation_refs,
+                context.root_recalculation_refs,
                 context.functional_option_refs,
                 context.form_refs,
                 context.template_refs,
@@ -3932,6 +3947,7 @@ struct RegisterProperties {
     explanation: Vec<(String, String)>,
     standard_attributes: Vec<RegisterStandardAttribute>,
     child_objects: Vec<MetadataChildObject>,
+    recalculations: Vec<String>,
 }
 
 struct CalculationRegisterFormPair {
@@ -5580,6 +5596,7 @@ fn extract_metadata_source_xml_with_refs(
         object_refs,
         object_refs,
         &BTreeMap::new(),
+        &BTreeMap::new(),
         functional_option_refs,
         form_refs,
         template_refs,
@@ -5609,6 +5626,7 @@ fn extract_metadata_source_xml_with_type_collisions(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_21,
     )
 }
@@ -5622,6 +5640,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
     functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
@@ -5640,6 +5659,7 @@ fn extract_metadata_source_xml_with_recalculation_refs(
         metadata_object_refs,
         configuration_root_object_refs,
         recalculation_refs,
+        root_recalculation_refs,
         functional_option_refs,
         form_refs,
         template_refs,
@@ -5656,6 +5676,7 @@ fn extract_metadata_source_xml_from_text_row(
     metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
     functional_option_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
@@ -5972,7 +5993,7 @@ fn extract_metadata_source_xml_from_text_row(
         } else {
             object_refs
         };
-        let register = parse_register_properties_from_text(
+        let mut register = parse_register_properties_from_text(
             kind,
             text,
             uuid,
@@ -5981,6 +6002,13 @@ fn extract_metadata_source_xml_from_text_row(
             form_refs,
             source_version,
         )?;
+        if kind == "CalculationRegister" {
+            register.recalculations = parse_calculation_register_recalculation_child_names(
+                text,
+                header,
+                root_recalculation_refs,
+            )?;
+        }
         format_register_source_xml(kind, &header, &register, source_version).into_bytes()
     } else if kind == "Language" {
         let language = parse_language_properties_from_text(text, uuid)?;
@@ -8103,6 +8131,7 @@ fn parse_register_properties_from_text(
         explanation,
         standard_attributes,
         child_objects,
+        recalculations: Vec::new(),
     })
 }
 
@@ -8878,6 +8907,8 @@ const CALCULATION_REGISTER_GENERATED_TYPE_SLOTS: &[(usize, usize, &str, &str)] =
     (11, 12, "CalculationRegisterRecordKey", "RecordKey"),
     (13, 14, "RecalculationsManager", "Recalcs"),
 ];
+const CALCULATION_REGISTER_RECALCULATION_LIST_MARKER: &str = "274bf899-db0e-4df6-8ab5-67bf6371ec0b";
+type CalculationRootRecalculationReferences = BTreeMap<String, Vec<(String, String)>>;
 
 fn parse_exact_calculation_register_generated_types(
     fields: &[&str],
@@ -8904,6 +8935,204 @@ fn parse_exact_calculation_register_generated_types(
     }
 
     Some(Some(entries))
+}
+
+fn parse_exact_calculation_register_recalculation_uuids(
+    text: &str,
+    expected_header: &MetadataHeader,
+) -> Option<Option<Vec<String>>> {
+    let fields = metadata_object_fields(text)?;
+    if !validate_exact_wrapped_register_owner_layout(&fields, expected_header, "21", 33, 15)? {
+        return Some(None);
+    }
+
+    let Some(root_fields) = split_1c_braced_fields(text, 0) else {
+        return Some(Some(Vec::new()));
+    };
+    let owner_indexes = root_fields
+        .iter()
+        .enumerate()
+        .filter_map(|(index, field)| {
+            let candidate = split_1c_braced_fields(field.trim(), 0)?;
+            validate_exact_wrapped_register_owner_layout(&candidate, expected_header, "21", 33, 15)
+                .is_some_and(|is_exact| is_exact)
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let [owner_index] = owner_indexes.as_slice() else {
+        return Some(Some(Vec::new()));
+    };
+    let collections = root_fields
+        .iter()
+        .enumerate()
+        .filter_map(|(index, field)| {
+            if index <= *owner_index {
+                return None;
+            }
+            let collection = split_1c_braced_fields(field.trim(), 0)?;
+            (collection.first().map(|field| field.trim())
+                == Some(CALCULATION_REGISTER_RECALCULATION_LIST_MARKER))
+            .then_some(collection)
+        })
+        .collect::<Vec<_>>();
+    let [collection] = collections.as_slice() else {
+        return Some(Some(Vec::new()));
+    };
+    let Some(count) = collection
+        .get(1)
+        .and_then(|field| parse_information_register_usize(field))
+    else {
+        return Some(Some(Vec::new()));
+    };
+    if collection.first().map(|field| field.trim())
+        != Some(CALCULATION_REGISTER_RECALCULATION_LIST_MARKER)
+        || collection.len() != count.saturating_add(2)
+    {
+        return Some(Some(Vec::new()));
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut uuids = Vec::with_capacity(count);
+    for field in collection.iter().skip(2) {
+        let Some(uuid) = parse_information_register_non_zero_uuid(field) else {
+            return Some(Some(Vec::new()));
+        };
+        if !seen.insert(uuid.to_ascii_lowercase()) {
+            return Some(Some(Vec::new()));
+        }
+        uuids.push(uuid);
+    }
+    Some(Some(uuids))
+}
+
+fn parse_calculation_register_recalculation_child_names(
+    text: &str,
+    expected_header: &MetadataHeader,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
+) -> Option<Vec<String>> {
+    let Some(uuids) = parse_exact_calculation_register_recalculation_uuids(text, expected_header)?
+    else {
+        return Some(Vec::new());
+    };
+
+    let mut owners = root_recalculation_refs
+        .iter()
+        .filter(|(uuid, _)| uuid.eq_ignore_ascii_case(&expected_header.uuid));
+    let Some((_, references)) = owners.next() else {
+        return Some(Vec::new());
+    };
+    if owners.next().is_some()
+        || references.len() != uuids.len()
+        || !references
+            .iter()
+            .zip(&uuids)
+            .all(|((reference_uuid, _), uuid)| reference_uuid.eq_ignore_ascii_case(uuid))
+    {
+        return Some(Vec::new());
+    }
+    Some(references.iter().map(|(_, name)| name.clone()).collect())
+}
+
+fn build_calculation_root_recalculation_reference_index(
+    rows: &[MetadataTextRow],
+) -> CalculationRootRecalculationReferences {
+    let mut rows_by_uuid = BTreeMap::<String, Vec<&MetadataTextRow>>::new();
+    for row in rows {
+        rows_by_uuid
+            .entry(row.file_name.to_ascii_lowercase())
+            .or_default()
+            .push(row);
+    }
+
+    let calculation_owners = rows
+        .iter()
+        .filter_map(|row| match (row.kind.as_deref(), row.header.as_ref()) {
+            (Some("CalculationRegister"), Some(header)) => Some((row, header)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let mut declaring_owners_by_child = BTreeMap::<String, BTreeSet<String>>::new();
+    for (row, owner) in &calculation_owners {
+        for uuid in calculation_register_recalculation_uuids_from_text(&row.text) {
+            declaring_owners_by_child
+                .entry(uuid.to_ascii_lowercase())
+                .or_default()
+                .insert(owner.uuid.to_ascii_lowercase());
+        }
+    }
+
+    let mut candidates = Vec::<(String, Vec<(String, String)>)>::new();
+    for (row, owner) in calculation_owners {
+        if rows_by_uuid
+            .get(&owner.uuid.to_ascii_lowercase())
+            .is_none_or(|owner_rows| owner_rows.len() != 1)
+        {
+            continue;
+        }
+        let Some(declared) =
+            parse_exact_calculation_register_recalculation_uuids(&row.text, owner).flatten()
+        else {
+            continue;
+        };
+        let resolved = declared
+            .into_iter()
+            .map(|uuid| {
+                let owner_ids = declaring_owners_by_child.get(&uuid.to_ascii_lowercase())?;
+                if owner_ids.len() != 1 || !owner_ids.contains(&owner.uuid.to_ascii_lowercase()) {
+                    return None;
+                }
+                let [recalculation_row] = rows_by_uuid.get(&uuid.to_ascii_lowercase())?.as_slice()
+                else {
+                    return None;
+                };
+                let recalculation = recalculation_row.header.as_ref()?;
+                if recalculation_row.object_code != Some(4)
+                    || !recalculation_row.file_name.eq_ignore_ascii_case(&uuid)
+                    || !recalculation.uuid.eq_ignore_ascii_case(&uuid)
+                    || recalculation_object_fields(
+                        &recalculation_row.text,
+                        &recalculation_row.file_name,
+                    )
+                    .is_none()
+                {
+                    return None;
+                }
+                Some((uuid, recalculation.name.clone()))
+            })
+            .collect::<Option<Vec<_>>>();
+        if let Some(resolved) = resolved {
+            candidates.push((owner.uuid.to_ascii_lowercase(), resolved));
+        }
+    }
+
+    let mut owners_by_path = BTreeMap::<(String, String), Vec<(String, String)>>::new();
+    for (owner_uuid, references) in &candidates {
+        let Some(owner) = rows_by_uuid
+            .get(owner_uuid)
+            .and_then(|rows| rows.iter().find_map(|row| row.header.as_ref()))
+        else {
+            continue;
+        };
+        for (child_uuid, child_name) in references {
+            owners_by_path
+                .entry((
+                    sanitize_source_path_segment(&owner.name).to_lowercase(),
+                    sanitize_source_path_segment(child_name).to_lowercase(),
+                ))
+                .or_default()
+                .push((owner_uuid.clone(), child_uuid.to_ascii_lowercase()));
+        }
+    }
+    let invalid_owners = owners_by_path
+        .values()
+        .filter(|entries| entries.iter().collect::<BTreeSet<_>>().len() > 1)
+        .flat_map(|entries| entries.iter().map(|(owner_uuid, _)| owner_uuid.clone()))
+        .collect::<BTreeSet<_>>();
+
+    candidates
+        .into_iter()
+        .filter(|(owner_uuid, _)| !invalid_owners.contains(owner_uuid))
+        .collect()
 }
 
 fn push_accounting_register_generated_type_entries(
@@ -18100,12 +18329,18 @@ fn format_register_source_xml(
             xml.insert_str(index, &properties);
         }
     }
-    if register.child_objects.is_empty() {
+    if register.child_objects.is_empty() && register.recalculations.is_empty() {
         return xml;
     }
     let mut child_objects = String::new();
     for child in &register.child_objects {
         push_metadata_child_object_xml(&mut child_objects, child);
+    }
+    for recalculation in &register.recalculations {
+        child_objects.push_str(&format!(
+            "\t\t\t<Recalculation>{}</Recalculation>\r\n",
+            escape_xml_element_text(recalculation)
+        ));
     }
     insert_metadata_child_objects_xml(&mut xml, kind, &child_objects);
     xml

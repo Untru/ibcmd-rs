@@ -24712,6 +24712,7 @@ fn routes_and_serializes_calculation_register_recalculation() {
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_20,
     )
     .unwrap();
@@ -24768,6 +24769,7 @@ fn undeclared_code4_continues_through_common_picture_serializer() {
         picture_uuid,
         &BTreeMap::new(),
         &BTreeSet::new(),
+        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -31024,6 +31026,7 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
         &BTreeSet::new(),
         object_refs,
         metadata_object_refs,
+        &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -42284,6 +42287,87 @@ impl CalculationRegisterPresentationsFixture {
     fn metadata_row(&self) -> MetadataTextRow {
         metadata_text_row_from_text(CALCULATION_PRESENTATIONS_TEST_UUID, self.raw()).unwrap()
     }
+
+    fn raw_with_recalculation_collections(&self, collections: &[String]) -> String {
+        let suffix = collections
+            .iter()
+            .map(|collection| format!(",{collection}"))
+            .collect::<String>();
+        format!("{{1,{{{}}}{suffix}}}", self.fields.join(","))
+    }
+
+    fn metadata_row_with_recalculation_collections(
+        &self,
+        collections: &[String],
+    ) -> MetadataTextRow {
+        metadata_text_row_from_text(
+            CALCULATION_PRESENTATIONS_TEST_UUID,
+            self.raw_with_recalculation_collections(collections),
+        )
+        .unwrap()
+    }
+}
+
+fn calculation_recalculation_collection(count: &str, members: &[&str]) -> String {
+    let members = members
+        .iter()
+        .map(|member| format!(",{member}"))
+        .collect::<String>();
+    format!("{{{CALCULATION_REGISTER_RECALCULATION_LIST_MARKER},{count}{members}}}")
+}
+
+fn calculation_recalculation_row(uuid: &str, name: &str) -> MetadataTextRow {
+    let text = format!(
+        "{{1,\r\n\
+{{4,55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
+66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\
+77777777-7777-4777-8777-777777777771,77777777-7777-4777-8777-777777777772,\r\n\
+{{0,\r\n\
+{{3,\r\n\
+{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n\
+}},1}},1,\r\n\
+{{{RECALCULATION_DIMENSION_LIST_MARKER},0}}\r\n\
+}}"
+    );
+    let row = metadata_text_row_from_text(uuid, text).unwrap();
+    assert!(recalculation_object_fields(&row.text, uuid).is_some());
+    row
+}
+
+fn calculation_root_xml_from_rows(rows: &[MetadataTextRow], owner_uuid: &str) -> Option<String> {
+    let owner = rows
+        .iter()
+        .find(|row| row.file_name.eq_ignore_ascii_case(owner_uuid))?;
+    let type_indexes = build_metadata_type_indexes_from_texts(rows);
+    let recalculation_refs = build_calculation_recalculation_reference_index(rows);
+    let root_recalculation_refs = build_calculation_root_recalculation_reference_index(rows);
+    extract_metadata_source_xml_from_text_row(
+        owner,
+        &type_indexes.references,
+        &type_indexes.reference_collisions,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &recalculation_refs,
+        &root_recalculation_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .and_then(|source| String::from_utf8(source.xml).ok())
+}
+
+fn clone_metadata_text_row(row: &MetadataTextRow) -> MetadataTextRow {
+    MetadataTextRow {
+        file_name: row.file_name.clone(),
+        text: row.text.clone(),
+        object_code: row.object_code,
+        header: row.header.clone(),
+        kind: row.kind.clone(),
+        folder: row.folder,
+    }
 }
 
 #[test]
@@ -45016,6 +45100,546 @@ fn calculation_generated_type_vector_has_exact_property_target_and_no_corpus_lit
         "7f0b707e-7684-4eed-b7e3-c8a25b51db87",
         "bac82510-0f81-4d0b-957e-55243c4938f7",
         "_ДемоОсновныеНачисления",
+        "Начисления.xml",
+        "Удержания.xml",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+#[test]
+fn calculation_recalculation_root_emits_exact_ordered_escaped_references() {
+    let first_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let second_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let collection = calculation_recalculation_collection("2", &[second_uuid, first_uuid]);
+    let owner = CalculationRegisterPresentationsFixture::exact()
+        .metadata_row_with_recalculation_collections(&[collection]);
+    let rows = vec![
+        owner,
+        calculation_recalculation_row(first_uuid, "Alpha"),
+        calculation_recalculation_row(second_uuid, "Zulu&amp"),
+    ];
+
+    let root_refs = build_calculation_root_recalculation_reference_index(&rows);
+    assert_eq!(
+        root_refs
+            .get(&CALCULATION_PRESENTATIONS_TEST_UUID.to_ascii_lowercase())
+            .cloned(),
+        Some(vec![
+            (second_uuid.to_string(), "Zulu&amp".to_string()),
+            (first_uuid.to_string(), "Alpha".to_string()),
+        ])
+    );
+    let xml = calculation_root_xml_from_rows(&rows, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let zulu = "<Recalculation>Zulu&amp;amp</Recalculation>";
+    let alpha = "<Recalculation>Alpha</Recalculation>";
+    assert_eq!(xml.matches("<Recalculation>").count(), 2);
+    assert!(xml.find(zulu).unwrap() < xml.find(alpha).unwrap());
+
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &rows[0].text,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    register.recalculations = vec!["Alpha".to_string()];
+    register.child_objects.push(MetadataChildObject {
+        tag: "Attribute",
+        header: MetadataHeader {
+            uuid: "cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_string(),
+            name: "Data".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        },
+        generated_types: Vec::new(),
+        value_types: Vec::new(),
+        emit_empty_type: true,
+        properties: None,
+        tabular_section_properties: None,
+        child_objects: Vec::new(),
+    });
+    let header = rows[0].header.as_ref().unwrap();
+    let mut ordered = format_register_source_xml(
+        "CalculationRegister",
+        header,
+        &register,
+        InfobaseConfigSourceVersion::V2_20,
+    );
+    insert_metadata_child_objects_xml(
+        &mut ordered,
+        "CalculationRegister",
+        "\t\t\t<Form>List</Form>\r\n",
+    );
+    assert!(
+        ordered.find("</Attribute>").unwrap()
+            < ordered
+                .find("<Recalculation>Alpha</Recalculation>")
+                .unwrap()
+    );
+    assert!(
+        ordered
+            .find("<Recalculation>Alpha</Recalculation>")
+            .unwrap()
+            < ordered.find("<Form>List</Form>").unwrap()
+    );
+}
+
+#[test]
+fn calculation_recalculation_root_collection_is_strict_and_atomic() {
+    let uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let duplicate_upper = uuid.to_ascii_uppercase();
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let cases = vec![
+        ("missing", Vec::new()),
+        (
+            "multiple",
+            vec![
+                calculation_recalculation_collection("1", &[uuid]),
+                calculation_recalculation_collection("1", &[uuid]),
+            ],
+        ),
+        (
+            "bad-count",
+            vec![calculation_recalculation_collection("value", &[uuid])],
+        ),
+        (
+            "negative-count",
+            vec![calculation_recalculation_collection("-1", &[uuid])],
+        ),
+        (
+            "overflow-count",
+            vec![calculation_recalculation_collection(
+                "999999999999999999999999999999",
+                &[uuid],
+            )],
+        ),
+        (
+            "missing-member",
+            vec![calculation_recalculation_collection("1", &[])],
+        ),
+        (
+            "trailing-member",
+            vec![calculation_recalculation_collection("0", &[uuid])],
+        ),
+        (
+            "arity",
+            vec![calculation_recalculation_collection("1", &[uuid, uuid])],
+        ),
+        (
+            "malformed-uuid",
+            vec![calculation_recalculation_collection("1", &["not-a-uuid"])],
+        ),
+        (
+            "zero-uuid",
+            vec![calculation_recalculation_collection(
+                "1",
+                &["00000000-0000-0000-0000-000000000000"],
+            )],
+        ),
+        (
+            "case-duplicate",
+            vec![calculation_recalculation_collection(
+                "2",
+                &[uuid, &duplicate_upper],
+            )],
+        ),
+    ];
+    for (case, collections) in cases {
+        let owner = fixture.metadata_row_with_recalculation_collections(&collections);
+        let parsed = parse_exact_calculation_register_recalculation_uuids(
+            &owner.text,
+            owner.header.as_ref().unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(parsed.is_empty(), "accepted {case}: {parsed:?}");
+        let rows = vec![owner, calculation_recalculation_row(uuid, "BaseData")];
+        let xml =
+            calculation_root_xml_from_rows(&rows, CALCULATION_PRESENTATIONS_TEST_UUID).expect(case);
+        assert!(!xml.contains("<Recalculation>"), "emitted {case}");
+    }
+
+    let zero = calculation_recalculation_collection("0", &[]);
+    let owner = fixture.metadata_row_with_recalculation_collections(&[zero]);
+    assert_eq!(
+        parse_exact_calculation_register_recalculation_uuids(
+            &owner.text,
+            owner.header.as_ref().unwrap()
+        ),
+        Some(Some(Vec::new()))
+    );
+
+    let decoy_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let decoy = calculation_recalculation_collection("1", &[decoy_uuid]);
+    let real = calculation_recalculation_collection("1", &[uuid]);
+    let mut nested = fixture.clone();
+    nested.fields[15] = nested.fields[15].replacen(",\"\",0,0", &format!(",\"{decoy}\",0,0"), 1);
+    let nested_owner = nested.metadata_row_with_recalculation_collections(&[real]);
+    assert_eq!(
+        parse_exact_calculation_register_recalculation_uuids(
+            &nested_owner.text,
+            nested_owner.header.as_ref().unwrap(),
+        ),
+        Some(Some(vec![uuid.to_string()])),
+        "nested marker affected the root-level collection"
+    );
+    assert_eq!(&nested.fields[30..=32], &["{0}", "{0}", "{0}"]);
+}
+
+#[test]
+fn calculation_recalculation_root_requires_all_structural_child_evidence() {
+    let first_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let second_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let collection = calculation_recalculation_collection("2", &[first_uuid, second_uuid]);
+    let owner = CalculationRegisterPresentationsFixture::exact()
+        .metadata_row_with_recalculation_collections(&[collection]);
+    let first = calculation_recalculation_row(first_uuid, "First");
+    let second = calculation_recalculation_row(second_uuid, "Second");
+
+    for (case, rows) in [
+        (
+            "missing",
+            vec![
+                clone_metadata_text_row(&owner),
+                clone_metadata_text_row(&first),
+            ],
+        ),
+        {
+            let mut wrong_code = clone_metadata_text_row(&second);
+            wrong_code.object_code = Some(5);
+            (
+                "wrong-code",
+                vec![
+                    clone_metadata_text_row(&owner),
+                    clone_metadata_text_row(&first),
+                    wrong_code,
+                ],
+            )
+        },
+        {
+            let mut malformed = clone_metadata_text_row(&second);
+            malformed.text = malformed
+                .text
+                .replace(RECALCULATION_DIMENSION_LIST_MARKER, "bad-marker");
+            (
+                "malformed-row",
+                vec![
+                    clone_metadata_text_row(&owner),
+                    clone_metadata_text_row(&first),
+                    malformed,
+                ],
+            )
+        },
+        {
+            let mut duplicate = clone_metadata_text_row(&second);
+            duplicate.file_name = second_uuid.to_ascii_uppercase();
+            (
+                "duplicate-row",
+                vec![
+                    clone_metadata_text_row(&owner),
+                    clone_metadata_text_row(&first),
+                    clone_metadata_text_row(&second),
+                    duplicate,
+                ],
+            )
+        },
+    ] {
+        let xml =
+            calculation_root_xml_from_rows(&rows, CALCULATION_PRESENTATIONS_TEST_UUID).expect(case);
+        assert!(
+            !xml.contains("<Recalculation>"),
+            "partial output for {case}"
+        );
+    }
+
+    let picture = MetadataTextRow {
+        file_name: second_uuid.to_string(),
+        text: format!("{{1,{{4,{{3,{{1,0,{second_uuid}}},\"Picture\",{{0}},\"\"}},1,0}}}}"),
+        object_code: Some(4),
+        header: Some(MetadataHeader {
+            uuid: second_uuid.to_string(),
+            name: "Picture".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: None,
+        folder: None,
+    };
+    let invalid_rows = vec![
+        clone_metadata_text_row(&owner),
+        clone_metadata_text_row(&first),
+        picture,
+    ];
+    assert!(
+        build_calculation_recalculation_reference_index(&invalid_rows).contains_key(second_uuid),
+        "provisional standalone route changed"
+    );
+    assert!(
+        build_calculation_root_recalculation_reference_index(&invalid_rows).is_empty(),
+        "invalid code4 entered root sidecar"
+    );
+    assert!(
+        !calculation_root_xml_from_rows(&invalid_rows, CALCULATION_PRESENTATIONS_TEST_UUID)
+            .unwrap()
+            .contains("<Recalculation>")
+    );
+}
+
+#[test]
+fn calculation_recalculation_root_rejects_owner_and_unicode_path_collisions() {
+    let first_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let second_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let same_owner = fixture.metadata_row_with_recalculation_collections(&[
+        calculation_recalculation_collection("2", &[first_uuid, second_uuid]),
+    ]);
+    let same_path_rows = vec![
+        same_owner,
+        calculation_recalculation_row(first_uuid, "Расчет"),
+        calculation_recalculation_row(second_uuid, "РАСЧЕТ"),
+    ];
+    assert!(build_calculation_root_recalculation_reference_index(&same_path_rows).is_empty());
+
+    let shared = calculation_recalculation_collection("1", &[first_uuid]);
+    let first_owner =
+        fixture.metadata_row_with_recalculation_collections(std::slice::from_ref(&shared));
+    let mut other_fixture = fixture.clone();
+    let other_owner_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    other_fixture.fields[15] = register_owner_header(other_owner_uuid, "OtherPayroll");
+    let other_owner = metadata_text_row_from_text(
+        other_owner_uuid,
+        other_fixture.raw_with_recalculation_collections(&[shared]),
+    )
+    .unwrap();
+    let cross_owner_rows = vec![
+        first_owner,
+        other_owner,
+        calculation_recalculation_row(first_uuid, "BaseData"),
+    ];
+    assert!(build_calculation_root_recalculation_reference_index(&cross_owner_rows).is_empty());
+
+    let mut unicode_first_fixture = fixture.clone();
+    unicode_first_fixture.fields[15] =
+        register_owner_header(CALCULATION_PRESENTATIONS_TEST_UUID, "Владелец");
+    let unicode_first = unicode_first_fixture.metadata_row_with_recalculation_collections(&[
+        calculation_recalculation_collection("1", &[first_uuid]),
+    ]);
+    let mut unicode_second_fixture = fixture;
+    unicode_second_fixture.fields[15] = register_owner_header(other_owner_uuid, "ВЛАДЕЛЕЦ");
+    let unicode_second = metadata_text_row_from_text(
+        other_owner_uuid,
+        unicode_second_fixture.raw_with_recalculation_collections(&[
+            calculation_recalculation_collection("1", &[second_uuid]),
+        ]),
+    )
+    .unwrap();
+    let cross_path_rows = vec![
+        unicode_first,
+        unicode_second,
+        calculation_recalculation_row(first_uuid, "Данные"),
+        calculation_recalculation_row(second_uuid, "ДАННЫЕ"),
+    ];
+    assert!(build_calculation_root_recalculation_reference_index(&cross_path_rows).is_empty());
+}
+
+#[test]
+fn calculation_recalculation_root_is_exact_only_and_selected_evidence_is_atomic() {
+    let child_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let collection = calculation_recalculation_collection("1", &[child_uuid]);
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let exact_owner =
+        fixture.metadata_row_with_recalculation_collections(std::slice::from_ref(&collection));
+    let child = calculation_recalculation_row(child_uuid, "BaseData");
+
+    let needs = selected_metadata_source_reference_index_needs(std::slice::from_ref(&exact_owner))
+        .expect("selected CalculationRegister needs");
+    assert!(needs.object_refs);
+    assert!(
+        selected_metadata_direct_reference_file_names(std::slice::from_ref(&exact_owner))
+            .contains(child_uuid)
+    );
+    assert!(
+        !calculation_root_xml_from_rows(
+            std::slice::from_ref(&exact_owner),
+            CALCULATION_PRESENTATIONS_TEST_UUID,
+        )
+        .unwrap()
+        .contains("<Recalculation>")
+    );
+    assert!(
+        calculation_root_xml_from_rows(
+            &[
+                clone_metadata_text_row(&exact_owner),
+                clone_metadata_text_row(&child),
+            ],
+            CALCULATION_PRESENTATIONS_TEST_UUID,
+        )
+        .unwrap()
+        .contains("<Recalculation>BaseData</Recalculation>")
+    );
+
+    for delta in [-1isize, 1] {
+        let mut nonexact = fixture.clone();
+        if delta < 0 {
+            nonexact.fields.pop();
+        } else {
+            nonexact.fields.push("0".to_string());
+        }
+        let owner =
+            nonexact.metadata_row_with_recalculation_collections(std::slice::from_ref(&collection));
+        assert!(
+            !calculation_root_xml_from_rows(
+                &[owner, clone_metadata_text_row(&child)],
+                CALCULATION_PRESENTATIONS_TEST_UUID
+            )
+            .unwrap()
+            .contains("<Recalculation>")
+        );
+    }
+}
+
+#[test]
+fn calculation_recalculation_root_leaves_other_register_families_unchanged() {
+    let child_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let collection = calculation_recalculation_collection("1", &[child_uuid]);
+    let child = calculation_recalculation_row(child_uuid, "BaseData");
+
+    let accounting_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    let mut accounting = vec!["21".to_string()];
+    accounting.extend(register_generated_type_fields(14));
+    accounting.push(register_owner_header(accounting_uuid, "Ledger"));
+    accounting.extend([
+        "1".to_string(),
+        "1".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+    ]);
+    assert_eq!(accounting.len(), 30);
+    let accounting_row = metadata_text_row_from_text(
+        accounting_uuid,
+        format!("{{1,{{{}}},{collection}}}", accounting.join(",")),
+    )
+    .unwrap();
+    assert_eq!(accounting_row.kind.as_deref(), Some("AccountingRegister"));
+    let accounting_xml = calculation_root_xml_from_rows(
+        &[accounting_row, clone_metadata_text_row(&child)],
+        accounting_uuid,
+    )
+    .unwrap();
+    assert!(!accounting_xml.contains("<Recalculation>"));
+    let accounting_baseline = metadata_text_row_from_text(
+        accounting_uuid,
+        format!("{{1,{{{}}}}}", accounting.join(",")),
+    )
+    .unwrap();
+    assert_eq!(
+        accounting_xml,
+        calculation_root_xml_from_rows(
+            &[accounting_baseline, clone_metadata_text_row(&child)],
+            accounting_uuid,
+        )
+        .unwrap()
+    );
+
+    let accumulation = AccumulationRegisterTotalsFixture::exact("0");
+    let accumulation_row = metadata_text_row_from_text(
+        ACCUMULATION_TOTALS_TEST_UUID,
+        format!("{{1,{{{}}},{collection}}}", accumulation.fields.join(",")),
+    )
+    .unwrap();
+    assert_eq!(
+        accumulation_row.kind.as_deref(),
+        Some("AccumulationRegister")
+    );
+    let accumulation_xml = calculation_root_xml_from_rows(
+        &[accumulation_row, clone_metadata_text_row(&child)],
+        ACCUMULATION_TOTALS_TEST_UUID,
+    )
+    .unwrap();
+    assert!(!accumulation_xml.contains("<Recalculation>"));
+    let accumulation_baseline =
+        metadata_text_row_from_text(ACCUMULATION_TOTALS_TEST_UUID, accumulation.raw()).unwrap();
+    assert_eq!(
+        accumulation_xml,
+        calculation_root_xml_from_rows(
+            &[accumulation_baseline, child],
+            ACCUMULATION_TOTALS_TEST_UUID,
+        )
+        .unwrap()
+    );
+}
+
+#[test]
+fn calculation_recalculation_root_has_one_line_target_and_no_corpus_literals() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let owner = fixture.metadata_row();
+    let mut register = parse_register_properties_from_text(
+        "CalculationRegister",
+        &owner.text,
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    register.child_objects.push(MetadataChildObject {
+        tag: "Attribute",
+        header: MetadataHeader {
+            uuid: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string(),
+            name: "Data".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        },
+        generated_types: Vec::new(),
+        value_types: Vec::new(),
+        emit_empty_type: true,
+        properties: None,
+        tabular_section_properties: None,
+        child_objects: Vec::new(),
+    });
+    let legacy = format_register_source_xml(
+        "CalculationRegister",
+        owner.header.as_ref().unwrap(),
+        &register,
+        InfobaseConfigSourceVersion::V2_20,
+    );
+    register.recalculations = vec!["BaseData".to_string()];
+    let exact = format_register_source_xml(
+        "CalculationRegister",
+        owner.header.as_ref().unwrap(),
+        &register,
+        InfobaseConfigSourceVersion::V2_20,
+    );
+    assert_eq!(exact.matches("<Recalculation>").count(), 1);
+    assert_eq!(legacy.matches("<Recalculation>").count(), 0);
+    let without_target = exact.replacen("\t\t\t<Recalculation>BaseData</Recalculation>\r\n", "", 1);
+    assert_eq!(without_target, legacy);
+    assert_eq!(exact.lines().count(), without_target.lines().count() + 1);
+
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "8215bfd6-dfdd-4bea-b079-3812893a1c4e",
+        "a6756af4-964f-400d-97d4-0bd3f5916693",
+        "_ДемоОсновныеНачисления",
+        "ПерерасчетОсновныхНачислений",
         "Начисления.xml",
         "Удержания.xml",
     ] {
