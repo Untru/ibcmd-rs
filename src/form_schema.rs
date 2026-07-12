@@ -59,8 +59,53 @@ pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlPro
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormDecorationHeaderXmlProperty {
+    Title,
+    ToolTip,
+    ToolTipRepresentation,
+}
+
+pub(crate) const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProperty] = &[
+    FormDecorationHeaderXmlProperty::Title,
+    FormDecorationHeaderXmlProperty::ToolTip,
+    FormDecorationHeaderXmlProperty::ToolTipRepresentation,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormDecorationHeaderSchema {
+    tooltip_slot: usize,
+    tooltip_representation_slot: usize,
+}
+
+impl FormDecorationHeaderSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+    ) -> Option<Self> {
+        match (wrapper, field_count, item_tag, direct_discriminator) {
+            ("12", 36, "PictureDecoration", Some("1")) => Some(Self {
+                tooltip_slot: 8,
+                tooltip_representation_slot: 24,
+            }),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn tooltip_slot(self) -> usize {
+        self.tooltip_slot
+    }
+
+    pub(crate) const fn tooltip_representation_slot(self) -> usize {
+        self.tooltip_representation_slot
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {
     UsualGroup,
+    PictureDecoration,
     LabelField,
     InputField,
     CheckBoxField,
@@ -75,6 +120,7 @@ impl FormTooltipRepresentationItemKind {
     fn from_xml_tag(tag: &str) -> Self {
         match tag {
             "UsualGroup" => Self::UsualGroup,
+            "PictureDecoration" => Self::PictureDecoration,
             "LabelField" => Self::LabelField,
             "InputField" => Self::InputField,
             "CheckBoxField" => Self::CheckBoxField,
@@ -90,6 +136,7 @@ impl FormTooltipRepresentationItemKind {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTooltipRepresentationXmlOrder {
     UsualGroupHeader,
+    DecorationHeader,
     FieldProperties,
     AfterTitle,
 }
@@ -111,6 +158,16 @@ pub(crate) fn form_tooltip_representation_schema(
     item_tag: &str,
     direct_discriminator: Option<&str>,
 ) -> Option<FormTooltipRepresentationSchema> {
+    if let Some(schema) = FormDecorationHeaderSchema::from_raw_layout(
+        wrapper,
+        field_count,
+        item_tag,
+        direct_discriminator,
+    ) {
+        return Some(FormTooltipRepresentationSchema {
+            slot: schema.tooltip_representation_slot(),
+        });
+    }
     let item_kind = FormTooltipRepresentationItemKind::from_xml_tag(item_tag);
     let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
         ("22", 30, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 23,
@@ -135,6 +192,9 @@ pub(crate) fn form_tooltip_representation_xml_order(
     match FormTooltipRepresentationItemKind::from_xml_tag(item_tag) {
         FormTooltipRepresentationItemKind::UsualGroup => {
             Some(FormTooltipRepresentationXmlOrder::UsualGroupHeader)
+        }
+        FormTooltipRepresentationItemKind::PictureDecoration => {
+            Some(FormTooltipRepresentationXmlOrder::DecorationHeader)
         }
         FormTooltipRepresentationItemKind::LabelField
         | FormTooltipRepresentationItemKind::InputField

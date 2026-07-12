@@ -1,6 +1,7 @@
 use super::*;
 use crate::form_schema::{
-    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER,
+    FORM_DECORATION_HEADER_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_TABLE_XML_ORDER,
+    FORM_USUAL_GROUP_HEADER_XML_ORDER, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
     FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
     FormInputFieldXmlProperty, FormLabelFieldOptionSlot as LabelFieldSlot,
     FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
@@ -4100,7 +4101,7 @@ pub(super) fn parse_form_child_item_with_context(
     } else {
         input_hint
     };
-    let tooltip = parse_form_child_item_tooltip(wrapper, &fields);
+    let tooltip = parse_form_child_item_tooltip(tag, wrapper, &fields);
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
     Some(FormChildItem {
         tag,
@@ -7670,19 +7671,28 @@ pub(super) fn parse_form_child_item_title(
 }
 
 pub(super) fn parse_form_child_item_tooltip(
+    tag: &str,
     wrapper: &str,
     fields: &[&str],
 ) -> Vec<(String, String)> {
+    let decoration_tooltip_slot = FormDecorationHeaderSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        tag,
+        fields.get(5).map(|field| field.trim()),
+    )
+    .map(|schema| schema.tooltip_slot());
     let indexes: &[usize] = match wrapper {
         "22" => &[8],
         "37" | "48" => &[10, 11],
         _ => &[],
     };
-    indexes
-        .iter()
+    decoration_tooltip_slot
+        .into_iter()
+        .chain(indexes.iter().copied())
         .find_map(|index| {
             let values = fields
-                .get(*index)
+                .get(index)
                 .map(|field| parse_form_localized_strings(field))
                 .unwrap_or_default();
             (!values.is_empty()).then_some(values)
@@ -10188,7 +10198,11 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if !early_title_for_field && !usual_group_title_first && item.tag != "Table" {
-        xml.push_str(&format_form_title_section(item, indent + 1));
+        if item.tag == "PictureDecoration" {
+            xml.push_str(&format_form_picture_decoration_header_xml(item, indent + 1));
+        } else {
+            xml.push_str(&format_form_title_section(item, indent + 1));
+        }
         if item.tag == "LabelDecoration" && item.hiperlink == Some(true) {
             xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
         }
@@ -10287,7 +10301,12 @@ pub(super) fn format_form_child_item_xml(
     }
     if !matches!(
         item.tag,
-        "InputField" | "PictureField" | "CalendarField" | "UsualGroup" | "ButtonGroup"
+        "InputField"
+            | "PictureField"
+            | "CalendarField"
+            | "PictureDecoration"
+            | "UsualGroup"
+            | "ButtonGroup"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -10400,6 +10419,35 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
+    xml
+}
+
+fn format_form_picture_decoration_header_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "PictureDecoration" {
+        return String::new();
+    }
+    let mut xml = String::new();
+    for property in FORM_DECORATION_HEADER_XML_ORDER {
+        match property {
+            FormDecorationHeaderXmlProperty::Title => {
+                xml.push_str(&format_form_title_section(item, indent));
+            }
+            FormDecorationHeaderXmlProperty::ToolTip => {
+                xml.push_str(&format_form_localized_section(
+                    "ToolTip",
+                    &item.tooltip,
+                    indent,
+                ));
+            }
+            FormDecorationHeaderXmlProperty::ToolTipRepresentation => {
+                xml.push_str(&format_form_tooltip_representation_xml(
+                    item,
+                    FormTooltipRepresentationXmlOrder::DecorationHeader,
+                    indent,
+                ));
+            }
+        }
+    }
     xml
 }
 
