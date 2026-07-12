@@ -1,14 +1,16 @@
 use super::*;
 use crate::form_schema::{
     FORM_DECORATION_HEADER_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER,
-    FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_TABLE_XML_ORDER,
-    FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment, FormDecorationHeaderSchema,
-    FormDecorationHeaderXmlProperty, FormFieldTopLevelSlot as FieldSlot,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
-    FormLabelDecorationAlignment, FormLabelDecorationAlignmentSchema,
-    FormLabelDecorationAlignmentTailXmlProperty, FormLabelFieldOptionSlot as LabelFieldSlot,
-    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER,
+    FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment,
+    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
+    FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
+    FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
+    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     decode_form_tooltip_representation, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
@@ -4716,10 +4718,9 @@ pub(super) fn parse_form_child_item_with_context(
                 .as_ref()
                 .and_then(|options| options.width.clone())
         } else if tag == "LabelDecoration" {
-            fields
-                .get(10)
-                .map(|field| field.trim().to_string())
-                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.width().map(str::to_owned))
         } else if tag == "PictureDecoration" {
             fields
                 .get(10)
@@ -4766,6 +4767,10 @@ pub(super) fn parse_form_child_item_with_context(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.height.clone())
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.height().map(str::to_owned))
         } else if tag == "PictureDecoration" {
             fields
                 .get(11)
@@ -4826,7 +4831,9 @@ pub(super) fn parse_form_child_item_with_context(
                 .as_ref()
                 .and_then(|options| options.auto_max_width)
         } else if tag == "LabelDecoration" {
-            parse_form_decoration_auto_max_width(&fields)
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.auto_max_width())
         } else if tag == "PictureDecoration" {
             parse_form_decoration_auto_max_width(&fields)
         } else if ordinary_table_layout {
@@ -4845,6 +4852,10 @@ pub(super) fn parse_form_child_item_with_context(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.max_width.clone())
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.max_width().map(str::to_owned))
         } else {
             None
         },
@@ -4854,6 +4865,10 @@ pub(super) fn parse_form_child_item_with_context(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.auto_max_height)
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.auto_max_height())
         } else if tag == "PictureDecoration" {
             fields
                 .get(11)
@@ -4870,6 +4885,10 @@ pub(super) fn parse_form_child_item_with_context(
         },
         max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_max_height(input_field_extended_options.as_deref())
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.max_height().map(str::to_owned))
         } else {
             None
         },
@@ -4879,6 +4898,10 @@ pub(super) fn parse_form_child_item_with_context(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.horizontal_stretch)
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.horizontal_stretch())
         } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
@@ -4888,6 +4911,10 @@ pub(super) fn parse_form_child_item_with_context(
         },
         vertical_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_vertical_stretch(input_field_extended_options.as_deref())
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.geometry.vertical_stretch())
         } else if tag == "UsualGroup" {
             parse_form_usual_group_vertical_stretch(&fields)
         } else {
@@ -5316,6 +5343,7 @@ pub(super) struct FormLabelDecorationOptions {
     pub(super) font_xml: Option<String>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) alignment: FormLabelDecorationAlignment,
+    pub(super) geometry: FormLabelDecorationGeometry,
 }
 
 pub(super) fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOptions> {
@@ -5472,12 +5500,10 @@ pub(super) fn parse_form_label_decoration_options(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormLabelDecorationOptions> {
     let options = split_1c_braced_fields(
-        fields
-            .get(FormLabelDecorationAlignmentSchema::OPTIONS_SLOT)?
-            .trim(),
+        fields.get(FormLabelDecorationSchema::OPTIONS_SLOT)?.trim(),
         0,
     )?;
-    let schema = FormLabelDecorationAlignmentSchema::from_raw_layout(
+    let schema = FormLabelDecorationSchema::from_raw_layout(
         fields.first()?.trim(),
         fields.len(),
         item_tag,
@@ -5493,6 +5519,7 @@ pub(super) fn parse_form_label_decoration_options(
             .get(schema.group_horizontal_align_slot())
             .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
         alignment: schema.alignment(fields, &options),
+        geometry: schema.geometry(fields),
     })
 }
 
@@ -9914,7 +9941,9 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     xml.push_str(&format_form_usual_group_header_xml(item, indent + 1));
+    xml.push_str(&format_form_label_decoration_geometry_xml(item, indent + 1));
     if item.tag != "Button"
+        && item.tag != "LabelDecoration"
         && let Some(width) = &item.width
     {
         xml.push_str(&format!(
@@ -9922,10 +9951,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(width)
         ));
     }
-    if item.tag != "Table" && item.auto_max_width == Some(false) {
+    if item.tag != "Table" && item.tag != "LabelDecoration" && item.auto_max_width == Some(false) {
         xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
     }
     if item.tag != "Table"
+        && item.tag != "LabelDecoration"
         && let Some(height) = &item.height
     {
         xml.push_str(&format!(
@@ -9967,7 +9997,9 @@ pub(super) fn format_form_child_item_xml(
             if skip_on_input { "true" } else { "false" }
         ));
     }
-    if let Some(max_width) = &item.max_width {
+    if item.tag != "LabelDecoration"
+        && let Some(max_width) = &item.max_width
+    {
         xml.push_str(&format!(
             "{tab}\t<MaxWidth>{}</MaxWidth>\r\n",
             escape_xml_text(max_width)
@@ -10012,16 +10044,19 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(text_color)
         ));
     }
-    if item.tag != "Table" && item.auto_max_height == Some(false) {
+    if item.tag != "Table" && item.tag != "LabelDecoration" && item.auto_max_height == Some(false) {
         xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
     }
-    if let Some(max_height) = &item.max_height {
+    if item.tag != "LabelDecoration"
+        && let Some(max_height) = &item.max_height
+    {
         xml.push_str(&format!(
             "{tab}\t<MaxHeight>{}</MaxHeight>\r\n",
             escape_xml_text(max_height)
         ));
     }
-    if let Some(horizontal_stretch) = item.horizontal_stretch
+    if item.tag != "LabelDecoration"
+        && let Some(horizontal_stretch) = item.horizontal_stretch
         && !usual_group_title_first
     {
         xml.push_str(&format!(
@@ -10037,7 +10072,8 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(choice_folders_and_items)
         ));
     }
-    if let Some(vertical_stretch) = item.vertical_stretch
+    if item.tag != "LabelDecoration"
+        && let Some(vertical_stretch) = item.vertical_stretch
         && !usual_group_title_first
     {
         xml.push_str(&format!(
@@ -10493,6 +10529,77 @@ fn format_form_decoration_header_xml(item: &FormChildItem, indent: usize) -> Str
                     xml.push_str(&format!(
                         "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
                         escape_xml_text(group_vertical_align)
+                    ));
+                }
+            }
+        }
+    }
+    xml
+}
+
+fn format_form_label_decoration_geometry_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "LabelDecoration" {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER {
+        match property {
+            FormLabelDecorationGeometryXmlProperty::Width => {
+                if let Some(width) = &item.width {
+                    xml.push_str(&format!(
+                        "{tab}<Width>{}</Width>\r\n",
+                        escape_xml_text(width)
+                    ));
+                }
+            }
+            FormLabelDecorationGeometryXmlProperty::AutoMaxWidth => {
+                if item.auto_max_width == Some(false) {
+                    xml.push_str(&format!("{tab}<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
+                }
+            }
+            FormLabelDecorationGeometryXmlProperty::MaxWidth => {
+                if let Some(max_width) = &item.max_width {
+                    xml.push_str(&format!(
+                        "{tab}<MaxWidth>{}</MaxWidth>\r\n",
+                        escape_xml_text(max_width)
+                    ));
+                }
+            }
+            FormLabelDecorationGeometryXmlProperty::Height => {
+                if let Some(height) = &item.height {
+                    xml.push_str(&format!(
+                        "{tab}<Height>{}</Height>\r\n",
+                        escape_xml_text(height)
+                    ));
+                }
+            }
+            FormLabelDecorationGeometryXmlProperty::AutoMaxHeight => {
+                if item.auto_max_height == Some(false) {
+                    xml.push_str(&format!("{tab}<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
+                }
+            }
+            FormLabelDecorationGeometryXmlProperty::MaxHeight => {
+                if let Some(max_height) = &item.max_height {
+                    xml.push_str(&format!(
+                        "{tab}<MaxHeight>{}</MaxHeight>\r\n",
+                        escape_xml_text(max_height)
+                    ));
+                }
+            }
+            FormLabelDecorationGeometryXmlProperty::HorizontalStretch => {
+                if let Some(horizontal_stretch) = item.horizontal_stretch {
+                    xml.push_str(&format!(
+                        "{tab}<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                        if horizontal_stretch { "true" } else { "false" }
+                    ));
+                }
+            }
+            FormLabelDecorationGeometryXmlProperty::VerticalStretch => {
+                if let Some(vertical_stretch) = item.vertical_stretch {
+                    xml.push_str(&format!(
+                        "{tab}<VerticalStretch>{}</VerticalStretch>\r\n",
+                        if vertical_stretch { "true" } else { "false" }
                     ));
                 }
             }

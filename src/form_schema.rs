@@ -108,14 +108,22 @@ impl FormDecorationHeaderSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormLabelDecorationAlignmentSchema {
+pub(crate) struct FormLabelDecorationSchema {
+    width_slot: usize,
+    height_slot: usize,
+    horizontal_stretch_slot: usize,
+    vertical_stretch_slot: usize,
+    auto_max_width_slot: usize,
+    max_width_slot: usize,
+    auto_max_height_slot: usize,
+    max_height_slot: usize,
     group_horizontal_align_slot: usize,
     group_vertical_align_slot: usize,
     horizontal_align_option_slot: usize,
     vertical_align_option_slot: usize,
 }
 
-impl FormLabelDecorationAlignmentSchema {
+impl FormLabelDecorationSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
 
     pub(crate) fn from_raw_layout(
@@ -134,6 +142,14 @@ impl FormLabelDecorationAlignmentSchema {
             options.first().map(|field| field.trim()),
         ) {
             ("12", 36, "LabelDecoration", Some("0"), 9, Some("5")) => Some(Self {
+                width_slot: 10,
+                height_slot: 11,
+                horizontal_stretch_slot: 12,
+                vertical_stretch_slot: 13,
+                auto_max_width_slot: 27,
+                max_width_slot: 28,
+                auto_max_height_slot: 30,
+                max_height_slot: 31,
                 group_horizontal_align_slot: 32,
                 group_vertical_align_slot: 33,
                 horizontal_align_option_slot: 2,
@@ -190,6 +206,36 @@ impl FormLabelDecorationAlignmentSchema {
                 }),
         }
     }
+
+    pub(crate) fn geometry(self, fields: &[&str]) -> FormLabelDecorationGeometry {
+        FormLabelDecorationGeometry {
+            width: Self::non_zero_u32(fields, self.width_slot),
+            auto_max_width: Self::false_or_omit(fields, self.auto_max_width_slot),
+            max_width: Self::non_zero_u32(fields, self.max_width_slot),
+            height: Self::non_zero_u32(fields, self.height_slot),
+            auto_max_height: Self::false_or_omit(fields, self.auto_max_height_slot),
+            max_height: Self::non_zero_u32(fields, self.max_height_slot),
+            horizontal_stretch: Self::stretch(fields, self.horizontal_stretch_slot),
+            vertical_stretch: Self::stretch(fields, self.vertical_stretch_slot),
+        }
+    }
+
+    fn non_zero_u32(fields: &[&str], slot: usize) -> Option<String> {
+        let value = fields.get(slot)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+
+    fn false_or_omit(fields: &[&str], slot: usize) -> Option<bool> {
+        (fields.get(slot)?.trim() == "0").then_some(false)
+    }
+
+    fn stretch(fields: &[&str], slot: usize) -> Option<bool> {
+        match fields.get(slot)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -197,6 +243,52 @@ pub(crate) struct FormLabelDecorationAlignment {
     group_vertical_align: Option<&'static str>,
     horizontal_align: Option<&'static str>,
     vertical_align: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FormLabelDecorationGeometry {
+    width: Option<String>,
+    auto_max_width: Option<bool>,
+    max_width: Option<String>,
+    height: Option<String>,
+    auto_max_height: Option<bool>,
+    max_height: Option<String>,
+    horizontal_stretch: Option<bool>,
+    vertical_stretch: Option<bool>,
+}
+
+impl FormLabelDecorationGeometry {
+    pub(crate) fn width(&self) -> Option<&str> {
+        self.width.as_deref()
+    }
+
+    pub(crate) const fn auto_max_width(&self) -> Option<bool> {
+        self.auto_max_width
+    }
+
+    pub(crate) fn max_width(&self) -> Option<&str> {
+        self.max_width.as_deref()
+    }
+
+    pub(crate) fn height(&self) -> Option<&str> {
+        self.height.as_deref()
+    }
+
+    pub(crate) const fn auto_max_height(&self) -> Option<bool> {
+        self.auto_max_height
+    }
+
+    pub(crate) fn max_height(&self) -> Option<&str> {
+        self.max_height.as_deref()
+    }
+
+    pub(crate) const fn horizontal_stretch(&self) -> Option<bool> {
+        self.horizontal_stretch
+    }
+
+    pub(crate) const fn vertical_stretch(&self) -> Option<bool> {
+        self.vertical_stretch
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -238,6 +330,30 @@ pub(crate) const FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER:
     &[FormLabelDecorationAlignmentTailXmlProperty] = &[
     FormLabelDecorationAlignmentTailXmlProperty::HorizontalAlign,
     FormLabelDecorationAlignmentTailXmlProperty::VerticalAlign,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormLabelDecorationGeometryXmlProperty {
+    Width,
+    AutoMaxWidth,
+    MaxWidth,
+    Height,
+    AutoMaxHeight,
+    MaxHeight,
+    HorizontalStretch,
+    VerticalStretch,
+}
+
+pub(crate) const FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER:
+    &[FormLabelDecorationGeometryXmlProperty] = &[
+    FormLabelDecorationGeometryXmlProperty::Width,
+    FormLabelDecorationGeometryXmlProperty::AutoMaxWidth,
+    FormLabelDecorationGeometryXmlProperty::MaxWidth,
+    FormLabelDecorationGeometryXmlProperty::Height,
+    FormLabelDecorationGeometryXmlProperty::AutoMaxHeight,
+    FormLabelDecorationGeometryXmlProperty::MaxHeight,
+    FormLabelDecorationGeometryXmlProperty::HorizontalStretch,
+    FormLabelDecorationGeometryXmlProperty::VerticalStretch,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
