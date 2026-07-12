@@ -2449,10 +2449,11 @@ Integrated commit `b681153` changes two files totaling `+45/-4`.
 `cargo fmt --check` and `cargo check --all-targets` pass with two pre-existing
 warnings. Tests, export, database access, ConfigDump, and ConfigDumpInfo were
 not run or changed. Independent frozen review returned GO and found no object
-name, path, DB UUID, arity, or corpus branch. The exact static prediction is
-Form `+8727/-29143` and full `1529 files, +13965/-85386`; the last actual full
-diff remains `1529 files, +14239/-85386` until another export is explicitly
-authorized.
+name, path, DB UUID, arity, or corpus branch. A later exact shadow gate corrected
+the file-count forecast: three Form.xml files contain no other difference.
+The exact #89 prediction is Form `1005 files, +8727/-29143` and full
+`1526 files, +13965/-85386`; the last actual full diff remains
+`1529 files, +14239/-85386` until another export is explicitly authorized.
 
 ## Form exact Button ToolTipRepresentation layout
 
@@ -2489,9 +2490,64 @@ pre-existing warnings. Independent frozen review returned GO. Tests, export,
 database access, ConfigDump, and ConfigDumpInfo were not run or changed; no
 object name, path, UUID, or corpus branch was added. The exact static #90
 target is 41 Form.xml files totaling `+0/-169`; combined with #89, predicted
-Form diff is `1008 files, +8727/-28974` and predicted full diff is
-`1529 files, +13965/-85217`. The last actual full diff remains
+Form diff is `1005 files, +8727/-28974` and predicted full diff is
+`1526 files, +13965/-85217`. The last actual full diff remains
 `1529 files, +14239/-85386` pending explicit authorization for another export.
+
+## Form UsualGroup header property order
+
+Status: integrated from an owner-wide property-order matrix and exact raw
+layouts; a new export was not run.
+
+Native contains 3,878 UsualGroup nodes across 1,108 forms. Current output has
+3,848 nodes, all matched to native by form path and item id; 30 native-only
+groups remain an upstream HOLD. The audit covers 38 direct property tags and
+all 703 co-occurring unordered pairs. No pair has mixed or reverse native
+ordering, which proves one owner-level order instead of per-form branches.
+
+The implemented boundary is the header prefix:
+
+```text
+Title < TitleTextColor < TitleFont < ToolTip < ToolTipRepresentation < Width
+```
+
+`FormUsualGroupHeaderXmlProperty` and
+`FORM_USUAL_GROUP_HEADER_XML_ORDER` own the first five properties. The formatter
+emits that prefix once immediately before the existing generic Width position.
+The old styled and unstyled Title branches are removed, and UsualGroup is
+excluded from the late ToolTip position. Width, Height, stretch, alignment,
+Group, Behavior, Representation, visual tails, ExtendedTooltip, and ChildItems
+remain in their existing serializers or explicit HOLD cohorts.
+
+The current wrong-order union contains 280 nodes in 86 files. Native has
+`Title < Width` in 171/171 applicable groups while current reverses all 171.
+All 116 parsed ToolTip blocks are value-exact but late. The two order cohorts
+overlap in seven nodes. Reordering existing blocks alone improves the saved
+native diff by 571 additions and 571 deletions.
+
+ToolTipRepresentation uses only four explicit wrapper-22, discriminator-5
+layouts: arity 30 slot 23, arity 32 slot 25, arity 34 slot 27, and arity 36
+slot 29. The full matrix contains 3,425 zero/absent controls and 68 values
+admitted by the unchanged shared decoder. A single raw code-6/native ShowLeft
+positive remains HOLD, as do arities 38 and above; no `len - 7` formula is
+used. The prior #88 field and #90 Button layouts and the #89 default filter are
+unchanged.
+
+Integrated commit `e954e72` changes two files totaling `+79/-33`.
+`cargo fmt --check`, `cargo check --all-targets`, and `git diff --check` pass;
+the same two pre-existing warnings remain. Independent frozen review returned
+GO. Tests, export, database access, ConfigDump, and ConfigDumpInfo were not run
+or changed. The frozen 8,473-byte diff has SHA-256
+`ED670891B89A3AFD1738EB4629B534FE8CD74981AC2E3610461B74912586088B` and adds
+no UUID, object name, path, corpus branch, or code-6 mapping.
+
+An exact flattened shadow gate reproduces the last actual Form diff
+`1008 files, +9001/-29143`. It predicts #89+#90 as
+`1005 files, +8727/-28974` and #91 as `1005 files, +8156/-28335`.
+The #91 pre/post delta is 94 files totaling `+639/-571`: 571 reordered lines
+plus 68 admitted TTR lines. The corrected combined full prediction is
+`1526 files, +13394/-84578`. The last actual full diff remains
+`1529 files, +14239/-85386` pending a separately authorized export.
 
 ## ConfigDumpInfo aggregate
 
