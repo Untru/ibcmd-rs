@@ -1,12 +1,12 @@
 use super::*;
 use crate::form_schema::{
-    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_TABLE_XML_ORDER, FormFieldTopLevelSlot as FieldSlot,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
-    FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
-    FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
-    FormTooltipRepresentationXmlOrder, decode_form_tooltip_representation,
-    form_child_item_representation_is_default, form_tooltip_representation_schema,
-    form_tooltip_representation_xml_order,
+    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER,
+    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldXmlProperty, FormLabelFieldOptionSlot as LabelFieldSlot,
+    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    decode_form_tooltip_representation, form_child_item_representation_is_default,
+    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -9647,8 +9647,6 @@ pub(super) fn format_form_child_item_xml(
             | "ColumnGroup"
     );
     let usual_group_title_first = matches!(item.tag, "UsualGroup" | "ButtonGroup");
-    let usual_group_has_title_style = item.tag == "UsualGroup"
-        && (item.title_text_color.is_some() || item.title_font_xml.is_some());
     let mut direct_context_menu_xml = String::new();
     let mut direct_regular_children = Vec::new();
     if is_form_field_direct_service_parent(item.tag) {
@@ -9882,22 +9880,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(footer_horizontal_align)
         ));
     }
-    if usual_group_has_title_style {
-        xml.push_str(&format_form_localized_section(
-            "Title",
-            &item.title,
-            indent + 1,
-        ));
-        if let Some(title_text_color) = &item.title_text_color {
-            xml.push_str(&format!(
-                "{tab}\t<TitleTextColor>{}</TitleTextColor>\r\n",
-                escape_xml_text(title_text_color)
-            ));
-        }
-        if let Some(title_font_xml) = &item.title_font_xml {
-            xml.push_str(&format!("{tab}\t{title_font_xml}\r\n"));
-        }
-    }
+    xml.push_str(&format_form_usual_group_header_xml(item, indent + 1));
     if item.tag != "Button"
         && let Some(width) = &item.width
     {
@@ -10104,13 +10087,6 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if usual_group_title_first {
-        if item.tag == "UsualGroup" && !usual_group_has_title_style {
-            xml.push_str(&format_form_localized_section(
-                "Title",
-                &item.title,
-                indent + 1,
-            ));
-        }
         if item.tag == "ButtonGroup" {
             xml.push_str(&format_form_localized_section(
                 "Title",
@@ -10311,7 +10287,7 @@ pub(super) fn format_form_child_item_xml(
     }
     if !matches!(
         item.tag,
-        "InputField" | "PictureField" | "CalendarField" | "ButtonGroup"
+        "InputField" | "PictureField" | "CalendarField" | "UsualGroup" | "ButtonGroup"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -10424,6 +10400,49 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
+    xml
+}
+
+fn format_form_usual_group_header_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "UsualGroup" {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_USUAL_GROUP_HEADER_XML_ORDER {
+        match property {
+            FormUsualGroupHeaderXmlProperty::Title => {
+                xml.push_str(&format_form_localized_section("Title", &item.title, indent));
+            }
+            FormUsualGroupHeaderXmlProperty::TitleTextColor => {
+                if let Some(title_text_color) = &item.title_text_color {
+                    xml.push_str(&format!(
+                        "{tab}<TitleTextColor>{}</TitleTextColor>\r\n",
+                        escape_xml_text(title_text_color)
+                    ));
+                }
+            }
+            FormUsualGroupHeaderXmlProperty::TitleFont => {
+                if let Some(title_font_xml) = &item.title_font_xml {
+                    xml.push_str(&format!("{tab}{title_font_xml}\r\n"));
+                }
+            }
+            FormUsualGroupHeaderXmlProperty::ToolTip => {
+                xml.push_str(&format_form_localized_section(
+                    "ToolTip",
+                    &item.tooltip,
+                    indent,
+                ));
+            }
+            FormUsualGroupHeaderXmlProperty::ToolTipRepresentation => {
+                xml.push_str(&format_form_tooltip_representation_xml(
+                    item,
+                    FormTooltipRepresentationXmlOrder::UsualGroupHeader,
+                    indent,
+                ));
+            }
+        }
+    }
     xml
 }
 

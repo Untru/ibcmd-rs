@@ -42,7 +42,25 @@ pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) 
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormUsualGroupHeaderXmlProperty {
+    Title,
+    TitleTextColor,
+    TitleFont,
+    ToolTip,
+    ToolTipRepresentation,
+}
+
+pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlProperty] = &[
+    FormUsualGroupHeaderXmlProperty::Title,
+    FormUsualGroupHeaderXmlProperty::TitleTextColor,
+    FormUsualGroupHeaderXmlProperty::TitleFont,
+    FormUsualGroupHeaderXmlProperty::ToolTip,
+    FormUsualGroupHeaderXmlProperty::ToolTipRepresentation,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {
+    UsualGroup,
     LabelField,
     InputField,
     CheckBoxField,
@@ -56,6 +74,7 @@ enum FormTooltipRepresentationItemKind {
 impl FormTooltipRepresentationItemKind {
     fn from_xml_tag(tag: &str) -> Self {
         match tag {
+            "UsualGroup" => Self::UsualGroup,
             "LabelField" => Self::LabelField,
             "InputField" => Self::InputField,
             "CheckBoxField" => Self::CheckBoxField,
@@ -70,6 +89,7 @@ impl FormTooltipRepresentationItemKind {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTooltipRepresentationXmlOrder {
+    UsualGroupHeader,
     FieldProperties,
     AfterTitle,
 }
@@ -93,6 +113,10 @@ pub(crate) fn form_tooltip_representation_schema(
 ) -> Option<FormTooltipRepresentationSchema> {
     let item_kind = FormTooltipRepresentationItemKind::from_xml_tag(item_tag);
     let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
+        ("22", 30, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 23,
+        ("22", 32, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 25,
+        ("22", 34, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 27,
+        ("22", 36, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 29,
         ("37", 59, FormTooltipRepresentationItemKind::LabelField, Some("1"))
         | ("37", 59, FormTooltipRepresentationItemKind::InputField, Some("2"))
         | ("37", 59, FormTooltipRepresentationItemKind::CheckBoxField, Some("3"))
@@ -109,6 +133,9 @@ pub(crate) fn form_tooltip_representation_xml_order(
     item_tag: &str,
 ) -> Option<FormTooltipRepresentationXmlOrder> {
     match FormTooltipRepresentationItemKind::from_xml_tag(item_tag) {
+        FormTooltipRepresentationItemKind::UsualGroup => {
+            Some(FormTooltipRepresentationXmlOrder::UsualGroupHeader)
+        }
         FormTooltipRepresentationItemKind::LabelField
         | FormTooltipRepresentationItemKind::InputField
         | FormTooltipRepresentationItemKind::CheckBoxField
