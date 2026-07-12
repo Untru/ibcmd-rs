@@ -2454,6 +2454,45 @@ Form `+8727/-29143` and full `1529 files, +13965/-85386`; the last actual full
 diff remains `1529 files, +14239/-85386` until another export is explicitly
 authorized.
 
+## Form exact Button ToolTipRepresentation layout
+
+Status: integrated from full and immutable-subset raw/native matrices; a new
+export was not run.
+
+ToolTipRepresentation is one property family with layout-specific raw schemas
+and XML positions. The shared scalar decoder remains the accepted #88 enum:
+zero omits the property, while 1, 2, 3, 4, 5, 7, and 8 map to None, Balloon,
+Button, ShowAuto, ShowTop, ShowBottom, and ShowRight. Code 6 remains HOLD and
+malformed, quoted, braced, suffixed, or unknown values omit the property.
+
+The exact Button layout is wrapper 31 with exactly 52 top-level fields and the
+enum at slot 30. Across all 1,108 forms, every one of 5,636 such records agrees
+with native XML: 5,467 zero/absent controls and 169 positives consisting of
+None 7, Balloon 4, Button 26, ShowBottom 121, and ShowRight 11. An immutable
+446-form slice independently reproduces 1,990 zero controls and 36 positives
+with counts 3, 2, 8, 22, and 1. Wrapper-31 length-53 is a decisive negative
+control: all 11 native records omit the property even though seven have raw
+slot-30 value 2. Wrapper 34, length 53, other owners, and other layouts remain
+HOLD.
+
+Native order is exact for 169/169 nodes:
+`CommandName < optional Title < ToolTipRepresentation < optional
+ShapeRepresentation/RepresentationInContextMenu < ExtendedTooltip`.
+`form_schema.rs` now owns the typed layout slot, shared enum decoder, and XML
+order class. The parser asks the schema for a slot; the formatter emits the
+property at the schema-selected field or post-Title position. The previously
+accepted wrapper-37/length-59 six-field schema remains semantically unchanged.
+
+Integrated commit `37eca68` changes two files totaling `+169/-43`.
+`cargo fmt --check` and `cargo check --all-targets` pass with the same two
+pre-existing warnings. Independent frozen review returned GO. Tests, export,
+database access, ConfigDump, and ConfigDumpInfo were not run or changed; no
+object name, path, UUID, or corpus branch was added. The exact static #90
+target is 41 Form.xml files totaling `+0/-169`; combined with #89, predicted
+Form diff is `1008 files, +8727/-28974` and predicted full diff is
+`1529 files, +13965/-85217`. The last actual full diff remains
+`1529 files, +14239/-85386` pending explicit authorization for another export.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
