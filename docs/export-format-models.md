@@ -2230,6 +2230,52 @@ remain HOLD. The saved normalized isolated residual is one root totaling
 not claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## CalculationRegister exact generated-type vector
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The exact code-21/33-field CalculationRegister owner layout has its wrapped
+header at field 15 and fourteen UUIDs in fields 1 through 14. Native consumes
+them as seven ordered TypeId/ValueId pairs: Record, Manager, Selection, List,
+RecordSet, RecordKey, and RecalculationsManager. The previous generated XML
+used `CalculationRegisterObject` with category `Object` for the first pair and
+omitted the final `RecalculationsManager` entry. Its raw type index repeated the
+same wrong first qualified name and omitted the seventh TypeId.
+
+One structural schema now feeds both XML entries and index entries. Exact
+admission requires the shared full header-15 validator plus fourteen strict,
+nonzero, case-insensitively unique UUIDs. Outer whitespace and UUID case are
+accepted. Any malformed, zero, duplicate, or case-duplicate slot in an exact
+layout rejects source extraction atomically and contributes no indexed types
+for that row. ValueIds participate in validation but are not index keys; all
+seven TypeIds retain the `Type` DCS policy.
+
+Nonexact Calculation layouts deliberately retain the preexisting permissive
+six-role `Object` through `RecordKey` XML and index behavior. Accounting code
+21 and code 22, and Accumulation code 28, retain their own role order and index
+semantics. Cross-row TypeId collisions continue through the established
+collision policy and do not affect owner validity. Selected Calculation
+extraction already requested the type index and now exposes the corrected
+Record and RecalculationsManager references.
+
+Integrated commit `47763b0` passes nine exact XML/index, case/whitespace,
+invalid-vector, duplicate/header, legacy-layout, family-control, collision,
+selected-index, target, and literal tests. The full suite changed from
+`1395 passed / 74 failed / 6 ignored` to
+`1404 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Two independent frozen reviews approved the 20,312-byte diff with SHA-256
+`1CB8E03334C8165E504C0ACB206CF2854FAD8780B607F0230F7F3E1F656C0321`.
+Production contains no generated UUID, owner name, database identity, path, or
+corpus-specific branch; UUIDs are read only from the raw vector.
+
+Seven-role inference for nonexact layouts, alternate role orders and offsets,
+global collision-policy changes, other Calculation properties, and the native
+re-export gate remain HOLD. The saved normalized isolated residual is one root
+totaling `+1/-5`. The expected future permitted native gate is `+0/-0`, but
+exactness is not claimed without that gate. No database access, ConfigDump,
+configuration export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
