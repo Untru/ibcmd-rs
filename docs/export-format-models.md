@@ -2549,6 +2549,61 @@ plus 68 admitted TTR lines. The corrected combined full prediction is
 `1526 files, +13394/-84578`. The last actual full diff remains
 `1529 files, +14239/-85386` pending a separately authorized export.
 
+## Form PictureDecoration tooltip header
+
+Status: integrated from complete full/subset raw and native matrices; a new
+export was not run.
+
+All 769 native PictureDecoration records have one exact raw layout: wrapper 12,
+direct discriminator 1, and exactly 36 top-level fields. One typed
+`FormDecorationHeaderSchema` owns both localized ToolTip slot 8 and
+ToolTipRepresentation slot 24. This prevents either property from being parsed
+through a wrapper-only rule.
+
+ToolTip is nonempty in 34 records and exactly `{1,0}` in 735; native has the
+same 34 localized values and 735 absences, with semantic equality 769/769 and
+no malformed values. The immutable 446-form subset independently matches all
+203 records: four nonempty and 199 empty. Discriminator-0/length-36 provides a
+decisive negative control with 63 nonempty slot-8 values that must not be
+treated as PictureDecoration ToolTip.
+
+ToolTipRepresentation has 748 zero/absent controls and 21 exact positives:
+ShowRight 19, None 1, and ShowBottom 1. The immutable subset reproduces 197
+zeros and six ShowRight positives. Discriminator-0/length-36 contains 86
+code-like slot-24 values plus one code 6, so the discriminator is mandatory.
+The exact target has no alternate arity and no code-6 value; ShowLeft and all
+other layouts remain HOLD.
+
+Across 769 nodes and all 378 co-occurring direct-property pairs, native has no
+mixed or reverse order. The typed decoration header is:
+
+```text
+Title < ToolTip < ToolTipRepresentation < Picture
+```
+
+`FORM_DECORATION_HEADER_XML_ORDER` owns Title, ToolTip, and TTR. A
+PictureDecoration-only helper replaces the prior Title call at the existing
+pre-Picture position, before PictureSize, Picture, and FileDragMode. The generic
+late ToolTip path excludes PictureDecoration. The existing AfterTitle position
+is deliberately not reused because it follows the Picture block. LabelDecoration,
+one missing PictureDecoration item, 39 late inline-file Picture nodes, and all
+other style/default/property gaps remain separate HOLD cohorts.
+
+Integrated commit `4613681` changes two files totaling `+115/-7`.
+`cargo fmt --check`, `cargo check --all-targets`, and `git diff --check` pass;
+the same two pre-existing warnings remain. Independent frozen review returned
+GO. Tests, export, database access, ConfigDump, and ConfigDumpInfo were not run
+or changed. The frozen 8,182-byte diff has SHA-256
+`601363033B40550512F8F1EC2535C5D59BD05AB08936BCC1BB29580A12B80F1A` and adds
+no UUID, object name, path, corpus branch, or code-6 mapping. Existing #88-#91
+schemas remain semantically unchanged.
+
+The exact combined shadow after #89-#91 changes 22 files by `+229/-0`: 208
+localized ToolTip lines and 21 TTR lines. It predicts Form
+`1005 files, +8156/-28106` and full `1526 files, +13394/-84349`. No path becomes
+exact or newly different. The last actual full diff remains
+`1529 files, +14239/-85386` pending a separately authorized export.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
