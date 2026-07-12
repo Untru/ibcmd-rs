@@ -2604,6 +2604,66 @@ localized ToolTip lines and 21 TTR lines. It predicts Form
 exact or newly different. The last actual full diff remains
 `1529 files, +14239/-85386` pending a separately authorized export.
 
+## Form LabelDecoration tooltip header
+
+Status: integrated for the already recognized, title-bearing owner cohort; a
+new export was not run.
+
+The exact LabelDecoration raw owner layout is wrapper 12, direct discriminator
+0, and exactly 36 top-level fields. The full corpus contains 1,866 such owners:
+1,513 have a nonempty localized slot 7 and 353 do not. The immutable subset
+independently contains 596 owners split 492/104. Current traversal reaches and
+emits 1,512 title-bearing owners; one further owner is below an unsupported
+parent layout and has no ToolTip or TTR, so #93 does not widen item admission.
+
+For the bounded title-bearing cohort, `FormDecorationHeaderSchema` owns ToolTip
+slot 8 and ToolTipRepresentation slot 24. ToolTip is present in 63 owners and
+absent in 1,450; the immutable subset reproduces 13 positives and 479 controls.
+All 353 title-empty owners have an empty ToolTip slot. TTR has 1,431 zero
+controls and 82 nonzero values: None 4, Button 67, ShowBottom 10, and one
+ShowLeft. The shared decoder admits the first 81 values. Raw code 6 and its
+single ShowLeft observation remain HOLD and are not added to production.
+
+Native direct-property order has no reverse pair or duplicate across all 1,866
+owners. The typed header prefix is:
+
+```text
+Title < ToolTip < ToolTipRepresentation < GroupHorizontalAlign
+```
+
+The existing 21 GroupHorizontalAlign properties in 16 files previously appeared
+too early. `FORM_DECORATION_HEADER_XML_ORDER` now owns the four-property order
+for both LabelDecoration and PictureDecoration; PictureDecoration remains
+semantically unchanged because that parser never assigns GroupHorizontalAlign.
+LabelDecoration is excluded from the generic late ToolTip path, and its old
+early GroupHorizontalAlign branch is removed, so each property is emitted once.
+
+The broader structural cleanups remain explicitly rejected. Admitting all 353
+title-empty LabelDecoration owners would expose many unrelated unsupported
+properties and is a separate HOLD. Eleven of them have a native empty
+`<Title/>`, which is not represented by the nonempty slot-7 predicate. Exact
+wrapper-12/discriminator-0/length-34 is also not a sufficient ExtendedTooltip
+classifier: the full corpus has 26,226 records but the existing suffix oracle
+matches 26,225, while the immutable subset is 9,710 versus 9,709. The same one
+non-oracle contradiction occurs in both corpora. Therefore
+`is_form_extended_tooltip_name`, both name checks, and child-item classification
+are deliberately unchanged by #93.
+
+Integrated commit `0d36bff` changes two files totaling `+23/-7`. The frozen
+4,818-byte diff has SHA-256
+`7DFD208BD4D3B6D86863C1EDCD06CC10983F16BE605EB7623C7B8920683D4A2A`.
+Independent frozen review returned GO. `cargo fmt --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. The change adds no object/form/item name, path, database
+UUID, corpus branch, or code-6 mapping. Tests, export, database access,
+ConfigDump, and ConfigDumpInfo were not run or changed.
+
+The exact header-only shadow removes 21 insertion lines and 508 deletion lines:
+21 moved GroupHorizontalAlign lines, 406 physical ToolTip lines, and 81 TTR
+lines. It predicts Form `1005 files, +8135/-27598` and full
+`1526 files, +13373/-83841`; file counts do not change. The last actual full
+diff remains `1529 files, +14239/-85386` pending a separately authorized export.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
