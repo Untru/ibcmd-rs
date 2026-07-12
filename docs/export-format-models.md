@@ -2363,8 +2363,11 @@ The implementation diff is three files totaling `+301/-0`, and production adds
 no object UUID, metadata name, database identity, path, or corpus-specific
 branch.
 
-The saved global diff remains `1546 files, +15779/-61205` because the export
-gate was not run. The represented lexical cohort is expected to remove
+The last accepted recorded global gate remains
+`1546 files, +15779/-61205` because the export gate was not run. The current
+on-disk `E:\ibcmd_lab\bsp_test` tree reports `1559 files, +20562/-87316`,
+matches the older post-#60 state, and is not authoritative for this change.
+The represented lexical cohort is expected to remove
 `+446/-223` and reach `+0/-0`, but that result is not claimed as a fresh full
 diff. The missing 224th item, ExcludedCommand cohorts, ToolTipRepresentation,
 FileDragMode, other AutoCommandBar layouts/properties, and the native re-export
