@@ -2363,21 +2363,19 @@ The implementation diff is three files totaling `+301/-0`, and production adds
 no object UUID, metadata name, database identity, path, or corpus-specific
 branch.
 
-The last accepted recorded global gate remains
-`1546 files, +15779/-61205` because the export gate was not run. The current
-on-disk `E:\ibcmd_lab\bsp_test` tree reports `1559 files, +20562/-87316`,
-matches the older post-#60 state, and is not authoritative for this change.
-The represented lexical cohort is expected to remove
-`+446/-223` and reach `+0/-0`, but that result is not claimed as a fresh full
-diff. The missing 224th item, ExcludedCommand cohorts, ToolTipRepresentation,
-FileDragMode, other AutoCommandBar layouts/properties, and the native re-export
-gate remain HOLD. No database access, ConfigDump, configuration export, or
-`ConfigDumpInfo.xml` change was performed.
+After explicit user authorization, a fresh release export produced 12,197
+files and the normalized full diff `1529 files, +14239/-85386`. This improves
+the overwritten pre-gate tree by 30 files and 8,253 changed lines. The current
+AutoCommandBar line residual is three files totaling `+1/-4`; one missing
+upstream item, HorizontalAlign, surrounding Form omissions, ExcludedCommand,
+FileDragMode, and other AutoCommandBar layouts/properties remain HOLD.
+ConfigDumpInfo remains byte-exact with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 
 ## Form exact field ToolTipRepresentation enum
 
-Status: implemented from immutable raw/native evidence; native re-export
-remains paused by user instruction.
+Status: implemented from immutable raw/native evidence and checked by a fresh
+full export after explicit user authorization.
 
 Across 1,108 native Form.xml files, 7,193 wrapper-37 field items map to raw
 records without an unmatched item. Field 50 is zero and the property is absent
@@ -2412,15 +2410,14 @@ SHA-256
 The implementation changes two files totaling `+316/-18`; production adds no
 object UUID, metadata name, database identity, path, or corpus-specific branch.
 
-The immutable scoped Form residual is 180 files totaling `+34/-358`; this gate
-is expected to reach `+0/-0` for ToolTipRepresentation, but no fresh export
-claim is made. The historical last accepted global gate remains
-`1546 files, +15779/-61205`. The current on-disk `bsp_test` tree reports the
-older `1559 files, +20562/-87316` state and is rejected as authoritative.
-Wrapper-48/len-60 semantics, localized ToolTip expansion, ExcludedCommand,
-FileDragMode, other form properties, and the native re-export gate remain HOLD.
-No database access, ConfigDump, configuration export, external artifact write,
-or `ConfigDumpInfo.xml` change was performed.
+The fresh release export produced 12,197 files and the normalized full diff
+`1529 files, +14239/-85386`. ToolTipRepresentation still has a line residual
+of 131 files totaling `+60/-444`: Balloon `+1/-7`, Button `+36/-142`, None
+`+2/-46`, ShowBottom `+21/-212`, ShowLeft `+0/-2`, ShowRight `+0/-31`, and
+ShowTop `+0/-4`. Wrapper-48/len-60 semantics, property ordering, localized
+ToolTip expansion, and other form layouts therefore remain HOLD; the issue
+stays open. ConfigDumpInfo remains byte-exact. No test command was run for this
+gate, following the direct user instruction.
 
 ## ConfigDumpInfo aggregate
 
