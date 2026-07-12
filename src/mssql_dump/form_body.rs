@@ -4,7 +4,9 @@ use crate::form_schema::{
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
-    form_child_item_representation_is_default,
+    FormTooltipRepresentationXmlOrder, decode_form_tooltip_representation,
+    form_child_item_representation_is_default, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -7693,32 +7695,15 @@ pub(super) fn parse_form_field_tooltip_representation(
     tag: &str,
     fields: &[&str],
 ) -> Option<&'static str> {
-    if wrapper != "37"
-        || fields.len() != 59
-        || !matches!(
-            (fields.get(5).map(|field| field.trim()), tag),
-            (Some("1"), "LabelField")
-                | (Some("2"), "InputField")
-                | (Some("3"), "CheckBoxField")
-                | (Some("4"), "PictureField")
-                | (Some("5"), "RadioButtonField")
-                | (Some("8"), "CalendarField")
-        )
-    {
-        return None;
-    }
-
-    match fields.get(50)?.trim() {
-        "0" => None,
-        "1" => Some("None"),
-        "2" => Some("Balloon"),
-        "3" => Some("Button"),
-        "4" => Some("ShowAuto"),
-        "5" => Some("ShowTop"),
-        "7" => Some("ShowBottom"),
-        "8" => Some("ShowRight"),
-        _ => None,
-    }
+    let schema = form_tooltip_representation_schema(
+        wrapper,
+        fields.len(),
+        tag,
+        fields.get(5).map(|field| field.trim()),
+    )?;
+    fields
+        .get(schema.slot())
+        .and_then(|field| decode_form_tooltip_representation(field.trim()))
 }
 
 pub(super) fn parse_form_child_item_input_hint(
@@ -9833,22 +9818,11 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
     }
-    if matches!(
-        item.tag,
-        "LabelField"
-            | "InputField"
-            | "CheckBoxField"
-            | "PictureField"
-            | "RadioButtonField"
-            | "CalendarField"
-    ) {
-        if let Some(tooltip_representation) = item.tooltip_representation {
-            xml.push_str(&format!(
-                "{tab}\t<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
-                escape_xml_text(tooltip_representation)
-            ));
-        }
-    }
+    xml.push_str(&format_form_tooltip_representation_xml(
+        item,
+        FormTooltipRepresentationXmlOrder::FieldProperties,
+        indent + 1,
+    ));
     if let Some(horizontal_align) = item.horizontal_align {
         xml.push_str(&format!(
             "{tab}\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
@@ -10270,6 +10244,11 @@ pub(super) fn format_form_child_item_xml(
             }
         }
     }
+    xml.push_str(&format_form_tooltip_representation_xml(
+        item,
+        FormTooltipRepresentationXmlOrder::AfterTitle,
+        indent + 1,
+    ));
     if item.tag == "Button"
         && let Some(representation) = item.representation_in_context_menu
     {
@@ -10446,6 +10425,25 @@ pub(super) fn format_form_child_item_xml(
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
     xml
+}
+
+fn format_form_tooltip_representation_xml(
+    item: &FormChildItem,
+    xml_order: FormTooltipRepresentationXmlOrder,
+    indent: usize,
+) -> String {
+    if form_tooltip_representation_xml_order(item.tag) != Some(xml_order) {
+        return String::new();
+    }
+    item.tooltip_representation
+        .map(|value| {
+            format!(
+                "{}<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
+                "\t".repeat(indent),
+                escape_xml_text(value)
+            )
+        })
+        .unwrap_or_default()
 }
 
 fn should_emit_form_picture_size(picture_size: &str) -> bool {

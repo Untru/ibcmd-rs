@@ -42,6 +42,134 @@ pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) 
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormTooltipRepresentationItemKind {
+    LabelField,
+    InputField,
+    CheckBoxField,
+    PictureField,
+    RadioButtonField,
+    CalendarField,
+    Button,
+    Other,
+}
+
+impl FormTooltipRepresentationItemKind {
+    fn from_xml_tag(tag: &str) -> Self {
+        match tag {
+            "LabelField" => Self::LabelField,
+            "InputField" => Self::InputField,
+            "CheckBoxField" => Self::CheckBoxField,
+            "PictureField" => Self::PictureField,
+            "RadioButtonField" => Self::RadioButtonField,
+            "CalendarField" => Self::CalendarField,
+            "Button" => Self::Button,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTooltipRepresentationXmlOrder {
+    FieldProperties,
+    AfterTitle,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormTooltipRepresentationSchema {
+    slot: usize,
+}
+
+impl FormTooltipRepresentationSchema {
+    pub(crate) const fn slot(self) -> usize {
+        self.slot
+    }
+}
+
+pub(crate) fn form_tooltip_representation_schema(
+    wrapper: &str,
+    field_count: usize,
+    item_tag: &str,
+    direct_discriminator: Option<&str>,
+) -> Option<FormTooltipRepresentationSchema> {
+    let item_kind = FormTooltipRepresentationItemKind::from_xml_tag(item_tag);
+    let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
+        ("37", 59, FormTooltipRepresentationItemKind::LabelField, Some("1"))
+        | ("37", 59, FormTooltipRepresentationItemKind::InputField, Some("2"))
+        | ("37", 59, FormTooltipRepresentationItemKind::CheckBoxField, Some("3"))
+        | ("37", 59, FormTooltipRepresentationItemKind::PictureField, Some("4"))
+        | ("37", 59, FormTooltipRepresentationItemKind::RadioButtonField, Some("5"))
+        | ("37", 59, FormTooltipRepresentationItemKind::CalendarField, Some("8")) => 50,
+        ("31", 52, FormTooltipRepresentationItemKind::Button, _) => 30,
+        _ => return None,
+    };
+    Some(FormTooltipRepresentationSchema { slot })
+}
+
+pub(crate) fn form_tooltip_representation_xml_order(
+    item_tag: &str,
+) -> Option<FormTooltipRepresentationXmlOrder> {
+    match FormTooltipRepresentationItemKind::from_xml_tag(item_tag) {
+        FormTooltipRepresentationItemKind::LabelField
+        | FormTooltipRepresentationItemKind::InputField
+        | FormTooltipRepresentationItemKind::CheckBoxField
+        | FormTooltipRepresentationItemKind::PictureField
+        | FormTooltipRepresentationItemKind::RadioButtonField
+        | FormTooltipRepresentationItemKind::CalendarField => {
+            Some(FormTooltipRepresentationXmlOrder::FieldProperties)
+        }
+        FormTooltipRepresentationItemKind::Button => {
+            Some(FormTooltipRepresentationXmlOrder::AfterTitle)
+        }
+        FormTooltipRepresentationItemKind::Other => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormTooltipRepresentation {
+    Omit,
+    None,
+    Balloon,
+    Button,
+    ShowAuto,
+    ShowTop,
+    ShowBottom,
+    ShowRight,
+}
+
+impl FormTooltipRepresentation {
+    fn from_raw_scalar(value: &str) -> Option<Self> {
+        match value {
+            "0" => Some(Self::Omit),
+            "1" => Some(Self::None),
+            "2" => Some(Self::Balloon),
+            "3" => Some(Self::Button),
+            "4" => Some(Self::ShowAuto),
+            "5" => Some(Self::ShowTop),
+            "7" => Some(Self::ShowBottom),
+            "8" => Some(Self::ShowRight),
+            _ => None,
+        }
+    }
+
+    const fn xml_value(self) -> Option<&'static str> {
+        match self {
+            Self::Omit => None,
+            Self::None => Some("None"),
+            Self::Balloon => Some("Balloon"),
+            Self::Button => Some("Button"),
+            Self::ShowAuto => Some("ShowAuto"),
+            Self::ShowTop => Some("ShowTop"),
+            Self::ShowBottom => Some("ShowBottom"),
+            Self::ShowRight => Some("ShowRight"),
+        }
+    }
+}
+
+pub(crate) fn decode_form_tooltip_representation(value: &str) -> Option<&'static str> {
+    FormTooltipRepresentation::from_raw_scalar(value)?.xml_value()
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormInputFieldXmlProperty {
     DropListButton,
     ChoiceButton,
