@@ -4,6 +4,7 @@ use crate::form_schema::{
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
+    form_child_item_representation_is_default,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -10192,10 +10193,7 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.tag != "Popup"
         && let Some(representation) = item.representation.filter(|representation| {
-            !(*representation == "WeakSeparation"
-                && item.tag == "UsualGroup"
-                && item.show_title == Some(false)
-                && item.behavior == Some("Usual"))
+            !form_child_item_representation_is_default(item.tag, representation)
         })
     {
         let tag_name = if item.tag == "Pages" {

@@ -1,4 +1,47 @@
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormChildItemKind {
+    UsualGroup,
+    Other,
+}
+
+impl FormChildItemKind {
+    fn from_xml_tag(tag: &str) -> Self {
+        match tag {
+            "UsualGroup" => Self::UsualGroup,
+            _ => Self::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormChildItemRepresentation {
+    WeakSeparation,
+    Other,
+}
+
+impl FormChildItemRepresentation {
+    fn from_xml_value(value: &str) -> Self {
+        match value {
+            "WeakSeparation" => Self::WeakSeparation,
+            _ => Self::Other,
+        }
+    }
+}
+
+pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) -> bool {
+    matches!(
+        (
+            FormChildItemKind::from_xml_tag(tag),
+            FormChildItemRepresentation::from_xml_value(value),
+        ),
+        (
+            FormChildItemKind::UsualGroup,
+            FormChildItemRepresentation::WeakSeparation,
+        )
+    )
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormInputFieldXmlProperty {
     DropListButton,
     ChoiceButton,
