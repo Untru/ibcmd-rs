@@ -4836,13 +4836,19 @@ fn parse_indexed_generated_types_from_text(
                 &header.name,
             );
         } else {
-            push_indexed_register_generated_type_entries(
-                &mut entries,
-                &fields,
-                start_index,
-                register_kind,
-                &header.name,
-            );
+            match parse_exact_calculation_register_generated_types(&fields, header) {
+                Some(Some(generated_types)) => {
+                    entries.extend(indexed_generated_types_from_entries(&generated_types));
+                }
+                Some(None) => push_indexed_register_generated_type_entries(
+                    &mut entries,
+                    &fields,
+                    start_index,
+                    register_kind,
+                    &header.name,
+                ),
+                None => return Some(Vec::new()),
+            }
         }
     }
     if object_code == 22 && header_index != Some(1) && field_is_unsigned_integer(fields.get(1)) {
@@ -5477,6 +5483,19 @@ fn push_indexed_register_generated_type_entries(
             GeneratedTypeDcsPolicy::Type,
         );
     }
+}
+
+fn indexed_generated_types_from_entries(
+    entries: &[GeneratedTypeEntry],
+) -> Vec<IndexedGeneratedType> {
+    entries
+        .iter()
+        .map(|entry| IndexedGeneratedType {
+            type_id: entry.type_id.clone(),
+            reference: format!("cfg:{}", entry.name),
+            dcs_policy: GeneratedTypeDcsPolicy::Type,
+        })
+        .collect()
 }
 
 fn push_indexed_accounting_register_generated_type_entries(
@@ -7836,9 +7855,15 @@ fn parse_register_properties_from_text(
     }
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
-    let mut generated_types = Vec::new();
+    let exact_calculation_generated_types = if kind == "CalculationRegister" {
+        parse_exact_calculation_register_generated_types(&fields, &header)?
+    } else {
+        None
+    };
+    let has_exact_calculation_generated_types = exact_calculation_generated_types.is_some();
+    let mut generated_types = exact_calculation_generated_types.unwrap_or_default();
     let register_start_index = register_generated_type_start_index(kind, &fields, uuid);
-    if let Some(start_index) = register_start_index {
+    if !has_exact_calculation_generated_types && let Some(start_index) = register_start_index {
         if kind == "AccountingRegister" {
             push_accounting_register_generated_type_entries(
                 &mut generated_types,
@@ -8842,6 +8867,43 @@ fn push_register_generated_type_entries(
             register_generated_type_category(type_prefix, suffix),
         );
     }
+}
+
+const CALCULATION_REGISTER_GENERATED_TYPE_SLOTS: &[(usize, usize, &str, &str)] = &[
+    (1, 2, "CalculationRegisterRecord", "Record"),
+    (3, 4, "CalculationRegisterManager", "Manager"),
+    (5, 6, "CalculationRegisterSelection", "Selection"),
+    (7, 8, "CalculationRegisterList", "List"),
+    (9, 10, "CalculationRegisterRecordSet", "RecordSet"),
+    (11, 12, "CalculationRegisterRecordKey", "RecordKey"),
+    (13, 14, "RecalculationsManager", "Recalcs"),
+];
+
+fn parse_exact_calculation_register_generated_types(
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<Option<Vec<GeneratedTypeEntry>>> {
+    if !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)? {
+        return Some(None);
+    }
+
+    let mut ids = BTreeSet::new();
+    let mut entries = Vec::with_capacity(CALCULATION_REGISTER_GENERATED_TYPE_SLOTS.len());
+    for (type_index, value_index, name, category) in CALCULATION_REGISTER_GENERATED_TYPE_SLOTS {
+        let type_id = parse_information_register_non_zero_uuid(fields.get(*type_index)?)?;
+        let value_id = parse_information_register_non_zero_uuid(fields.get(*value_index)?)?;
+        if !ids.insert(type_id.to_ascii_lowercase()) || !ids.insert(value_id.to_ascii_lowercase()) {
+            return None;
+        }
+        entries.push(GeneratedTypeEntry {
+            name: format!("{name}.{}", expected_header.name),
+            category,
+            type_id,
+            value_id,
+        });
+    }
+
+    Some(Some(entries))
 }
 
 fn push_accounting_register_generated_type_entries(

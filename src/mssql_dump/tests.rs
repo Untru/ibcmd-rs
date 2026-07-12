@@ -42280,6 +42280,10 @@ impl CalculationRegisterPresentationsFixture {
         self.extract_with_object_refs(object_refs)
             .and_then(|source| String::from_utf8(source.xml).ok())
     }
+
+    fn metadata_row(&self) -> MetadataTextRow {
+        metadata_text_row_from_text(CALCULATION_PRESENTATIONS_TEST_UUID, self.raw()).unwrap()
+    }
 }
 
 #[test]
@@ -44635,6 +44639,382 @@ fn calculation_full_text_search_has_no_production_corpus_literals() {
     let source = include_str!("mod.rs");
     for forbidden in [
         "a6756af4-964f-400d-97d4-0bd3f5916693",
+        "_ДемоОсновныеНачисления",
+        "Начисления.xml",
+        "Удержания.xml",
+    ] {
+        assert!(!source.contains(forbidden));
+    }
+}
+
+#[test]
+fn calculation_generated_type_vector_emits_and_indexes_exact_seven_roles() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let xml = fixture
+        .xml()
+        .expect("exact calculation generated-type vector");
+    let entries = parse_indexed_generated_types_from_text(&fixture.metadata_row()).unwrap();
+    let expected = [
+        (1usize, 2usize, "CalculationRegisterRecord", "Record"),
+        (3, 4, "CalculationRegisterManager", "Manager"),
+        (5, 6, "CalculationRegisterSelection", "Selection"),
+        (7, 8, "CalculationRegisterList", "List"),
+        (9, 10, "CalculationRegisterRecordSet", "RecordSet"),
+        (11, 12, "CalculationRegisterRecordKey", "RecordKey"),
+        (13, 14, "RecalculationsManager", "Recalcs"),
+    ];
+
+    assert_eq!(xml.matches("<xr:GeneratedType").count(), expected.len());
+    assert_eq!(entries.len(), expected.len());
+    assert!(!xml.contains("CalculationRegisterObject"));
+    let mut previous = xml.find("<InternalInfo>").unwrap();
+    for (entry, (type_index, value_index, name, category)) in
+        entries.iter().zip(expected.into_iter())
+    {
+        let qualified_name = format!("{name}.Payroll");
+        let opening =
+            format!("<xr:GeneratedType name=\"{qualified_name}\" category=\"{category}\">");
+        let position = xml.find(&opening).unwrap();
+        assert!(previous < position);
+        previous = position;
+        assert!(xml.contains(&format!(
+            "<xr:TypeId>{}</xr:TypeId>",
+            fixture.fields[type_index]
+        )));
+        assert!(xml.contains(&format!(
+            "<xr:ValueId>{}</xr:ValueId>",
+            fixture.fields[value_index]
+        )));
+        assert_eq!(entry.type_id, fixture.fields[type_index]);
+        assert_eq!(entry.reference, format!("cfg:{qualified_name}"));
+        assert_eq!(entry.dcs_policy, GeneratedTypeDcsPolicy::Type);
+        assert!(
+            !entries
+                .iter()
+                .any(|candidate| candidate.type_id == fixture.fields[value_index])
+        );
+    }
+}
+
+#[test]
+fn calculation_generated_type_vector_accepts_uuid_case_and_outer_whitespace() {
+    let mut fixture = CalculationRegisterPresentationsFixture::exact();
+    for field in &mut fixture.fields[1..=14] {
+        *field = format!(" \r\n{}\t", field.to_uppercase());
+    }
+
+    let xml = fixture
+        .xml()
+        .expect("padded uppercase generated-type vector");
+    let entries = parse_indexed_generated_types_from_text(&fixture.metadata_row()).unwrap();
+    assert_eq!(xml.matches("<xr:GeneratedType").count(), 7);
+    assert_eq!(entries.len(), 7);
+    assert!(xml.contains("<xr:TypeId>00000000-0000-4000-8000-00000000000B</xr:TypeId>"));
+}
+
+#[test]
+fn calculation_generated_type_vector_rejects_every_invalid_exact_slot_atomically() {
+    for slot in 1..=14 {
+        for value in ["0", ACCUMULATION_TOTALS_ZERO_UUID] {
+            let mut fixture = CalculationRegisterPresentationsFixture::exact();
+            fixture.fields[slot] = value.to_string();
+            let row = fixture.metadata_row();
+
+            assert!(fixture.extract().is_none(), "accepted F{slot}={value}");
+            assert!(
+                parse_indexed_generated_types_from_text(&row)
+                    .unwrap_or_default()
+                    .is_empty(),
+                "indexed F{slot}={value}"
+            );
+        }
+    }
+}
+
+#[test]
+fn calculation_generated_type_vector_rejects_duplicates_and_bad_header_atomically() {
+    for slot in 1..=14 {
+        let source = if slot == 1 { 2 } else { 1 };
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[slot] = fixture.fields[source].clone();
+        let row = fixture.metadata_row();
+        assert!(fixture.extract().is_none(), "accepted duplicate F{slot}");
+        assert!(
+            parse_indexed_generated_types_from_text(&row)
+                .unwrap_or_default()
+                .is_empty(),
+            "indexed duplicate F{slot}"
+        );
+    }
+
+    let mut case_duplicate = CalculationRegisterPresentationsFixture::exact();
+    case_duplicate.fields[1] = case_duplicate.fields[10].to_uppercase();
+    let row = case_duplicate.metadata_row();
+    assert!(case_duplicate.extract().is_none());
+    assert!(
+        parse_indexed_generated_types_from_text(&row)
+            .unwrap_or_default()
+            .is_empty()
+    );
+
+    let original = CalculationRegisterPresentationsFixture::exact();
+    let valid_header = original.fields[15].clone();
+    let mut moved = original.clone();
+    moved.fields[14] = valid_header.clone();
+    moved.fields[15] = "0".to_string();
+    let mut duplicate = original.clone();
+    duplicate.fields[29] = valid_header.clone();
+    let mut wrong_then_valid = original;
+    wrong_then_valid.fields[15] = wrong_then_valid.fields[15].replace(
+        CALCULATION_PRESENTATIONS_TEST_UUID,
+        "99999999-9999-4999-8999-999999999999",
+    );
+    wrong_then_valid.fields[29] = valid_header;
+
+    for fixture in [moved, duplicate, wrong_then_valid] {
+        let row = fixture.metadata_row();
+        assert!(fixture.extract().is_none());
+        assert!(
+            parse_indexed_generated_types_from_text(&row)
+                .unwrap_or_default()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn calculation_generated_type_vector_preserves_nonexact_legacy_six_xml_and_index() {
+    for field_count in [16, 32, 34] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields.truncate(field_count.min(33));
+        while fixture.fields.len() < field_count {
+            fixture.fields.push("0".to_string());
+        }
+
+        let xml = fixture.xml().expect("legacy nonexact calculation root");
+        let entries = parse_indexed_generated_types_from_text(&fixture.metadata_row()).unwrap();
+        assert_eq!(
+            xml.matches("<xr:GeneratedType").count(),
+            6,
+            "len {field_count}"
+        );
+        assert_eq!(entries.len(), 6, "len {field_count}");
+        assert!(xml.contains("CalculationRegisterObject.Payroll"));
+        assert!(!xml.contains("CalculationRegisterRecord.Payroll"));
+        assert!(!xml.contains("RecalculationsManager.Payroll"));
+        assert_eq!(
+            entries.first().map(|entry| entry.reference.as_str()),
+            Some("cfg:CalculationRegisterObject.Payroll")
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| entry.reference == "cfg:RecalculationsManager.Payroll")
+        );
+    }
+}
+
+#[test]
+fn calculation_generated_type_vector_preserves_register_family_indexes() {
+    let accounting_uuid = "33333333-3333-4333-8333-333333333333";
+    let mut accounting21 = vec!["21".to_string()];
+    accounting21.extend(register_generated_type_fields(14));
+    accounting21.push(register_owner_header(accounting_uuid, "Ledger"));
+    accounting21.extend([
+        "1".to_string(),
+        "1".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+    ]);
+    let accounting21_raw = format!("{{1,{{{}}}}}", accounting21.join(","));
+    let accounting21_row =
+        metadata_text_row_from_text(accounting_uuid, accounting21_raw.clone()).unwrap();
+    let accounting21_xml = extract_register_fields(&accounting21, accounting_uuid)
+        .and_then(|source| String::from_utf8(source.xml).ok())
+        .unwrap();
+    let accounting21_entries = parse_indexed_generated_types_from_text(&accounting21_row).unwrap();
+    assert_eq!(accounting21_xml.matches("<xr:GeneratedType").count(), 7);
+    assert_eq!(accounting21_entries.len(), 7);
+    assert!(accounting21_xml.contains(
+        "<xr:GeneratedType name=\"AccountingRegisterRecord.Ledger\" category=\"Record\">"
+    ));
+    assert!(accounting21_xml.contains(
+        "<xr:GeneratedType name=\"AccountingRegisterExtDimensions.Ledger\" category=\"ExtDimensions\">"
+    ));
+    assert_eq!(
+        accounting21_entries
+            .first()
+            .map(|entry| entry.reference.as_str()),
+        Some("cfg:AccountingRegisterRecord.Ledger")
+    );
+    assert_eq!(
+        accounting21_entries
+            .get(1)
+            .map(|entry| entry.reference.as_str()),
+        Some("cfg:AccountingRegisterExtDimensions.Ledger")
+    );
+    assert_eq!(
+        accounting21_entries
+            .last()
+            .map(|entry| entry.reference.as_str()),
+        Some("cfg:AccountingRegisterManager.Ledger")
+    );
+
+    let accounting22_uuid = "66666666-6666-4666-8666-666666666666";
+    let mut accounting22 = vec!["22".to_string(), "22".to_string()];
+    accounting22.extend(register_generated_type_fields(14));
+    accounting22.push(register_owner_header(accounting22_uuid, "LegacyLedger"));
+    let accounting22_raw = format!("{{1,{{{}}}}}", accounting22.join(","));
+    let accounting22_row =
+        metadata_text_row_from_text(accounting22_uuid, accounting22_raw.clone()).unwrap();
+    let accounting22_xml = extract_register_fields(&accounting22, accounting22_uuid)
+        .and_then(|source| String::from_utf8(source.xml).ok())
+        .unwrap();
+    let accounting22_entries = parse_indexed_generated_types_from_text(&accounting22_row).unwrap();
+    assert_eq!(accounting22_xml.matches("<xr:GeneratedType").count(), 7);
+    assert_eq!(accounting22_entries.len(), 7);
+    assert!(accounting22_xml.contains(
+        "<xr:GeneratedType name=\"AccountingRegisterRecord.LegacyLedger\" category=\"Record\">"
+    ));
+    assert!(accounting22_xml.contains(
+        "<xr:GeneratedType name=\"AccountingRegisterExtDimensions.LegacyLedger\" category=\"ExtDimensions\">"
+    ));
+    assert_eq!(
+        accounting22_entries
+            .first()
+            .map(|entry| entry.reference.as_str()),
+        Some("cfg:AccountingRegisterRecord.LegacyLedger")
+    );
+    assert_eq!(
+        accounting22_entries
+            .get(1)
+            .map(|entry| entry.reference.as_str()),
+        Some("cfg:AccountingRegisterExtDimensions.LegacyLedger")
+    );
+    assert_eq!(
+        accounting22_entries
+            .last()
+            .map(|entry| entry.reference.as_str()),
+        Some("cfg:AccountingRegisterManager.LegacyLedger")
+    );
+
+    let accumulation = AccumulationRegisterTotalsFixture::exact("1");
+    let accumulation_xml = accumulation.xml().unwrap();
+    let accumulation_row =
+        metadata_text_row_from_text(ACCUMULATION_TOTALS_TEST_UUID, accumulation.raw()).unwrap();
+    assert_eq!(accumulation_xml.matches("<xr:GeneratedType").count(), 6);
+    let accumulation_entries = parse_indexed_generated_types_from_text(&accumulation_row).unwrap();
+    assert_eq!(accumulation_entries.len(), 1);
+    assert_eq!(
+        accumulation_entries[0].reference,
+        "cfg:AccumulationRegisterRecordSet.Totals"
+    );
+}
+
+#[test]
+fn calculation_generated_type_vector_keeps_cross_row_collision_policy() {
+    let first = CalculationRegisterPresentationsFixture::exact();
+    let second_uuid = "77777777-7777-4777-8777-777777777777";
+    let mut second = first.clone();
+    second.fields[15] = register_owner_header(second_uuid, "Benefits");
+    let second_row = metadata_text_row_from_text(second_uuid, second.raw()).unwrap();
+    let indexes = build_metadata_type_indexes_from_texts(&[first.metadata_row(), second_row]);
+    let duplicate_id = first.fields[1].to_ascii_lowercase();
+
+    assert!(indexes.reference_collisions.contains(&duplicate_id));
+    assert_eq!(
+        indexes.references.get(&duplicate_id).map(String::as_str),
+        Some("cfg:CalculationRegisterRecord.Benefits")
+    );
+    assert!(matches!(
+        indexes.dcs.get(&duplicate_id),
+        Some(DcsTypeResolution::Type { qname })
+            if qname == "cfg:CalculationRegisterRecord.Benefits"
+    ));
+}
+
+#[test]
+fn selected_calculation_generated_type_vector_exposes_exact_type_index() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let row = fixture.metadata_row();
+    let needs = selected_metadata_source_reference_index_needs(std::slice::from_ref(&row))
+        .expect("selected calculation reference needs");
+    assert!(needs.type_index);
+
+    let indexes = build_metadata_type_indexes_from_texts(&[row]);
+    assert_eq!(
+        indexes
+            .references
+            .get(&fixture.fields[1])
+            .map(String::as_str),
+        Some("cfg:CalculationRegisterRecord.Payroll")
+    );
+    assert_eq!(
+        indexes
+            .references
+            .get(&fixture.fields[13])
+            .map(String::as_str),
+        Some("cfg:RecalculationsManager.Payroll")
+    );
+}
+
+#[test]
+fn calculation_generated_type_vector_has_exact_property_target_and_no_corpus_literals() {
+    let fixture = CalculationRegisterPresentationsFixture::exact();
+    let raw = fixture.raw();
+    let fields = fixture
+        .fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let header =
+        parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+    let exact = parse_exact_calculation_register_generated_types(&fields, &header)
+        .unwrap()
+        .unwrap();
+    let mut legacy = Vec::new();
+    push_register_generated_type_entries(
+        &mut legacy,
+        &fields,
+        1,
+        "CalculationRegister",
+        &header.name,
+    );
+    let exact_xml = format_generated_types_internal_info_xml(&exact);
+    let legacy_xml = format_generated_types_internal_info_xml(&legacy);
+    let count_lines = |value: &str| {
+        let mut counts = BTreeMap::<String, usize>::new();
+        for line in value.lines() {
+            *counts.entry(line.to_string()).or_default() += 1;
+        }
+        counts
+    };
+    let exact_lines = count_lines(&exact_xml);
+    let legacy_lines = count_lines(&legacy_xml);
+    let added = exact_lines
+        .iter()
+        .map(|(line, count)| count.saturating_sub(*legacy_lines.get(line).unwrap_or(&0)))
+        .sum::<usize>();
+    let removed = legacy_lines
+        .iter()
+        .map(|(line, count)| count.saturating_sub(*exact_lines.get(line).unwrap_or(&0)))
+        .sum::<usize>();
+    assert_eq!((added, removed), (5, 1));
+
+    let source = include_str!("mod.rs");
+    for forbidden in [
+        "7f0b707e-7684-4eed-b7e3-c8a25b51db87",
+        "bac82510-0f81-4d0b-957e-55243c4938f7",
         "_ДемоОсновныеНачисления",
         "Начисления.xml",
         "Удержания.xml",
