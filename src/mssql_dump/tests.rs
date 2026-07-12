@@ -5609,6 +5609,7 @@ fn extracts_ordinary_wrapper55_table_properties_and_autocommandbar_autofill() {
     assert_eq!(item.file_drag_mode, Some("AsFile"));
     assert_eq!(item.child_items[1].tag, "AutoCommandBar");
     assert_eq!(item.child_items[1].autofill, Some(false));
+    assert!(!item.child_items[1].auto_command_bar_empty_element);
 
     let xml = format_form_child_items_xml(&[item], 1);
     assert!(xml.contains("<ReadOnly>true</ReadOnly>"));
@@ -5621,6 +5622,242 @@ fn extracts_ordinary_wrapper55_table_properties_and_autocommandbar_autofill() {
     assert!(!xml.contains("<RowSelectionMode>"));
     assert!(xml.contains("<EnableStartDrag>true</EnableStartDrag>"));
     assert!(xml.contains("<FileDragMode>AsFile</FileDragMode>"));
+}
+
+#[test]
+fn keeps_nested_auto_command_bar_controls_and_table_order() {
+    let raw_table = r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,0},{1,0},{1,{3}},0,1,1,0,0,0,1,0,3,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,1,13,{"U"},{0},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0}"#;
+    let mut table = parse_form_child_item(
+        raw_table,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    let mut autofill_and_children = table.child_items[1].clone();
+    assert_eq!(autofill_and_children.autofill, Some(false));
+    autofill_and_children
+        .child_items
+        .push(table.child_items[0].clone());
+    let autofill_xml = format_form_child_item_xml(&autofill_and_children, 2, false);
+    let autofill_at = autofill_xml.find("<Autofill>false</Autofill>").unwrap();
+    let children_at = autofill_xml.find("<ChildItems>").unwrap();
+    assert!(autofill_at < children_at);
+    assert!(autofill_xml.contains("</AutoCommandBar>"));
+
+    let empty_bar = parse_form_child_item(
+        r#"{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let mut addition = empty_bar.clone();
+    addition.tag = "SearchStringAddition";
+    addition.name = "RowsSearch".to_string();
+    addition.auto_command_bar_empty_element = false;
+    let mut regular_child = empty_bar.clone();
+    regular_child.tag = "CommandBar";
+    regular_child.name = "RowsCommands".to_string();
+    regular_child.auto_command_bar_empty_element = false;
+    table.child_items[1] = empty_bar;
+    table.child_items.push(addition);
+    table.child_items.push(regular_child);
+    table.extended_tooltip = Some(("RowsTip".to_string(), "59".to_string()));
+    table.events.push(FormBodyEvent {
+        name: "Selection".to_string(),
+        handler: "RowsSelection".to_string(),
+    });
+
+    let xml = format_form_child_items_xml(&[table], 1);
+    let context_at = xml.find("\t\t<ContextMenu").unwrap();
+    let bar_at = xml
+        .find("\t\t<AutoCommandBar name=\"RowsBar\" id=\"58\"/>")
+        .unwrap();
+    let tooltip_at = xml.find("\t\t<ExtendedTooltip").unwrap();
+    let addition_at = xml.find("\t\t<SearchStringAddition").unwrap();
+    let events_at = xml.find("\t\t<Events>").unwrap();
+    let children_at = xml.find("\t\t<ChildItems>").unwrap();
+    assert!(context_at < bar_at);
+    assert!(bar_at < tooltip_at);
+    assert!(tooltip_at < addition_at);
+    assert!(addition_at < events_at);
+    assert!(events_at < children_at);
+}
+
+#[test]
+fn formats_raw_empty_nested_auto_command_bar_as_empty_element() {
+    let item = parse_form_child_item(
+        r#"{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{ 0,
+            0, 1 },0,1,0,0,0,3,3,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert_eq!(item.tag, "AutoCommandBar");
+    assert!(item.auto_command_bar_empty_element);
+    assert_eq!(item.autofill, Some(true));
+    let empty_element =
+        "\t<ChildItems>\r\n\t\t<AutoCommandBar name=\"RowsBar\" id=\"58\"/>\r\n\t</ChildItems>\r\n";
+    assert_eq!(format_form_child_items_xml(&[item], 1), empty_element);
+
+    // The saved comparison contains 223 represented mismatches; one of 224 raw positives is absent upstream.
+    const REPRESENTED_SAVED_NODES: usize = 223;
+    let legacy_open_close =
+        "\t\t<AutoCommandBar name=\"RowsBar\" id=\"58\">\r\n\t\t</AutoCommandBar>\r\n";
+    let native_empty = "\t\t<AutoCommandBar name=\"RowsBar\" id=\"58\"/>\r\n";
+    assert_eq!(
+        legacy_open_close.lines().count() * REPRESENTED_SAVED_NODES,
+        446
+    );
+    assert_eq!(native_empty.lines().count() * REPRESENTED_SAVED_NODES, 223);
+}
+
+#[test]
+fn raw_empty_nested_auto_command_bar_requires_exact_structural_shape() {
+    const RAW: &str = r#"{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0}"#;
+    let raw_fields = split_1c_braced_fields(RAW, 0).unwrap();
+    assert_eq!(raw_fields.len(), 29);
+
+    let build = |mutations: &[(usize, &str)], remove_last: bool, append: bool| {
+        let mut fields = raw_fields
+            .iter()
+            .map(|field| field.to_string())
+            .collect::<Vec<_>>();
+        for (index, value) in mutations {
+            fields[*index] = (*value).to_string();
+        }
+        if remove_last {
+            fields.pop();
+        }
+        if append {
+            fields.push("0".to_string());
+        }
+        format!("{{{}}}", fields.join(","))
+    };
+    let is_empty_element = |raw: &str| {
+        parse_form_child_item(
+            raw,
+            None,
+            None,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .is_some_and(|item| item.auto_command_bar_empty_element)
+    };
+
+    assert!(!is_empty_element(&build(
+        &[(1, "{-1,02023637-7868-4a5f-8576-835a76e0c9ba}")],
+        false,
+        false,
+    )));
+    assert!(!is_empty_element(&build(&[(0, "12")], false, false)));
+    assert!(!is_empty_element(&build(&[(5, "8")], false, false)));
+    assert!(!is_empty_element(&build(&[], true, false)));
+    assert!(!is_empty_element(&build(&[], false, true)));
+    for align in ["1", "2", "3"] {
+        for autofill in ["0", "1"] {
+            let marker = format!("{{0,{align},{autofill}}}");
+            let raw = build(&[(20, marker.as_str())], false, false);
+            let item = parse_form_child_item(
+                &raw,
+                None,
+                None,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &[],
+                &BTreeMap::new(),
+            )
+            .unwrap();
+            assert!(!item.auto_command_bar_empty_element, "{marker}");
+            let xml = format_form_child_items_xml(&[item], 1);
+            assert!(
+                xml.contains(r#"<AutoCommandBar name="RowsBar" id="58">"#),
+                "{marker}: {xml}"
+            );
+            assert!(xml.contains("</AutoCommandBar>"), "{marker}: {xml}");
+        }
+    }
+    assert!(!is_empty_element(&build(
+        &[(20, "{0,0,1,0}")],
+        false,
+        false
+    )));
+    assert!(!is_empty_element(&build(
+        &[(20, "{0,0,1}{9}")],
+        false,
+        false
+    )));
+    assert!(!is_empty_element(&build(
+        &[(20, "{0,0,1}tail")],
+        false,
+        false
+    )));
+}
+
+#[test]
+fn keeps_nonempty_nested_auto_command_bar_open() {
+    let item = parse_form_child_item(
+        r#"{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,2,1},0,1,0,0,0,3,3,0}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+
+    assert!(!item.auto_command_bar_empty_element);
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert!(xml.contains(r#"<AutoCommandBar name="RowsBar" id="58">"#));
+    assert!(xml.contains("</AutoCommandBar>"));
+}
+
+#[test]
+fn keeps_top_level_auto_command_bar_lexical_controls() {
+    let default_body = deflate_for_test(
+        br#"{4,{59,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormBar",{1,0}}},"",{0}}"#,
+    );
+    let default_xml = extract_form_body_xml(&default_body, &BTreeMap::new()).unwrap();
+    assert!(default_xml.contains(r#"<AutoCommandBar name="FormBar" id="-1"/>"#));
+
+    let configured_body = deflate_for_test(
+        br#"{4,{59,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"FormBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{1,2,0,0},0,1,0,0,0,3,3,0}},"",{0}}"#,
+    );
+    let configured_xml = extract_form_body_xml(&configured_body, &BTreeMap::new()).unwrap();
+    assert!(configured_xml.contains(r#"<AutoCommandBar name="FormBar" id="-1">"#));
+    assert!(configured_xml.contains("<HorizontalAlign>Right</HorizontalAlign>"));
+    assert!(configured_xml.contains("<Autofill>false</Autofill>"));
+    assert!(configured_xml.contains("</AutoCommandBar>"));
+}
+
+#[test]
+fn form_body_empty_auto_command_bar_rule_has_no_corpus_owner_literals() {
+    let production = include_str!("form_body.rs");
+    for owner_literal in [
+        "Пользователи",
+        "ВыборОбъектовМетаданных",
+        "ОперандыДляРасчетовКоманднаяПанель",
+        "RowsBar",
+        "579baaa4-6493-4d99-8744-6399757295c7",
+    ] {
+        assert!(!production.contains(owner_literal), "{owner_literal}");
+    }
 }
 
 #[test]
@@ -9615,6 +9852,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
         vec!["ContextMenu", "AutoCommandBar", "SearchStringAddition"]
     );
     assert_eq!(item.child_items[1].child_items[0].tag, "Button");
+    assert!(!item.child_items[1].auto_command_bar_empty_element);
     assert_eq!(
         item.child_items[1].child_items[0].command_name.as_deref(),
         Some("Form.Command.Run")
@@ -9643,6 +9881,7 @@ fn formats_table_search_additions_as_direct_sections() {
         tag: "Table",
         id: "25".to_string(),
         name: "Rows".to_string(),
+        auto_command_bar_empty_element: false,
         autofill: None,
         group: None,
         behavior: None,
@@ -9760,6 +9999,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 tag: "SearchStringAddition",
                 id: "26".to_string(),
                 name: "RowsSearch".to_string(),
+                auto_command_bar_empty_element: false,
                 autofill: None,
                 group: None,
                 behavior: None,
@@ -9878,6 +10118,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 tag: "InputField",
                 id: "40".to_string(),
                 name: "Name".to_string(),
+                auto_command_bar_empty_element: false,
                 autofill: None,
                 group: None,
                 behavior: None,

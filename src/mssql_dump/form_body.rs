@@ -372,6 +372,7 @@ pub(super) struct FormChildItem {
     pub(super) tag: &'static str,
     pub(super) id: String,
     pub(super) name: String,
+    pub(super) auto_command_bar_empty_element: bool,
     pub(super) autofill: Option<bool>,
     pub(super) group: Option<&'static str>,
     pub(super) behavior: Option<&'static str>,
@@ -1187,6 +1188,27 @@ pub(super) fn parse_form_auto_command_bar_autofill(field: &str) -> Option<bool> 
         "1" => Some(true),
         _ => None,
     }
+}
+
+fn is_raw_empty_nested_auto_command_bar(
+    wrapper: &str,
+    tag: &str,
+    id: &str,
+    fields: &[&str],
+) -> bool {
+    if wrapper != "22" || tag != "AutoCommandBar" || id == "-1" || fields.len() != 29 {
+        return false;
+    }
+    let Some(marker_text) = fields.get(20).map(|field| field.trim()) else {
+        return false;
+    };
+    if scan_1c_braced_value(marker_text, 0) != Some(marker_text.len()) {
+        return false;
+    }
+    let Some(marker) = split_1c_braced_fields(marker_text, 0) else {
+        return false;
+    };
+    marker.len() == 3 && marker.iter().map(|field| field.trim()).eq(["0", "0", "1"])
 }
 
 pub(super) fn parse_form_context_menu_autofill(field: &str) -> Option<bool> {
@@ -4080,6 +4102,9 @@ pub(super) fn parse_form_child_item_with_context(
         tag,
         id: id.to_string(),
         name,
+        auto_command_bar_empty_element: is_raw_empty_nested_auto_command_bar(
+            wrapper, tag, id, &fields,
+        ),
         autofill: if tag == "ContextMenu" {
             fields
                 .get(20)
@@ -9596,6 +9621,13 @@ pub(super) fn format_form_child_item_xml(
         return format_form_context_menu_xml(item, indent);
     }
     let tab = "\t".repeat(indent);
+    if item.tag == "AutoCommandBar" && item.auto_command_bar_empty_element {
+        return format!(
+            "{tab}<AutoCommandBar name=\"{}\" id=\"{}\"/>\r\n",
+            escape_xml_text(&item.name),
+            escape_xml_text(&item.id)
+        );
+    }
     let early_title_for_field = matches!(
         item.tag,
         "InputField"

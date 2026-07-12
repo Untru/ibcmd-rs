@@ -32802,6 +32802,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_form_body_xml_preserving_existing_empty_nested_auto_command_bar_row()
+    -> anyhow::Result<()> {
+        let base = super::deflate_raw(
+            br#"{4,{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{22,{27,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0}},"Old module",{0}}"#,
+        )?;
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
+	<ChildItems>
+		<AutoCommandBar name="RowsBar" id="27"/>
+	</ChildItems>
+</Form>
+"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let bar_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+
+        assert_eq!(bar_fields.len(), 29, "{}", parsed.layout);
+        assert_eq!(&parsed.layout[bar_fields[0].clone()], "22");
+        assert_eq!(&parsed.layout[bar_fields[5].clone()], "9");
+        assert_eq!(&parsed.layout[bar_fields[20].clone()], "{0,0,1}");
+        assert_eq!(parsed.module_text, "Old module");
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_existing_search_addition_type() -> anyhow::Result<()> {
         let base = super::deflate_raw(
             br##"{4,{59,{6,{134,11111111-1111-4111-8111-111111111111},0,0,0,1,"OldStatus",{1,0}}},"Old module",{0}}"##,
