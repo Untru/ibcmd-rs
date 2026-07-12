@@ -4980,7 +4980,9 @@ fn emits_exact_tooltip_representation_for_all_six_field_tags_in_native_order() {
         );
         assert_eq!(item.tag, expected_tag);
         assert_eq!(item.tooltip_representation, Some(expected));
-        item.horizontal_align = Some("Right");
+        item.horizontal_align = Some(crate::form_schema::FormChildItemAlignment::Horizontal(
+            "Right",
+        ));
 
         let xml = format_form_child_items_xml(&[item], 1);
         let title_location_at = xml.find("<TitleLocation>").unwrap();
@@ -5010,7 +5012,9 @@ fn emits_exact_tooltip_representation_for_all_six_field_tags_in_native_order() {
                 r#"{1,1,{"en","Tip"}}"#,
             ),
         );
-        zero_item.horizontal_align = Some("Right");
+        zero_item.horizontal_align = Some(crate::form_schema::FormChildItemAlignment::Horizontal(
+            "Right",
+        ));
         let zero_xml = format_form_child_items_xml(&[zero_item], 1);
         let representation_line = xml
             .lines()
@@ -8122,7 +8126,11 @@ fn extracts_input_field_right_align_from_native_slot_for_renamed_path() {
         .unwrap();
 
         assert_eq!(item.data_path.as_deref(), Some("RenamedRows.RenamedAmount"));
-        assert_eq!(item.horizontal_align, Some("Right"));
+        assert_eq!(
+            item.horizontal_align
+                .and_then(crate::form_schema::FormChildItemAlignment::horizontal_align),
+            Some("Right")
+        );
         let xml = format_form_child_items_xml(&[item], 1);
         assert!(xml.contains("<HorizontalAlign>Right</HorizontalAlign>"));
     }

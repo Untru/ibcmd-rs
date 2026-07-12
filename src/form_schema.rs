@@ -64,6 +64,7 @@ pub(crate) enum FormDecorationHeaderXmlProperty {
     ToolTip,
     ToolTipRepresentation,
     GroupHorizontalAlign,
+    GroupVerticalAlign,
 }
 
 pub(crate) const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProperty] = &[
@@ -71,6 +72,7 @@ pub(crate) const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProp
     FormDecorationHeaderXmlProperty::ToolTip,
     FormDecorationHeaderXmlProperty::ToolTipRepresentation,
     FormDecorationHeaderXmlProperty::GroupHorizontalAlign,
+    FormDecorationHeaderXmlProperty::GroupVerticalAlign,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -104,6 +106,139 @@ impl FormDecorationHeaderSchema {
         self.tooltip_representation_slot
     }
 }
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormLabelDecorationAlignmentSchema {
+    group_horizontal_align_slot: usize,
+    group_vertical_align_slot: usize,
+    horizontal_align_option_slot: usize,
+    vertical_align_option_slot: usize,
+}
+
+impl FormLabelDecorationAlignmentSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 18;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        match (
+            wrapper,
+            field_count,
+            item_tag,
+            direct_discriminator,
+            options.len(),
+            options.first().map(|field| field.trim()),
+        ) {
+            ("12", 36, "LabelDecoration", Some("0"), 9, Some("5")) => Some(Self {
+                group_horizontal_align_slot: 32,
+                group_vertical_align_slot: 33,
+                horizontal_align_option_slot: 2,
+                vertical_align_option_slot: 3,
+            }),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn group_horizontal_align_slot(self) -> usize {
+        self.group_horizontal_align_slot
+    }
+
+    pub(crate) const fn group_vertical_align_slot(self) -> usize {
+        self.group_vertical_align_slot
+    }
+
+    pub(crate) const fn horizontal_align_option_slot(self) -> usize {
+        self.horizontal_align_option_slot
+    }
+
+    pub(crate) const fn vertical_align_option_slot(self) -> usize {
+        self.vertical_align_option_slot
+    }
+
+    pub(crate) fn alignment(
+        self,
+        fields: &[&str],
+        options: &[&str],
+    ) -> FormLabelDecorationAlignment {
+        FormLabelDecorationAlignment {
+            group_vertical_align: fields
+                .get(self.group_vertical_align_slot())
+                .and_then(|field| match field.trim() {
+                    "1" => Some("Center"),
+                    "2" => Some("Bottom"),
+                    _ => None,
+                }),
+            horizontal_align: options
+                .get(self.horizontal_align_option_slot())
+                .and_then(|field| match field.trim() {
+                    "1" => Some("Center"),
+                    "2" => Some("Right"),
+                    "3" => Some("Auto"),
+                    _ => None,
+                }),
+            vertical_align: options
+                .get(self.vertical_align_option_slot())
+                .and_then(|field| match field.trim() {
+                    "0" => Some("Top"),
+                    "1" => Some("Center"),
+                    "2" => Some("Bottom"),
+                    _ => None,
+                }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormLabelDecorationAlignment {
+    group_vertical_align: Option<&'static str>,
+    horizontal_align: Option<&'static str>,
+    vertical_align: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormChildItemAlignment {
+    Horizontal(&'static str),
+    LabelDecoration(FormLabelDecorationAlignment),
+}
+
+impl FormChildItemAlignment {
+    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+        match self {
+            Self::Horizontal(value) => Some(value),
+            Self::LabelDecoration(alignment) => alignment.horizontal_align,
+        }
+    }
+
+    pub(crate) const fn group_vertical_align(self) -> Option<&'static str> {
+        match self {
+            Self::Horizontal(_) => None,
+            Self::LabelDecoration(alignment) => alignment.group_vertical_align,
+        }
+    }
+
+    pub(crate) const fn vertical_align(self) -> Option<&'static str> {
+        match self {
+            Self::Horizontal(_) => None,
+            Self::LabelDecoration(alignment) => alignment.vertical_align,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormLabelDecorationAlignmentTailXmlProperty {
+    HorizontalAlign,
+    VerticalAlign,
+}
+
+pub(crate) const FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER:
+    &[FormLabelDecorationAlignmentTailXmlProperty] = &[
+    FormLabelDecorationAlignmentTailXmlProperty::HorizontalAlign,
+    FormLabelDecorationAlignmentTailXmlProperty::VerticalAlign,
+];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {

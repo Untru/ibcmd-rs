@@ -1,9 +1,12 @@
 use super::*;
 use crate::form_schema::{
-    FORM_DECORATION_HEADER_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_TABLE_XML_ORDER,
-    FORM_USUAL_GROUP_HEADER_XML_ORDER, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldXmlProperty, FormLabelFieldOptionSlot as LabelFieldSlot,
+    FORM_DECORATION_HEADER_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER,
+    FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_TABLE_XML_ORDER,
+    FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
+    FormLabelDecorationAlignment, FormLabelDecorationAlignmentSchema,
+    FormLabelDecorationAlignmentTailXmlProperty, FormLabelFieldOptionSlot as LabelFieldSlot,
     FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
     FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     decode_form_tooltip_representation, form_child_item_representation_is_default,
@@ -426,7 +429,7 @@ pub(super) struct FormChildItem {
     pub(super) title_location: Option<&'static str>,
     pub(super) tooltip_representation: Option<&'static str>,
     pub(super) edit_mode: Option<&'static str>,
-    pub(super) horizontal_align: Option<&'static str>,
+    pub(super) horizontal_align: Option<FormChildItemAlignment>,
     pub(super) check_box_type: Option<&'static str>,
     pub(super) radio_button_type: Option<&'static str>,
     pub(super) columns_count: Option<u32>,
@@ -4052,7 +4055,7 @@ pub(super) fn parse_form_child_item_with_context(
         .then(|| parse_form_column_group_options(&fields))
         .flatten();
     let label_decoration_options = (tag == "LabelDecoration")
-        .then(|| parse_form_label_decoration_options(&fields, object_refs))
+        .then(|| parse_form_label_decoration_options(tag, &fields, object_refs))
         .flatten();
     let label_field_options = (tag == "LabelField")
         .then(|| parse_form_label_field_options(&fields, object_refs))
@@ -4568,7 +4571,11 @@ pub(super) fn parse_form_child_item_with_context(
         horizontal_align: if matches!(tag, "InputField" | "LabelField")
             && form_input_field_layout_is_extended(&fields)
         {
-            parse_form_input_field_horizontal_align(&fields)
+            parse_form_input_field_horizontal_align(&fields).map(FormChildItemAlignment::Horizontal)
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .map(|options| FormChildItemAlignment::LabelDecoration(options.alignment))
         } else {
             None
         },
@@ -5308,6 +5315,7 @@ pub(super) struct FormLabelDecorationOptions {
     pub(super) hyperlink: bool,
     pub(super) font_xml: Option<String>,
     pub(super) group_horizontal_align: Option<&'static str>,
+    pub(super) alignment: FormLabelDecorationAlignment,
 }
 
 pub(super) fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOptions> {
@@ -5459,21 +5467,32 @@ pub(super) fn parse_form_label_field_text_color(
 }
 
 pub(super) fn parse_form_label_decoration_options(
+    item_tag: &str,
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormLabelDecorationOptions> {
-    let options = split_1c_braced_fields(fields.get(18)?.trim(), 0)?;
-    if options.first()?.trim() != "5" {
-        return None;
-    }
+    let options = split_1c_braced_fields(
+        fields
+            .get(FormLabelDecorationAlignmentSchema::OPTIONS_SLOT)?
+            .trim(),
+        0,
+    )?;
+    let schema = FormLabelDecorationAlignmentSchema::from_raw_layout(
+        fields.first()?.trim(),
+        fields.len(),
+        item_tag,
+        fields.get(5).map(|field| field.trim()),
+        &options,
+    )?;
     Some(FormLabelDecorationOptions {
         hyperlink: options.get(1).map(|field| field.trim()) == Some("1"),
         font_xml: fields
             .get(15)
             .and_then(|field| parse_form_font_tuple_xml(field, object_refs)),
         group_horizontal_align: fields
-            .get(32)
+            .get(schema.group_horizontal_align_slot())
             .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
+        alignment: schema.alignment(fields, &options),
     })
 }
 
@@ -9831,7 +9850,11 @@ pub(super) fn format_form_child_item_xml(
         FormTooltipRepresentationXmlOrder::FieldProperties,
         indent + 1,
     ));
-    if let Some(horizontal_align) = item.horizontal_align {
+    if item.tag != "LabelDecoration"
+        && let Some(horizontal_align) = item
+            .horizontal_align
+            .and_then(FormChildItemAlignment::horizontal_align)
+    {
         xml.push_str(&format!(
             "{tab}\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
             escape_xml_text(horizontal_align)
@@ -10206,6 +10229,12 @@ pub(super) fn format_form_child_item_xml(
         if item.tag == "LabelDecoration" && item.hiperlink == Some(true) {
             xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
         }
+        if item.tag == "LabelDecoration" {
+            xml.push_str(&format_form_label_decoration_alignment_tail_xml(
+                item,
+                indent + 1,
+            ));
+        }
         if item.tag == "PictureDecoration" {
             if let Some(picture_size) = item
                 .picture_size
@@ -10456,6 +10485,46 @@ fn format_form_decoration_header_xml(item: &FormChildItem, indent: usize) -> Str
                     ));
                 }
             }
+            FormDecorationHeaderXmlProperty::GroupVerticalAlign => {
+                if let Some(group_vertical_align) = item
+                    .horizontal_align
+                    .and_then(FormChildItemAlignment::group_vertical_align)
+                {
+                    xml.push_str(&format!(
+                        "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                        escape_xml_text(group_vertical_align)
+                    ));
+                }
+            }
+        }
+    }
+    xml
+}
+
+fn format_form_label_decoration_alignment_tail_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "LabelDecoration" {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER {
+        let value = match property {
+            FormLabelDecorationAlignmentTailXmlProperty::HorizontalAlign => item
+                .horizontal_align
+                .and_then(FormChildItemAlignment::horizontal_align),
+            FormLabelDecorationAlignmentTailXmlProperty::VerticalAlign => item
+                .horizontal_align
+                .and_then(FormChildItemAlignment::vertical_align),
+        };
+        if let Some(value) = value {
+            let tag_name = match property {
+                FormLabelDecorationAlignmentTailXmlProperty::HorizontalAlign => "HorizontalAlign",
+                FormLabelDecorationAlignmentTailXmlProperty::VerticalAlign => "VerticalAlign",
+            };
+            xml.push_str(&format!(
+                "{tab}<{tag_name}>{}</{tag_name}>\r\n",
+                escape_xml_text(value)
+            ));
         }
     }
     xml
