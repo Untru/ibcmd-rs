@@ -2664,6 +2664,65 @@ lines. It predicts Form `1005 files, +8135/-27598` and full
 `1526 files, +13373/-83841`; file counts do not change. The last actual full
 diff remains `1529 files, +14239/-85386` pending a separately authorized export.
 
+## Form LabelDecoration alignment tail
+
+Status: integrated for the same 1,512 reachable, title-bearing owners as the
+LabelDecoration tooltip header; a new export was not run.
+
+The alignment schema is guarded by the complete raw owner shape: wrapper 12,
+direct discriminator 0, exactly 36 top-level fields, and a nine-field options
+tuple at slot 18 whose kind is 5. It owns GroupHorizontalAlign slot 32,
+GroupVerticalAlign slot 33, HorizontalAlign options slot 2, and VerticalAlign
+options slot 3. No item name, path, UUID, database identity, or corpus branch is
+part of this classifier.
+
+The full/immutable matrices have zero raw-only, native-only, or value
+contradictions. Existing GroupHorizontalAlign has Left 5/1, Center 8/2, Right
+8/3, and omitted default 1,491/486. GroupVerticalAlign has Center 64/19,
+Bottom 3/1, and omitted default 1,445/472. HorizontalAlign has Center 9/3,
+Right 8/4, Auto 4/1, and omitted default 1,491/484. VerticalAlign has Top
+78/26, Center 169/57, Bottom 27/8, and omitted default 1,238/401. The first
+number in each pair is the complete 1,512-owner cohort and the second is the
+immutable 492-owner subset.
+
+Across the native owner-wide property matrix, all applicable pair reversals and
+duplicates are zero. The typed boundary is:
+
+```text
+Title < ToolTip < ToolTipRepresentation < GroupHorizontalAlign
+      < GroupVerticalAlign < Hyperlink < HorizontalAlign < VerticalAlign
+```
+
+The shared decoration header owns GroupVerticalAlign immediately after the
+existing GroupHorizontalAlign position. A LabelDecoration-only typed tail owns
+HorizontalAlign followed by VerticalAlign after the existing Hyperlink
+position. LabelDecoration is excluded from the earlier generic HorizontalAlign
+serializer, preventing both reordering and duplicate output. PictureDecoration
+cannot receive the new alignment model, so its #92 behavior remains unchanged;
+the #93 tooltip, TTR, and GroupHorizontalAlign semantics are also unchanged.
+
+Integrated commit `02a4df8` changes three files totaling `+228/-16`. Eleven
+insertions and three deletions in the existing test module are only the three
+mechanical type adaptations required by `cargo check --all-targets`; they add no
+test, assertion, or fixture. The frozen 14,854-byte diff has SHA-256
+`0C30488CE96E1BC81DE7D65AAFF838CC6EDE1E6F54B1C45628F3300491F01CFB`.
+Independent frozen review returned GO. `cargo fmt --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. Tests, export, database access, ConfigDump, and
+ConfigDumpInfo were not run or changed.
+
+The exact shadow adds 362 native scalar lines in 153 already changed Form.xml
+files: 67 GroupVerticalAlign, 21 HorizontalAlign, and 274 VerticalAlign lines.
+It predicts Form `1005 files, +8135/-27236` and full
+`1526 files, +13373/-83479`; file counts and additions do not change. The last
+actual full diff remains `1529 files, +14239/-85386` pending a separately
+authorized export.
+
+Title-empty and unreachable owners, unobserved GroupVerticalAlign code 0,
+ToolTipRepresentation code 6, ExtendedTooltip, geometry, stretch, style,
+visibility, enabled state, shortcuts, input skipping, and the outstanding
+TextColor and AutoMaxWidth mismatches remain separate HOLD cohorts.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
