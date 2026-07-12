@@ -2419,6 +2419,41 @@ ToolTip expansion, and other form layouts therefore remain HOLD; the issue
 stays open. ConfigDumpInfo remains byte-exact. No test command was run for this
 gate, following the direct user instruction.
 
+## Form UsualGroup default Representation
+
+Status: integrated from a comprehensive native/generated schema matrix; a new
+export was not run.
+
+`Representation=WeakSeparation` is a parsed `UsualGroup` value but is also the
+native XML default for that owner kind. The parser must preserve the enum value
+for the in-memory form model, while the XML formatter must omit the property.
+This default does not depend on `Group`, `Behavior`, `ShowTitle`, an object or
+form name, a UUID, or the metadata family that owns the form.
+
+The comprehensive path model is every managed-form body matching
+`bsp/**/Ext/Form.xml`, including object Forms and CommonForms. The current tree
+contains 1,008 changed Form.xml files totaling `+9001/-29143`. It has exactly
+274 emitted `UsualGroup/Representation=WeakSeparation` nodes in 127 files;
+all 274 match native items where Representation is absent. The native baseline
+contains zero positive nodes across all 1,108 Form.xml files. The earlier
+object-Forms-only slice was 246 nodes in 113 files; CommonForms contribute the
+remaining 28 nodes in 14 files.
+
+`form_schema.rs` now owns typed child-item kind and representation default
+semantics. `form_body.rs` keeps parsing unchanged and asks that schema predicate
+at the existing formatter position. The rule is fail-closed: only the pair
+`UsualGroup + WeakSeparation` is omitted; every other owner/value pair is still
+emitted, so neighboring XML order is unchanged.
+
+Integrated commit `b681153` changes two files totaling `+45/-4`.
+`cargo fmt --check` and `cargo check --all-targets` pass with two pre-existing
+warnings. Tests, export, database access, ConfigDump, and ConfigDumpInfo were
+not run or changed. Independent frozen review returned GO and found no object
+name, path, DB UUID, arity, or corpus branch. The exact static prediction is
+Form `+8727/-29143` and full `1529 files, +13965/-85386`; the last actual full
+diff remains `1529 files, +14239/-85386` until another export is explicitly
+authorized.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
