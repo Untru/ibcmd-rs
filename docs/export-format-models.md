@@ -2723,6 +2723,75 @@ ToolTipRepresentation code 6, ExtendedTooltip, geometry, stretch, style,
 visibility, enabled state, shortcuts, input skipping, and the outstanding
 TextColor and AutoMaxWidth mismatches remain separate HOLD cohorts.
 
+## Form LabelDecoration geometry block
+
+Status: integrated for the same 1,512 reachable, title-bearing owners as the
+LabelDecoration header and alignment gates; a new export was not run.
+
+`FormLabelDecorationSchema` now owns both alignment and geometry under one
+exact raw guard: wrapper 12, direct discriminator 0, 36 top-level fields, and a
+nine-field options tuple of kind 5 at slot 18. No second layout predicate was
+introduced. The complete 1,512-owner corpus and independent 492-owner subset
+have zero raw-only, native-only, or value contradictions for every accepted
+geometry property.
+
+Width slot 10 is a nonzero unsigned integer and was already exact in 101/33
+owners. Height slot 11 is present in 165/41 owners. HorizontalStretch slot 12
+contains false 29/11, true 146/39, and omitted default 1,337/442;
+VerticalStretch slot 13 contains false 17/7, true 68/28, and omitted default
+1,427/457. AutoMaxWidth slot 27 contains false 985/325 and omitted default
+527/167. MaxWidth slot 28 is present in 112/30 owners. AutoMaxHeight slot 30
+contains false 35/9 and omitted default 1,477/483. MaxHeight slot 31 is present
+in eight/two owners. The first number in each pair is the complete cohort and
+the second is the immutable subset.
+
+The previous decoration AutoMaxWidth heuristic was not an owner schema: for
+LabelDecoration it emitted 14 non-native lines and missed 34 native lines; the
+subset independently reproduced three extras and eight misses. Exact slot 27
+removes every contradiction. The old helper remains unchanged for
+PictureDecoration and nested ExtendedTooltip only. As negative controls, slot
+23 is empty in all 1,512 owners despite 112 MaxWidth positives, slot 25 is one
+in all owners despite the AutoMaxHeight split, and MinWidth/MinHeight are absent
+from the native owner property universe.
+
+All applicable native adjacent pairs have zero reverse occurrences and both
+native and current output have zero duplicates. The complete boundary is:
+
+```text
+Width < AutoMaxWidth < MaxWidth < Height < AutoMaxHeight < MaxHeight
+      < HorizontalStretch < VerticalStretch < SkipOnInput < TextColor
+      < Font < Title < ToolTip < ToolTipRepresentation
+      < GroupHorizontalAlign < GroupVerticalAlign < Hyperlink
+      < HorizontalAlign < VerticalAlign
+```
+
+`FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER` owns the first eight properties. A
+LabelDecoration-only helper emits them once at the existing Width position;
+the eight scattered generic serializers exclude this owner. Consequently the
+101 exact Width lines and 951 already exact AutoMaxWidth lines do not move,
+while SkipOnInput, TextColor, Font, and the #93/#94 post-title header remain at
+their established positions. PictureDecoration behavior is unchanged.
+
+Integrated commit `9044cc0` changes two files totaling `+248/-25`. The frozen
+18,994-byte diff has SHA-256
+`9A38DC8CE5DB5A9D84EA6F299ED20628296AEA41849D81856A4D911C12706CF9`.
+Independent frozen review returned GO. `cargo fmt --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. The diff adds no object/form/item name, path, UUID,
+database identity, or corpus branch. Tests, export, database access, ConfigDump,
+and ConfigDumpInfo were not run or changed.
+
+The exact shadow covers 436 nodes in 166 already changed Form.xml files. It
+adds 614 native lines, removes 14 non-native AutoMaxWidth lines, and makes four
+Form.xml paths exact. It predicts Form `1001 files, +8121/-26622` and full
+`1522 files, +13359/-82865`. The last actual full diff remains
+`1529 files, +14239/-85386` pending a separately authorized export.
+
+TitleHeight and the style tail remain post-VerticalAlign HOLD cohorts. TextColor,
+BackColor, Border, visibility, enabled state, shortcuts, input skipping,
+title-empty and unreachable owners, ToolTipRepresentation code 6, and
+ExtendedTooltip also remain outside this gate.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
