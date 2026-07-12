@@ -2374,6 +2374,54 @@ FileDragMode, other AutoCommandBar layouts/properties, and the native re-export
 gate remain HOLD. No database access, ConfigDump, configuration export, or
 `ConfigDumpInfo.xml` change was performed.
 
+## Form exact field ToolTipRepresentation enum
+
+Status: implemented from immutable raw/native evidence; native re-export
+remains paused by user instruction.
+
+Across 1,108 native Form.xml files, 7,193 wrapper-37 field items map to raw
+records without an unmatched item. Field 50 is zero and the property is absent
+for 6,825/6,825 controls. All 368 nonzero values match the native enum exactly:
+None 16, Balloon 4, Button 205, ShowAuto 2, ShowTop 2, ShowBottom 133, and
+ShowRight 6. An independent 446-form raw subset confirms 2,813 zero controls
+and 135 nonzero positives with no contradiction.
+
+The exact parser requires wrapper 37, exactly 59 top-level fields, a direct
+field-5 kind/tag pair for LabelField, InputField, CheckBoxField, PictureField,
+RadioButtonField, or CalendarField, and one scalar field-50 value. Zero omits
+the property; values 1, 2, 3, 4, 5, 7, and 8 map to the seven native enum names.
+Unknown, quoted, braced, prefixed, suffixed, shifted-discriminator, wrapper-48,
+58-field, and 60-field alternatives remain accepted omissions.
+
+The previous InputField heuristic inferred Button from InputHint or
+ListChoiceMode, creating 34 false additions. A separate Calendar branch also
+depended on nonempty parsed tooltip text. Both are removed. Formatting emits
+the raw-derived property for only the six admitted tags, after the existing
+localized ToolTip position and before later field properties. Localized ToolTip
+serialization remains limited to its previous InputField, PictureField, and
+CalendarField scope.
+
+Integrated commit `202a5c5` passes eight exact enum, tag, ordering, zero,
+inference, empty-tooltip, malformed-layout, target, and literal tests plus the
+Calendar and document-field regressions. The full suite changed from
+`1418 passed / 74 failed / 6 ignored` to
+`1426 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Independent immutable review approved the 13,466-byte canonical diff with
+SHA-256
+`9740DDDEC14FEDB389B5B42B240B37EB88089C3417157D5CE2ACABDB1C27F614`.
+The implementation changes two files totaling `+316/-18`; production adds no
+object UUID, metadata name, database identity, path, or corpus-specific branch.
+
+The immutable scoped Form residual is 180 files totaling `+34/-358`; this gate
+is expected to reach `+0/-0` for ToolTipRepresentation, but no fresh export
+claim is made. The historical last accepted global gate remains
+`1546 files, +15779/-61205`. The current on-disk `bsp_test` tree reports the
+older `1559 files, +20562/-87316` state and is rejected as authoritative.
+Wrapper-48/len-60 semantics, localized ToolTip expansion, ExcludedCommand,
+FileDragMode, other form properties, and the native re-export gate remain HOLD.
+No database access, ConfigDump, configuration export, external artifact write,
+or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
