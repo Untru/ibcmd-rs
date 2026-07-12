@@ -2276,6 +2276,59 @@ totaling `+1/-5`. The expected future permitted native gate is `+0/-0`, but
 exactness is not claimed without that gate. No database access, ConfigDump,
 configuration export, or `ConfigDumpInfo.xml` change was performed.
 
+## CalculationRegister exact recalculation child references
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+The exact code-21/33-field CalculationRegister owner layout declares
+Recalculation children in a top-level protocol collection after the owner
+object. The paired BSP owner declares one UUID whose separate code-4 row is a
+structurally valid Recalculation already routed to that same owner. Native emits
+its leaf name as one `Recalculation` child after register data children and
+before Forms; the previous generated root omitted the line. Both native-only
+SFC Calculation roots declare no Recalculation children.
+
+The root collection parser is separate from the existing provisional child
+routing index. It first requires the shared exact owner validator, then requires
+one top-level collection with an unsigned exact count, strict nonzero and
+case-insensitively unique UUID members, and no trailing values. Missing,
+multiple, malformed, nested, quoted, zero, or duplicate alternatives remain
+accepted whole-cohort omissions. Nonexact owner layouts do not consume the
+collection.
+
+A dedicated validated sidecar resolves every declared member atomically. Each
+UUID must have exactly one matching metadata row with code 4, a matching header,
+and a structurally valid Recalculation body. Multi-owner declarations, duplicate
+owner rows, unresolved or CommonPicture-shaped code-4 rows, and sanitized path
+collisions omit the entire owner cohort. Path collision keys use Unicode-aware
+lowercasing. The provisional index remains unchanged so standalone child
+routing keeps its previous behavior.
+
+Formatting preserves raw declaration order, escapes only validated leaf names,
+and emits no partial list. Selected owner extraction supplies the declared child
+row through its existing direct-reference path; an owner without that evidence
+omits the root line. Accounting and Accumulation families remain unchanged.
+The collection marker UUID is a platform serialization discriminator already
+present in the format model, not an object UUID from the paired database.
+
+Integrated commit `78d4a26` passes seven strict collection, structural child,
+collision, exact/nonexact, selected, family-control, target, and literal tests,
+plus all ten related recalculation tests. The full suite changed from
+`1404 passed / 74 failed / 6 ignored` to
+`1411 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Independent frozen review approved the 39,550-byte diff with SHA-256
+`5E1A95D218B2E3BAFD63E5F31080AEF4ECEA5AA60C70E3AB396B048A157946FE`.
+Production contains no owner or child UUID, metadata name, database identity,
+path, or corpus-specific branch.
+
+Resource/Dimension tag correction and child properties, Calculation F26/F28,
+nonexact layouts, alternate collection formats, and the native re-export gate
+remain HOLD. The saved normalized isolated residual is one root totaling
+`+0/-1`. The expected future permitted native gate is `+0/-0`, but exactness is
+not claimed without that gate. No database access, ConfigDump, configuration
+export, or `ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
