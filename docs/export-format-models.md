@@ -2329,6 +2329,48 @@ remain HOLD. The saved normalized isolated residual is one root totaling
 not claimed without that gate. No database access, ConfigDump, configuration
 export, or `ConfigDumpInfo.xml` change was performed.
 
+## Form exact empty nested AutoCommandBar lexical form
+
+Status: implemented from saved raw/native evidence; native re-export remains
+paused by user instruction.
+
+Across 1,108 saved BSP Form.xml files, native has 224 self-closing and 527
+open nested AutoCommandBar nodes. Generated output represented 223 of those
+self-closing nodes as empty open/close pairs; the remaining native positive is
+an independently missing upstream item and is outside this change. Top-level
+AutoCommandBar output was already exact at 306 self-closing and 802 open nodes.
+
+A dedicated FormChildItem flag is derived only from the exact raw grammar:
+wrapper 22, item type 9, non-top-level id, exactly 29 fields, and field 20
+structurally equal to exactly `{0,0,1}`. The field parser must consume the
+entire trimmed value, so appended braced values or text cannot make a malformed
+marker pass. Wrong wrapper/type/id/arity, all six observed horizontal-alignment
+and autofill variants, and child-bearing command bars remain open. Formatting
+does not infer lexical emptiness from the parsed property model and requires
+both the AutoCommandBar tag and the raw-derived flag.
+
+The nested formatter emits one escaped self-closing line for that exact flag.
+ContextMenu, top-level bars, nonempty bars, packer row preservation, and service
+child ordering remain unchanged:
+`ContextMenu < AutoCommandBar < ExtendedTooltip < additions < Events < regular ChildItems`.
+
+Integrated commit `642626d` adds seven tests and passes the exact nested filter
+5/5. The full suite changed from `1411 passed / 74 failed / 6 ignored` to
+`1418 passed / 74 failed / 6 ignored`; exact failure-name delta is zero.
+Independent frozen reviews approved the 15,912-byte canonical diff with SHA-256
+`05673CB8C403BC3EB774108C3E6BE3078E8C1FF8A68F88528744C069102610F3`.
+The implementation diff is three files totaling `+301/-0`, and production adds
+no object UUID, metadata name, database identity, path, or corpus-specific
+branch.
+
+The saved global diff remains `1546 files, +15779/-61205` because the export
+gate was not run. The represented lexical cohort is expected to remove
+`+446/-223` and reach `+0/-0`, but that result is not claimed as a fresh full
+diff. The missing 224th item, ExcludedCommand cohorts, ToolTipRepresentation,
+FileDragMode, other AutoCommandBar layouts/properties, and the native re-export
+gate remain HOLD. No database access, ConfigDump, configuration export, or
+`ConfigDumpInfo.xml` change was performed.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
