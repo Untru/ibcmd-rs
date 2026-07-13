@@ -2953,3 +2953,37 @@ Accepted BSP gate:
 - configuration `Ext/Help.xml` and `Ext/Help/ru.html` are byte-exact;
 - HTTPService files have zero content diff, while Form and DCS guard metrics
   remain unchanged.
+
+## InformationRegister root collection admission acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+The previously implemented exact code-33 owner/property model was unreachable
+for every BSP InformationRegister because
+`information_register_root_collection_is_valid` accepted a synthetic aggregate
+test shape but rejected the physical direct counted-object collections. The
+correct gate first proves the exact count and then admits one homogeneous
+representation: unique nonzero UUID items, or direct object items with an exact
+outer `{braced_wrapper,0}` envelope. The inner wrapper is fully consumed, has
+at least two fields, starts with a digits-only discriminator, and contains a
+fully consumed braced payload at field 1. Mixed, aggregate, malformed, and exact
+duplicate items fail closed.
+
+The model was independently reproduced on 568 InformationRegisters from BSP
+and SFC. All 5,181 direct object items use the same outer envelope; observed
+inner wrapper lengths and discriminators vary by object family, so production
+contains no family-code allowlist, object name, database UUID, path, or corpus
+branch.
+
+Integrated commit `1d5b963` changes two files totaling `+42/-15`. Independent
+frozen review returned GO. `cargo fmt -- --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. Tests were not run by direct user instruction.
+
+The release export wrote 12,197 files and changed the normalized full diff from
+`1518 files, +13365/-82827` to `1259 files, +13365/-51180`. The exact batch
+delta is `-259 files, +0 additions, -31647 deletions`; all 259 root
+`InformationRegisters/*.xml` files are now exact. Form remains unchanged at
+`997 files, +8127/-26584`. `ConfigDumpInfo.xml` remains byte-exact with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #63 is closed after this native acceptance gate.
