@@ -12188,6 +12188,12 @@ pub(super) fn format_form_title_section(item: &FormChildItem, indent: usize) -> 
         return format_form_localized_section("Title", &item.title, indent);
     }
     let tab = "\t".repeat(indent);
+    if item.title.is_empty() {
+        return format!(
+            "{tab}<Title formatted=\"{}\"/>\r\n",
+            xml_bool(item.title_formatted.unwrap_or(false))
+        );
+    }
     let mut xml = format!(
         "{tab}<Title formatted=\"{}\">\r\n",
         xml_bool(item.title_formatted.unwrap_or(false))
