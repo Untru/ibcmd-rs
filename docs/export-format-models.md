@@ -3194,3 +3194,51 @@ ShowLeft values remove two further deletions. The newly exact path is
 at 7,955 bytes. ShowLeft is exact `2/2` with zero normalized residual lines.
 `ConfigDumpInfo.xml` and all direct InformationRegister roots remain exact.
 Issue #102 is closed after this acceptance gate.
+
+## Form CheckBoxField typed-schema acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+Commit `b40bc69` replaces the broad CheckBoxField fallbacks with one typed,
+fail-closed raw schema. Admission requires wrapper `37`, exact top-level arity
+`59` or `60` with offsets zero or one, direct field discriminator `3`, and an
+options record of exactly 13 fields beginning with marker `11`. The admitted
+schema owns localized ToolTip slot `10 + offset`, HorizontalAlign slot
+`23 + offset`, and CheckBoxType options `[1]` and `[12]`. Unknown layouts,
+record shapes, scalar combinations, and alignment values are omitted.
+
+The complete raw census contains 1,142 CheckBoxField owners: 1,092 use the
+59-field layout and 50 use the 60-field layout. There are no unmatched or
+duplicate raw owners, and 6,051 other wrapper-37 field records are negative
+discriminator controls. An independent frozen review matched 968 available
+raw/native owners (924 plus 44) and confirmed all three owned properties in
+`968/968`, with zero structural counterexamples.
+
+CheckBoxType is decoded from exact option pairs: `(1,0)` omits the property,
+while `(0,0)`, `(0,1)`, `(0,2)`, and `(0,3)` produce `Auto`, `CheckBox`,
+`Tumbler`, and `Switcher`. HorizontalAlign values `0` and `1` produce `Left`
+and `Center`; default value `3` and every unknown value are omitted. Exact
+ToolTip ownership removes eight value mismatches and eleven generated-only
+fallback values. Two native-only ToolTips remain behind upstream owner
+admission and are outside this gate.
+
+The exact formatter shadow predicted `0 files, -104 additions, -24 deletions`.
+The release export writes 12,197 files and reproduces that prediction exactly:
+the normalized full diff changes from `1241 files, +10533/-46345` to
+`1241 files, +10429/-46321`; Form changes from
+`979 files, +5295/-21749` to `979 files, +5191/-21725`. No files close or
+become newly different in this batch.
+
+The production diff is two files totaling `+109/-19`. It adds no object/form
+name, path, database identity, UUID, corpus-specific branch, panic, unwrap, or
+unsafe path. `cargo fmt -- --check`, `cargo check --all-targets`, and
+`git diff --check` pass with the same two pre-existing warnings. Tests and
+native ConfigDump were not run by direct user instruction. `ConfigDumpInfo.xml`
+remains canonically exact with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #103 is closed after this acceptance gate.
+
+Related Table FileDragMode and ExcludedCommand audits remain HOLD. Their raw
+cohorts contain native-positive and native-negative owners with identical
+available structural signatures, so accepting only the improving owners would
+require a path/name or corpus-specific fallback.
