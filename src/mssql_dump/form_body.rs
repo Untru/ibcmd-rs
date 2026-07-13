@@ -3,9 +3,9 @@ use crate::form_schema::{
     FORM_DECORATION_HEADER_XML_ORDER, FORM_EXTENDED_TOOLTIP_XML_ORDER,
     FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER,
     FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
-    FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment,
-    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
-    FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
+    FormChildItemAlignment, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
@@ -3989,6 +3989,9 @@ pub(super) fn parse_form_child_item_with_context(
     let radio_button_options = (tag == "RadioButtonField")
         .then(|| parse_form_radio_button_options(&fields))
         .flatten();
+    let check_box_field_layout = (tag == "CheckBoxField")
+        .then(|| parse_form_check_box_field_layout(wrapper, &fields))
+        .flatten();
     let input_field_top_level_offset = matches!(
         tag,
         "InputField"
@@ -4149,7 +4152,12 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             input_hint
         };
-    let tooltip = parse_form_child_item_tooltip(tag, wrapper, &fields);
+    let tooltip = parse_form_child_item_tooltip(
+        tag,
+        wrapper,
+        &fields,
+        check_box_field_layout.as_ref().map(|(schema, _)| *schema),
+    );
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
     Some(FormChildItem {
         tag,
@@ -4619,6 +4627,10 @@ pub(super) fn parse_form_child_item_with_context(
             && form_input_field_layout_is_extended(&fields)
         {
             parse_form_input_field_horizontal_align(&fields).map(FormChildItemAlignment::Horizontal)
+        } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
+            schema
+                .horizontal_align(&fields)
+                .map(FormChildItemAlignment::Horizontal)
         } else if tag == "LabelDecoration" {
             label_decoration_options
                 .as_ref()
@@ -4629,11 +4641,9 @@ pub(super) fn parse_form_child_item_with_context(
         label_decoration_visual_tail: label_decoration_options
             .as_ref()
             .map(|options| options.visual_tail.clone()),
-        check_box_type: if tag == "CheckBoxField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_checkbox_type(&fields)
-        } else {
-            None
-        },
+        check_box_type: check_box_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.check_box_type(options)),
         radio_button_type: if tag == "RadioButtonField" {
             parse_form_radio_button_type(radio_button_options.as_deref())
         } else {
@@ -6458,16 +6468,21 @@ pub(super) fn parse_form_input_field_choice_folders_and_items(
     )
 }
 
-pub(super) fn parse_form_checkbox_type(fields: &[&str]) -> Option<&'static str> {
-    let options_index = 39 + form_input_field_top_level_offset(fields);
-    let options = split_1c_braced_fields(fields.get(options_index)?.trim(), 0)?;
-    if options.first()?.trim() != "11" {
-        return None;
-    }
-    match options.get(11).map(|field| field.trim())? {
-        "2" => Some("Auto"),
-        _ => None,
-    }
+fn parse_form_check_box_field_layout<'a>(
+    wrapper: &str,
+    fields: &'a [&'a str],
+) -> Option<(FormCheckBoxFieldSchema, Vec<&'a str>)> {
+    let top_level_offset =
+        FormCheckBoxFieldSchema::top_level_offset_for_raw_layout(wrapper, fields.len())?;
+    let options = split_1c_braced_fields(fields.get(39 + top_level_offset)?.trim(), 0)?;
+    let schema = FormCheckBoxFieldSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        fields.get(5 + top_level_offset).map(|field| field.trim()),
+        &options,
+    )?;
+    debug_assert_eq!(schema.options_slot(), 39 + top_level_offset);
+    Some((schema, options))
 }
 
 pub(super) fn parse_form_radio_button_type(
@@ -7769,7 +7784,14 @@ pub(super) fn parse_form_child_item_tooltip(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
+    check_box_schema: Option<FormCheckBoxFieldSchema>,
 ) -> Vec<(String, String)> {
+    if tag == "CheckBoxField" {
+        return check_box_schema
+            .and_then(|schema| fields.get(schema.tooltip_slot()))
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default();
+    }
     let decoration_tooltip_slot = FormDecorationHeaderSchema::from_raw_layout(
         wrapper,
         fields.len(),

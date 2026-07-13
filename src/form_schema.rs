@@ -568,6 +568,74 @@ pub(crate) const FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER:
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormCheckBoxFieldSchema {
+    top_level_offset: usize,
+}
+
+impl FormCheckBoxFieldSchema {
+    pub(crate) fn top_level_offset_for_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+    ) -> Option<usize> {
+        match (wrapper, field_count) {
+            ("37", 59) => Some(0),
+            ("37", 60) => Some(1),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        let top_level_offset = Self::top_level_offset_for_raw_layout(wrapper, field_count)?;
+        if direct_discriminator != Some("3")
+            || options.len() != 13
+            || options.first().map(|field| field.trim()) != Some("11")
+        {
+            return None;
+        }
+        Some(Self { top_level_offset })
+    }
+
+    pub(crate) const fn options_slot(self) -> usize {
+        39 + self.top_level_offset
+    }
+
+    pub(crate) const fn tooltip_slot(self) -> usize {
+        10 + self.top_level_offset
+    }
+
+    pub(crate) fn horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+        match fields
+            .get(23 + self.top_level_offset)
+            .map(|field| field.trim())?
+        {
+            "0" => Some("Left"),
+            "1" => Some("Center"),
+            "3" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) fn check_box_type(self, options: &[&str]) -> Option<&'static str> {
+        match (
+            options.get(1).map(|field| field.trim()),
+            options.get(12).map(|field| field.trim()),
+        ) {
+            (Some("1"), Some("0")) => None,
+            (Some("0"), Some("0")) => Some("Auto"),
+            (Some("0"), Some("1")) => Some("CheckBox"),
+            (Some("0"), Some("2")) => Some("Tumbler"),
+            (Some("0"), Some("3")) => Some("Switcher"),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {
     UsualGroup,
     LabelDecoration,
