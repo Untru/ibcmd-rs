@@ -4089,25 +4089,15 @@ pub(super) fn parse_form_child_item_with_context(
         None
     };
     let title = parse_form_child_item_title(tag, wrapper, &fields);
-    let input_hint = if tag == "InputField" {
-        parse_form_input_field_input_hint(input_field_extended_options.as_deref())
-    } else if matches!(
-        tag,
-        "FormattedDocumentField"
-            | "CalendarField"
-            | "GraphicalSchemaField"
-            | "SpreadSheetDocumentField"
-            | "HTMLDocumentField"
-    ) {
-        Vec::new()
-    } else {
-        parse_form_child_item_input_hint(wrapper, &fields)
-    };
-    let input_hint = if !input_hint.is_empty() && input_hint == title {
-        Vec::new()
-    } else {
-        input_hint
-    };
+    let input_hint = (tag == "InputField")
+        .then(|| parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
+        .unwrap_or_default();
+    let input_hint =
+        if input_field_top_level_offset > 0 && !input_hint.is_empty() && input_hint == title {
+            Vec::new()
+        } else {
+            input_hint
+        };
     let tooltip = parse_form_child_item_tooltip(tag, wrapper, &fields);
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
     Some(FormChildItem {
@@ -7773,26 +7763,6 @@ pub(super) fn parse_form_field_tooltip_representation(
         .and_then(|field| decode_form_tooltip_representation(field.trim()))
 }
 
-pub(super) fn parse_form_child_item_input_hint(
-    wrapper: &str,
-    fields: &[&str],
-) -> Vec<(String, String)> {
-    let indexes: &[usize] = match wrapper {
-        "37" | "48" => &[10, 11],
-        _ => &[],
-    };
-    indexes
-        .iter()
-        .find_map(|index| {
-            let values = fields
-                .get(*index)
-                .map(|field| parse_form_localized_strings(field))
-                .unwrap_or_default();
-            (!values.is_empty()).then_some(values)
-        })
-        .unwrap_or_default()
-}
-
 pub(super) fn parse_form_input_field_input_hint(
     extended_options: Option<&[&str]>,
 ) -> Vec<(String, String)> {
@@ -10159,7 +10129,7 @@ pub(super) fn format_form_child_item_xml(
     if item.text_edit == Some(false) {
         xml.push_str(&format!("{tab}\t<TextEdit>false</TextEdit>\r\n"));
     }
-    if !item.input_hint.is_empty() {
+    if item.tag == "InputField" && !item.input_hint.is_empty() {
         xml.push_str(&format_form_localized_section(
             "InputHint",
             &item.input_hint,

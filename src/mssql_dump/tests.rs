@@ -5146,7 +5146,7 @@ fn tooltip_representation_production_has_no_corpus_literals() {
         .find("pub(super) fn parse_form_field_tooltip_representation")
         .unwrap();
     let end = production[start..]
-        .find("pub(super) fn parse_form_child_item_input_hint")
+        .find("pub(super) fn parse_form_input_field_input_hint")
         .map(|offset| start + offset)
         .unwrap();
     let implementation = &production[start..end];
