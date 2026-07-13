@@ -10982,8 +10982,8 @@ fn format_form_extended_tooltip_title_xml(
     for (lang, content) in &title.values {
         xml.push_str(&format!(
             "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
-            escape_xml_text(lang),
-            escape_xml_text(content)
+            escape_xml_element_text(lang),
+            escape_xml_element_text(content)
         ));
     }
     xml.push_str(&format!("{tab}</Title>\r\n"));
