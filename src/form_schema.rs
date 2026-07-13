@@ -1346,10 +1346,11 @@ pub(crate) enum FormTableXmlProperty {
     DefaultItem,
     ChangeRowSet,
     ChangeRowOrder,
+    Width,
+    AutoMaxWidth,
     Height,
     AutoMaxHeight,
     HeightInTableRows,
-    AutoMaxWidth,
     ChoiceMode,
     RowInputMode,
     SelectionMode,
@@ -1393,10 +1394,11 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::DefaultItem,
     FormTableXmlProperty::ChangeRowSet,
     FormTableXmlProperty::ChangeRowOrder,
+    FormTableXmlProperty::Width,
+    FormTableXmlProperty::AutoMaxWidth,
     FormTableXmlProperty::Height,
     FormTableXmlProperty::AutoMaxHeight,
     FormTableXmlProperty::HeightInTableRows,
-    FormTableXmlProperty::AutoMaxWidth,
     FormTableXmlProperty::ChoiceMode,
     FormTableXmlProperty::RowInputMode,
     FormTableXmlProperty::SelectionMode,
@@ -1435,6 +1437,8 @@ enum FormTableSlot {
     ReadOnly,
     DefaultItem,
     ChangeRowOrder,
+    Width,
+    Height,
     ChoiceMode,
     RowInputMode,
     SelectionMode,
@@ -1449,11 +1453,13 @@ enum FormTableSlot {
 }
 
 impl FormTableSlot {
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 17] = [
         Self::Autofill,
         Self::ReadOnly,
         Self::DefaultItem,
         Self::ChangeRowOrder,
+        Self::Width,
+        Self::Height,
         Self::ChoiceMode,
         Self::RowInputMode,
         Self::SelectionMode,
@@ -1473,6 +1479,8 @@ impl FormTableSlot {
             Self::ReadOnly => 14,
             Self::DefaultItem => 16,
             Self::ChangeRowOrder => 18,
+            Self::Width => 19,
+            Self::Height => 20,
             Self::ChoiceMode => 22,
             Self::RowInputMode => 23,
             Self::SelectionMode => 24,
@@ -1490,6 +1498,7 @@ impl FormTableSlot {
     fn accepts(self, field: &str) -> bool {
         match self {
             Self::RowInputMode => matches!(field.trim(), "0" | "2"),
+            Self::Width | Self::Height => field.trim().parse::<u32>().is_ok(),
             _ => matches!(field.trim(), "0" | "1"),
         }
     }
@@ -1532,6 +1541,14 @@ impl FormTableSchema {
 
     pub(crate) fn change_row_order(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::ChangeRowOrder)
+    }
+
+    pub(crate) fn width(self, fields: &[&str]) -> Option<String> {
+        self.non_zero_u32(fields, FormTableSlot::Width)
+    }
+
+    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+        self.non_zero_u32(fields, FormTableSlot::Height)
     }
 
     pub(crate) fn choice_mode(self, fields: &[&str]) -> Option<bool> {
@@ -1585,6 +1602,11 @@ impl FormTableSchema {
 
     fn explicit_false(self, fields: &[&str], slot: FormTableSlot) -> Option<bool> {
         (fields.get(slot.index())?.trim() == "0").then_some(false)
+    }
+
+    fn non_zero_u32(self, fields: &[&str], slot: FormTableSlot) -> Option<String> {
+        let value = fields.get(slot.index())?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 }
 

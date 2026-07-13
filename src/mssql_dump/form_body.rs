@@ -4822,7 +4822,9 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        width: if tag == "CalendarField" {
+        width: if tag == "Table" {
+            table_schema.and_then(|schema| schema.width(&fields))
+        } else if tag == "CalendarField" {
             document_field_options
                 .as_deref()
                 .and_then(|options| options.get(1))
@@ -4883,11 +4885,8 @@ pub(super) fn parse_form_child_item_with_context(
                 .get(23)
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
-        } else if ordinary_table_layout {
-            fields
-                .get(20)
-                .map(|field| field.trim().to_string())
-                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if tag == "Table" {
+            table_schema.and_then(|schema| schema.height(&fields))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_height(input_field_extended_options.as_deref())
         } else if tag == "LabelField" {
@@ -10089,6 +10088,11 @@ fn format_form_table_property_xml(
             Some(false) => format!("{tab}<ChangeRowSet>false</ChangeRowSet>\r\n"),
             _ => String::new(),
         },
+        FormTableXmlProperty::Width => item
+            .width
+            .as_ref()
+            .map(|value| format!("{tab}<Width>{}</Width>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
         FormTableXmlProperty::Height => item
             .height
             .as_ref()
@@ -10621,7 +10625,8 @@ pub(super) fn format_form_child_item_xml(
     }
     xml.push_str(&format_form_usual_group_header_xml(item, indent + 1));
     xml.push_str(&format_form_label_decoration_geometry_xml(item, indent + 1));
-    if item.tag != "Button"
+    if item.tag != "Table"
+        && item.tag != "Button"
         && item.tag != "LabelDecoration"
         && let Some(width) = &item.width
     {
