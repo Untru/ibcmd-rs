@@ -435,6 +435,7 @@ pub(super) struct FormChildItem {
     pub(super) tag: &'static str,
     pub(super) id: String,
     pub(super) name: String,
+    pub(super) display_importance: Option<&'static str>,
     pub(super) auto_command_bar_empty_element: bool,
     pub(super) autofill: Option<bool>,
     pub(super) group: Option<&'static str>,
@@ -4158,6 +4159,9 @@ pub(super) fn parse_form_child_item_with_context(
         tag,
         id: id.to_string(),
         name,
+        display_importance: label_decoration_options
+            .as_ref()
+            .and_then(|options| options.display_importance),
         auto_command_bar_empty_element: is_raw_empty_nested_auto_command_bar(
             wrapper, tag, id, &fields,
         ),
@@ -4679,7 +4683,11 @@ pub(super) fn parse_form_child_item_with_context(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.text_color.clone())
-        } else if matches!(tag, "LabelDecoration" | "PictureDecoration") {
+        } else if tag == "LabelDecoration" && !title.is_empty() {
+            fields
+                .get(14)
+                .and_then(|field| parse_form_label_field_text_color(field, object_refs))
+        } else if tag == "PictureDecoration" {
             fields
                 .get(14)
                 .and_then(|field| parse_form_label_field_text_color(field, object_refs))
@@ -4752,7 +4760,7 @@ pub(super) fn parse_form_child_item_with_context(
             label_field_options
                 .as_ref()
                 .and_then(|options| options.font_xml.clone())
-        } else if tag == "LabelDecoration" {
+        } else if tag == "LabelDecoration" && !title.is_empty() {
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.font_xml.clone())
@@ -5424,6 +5432,7 @@ pub(super) struct FormLabelFieldOptions {
 pub(super) struct FormLabelDecorationOptions {
     pub(super) hyperlink: bool,
     pub(super) font_xml: Option<String>,
+    pub(super) display_importance: Option<&'static str>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) alignment: FormLabelDecorationAlignment,
     pub(super) geometry: FormLabelDecorationGeometry,
@@ -5600,6 +5609,7 @@ pub(super) fn parse_form_label_decoration_options(
         font_xml: fields
             .get(15)
             .and_then(|field| parse_form_font_tuple_xml(field, object_refs)),
+        display_importance: schema.display_importance(fields),
         group_horizontal_align: fields
             .get(schema.group_horizontal_align_slot())
             .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
@@ -7730,16 +7740,13 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
         "12" => {
             let kind = fields.get(5).map(|value| value.trim())?;
             if kind == "0" {
-                let name = fields.get(6).and_then(|value| parse_1c_string(value));
-                let has_title = fields
-                    .get(7)
-                    .map(|field| !parse_form_localized_strings(field).is_empty())
-                    .unwrap_or(false);
-                if has_title && !name.as_deref().is_some_and(is_form_extended_tooltip_name) {
-                    Some("LabelDecoration")
-                } else {
-                    None
-                }
+                FormDecorationHeaderSchema::from_raw_layout(
+                    wrapper,
+                    fields.len(),
+                    "LabelDecoration",
+                    Some(kind),
+                )
+                .map(|_| "LabelDecoration")
             } else if kind == "1" {
                 Some("PictureDecoration")
             } else {
@@ -9923,8 +9930,12 @@ pub(super) fn format_form_child_item_xml(
             }
         }
     }
+    let display_importance = item
+        .display_importance
+        .map(|value| format!(" DisplayImportance=\"{}\"", escape_xml_text(value)))
+        .unwrap_or_default();
     let mut xml = format!(
-        "{tab}<{} name=\"{}\" id=\"{}\">\r\n",
+        "{tab}<{} name=\"{}\" id=\"{}\"{display_importance}>\r\n",
         item.tag,
         escape_xml_text(&item.name),
         escape_xml_text(&item.id)

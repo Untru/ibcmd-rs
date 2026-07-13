@@ -293,6 +293,7 @@ pub(crate) struct FormLabelDecorationSchema {
     max_height_slot: usize,
     group_horizontal_align_slot: usize,
     group_vertical_align_slot: usize,
+    display_importance_slot: usize,
     horizontal_align_option_slot: usize,
     vertical_align_option_slot: usize,
     title_height_option_slot: usize,
@@ -328,6 +329,7 @@ impl FormLabelDecorationSchema {
                 max_height_slot: 31,
                 group_horizontal_align_slot: 32,
                 group_vertical_align_slot: 33,
+                display_importance_slot: 34,
                 horizontal_align_option_slot: 2,
                 vertical_align_option_slot: 3,
                 title_height_option_slot: 4,
@@ -342,6 +344,14 @@ impl FormLabelDecorationSchema {
 
     pub(crate) const fn group_vertical_align_slot(self) -> usize {
         self.group_vertical_align_slot
+    }
+
+    pub(crate) fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(self.display_importance_slot)?.trim() {
+            "1" => Some("VeryHigh"),
+            "5" => Some("VeryLow"),
+            _ => None,
+        }
     }
 
     pub(crate) const fn horizontal_align_option_slot(self) -> usize {
