@@ -3420,3 +3420,62 @@ and Title `+332/-301`. `ConfigDumpInfo.xml` remains byte-exact at 3,110,746
 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #106 is closed after this acceptance gate.
+
+## Conditional UserVisible, table service nodes, and CommandInterface acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch again audits all 1,108 Form body rows. Commit `f62b7bc` admits
+conditional UserVisible only for the exact wrapper/arity/tag/offset layouts of
+11 Button owners and five PictureField owners. The selected shadow changes 11
+files by `+0/-48`, restoring 16 three-line UserVisible blocks. Native/current
+counts move from 449 to 465 of 466; no other child owner is admitted.
+
+Commit `bc4c71f` normalizes the exact conditional Table layout before item
+index, binding, path, service-node, and descendant parsing. The corpus contains
+750 ordinary wrapper `55` tables and one conditional table with the typed false
+prefix. That owner accounts for the final UserVisible block, nine ContextMenu
+blocks, nine ExtendedTooltip blocks, and one ChildItems block. The same commit
+accepts the one standard ExtendedTooltip marker with an ASCII numeric suffix;
+all 26,214 existing positives remain accepted and the 1,866 LabelDecoration
+negative controls contain no numeric-suffix case. Table XML keeps native
+`Representation`, UserVisible, ordinary properties, service nodes, and
+ChildItems order.
+
+Commit `38d6614` replaces the first-container CommandInterface heuristic with
+typed schemas. Across all forms, 1,064 contain no CommandInterface and 44
+contain 129 items: trailing slot 3 owns 50 NavigationPanel items and slot 4
+owns 79 CommandBar items. Ten forms contain both containers, always in native
+NavigationPanel-before-CommandBar order. Container wrapper/count/arity, item
+wrapper/arity/type/default visibility, and the nested Common/role visibility
+record must all agree. The 111 native visibility records consist of 110
+Common=false records and one Common=false record with two ordered Role values.
+Generic command resolution uses metadata type shapes and fails closed. Its
+selected shadow changes 23 files, removes 29 existing generated-only lines,
+and restores 506 native lines with zero new additions or differing files.
+
+The three production commits have a net code diff of two files totaling
+`+449/-82`. Two frozen reviews returned GO. Added production lines contain no
+database or server identity, object/form name, path, UUID, corpus-specific
+fallback, panic, unwrap, expect, or unsafe path. `cargo fmt --all --check`,
+`cargo check --all-targets`, `git diff --check`, and the release build pass;
+the check retains the same two pre-existing warnings. Tests and native
+ConfigDump were not run by direct user instruction.
+
+The serialized release export writes 12,197 files. The established normalized
+guard (`--ignore-space-at-eol`) changes the full diff from `1222 files,
++10250/-42165` to `1222 files, +10221/-41480`; Form changes from `960 files,
++5012/-17569` to `960 files, +4983/-16884`. The exact batch delta is therefore
+`0 files, -29 additions, -685 deletions`, entirely in Form.xml. Nineteen
+Predefined.xml paths in the raw working-tree diff differ only by the final
+newline and disappear under the established normalized guard.
+
+Residual tag starts are LabelDecoration `+0/-0`, ShowTitle `+0/-0`,
+VerticalScroll `+0/-0`, ContextMenu `+0/-0`, ExtendedTooltip `+0/-0`,
+UserVisible `+0/-0`, ChildItems `+0/-0`, Visible `+0/-6`, and Title
+`+332/-295`. The six remaining Visible lines belong to six fail-closed
+InformationRegister OpenByValue CommandInterface items whose complete command
+reference is still unresolved. `ConfigDumpInfo.xml` remains byte-exact at
+3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #107 is closed after this acceptance gate.
