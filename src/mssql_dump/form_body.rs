@@ -3394,7 +3394,7 @@ pub(super) fn parse_form_type_pattern(
 pub(super) fn normalize_form_type_pattern(
     value_types: Vec<ConstantValueType>,
 ) -> Vec<ConstantValueType> {
-    value_types
+    let normalized = value_types
         .into_iter()
         .map(|value_type| match value_type {
             ConstantValueType::String {
@@ -3409,7 +3409,12 @@ pub(super) fn normalize_form_type_pattern(
             },
             other => other,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let (mut types, type_sets): (Vec<_>, Vec<_>) = normalized
+        .into_iter()
+        .partition(|value_type| form_metadata_type_xml_tag(value_type) != "TypeSet");
+    types.extend(type_sets);
+    types
 }
 
 pub(super) fn extract_form_child_items(

@@ -22199,11 +22199,7 @@ fn format_form_metadata_types_xml_with_indent(
     let nested2 = format!("{nested}\t");
     let mut xml = format!("{indent}<Type>\r\n");
     for value_type in value_types {
-        let tag_name = match value_type {
-            ConstantValueType::Reference { reference } => form_reference_type_tag(reference),
-            ConstantValueType::ReferenceTypeSet { .. } => "TypeSet",
-            _ => "Type",
-        };
+        let tag_name = form_metadata_type_xml_tag(value_type);
         let namespace_attr = form_metadata_type_xml_namespace_attr(value_type);
         xml.push_str(&format!(
             "{nested}<v8:{tag_name}{namespace_attr}>{}</v8:{tag_name}>\r\n",
@@ -22414,6 +22410,14 @@ fn format_metadata_types_xml_with_indent(
 fn metadata_type_xml_tag(value_type: &ConstantValueType) -> &'static str {
     match value_type {
         ConstantValueType::Reference { reference } => constant_reference_type_tag(reference),
+        ConstantValueType::ReferenceTypeSet { .. } => "TypeSet",
+        _ => "Type",
+    }
+}
+
+fn form_metadata_type_xml_tag(value_type: &ConstantValueType) -> &'static str {
+    match value_type {
+        ConstantValueType::Reference { reference } => form_reference_type_tag(reference),
         ConstantValueType::ReferenceTypeSet { .. } => "TypeSet",
         _ => "Type",
     }
