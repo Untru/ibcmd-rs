@@ -3152,3 +3152,45 @@ reviews returned GO. `cargo fmt -- --check`, `cargo check --all-targets`, and
 `git diff --check` pass with the same two pre-existing warnings. Tests and
 native ConfigDump were not run by direct user instruction. Production adds no
 object/form name, path, UUID, database identity, or corpus-specific branch.
+
+## Form CheckBoxField ToolTip order and ShowLeft acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch combines two related shared Form-schema corrections. Raw
+`ToolTipRepresentation` scalar code `6` is the platform enum value
+`ShowLeft`. The corpus has two exact native observations, owned by one
+`UsualGroup` and one `LabelDecoration`, with no inverse contradiction. The
+second correction moves the existing localized `CheckBoxField` `ToolTip` from
+the late generic position to the established field-property position directly
+after optional `TitleLocation` and before `ToolTipRepresentation`,
+`HorizontalAlign`, `EditMode`, and `CheckBoxType`. `CheckBoxField` is excluded
+from the late path, so the property is emitted once.
+
+Native XML has 176 direct CheckBoxField ToolTip owners in 93 files. Generated
+XML has 185 in 101 files. After the change, ToolTip precedes
+ToolTipRepresentation in `63/63`, EditMode in `47/47`, and CheckBoxType in
+`185/185` generated co-occurrences, with zero reverse cases and zero XML parse
+failures. Native has the same order in `63/63`, `43/43`, and `176/176`
+co-occurrences. The owner relation remains common 174, value-exact 166,
+mismatched 8, native-only 2, and generated-only 11; those content and admission
+residuals are outside this order-only gate.
+
+Commits `bfae4fb` and `beeb844` change two production files totaling `+8/-1`.
+The additions are limited to the platform enum scalar/value and generic owner
+tag predicates. They add no object/form name, path, database identity, UUID,
+corpus branch, panic, unwrap, or unsafe path. Frozen and post-export reviews
+returned GO. `cargo fmt -- --check`, `cargo check --all-targets`, and
+`git diff --check` pass with the same two pre-existing warnings. Tests and
+native ConfigDump were not run by direct user instruction.
+
+The release export writes 12,197 files. The normalized full diff changes from
+`1242 files, +10811/-46625` to `1241 files, +10533/-46345`; Form changes from
+`980 files, +5573/-22029` to `979 files, +5295/-21749`. The exact combined
+delta is `-1 file, -278 additions, -280 deletions`, or 558 fewer differing
+lines. The CheckBox order contribution is `-278/-278`; the two accepted
+ShowLeft values remove two further deletions. The newly exact path is
+`Catalogs/МакетыПечатныхФорм/Forms/НастройкиМакета/Ext/Form.xml`, byte-identical
+at 7,955 bytes. ShowLeft is exact `2/2` with zero normalized residual lines.
+`ConfigDumpInfo.xml` and all direct InformationRegister roots remain exact.
+Issue #102 is closed after this acceptance gate.
