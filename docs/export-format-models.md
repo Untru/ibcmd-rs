@@ -3358,3 +3358,65 @@ exact and no unexpected delta appears. `ConfigDumpInfo.xml` remains byte-exact
 at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #105 is closed after this acceptance gate.
+
+## Schema-backed LabelDecoration and residual form scalars acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch audits the complete corpus of all 1,108 Form body rows. Commit
+`1044334` admits LabelDecoration only through the existing wrapper `12`
+decoration schema. All 1,866 raw labels correspond to 1,866 native labels,
+with no missing, extra, or duplicate rows. The exact DisplayImportance scalar
+maps `1` to `VeryHigh`, `5` to `VeryLow`, and `0` or an unknown value to
+omission. Title-empty labels suppress Font and TextColor fail-closed. All seven
+native start-tag shapes retain the exact `name`, `id`, and
+DisplayImportance order.
+
+Commit `ac2d193` adds typed schemas for Page, UsualGroup, and ColumnGroup
+ShowTitle values and for the fixed form-root VerticalScroll trailer. The
+ShowTitle matrix covers 5,439 owners: 3,474 true values and 1,965 omissions,
+with no contradictions. Commit `8887f0e` places Page ShowTitle after Title,
+matching all 78 native co-occurrences; UsualGroup and ColumnGroup keep their
+owner-specific order. Across all 1,108 roots, VerticalScroll contains 1,019
+omissions, 88 `UseIfNecessary` values, and one `UseWithoutStretch` value, with
+no contradictions. ShowTitle and VerticalScroll are now both `+0/-0`.
+
+Commit `f532bd9` recognizes the exact conditional wrapper `22` group layout:
+odd arity `31 + 2n`, prefix `{0,{0,{"B",0},0}}`, and discriminators `2`, `3`,
+or `5`. The complete corpus contains exactly 35 such owners: 24 UsualGroup,
+nine ColumnGroup, and two Pages, with no near misses. Their common
+UserVisible value is false. Commit `982d7f1` then sanitizes unsupported
+conditional descendants only after normal parsing has resolved bindings and
+child paths, preventing speculative DataPath and presentation properties.
+The batch restores 12 Visible values without introducing a generated-only
+property; the remaining Visible residual is `+0/-53`.
+
+The five production commits change three files totaling `+309/-102`. Frozen
+reviews returned GO. The changes add no object or form name, path, database
+identity, UUID, localized corpus marker, panic, unwrap, or unsafe path.
+`cargo fmt --all --check`, `cargo check --all-targets`, `git diff --check`, and
+the release build pass with the same two pre-existing warnings. Tests and
+native ConfigDump were not run by direct user instruction.
+
+The final selected shadow over all forms changes Form from `965 files,
++5017/-20871` to `960 files, +5012/-17569`: five files close, five existing
+generated-only lines disappear, and 3,302 missing native lines are restored.
+There are no newly differing files or new generated-only occurrences. The
+five closed forms are:
+
+- `DataProcessors/_ДемоСозданиеДублей/Forms/ОсновнаяФорма/Ext/Form.xml`
+- `DataProcessors/БлокировкаРаботыПользователей/Forms/ОшибкаУстановкиМонопольногоРежима/Ext/Form.xml`
+- `DataProcessors/ТранспортСообщенийОбменаESB1C/Forms/ФормаНастройкиРегламентногоЗадания/Ext/Form.xml`
+- `InformationRegisters/РезультатыОбменаДанными/Forms/ОтборПредупрежденийПоТипам/Ext/Form.xml`
+- `InformationRegisters/РезультатыОбменаДанными/Forms/УдалениеУстаревшихПредупреждений/Ext/Form.xml`
+
+The serialized release export writes 12,197 files and reproduces the shadow
+exactly. The normalized full diff changes from `1227 files, +10255/-45467` to
+`1222 files, +10250/-42165`; Form changes from `965 files, +5017/-20871` to
+`960 files, +5012/-17569`. Residual tag starts are LabelDecoration `+0/-0`,
+ShowTitle `+0/-0`, VerticalScroll `+0/-0`, Visible `+0/-53`, ContextMenu
+`+0/-9`, ExtendedTooltip `+0/-10`, UserVisible `+0/-17`, ChildItems `+0/-1`,
+and Title `+332/-301`. `ConfigDumpInfo.xml` remains byte-exact at 3,110,746
+bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #106 is closed after this acceptance gate.
