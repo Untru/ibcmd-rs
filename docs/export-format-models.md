@@ -2852,6 +2852,50 @@ BackColor, Border, TextColor, Font, Title values, ExtendedTooltip, visibility,
 enabled state, shortcuts, input skipping, title-empty and unreachable owners,
 and ToolTipRepresentation code 6 remain HOLD.
 
+## Form LabelDecoration SkipOnInput completion
+
+Status: integrated for the same 1,512 reachable, title-bearing owners as the
+other LabelDecoration gates; a new export was not run.
+
+The existing exact `FormLabelDecorationSchema` now owns direct slot 22. Its
+complete decoder is zero to false, one to true, and any other or invalid value
+to omission. The reachable full matrix contains 125 false, 10 true, and 1,377
+omitted values. The immutable 492-owner subset independently contains 33
+false, two true, and 457 omissions. Both matrices have zero raw-only,
+native-only, or value contradictions.
+
+Before this gate, LabelDecoration read slot 22 outside the owner schema and
+recognized only zero. All 125 reachable false values were already native-exact,
+with no additions or value mismatches; the parser missed the 10 true values.
+`FormLabelDecorationOptions` now receives the schema-owned result and feeds the
+existing `FormChildItem.skip_on_input` field. The unguarded branch is removed.
+
+The formatter is deliberately unchanged. Its LabelDecoration-only position is
+after the complete geometry block and before TextColor, Font, and Title. Every
+observed native pair has zero reversals: Width, AutoMaxWidth, MaxWidth, Height,
+AutoMaxHeight, HorizontalStretch, and VerticalStretch precede SkipOnInput;
+SkipOnInput precedes TextColor, Font, Title, and the post-title tail. Native and
+current duplicate counts are zero, so the 125 existing false lines do not move.
+
+Integrated commit `9e4062f` changes two files totaling `+15/-1`; formatter and
+tests are untouched. The frozen 2,648-byte diff has SHA-256
+`F26B0CC8569C5AB3DD17554AFBA78D27C54949C9F095B2038BC6545FE501D7EF`.
+Independent frozen review returned GO. `cargo fmt --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. The diff adds no object/form/item name, path, UUID,
+database identity, or corpus branch. Tests, export, database access, ConfigDump,
+and ConfigDumpInfo were not run or changed.
+
+The exact shadow adds 10 native one-line properties in six Form.xml files and
+does not close another path. It predicts Form `1000 files, +8121/-26578` and
+full `1521 files, +13359/-82821`. The last actual full diff remains
+`1529 files, +14239/-85386` pending a separately authorized export.
+
+Visible, Enabled, ReadOnly, UserVisible, DefaultItem, and Shortcut remain HOLD
+until their raw ownership and ordering are independently complete. Styles,
+Font and Title values, ExtendedTooltip, title-empty and unreachable owners, and
+ToolTipRepresentation code 6 also remain outside this gate.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
