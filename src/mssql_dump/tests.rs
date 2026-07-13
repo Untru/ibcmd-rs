@@ -23267,12 +23267,13 @@ aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb}",
         1,
     );
     assert!(parse_information_register_owner_fields(&direct_uuid_collection, &header).is_some());
-    let nested_object_collection = raw.replacen(
+    let direct_object_collection = raw.replacen(
         "{11111111-1111-4111-8111-111111111112,0}",
-        "{11111111-1111-4111-8111-111111111112,2,{{9,0},{9,1}}}",
+        "{11111111-1111-4111-8111-111111111112,2,\
+{{9,{0}},0},{{27,{1},extra},0}}",
         1,
     );
-    assert!(parse_information_register_owner_fields(&nested_object_collection, &header).is_some());
+    assert!(parse_information_register_owner_fields(&direct_object_collection, &header).is_some());
 
     let short_root = format!(
         "{{1,{}}}",
@@ -23326,6 +23327,21 @@ aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb}",
         1,
     );
     assert!(parse_information_register_owner_fields(&scalar_nested_item, &header).is_none());
+    let synthetic_aggregate_collection = raw.replacen(
+        "{11111111-1111-4111-8111-111111111112,0}",
+        "{11111111-1111-4111-8111-111111111112,2,{{9,0},{9,1}}}",
+        1,
+    );
+    assert!(
+        parse_information_register_owner_fields(&synthetic_aggregate_collection, &header).is_none()
+    );
+    let duplicate_direct_object = raw.replacen(
+        "{11111111-1111-4111-8111-111111111112,0}",
+        "{11111111-1111-4111-8111-111111111112,2,\
+{{9,{0}},0},{{9,{0}},0}}",
+        1,
+    );
+    assert!(parse_information_register_owner_fields(&duplicate_direct_object, &header).is_none());
     let mixed_collection = raw.replacen(
         "{11111111-1111-4111-8111-111111111112,0}",
         "{11111111-1111-4111-8111-111111111112,2,\

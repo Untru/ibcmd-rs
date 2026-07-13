@@ -7064,26 +7064,37 @@ fn information_register_root_collection_is_valid(value: &str) -> bool {
     if count == 0 {
         return fields.len() == 2;
     }
-    if let [_, _, values] = fields.as_slice()
-        && values.trim_start().starts_with('{')
-    {
-        return split_information_register_braced_fields(values).is_some_and(|values| {
-            values.len() == count
-                && values
-                    .iter()
-                    .all(|value| split_information_register_braced_fields(value).is_some())
-        });
-    }
     if fields.len() != count.checked_add(2).unwrap_or(usize::MAX) {
         return false;
     }
-    let values = fields[2..]
+    let items = &fields[2..];
+    let uuids = items
         .iter()
         .map(|value| {
             parse_information_register_non_zero_uuid(value).map(|uuid| uuid.to_ascii_lowercase())
         })
         .collect::<Option<BTreeSet<_>>>();
-    values.is_some_and(|values| values.len() == count)
+    if uuids.is_some_and(|uuids| uuids.len() == count) {
+        return true;
+    }
+
+    let mut object_items = BTreeSet::new();
+    items.iter().all(|value| {
+        if !object_items.insert(value.trim()) {
+            return false;
+        }
+        let Some(item) = split_information_register_braced_fields(value) else {
+            return false;
+        };
+        if item.len() != 2 || item[1].trim() != "0" {
+            return false;
+        }
+        split_information_register_braced_fields(item[0]).is_some_and(|wrapper| {
+            wrapper.len() >= 2
+                && parse_information_register_usize(wrapper[0]).is_some()
+                && split_information_register_braced_fields(wrapper[1]).is_some()
+        })
+    })
 }
 
 fn parse_information_register_owner_fields<'a>(
