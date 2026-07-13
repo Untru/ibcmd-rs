@@ -11495,8 +11495,8 @@ pub(super) fn format_form_localized_section(
     for (lang, content) in values {
         xml.push_str(&format!(
             "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
-            escape_xml_text(lang),
-            escape_xml_text(content)
+            escape_xml_element_text(lang),
+            escape_xml_element_text(content)
         ));
     }
     xml.push_str(&format!("{tab}</{}>\r\n", name));
@@ -11515,8 +11515,8 @@ pub(super) fn format_form_title_section(item: &FormChildItem, indent: usize) -> 
     for (lang, content) in &item.title {
         xml.push_str(&format!(
             "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
-            escape_xml_text(lang),
-            escape_xml_text(content)
+            escape_xml_element_text(lang),
+            escape_xml_element_text(content)
         ));
     }
     xml.push_str(&format!("{tab}</Title>\r\n"));
