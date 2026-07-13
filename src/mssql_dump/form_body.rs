@@ -4394,21 +4394,10 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             Vec::new()
         },
-        use_alternation_row_color: if tag == "Table" {
-            parse_form_table_property_bag_bool(&fields, TableBagKey::UseAlternationRowColor)
-                .filter(|value| *value)
-                .or_else(|| parse_form_table_use_alternation_row_color_from_slots(wrapper, &fields))
-        } else {
-            None
-        },
+        use_alternation_row_color: table_schema
+            .and_then(|schema| schema.use_alternation_row_color(&fields)),
         default_item: if tag == "Table" {
-            if ordinary_table_layout {
-                (fields.get(16).map(|field| field.trim()) == Some("1")).then_some(true)
-            } else {
-                parse_form_table_property_bag_bool(&fields, TableBagKey::DefaultItem)
-                    .filter(|value| *value)
-                    .or_else(|| parse_form_table_default_item_from_slots(wrapper, &fields))
-            }
+            table_schema.and_then(|schema| schema.default_item(&fields))
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(13 + button_top_level_offset)
@@ -4439,15 +4428,7 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        row_input_mode: if tag == "Table" {
-            if ordinary_table_layout {
-                parse_form_table_row_input_mode(fields.get(23).copied())
-            } else {
-                None
-            }
-        } else {
-            None
-        },
+        row_input_mode: table_schema.and_then(|schema| schema.row_input_mode(&fields)),
         table_choice_mode: table_schema.and_then(|schema| schema.choice_mode(&fields)),
         table_selection_mode: table_schema.and_then(|schema| schema.selection_mode(&fields)),
         table_header: table_schema.and_then(|schema| schema.header(&fields)),
@@ -4635,7 +4616,9 @@ pub(super) fn parse_form_child_item_with_context(
             input_field_top_level_offset,
         )
         .and_then(|schema| schema.visible(&fields)),
-        read_only: if matches!(
+        read_only: if tag == "Table" {
+            table_schema.and_then(|schema| schema.read_only(&fields))
+        } else if matches!(
             tag,
             "InputField"
                 | "TextDocumentField"
@@ -4646,10 +4629,6 @@ pub(super) fn parse_form_child_item_with_context(
         {
             fields
                 .get(14 + input_field_top_level_offset)
-                .and_then(|field| parse_form_child_item_show_title(field))
-        } else if ordinary_table_layout {
-            fields
-                .get(14)
                 .and_then(|field| parse_form_child_item_show_title(field))
         } else {
             None
@@ -4790,14 +4769,7 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        auto_insert_new_row: if ordinary_table_layout {
-            fields
-                .get(37)
-                .and_then(|field| parse_form_child_item_show_title(field))
-                .filter(|value| *value)
-        } else {
-            None
-        },
+        auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
         format: if tag == "LabelField" {
             label_field_options
                 .as_ref()
@@ -6812,23 +6784,6 @@ pub(super) fn parse_form_table_initial_tree_view(
     }
 }
 
-pub(super) fn parse_form_table_use_alternation_row_color_from_slots(
-    wrapper: &str,
-    fields: &[&str],
-) -> Option<bool> {
-    (wrapper == "55"
-        && fields.get(14).map(|field| field.trim()) == Some("0")
-        && fields.get(36).map(|field| field.trim()) == Some("1"))
-    .then_some(true)
-}
-
-pub(super) fn parse_form_table_default_item_from_slots(
-    wrapper: &str,
-    fields: &[&str],
-) -> Option<bool> {
-    (wrapper == "55" && fields.get(16).map(|field| field.trim()) == Some("1")).then_some(true)
-}
-
 pub(super) fn parse_form_table_default_row_picture_data_path(
     wrapper: &str,
     fields: &[&str],
@@ -6877,13 +6832,6 @@ pub(super) fn form_table_default_picture_marker(field: &str) -> bool {
 pub(super) fn parse_form_table_row_selection_mode(field: &str) -> Option<&'static str> {
     match field.trim() {
         "1" => Some("Cell"),
-        _ => None,
-    }
-}
-
-pub(super) fn parse_form_table_row_input_mode(field: Option<&str>) -> Option<&'static str> {
-    match field.map(|value| value.trim()) {
-        Some("2") => Some("AfterCurrentRow"),
         _ => None,
     }
 }

@@ -1432,27 +1432,37 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTableSlot {
     Autofill,
+    ReadOnly,
+    DefaultItem,
     ChangeRowOrder,
     ChoiceMode,
+    RowInputMode,
     SelectionMode,
     RowSelectionMode,
     Header,
     HorizontalLines,
     VerticalLines,
+    UseAlternationRowColor,
+    AutoInsertNewRow,
     EnableStartDrag,
     EnableDrag,
 }
 
 impl FormTableSlot {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 15] = [
         Self::Autofill,
+        Self::ReadOnly,
+        Self::DefaultItem,
         Self::ChangeRowOrder,
         Self::ChoiceMode,
+        Self::RowInputMode,
         Self::SelectionMode,
         Self::RowSelectionMode,
         Self::Header,
         Self::HorizontalLines,
         Self::VerticalLines,
+        Self::UseAlternationRowColor,
+        Self::AutoInsertNewRow,
         Self::EnableStartDrag,
         Self::EnableDrag,
     ];
@@ -1460,15 +1470,27 @@ impl FormTableSlot {
     const fn index(self) -> usize {
         match self {
             Self::Autofill => 12,
+            Self::ReadOnly => 14,
+            Self::DefaultItem => 16,
             Self::ChangeRowOrder => 18,
             Self::ChoiceMode => 22,
+            Self::RowInputMode => 23,
             Self::SelectionMode => 24,
             Self::RowSelectionMode => 25,
             Self::Header => 26,
             Self::HorizontalLines => 32,
             Self::VerticalLines => 33,
+            Self::UseAlternationRowColor => 36,
+            Self::AutoInsertNewRow => 37,
             Self::EnableStartDrag => 52,
             Self::EnableDrag => 53,
+        }
+    }
+
+    fn accepts(self, field: &str) -> bool {
+        match self {
+            Self::RowInputMode => matches!(field.trim(), "0" | "2"),
+            _ => matches!(field.trim(), "0" | "1"),
         }
     }
 }
@@ -1488,7 +1510,7 @@ impl FormTableSchema {
             || !FormTableSlot::ALL.iter().all(|slot| {
                 fields
                     .get(slot.index())
-                    .is_some_and(|field| matches!(field.trim(), "0" | "1"))
+                    .is_some_and(|field| slot.accepts(field))
             })
         {
             return None;
@@ -1500,12 +1522,25 @@ impl FormTableSchema {
         self.explicit_true(fields, FormTableSlot::Autofill)
     }
 
+    pub(crate) fn read_only(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::ReadOnly)
+    }
+
+    pub(crate) fn default_item(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::DefaultItem)
+    }
+
     pub(crate) fn change_row_order(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::ChangeRowOrder)
     }
 
     pub(crate) fn choice_mode(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::ChoiceMode)
+    }
+
+    pub(crate) fn row_input_mode(self, fields: &[&str]) -> Option<&'static str> {
+        (fields.get(FormTableSlot::RowInputMode.index())?.trim() == "2")
+            .then_some("AfterCurrentRow")
     }
 
     pub(crate) fn selection_mode(self, fields: &[&str]) -> Option<&'static str> {
@@ -1526,6 +1561,14 @@ impl FormTableSchema {
 
     pub(crate) fn vertical_lines(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::VerticalLines)
+    }
+
+    pub(crate) fn use_alternation_row_color(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::UseAlternationRowColor)
+    }
+
+    pub(crate) fn auto_insert_new_row(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::AutoInsertNewRow)
     }
 
     pub(crate) fn enable_start_drag(self, fields: &[&str]) -> Option<bool> {
