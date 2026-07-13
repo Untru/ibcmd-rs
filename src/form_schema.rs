@@ -121,6 +121,7 @@ pub(crate) struct FormLabelDecorationSchema {
     group_vertical_align_slot: usize,
     horizontal_align_option_slot: usize,
     vertical_align_option_slot: usize,
+    title_height_option_slot: usize,
 }
 
 impl FormLabelDecorationSchema {
@@ -154,6 +155,7 @@ impl FormLabelDecorationSchema {
                 group_vertical_align_slot: 33,
                 horizontal_align_option_slot: 2,
                 vertical_align_option_slot: 3,
+                title_height_option_slot: 4,
             }),
             _ => None,
         }
@@ -220,6 +222,12 @@ impl FormLabelDecorationSchema {
         }
     }
 
+    pub(crate) fn visual_tail(self, options: &[&str]) -> FormLabelDecorationVisualTail {
+        FormLabelDecorationVisualTail {
+            title_height: Self::non_zero_u32(options, self.title_height_option_slot),
+        }
+    }
+
     fn non_zero_u32(fields: &[&str], slot: usize) -> Option<String> {
         let value = fields.get(slot)?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
@@ -235,6 +243,17 @@ impl FormLabelDecorationSchema {
             "1" => Some(true),
             _ => None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FormLabelDecorationVisualTail {
+    title_height: Option<String>,
+}
+
+impl FormLabelDecorationVisualTail {
+    pub(crate) fn title_height(&self) -> Option<&str> {
+        self.title_height.as_deref()
     }
 }
 
@@ -331,6 +350,15 @@ pub(crate) const FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER:
     FormLabelDecorationAlignmentTailXmlProperty::HorizontalAlign,
     FormLabelDecorationAlignmentTailXmlProperty::VerticalAlign,
 ];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormLabelDecorationVisualTailXmlProperty {
+    TitleHeight,
+}
+
+pub(crate) const FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER:
+    &[FormLabelDecorationVisualTailXmlProperty] =
+    &[FormLabelDecorationVisualTailXmlProperty::TitleHeight];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormLabelDecorationGeometryXmlProperty {

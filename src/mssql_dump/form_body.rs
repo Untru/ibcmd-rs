@@ -2,12 +2,13 @@ use super::*;
 use crate::form_schema::{
     FORM_DECORATION_HEADER_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER,
     FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER,
-    FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment,
-    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
-    FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
-    FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER, FORM_TABLE_XML_ORDER,
+    FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
+    FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
+    FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
     FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
@@ -432,6 +433,7 @@ pub(super) struct FormChildItem {
     pub(super) tooltip_representation: Option<&'static str>,
     pub(super) edit_mode: Option<&'static str>,
     pub(super) horizontal_align: Option<FormChildItemAlignment>,
+    pub(super) label_decoration_visual_tail: Option<FormLabelDecorationVisualTail>,
     pub(super) check_box_type: Option<&'static str>,
     pub(super) radio_button_type: Option<&'static str>,
     pub(super) columns_count: Option<u32>,
@@ -4581,6 +4583,9 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
+        label_decoration_visual_tail: label_decoration_options
+            .as_ref()
+            .map(|options| options.visual_tail.clone()),
         check_box_type: if tag == "CheckBoxField" && form_input_field_layout_is_extended(&fields) {
             parse_form_checkbox_type(&fields)
         } else {
@@ -5344,6 +5349,7 @@ pub(super) struct FormLabelDecorationOptions {
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) alignment: FormLabelDecorationAlignment,
     pub(super) geometry: FormLabelDecorationGeometry,
+    pub(super) visual_tail: FormLabelDecorationVisualTail,
 }
 
 pub(super) fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOptions> {
@@ -5520,6 +5526,7 @@ pub(super) fn parse_form_label_decoration_options(
             .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
         alignment: schema.alignment(fields, &options),
         geometry: schema.geometry(fields),
+        visual_tail: schema.visual_tail(&options),
     })
 }
 
@@ -10270,6 +10277,10 @@ pub(super) fn format_form_child_item_xml(
                 item,
                 indent + 1,
             ));
+            xml.push_str(&format_form_label_decoration_visual_tail_xml(
+                item,
+                indent + 1,
+            ));
         }
         if item.tag == "PictureDecoration" {
             if let Some(picture_size) = item
@@ -10632,6 +10643,30 @@ fn format_form_label_decoration_alignment_tail_xml(item: &FormChildItem, indent:
                 "{tab}<{tag_name}>{}</{tag_name}>\r\n",
                 escape_xml_text(value)
             ));
+        }
+    }
+    xml
+}
+
+fn format_form_label_decoration_visual_tail_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "LabelDecoration" {
+        return String::new();
+    }
+    let Some(visual_tail) = &item.label_decoration_visual_tail else {
+        return String::new();
+    };
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER {
+        match property {
+            FormLabelDecorationVisualTailXmlProperty::TitleHeight => {
+                if let Some(title_height) = visual_tail.title_height() {
+                    xml.push_str(&format!(
+                        "{tab}<TitleHeight>{}</TitleHeight>\r\n",
+                        escape_xml_text(title_height)
+                    ));
+                }
+            }
         }
     }
     xml
