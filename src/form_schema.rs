@@ -76,6 +76,179 @@ pub(crate) const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProp
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormExtendedTooltipXmlProperty {
+    Width,
+    AutoMaxWidth,
+    MaxWidth,
+    Height,
+    AutoMaxHeight,
+    HorizontalStretch,
+    VerticalStretch,
+    TextColor,
+    Font,
+    Title,
+    GroupHorizontalAlign,
+    VerticalAlign,
+    Events,
+}
+
+pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProperty] = &[
+    FormExtendedTooltipXmlProperty::Width,
+    FormExtendedTooltipXmlProperty::AutoMaxWidth,
+    FormExtendedTooltipXmlProperty::MaxWidth,
+    FormExtendedTooltipXmlProperty::Height,
+    FormExtendedTooltipXmlProperty::AutoMaxHeight,
+    FormExtendedTooltipXmlProperty::HorizontalStretch,
+    FormExtendedTooltipXmlProperty::VerticalStretch,
+    FormExtendedTooltipXmlProperty::TextColor,
+    FormExtendedTooltipXmlProperty::Font,
+    FormExtendedTooltipXmlProperty::Title,
+    FormExtendedTooltipXmlProperty::GroupHorizontalAlign,
+    FormExtendedTooltipXmlProperty::VerticalAlign,
+    FormExtendedTooltipXmlProperty::Events,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormExtendedTooltipSchema {
+    width_slot: usize,
+    height_slot: usize,
+    horizontal_stretch_slot: usize,
+    vertical_stretch_slot: usize,
+    text_color_slot: usize,
+    font_slot: usize,
+    auto_max_width_slot: usize,
+    max_width_slot: usize,
+    auto_max_height_slot: usize,
+    group_horizontal_align_slot: usize,
+    vertical_align_option_slot: usize,
+    title_values_slot: usize,
+    title_formatted_slot: usize,
+}
+
+impl FormExtendedTooltipSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 18;
+    pub(crate) const TITLE_SLOT: usize = 22;
+    pub(crate) const EVENT_OPTION_SLOT: usize = 5;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+        title: &[&str],
+        event_fields: &[&str],
+    ) -> Option<Self> {
+        if !matches!(
+            (
+                wrapper,
+                field_count,
+                direct_discriminator,
+                options.len(),
+                options.first().map(|field| field.trim()),
+                title.len(),
+                title.first().map(|field| field.trim()),
+                title.get(2).map(|field| field.trim()),
+            ),
+            (
+                "12",
+                34,
+                Some("0"),
+                9,
+                Some("5"),
+                3,
+                Some("1"),
+                Some("0" | "1")
+            )
+        ) || !Self::event_fields_are_exact(event_fields)
+        {
+            return None;
+        }
+        Some(Self {
+            width_slot: 10,
+            height_slot: 11,
+            horizontal_stretch_slot: 12,
+            vertical_stretch_slot: 13,
+            text_color_slot: 14,
+            font_slot: 15,
+            auto_max_width_slot: 25,
+            max_width_slot: 26,
+            auto_max_height_slot: 28,
+            group_horizontal_align_slot: 30,
+            vertical_align_option_slot: 3,
+            title_values_slot: 1,
+            title_formatted_slot: 2,
+        })
+    }
+
+    fn event_fields_are_exact(fields: &[&str]) -> bool {
+        (fields.len() == 3
+            && fields.first().map(|field| field.trim()) == Some("0")
+            && fields.get(1).map(|field| field.trim()) == Some("1")
+            && fields.get(2).map(|field| field.trim()) == Some("0"))
+            || (fields.len() == 8
+                && fields.first().map(|field| field.trim()) == Some("1")
+                && fields.get(3).map(|field| field.trim()) == Some("1")
+                && fields.get(4).map(|field| field.trim()) == Some("0")
+                && fields.get(6).map(|field| field.trim()) == Some("0")
+                && fields.get(7).map(|field| field.trim()) == Some("1")
+                && fields.get(1).map(|field| field.trim())
+                    == fields.get(5).map(|field| field.trim()))
+    }
+
+    pub(crate) const fn width_slot(self) -> usize {
+        self.width_slot
+    }
+
+    pub(crate) const fn height_slot(self) -> usize {
+        self.height_slot
+    }
+
+    pub(crate) const fn horizontal_stretch_slot(self) -> usize {
+        self.horizontal_stretch_slot
+    }
+
+    pub(crate) const fn vertical_stretch_slot(self) -> usize {
+        self.vertical_stretch_slot
+    }
+
+    pub(crate) const fn text_color_slot(self) -> usize {
+        self.text_color_slot
+    }
+
+    pub(crate) const fn font_slot(self) -> usize {
+        self.font_slot
+    }
+
+    pub(crate) const fn auto_max_width_slot(self) -> usize {
+        self.auto_max_width_slot
+    }
+
+    pub(crate) const fn max_width_slot(self) -> usize {
+        self.max_width_slot
+    }
+
+    pub(crate) const fn auto_max_height_slot(self) -> usize {
+        self.auto_max_height_slot
+    }
+
+    pub(crate) const fn group_horizontal_align_slot(self) -> usize {
+        self.group_horizontal_align_slot
+    }
+
+    pub(crate) const fn vertical_align_option_slot(self) -> usize {
+        self.vertical_align_option_slot
+    }
+
+    pub(crate) const fn title_values_slot(self) -> usize {
+        self.title_values_slot
+    }
+
+    pub(crate) const fn title_formatted_slot(self) -> usize {
+        self.title_formatted_slot
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormDecorationHeaderSchema {
     tooltip_slot: usize,
     tooltip_representation_slot: usize,

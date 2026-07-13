@@ -1,10 +1,11 @@
 use super::*;
 use crate::form_schema::{
-    FORM_DECORATION_HEADER_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER,
-    FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER,
-    FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER, FORM_TABLE_XML_ORDER,
-    FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment, FormDecorationHeaderSchema,
-    FormDecorationHeaderXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FORM_DECORATION_HEADER_XML_ORDER, FORM_EXTENDED_TOOLTIP_XML_ORDER,
+    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER,
+    FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
+    FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormChildItemAlignment,
+    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
+    FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
@@ -378,6 +379,57 @@ pub(super) struct FormCommandInterfaceItem {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormExtendedTooltipTitle {
+    pub(super) values: Vec<(String, String)>,
+    pub(super) formatted: bool,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(super) struct FormExtendedTooltip {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) width: Option<String>,
+    pub(super) auto_max_width: Option<bool>,
+    pub(super) max_width: Option<String>,
+    pub(super) height: Option<String>,
+    pub(super) auto_max_height: Option<bool>,
+    pub(super) horizontal_stretch: Option<bool>,
+    pub(super) vertical_stretch: Option<bool>,
+    pub(super) text_color: Option<String>,
+    pub(super) font_xml: Option<String>,
+    pub(super) title: Option<FormExtendedTooltipTitle>,
+    pub(super) group_horizontal_align: Option<&'static str>,
+    pub(super) vertical_align: Option<&'static str>,
+    pub(super) events: Vec<FormBodyEvent>,
+}
+
+impl FormExtendedTooltip {
+    pub(super) fn new(name: String, id: String) -> Self {
+        Self {
+            id,
+            name,
+            ..Self::default()
+        }
+    }
+
+    fn has_properties(&self) -> bool {
+        self.width.is_some()
+            || self.auto_max_width.is_some()
+            || self.max_width.is_some()
+            || self.height.is_some()
+            || self.auto_max_height.is_some()
+            || self.horizontal_stretch.is_some()
+            || self.vertical_stretch.is_some()
+            || self.text_color.is_some()
+            || self.font_xml.is_some()
+            || self.title.is_some()
+            || self.group_horizontal_align.is_some()
+            || self.vertical_align.is_some()
+            || !self.events.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct FormChildItem {
     pub(super) tag: &'static str,
     pub(super) id: String,
@@ -490,8 +542,7 @@ pub(super) struct FormChildItem {
     pub(super) tooltip: Vec<(String, String)>,
     pub(super) input_hint: Vec<(String, String)>,
     pub(super) choice_list: Vec<FormChoiceListItem>,
-    pub(super) extended_tooltip: Option<(String, String)>,
-    pub(super) extended_tooltip_auto_max_width: Option<bool>,
+    pub(super) extended_tooltip: Option<FormExtendedTooltip>,
     pub(super) events: Vec<FormBodyEvent>,
     pub(super) data_path: Option<String>,
     pub(super) command_name: Option<String>,
@@ -5100,10 +5151,7 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             Vec::new()
         },
-        extended_tooltip: parse_form_child_item_extended_tooltip(&fields),
-        extended_tooltip_auto_max_width: parse_form_child_item_extended_tooltip_auto_max_width(
-            tag, &fields,
-        ),
+        extended_tooltip: parse_form_child_item_extended_tooltip(&fields, object_refs),
         events: {
             let mut events = parse_form_child_item_event_fields(&fields);
             if tag == "InputField" {
@@ -7773,7 +7821,18 @@ pub(super) fn parse_form_input_field_input_hint(
         .unwrap_or_default()
 }
 
-pub(super) fn parse_form_child_item_extended_tooltip(fields: &[&str]) -> Option<(String, String)> {
+fn parse_form_extended_tooltip_option_events(fields: &[&str]) -> Option<Vec<FormBodyEvent>> {
+    if fields.first().map(|value| value.trim()) == Some("0") {
+        return Some(Vec::new());
+    }
+    let events = parse_form_child_item_event_record(fields);
+    (events.len() == 1 && events.first()?.name == "URLProcessing").then_some(events)
+}
+
+pub(super) fn parse_form_child_item_extended_tooltip(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormExtendedTooltip> {
     fields.iter().find_map(|field| {
         let nested = split_1c_braced_fields(field.trim(), 0)?;
         if nested.first().map(|value| value.trim()) != Some("12") {
@@ -7788,30 +7847,104 @@ pub(super) fn parse_form_child_item_extended_tooltip(fields: &[&str]) -> Option<
             return None;
         }
         let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
-        is_form_extended_tooltip_name(&name).then(|| (name, id.to_string()))
-    })
-}
-
-pub(super) fn parse_form_child_item_extended_tooltip_auto_max_width(
-    tag: &str,
-    fields: &[&str],
-) -> Option<bool> {
-    fields.iter().find_map(|field| {
-        let nested = split_1c_braced_fields(field.trim(), 0)?;
-        if nested.first().map(|value| value.trim()) != Some("12") {
-            return None;
-        }
-        if nested.get(5).map(|value| value.trim()) == Some("1") {
-            return None;
-        }
-        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
         if !is_form_extended_tooltip_name(&name) {
             return None;
         }
-        if tag == "CalendarField" && nested.len() == 34 {
-            return (nested.get(25).map(|value| value.trim()) == Some("0")).then_some(false);
+
+        let mut tooltip = FormExtendedTooltip::new(name, id.to_string());
+        let Some(options) = nested
+            .get(FormExtendedTooltipSchema::OPTIONS_SLOT)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        else {
+            return Some(tooltip);
+        };
+        let Some(title) = nested
+            .get(FormExtendedTooltipSchema::TITLE_SLOT)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        else {
+            return Some(tooltip);
+        };
+        let Some(event_fields) = options
+            .get(FormExtendedTooltipSchema::EVENT_OPTION_SLOT)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        else {
+            return Some(tooltip);
+        };
+        let Some(schema) = FormExtendedTooltipSchema::from_raw_layout(
+            nested.first()?.trim(),
+            nested.len(),
+            nested.get(5).map(|field| field.trim()),
+            &options,
+            &title,
+            &event_fields,
+        ) else {
+            return Some(tooltip);
+        };
+        let Some(events) = parse_form_extended_tooltip_option_events(&event_fields) else {
+            return Some(tooltip);
+        };
+        tooltip.width = extract_form_dimension(&nested, schema.width_slot());
+        tooltip.auto_max_width = match nested
+            .get(schema.auto_max_width_slot())
+            .map(|value| value.trim())
+        {
+            Some("0") => Some(false),
+            _ => None,
+        };
+        tooltip.max_width = extract_form_dimension(&nested, schema.max_width_slot());
+        tooltip.height = extract_form_dimension(&nested, schema.height_slot());
+        tooltip.auto_max_height = match nested
+            .get(schema.auto_max_height_slot())
+            .map(|value| value.trim())
+        {
+            Some("0") => Some(false),
+            _ => None,
+        };
+        tooltip.horizontal_stretch = match nested
+            .get(schema.horizontal_stretch_slot())
+            .map(|value| value.trim())
+        {
+            Some("0") => Some(false),
+            Some("1") => Some(true),
+            _ => None,
+        };
+        tooltip.vertical_stretch = match nested
+            .get(schema.vertical_stretch_slot())
+            .map(|value| value.trim())
+        {
+            Some("0") => Some(false),
+            Some("1") => Some(true),
+            _ => None,
+        };
+        tooltip.text_color = nested
+            .get(schema.text_color_slot())
+            .and_then(|field| parse_form_label_field_text_color(field, object_refs));
+        tooltip.font_xml = nested
+            .get(schema.font_slot())
+            .and_then(|field| parse_form_font_tuple_xml(field, object_refs));
+        let title_values =
+            parse_form_localized_strings(title.get(schema.title_values_slot())?.trim());
+        let title_formatted = title.get(schema.title_formatted_slot())?.trim() == "1";
+        if title_formatted || !title_values.is_empty() {
+            tooltip.title = Some(FormExtendedTooltipTitle {
+                values: title_values,
+                formatted: title_formatted,
+            });
         }
-        parse_form_decoration_auto_max_width(&nested)
+        tooltip.group_horizontal_align = nested
+            .get(schema.group_horizontal_align_slot())
+            .and_then(|field| parse_form_button_group_horizontal_align(field));
+        tooltip.vertical_align = match options
+            .get(schema.vertical_align_option_slot())
+            .map(|value| value.trim())
+        {
+            Some("0") => Some("Top"),
+            Some("1") => Some("Center"),
+            Some("2") => Some("Bottom"),
+            _ => None,
+        };
+        tooltip.events = events;
+        Some(tooltip)
     })
 }
 
@@ -10382,12 +10515,10 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if item.tag != "Table"
-        && let Some((name, id)) = &item.extended_tooltip
+        && let Some(extended_tooltip) = &item.extended_tooltip
     {
         xml.push_str(&format_form_extended_tooltip_xml(
-            name,
-            id,
-            item.extended_tooltip_auto_max_width,
+            extended_tooltip,
             indent + 1,
         ));
     }
@@ -10437,11 +10568,9 @@ pub(super) fn format_form_child_item_xml(
         for child in &auto_command_bar_children {
             xml.push_str(&format_form_child_item_xml(child, indent + 1, false));
         }
-        if let Some((name, id)) = &item.extended_tooltip {
+        if let Some(extended_tooltip) = &item.extended_tooltip {
             xml.push_str(&format_form_extended_tooltip_xml(
-                name,
-                id,
-                item.extended_tooltip_auto_max_width,
+                extended_tooltip,
                 indent + 1,
             ));
         }
@@ -10717,28 +10846,165 @@ fn should_emit_form_picture_size(picture_size: &str) -> bool {
     picture_size != "RealSize"
 }
 
-fn format_form_extended_tooltip_xml(
-    name: &str,
-    id: &str,
-    auto_max_width: Option<bool>,
+fn format_form_extended_tooltip_xml(tooltip: &FormExtendedTooltip, indent: usize) -> String {
+    let tab = "\t".repeat(indent);
+    if !tooltip.has_properties() {
+        return format!(
+            "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
+            escape_xml_text(&tooltip.name),
+            escape_xml_text(&tooltip.id)
+        );
+    }
+
+    let mut xml = format!(
+        "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\">\r\n",
+        escape_xml_text(&tooltip.name),
+        escape_xml_text(&tooltip.id)
+    );
+    for property in FORM_EXTENDED_TOOLTIP_XML_ORDER {
+        xml.push_str(&format_form_extended_tooltip_property_xml(
+            tooltip,
+            *property,
+            indent + 1,
+        ));
+    }
+    xml.push_str(&format!("{tab}</ExtendedTooltip>\r\n"));
+    xml
+}
+
+fn format_form_extended_tooltip_property_xml(
+    tooltip: &FormExtendedTooltip,
+    property: FormExtendedTooltipXmlProperty,
     indent: usize,
 ) -> String {
     let tab = "\t".repeat(indent);
-    if auto_max_width == Some(false) {
-        format!(
-            "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\">\r\n\
-{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n\
-{tab}</ExtendedTooltip>\r\n",
-            escape_xml_text(name),
-            escape_xml_text(id)
-        )
-    } else {
-        format!(
-            "{tab}<ExtendedTooltip name=\"{}\" id=\"{}\"/>\r\n",
-            escape_xml_text(name),
-            escape_xml_text(id)
-        )
+    match property {
+        FormExtendedTooltipXmlProperty::Width => tooltip
+            .width
+            .as_ref()
+            .map(|value| format!("{tab}<Width>{}</Width>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::AutoMaxWidth => tooltip
+            .auto_max_width
+            .map(|value| format!("{tab}<AutoMaxWidth>{}</AutoMaxWidth>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::MaxWidth => tooltip
+            .max_width
+            .as_ref()
+            .map(|value| format!("{tab}<MaxWidth>{}</MaxWidth>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::Height => tooltip
+            .height
+            .as_ref()
+            .map(|value| format!("{tab}<Height>{}</Height>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::AutoMaxHeight => tooltip
+            .auto_max_height
+            .map(|value| {
+                format!(
+                    "{tab}<AutoMaxHeight>{}</AutoMaxHeight>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::HorizontalStretch => tooltip
+            .horizontal_stretch
+            .map(|value| {
+                format!(
+                    "{tab}<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::VerticalStretch => tooltip
+            .vertical_stretch
+            .map(|value| {
+                format!(
+                    "{tab}<VerticalStretch>{}</VerticalStretch>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::TextColor => tooltip
+            .text_color
+            .as_ref()
+            .map(|value| format!("{tab}<TextColor>{}</TextColor>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::Font => tooltip
+            .font_xml
+            .as_ref()
+            .map(|value| format!("{tab}{value}\r\n"))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::Title => tooltip
+            .title
+            .as_ref()
+            .map(|title| format_form_extended_tooltip_title_xml(title, indent))
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::GroupHorizontalAlign => tooltip
+            .group_horizontal_align
+            .map(|value| {
+                format!(
+                    "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::VerticalAlign => tooltip
+            .vertical_align
+            .map(|value| {
+                format!(
+                    "{tab}<VerticalAlign>{}</VerticalAlign>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormExtendedTooltipXmlProperty::Events => {
+            format_form_extended_tooltip_events_xml(&tooltip.events, indent)
+        }
     }
+}
+
+fn format_form_extended_tooltip_title_xml(
+    title: &FormExtendedTooltipTitle,
+    indent: usize,
+) -> String {
+    let tab = "\t".repeat(indent);
+    if title.values.is_empty() {
+        return format!(
+            "{tab}<Title formatted=\"{}\"/>\r\n",
+            xml_bool(title.formatted)
+        );
+    }
+    let mut xml = format!(
+        "{tab}<Title formatted=\"{}\">\r\n",
+        xml_bool(title.formatted)
+    );
+    for (lang, content) in &title.values {
+        xml.push_str(&format!(
+            "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
+            escape_xml_text(lang),
+            escape_xml_text(content)
+        ));
+    }
+    xml.push_str(&format!("{tab}</Title>\r\n"));
+    xml
+}
+
+fn format_form_extended_tooltip_events_xml(events: &[FormBodyEvent], indent: usize) -> String {
+    if events.is_empty() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<Events>\r\n");
+    for event in events {
+        xml.push_str(&format!(
+            "{tab}\t<Event name=\"{}\">{}</Event>\r\n",
+            escape_xml_text(&event.name),
+            escape_xml_text(&event.handler)
+        ));
+    }
+    xml.push_str(&format!("{tab}</Events>\r\n"));
+    xml
 }
 
 pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {

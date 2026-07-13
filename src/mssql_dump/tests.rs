@@ -4868,7 +4868,13 @@ fn parses_calendar_tooltip_and_extended_tooltip() {
     extended_tooltip[1] = "{102,02023637-7868-4a5f-8576-835a76e0c9ba}".to_string();
     extended_tooltip[5] = "0".to_string();
     extended_tooltip[6] = "\"DocumentFieldExtendedTooltip\"".to_string();
+    extended_tooltip[12] = "2".to_string();
+    extended_tooltip[13] = "2".to_string();
+    extended_tooltip[18] = "{5,0,0,3,0,{0,1,0},0,0,0}".to_string();
+    extended_tooltip[22] = "{1,{1,0},0}".to_string();
     extended_tooltip[25] = "0".to_string();
+    extended_tooltip[28] = "1".to_string();
+    extended_tooltip[30] = "3".to_string();
     fields[52] = format!("{{{}}}", extended_tooltip.join(","));
 
     let item = parse_form_child_item_with_attrs(
@@ -5347,11 +5353,10 @@ fn extracts_text_document_field_child_item() {
     assert_eq!(item.title_location, Some("None"));
     assert_eq!(item.height.as_deref(), Some("3"));
     assert_eq!(
-        item.extended_tooltip,
-        Some((
-            "ProcedureEditorExtendedTooltip".to_string(),
-            "111".to_string()
-        ))
+        item.extended_tooltip
+            .as_ref()
+            .map(|tooltip| (tooltip.name.as_str(), tooltip.id.as_str())),
+        Some(("ProcedureEditorExtendedTooltip", "111"))
     );
     assert_eq!(item.events[0].name, "OnChange");
     assert_eq!(item.events[0].handler, "ProcedureChanged");
@@ -5944,7 +5949,10 @@ fn keeps_nested_auto_command_bar_controls_and_table_order() {
     table.child_items[1] = empty_bar;
     table.child_items.push(addition);
     table.child_items.push(regular_child);
-    table.extended_tooltip = Some(("RowsTip".to_string(), "59".to_string()));
+    table.extended_tooltip = Some(FormExtendedTooltip::new(
+        "RowsTip".to_string(),
+        "59".to_string(),
+    ));
     table.events.push(FormBodyEvent {
         name: "Selection".to_string(),
         handler: "RowsSelection".to_string(),
@@ -7295,8 +7303,10 @@ fn extracts_form_extended_button_properties_from_layout_code() {
     assert_eq!(item.button_representation, Some("PictureAndText"));
     assert_eq!(item.default_button, Some(true));
     assert_eq!(
-        item.extended_tooltip,
-        Some(("SaveExtendedTooltip".to_string(), "45".to_string()))
+        item.extended_tooltip
+            .as_ref()
+            .map(|tooltip| (tooltip.name.as_str(), tooltip.id.as_str())),
+        Some(("SaveExtendedTooltip", "45"))
     );
 
     let xml = format_form_child_items_xml(&[item], 1);
@@ -7639,11 +7649,11 @@ fn extracts_label_decoration_and_standard_close_command_from_layout_code() {
     assert_eq!(decoration.auto_max_width, Some(false));
     assert_eq!(decoration.skip_on_input, Some(false));
     assert_eq!(
-        decoration.extended_tooltip,
-        Some((
-            "ДекорацияСекРасширеннаяПодсказка".to_string(),
-            "27".to_string()
-        ))
+        decoration
+            .extended_tooltip
+            .as_ref()
+            .map(|tooltip| (tooltip.name.as_str(), tooltip.id.as_str())),
+        Some(("ДекорацияСекРасширеннаяПодсказка", "27"))
     );
     assert_eq!(decoration.child_items.len(), 1);
     assert_eq!(decoration.child_items[0].tag, "ContextMenu");
@@ -10137,8 +10147,11 @@ fn extracts_table_service_child_items_from_layout_fields() {
     );
     assert_eq!(item.child_items[2].child_items[0].tag, "ContextMenu");
     assert_eq!(
-        item.child_items[2].extended_tooltip,
-        Some(("RowsSearchTip".to_string(), "32".to_string()))
+        item.child_items[2]
+            .extended_tooltip
+            .as_ref()
+            .map(|tooltip| (tooltip.name.as_str(), tooltip.id.as_str())),
+        Some(("RowsSearchTip", "32"))
     );
 
     let xml = format_form_child_items_xml(&[item], 1);
@@ -10268,7 +10281,6 @@ fn formats_table_search_additions_as_direct_sections() {
         input_hint: Vec::new(),
         choice_list: Vec::new(),
         extended_tooltip: None,
-        extended_tooltip_auto_max_width: None,
         events: Vec::new(),
         data_path: Some("List".to_string()),
         command_name: None,
@@ -10387,7 +10399,6 @@ fn formats_table_search_additions_as_direct_sections() {
                 input_hint: Vec::new(),
                 choice_list: Vec::new(),
                 extended_tooltip: None,
-                extended_tooltip_auto_max_width: None,
                 events: Vec::new(),
                 data_path: None,
                 command_name: None,
@@ -10507,7 +10518,6 @@ fn formats_table_search_additions_as_direct_sections() {
                 input_hint: Vec::new(),
                 choice_list: Vec::new(),
                 extended_tooltip: None,
-                extended_tooltip_auto_max_width: None,
                 events: Vec::new(),
                 data_path: Some("List.Name".to_string()),
                 command_name: None,
