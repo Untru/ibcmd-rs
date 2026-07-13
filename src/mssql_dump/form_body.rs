@@ -4394,11 +4394,9 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         change_row_order: table_schema.and_then(|schema| schema.change_row_order(&fields)),
-        command_set_excluded_commands: if tag == "Table" {
-            parse_form_table_command_set_excluded_commands(&fields)
-        } else {
-            Vec::new()
-        },
+        command_set_excluded_commands: table_schema
+            .map(|schema| parse_form_table_command_set_excluded_commands_for_table(schema, &fields))
+            .unwrap_or_default(),
         use_alternation_row_color: table_schema
             .and_then(|schema| schema.use_alternation_row_color(&fields)),
         default_item: if tag == "Table" {
@@ -7120,625 +7118,128 @@ pub(super) fn form_table_property_bag_value<'a>(
     })
 }
 
-pub(super) fn form_table_excluded_command_name(uuid: &str) -> Option<&'static str> {
+fn form_table_excluded_command_name(_schema: FormTableSchema, uuid: &str) -> Option<&'static str> {
     match uuid {
-        "04ac7211-e74f-4776-9749-35a9282b1d52" => Some("UndoPosting"),
-        "0ae4bea5-23be-42a7-b69e-97b11b29c453" => Some("Copy"),
-        "0f8d6d98-2f8b-405a-b8b3-0538e9d95da5" => Some("ChangeHistory"),
-        "11761e12-cf32-4826-a175-b23213e3b229" => Some("Change"),
-        "18248aa8-e621-4e19-a611-54fb8923644c" => Some("CheckAll"),
-        "182a793b-22a5-4625-b316-6a5be7f88078" => Some("LoadDynamicListSettings"),
-        "2bbe4e12-06d2-409b-a972-eea585125d83" => Some("SortListAsc"),
-        "33b7b9cd-6979-4435-8c58-d9bc8250edec" => Some("DynamicListStandardSettings"),
-        "37740564-9e86-44a0-bea9-3f485a5a3f91" => Some("MoveUp"),
-        "403bc6e6-b98e-4181-9f43-9c75cbbf82cf" => Some("Refresh"),
-        "44ad3ec9-f3c2-4913-9224-5f9fb6418743" => Some("CancelSearch"),
-        "58b2a785-23f6-4b0e-a324-9a1323285595" => Some("SortListDesc"),
-        "59b4387d-f5be-4658-901f-bd3068217469" => Some("Pickup"),
-        "714d44cc-63da-4431-b33a-428e398d2a08" => Some("FindByCurrentValue"),
-        "7b683784-b474-441a-ba63-3d757bd0ffd4" => Some("FindByCurrentValue"),
-        "825c1c15-ef8f-47ab-b002-e6b84b3e5b10" => Some("OutputList"),
-        "88078230-1f6b-415f-99e4-ad2ff73810cf" => Some("CopyToClipboard"),
-        "8af6ebff-cd02-4bfe-a984-44a292623708" => Some("Copy"),
-        "8d772f97-c0ef-47c0-9cb0-efea28c61341" => Some("Delete"),
-        "8969c93a-23e5-4bef-941d-aaef315858d2" => Some("Choose"),
-        "95b4bc12-2ece-4d7a-b3e2-6f9293620a06" => Some("SaveDynamicListSettings"),
-        "9ef79140-3de6-436a-8dda-610bb963f5db" => Some("EndEdit"),
-        "a2f737a8-0114-4e86-a214-45e5c213fa65" => Some("SetDeletionMark"),
-        "b0016a68-ec64-4e6d-b905-c71fd62efc4c" => Some("Add"),
-        "b41f5bbc-ba5d-4888-8cd1-db246a371418" => Some("Change"),
-        "c0519548-2a9a-44de-a25e-faf01e089d4d" => Some("Find"),
-        "daa306cd-a78a-4e74-a14c-739daba624cb" => Some("SetDateInterval"),
-        "e3dd8850-fc3c-41b1-bbb3-7c66af082608" => Some("SetDateInterval"),
-        "e7216412-03ac-4a81-99c2-1d7c28e88e31" => Some("SetDeletionMark"),
-        "ec576e13-1e76-4c33-98aa-a33204514227" => Some("ShowMultipleSelection"),
-        "fa51b106-eae6-44c7-8054-76cbb3100603" => Some("MoveDown"),
-        "01833a5a-6553-4c49-b445-095018107bb5" => Some("HierarchicalList"),
-        "05468165-f954-45a5-84f2-6641c51f9f23" => Some("Tree"),
-        "0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc" => Some("List"),
-        "49602716-fea6-497f-8047-726404038857" => Some("OutputList"),
-        "51c99108-107c-43e1-8918-e48835bf2495" => Some("SelectAll"),
-        _ => None,
+        "11761e12-cf32-4826-a175-b23213e3b229" => Some("ChangeHistory"),
+        "7d4db5ed-0981-4020-b3b8-886b7165ba05" => Some("SetPresentation"),
+        "8af6ebff-cd02-4bfe-a984-44a292623708" => Some("ShowRowRearrangement"),
+        "d96b0c03-b209-4d01-a3fc-17a14f873b64" => Some("SearchHistory"),
+        "e6900951-1a42-4397-bf00-cabb2cd7ad6d" => Some("Detailed"),
+        "ec576e13-1e76-4c33-98aa-a33204514227" => Some("Delete"),
+        _ => form_table_standard_command_suffix(uuid),
     }
 }
 
-pub(super) fn form_table_excluded_command_rank(command: &str) -> usize {
-    match command {
-        "Add" => 0,
-        "CancelSearch" => 1,
-        "Change" => 2,
-        "Choose" => 3,
-        "ChangeHistory" => 4,
-        "CheckAll" => 5,
-        "Copy" => 6,
-        "CopyToClipboard" => 7,
-        "Create" => 8,
-        "Delete" => 9,
-        "DynamicListStandardSettings" => 10,
-        "EndEdit" => 11,
-        "Find" => 12,
-        "FindByCurrentValue" => 13,
-        "HierarchicalList" => 14,
-        "List" => 15,
-        "LoadDynamicListSettings" => 16,
-        "MoveDown" => 17,
-        "MoveUp" => 18,
-        "OutputList" => 19,
-        "Pickup" => 20,
-        "Post" => 21,
-        "Refresh" => 22,
-        "SaveDynamicListSettings" => 23,
-        "SearchEverywhere" => 24,
-        "SearchHistory" => 25,
-        "SelectAll" => 26,
-        "SetDateInterval" => 27,
-        "SetDeletionMark" => 28,
-        "ShowMultipleSelection" => 29,
-        "ShowRowRearrangement" => 30,
-        "SortListAsc" => 31,
-        "SortListDesc" => 32,
-        "Tree" => 33,
-        "UndoPosting" => 34,
-        _ => usize::MAX,
+fn parse_form_table_counted_uuid_list(field: &str) -> Option<Vec<&str>> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if fields.len() != count.checked_add(1)? {
+        return None;
     }
+    let uuids: Vec<_> = fields.iter().skip(1).map(|uuid| uuid.trim()).collect();
+    uuids
+        .iter()
+        .all(|uuid| parse_non_zero_uuid(uuid).is_some())
+        .then_some(uuids)
 }
 
+fn form_table_event_collection_is_valid(field: &str) -> bool {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return false;
+    };
+    let Some(count) = fields
+        .first()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    else {
+        return false;
+    };
+    count
+        .checked_mul(5)
+        .and_then(|event_fields| event_fields.checked_add(3))
+        == Some(fields.len())
+}
+
+fn form_table_child_owner_section_starts_at(fields: &[&str], index: usize) -> bool {
+    fields.get(index).map(|field| field.trim()) == Some("1")
+        && fields
+            .get(index + 1)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+            .and_then(|owner| owner.first().map(|field| field.trim() == "22"))
+            == Some(true)
+}
+
+fn map_form_table_excluded_commands(
+    schema: FormTableSchema,
+    uuids: &[&str],
+) -> Option<Vec<&'static str>> {
+    let mut commands: Vec<_> = uuids
+        .iter()
+        .map(|uuid| form_table_excluded_command_name(schema, uuid))
+        .collect::<Option<_>>()?;
+    commands.sort_unstable();
+    Some(commands)
+}
+
+fn parse_form_table_command_set_excluded_commands_for_table(
+    schema: FormTableSchema,
+    fields: &[&str],
+) -> Vec<&'static str> {
+    let pair_count_slot = schema.command_set_pair_count_slot();
+    let Some(pair_count) = fields
+        .get(pair_count_slot)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    let Some(event_slot) = pair_count
+        .checked_mul(2)
+        .and_then(|pair_fields| pair_count_slot.checked_add(1 + pair_fields))
+    else {
+        return Vec::new();
+    };
+    for pair_index in 0..pair_count {
+        let key_slot = pair_count_slot + 1 + pair_index * 2;
+        if fields
+            .get(key_slot)
+            .is_none_or(|field| field.trim().parse::<usize>().is_err())
+            || fields
+                .get(key_slot + 1)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+                .is_none()
+        {
+            return Vec::new();
+        }
+    }
+    if fields
+        .get(event_slot)
+        .is_none_or(|field| !form_table_event_collection_is_valid(field))
+    {
+        return Vec::new();
+    }
+    let command_slot = event_slot + 1;
+    let Some(uuids) = fields
+        .get(command_slot)
+        .and_then(|field| parse_form_table_counted_uuid_list(field))
+    else {
+        return Vec::new();
+    };
+    if !form_table_child_owner_section_starts_at(fields, command_slot + 1) {
+        return Vec::new();
+    }
+    map_form_table_excluded_commands(schema, &uuids).unwrap_or_default()
+}
+
+#[cfg(test)]
 pub(super) fn parse_form_table_command_set_excluded_commands(fields: &[&str]) -> Vec<&'static str> {
     for field in fields {
-        let field = field.trim();
-        let nested_field = if field.starts_with('{') {
-            scan_1c_braced_value(field, 0)
-                .map(|end| &field[..end])
-                .unwrap_or(field)
-        } else {
-            field
-        };
-        let Some(nested) = split_1c_braced_fields(nested_field, 0) else {
+        let Some(uuids) = parse_form_table_counted_uuid_list(field) else {
             continue;
         };
-        let Some(count) = nested
-            .first()
-            .and_then(|value| value.trim().parse::<usize>().ok())
-        else {
-            continue;
-        };
-        let uuids: Vec<&str> = nested.iter().skip(1).map(|uuid| uuid.trim()).collect();
-        if count == 0 || count != uuids.len() {
+        if uuids.is_empty() {
             continue;
         }
-        match uuids.as_slice() {
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "0f8d6d98-2f8b-405a-b8b3-0538e9d95da5",
-                "182a793b-22a5-4625-b316-6a5be7f88078",
-                "33b7b9cd-6979-4435-8c58-d9bc8250edec",
-                "403bc6e6-b98e-4181-9f43-9c75cbbf82cf",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "95b4bc12-2ece-4d7a-b3e2-6f9293620a06",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-            ] => {
-                return vec![
-                    "Change",
-                    "Copy",
-                    "Create",
-                    "Delete",
-                    "DynamicListStandardSettings",
-                    "LoadDynamicListSettings",
-                    "Refresh",
-                    "SaveDynamicListSettings",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Copy",
-                    "Delete",
-                    "EndEdit",
-                    "MoveDown",
-                    "MoveUp",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "51c99108-107c-43e1-8918-e48835bf2495",
-                "59b4387d-f5be-4658-901f-bd3068217469",
-                "714d44cc-63da-4431-b33a-428e398d2a08",
-                "7b683784-b474-441a-ba63-3d757bd0ffd4",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "d96b0c03-b209-4d01-a3fc-17a14f873b64",
-                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "Copy",
-                    "CopyToClipboard",
-                    "Delete",
-                    "EndEdit",
-                    "FindByCurrentValue",
-                    "Pickup",
-                    "SearchEverywhere",
-                    "SearchHistory",
-                    "SelectAll",
-                    "ShowMultipleSelection",
-                    "ShowRowRearrangement",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "51c99108-107c-43e1-8918-e48835bf2495",
-                "7b683784-b474-441a-ba63-3d757bd0ffd4",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "Copy",
-                    "Delete",
-                    "EndEdit",
-                    "MoveDown",
-                    "MoveUp",
-                    "SearchEverywhere",
-                    "SelectAll",
-                    "ShowMultipleSelection",
-                    "ShowRowRearrangement",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
-                "714d44cc-63da-4431-b33a-428e398d2a08",
-                "7b683784-b474-441a-ba63-3d757bd0ffd4",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "c0519548-2a9a-44de-a25e-faf01e089d4d",
-                "d96b0c03-b209-4d01-a3fc-17a14f873b64",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "CancelSearch",
-                    "Change",
-                    "Copy",
-                    "CopyToClipboard",
-                    "Delete",
-                    "EndEdit",
-                    "Find",
-                    "FindByCurrentValue",
-                    "MoveDown",
-                    "MoveUp",
-                    "SearchEverywhere",
-                    "SearchHistory",
-                    "ShowRowRearrangement",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "18248aa8-e621-4e19-a611-54fb8923644c",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "59b4387d-f5be-4658-901f-bd3068217469",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "CheckAll",
-                    "Copy",
-                    "Delete",
-                    "EndEdit",
-                    "MoveDown",
-                    "MoveUp",
-                    "Pickup",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "c0519548-2a9a-44de-a25e-faf01e089d4d",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "CancelSearch",
-                    "Copy",
-                    "EndEdit",
-                    "Find",
-                    "MoveDown",
-                    "MoveUp",
-                    "ShowRowRearrangement",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "Copy",
-                    "Delete",
-                    "EndEdit",
-                    "MoveDown",
-                    "MoveUp",
-                    "ShowRowRearrangement",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "c0519548-2a9a-44de-a25e-faf01e089d4d",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "CancelSearch",
-                    "Change",
-                    "Copy",
-                    "Delete",
-                    "EndEdit",
-                    "Find",
-                    "MoveDown",
-                    "MoveUp",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "49602716-fea6-497f-8047-726404038857",
-                "51c99108-107c-43e1-8918-e48835bf2495",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "Copy",
-                    "CopyToClipboard",
-                    "EndEdit",
-                    "MoveDown",
-                    "MoveUp",
-                    "OutputList",
-                    "SelectAll",
-                    "ShowMultipleSelection",
-                    "ShowRowRearrangement",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
-                "49602716-fea6-497f-8047-726404038857",
-                "51c99108-107c-43e1-8918-e48835bf2495",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "c0519548-2a9a-44de-a25e-faf01e089d4d",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "CancelSearch",
-                    "Change",
-                    "Copy",
-                    "CopyToClipboard",
-                    "Delete",
-                    "EndEdit",
-                    "Find",
-                    "MoveDown",
-                    "MoveUp",
-                    "OutputList",
-                    "SelectAll",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
-                "49602716-fea6-497f-8047-726404038857",
-                "51c99108-107c-43e1-8918-e48835bf2495",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "c0519548-2a9a-44de-a25e-faf01e089d4d",
-                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "CancelSearch",
-                    "Change",
-                    "Copy",
-                    "CopyToClipboard",
-                    "Delete",
-                    "EndEdit",
-                    "Find",
-                    "MoveDown",
-                    "MoveUp",
-                    "OutputList",
-                    "SelectAll",
-                    "ShowMultipleSelection",
-                    "ShowRowRearrangement",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "01833a5a-6553-4c49-b445-095018107bb5",
-                "05468165-f954-45a5-84f2-6641c51f9f23",
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "49602716-fea6-497f-8047-726404038857",
-                "51c99108-107c-43e1-8918-e48835bf2495",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "Copy",
-                    "CopyToClipboard",
-                    "Delete",
-                    "EndEdit",
-                    "HierarchicalList",
-                    "List",
-                    "MoveDown",
-                    "MoveUp",
-                    "OutputList",
-                    "SelectAll",
-                    "ShowMultipleSelection",
-                    "ShowRowRearrangement",
-                    "SortListAsc",
-                    "SortListDesc",
-                    "Tree",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
-                "49602716-fea6-497f-8047-726404038857",
-                "51c99108-107c-43e1-8918-e48835bf2495",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "714d44cc-63da-4431-b33a-428e398d2a08",
-                "7b683784-b474-441a-ba63-3d757bd0ffd4",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "8d772f97-c0ef-47c0-9cb0-efea28c61341",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "c0519548-2a9a-44de-a25e-faf01e089d4d",
-                "d96b0c03-b209-4d01-a3fc-17a14f873b64",
-                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "CancelSearch",
-                    "Change",
-                    "Copy",
-                    "CopyToClipboard",
-                    "Delete",
-                    "EndEdit",
-                    "Find",
-                    "FindByCurrentValue",
-                    "MoveDown",
-                    "MoveUp",
-                    "OutputList",
-                    "SearchEverywhere",
-                    "SearchHistory",
-                    "SelectAll",
-                    "ShowMultipleSelection",
-                    "ShowRowRearrangement",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "8af6ebff-cd02-4bfe-a984-44a292623708",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "Copy",
-                    "EndEdit",
-                    "MoveDown",
-                    "MoveUp",
-                    "ShowRowRearrangement",
-                ];
-            }
-            [
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "2bbe4e12-06d2-409b-a972-eea585125d83",
-                "37740564-9e86-44a0-bea9-3f485a5a3f91",
-                "58b2a785-23f6-4b0e-a324-9a1323285595",
-                "9ef79140-3de6-436a-8dda-610bb963f5db",
-                "b0016a68-ec64-4e6d-b905-c71fd62efc4c",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "fa51b106-eae6-44c7-8054-76cbb3100603",
-            ] => {
-                return vec![
-                    "Add",
-                    "Change",
-                    "Copy",
-                    "EndEdit",
-                    "MoveDown",
-                    "MoveUp",
-                    "SortListAsc",
-                    "SortListDesc",
-                ];
-            }
-            [
-                "04ac7211-e74f-4776-9749-35a9282b1d52",
-                "0ae4bea5-23be-42a7-b69e-97b11b29c453",
-                "0f8d6d98-2f8b-405a-b8b3-0538e9d95da5",
-                "11761e12-cf32-4826-a175-b23213e3b229",
-                "182a793b-22a5-4625-b316-6a5be7f88078",
-                "33b7b9cd-6979-4435-8c58-d9bc8250edec",
-                "403bc6e6-b98e-4181-9f43-9c75cbbf82cf",
-                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
-                "714d44cc-63da-4431-b33a-428e398d2a08",
-                "7b683784-b474-441a-ba63-3d757bd0ffd4",
-                "825c1c15-ef8f-47ab-b002-e6b84b3e5b10",
-                "88078230-1f6b-415f-99e4-ad2ff73810cf",
-                "95b4bc12-2ece-4d7a-b3e2-6f9293620a06",
-                "a2f737a8-0114-4e86-a214-45e5c213fa65",
-                "b41f5bbc-ba5d-4888-8cd1-db246a371418",
-                "daa306cd-a78a-4e74-a14c-739daba624cb",
-                "e3dd8850-fc3c-41b1-bbb3-7c66af082608",
-                "e7216412-03ac-4a81-99c2-1d7c28e88e31",
-                "ec576e13-1e76-4c33-98aa-a33204514227",
-            ] => {
-                return vec![
-                    "CancelSearch",
-                    "Change",
-                    "ChangeHistory",
-                    "Copy",
-                    "CopyToClipboard",
-                    "Create",
-                    "Delete",
-                    "DynamicListStandardSettings",
-                    "FindByCurrentValue",
-                    "LoadDynamicListSettings",
-                    "OutputList",
-                    "Post",
-                    "Refresh",
-                    "SaveDynamicListSettings",
-                    "SearchEverywhere",
-                    "SetDateInterval",
-                    "SetDeletionMark",
-                    "ShowMultipleSelection",
-                    "UndoPosting",
-                ];
-            }
-            _ => {}
-        }
-        let mapped: Option<Vec<_>> = uuids
-            .iter()
-            .map(|uuid| form_table_excluded_command_name(uuid))
-            .collect();
-        if let Some(mut mapped) = mapped {
-            mapped.sort_by_key(|command| form_table_excluded_command_rank(command));
-            return mapped;
+        if let Some(commands) = map_form_table_excluded_commands(FormTableSchema, &uuids) {
+            return commands;
         }
     }
     Vec::new()

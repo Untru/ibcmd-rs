@@ -1509,6 +1509,7 @@ pub(crate) struct FormTableSchema;
 
 impl FormTableSchema {
     const BASE_FIELD_COUNT: usize = 99;
+    const COMMAND_SET_PAIR_COUNT_SLOT: usize = 54;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -1525,6 +1526,10 @@ impl FormTableSchema {
             return None;
         }
         Some(Self)
+    }
+
+    pub(crate) const fn command_set_pair_count_slot(self) -> usize {
+        Self::COMMAND_SET_PAIR_COUNT_SLOT
     }
 
     pub(crate) fn autofill(self, fields: &[&str]) -> Option<bool> {
