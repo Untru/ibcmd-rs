@@ -3043,3 +3043,57 @@ passed and wrote 12,197 files. The normalized full diff changed from
 `-1 file, -400 additions, -400 deletions`. The closed path is
 `Catalogs/ВидыПроверок/Forms/ФормаЭлемента/Ext/Form.xml`. ConfigDumpInfo remains
 byte-exact. Issue #99 is closed after this serialized order gate.
+
+## Form ExtendedTooltip typed property acceptance
+
+Status: implemented and accepted by a fresh serialized full export.
+
+Generated output already admitted 25,728 suffix-owned `ExtendedTooltip` nodes.
+Native XML has 440 property-bearing nodes with 625 direct properties. The exact
+reachable batch consists of 435 nodes in 140 `Form.xml` files and 620 missing
+properties. Four property-bearing native nodes remain unreachable because their
+owners are outside the existing suffix admission, while one Calendar node was
+already exact with `AutoMaxWidth=false`; neither cohort was broadened.
+
+`FormExtendedTooltipSchema` admits properties only for wrapper 12,
+discriminator 0, arity 34, an options tuple at slot 18 with kind 5 and arity 9,
+and a title tuple at slot 22 with kind 1, arity 3, and a formatted flag of zero
+or one. The event option must be the exact empty sentinel or the exact
+`URLProcessing` record shape. Identity and suffix admission are unchanged, and
+non-schema records remain self-closing.
+
+The schema owns the following native order:
+
+```text
+Width, AutoMaxWidth, MaxWidth, Height, AutoMaxHeight,
+HorizontalStretch, VerticalStretch, TextColor, Font, Title,
+GroupHorizontalAlign, VerticalAlign, Events
+```
+
+The bounded property counts are Title 405, AutoMaxWidth 144, Events 16, Width
+13, HorizontalStretch 12, MaxWidth 9, Height 6, VerticalAlign 6,
+GroupHorizontalAlign 3, TextColor 3, AutoMaxHeight 1, Font 1, and
+VerticalStretch 1. Title is a typed value containing localized strings and its
+formatted flag, which preserves two explicit empty `formatted=true` nodes.
+
+Integrated commit `5a6db38` changes three files totaling `+525/-76`. The first
+controlled export exposed 48 otherwise exact title blocks whose only residual
+was XML text escaping: literal quotes were written as `&quot;`. Commit
+`4da8243` changes the two localized element-text calls to the established
+`escape_xml_element_text` helper; attributes retain attribute escaping. Both
+frozen reviews returned GO. `cargo fmt -- --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. Tests and native ConfigDump were not run. Production
+adds no object/form name, path, UUID, database identity, or corpus branch.
+
+The final release export writes 12,197 files. The normalized full diff changes
+from `1258 files, +11547/-50744` to `1252 files, +11115/-46929`; Form changes
+from `996 files, +6309/-26148` to `990 files, +5877/-22333`. The exact batch
+delta is `-6 files, -432 additions, -3815 deletions`, or 4,247 fewer differing
+lines. Generated output contains 25,728 total nodes, 436 property-bearing nodes,
+and 621 direct properties including the previously exact Calendar property.
+All 436 generated property-bearing blocks are byte-exact against native across
+140 files, with zero missing or mismatched blocks. `ConfigDumpInfo.xml` remains
+byte-exact with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #100 is closed after this acceptance gate.
