@@ -85,6 +85,28 @@ const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str = "cab0d12b-3c88-4993-8ed
 const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME: &str = "dcsset:SettingsComposer";
 const DATA_COMPOSITION_SETTINGS_NAMESPACE_ATTRIBUTE: &str =
     r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#;
+// Platform type IDs used by serialized Form type patterns.
+const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
+    ("dcfc3784-a14f-4786-ac7b-c82db5ba275f", "cfg:ConstantsSet"),
+    (
+        DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID,
+        DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME,
+    ),
+    (
+        "151f8778-e2d0-496a-9f02-d9ffd93b57ec",
+        "fd:FormattedDocument",
+    ),
+    ("f5c65050-3bbb-11d5-b988-0050bae0a95d", "v8:TypeDescription"),
+    ("ebf766b1-f32c-11d3-9851-008048da1252", "d5p1:TextDocument"),
+    ("e6f51714-91cb-4dce-94fe-90ae3e3e1ad1", "v8ui:Picture"),
+    ("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb", "cfg:ReportObject"),
+    ("52616226-8ccf-4d1d-a3da-827eeb4f9cf9", "v8ui:VerticalAlign"),
+    ("3543ef08-3316-4f7e-9447-0cd0a1cbf1d5", "d5p1:Chart"),
+    (
+        "4af83795-fc2a-48cd-9bea-ce665789a62c",
+        "d5p1:FlowchartContextType",
+    ),
+];
 const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
@@ -16965,6 +16987,21 @@ fn parse_metadata_type_pattern(
     value: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
+    parse_metadata_type_pattern_with_builtin(value, type_index, builtin_type_reference)
+}
+
+fn parse_form_metadata_type_pattern(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    parse_metadata_type_pattern_with_builtin(value, type_index, form_builtin_type_reference)
+}
+
+fn parse_metadata_type_pattern_with_builtin(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    builtin_reference: fn(&str) -> Option<&'static str>,
+) -> Option<Vec<ConstantValueType>> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != r#""Pattern""# {
         return None;
@@ -16972,7 +17009,9 @@ fn parse_metadata_type_pattern(
     fields
         .iter()
         .skip(1)
-        .map(|field| parse_metadata_type_pattern_element(field, type_index))
+        .map(|field| {
+            parse_metadata_type_pattern_element_with_builtin(field, type_index, builtin_reference)
+        })
         .collect()
 }
 
@@ -17025,6 +17064,14 @@ fn parse_metadata_type_pattern_element(
     value: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<ConstantValueType> {
+    parse_metadata_type_pattern_element_with_builtin(value, type_index, builtin_type_reference)
+}
+
+fn parse_metadata_type_pattern_element_with_builtin(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    builtin_reference: fn(&str) -> Option<&'static str>,
+) -> Option<ConstantValueType> {
     let element = split_1c_braced_fields(value, 0)?;
     match element.first()?.trim() {
         r#""B""# => Some(ConstantValueType::Boolean),
@@ -17058,7 +17105,7 @@ fn parse_metadata_type_pattern_element(
             let reference = type_index
                 .get(&type_id)
                 .cloned()
-                .or_else(|| builtin_type_reference(&type_id).map(ToOwned::to_owned))?;
+                .or_else(|| builtin_reference(&type_id).map(ToOwned::to_owned))?;
             Some(ConstantValueType::Reference { reference })
         }
         _ => None,
@@ -17157,6 +17204,26 @@ fn builtin_type_reference(type_id: &str) -> Option<&'static str> {
         "e61ef7b8-f3e1-4f4b-8ac7-676e90524997" => Some("cfg:CatalogRef"),
         _ => None,
     }
+}
+
+fn form_builtin_type_reference(type_id: &str) -> Option<&'static str> {
+    FORM_BUILTIN_TYPE_REFERENCES
+        .iter()
+        .find_map(|(candidate, reference)| {
+            candidate
+                .eq_ignore_ascii_case(type_id)
+                .then_some(*reference)
+        })
+        .or_else(|| {
+            DCS_BUILTIN_REFERENCE_TYPE_SETS
+                .iter()
+                .find_map(|(candidate, reference)| {
+                    candidate
+                        .eq_ignore_ascii_case(type_id)
+                        .then_some(*reference)
+                })
+        })
+        .or_else(|| builtin_type_reference(type_id))
 }
 
 fn split_1c_braced_fields(text: &str, start: usize) -> Option<Vec<&str>> {
@@ -22137,7 +22204,7 @@ fn format_form_metadata_types_xml_with_indent(
             ConstantValueType::ReferenceTypeSet { .. } => "TypeSet",
             _ => "Type",
         };
-        let namespace_attr = metadata_type_xml_namespace_attr(value_type);
+        let namespace_attr = form_metadata_type_xml_namespace_attr(value_type);
         xml.push_str(&format!(
             "{nested}<v8:{tag_name}{namespace_attr}>{}</v8:{tag_name}>\r\n",
             metadata_type_xml_name(value_type)
@@ -22378,6 +22445,42 @@ fn metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'static 
             r#" xmlns:mxl="http://v8.1c.ru/8.2/data/spreadsheet""#
         }
         _ => "",
+    }
+}
+
+fn form_metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'static str {
+    match value_type {
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME =>
+        {
+            ""
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == "fd:FormattedDocument" =>
+        {
+            r#" xmlns:fd="http://v8.1c.ru/8.2/data/formatted-document""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == "d5p1:TextDocument" =>
+        {
+            r#" xmlns:d5p1="http://v8.1c.ru/8.1/data/txtedt""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == "d5p1:Chart" =>
+        {
+            r#" xmlns:d5p1="http://v8.1c.ru/8.2/data/chart""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == "d5p1:FlowchartContextType" =>
+        {
+            r#" xmlns:d5p1="http://v8.1c.ru/8.2/data/graphscheme""#
+        }
+        _ => metadata_type_xml_namespace_attr(value_type),
     }
 }
 

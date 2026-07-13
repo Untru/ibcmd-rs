@@ -3388,7 +3388,7 @@ pub(super) fn parse_form_type_pattern(
     field: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    parse_metadata_type_pattern(field, object_refs).map(normalize_form_type_pattern)
+    parse_form_metadata_type_pattern(field, object_refs).map(normalize_form_type_pattern)
 }
 
 pub(super) fn normalize_form_type_pattern(
