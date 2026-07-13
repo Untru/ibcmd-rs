@@ -3754,3 +3754,73 @@ remains byte-exact at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #111 is closed after this acceptance gate. Telegram selected and full
 reports were sent; an automatic email sender remains unavailable.
+
+## Schema-backed Form direct links, groups, pictures, and property order acceptance
+
+Status: accepted by frozen reviews, a selected shadow of every Form, and a
+fresh serialized full export.
+
+This batch again uses all 1,108 Form body rows and keeps parsing fail-closed.
+The Attribute formatter now follows the complete native section order:
+`Title`, `Type`, `MainAttribute`, `SavedData`, `FillCheck`, `UseAlways`,
+`Save`, `FunctionalOptions`, `Columns`, and `Settings`. The direct Attribute
+required-field grammar also maps only its exact `-8` sentinel to
+`RegisterRecords`.
+
+The shared Form schema now owns three additional property groups:
+
+- `UsualGroup` requires wrapper `22`, discriminator `5`, and the exact
+  kind-`29`/length-`29` options record before decoding
+  `EnableContentChange`, horizontal and vertical alignment, `Collapsed`,
+  `ControlRepresentation`, `United`, `ChildItemsWidth`, and `ThroughAlign`.
+  Named XML anchors preserve the native order around Title, Behavior,
+  Representation, and ExtendedTooltip.
+- root `MobileDeviceCommandBarContent` requires the exact 24-field root
+  trailer, kind `50`, a consistent declared count, and the same number of
+  typed item references. Each item is serialized as Presentation,
+  CheckState, then Value.
+- `PictureDecoration` requires wrapper `12`, arity `36`, discriminator `1`,
+  and the PictureDecoration owner before decoding width/height, maximums,
+  stretch flags, `SkipOnInput`, and group alignment. Field `HeaderPicture`
+  separately requires wrapper `37`, arity `59 + offset`, an admitted field
+  owner, and an exact empty/reference/embedded picture record.
+
+The audited InputField extended-options layout is exactly kind `36` with 66
+fields. `ChoiceParameterLinks` is emitted only when the primary marker `5006`
+and duplicate marker `5007` parse to the same owner, name, terminal, and
+clear-on-change semantics. Its readable XML uses `xr:Link`, `xr:Name`,
+`xr:DataPath xsi:type="xs:string"`, and `xr:ValueChange` in native order.
+`TypeLink` accepts only its two exact mode layouts and emits
+`xr:DataPath`/`xr:LinkItem`. Button `DataPath` and Page/UsualGroup
+`TitleDataPath` use exact direct-binding layouts. Table current-row routes are
+resolved by the scoped `(table_id, field_id)` map built from the bound
+Attribute `FieldsMap`; canonical `Ref` therefore does not leak into unrelated
+tables whose canonical field is `Ссылка`.
+
+Two selected candidates were deliberately rejected before the full export.
+The first used unprefixed ChoiceParameterLinks children and worsened four
+files. The second propagated canonical dynamic-list names through the global
+child-field map and also worsened four files because numeric IDs from separate
+scopes collided. The accepted implementation confines canonical names to the
+scoped current-row route. Frozen schema and resolver reviews returned GO.
+The code diff before this documentation change is three files, `+1651/-103`;
+added production lines contain no database/server identity, object or form
+name, filesystem path, new UUID, ConfigDumpInfo dependency, panic, unwrap,
+expect, unsafe path, or improvement-only fallback.
+
+`cargo fmt --all -- --check`, `cargo check --all-targets`, `git diff --check`,
+the hardcode scan, and the release build pass with the same two pre-existing
+warnings. Tests and native ConfigDump were not run by direct user instruction.
+The accepted selected shadow contains all 1,108 Form.xml files and is
+byte-identical to the subsequent full export. It changes 431 Form files; all
+431 improve, none are equal or worse, 32 become exact, and no new differing
+file is opened.
+
+The serialized release export writes 12,197 files. The normalized full diff
+changes from `1170 files, +8490/-38010` to `1138 files, +8053/-35480`; Form
+changes from `908 files, +3252/-13414` to `876 files, +2815/-10884`. The exact
+batch delta is `-32 files, -437 additions, -2530 deletions`, entirely in
+Form.xml. `ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with
+SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #112 is closed after this acceptance gate.

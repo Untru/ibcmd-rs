@@ -1,25 +1,32 @@
 use super::*;
 use crate::form_schema::{
     FORM_DECORATION_HEADER_XML_ORDER, FORM_EXTENDED_TOOLTIP_XML_ORDER,
-    FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER,
-    FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
-    FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
+    FORM_FIELD_HEADER_PICTURE_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER,
+    FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER,
+    FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
+    FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER,
+    FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER, FORM_TABLE_XML_ORDER,
+    FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER, FormCheckBoxFieldSchema,
     FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
     FormChildItemVisibleSchema, FormCommandInterfaceContainerOwner,
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormConditionalGroupSchema, FormConditionalTableSchema,
     FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
-    FormExtendedTooltipXmlProperty, FormFieldTitleSchema, FormFieldTopLevelSlot as FieldSlot,
+    FormExtendedTooltipXmlProperty, FormFieldHeaderPictureKind, FormFieldHeaderPictureSchema,
+    FormFieldHeaderPictureXmlProperty, FormFieldTitleSchema, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
-    FormLabelFieldOptionSlot as LabelFieldSlot, FormRootVerticalScrollSchema,
+    FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
+    FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema,
+    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableSchema, FormTableXmlProperty,
-    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
-    decode_form_tooltip_representation, form_child_item_representation_is_default,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema,
+    FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty, decode_form_tooltip_representation,
+    form_child_item_representation_is_default, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -124,6 +131,10 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     let started = Instant::now();
     let child_item_indexes =
         collect_form_child_item_indexes_with_object_refs(&form_fields, &attributes, object_refs);
+    properties.mobile_device_command_bar_content = extract_form_mobile_device_command_bar_content(
+        &form_fields,
+        &child_item_indexes.item_name_by_id,
+    );
     let child_item_indexes_cpu_ms = elapsed_ms(started);
 
     let started = Instant::now();
@@ -222,6 +233,7 @@ pub(super) struct FormBodyProperties {
     pub(super) vertical_scroll: Option<&'static str>,
     pub(super) horizontal_align: Option<&'static str>,
     pub(super) conversations_representation: Option<&'static str>,
+    pub(super) mobile_device_command_bar_content: Vec<String>,
     pub(super) show_title: Option<bool>,
     pub(super) show_close_button: Option<bool>,
     pub(super) report_result: Option<String>,
@@ -477,6 +489,14 @@ pub(super) struct FormChildItem {
     pub(super) group: Option<&'static str>,
     pub(super) behavior: Option<&'static str>,
     pub(super) representation: Option<&'static str>,
+    pub(super) enable_content_change: Option<bool>,
+    pub(super) child_items_width: Option<&'static str>,
+    pub(super) control_representation: Option<&'static str>,
+    pub(super) collapsed: Option<bool>,
+    pub(super) usual_group_horizontal_align: Option<&'static str>,
+    pub(super) usual_group_vertical_align: Option<&'static str>,
+    pub(super) through_align: Option<&'static str>,
+    pub(super) united: Option<bool>,
     pub(super) table_representation: Option<&'static str>,
     pub(super) table_command_bar_location: Option<&'static str>,
     pub(super) height_in_table_rows: Option<String>,
@@ -583,6 +603,9 @@ pub(super) struct FormChildItem {
     pub(super) addition_source_item: Option<String>,
     pub(super) picture_ref: Option<String>,
     pub(super) picture_load_transparent: bool,
+    pub(super) header_picture_ref: Option<String>,
+    pub(super) header_picture_file_name: Option<String>,
+    pub(super) header_picture_load_transparent: bool,
     pub(super) picture_size: Option<&'static str>,
     pub(super) picture_file_name: Option<&'static str>,
     pub(super) title: Vec<(String, String)>,
@@ -590,9 +613,12 @@ pub(super) struct FormChildItem {
     pub(super) tooltip: Vec<(String, String)>,
     pub(super) input_hint: Vec<(String, String)>,
     pub(super) choice_list: Vec<FormChoiceListItem>,
+    pub(super) choice_parameter_links: Vec<FormChoiceParameterLink>,
+    pub(super) type_link: Option<FormTypeLink>,
     pub(super) extended_tooltip: Option<FormExtendedTooltip>,
     pub(super) events: Vec<FormBodyEvent>,
     pub(super) data_path: Option<String>,
+    pub(super) title_data_path: Option<String>,
     pub(super) command_name: Option<String>,
     pub(super) command_source: Option<String>,
     pub(super) child_items: Vec<FormChildItem>,
@@ -609,6 +635,19 @@ pub(super) enum FormChoiceListValue {
     Decimal(String),
     String(String),
     DesignTimeRef(String),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormChoiceParameterLink {
+    pub(super) name: String,
+    pub(super) data_path: String,
+    pub(super) value_change: &'static str,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormTypeLink {
+    pub(super) data_path: String,
+    pub(super) link_item: &'static str,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -647,6 +686,7 @@ pub(super) fn extract_form_body_properties(fields: &[&str]) -> FormBodyPropertie
         vertical_scroll: extract_form_vertical_scroll(fields),
         horizontal_align: extract_form_horizontal_align(fields),
         conversations_representation: extract_form_conversations_representation(fields),
+        mobile_device_command_bar_content: Vec::new(),
         show_title: extract_form_show_title(fields),
         show_close_button: extract_form_show_close_button(fields),
         report_result: None,
@@ -1080,6 +1120,70 @@ pub(super) fn extract_form_show_close_button(fields: &[&str]) -> Option<bool> {
     }
 }
 
+pub(super) fn extract_form_mobile_device_command_bar_content(
+    fields: &[&str],
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Some(tail_start) = form_root_child_items_tail_start(fields) else {
+        return Vec::new();
+    };
+    let Some(trailer) = fields.get(tail_start..) else {
+        return Vec::new();
+    };
+    let Some(content) = trailer
+        .get(FormRootMobileDeviceCommandBarContentSchema::CONTENT_TRAILER_SLOT)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return Vec::new();
+    };
+    let Some(declared_item_count) = content
+        .get(1)
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    let parsed_ids = content
+        .get(2..)
+        .unwrap_or_default()
+        .chunks_exact(2)
+        .filter_map(|pair| {
+            if pair.first()?.trim() != "\"\"" {
+                return None;
+            }
+            let value = split_1c_braced_fields(pair.get(1)?.trim(), 0)?;
+            if value.len() != 2 || value.first()?.trim() != "\"N\"" {
+                return None;
+            }
+            let id = value.get(1)?.trim();
+            id.parse::<u64>().ok().map(|_| id.to_string())
+        })
+        .collect::<Vec<_>>();
+    let Some(schema) = FormRootMobileDeviceCommandBarContentSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+        content.first().map(|field| field.trim()),
+        content.len(),
+        declared_item_count,
+        parsed_ids.len(),
+    ) else {
+        return Vec::new();
+    };
+    if schema.item_count() != parsed_ids.len() {
+        return Vec::new();
+    }
+    let mut items = Vec::with_capacity(schema.item_count());
+    for id in parsed_ids {
+        if id == "0" {
+            items.push(String::new());
+        } else if let Some(name) = item_name_by_id.get(&id) {
+            items.push(name.clone());
+        } else {
+            return Vec::new();
+        }
+    }
+    items
+}
+
 pub(super) fn form_root_uses_property_bag(fields: &[&str]) -> bool {
     fields
         .get(18)
@@ -1270,6 +1374,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
             table_name_by_id,
             standard_command_owner_name_by_id,
             command_source_owner_name_by_id,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -2549,6 +2654,7 @@ pub(super) fn form_attribute_direct_use_always_field_name(
         return Some(format!("{attribute_name}.{}", column.name));
     }
     match code {
+        "-8" => Some(format!("{attribute_name}.RegisterRecords")),
         "-1" => Some(format!("{attribute_name}.Picture")),
         "1" => Some(format!("{attribute_name}.Presentation")),
         "3" => Some(format!("{attribute_name}.ValueType")),
@@ -3454,6 +3560,7 @@ pub(super) fn extract_form_child_items(
         &indexes.standard_command_owner_name_by_id,
         &indexes.command_source_owner_name_by_id,
         &indexes.table_column_names_by_id,
+        &indexes.type_link_data_path_by_table_column,
         &indexes.data_path_by_binding_key,
         &indexes.bound_table_path_by_binding_key,
         &indexes.table_column_names_by_binding_key,
@@ -3517,6 +3624,28 @@ pub(super) fn extend_form_attribute_special_columns(
     }
 }
 
+fn form_attribute_is_value_list(attribute: &FormAttribute) -> bool {
+    attribute.value_types.iter().any(|value_type| {
+        matches!(
+            value_type,
+            ConstantValueType::Reference { reference }
+                if matches!(reference.as_str(), "v8:ValueListType" | "ValueListType")
+        )
+    })
+}
+
+fn parse_exact_form_attribute_binding_id(field: &str) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 2 || fields.first().map(|field| field.trim()) != Some("1") {
+        return None;
+    }
+    let ids = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    if ids.len() != 1 || ids.first()?.trim().is_empty() {
+        return None;
+    }
+    Some(ids.first()?.trim().to_string())
+}
+
 #[derive(Default)]
 pub(super) struct FormChildItemIndexes {
     pub(super) table_name_by_id: BTreeMap<String, String>,
@@ -3531,6 +3660,8 @@ pub(super) struct FormChildItemIndexes {
     pub(super) command_source_owner_name_by_id: BTreeMap<String, String>,
     pub(super) user_settings_group_id_by_table_id: BTreeMap<String, String>,
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
+    bound_attribute_id_by_table_id: BTreeMap<String, String>,
+    pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
 }
 
 pub(super) struct FormStandardCommandOwner {
@@ -3621,6 +3752,50 @@ fn collect_form_child_item_indexes_with_object_refs(
                         .as_ref()
                         .map(|item_id| (item_id.clone(), field.field.clone()))
                 }));
+        }
+    }
+    let type_link_routes = indexes
+        .bound_attribute_id_by_table_id
+        .iter()
+        .filter_map(|(table_id, attribute_id)| {
+            let table_name = indexes.table_name_by_id.get(table_id)?;
+            let attribute = attributes
+                .iter()
+                .find(|attribute| attribute.id == *attribute_id)?;
+            let mut columns = attribute
+                .columns
+                .iter()
+                .map(|column| (column.id.clone(), column.name.clone()))
+                .collect::<BTreeMap<_, _>>();
+            if let Some(settings) = &attribute.settings {
+                columns.extend(settings.fields.iter().filter_map(|field| {
+                    field
+                        .item_id
+                        .as_ref()
+                        .map(|item_id| (item_id.clone(), field.field.clone()))
+                }));
+            }
+            Some((
+                table_id.clone(),
+                table_name.clone(),
+                columns,
+                form_attribute_is_value_list(attribute),
+            ))
+        })
+        .collect::<Vec<_>>();
+    for (table_id, table_name, columns, value_list) in type_link_routes {
+        for (column_id, column_name) in columns {
+            let field_name = normalize_form_table_column_name(&table_name, &column_name);
+            indexes.type_link_data_path_by_table_column.insert(
+                (table_id.clone(), column_id),
+                format!("Items.{table_name}.CurrentData.{field_name}"),
+            );
+        }
+        if value_list {
+            indexes.type_link_data_path_by_table_column.insert(
+                (table_id, "0".to_string()),
+                format!("Items.{table_name}.CurrentData.Value"),
+            );
         }
     }
     indexes.user_settings_group_by_table_id = indexes
@@ -3723,6 +3898,14 @@ pub(super) fn collect_form_child_item_indexes_from_field(
             indexes
                 .table_name_by_id
                 .insert(id.to_string(), name.clone());
+            if let Some(attribute_id) = fields
+                .get(11)
+                .and_then(|field| parse_exact_form_attribute_binding_id(field))
+            {
+                indexes
+                    .bound_attribute_id_by_table_id
+                    .insert(id.to_string(), attribute_id);
+            }
             if let Some((attribute_id, table_key)) = fields
                 .get(11)
                 .and_then(|field| parse_form_table_binding(field))
@@ -3873,6 +4056,7 @@ pub(super) fn parse_form_child_item_pairs(
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
@@ -3911,6 +4095,7 @@ pub(super) fn parse_form_child_item_pairs(
                 standard_command_owner_name_by_id,
                 item_name_by_id,
                 table_column_names_by_id,
+                type_link_data_path_by_table_column,
                 data_path_by_binding_key,
                 bound_table_path_by_binding_key,
                 table_column_names_by_binding_key,
@@ -4034,6 +4219,7 @@ pub(super) fn parse_form_child_item_with_attrs(
         &BTreeMap::new(),
         table_column_names_by_id,
         &BTreeMap::new(),
+        &BTreeMap::new(),
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
         commands,
@@ -4069,6 +4255,7 @@ pub(super) fn parse_form_child_item_with_context(
         standard_command_owner_name_by_id,
         item_name_by_id,
         table_column_names_by_id,
+        &BTreeMap::new(),
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
@@ -4088,6 +4275,7 @@ fn parse_form_child_item_with_metadata_owners(
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
@@ -4133,6 +4321,7 @@ fn parse_form_child_item_with_metadata_owners(
         attribute_metadata_owners_by_id,
         table_name_by_id,
         table_column_names_by_id,
+        type_link_data_path_by_table_column,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
@@ -4232,6 +4421,7 @@ fn parse_form_child_item_with_metadata_owners(
         standard_command_owner_name_by_id,
         item_name_by_id,
         table_column_names_by_id,
+        type_link_data_path_by_table_column,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
@@ -4252,6 +4442,7 @@ fn parse_form_child_item_with_metadata_owners(
             standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
+            type_link_data_path_by_table_column,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
@@ -4272,6 +4463,7 @@ fn parse_form_child_item_with_metadata_owners(
             standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
+            type_link_data_path_by_table_column,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
@@ -4292,6 +4484,7 @@ fn parse_form_child_item_with_metadata_owners(
             standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
+            type_link_data_path_by_table_column,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
@@ -4312,6 +4505,7 @@ fn parse_form_child_item_with_metadata_owners(
             standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
+            type_link_data_path_by_table_column,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
@@ -4330,6 +4524,13 @@ fn parse_form_child_item_with_metadata_owners(
     let label_decoration_options = (tag == "LabelDecoration")
         .then(|| parse_form_label_decoration_options(tag, &fields, object_refs))
         .flatten();
+    let picture_decoration_properties = FormPictureDecorationSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        tag,
+        direct_discriminator,
+    )
+    .map(|schema| schema.properties(&fields));
     let label_field_options = (tag == "LabelField")
         .then(|| parse_form_label_field_options(&fields, object_refs))
         .flatten();
@@ -4374,6 +4575,12 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             input_hint
         };
+    let audited_input_field_options = (tag == "InputField"
+        && wrapper == "37"
+        && fields.len() == 59
+        && input_field_top_level_offset == 0)
+        .then_some(input_field_extended_options.as_deref())
+        .flatten();
     let tooltip = parse_form_child_item_tooltip(
         tag,
         wrapper,
@@ -4381,6 +4588,13 @@ fn parse_form_child_item_with_metadata_owners(
         check_box_field_layout.as_ref().map(|(schema, _)| *schema),
     );
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
+    let header_picture = parse_form_field_header_picture(
+        wrapper,
+        tag,
+        &fields,
+        input_field_top_level_offset,
+        object_refs,
+    );
     let mut item = FormChildItem {
         tag,
         id: id.to_string(),
@@ -4445,6 +4659,30 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.representation)
         },
+        enable_content_change: extended_group_options
+            .as_ref()
+            .and_then(|options| options.enable_content_change),
+        child_items_width: extended_group_options
+            .as_ref()
+            .and_then(|options| options.child_items_width),
+        control_representation: extended_group_options
+            .as_ref()
+            .and_then(|options| options.control_representation),
+        collapsed: extended_group_options
+            .as_ref()
+            .and_then(|options| options.collapsed),
+        usual_group_horizontal_align: extended_group_options
+            .as_ref()
+            .and_then(|options| options.horizontal_align),
+        usual_group_vertical_align: extended_group_options
+            .as_ref()
+            .and_then(|options| options.vertical_align),
+        through_align: extended_group_options
+            .as_ref()
+            .and_then(|options| options.through_align),
+        united: extended_group_options
+            .as_ref()
+            .and_then(|options| options.united),
         table_representation: if tag == "Table" {
             parse_form_table_representation_from_fields(wrapper, &fields)
         } else {
@@ -4669,6 +4907,10 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.group_horizontal_align)
+        } else if tag == "PictureDecoration" {
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.group_horizontal_align())
         } else {
             None
         },
@@ -4766,6 +5008,10 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.skip_on_input)
+        } else if tag == "PictureDecoration" {
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.skip_on_input())
         } else {
             None
         },
@@ -4819,9 +5065,15 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        group_vertical_align: special_field_layout
-            .as_ref()
-            .and_then(|(schema, _)| schema.group_vertical_align(&fields)),
+        group_vertical_align: if tag == "PictureDecoration" {
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.group_vertical_align())
+        } else {
+            special_field_layout
+                .as_ref()
+                .and_then(|(schema, _)| schema.group_vertical_align(&fields))
+        },
         label_decoration_visual_tail: label_decoration_options
             .as_ref()
             .map(|options| options.visual_tail.clone()),
@@ -4966,10 +5218,9 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.geometry.width().map(str::to_owned))
         } else if tag == "PictureDecoration" {
-            fields
-                .get(10)
-                .map(|field| field.trim().to_string())
-                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.width().map(str::to_owned))
         } else if let Some((schema, options)) = special_field_layout.as_ref() {
             schema.width(options)
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
@@ -5015,10 +5266,9 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.geometry.height().map(str::to_owned))
         } else if tag == "PictureDecoration" {
-            fields
-                .get(11)
-                .map(|field| field.trim().to_string())
-                .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.height().map(str::to_owned))
         } else if tag == "Pages" {
             fields
                 .get(13)
@@ -5078,7 +5328,9 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.geometry.auto_max_width())
         } else if tag == "PictureDecoration" {
-            parse_form_decoration_auto_max_width(&fields)
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.auto_max_width())
         } else if let Some((schema, options)) = special_field_layout.as_ref() {
             schema.auto_max_width(options)
         } else if ordinary_table_layout {
@@ -5101,6 +5353,10 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.geometry.max_width().map(str::to_owned))
+        } else if tag == "PictureDecoration" {
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.max_width().map(str::to_owned))
         } else {
             None
         },
@@ -5115,11 +5371,9 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.geometry.auto_max_height())
         } else if tag == "PictureDecoration" {
-            fields
-                .get(11)
-                .map(|field| field.trim())
-                .filter(|value| *value != "0" && value.parse::<u32>().is_ok())
-                .map(|_| false)
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.auto_max_height())
         } else if ordinary_table_layout {
             match fields.get(53).map(|field| field.trim()) {
                 Some("0") if fields.get(20).map(|field| field.trim()) != Some("0") => Some(false),
@@ -5134,6 +5388,10 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.geometry.max_height().map(str::to_owned))
+        } else if tag == "PictureDecoration" {
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.max_height().map(str::to_owned))
         } else {
             None
         },
@@ -5147,6 +5405,10 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.geometry.horizontal_stretch())
+        } else if tag == "PictureDecoration" {
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.horizontal_stretch())
         } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
@@ -5162,6 +5424,10 @@ fn parse_form_child_item_with_metadata_owners(
             label_decoration_options
                 .as_ref()
                 .and_then(|options| options.geometry.vertical_stretch())
+        } else if tag == "PictureDecoration" {
+            picture_decoration_properties
+                .as_ref()
+                .and_then(|properties| properties.vertical_stretch())
         } else if tag == "UsualGroup" {
             parse_form_usual_group_vertical_stretch(&fields)
         } else {
@@ -5339,6 +5605,15 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             false
         },
+        header_picture_ref: header_picture
+            .as_ref()
+            .and_then(|picture| picture.reference.clone()),
+        header_picture_file_name: header_picture
+            .as_ref()
+            .and_then(|picture| picture.file_name.clone()),
+        header_picture_load_transparent: header_picture
+            .as_ref()
+            .is_some_and(|picture| picture.load_transparent),
         picture_size: if tag == "PictureDecoration" {
             parse_form_picture_decoration_picture_size(&fields)
         } else if tag == "PictureField" {
@@ -5362,6 +5637,15 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             Vec::new()
         },
+        choice_parameter_links: parse_form_input_field_choice_parameter_links(
+            audited_input_field_options,
+            attribute_names_by_id,
+        ),
+        type_link: parse_form_input_field_type_link(
+            audited_input_field_options,
+            attribute_names_by_id,
+            type_link_data_path_by_table_column,
+        ),
         extended_tooltip: parse_form_child_item_extended_tooltip(&fields, object_refs),
         events: {
             let mut events = parse_form_child_item_event_fields(&fields);
@@ -5393,6 +5677,18 @@ fn parse_form_child_item_with_metadata_owners(
             events
         },
         data_path,
+        title_data_path: parse_form_title_data_path(
+            tag,
+            wrapper,
+            &fields,
+            conditional_group_schema.is_some(),
+            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            data_path_by_binding_key,
+            object_refs,
+        ),
         command_name,
         command_source: if tag == "CommandBar" {
             parse_form_command_bar_source_with_items(&fields, item_name_by_id)
@@ -5414,6 +5710,9 @@ fn parse_form_child_item_with_metadata_owners(
 fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
     for item in items {
         item.data_path = None;
+        item.choice_parameter_links.clear();
+        item.type_link = None;
+        item.title_data_path = None;
         match item.tag {
             "LabelField" => {
                 item.tooltip.clear();
@@ -5467,6 +5766,7 @@ pub(super) fn append_form_table_service_child_items(
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
@@ -5492,6 +5792,7 @@ pub(super) fn append_form_table_service_child_items(
         standard_command_owner_name_by_id,
         item_name_by_id,
         table_column_names_by_id,
+        type_link_data_path_by_table_column,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
@@ -5513,6 +5814,7 @@ pub(super) fn append_form_child_items_by_tag(
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
@@ -5531,6 +5833,7 @@ pub(super) fn append_form_child_items_by_tag(
             standard_command_owner_name_by_id,
             item_name_by_id,
             table_column_names_by_id,
+            type_link_data_path_by_table_column,
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
@@ -5573,6 +5876,7 @@ pub(super) fn parse_form_text_document_context_menu(
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
@@ -5593,6 +5897,7 @@ pub(super) fn parse_form_text_document_context_menu(
         standard_command_owner_name_by_id,
         item_name_by_id,
         table_column_names_by_id,
+        type_link_data_path_by_table_column,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
@@ -5606,6 +5911,14 @@ pub(super) struct FormUsualGroupExtendedOptions {
     pub(super) behavior: Option<&'static str>,
     pub(super) representation: Option<&'static str>,
     pub(super) horizontal_stretch: Option<bool>,
+    pub(super) enable_content_change: Option<bool>,
+    pub(super) child_items_width: Option<&'static str>,
+    pub(super) control_representation: Option<&'static str>,
+    pub(super) collapsed: Option<bool>,
+    pub(super) horizontal_align: Option<&'static str>,
+    pub(super) vertical_align: Option<&'static str>,
+    pub(super) through_align: Option<&'static str>,
+    pub(super) united: Option<bool>,
 }
 
 pub(super) struct FormColumnGroupOptions {
@@ -5880,16 +6193,34 @@ pub(super) fn parse_form_usual_group_title_font_xml(
 pub(super) fn parse_form_usual_group_extended_options(
     fields: &[&str],
 ) -> Option<FormUsualGroupExtendedOptions> {
-    let options = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    let options =
+        split_1c_braced_fields(fields.get(FormUsualGroupSchema::OPTIONS_SLOT)?.trim(), 0)?;
     match options.first()?.trim() {
-        "29" => Some(FormUsualGroupExtendedOptions {
-            group: parse_form_usual_group_property_bag_group(&options),
-            behavior: parse_form_usual_group_property_bag_behavior(&options),
-            representation: options
-                .get(3)
-                .and_then(|field| parse_form_child_item_representation(field)),
-            horizontal_stretch: parse_form_usual_group_horizontal_stretch(fields),
-        }),
+        "29" => {
+            let schema = FormUsualGroupSchema::from_raw_layout(
+                fields.first()?.trim(),
+                "UsualGroup",
+                fields.get(5).map(|field| field.trim()),
+                &options,
+            )?;
+            let properties = schema.properties(fields, &options);
+            Some(FormUsualGroupExtendedOptions {
+                group: parse_form_usual_group_property_bag_group(&options),
+                behavior: parse_form_usual_group_property_bag_behavior(&options),
+                representation: options
+                    .get(3)
+                    .and_then(|field| parse_form_child_item_representation(field)),
+                horizontal_stretch: parse_form_usual_group_horizontal_stretch(fields),
+                enable_content_change: properties.enable_content_change(),
+                child_items_width: properties.child_items_width(),
+                control_representation: properties.control_representation(),
+                collapsed: properties.collapsed(),
+                horizontal_align: properties.horizontal_align(),
+                vertical_align: properties.vertical_align(),
+                through_align: properties.through_align(),
+                united: properties.united(),
+            })
+        }
         "38" => {
             let group = parse_form_extended_group(
                 options.get(1)?.trim(),
@@ -5913,6 +6244,14 @@ pub(super) fn parse_form_usual_group_extended_options(
                 behavior,
                 representation,
                 horizontal_stretch: None,
+                enable_content_change: None,
+                child_items_width: None,
+                control_representation: None,
+                collapsed: None,
+                horizontal_align: None,
+                vertical_align: None,
+                through_align: None,
+                united: None,
             })
         }
         _ => None,
@@ -6099,6 +6438,169 @@ pub(super) fn form_input_field_top_level_offset(fields: &[&str]) -> usize {
         .filter(|(value, _)| !value.is_empty())
         .map(|_| 0)
         .unwrap_or(1)
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct RawFormChoiceParameterLink {
+    name: String,
+    attribute_id: String,
+    terminal: Option<&'static str>,
+}
+
+fn parse_exact_1c_quoted_string(field: &str) -> Option<String> {
+    let field = field.trim();
+    let (value, consumed) = parse_1c_quoted_string_with_len(field)?;
+    (consumed == field.len()).then_some(value)
+}
+
+fn parse_raw_form_choice_parameter_link(
+    field: &str,
+    marker: &str,
+    duplicate: bool,
+) -> Option<RawFormChoiceParameterLink> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|field| field.trim()) != Some(marker)
+        || fields.get(1).map(|field| field.trim()) != Some("1")
+    {
+        return None;
+    }
+    let name = parse_exact_1c_quoted_string(fields.get(2)?)?;
+    if name.is_empty() {
+        return None;
+    }
+    let mode = fields.get(3)?.trim();
+    let duplicate_tail_len = if duplicate { 2 } else { 0 };
+    let value_change_slot = match mode {
+        "1" if fields.len() == 6 + duplicate_tail_len => 5,
+        "2" if fields.len() == 7 + duplicate_tail_len => 6,
+        _ => return None,
+    };
+    let owner = split_1c_braced_fields(fields.get(4)?.trim(), 0)?;
+    if owner.len() != 1 {
+        return None;
+    }
+    let attribute_id = owner.first()?.trim();
+    if attribute_id.is_empty() {
+        return None;
+    }
+    let terminal = if mode == "2" {
+        let terminal = split_1c_braced_fields(fields.get(5)?.trim(), 0)?;
+        if terminal.len() != 1 {
+            return None;
+        }
+        match terminal.first()?.trim() {
+            "-5" => Some("Owner"),
+            "-8" => Some("Ref"),
+            _ => return None,
+        }
+    } else {
+        None
+    };
+    if fields.get(value_change_slot).map(|field| field.trim()) != Some("0") {
+        return None;
+    }
+    if duplicate
+        && (!fields[value_change_slot + 1..]
+            .iter()
+            .all(|field| parse_exact_1c_quoted_string(field).is_some_and(|value| value.is_empty()))
+            || fields.len() != value_change_slot + 3)
+    {
+        return None;
+    }
+    Some(RawFormChoiceParameterLink {
+        name,
+        attribute_id: attribute_id.to_string(),
+        terminal,
+    })
+}
+
+pub(super) fn parse_form_input_field_choice_parameter_links(
+    options: Option<&[&str]>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+) -> Vec<FormChoiceParameterLink> {
+    let Some(options) = options.filter(|options| {
+        options.len() == 66 && options.first().map(|field| field.trim()) == Some("36")
+    }) else {
+        return Vec::new();
+    };
+    let Some(primary) = options
+        .get(InputFieldSlot::ChoiceParameterLinks.index())
+        .and_then(|field| parse_raw_form_choice_parameter_link(field, "5006", false))
+    else {
+        return Vec::new();
+    };
+    let Some(duplicate) = options
+        .get(64)
+        .and_then(|field| parse_raw_form_choice_parameter_link(field, "5007", true))
+    else {
+        return Vec::new();
+    };
+    if primary != duplicate {
+        return Vec::new();
+    }
+    let Some(attribute_name) = attribute_names_by_id.get(&primary.attribute_id) else {
+        return Vec::new();
+    };
+    let data_path = primary
+        .terminal
+        .map(|terminal| format!("{attribute_name}.{terminal}"))
+        .unwrap_or_else(|| attribute_name.clone());
+    vec![FormChoiceParameterLink {
+        name: primary.name,
+        data_path,
+        value_change: "Clear",
+    }]
+}
+
+pub(super) fn parse_form_input_field_type_link(
+    options: Option<&[&str]>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    data_path_by_table_column: &BTreeMap<(String, String), String>,
+) -> Option<FormTypeLink> {
+    let options = options.filter(|options| {
+        options.len() == 66 && options.first().map(|field| field.trim()) == Some("36")
+    })?;
+    let fields = options
+        .get(InputFieldSlot::TypeLink.index())
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    if fields.first().map(|field| field.trim()) != Some("3") {
+        return None;
+    }
+    let (data_path, link_item) = match fields.as_slice() {
+        [_, mode, owner, link_item] if mode.trim() == "1" && link_item.trim() == "0" => {
+            let owner = split_1c_braced_fields(owner.trim(), 0)?;
+            if owner.len() != 1 {
+                return None;
+            }
+            let data_path = attribute_names_by_id.get(owner.first()?.trim())?.clone();
+            (data_path, "0")
+        }
+        [_, mode, owner, terminal, link_item] if mode.trim() == "2" => {
+            let owner = split_1c_braced_fields(owner.trim(), 0)?;
+            if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID {
+                return None;
+            }
+            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+            if terminal.len() != 1 {
+                return None;
+            }
+            let link_item = match link_item.trim() {
+                "0" => "0",
+                "1" => "1",
+                _ => return None,
+            };
+            let key = (
+                owner.first()?.trim().to_string(),
+                terminal.first()?.trim().to_string(),
+            );
+            (data_path_by_table_column.get(&key)?.clone(), link_item)
+        }
+        _ => return None,
+    };
+    Some(FormTypeLink {
+        data_path,
+        link_item,
+    })
 }
 
 pub(super) fn parse_form_button_type(field: &str) -> Option<&'static str> {
@@ -6354,19 +6856,6 @@ pub(super) fn parse_form_input_field_auto_max_width(
     {
         "0" => Some(false),
         _ => None,
-    }
-}
-
-pub(super) fn parse_form_decoration_auto_max_width(fields: &[&str]) -> Option<bool> {
-    if fields.get(22).map(|field| field.trim()) == Some("0") {
-        Some(false)
-    } else if fields.get(27).map(|field| field.trim()) == Some("0")
-        && fields.get(30).map(|field| field.trim()) == Some("1")
-        && fields.get(31).map(|field| field.trim()) == Some("0")
-    {
-        Some(false)
-    } else {
-        None
     }
 }
 
@@ -7866,6 +8355,73 @@ pub(super) fn parse_form_picture_field_options<'a>(fields: &'a [&'a str]) -> Opt
     })
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormFieldHeaderPicture {
+    reference: Option<String>,
+    file_name: Option<String>,
+    load_transparent: bool,
+}
+
+fn parse_form_field_header_picture(
+    wrapper: &str,
+    item_tag: &str,
+    fields: &[&str],
+    top_level_offset: usize,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormFieldHeaderPicture> {
+    let picture_slot = 29 + top_level_offset;
+    let raw = fields.get(picture_slot)?.trim();
+    let value = split_1c_braced_fields(raw, 0)?;
+    let schema = FormFieldHeaderPictureSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        item_tag,
+        top_level_offset,
+        &value,
+    )?;
+    if schema.picture_slot() != picture_slot {
+        return None;
+    }
+    match schema.kind() {
+        FormFieldHeaderPictureKind::Empty => None,
+        FormFieldHeaderPictureKind::Reference => {
+            let reference_fields = split_1c_braced_fields(value.get(2)?.trim(), 0)?;
+            let exact_reference = match reference_fields.as_slice() {
+                [code] => code.trim().parse::<i32>().is_ok_and(|code| code < 0),
+                [kind, uuid] => kind.trim() == "0" && parse_non_zero_uuid(uuid.trim()).is_some(),
+                _ => false,
+            };
+            if !exact_reference {
+                return None;
+            }
+            let (reference, load_transparent) =
+                parse_common_command_picture_value(raw, object_refs)?;
+            if load_transparent != schema.load_transparent() {
+                return None;
+            }
+            Some(FormFieldHeaderPicture {
+                reference: Some(reference?),
+                file_name: None,
+                load_transparent,
+            })
+        }
+        FormFieldHeaderPictureKind::Embedded => {
+            let payload = value
+                .get(7)
+                .and_then(|field| extract_base64_payload(field))?;
+            let content = decode_base64_mime(payload)?;
+            if !is_form_item_picture_content(&content) {
+                return None;
+            }
+            Some(FormFieldHeaderPicture {
+                reference: None,
+                file_name: Some(form_item_picture_file_name("HeaderPicture", &content)),
+                load_transparent: schema.load_transparent(),
+            })
+        }
+    }
+}
+
 pub(super) fn parse_form_picture_field_value(
     options: Option<&[&str]>,
     object_refs: &BTreeMap<String, String>,
@@ -8117,6 +8673,7 @@ pub(super) fn parse_form_child_item_data_path(
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
@@ -8243,11 +8800,23 @@ pub(super) fn parse_form_child_item_data_path(
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound),
-        "Button" => fields
-            .get(9 + form_button_top_level_offset(fields))
-            .and_then(|field| {
-                parse_form_button_data_path(field, table_name_by_id, table_column_names_by_id)
-            }),
+        "Button"
+            if fields.first().map(|field| field.trim()) == Some("31")
+                && fields.len() == 52
+                && form_button_top_level_offset(fields) == 0 =>
+        {
+            fields.get(9).and_then(|field| {
+                parse_form_button_data_path(
+                    field,
+                    attribute_names_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    type_link_data_path_by_table_column,
+                    data_path_by_binding_key,
+                )
+            })
+        }
+        "Button" => None,
         _ => table_name_by_id.get(id).cloned(),
     }
 }
@@ -8348,6 +8917,110 @@ fn form_attribute_matches_metadata_owner(
         proven_bases.insert(main_table.clone());
     }
     proven_bases.len() == 1 && proven_bases.contains(owner_base)
+}
+
+pub(super) fn parse_form_title_data_path(
+    tag: &str,
+    wrapper: &str,
+    fields: &[&str],
+    conditional_layout: bool,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if wrapper != "22" || conditional_layout {
+        return None;
+    }
+    let (options_kind, options_len, binding_slot) = match tag {
+        "Page" if matches!(fields.len(), 32 | 34 | 40) => ("18", 20, 4),
+        "UsualGroup" if matches!(fields.len(), 32 | 34) => ("29", 29, 5),
+        _ => return None,
+    };
+    let options = fields
+        .get(20)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    if options.len() != options_len
+        || options.first().map(|field| field.trim()) != Some(options_kind)
+    {
+        return None;
+    }
+    let binding = options
+        .get(binding_slot)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    match binding.as_slice() {
+        [kind, owner] if kind.trim() == "1" => {
+            let owner = split_1c_braced_fields(owner.trim(), 0)?;
+            if owner.len() != 1 {
+                return None;
+            }
+            attribute_names_by_id.get(owner.first()?.trim()).cloned()
+        }
+        [kind, owner, metadata, terminal] if tag == "Page" && kind.trim() == "3" => {
+            let owner = split_1c_braced_fields(owner.trim(), 0)?;
+            let metadata = split_1c_braced_fields(metadata.trim(), 0)?;
+            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+            if owner.len() != 1
+                || metadata.len() != 2
+                || metadata.first()?.trim() != "0"
+                || terminal.len() != 1
+                || terminal.first()?.trim() != "100000000"
+            {
+                return None;
+            }
+            let uuid = parse_non_zero_uuid(metadata.get(1)?.trim())?;
+            resolve_form_title_rows_count_path(
+                owner.first()?.trim(),
+                &uuid,
+                attribute_metadata_owners_by_id,
+                object_refs,
+            )
+        }
+        [kind, owner, terminal] if tag == "UsualGroup" && kind.trim() == "2" => {
+            let owner = split_1c_braced_fields(owner.trim(), 0)?;
+            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+            if owner.len() != 2
+                || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID
+                || terminal.len() != 1
+            {
+                return None;
+            }
+            resolve_form_item_current_data_path(
+                owner.first()?.trim(),
+                terminal.first()?.trim(),
+                table_name_by_id,
+                table_column_names_by_id,
+                data_path_by_binding_key,
+            )
+        }
+        _ => None,
+    }
+}
+
+fn resolve_form_title_rows_count_path(
+    attribute_id: &str,
+    uuid: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let attribute = attribute_metadata_owners_by_id.get(attribute_id)?;
+    let reference = object_refs.get(uuid)?;
+    let route = reference.split('.').collect::<Vec<_>>();
+    let (owner_kind, owner_name, table_name) = match route.as_slice() {
+        [owner_kind, owner_name, "TabularSection", table_name]
+            if !owner_kind.is_empty() && !owner_name.is_empty() && !table_name.is_empty() =>
+        {
+            (*owner_kind, *owner_name, *table_name)
+        }
+        _ => return None,
+    };
+    let owner_base = format!("{owner_kind}.{owner_name}");
+    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
+        return None;
+    }
+    Some(format!("{}.{}.RowsCount", attribute.name, table_name))
 }
 
 fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
@@ -8949,31 +9622,80 @@ pub(super) fn collect_form_table_column_names_for_table(
 
 pub(super) fn parse_form_button_data_path(
     field: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    if fields.first().map(|value| value.trim()) != Some("2") {
-        return None;
+    match fields.as_slice() {
+        [kind, owner] if kind.trim() == "1" => {
+            let owner = split_1c_braced_fields(owner.trim(), 0)?;
+            if owner.len() != 1 {
+                return None;
+            }
+            attribute_names_by_id.get(owner.first()?.trim()).cloned()
+        }
+        [kind, owner, terminal] if kind.trim() == "2" => {
+            let owner = split_1c_braced_fields(owner.trim(), 0)?;
+            let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+            if terminal.len() != 1 {
+                return None;
+            }
+            if owner.len() == 1 {
+                if !matches!(terminal.first()?.trim(), "-5" | "-8") {
+                    return None;
+                }
+                let attribute_name = attribute_names_by_id.get(owner.first()?.trim())?;
+                return Some(format!("{attribute_name}.Ref"));
+            }
+            if owner.len() != 2 || owner.get(1)?.trim() != FORM_ITEM_TYPE_UUID {
+                return None;
+            }
+            if let Some(data_path) = type_link_data_path_by_table_column.get(&(
+                owner.first()?.trim().to_string(),
+                terminal.first()?.trim().to_string(),
+            )) {
+                return Some(data_path.clone());
+            }
+            resolve_form_item_current_data_path(
+                owner.first()?.trim(),
+                terminal.first()?.trim(),
+                table_name_by_id,
+                table_column_names_by_id,
+                data_path_by_binding_key,
+            )
+        }
+        _ => None,
     }
-    let table = fields
-        .get(1)
-        .and_then(|field| split_1c_braced_fields(field, 0))?;
-    let table_id = table.first()?.trim();
+}
+
+fn resolve_form_item_current_data_path(
+    table_id: &str,
+    binding_key: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+) -> Option<String> {
     let table_name = table_name_by_id.get(table_id)?;
-    let column = fields
-        .get(2)
-        .and_then(|field| split_1c_braced_fields(field, 0))
-        .and_then(|fields| fields.first().map(|value| value.trim().to_string()))?;
-    let field_name = if column == "8" {
+    let field_name = if binding_key == "8" {
         "Ref".to_string()
+    } else if let Some(field_name) = data_path_by_binding_key
+        .get(binding_key)
+        .and_then(|data_path| data_path.strip_prefix(table_name))
+        .and_then(|field_name| field_name.strip_prefix('.'))
+        .filter(|field_name| !field_name.is_empty())
+    {
+        normalize_form_table_column_name(table_name, field_name)
+    } else if let Some(field_name) = table_column_names_by_id
+        .get(table_id)
+        .and_then(|columns| columns.get(binding_key))
+    {
+        normalize_form_table_column_name(table_name, field_name)
     } else {
-        table_column_names_by_id
-            .get(table_id)
-            .and_then(|columns| columns.get(&column))
-            .cloned()?
+        return None;
     };
-    let field_name = normalize_form_table_column_name(table_name, &field_name);
     Some(format!("Items.{table_name}.CurrentData.{field_name}"))
 }
 
@@ -9411,6 +10133,38 @@ fn append_form_document_properties_xml(xml: &mut String, properties: &FormBodyPr
     }
 }
 
+fn format_form_mobile_device_command_bar_content_xml(items: &[String]) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    let mut xml = "\t<MobileDeviceCommandBarContent>\r\n".to_string();
+    for item in items {
+        xml.push_str("\t\t<xr:Item>\r\n");
+        for property in FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER {
+            match property {
+                FormMobileDeviceCommandBarContentItemXmlProperty::Presentation => {
+                    xml.push_str("\t\t\t<xr:Presentation/>\r\n");
+                }
+                FormMobileDeviceCommandBarContentItemXmlProperty::CheckState => {
+                    xml.push_str("\t\t\t<xr:CheckState>0</xr:CheckState>\r\n");
+                }
+                FormMobileDeviceCommandBarContentItemXmlProperty::Value if item.is_empty() => {
+                    xml.push_str("\t\t\t<xr:Value xsi:type=\"xs:string\"/>\r\n");
+                }
+                FormMobileDeviceCommandBarContentItemXmlProperty::Value => {
+                    xml.push_str(&format!(
+                        "\t\t\t<xr:Value xsi:type=\"xs:string\">{}</xr:Value>\r\n",
+                        escape_xml_text(item)
+                    ));
+                }
+            }
+        }
+        xml.push_str("\t\t</xr:Item>\r\n");
+    }
+    xml.push_str("\t</MobileDeviceCommandBarContent>\r\n");
+    xml
+}
+
 pub(super) fn format_form_body_xml(
     properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
@@ -9518,6 +10272,9 @@ pub(super) fn format_form_body_xml(
             escape_xml_text(conversations_representation)
         ));
     }
+    xml.push_str(&format_form_mobile_device_command_bar_content_xml(
+        &properties.mobile_device_command_bar_content,
+    ));
     if !properties.command_set_excluded_commands.is_empty() {
         xml.push_str("\t<CommandSet>\r\n");
         for command in &properties.command_set_excluded_commands {
@@ -10299,6 +11056,7 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
     if item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
         && item.tag != "Table"
         && item.tag != "InputField"
         && let Some(skip_on_input) = item.skip_on_input
@@ -10335,7 +11093,9 @@ pub(super) fn format_form_child_item_xml(
         FormTooltipRepresentationXmlOrder::FieldProperties,
         indent + 1,
     ));
-    if let Some(group_vertical_align) = item.group_vertical_align {
+    if item.tag != "PictureDecoration"
+        && let Some(group_vertical_align) = item.group_vertical_align
+    {
         xml.push_str(&format!(
             "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
             escape_xml_text(group_vertical_align)
@@ -10357,6 +11117,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(edit_mode)
         ));
     }
+    xml.push_str(&format_form_field_header_picture_xml(item, indent + 1));
     if item.tag == "PictureField"
         && let Some(reference) = &item.picture_ref
     {
@@ -10404,11 +11165,21 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(footer_horizontal_align)
         ));
     }
+    xml.push_str(&format_form_usual_group_properties_xml(
+        item,
+        FormUsualGroupXmlAnchor::BeforeTitle,
+        indent + 1,
+    ));
     xml.push_str(&format_form_usual_group_header_xml(item, indent + 1));
     xml.push_str(&format_form_label_decoration_geometry_xml(item, indent + 1));
+    xml.push_str(&format_form_picture_decoration_geometry_xml(
+        item,
+        indent + 1,
+    ));
     if item.tag != "Table"
         && item.tag != "Button"
         && item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
         && let Some(width) = &item.width
     {
         xml.push_str(&format!(
@@ -10416,11 +11187,16 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(width)
         ));
     }
-    if item.tag != "Table" && item.tag != "LabelDecoration" && item.auto_max_width == Some(false) {
+    if item.tag != "Table"
+        && item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
+        && item.auto_max_width == Some(false)
+    {
         xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
     }
     if item.tag != "Table"
         && item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
         && let Some(height) = &item.height
     {
         xml.push_str(&format!(
@@ -10463,6 +11239,7 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
         && let Some(max_width) = &item.max_width
     {
         xml.push_str(&format!(
@@ -10509,10 +11286,15 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(text_color)
         ));
     }
-    if item.tag != "Table" && item.tag != "LabelDecoration" && item.auto_max_height == Some(false) {
+    if item.tag != "Table"
+        && item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
+        && item.auto_max_height == Some(false)
+    {
         xml.push_str(&format!("{tab}\t<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
     }
     if item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
         && let Some(max_height) = &item.max_height
     {
         xml.push_str(&format!(
@@ -10521,6 +11303,7 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
         && let Some(horizontal_stretch) = item.horizontal_stretch
         && !usual_group_title_first
     {
@@ -10538,6 +11321,7 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if item.tag != "LabelDecoration"
+        && item.tag != "PictureDecoration"
         && let Some(vertical_stretch) = item.vertical_stretch
         && !usual_group_title_first
     {
@@ -10628,6 +11412,17 @@ pub(super) fn format_form_child_item_xml(
     if item.text_edit == Some(false) {
         xml.push_str(&format!("{tab}\t<TextEdit>false</TextEdit>\r\n"));
     }
+    if item.tag == "InputField" && !item.choice_parameter_links.is_empty() {
+        xml.push_str(&format_form_choice_parameter_links_xml(
+            &item.choice_parameter_links,
+            indent + 1,
+        ));
+    }
+    if item.tag == "InputField"
+        && let Some(type_link) = &item.type_link
+    {
+        xml.push_str(&format_form_type_link_xml(type_link, indent + 1));
+    }
     if item.tag == "InputField" && !item.input_hint.is_empty() {
         xml.push_str(&format_form_localized_section(
             "InputHint",
@@ -10684,12 +11479,22 @@ pub(super) fn format_form_child_item_xml(
             if scroll_on_compress { "true" } else { "false" }
         ));
     }
+    xml.push_str(&format_form_usual_group_properties_xml(
+        item,
+        FormUsualGroupXmlAnchor::BeforeBehavior,
+        indent + 1,
+    ));
     if let Some(behavior) = item.behavior {
         xml.push_str(&format!(
             "{tab}\t<Behavior>{}</Behavior>\r\n",
             escape_xml_text(behavior)
         ));
     }
+    xml.push_str(&format_form_usual_group_properties_xml(
+        item,
+        FormUsualGroupXmlAnchor::AfterBehavior,
+        indent + 1,
+    ));
     if !matches!(item.tag, "Pages" | "Popup")
         && let Some(representation) = item.representation.filter(|representation| {
             !form_child_item_representation_is_default(item.tag, representation)
@@ -10700,6 +11505,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
+    xml.push_str(&format_form_usual_group_properties_xml(
+        item,
+        FormUsualGroupXmlAnchor::AfterRepresentation,
+        indent + 1,
+    ));
     if item.tag != "Page" && item.show_title == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
     }
@@ -10729,6 +11539,14 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<TextColor>{}</TextColor>\r\n",
             escape_xml_text(text_color)
+        ));
+    }
+    if item.tag == "PictureDecoration"
+        && let Some(skip_on_input) = item.skip_on_input
+    {
+        xml.push_str(&format!(
+            "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
+            xml_bool(skip_on_input)
         ));
     }
     if !early_title_for_field && !usual_group_title_first && item.tag != "Table" {
@@ -10896,6 +11714,19 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
+    if matches!(item.tag, "Page" | "UsualGroup")
+        && let Some(title_data_path) = &item.title_data_path
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TitleDataPath>{}</TitleDataPath>\r\n",
+            escape_xml_text(title_data_path)
+        ));
+    }
+    xml.push_str(&format_form_usual_group_properties_xml(
+        item,
+        FormUsualGroupXmlAnchor::BeforeExtendedTooltip,
+        indent + 1,
+    ));
     if item.tag != "Table"
         && let Some(extended_tooltip) = &item.extended_tooltip
     {
@@ -11014,10 +11845,13 @@ fn format_form_decoration_header_xml(item: &FormChildItem, indent: usize) -> Str
                 }
             }
             FormDecorationHeaderXmlProperty::GroupVerticalAlign => {
-                if let Some(group_vertical_align) = item
-                    .horizontal_align
-                    .and_then(FormChildItemAlignment::group_vertical_align)
-                {
+                let group_vertical_align = if item.tag == "PictureDecoration" {
+                    item.group_vertical_align
+                } else {
+                    item.horizontal_align
+                        .and_then(FormChildItemAlignment::group_vertical_align)
+                };
+                if let Some(group_vertical_align) = group_vertical_align {
                     xml.push_str(&format!(
                         "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
                         escape_xml_text(group_vertical_align)
@@ -11100,6 +11934,77 @@ fn format_form_label_decoration_geometry_xml(item: &FormChildItem, indent: usize
     xml
 }
 
+fn format_form_picture_decoration_geometry_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "PictureDecoration" {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER {
+        match property {
+            FormPictureDecorationGeometryXmlProperty::Width => {
+                if let Some(width) = &item.width {
+                    xml.push_str(&format!(
+                        "{tab}<Width>{}</Width>\r\n",
+                        escape_xml_text(width)
+                    ));
+                }
+            }
+            FormPictureDecorationGeometryXmlProperty::AutoMaxWidth => {
+                if item.auto_max_width == Some(false) {
+                    xml.push_str(&format!("{tab}<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
+                }
+            }
+            FormPictureDecorationGeometryXmlProperty::MaxWidth => {
+                if let Some(max_width) = &item.max_width {
+                    xml.push_str(&format!(
+                        "{tab}<MaxWidth>{}</MaxWidth>\r\n",
+                        escape_xml_text(max_width)
+                    ));
+                }
+            }
+            FormPictureDecorationGeometryXmlProperty::Height => {
+                if let Some(height) = &item.height {
+                    xml.push_str(&format!(
+                        "{tab}<Height>{}</Height>\r\n",
+                        escape_xml_text(height)
+                    ));
+                }
+            }
+            FormPictureDecorationGeometryXmlProperty::AutoMaxHeight => {
+                if item.auto_max_height == Some(false) {
+                    xml.push_str(&format!("{tab}<AutoMaxHeight>false</AutoMaxHeight>\r\n"));
+                }
+            }
+            FormPictureDecorationGeometryXmlProperty::MaxHeight => {
+                if let Some(max_height) = &item.max_height {
+                    xml.push_str(&format!(
+                        "{tab}<MaxHeight>{}</MaxHeight>\r\n",
+                        escape_xml_text(max_height)
+                    ));
+                }
+            }
+            FormPictureDecorationGeometryXmlProperty::HorizontalStretch => {
+                if let Some(horizontal_stretch) = item.horizontal_stretch {
+                    xml.push_str(&format!(
+                        "{tab}<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                        xml_bool(horizontal_stretch)
+                    ));
+                }
+            }
+            FormPictureDecorationGeometryXmlProperty::VerticalStretch => {
+                if let Some(vertical_stretch) = item.vertical_stretch {
+                    xml.push_str(&format!(
+                        "{tab}<VerticalStretch>{}</VerticalStretch>\r\n",
+                        xml_bool(vertical_stretch)
+                    ));
+                }
+            }
+        }
+    }
+    xml
+}
+
 fn format_form_label_decoration_alignment_tail_xml(item: &FormChildItem, indent: usize) -> String {
     if item.tag != "LabelDecoration" {
         return String::new();
@@ -11145,6 +12050,83 @@ fn format_form_label_decoration_visual_tail_xml(item: &FormChildItem, indent: us
                     xml.push_str(&format!(
                         "{tab}<TitleHeight>{}</TitleHeight>\r\n",
                         escape_xml_text(title_height)
+                    ));
+                }
+            }
+        }
+    }
+    xml
+}
+
+fn format_form_usual_group_properties_xml(
+    item: &FormChildItem,
+    anchor: FormUsualGroupXmlAnchor,
+    indent: usize,
+) -> String {
+    if item.tag != "UsualGroup" {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_USUAL_GROUP_XML_ORDER {
+        if property.anchor() != anchor {
+            continue;
+        }
+        match property {
+            FormUsualGroupXmlProperty::EnableContentChange => {
+                if item.enable_content_change == Some(true) {
+                    xml.push_str(&format!(
+                        "{tab}<EnableContentChange>true</EnableContentChange>\r\n"
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::HorizontalAlign => {
+                if let Some(value) = item.usual_group_horizontal_align {
+                    xml.push_str(&format!(
+                        "{tab}<HorizontalAlign>{}</HorizontalAlign>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::VerticalAlign => {
+                if let Some(value) = item.usual_group_vertical_align {
+                    xml.push_str(&format!(
+                        "{tab}<VerticalAlign>{}</VerticalAlign>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::Collapsed => {
+                if item.collapsed == Some(true) {
+                    xml.push_str(&format!("{tab}<Collapsed>true</Collapsed>\r\n"));
+                }
+            }
+            FormUsualGroupXmlProperty::ControlRepresentation => {
+                if let Some(value) = item.control_representation {
+                    xml.push_str(&format!(
+                        "{tab}<ControlRepresentation>{}</ControlRepresentation>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::United => {
+                if item.united == Some(false) {
+                    xml.push_str(&format!("{tab}<United>false</United>\r\n"));
+                }
+            }
+            FormUsualGroupXmlProperty::ChildItemsWidth => {
+                if let Some(value) = item.child_items_width {
+                    xml.push_str(&format!(
+                        "{tab}<ChildItemsWidth>{}</ChildItemsWidth>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::ThroughAlign => {
+                if let Some(value) = item.through_align {
+                    xml.push_str(&format!(
+                        "{tab}<ThroughAlign>{}</ThroughAlign>\r\n",
+                        escape_xml_text(value)
                     ));
                 }
             }
@@ -11213,6 +12195,39 @@ fn format_form_tooltip_representation_xml(
             )
         })
         .unwrap_or_default()
+}
+
+fn format_form_field_header_picture_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.header_picture_ref.is_none() && item.header_picture_file_name.is_none() {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<HeaderPicture>\r\n");
+    for property in FORM_FIELD_HEADER_PICTURE_XML_ORDER {
+        match property {
+            FormFieldHeaderPictureXmlProperty::Value => {
+                if let Some(reference) = &item.header_picture_ref {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Ref>{}</xr:Ref>\r\n",
+                        escape_xml_text(reference)
+                    ));
+                } else if let Some(file_name) = &item.header_picture_file_name {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Abs>{}</xr:Abs>\r\n",
+                        escape_xml_text(file_name)
+                    ));
+                }
+            }
+            FormFieldHeaderPictureXmlProperty::LoadTransparent => {
+                xml.push_str(&format!(
+                    "{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n",
+                    xml_bool(item.header_picture_load_transparent)
+                ));
+            }
+        }
+    }
+    xml.push_str(&format!("{tab}</HeaderPicture>\r\n"));
+    xml
 }
 
 fn should_emit_form_picture_size(picture_size: &str) -> bool {
@@ -11420,6 +12435,40 @@ pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: 
     xml
 }
 
+fn format_form_choice_parameter_links_xml(
+    links: &[FormChoiceParameterLink],
+    indent: usize,
+) -> String {
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<ChoiceParameterLinks>\r\n");
+    for link in links {
+        xml.push_str(&format!(
+            "{tab}\t<xr:Link>\r\n\
+{tab}\t\t<xr:Name>{}</xr:Name>\r\n\
+{tab}\t\t<xr:DataPath xsi:type=\"xs:string\">{}</xr:DataPath>\r\n\
+{tab}\t\t<xr:ValueChange>{}</xr:ValueChange>\r\n\
+{tab}\t</xr:Link>\r\n",
+            escape_xml_text(&link.name),
+            escape_xml_text(&link.data_path),
+            escape_xml_text(link.value_change)
+        ));
+    }
+    xml.push_str(&format!("{tab}</ChoiceParameterLinks>\r\n"));
+    xml
+}
+
+fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String {
+    let tab = "\t".repeat(indent);
+    format!(
+        "{tab}<TypeLink>\r\n\
+{tab}\t<xr:DataPath>{}</xr:DataPath>\r\n\
+{tab}\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
+{tab}</TypeLink>\r\n",
+        escape_xml_text(&type_link.data_path),
+        escape_xml_text(type_link.link_item)
+    )
+}
+
 pub(super) fn should_emit_explicit_table_skip_on_input(item: &FormChildItem) -> bool {
     item.tag == "Table"
         && !form_table_has_hierarchical_navigation(item)
@@ -11492,34 +12541,17 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
         } else if attribute.explicit_empty_type {
             xml.push_str("\t\t\t<Type/>\r\n");
         }
-        if let Some(fill_check) = attribute.fill_check {
-            xml.push_str(&format!(
-                "\t\t\t<FillCheck>{}</FillCheck>\r\n",
-                escape_xml_text(fill_check)
-            ));
-        }
-        if !attribute.columns.is_empty() || !attribute.additional_columns.is_empty() {
-            xml.push_str("\t\t\t<Columns>\r\n");
-            for column in &attribute.columns {
-                xml.push_str(&format_form_attribute_column_xml(column, "\t\t\t\t"));
-            }
-            for additional in &attribute.additional_columns {
-                xml.push_str(&format!(
-                    "\t\t\t\t<AdditionalColumns table=\"{}\">\r\n",
-                    escape_xml_text(&additional.table)
-                ));
-                for column in &additional.columns {
-                    xml.push_str(&format_form_attribute_column_xml(column, "\t\t\t\t\t"));
-                }
-                xml.push_str("\t\t\t\t</AdditionalColumns>\r\n");
-            }
-            xml.push_str("\t\t\t</Columns>\r\n");
-        }
         if attribute.main_attribute {
             xml.push_str("\t\t\t<MainAttribute>true</MainAttribute>\r\n");
         }
         if attribute.saved_data {
             xml.push_str("\t\t\t<SavedData>true</SavedData>\r\n");
+        }
+        if let Some(fill_check) = attribute.fill_check {
+            xml.push_str(&format!(
+                "\t\t\t<FillCheck>{}</FillCheck>\r\n",
+                escape_xml_text(fill_check)
+            ));
         }
         if !attribute.use_always.is_empty() {
             xml.push_str("\t\t\t<UseAlways>\r\n");
@@ -11550,6 +12582,23 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
                 ));
             }
             xml.push_str("\t\t\t</FunctionalOptions>\r\n");
+        }
+        if !attribute.columns.is_empty() || !attribute.additional_columns.is_empty() {
+            xml.push_str("\t\t\t<Columns>\r\n");
+            for column in &attribute.columns {
+                xml.push_str(&format_form_attribute_column_xml(column, "\t\t\t\t"));
+            }
+            for additional in &attribute.additional_columns {
+                xml.push_str(&format!(
+                    "\t\t\t\t<AdditionalColumns table=\"{}\">\r\n",
+                    escape_xml_text(&additional.table)
+                ));
+                for column in &additional.columns {
+                    xml.push_str(&format_form_attribute_column_xml(column, "\t\t\t\t\t"));
+                }
+                xml.push_str("\t\t\t\t</AdditionalColumns>\r\n");
+            }
+            xml.push_str("\t\t\t</Columns>\r\n");
         }
         if let Some(settings) = &attribute.settings {
             xml.push_str("\t\t\t<Settings xsi:type=\"DynamicList\">\r\n");

@@ -59,6 +59,310 @@ pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlPro
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormUsualGroupXmlAnchor {
+    BeforeTitle,
+    BeforeBehavior,
+    AfterBehavior,
+    AfterRepresentation,
+    BeforeExtendedTooltip,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormUsualGroupXmlProperty {
+    EnableContentChange,
+    HorizontalAlign,
+    VerticalAlign,
+    Collapsed,
+    ControlRepresentation,
+    United,
+    ChildItemsWidth,
+    ThroughAlign,
+}
+
+pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
+    FormUsualGroupXmlProperty::EnableContentChange,
+    FormUsualGroupXmlProperty::HorizontalAlign,
+    FormUsualGroupXmlProperty::VerticalAlign,
+    FormUsualGroupXmlProperty::Collapsed,
+    FormUsualGroupXmlProperty::ControlRepresentation,
+    FormUsualGroupXmlProperty::United,
+    FormUsualGroupXmlProperty::ChildItemsWidth,
+    FormUsualGroupXmlProperty::ThroughAlign,
+];
+
+impl FormUsualGroupXmlProperty {
+    pub(crate) const fn anchor(self) -> FormUsualGroupXmlAnchor {
+        match self {
+            Self::EnableContentChange => FormUsualGroupXmlAnchor::BeforeTitle,
+            Self::HorizontalAlign | Self::VerticalAlign => FormUsualGroupXmlAnchor::BeforeBehavior,
+            Self::Collapsed | Self::ControlRepresentation => FormUsualGroupXmlAnchor::AfterBehavior,
+            Self::United | Self::ChildItemsWidth => FormUsualGroupXmlAnchor::AfterRepresentation,
+            Self::ThroughAlign => FormUsualGroupXmlAnchor::BeforeExtendedTooltip,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormUsualGroupSchema;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormUsualGroupProperties {
+    enable_content_change: Option<bool>,
+    child_items_width: Option<&'static str>,
+    control_representation: Option<&'static str>,
+    collapsed: Option<bool>,
+    horizontal_align: Option<&'static str>,
+    vertical_align: Option<&'static str>,
+    through_align: Option<&'static str>,
+    united: Option<bool>,
+}
+
+impl FormUsualGroupSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 20;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        matches!(
+            (
+                wrapper,
+                item_tag,
+                direct_discriminator,
+                options.len(),
+                options.first().map(|field| field.trim()),
+            ),
+            ("22", "UsualGroup", Some("5"), 29, Some("29"))
+        )
+        .then_some(Self)
+    }
+
+    pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormUsualGroupProperties {
+        FormUsualGroupProperties {
+            enable_content_change: (fields.get(9).map(|field| field.trim()) == Some("1"))
+                .then_some(true),
+            child_items_width: options.get(2).and_then(|field| match field.trim() {
+                "1" => Some("Equal"),
+                "2" => Some("LeftWide"),
+                "3" => Some("LeftWidest"),
+                "4" => Some("LeftNarrow"),
+                "5" => Some("LeftNarrowest"),
+                _ => None,
+            }),
+            control_representation: (options.get(11).map(|field| field.trim()) == Some("1"))
+                .then_some("Picture"),
+            collapsed: (options.get(12).map(|field| field.trim()) == Some("1")).then_some(true),
+            horizontal_align: options.get(17).and_then(|field| match field.trim() {
+                "0" => Some("Left"),
+                "1" => Some("Center"),
+                "2" => Some("Right"),
+                _ => None,
+            }),
+            vertical_align: options.get(18).and_then(|field| match field.trim() {
+                "0" => Some("Top"),
+                "1" => Some("Center"),
+                "2" => Some("Bottom"),
+                _ => None,
+            }),
+            through_align: options.get(19).and_then(|field| match field.trim() {
+                "0" => Some("Use"),
+                "1" => Some("DontUse"),
+                _ => None,
+            }),
+            united: (options.get(21).map(|field| field.trim()) == Some("0")).then_some(false),
+        }
+    }
+}
+
+impl FormUsualGroupProperties {
+    pub(crate) const fn enable_content_change(self) -> Option<bool> {
+        self.enable_content_change
+    }
+
+    pub(crate) const fn child_items_width(self) -> Option<&'static str> {
+        self.child_items_width
+    }
+
+    pub(crate) const fn control_representation(self) -> Option<&'static str> {
+        self.control_representation
+    }
+
+    pub(crate) const fn collapsed(self) -> Option<bool> {
+        self.collapsed
+    }
+
+    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+        self.horizontal_align
+    }
+
+    pub(crate) const fn vertical_align(self) -> Option<&'static str> {
+        self.vertical_align
+    }
+
+    pub(crate) const fn through_align(self) -> Option<&'static str> {
+        self.through_align
+    }
+
+    pub(crate) const fn united(self) -> Option<bool> {
+        self.united
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormFieldHeaderPictureKind {
+    Empty,
+    Reference,
+    Embedded,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormFieldHeaderPictureSchema {
+    picture_slot: usize,
+    kind: FormFieldHeaderPictureKind,
+    load_transparent: bool,
+}
+
+impl FormFieldHeaderPictureSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        value: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "37"
+            || field_count != 59 + top_level_offset
+            || top_level_offset > 1
+            || !matches!(
+                item_tag,
+                "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
+            )
+            || value.first().map(|field| field.trim()) != Some("4")
+            || value.get(3).map(|field| field.trim()) != Some("\"\"")
+            || value.get(4).map(|field| field.trim()) != Some("-1")
+            || value.get(5).map(|field| field.trim()) != Some("-1")
+        {
+            return None;
+        }
+        let load_transparent = match value.get(6).map(|field| field.trim()) {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return None,
+        };
+        let kind =
+            match value.get(1).map(|field| field.trim()) {
+                Some("0")
+                    if value.len() == 9
+                        && value.get(2).map(|field| field.trim()) == Some("{0}")
+                        && value.get(7).map(|field| field.trim()) == Some("0")
+                        && value.get(8).map(|field| field.trim()) == Some("\"\"") =>
+                {
+                    FormFieldHeaderPictureKind::Empty
+                }
+                Some("1")
+                    if value.len() == 9
+                        && value.get(2).map(|field| field.trim()).is_some_and(|field| {
+                            field.starts_with('{') && field.ends_with('}')
+                        })
+                        && value.get(7).map(|field| field.trim()) == Some("0")
+                        && value.get(8).map(|field| field.trim()) == Some("\"\"") =>
+                {
+                    FormFieldHeaderPictureKind::Reference
+                }
+                Some("3")
+                    if value.len() == 10
+                        && value.get(2).map(|field| field.trim()) == Some("{0}")
+                        && value.get(7).map(|field| field.trim()).is_some_and(|field| {
+                            field.starts_with('{') && field.ends_with('}')
+                        })
+                        && value.get(8).map(|field| field.trim()) == Some("0")
+                        && value.get(9).map(|field| field.trim()) == Some("\"\"") =>
+                {
+                    FormFieldHeaderPictureKind::Embedded
+                }
+                _ => return None,
+            };
+        Some(Self {
+            picture_slot: 29 + top_level_offset,
+            kind,
+            load_transparent,
+        })
+    }
+
+    pub(crate) const fn picture_slot(self) -> usize {
+        self.picture_slot
+    }
+
+    pub(crate) const fn kind(self) -> FormFieldHeaderPictureKind {
+        self.kind
+    }
+
+    pub(crate) const fn load_transparent(self) -> bool {
+        self.load_transparent
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormFieldHeaderPictureXmlProperty {
+    Value,
+    LoadTransparent,
+}
+
+pub(crate) const FORM_FIELD_HEADER_PICTURE_XML_ORDER: &[FormFieldHeaderPictureXmlProperty] = &[
+    FormFieldHeaderPictureXmlProperty::Value,
+    FormFieldHeaderPictureXmlProperty::LoadTransparent,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootMobileDeviceCommandBarContentSchema {
+    item_count: usize,
+}
+
+impl FormRootMobileDeviceCommandBarContentSchema {
+    pub(crate) const ROOT_TRAILER_FIELDS: usize = 24;
+    pub(crate) const CONTENT_TRAILER_SLOT: usize = 22;
+
+    pub(crate) fn from_raw_layout(
+        root_marker: Option<&str>,
+        trailer_len: usize,
+        content_kind: Option<&str>,
+        content_field_count: usize,
+        declared_item_count: usize,
+        typed_item_count: usize,
+    ) -> Option<Self> {
+        let expected_field_count = declared_item_count.checked_mul(2)?.checked_add(2)?;
+        (root_marker == Some("50")
+            && trailer_len == Self::ROOT_TRAILER_FIELDS
+            && content_kind == Some("50")
+            && content_field_count == expected_field_count
+            && typed_item_count == declared_item_count)
+            .then_some(Self {
+                item_count: declared_item_count,
+            })
+    }
+
+    pub(crate) const fn item_count(self) -> usize {
+        self.item_count
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormMobileDeviceCommandBarContentItemXmlProperty {
+    Presentation,
+    CheckState,
+    Value,
+}
+
+pub(crate) const FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER:
+    &[FormMobileDeviceCommandBarContentItemXmlProperty] = &[
+    FormMobileDeviceCommandBarContentItemXmlProperty::Presentation,
+    FormMobileDeviceCommandBarContentItemXmlProperty::CheckState,
+    FormMobileDeviceCommandBarContentItemXmlProperty::Value,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormDecorationHeaderXmlProperty {
     Title,
     ToolTip,
@@ -277,6 +581,155 @@ impl FormDecorationHeaderSchema {
 
     pub(crate) const fn tooltip_representation_slot(self) -> usize {
         self.tooltip_representation_slot
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormPictureDecorationGeometryXmlProperty {
+    Width,
+    AutoMaxWidth,
+    MaxWidth,
+    Height,
+    AutoMaxHeight,
+    MaxHeight,
+    HorizontalStretch,
+    VerticalStretch,
+}
+
+pub(crate) const FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER:
+    &[FormPictureDecorationGeometryXmlProperty] = &[
+    FormPictureDecorationGeometryXmlProperty::Width,
+    FormPictureDecorationGeometryXmlProperty::AutoMaxWidth,
+    FormPictureDecorationGeometryXmlProperty::MaxWidth,
+    FormPictureDecorationGeometryXmlProperty::Height,
+    FormPictureDecorationGeometryXmlProperty::AutoMaxHeight,
+    FormPictureDecorationGeometryXmlProperty::MaxHeight,
+    FormPictureDecorationGeometryXmlProperty::HorizontalStretch,
+    FormPictureDecorationGeometryXmlProperty::VerticalStretch,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormPictureDecorationSchema;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FormPictureDecorationProperties {
+    width: Option<String>,
+    auto_max_width: Option<bool>,
+    max_width: Option<String>,
+    height: Option<String>,
+    auto_max_height: Option<bool>,
+    max_height: Option<String>,
+    horizontal_stretch: Option<bool>,
+    vertical_stretch: Option<bool>,
+    skip_on_input: Option<bool>,
+    group_horizontal_align: Option<&'static str>,
+    group_vertical_align: Option<&'static str>,
+}
+
+impl FormPictureDecorationSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+    ) -> Option<Self> {
+        matches!(
+            (wrapper, field_count, item_tag, direct_discriminator),
+            ("12", 36, "PictureDecoration", Some("1"))
+        )
+        .then_some(Self)
+    }
+
+    pub(crate) fn properties(self, fields: &[&str]) -> FormPictureDecorationProperties {
+        FormPictureDecorationProperties {
+            width: Self::non_zero_u32(fields, 10),
+            height: Self::non_zero_u32(fields, 11),
+            horizontal_stretch: Self::stretch(fields, 12),
+            vertical_stretch: Self::stretch(fields, 13),
+            skip_on_input: Self::bool_or_omit(fields, 22),
+            auto_max_width: Self::false_or_omit(fields, 27),
+            max_width: Self::non_zero_u32(fields, 28),
+            auto_max_height: Self::false_or_omit(fields, 30),
+            max_height: Self::non_zero_u32(fields, 31),
+            group_horizontal_align: fields.get(32).and_then(|field| match field.trim() {
+                "0" => Some("Left"),
+                "1" => Some("Center"),
+                "2" => Some("Right"),
+                _ => None,
+            }),
+            group_vertical_align: fields.get(33).and_then(|field| match field.trim() {
+                "0" => Some("Top"),
+                "1" => Some("Center"),
+                _ => None,
+            }),
+        }
+    }
+
+    fn non_zero_u32(fields: &[&str], slot: usize) -> Option<String> {
+        let value = fields.get(slot)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+
+    fn false_or_omit(fields: &[&str], slot: usize) -> Option<bool> {
+        (fields.get(slot)?.trim() == "0").then_some(false)
+    }
+
+    fn bool_or_omit(fields: &[&str], slot: usize) -> Option<bool> {
+        match fields.get(slot)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
+    }
+
+    fn stretch(fields: &[&str], slot: usize) -> Option<bool> {
+        Self::bool_or_omit(fields, slot)
+    }
+}
+
+impl FormPictureDecorationProperties {
+    pub(crate) fn width(&self) -> Option<&str> {
+        self.width.as_deref()
+    }
+
+    pub(crate) const fn auto_max_width(&self) -> Option<bool> {
+        self.auto_max_width
+    }
+
+    pub(crate) fn max_width(&self) -> Option<&str> {
+        self.max_width.as_deref()
+    }
+
+    pub(crate) fn height(&self) -> Option<&str> {
+        self.height.as_deref()
+    }
+
+    pub(crate) const fn auto_max_height(&self) -> Option<bool> {
+        self.auto_max_height
+    }
+
+    pub(crate) fn max_height(&self) -> Option<&str> {
+        self.max_height.as_deref()
+    }
+
+    pub(crate) const fn horizontal_stretch(&self) -> Option<bool> {
+        self.horizontal_stretch
+    }
+
+    pub(crate) const fn vertical_stretch(&self) -> Option<bool> {
+        self.vertical_stretch
+    }
+
+    pub(crate) const fn skip_on_input(&self) -> Option<bool> {
+        self.skip_on_input
+    }
+
+    pub(crate) const fn group_horizontal_align(&self) -> Option<&'static str> {
+        self.group_horizontal_align
+    }
+
+    pub(crate) const fn group_vertical_align(&self) -> Option<&'static str> {
+        self.group_vertical_align
     }
 }
 
@@ -1684,6 +2137,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     QuickChoice,
     AutoCellHeight,
     ChoiceFoldersAndItems,
+    ChoiceParameterLinks,
     AutoChoiceIncomplete,
     AutoMarkIncomplete,
     ChooseType,
@@ -1691,6 +2145,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     EditFormat,
     Font,
     TextEdit,
+    TypeLink,
     CreateButton,
     ChoiceButtonRepresentation,
     DropListButton,
@@ -1719,6 +2174,7 @@ impl FormInputFieldExtendedOptionSlot {
             Self::ListChoiceMode => 19,
             Self::QuickChoice => 23,
             Self::ChoiceFoldersAndItems => 24,
+            Self::ChoiceParameterLinks => 26,
             Self::AutoCellHeight => 28,
             Self::AutoChoiceIncomplete => 28,
             Self::Format => 29,
@@ -1727,6 +2183,7 @@ impl FormInputFieldExtendedOptionSlot {
             Self::ChooseType => 32,
             Self::Font => 40,
             Self::TextEdit => 41,
+            Self::TypeLink => 42,
             Self::CreateButton => 45,
             Self::ChoiceButtonRepresentation => 46,
             Self::DropListButton => 47,
