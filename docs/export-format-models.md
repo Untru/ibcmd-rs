@@ -3824,3 +3824,63 @@ Form.xml. `ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with
 SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #112 is closed after this acceptance gate.
+
+## Form shared field schema, command sets, colors, and row pictures acceptance
+
+Status: accepted by an all-Form selected gate, an independent frozen review,
+and a fresh serialized full export.
+
+This batch keeps the complete 1,108-Form corpus as the admission boundary and
+extends the shared typed model instead of matching object or form names. The
+strict wrapper-37 field schema owns `FooterHorizontalAlign` and `SkipOnInput`;
+the exact PictureField options record owns `FileDragMode`. Button, InputField,
+Table, Page, UsualGroup, LabelDecoration, LabelField, HTMLDocumentField, and
+SpreadSheetDocumentField use owner-specific color slots with one typed color decoder. The
+decoder accepts only the exact `{3, variant, {payload}}` record and resolves
+platform/system colors or existing `object_refs`; malformed and unknown
+variants fail closed. Table row pictures use their schema-backed row binding,
+picture descriptor, and native XML order.
+
+Command sets are now positional and counted. The root parser reads the
+declared property count and its derived command-list slot; Spreadsheet and
+FormattedDocument field command sets require their exact wrapper,
+discriminator, arity, empty sentinel, and counted UUID list. Unknown UUIDs
+reject the entire set. The audited registries contain 68 root, 104
+Spreadsheet, and 30 FormattedDocument platform standard-command identifiers,
+with `68/68`, `104/104`, and `30/30` agreement against the independent mapping
+artifacts. `2ef6d6fa-847a-485e-8684-d37a3ab5efb8` is the platform Form global
+command-source TypeId used only in an exact source tuple; it is not a current
+database object identifier. The Change, Copy, and Create platform command
+constants in the reverse Form serializer were also corrected to the same
+audited registry.
+
+The selected shadow is byte-identical to the subsequent full export for all
+1,108 Form.xml files. Relative to the accepted row-picture selected baseline,
+315 differing Form files improve, none worsen, 31 become exact, and no new
+differing file opens. The accepted Form diff is `845 files, +2763/-8970`.
+Relative to issue #112, the fresh normalized full diff changes from `1138
+files, +8053/-35480` to `1107 files, +8001/-33566`; the Form diff changes from
+`876 files, +2815/-10884` to `845 files, +2763/-8970`. The exact combined
+delta is `-31 files, -52 additions, -1914 deletions`, entirely in Form.xml.
+The export contains 12,197 source files excluding `ConfigDumpInfo.xml`.
+`ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+
+The accepted residual property metrics are: `ExcludedCommand +0/-0`,
+`CommandSet +0/-0`, `RowsPicture +0/-0`, `BackColor +1/-6`, `TextColor
++2/-3`, `BorderColor +5/-7`, `FooterHorizontalAlign +1/-1`, `FileDragMode
++101/-209`, `SkipOnInput +86/-206`, and `RowPictureDataPath +5/-46`.
+Table `SkipOnInput` and `FileDragMode` remain explicit HOLD: the same raw
+scalar values produce both present and absent native properties, so they need
+the surrounding table model or binding context and cannot be generalized from
+one slot. FormattedDocumentField `BorderColor` also remains HOLD until its
+native XML anchor is proved; the rejected pre-gate placement worsened one
+Form.xml file, so the accepted schema does not decode or serialize it.
+
+The final code gate passes `cargo fmt --all -- --check`, `cargo check
+--all-targets`, `cargo build --release`, `git diff --check`, and the added-line
+hardcode scan. Tests and native ConfigDump were not run by direct user
+instruction. Added UUID literals are audited platform protocol identifiers;
+added production lines contain no database/server identity, object or form
+name, filesystem path, Cyrillic corpus literal, ConfigDumpInfo dependency, or
+case-specific fallback. Issue #113 is closed after this acceptance gate.

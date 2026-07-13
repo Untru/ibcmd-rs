@@ -9542,9 +9542,9 @@ const FORM_REPORT_RESULT_VIEW_MODE_UUID: &str = "b9311bea-b26b-4ae0-8b5d-7b64048
 const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
     "874260df-7e23-4f02-9e10-5794914b5adf";
 const FORM_REPORT_ATTRIBUTE_REF_UUID: &str = "11cfd3e0-86f8-4480-aaa5-dc6a6ccac689";
-const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
-const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
-const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
+const FORM_COMMAND_CHANGE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
+const FORM_COMMAND_COPY_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
+const FORM_COMMAND_CREATE_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
 const FORM_COMMAND_CUSTOMIZE_FORM_UUID: &str = "198ea630-fda2-4cda-8a23-f999f4c67ee6";
 
 fn replace_form_auto_url(layout: &mut String, value: bool) -> Result<()> {

@@ -1099,11 +1099,15 @@ pub(crate) struct FormCheckBoxFieldSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormFieldTitleSchema {
+pub(crate) struct FormFieldSchema {
+    top_level_offset: usize,
     title_slot: usize,
+    text_color_option_slot: Option<usize>,
+    back_color_option_slot: Option<usize>,
+    border_color_option_slot: Option<usize>,
 }
 
-impl FormFieldTitleSchema {
+impl FormFieldSchema {
     pub(crate) const OPTIONS_BASE_SLOT: usize = 39;
 
     pub(crate) fn from_raw_layout(
@@ -1114,18 +1118,18 @@ impl FormFieldTitleSchema {
         direct_discriminator: Option<&str>,
         options: &[&str],
     ) -> Option<Self> {
-        let (discriminator, options_len, options_kind) = match item_tag {
-            "LabelField" => ("1", 20, "11"),
-            "InputField" => ("2", 66, "36"),
-            "CheckBoxField" => ("3", 13, "11"),
-            "PictureField" => ("4", 24, "10"),
-            "RadioButtonField" => ("5", 12, "8"),
-            "SpreadSheetDocumentField" => ("6", 32, "13"),
-            "TextDocumentField" => ("7", 16, "5"),
-            "CalendarField" => ("8", 24, "6"),
-            "GraphicalSchemaField" => ("14", 14, "3"),
-            "HTMLDocumentField" => ("15", 13, "3"),
-            "FormattedDocumentField" => ("17", 16, "1"),
+        let (discriminator, options_len, options_kind, text, back, border) = match item_tag {
+            "LabelField" => ("1", 20, "11", Some(8), Some(9), None),
+            "InputField" => ("2", 66, "36", Some(37), Some(38), Some(39)),
+            "CheckBoxField" => ("3", 13, "11", None, None, None),
+            "PictureField" => ("4", 24, "10", None, None, None),
+            "RadioButtonField" => ("5", 12, "8", None, None, None),
+            "SpreadSheetDocumentField" => ("6", 32, "13", None, None, Some(15)),
+            "TextDocumentField" => ("7", 16, "5", None, None, None),
+            "CalendarField" => ("8", 24, "6", None, None, None),
+            "GraphicalSchemaField" => ("14", 14, "3", None, None, None),
+            "HTMLDocumentField" => ("15", 13, "3", None, None, Some(3)),
+            "FormattedDocumentField" => ("17", 16, "1", None, None, None),
             _ => return None,
         };
         if wrapper != "37"
@@ -1143,12 +1147,69 @@ impl FormFieldTitleSchema {
             return None;
         }
         Some(Self {
+            top_level_offset,
             title_slot: 9 + top_level_offset,
+            text_color_option_slot: text,
+            back_color_option_slot: back,
+            border_color_option_slot: border,
         })
     }
 
     pub(crate) const fn title_slot(self) -> usize {
         self.title_slot
+    }
+
+    pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+        (fields.get(25 + self.top_level_offset)?.trim() == "0").then_some("Left")
+    }
+
+    pub(crate) fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(15 + self.top_level_offset)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn picture_field_file_drag_mode(self, options: &[&str]) -> Option<&'static str> {
+        (options.get(22)?.trim() == "0").then_some("AsFile")
+    }
+
+    pub(crate) const fn text_color_option_slot(self) -> Option<usize> {
+        self.text_color_option_slot
+    }
+
+    pub(crate) const fn back_color_option_slot(self) -> Option<usize> {
+        self.back_color_option_slot
+    }
+
+    pub(crate) const fn border_color_option_slot(self) -> Option<usize> {
+        self.border_color_option_slot
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormButtonColorSchema;
+
+impl FormButtonColorSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+    ) -> Option<Self> {
+        (wrapper == "31" && field_count == 52 && item_tag == "Button").then_some(Self)
+    }
+
+    pub(crate) const fn back_color_slot(self) -> usize {
+        19
+    }
+
+    pub(crate) const fn text_color_slot(self) -> usize {
+        20
+    }
+
+    pub(crate) const fn border_color_slot(self) -> usize {
+        21
     }
 }
 
@@ -1453,6 +1514,7 @@ impl FormChildItemVisibleSchema {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormChildItemShowTitleSchema {
     option_slot: usize,
+    back_color_option_slot: Option<usize>,
 }
 
 impl FormChildItemShowTitleSchema {
@@ -1468,22 +1530,29 @@ impl FormChildItemShowTitleSchema {
         if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
             return None;
         }
-        let option_slot = match (
+        let (option_slot, back_color_option_slot) = match (
             item_tag,
             direct_discriminator,
             options.len(),
             options.first().map(|field| field.trim()),
         ) {
-            ("ColumnGroup", Some("2"), 12, Some("2")) => 2,
-            ("Page", Some("4"), 20, Some("18")) => 6,
-            ("UsualGroup", Some("5"), 29, Some("29")) => 4,
+            ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None),
+            ("Page", Some("4"), 20, Some("18")) => (6, Some(9)),
+            ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9)),
             _ => return None,
         };
-        Some(Self { option_slot })
+        Some(Self {
+            option_slot,
+            back_color_option_slot,
+        })
     }
 
     pub(crate) fn show_title(self, options: &[&str]) -> Option<bool> {
         (options.get(self.option_slot)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) const fn back_color_option_slot(self) -> Option<usize> {
+        self.back_color_option_slot
     }
 }
 
@@ -1846,6 +1915,9 @@ pub(crate) enum FormTableXmlProperty {
     DataPath,
     RowPictureDataPath,
     RowsPicture,
+    BackColor,
+    TextColor,
+    BorderColor,
     Title,
     CommandSet,
     AutoRefresh,
@@ -1894,6 +1966,9 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::DataPath,
     FormTableXmlProperty::RowPictureDataPath,
     FormTableXmlProperty::RowsPicture,
+    FormTableXmlProperty::BackColor,
+    FormTableXmlProperty::TextColor,
+    FormTableXmlProperty::BorderColor,
     FormTableXmlProperty::Title,
     FormTableXmlProperty::CommandSet,
     FormTableXmlProperty::AutoRefresh,
@@ -1991,6 +2066,9 @@ impl FormTableSchema {
     const DATA_PATH_SLOT: usize = 11;
     const ROW_PICTURE_DATA_PATH_SLOT: usize = 43;
     const ROWS_PICTURE_SLOT: usize = 44;
+    const BACK_COLOR_SLOT: usize = 45;
+    const TEXT_COLOR_SLOT: usize = 46;
+    const BORDER_COLOR_SLOT: usize = 47;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -2023,6 +2101,18 @@ impl FormTableSchema {
 
     pub(crate) const fn rows_picture_slot(self) -> usize {
         Self::ROWS_PICTURE_SLOT
+    }
+
+    pub(crate) const fn back_color_slot(self) -> usize {
+        Self::BACK_COLOR_SLOT
+    }
+
+    pub(crate) const fn text_color_slot(self) -> usize {
+        Self::TEXT_COLOR_SLOT
+    }
+
+    pub(crate) const fn border_color_slot(self) -> usize {
+        Self::BORDER_COLOR_SLOT
     }
 
     pub(crate) fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {

@@ -6,14 +6,14 @@ use crate::form_schema::{
     FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER,
     FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER, FORM_TABLE_XML_ORDER,
-    FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER, FormCheckBoxFieldSchema,
-    FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
-    FormChildItemVisibleSchema, FormCommandInterfaceContainerOwner,
+    FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER, FormButtonColorSchema,
+    FormCheckBoxFieldSchema, FormChildItemAlignment, FormChildItemShowTitleSchema,
+    FormChildItemUserVisibleSchema, FormChildItemVisibleSchema, FormCommandInterfaceContainerOwner,
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormConditionalGroupSchema, FormConditionalTableSchema,
     FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
     FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
-    FormFieldHeaderPictureXmlProperty, FormFieldTitleSchema, FormFieldTopLevelSlot as FieldSlot,
+    FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
@@ -89,7 +89,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let mut properties = extract_form_body_properties(&form_fields);
+    let mut properties = extract_form_body_properties(&form_fields, form_owner_reference);
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_properties_cpu_ms += elapsed_ms(started);
     }
@@ -259,9 +259,6 @@ pub(super) const FORM_VIEW_MODE_APPLICATION_ON_SET_REPORT_RESULT_UUID: &str =
     "874260df-7e23-4f02-9e10-5794914b5adf";
 pub(super) const FORM_REPORT_ATTRIBUTE_REF_UUID: &str = "11cfd3e0-86f8-4480-aaa5-dc6a6ccac689";
 pub(super) const FORM_UPDATE_ON_DATA_CHANGE_UUID: &str = "eac7bfa0-10b4-4369-996c-d258871ad519";
-pub(super) const FORM_COMMAND_CHANGE_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
-pub(super) const FORM_COMMAND_COPY_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
-pub(super) const FORM_COMMAND_CREATE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
 pub(super) const FORM_COMMAND_CUSTOMIZE_FORM_UUID: &str = "198ea630-fda2-4cda-8a23-f999f4c67ee6";
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -559,6 +556,8 @@ pub(super) struct FormChildItem {
     pub(super) footer_horizontal_align: Option<&'static str>,
     pub(super) hiperlink: Option<bool>,
     pub(super) text_color: Option<String>,
+    pub(super) back_color: Option<String>,
+    pub(super) border_color: Option<String>,
     pub(super) title_text_color: Option<String>,
     pub(super) mark_required_complete: Option<bool>,
     pub(super) auto_edit_mode: Option<bool>,
@@ -658,7 +657,10 @@ pub(super) struct FormTablePeriod {
     pub(super) end_date: String,
 }
 
-pub(super) fn extract_form_body_properties(fields: &[&str]) -> FormBodyProperties {
+pub(super) fn extract_form_body_properties(
+    fields: &[&str],
+    form_owner_reference: Option<&str>,
+) -> FormBodyProperties {
     let report_form_type = extract_form_report_form_type(fields);
     FormBodyProperties {
         title: fields
@@ -680,7 +682,10 @@ pub(super) fn extract_form_body_properties(fields: &[&str]) -> FormBodyPropertie
         use_posting_mode: extract_form_use_posting_mode(fields),
         repost_on_write: extract_form_repost_on_write(fields),
         auto_fill_check: extract_form_auto_fill_check(fields),
-        command_set_excluded_commands: extract_form_command_set_excluded_commands(fields),
+        command_set_excluded_commands: extract_form_command_set_excluded_commands(
+            fields,
+            form_owner_reference,
+        ),
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
         command_bar_location: extract_form_command_bar_location(fields),
@@ -781,94 +786,43 @@ pub(super) fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
     }
 }
 
-pub(super) fn extract_form_command_set_excluded_commands(fields: &[&str]) -> Vec<&'static str> {
-    let Some(command_set) = find_form_root_command_set_field(fields) else {
+pub(super) fn extract_form_command_set_excluded_commands(
+    fields: &[&str],
+    form_owner_reference: Option<&str>,
+) -> Vec<&'static str> {
+    let Some(property_count) = fields
+        .get(18)
+        .and_then(|value| value.trim().parse::<usize>().ok())
+    else {
         return Vec::new();
     };
-    let uuids: Vec<&str> = command_set.iter().skip(1).map(|uuid| uuid.trim()).collect();
-    match uuids.as_slice() {
-        [
-            "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d",
-            "0ea1a92b-3477-44dd-b152-ea7d411f1c5d",
-            "239f0103-8de9-4fdf-b485-eb5531da7e51",
-            "39bb0fe9-771d-4dd5-8a6e-2d16984523af",
-            "3f01ed62-97f8-465b-b4f7-6517ac2bc994",
-            "5174ad3f-0569-42fd-8adf-011d8206db6c",
-            "573e81b7-57eb-45f0-ba4d-ada7c2537a2d",
-            "5d41082e-9619-42ec-b96f-98b082b3a2f0",
-            "679b62d9-ff72-4329-bf3a-c0c32b311dd2",
-            "71e0226e-ebb2-4e33-8745-0a94a01bbf15",
-            "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7",
-            "f3613d5c-20c6-46e5-b4d5-7d712ece1296",
-        ] => {
-            return vec![
-                "Abort",
-                "Cancel",
-                "Help",
-                "Ignore",
-                "No",
-                "OK",
-                "OpenFromMainServer",
-                "OpenFromStandaloneServer",
-                "RestoreValues",
-                "Retry",
-                "SaveValues",
-                "Yes",
-            ];
-        }
-        [
-            "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d",
-            "3f01ed62-97f8-465b-b4f7-6517ac2bc994",
-            "5174ad3f-0569-42fd-8adf-011d8206db6c",
-            "5d41082e-9619-42ec-b96f-98b082b3a2f0",
-            "679b62d9-ff72-4329-bf3a-c0c32b311dd2",
-            "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7",
-            "f3613d5c-20c6-46e5-b4d5-7d712ece1296",
-        ] => {
-            return vec!["Abort", "Cancel", "Ignore", "No", "OK", "Retry", "Yes"];
-        }
-        _ => {}
-    }
-    let mut commands: Vec<_> = uuids
+    let Some(command_slot) = property_count
+        .checked_mul(2)
+        .and_then(|offset| 20usize.checked_add(offset))
+    else {
+        return Vec::new();
+    };
+    let Some(command_set) = fields
+        .get(command_slot)
+        .and_then(|field| parse_form_table_counted_uuid_list(field))
+    else {
+        return Vec::new();
+    };
+    let business_process_or_task = form_owner_reference.is_some_and(|owner| {
+        matches!(
+            owner.split_once('.').map(|(kind, _)| kind),
+            Some("BusinessProcess" | "Task")
+        )
+    });
+    let Some(mut commands) = command_set
         .iter()
-        .filter_map(|uuid| form_standard_excluded_command_name(uuid))
-        .collect();
-    commands.sort_by_key(|command| form_standard_excluded_command_rank(command));
+        .map(|uuid| form_standard_excluded_command_name(uuid, business_process_or_task))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Vec::new();
+    };
+    commands.sort_unstable();
     commands
-}
-
-pub(super) fn form_standard_excluded_command_rank(command: &str) -> usize {
-    match command {
-        "Abort" => 0,
-        "Cancel" => 1,
-        "Close" => 2,
-        "CustomizeForm" => 3,
-        "Help" => 4,
-        "Ignore" => 5,
-        "No" => 6,
-        "OK" => 7,
-        "OpenFromMainServer" => 8,
-        "OpenFromStandaloneServer" => 9,
-        "RestoreValues" => 10,
-        "Retry" => 11,
-        "SaveValues" => 12,
-        "Write" => 13,
-        "WriteAndClose" => 14,
-        "Yes" => 15,
-        "Change" => 16,
-        "Copy" => 17,
-        "Create" => 18,
-        "CancelSearch" => 19,
-        "DynamicListStandardSettings" => 20,
-        "Find" => 21,
-        "FindByCurrentValue" => 22,
-        "ListSettings" => 23,
-        "LoadDynamicListSettings" => 24,
-        "OutputList" => 25,
-        "Refresh" => 26,
-        "SaveDynamicListSettings" => 27,
-        _ => usize::MAX,
-    }
 }
 
 pub(super) fn extract_form_auto_time(fields: &[&str]) -> Option<&'static str> {
@@ -1215,65 +1169,82 @@ pub(super) fn form_root_property_bag_value<'a>(
     None
 }
 
-pub(super) fn find_form_root_command_set_field<'a>(fields: &'a [&str]) -> Option<Vec<&'a str>> {
-    for field in fields {
-        let value = field.trim();
-        if !value.starts_with('{') {
-            continue;
-        }
-        let Some(nested) = split_1c_braced_fields(value, 0) else {
-            continue;
-        };
-        let Some(count) = nested
-            .first()
-            .and_then(|value| value.trim().parse::<usize>().ok())
-        else {
-            continue;
-        };
-        if count == 0 || count != nested.len().saturating_sub(1) {
-            continue;
-        }
-        if nested
-            .iter()
-            .skip(1)
-            .all(|uuid| form_standard_excluded_command_name(uuid.trim()).is_some())
-        {
-            return Some(nested);
-        }
+pub(super) fn form_standard_excluded_command_name(
+    uuid: &str,
+    business_process_or_task: bool,
+) -> Option<&'static str> {
+    if business_process_or_task && uuid == "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" {
+        return Some("ExecuteAndClose");
     }
-    None
-}
-
-pub(super) fn form_standard_excluded_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
         "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("No"),
-        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("CancelSearch"),
+        "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Tree"),
         "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromMainServer"),
-        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("RestoreValues"),
+        "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("ReportSettings"),
+        "174e58ce-82ad-4787-b956-9367937f7971" => Some("ChangeHistory"),
+        "198ea630-fda2-4cda-8a23-f999f4c67ee6" => Some("CustomizeForm"),
+        "1c00edb8-a826-4855-9bde-94dbc5f620e5" => Some("ListSettings"),
+        "1cc781aa-f32b-4dc7-996a-6c38c3deda5c" => Some("Delete"),
+        "1f317795-c420-4a30-b594-c492abc55f7a" => Some("Reread"),
+        "239f0103-8de9-4fdf-b485-eb5531da7e51" => Some("SaveValues"),
+        "2cacadf7-8fb3-4ec6-ae2b-0ca3fd311c9e" => Some("Execute"),
+        "2e86453d-8958-4c9a-a1b4-b15215eedc2e" => Some("SetDeletionMark"),
         "32df4349-2607-4c2b-a4b9-bca4a1a28bd7" => Some("WriteAndClose"),
+        "3328a951-c3c8-4f22-b99e-814f7cea6b82" => Some("ReadChanges"),
+        "342c531d-dc73-458a-8ac4-6a746916a33b" => Some("Copy"),
         "3772996b-41f4-4c47-a5a8-ea397db424ae" => Some("Close"),
+        "389ef1f1-97ce-4326-adf5-886b2dead75c" => Some("UndoPosting"),
         "39bb0fe9-771d-4dd5-8a6e-2d16984523af" => Some("Help"),
+        "39c6a2fb-45cc-41b1-853f-967fb68aa1df" => Some("MoveItem"),
+        "3a17e914-ec6a-4280-b4df-78914f40522b" => Some("ShowInList"),
+        "3b8cedbc-8e74-4017-b901-d14b09f32f7a" => Some("Post"),
+        "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Delete"),
+        "3ea8bf45-5f33-4545-a3bb-29f80666b627" => Some("ChangeSettingsStructure"),
         "3f01ed62-97f8-465b-b4f7-6517ac2bc994" => Some("Abort"),
+        "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Create"),
         "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Retry"),
         "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromStandaloneServer"),
         "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Yes"),
         "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Cancel"),
-        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("SaveValues"),
-        "952c2984-9955-415a-8235-5c710aabe732" => Some("DynamicListStandardSettings"),
-        "96e0bc70-f8ff-4732-8119-060923203629" => Some("Find"),
-        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("FindByCurrentValue"),
-        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("ListSettings"),
-        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("LoadDynamicListSettings"),
-        "d5c3842d-7252-4370-9174-756a6cc553e5" => Some("OutputList"),
-        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => Some("Refresh"),
+        "6886601d-276c-4d3f-af0a-05c586025608" => Some("Change"),
+        "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Copy"),
+        "6f959e83-23ec-4991-901d-575d7ea98868" => Some("Activate"),
+        "71e0226e-ebb2-4e33-8745-0a94a01bbf15" => Some("RestoreValues"),
+        "74c1abd6-b274-4654-baf0-7b8418b792ea" => Some("EndEdit"),
+        "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("SaveReportSettings"),
+        "8149a06a-dbf3-4d4d-a275-5385a4196fc7" => Some("CancelEdit"),
+        "827b541d-30c1-4f06-aecf-92aa496a0835" => Some("SetDeletionMark"),
+        "87317f86-057f-477e-9045-2da4e4980199" => Some("PostAndClose"),
+        "8b81add7-25af-4df7-a69c-144e3e3e4c8e" => Some("WriteChanges"),
+        "952c2984-9955-415a-8235-5c710aabe732" => Some("LoadDynamicListSettings"),
+        "96e0bc70-f8ff-4732-8119-060923203629" => Some("CancelSearch"),
+        "9758d344-4b1d-4dc9-80bd-81060bc18b2a" => Some("OutputList"),
+        "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("SaveVariant"),
+        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => Some("ShowMultipleSelection"),
+        "a29c4f3a-3b41-480a-a31e-5f9f73aa3216" => Some("WriteChanges"),
+        "a2b927a1-35af-43e3-af73-4af22ac2c0fa" => Some("List"),
+        "aa042316-63ba-4f10-8d39-3935474562d0" => Some("LevelDown"),
+        "b08b7a35-583a-4756-b814-0436ff9139c0" => Some("LoadVariant"),
+        "b0c9afb6-320c-4e36-be21-8f6d48116415" => Some("LoadReportSettings"),
+        "b520ca45-d8db-4982-b128-bb42a6afd911" => Some("FindByCurrentValue"),
+        "b5e6da6b-cec4-450c-876a-6a5f0837f6cc" => Some("Generate"),
+        "bdefa701-6685-453e-a02a-3683d0cc16d3" => Some("Find"),
+        "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Delete"),
+        "c8f1bd8c-b4d1-46d5-97b3-929b5606b6c3" => Some("StandardSettings"),
+        "c9abb6b0-eafd-4505-8312-9a7b6888cbf3" => Some("ChangeHistory"),
+        "d5c3842d-7252-4370-9174-756a6cc553e5" => Some("SaveDynamicListSettings"),
+        "d603a249-6eb3-4e38-bb2d-a8a86a8ab156" => Some("DynamicListStandardSettings"),
         "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7" => Some("Ignore"),
-        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("SaveDynamicListSettings"),
+        "d82e191e-f052-40ee-8691-00cac5b34629" => Some("CreateInitialImage"),
+        "d8772fd1-a3bf-417d-8334-c49968dbb45e" => Some("CreateFolder"),
+        "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb" => Some("LevelUp"),
+        "e7ae2a27-60a2-44ae-ab1d-f307d11c85bf" => Some("ReadChanges"),
         "f3613d5c-20c6-46e5-b4d5-7d712ece1296" => Some("OK"),
+        "f4613f71-5449-48ed-aea5-de005b272a1d" => Some("SwitchActivity"),
+        "fb9d7977-258a-440a-9b59-0a650c86f6a2" => Some("ChangeVariant"),
+        "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Refresh"),
         "fe558fde-99b3-45d0-a060-9fc2905309f6" => Some("Write"),
-        FORM_COMMAND_CHANGE_UUID => Some("Change"),
-        FORM_COMMAND_COPY_UUID => Some("Copy"),
-        FORM_COMMAND_CREATE_UUID => Some("Create"),
-        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("CustomizeForm"),
+        "ffc5e8d5-40a7-4893-a590-49bd588f9466" => Some("HierarchicalList"),
         _ => None,
     }
 }
@@ -4370,6 +4341,21 @@ fn parse_form_child_item_with_metadata_owners(
     let direct_discriminator = fields
         .get(5 + input_field_top_level_offset)
         .map(|field| field.trim());
+    let field_schema_and_options = fields
+        .get(FormFieldSchema::OPTIONS_BASE_SLOT + input_field_top_level_offset)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        .and_then(|options| {
+            FormFieldSchema::from_raw_layout(
+                wrapper,
+                fields.len(),
+                tag,
+                input_field_top_level_offset,
+                direct_discriminator,
+                &options,
+            )
+            .map(|schema| (schema, options))
+        });
+    let button_color_schema = FormButtonColorSchema::from_raw_layout(wrapper, fields.len(), tag);
     let user_visible_schema = if tag == "Button" {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,
@@ -4564,8 +4550,7 @@ fn parse_form_child_item_with_metadata_owners(
         tag,
         wrapper,
         &fields,
-        input_field_top_level_offset,
-        direct_discriminator,
+        field_schema_and_options.as_ref().map(|(schema, _)| *schema),
     );
     let input_hint = (tag == "InputField")
         .then(|| parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
@@ -4724,7 +4709,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_file_drag_mode(&fields)
         } else if tag == "PictureField" {
-            parse_form_picture_field_file_drag_mode(picture_field_options.as_deref())
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| schema.picture_field_file_drag_mode(options))
         } else {
             None
         },
@@ -4751,7 +4738,9 @@ fn parse_form_child_item_with_metadata_owners(
         change_row_order: table_schema.and_then(|schema| schema.change_row_order(&fields)),
         command_set_excluded_commands: table_schema
             .map(|schema| parse_form_table_command_set_excluded_commands_for_table(schema, &fields))
-            .unwrap_or_default(),
+            .unwrap_or_else(|| {
+                parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
+            }),
         use_alternation_row_color: table_schema
             .and_then(|schema| schema.use_alternation_row_color(&fields)),
         default_item: if tag == "Table" {
@@ -4996,10 +4985,8 @@ fn parse_form_child_item_with_metadata_owners(
             fields
                 .get(29 + button_top_level_offset)
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
-        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            fields
-                .get(15 + input_field_top_level_offset)
-                .and_then(|field| parse_form_input_field_skip_on_input(field))
+        } else if let Some((schema, _)) = field_schema_and_options.as_ref() {
+            schema.skip_on_input(&fields)
         } else if tag == "LabelDecoration" {
             label_decoration_options
                 .as_ref()
@@ -5088,7 +5075,9 @@ fn parse_form_child_item_with_metadata_owners(
         },
         cell_hyperlink: None,
         show_in_footer: None,
-        footer_horizontal_align: None,
+        footer_horizontal_align: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.footer_horizontal_align(&fields)),
         hiperlink: if (tag == "LabelField"
             && label_field_options
                 .as_ref()
@@ -5102,18 +5091,95 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        text_color: if tag == "LabelField" {
+        text_color: if let Some(schema) = button_color_schema {
+            fields
+                .get(schema.text_color_slot())
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if tag == "InputField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| options.get(schema.text_color_option_slot()?))
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if let Some(schema) = table_schema {
+            fields
+                .get(schema.text_color_slot())
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if tag == "LabelField"
+            && let Some(value) = field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| options.get(schema.text_color_option_slot()?))
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        {
+            Some(value)
+        } else if tag == "LabelField" {
             label_field_options
                 .as_ref()
                 .and_then(|options| options.text_color.clone())
-        } else if tag == "LabelDecoration" && !title.is_empty() {
-            fields
-                .get(14)
-                .and_then(|field| parse_form_label_field_text_color(field, object_refs))
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.text_color.clone())
         } else if tag == "PictureDecoration" {
             fields
                 .get(14)
                 .and_then(|field| parse_form_label_field_text_color(field, object_refs))
+        } else {
+            None
+        },
+        back_color: if let Some(schema) = button_color_schema {
+            fields
+                .get(schema.back_color_slot())
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if tag == "InputField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| options.get(schema.back_color_option_slot()?))
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if let Some(schema) = table_schema {
+            fields
+                .get(schema.back_color_slot())
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if let Some(value) = field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| options.get(schema.back_color_option_slot()?))
+            .and_then(|field| parse_form_control_color(field, object_refs))
+        {
+            Some(value)
+        } else if tag == "LabelDecoration" {
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.back_color.clone())
+        } else if let Some(value) = show_title_schema
+            .and_then(|schema| {
+                show_title_options
+                    .as_deref()?
+                    .get(schema.back_color_option_slot()?)
+            })
+            .and_then(|field| parse_form_control_color(field, object_refs))
+        {
+            Some(value)
+        } else {
+            None
+        },
+        border_color: if let Some(schema) = button_color_schema {
+            fields
+                .get(schema.border_color_slot())
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if tag == "InputField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| options.get(schema.border_color_option_slot()?))
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if let Some(schema) = table_schema {
+            fields
+                .get(schema.border_color_slot())
+                .and_then(|field| parse_form_control_color(field, object_refs))
+        } else if let Some(value) = field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| options.get(schema.border_color_option_slot()?))
+            .and_then(|field| parse_form_control_color(field, object_refs))
+        {
+            Some(value)
         } else {
             None
         },
@@ -5938,6 +6004,8 @@ pub(super) struct FormLabelFieldOptions {
 pub(super) struct FormLabelDecorationOptions {
     pub(super) hyperlink: bool,
     pub(super) font_xml: Option<String>,
+    pub(super) text_color: Option<String>,
+    pub(super) back_color: Option<String>,
     pub(super) display_importance: Option<&'static str>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) alignment: FormLabelDecorationAlignment,
@@ -6094,6 +6162,68 @@ pub(super) fn parse_form_label_field_text_color(
     }
 }
 
+pub(super) fn parse_form_control_color(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let color = split_1c_braced_fields(field.trim(), 0)?;
+    if color.len() != 3 || color.first()?.trim() != "3" {
+        return None;
+    }
+    let variant = color.get(1)?.trim();
+    let payload = split_1c_braced_fields(color.get(2)?.trim(), 0)?;
+    match variant {
+        "0" if payload.len() == 1 => {
+            let value = payload.first()?.trim().parse::<u32>().ok()? & 0x00ff_ffff;
+            let red = value & 0xff;
+            let green = (value >> 8) & 0xff;
+            let blue = (value >> 16) & 0xff;
+            Some(format!("#{red:02X}{green:02X}{blue:02X}"))
+        }
+        "2" if payload.len() == 1 => payload
+            .first()?
+            .trim()
+            .parse::<i32>()
+            .ok()
+            .and_then(style_web_color_name)
+            .map(ToOwned::to_owned),
+        "3" if payload.len() == 1 => payload
+            .first()?
+            .trim()
+            .parse::<i32>()
+            .ok()
+            .and_then(form_control_system_color_name)
+            .map(ToOwned::to_owned),
+        "3" if payload.len() == 2 && payload.first()?.trim() == "0" => {
+            let uuid = parse_non_zero_uuid(payload.get(1)?.trim())?;
+            object_refs
+                .get(&uuid)
+                .and_then(|reference| reference.strip_prefix("StyleItem."))
+                .map(|name| format!("style:{name}"))
+        }
+        "4" if payload.len() == 1 && payload.first()?.trim() == "0" => None,
+        _ => None,
+    }
+}
+
+fn form_control_system_color_name(code: i32) -> Option<&'static str> {
+    match code {
+        -1 => Some("style:FormBackColor"),
+        -3 => Some("style:FormTextColor"),
+        -7 => Some("style:ButtonBackColor"),
+        -10 => Some("style:FieldBackColor"),
+        -11 => Some("style:FieldTextColor"),
+        -14 => Some("style:FieldSelectionBackColor"),
+        -16 => Some("style:SpecialTextColor"),
+        -21 => Some("style:ButtonTextColor"),
+        -22 => Some("style:BorderColor"),
+        -23 => Some("style:ToolTipBackColor"),
+        -37 => Some("style:TableFooterBackColor"),
+        -46 => Some("style:AccentColor"),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_form_label_decoration_options(
     item_tag: &str,
     fields: &[&str],
@@ -6115,6 +6245,12 @@ pub(super) fn parse_form_label_decoration_options(
         font_xml: fields
             .get(15)
             .and_then(|field| parse_form_font_tuple_xml(field, object_refs)),
+        text_color: fields
+            .get(14)
+            .and_then(|field| parse_form_control_color(field, object_refs)),
+        back_color: options
+            .get(6)
+            .and_then(|field| parse_form_control_color(field, object_refs)),
         display_importance: schema.display_importance(fields),
         group_horizontal_align: fields
             .get(schema.group_horizontal_align_slot())
@@ -7834,6 +7970,44 @@ fn parse_form_table_command_set_excluded_commands_for_table(
     map_form_table_excluded_commands(schema, &uuids).unwrap_or_default()
 }
 
+fn parse_form_field_command_set_excluded_commands(
+    wrapper: &str,
+    item_tag: &str,
+    fields: &[&str],
+) -> Vec<&'static str> {
+    if wrapper != "37"
+        || fields.len() != 59
+        || fields.get(47).map(|field| field.trim()) != Some("\"\"")
+        || fields.get(49).map(|field| field.trim()) != Some("0")
+    {
+        return Vec::new();
+    }
+    let mapper: fn(&str) -> Option<&'static str> =
+        match (item_tag, fields.get(5).map(|field| field.trim())) {
+            ("SpreadSheetDocumentField", Some("6")) => {
+                form_spreadsheet_document_standard_command_suffix
+            }
+            ("FormattedDocumentField", Some("17")) => {
+                form_formatted_document_standard_command_suffix
+            }
+            _ => return Vec::new(),
+        };
+    let Some(mut commands) = fields
+        .get(48)
+        .and_then(|field| parse_form_table_counted_uuid_list(field))
+        .and_then(|uuids| {
+            uuids
+                .iter()
+                .map(|uuid| mapper(uuid))
+                .collect::<Option<Vec<_>>>()
+        })
+    else {
+        return Vec::new();
+    };
+    commands.sort_unstable();
+    commands
+}
+
 #[cfg(test)]
 pub(super) fn parse_form_table_command_set_excluded_commands(fields: &[&str]) -> Vec<&'static str> {
     for field in fields {
@@ -8016,26 +8190,14 @@ pub(super) fn parse_form_child_item_title(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
-    top_level_offset: usize,
-    direct_discriminator: Option<&str>,
+    field_schema: Option<FormFieldSchema>,
 ) -> (Vec<(String, String)>, Option<bool>) {
     if tag == "LabelDecoration"
         && let Some(title) = parse_form_label_decoration_title(fields)
     {
         return title;
     }
-    if let Some(options) = fields
-        .get(FormFieldTitleSchema::OPTIONS_BASE_SLOT + top_level_offset)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
-        && let Some(schema) = FormFieldTitleSchema::from_raw_layout(
-            wrapper,
-            fields.len(),
-            tag,
-            top_level_offset,
-            direct_discriminator,
-            &options,
-        )
-    {
+    if let Some(schema) = field_schema {
         return (
             fields
                 .get(schema.title_slot())
@@ -8470,15 +8632,6 @@ pub(super) fn parse_form_picture_field_picture_size(
         .and_then(|options| options.get(8))
         .and_then(|field| field.trim().parse::<usize>().ok())
         .and_then(moxel_picture_size_mode)
-}
-
-pub(super) fn parse_form_picture_field_file_drag_mode(
-    options: Option<&[&str]>,
-) -> Option<&'static str> {
-    match options?.get(17).map(|field| field.trim()) {
-        Some("1") => Some("AsFile"),
-        _ => None,
-    }
 }
 
 pub(super) fn parse_form_picture_decoration_file_drag_mode(
@@ -9473,18 +9626,36 @@ pub(super) fn form_standard_button_command_name(uuid: &str) -> Option<&'static s
 
 pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "0bdc43a3-79f0-48d6-bce4-1142542e1a59" => Some("IncreaseFontSize"),
+        "17724105-6e59-4d52-8a42-cf0fb4838037" => Some("BackColor"),
+        "2b5d0007-b74c-4786-a904-37e64bda8414" => Some("NumberedList"),
         "b67f202a-dcf8-41f3-bda8-1ff9bed5f2ef" => Some("SelectAll"),
         "39f6b9f1-7aa1-4a03-a01b-e127d51bc228" => Some("DecreaseIndent"),
+        "408f351e-0536-46be-8916-a891db9bfbe6" => Some("LineSpacing"),
         "4ca32834-6f9f-4dfb-89ce-6db36931c89b" => Some("Preview"),
         "56ae90b6-588f-406e-919c-cc5cc7f86297" => Some("AlignJustify"),
         "5a331cec-bf93-4af5-8f51-80fd7118db47" => Some("SaveAs"),
+        "6d83186a-5838-40a5-95e7-8990193adf0a" => Some("Hyperlink"),
+        "6f1ea963-0807-4de8-b544-b5666f500b05" => Some("Redo"),
+        "71007f7d-1995-44aa-9125-9926e70a35b5" => Some("TextColor"),
         "7a294bdc-b86b-4b73-abc4-df9c811f61ef" => Some("CopyToClipboard"),
+        "83670388-2e45-439e-9968-587eca6c7f8d" => Some("CutToClipboard"),
+        "85bd789b-0047-46f9-9b2e-845907fc1b1d" => Some("Underline"),
+        "871100d5-049d-4b22-a46a-fabf54bd64c3" => Some("Char"),
         "87ecfbdd-8e2b-4ba2-a315-0897020f382f" => Some("AlignLeft"),
+        "905692d2-c3e7-4433-8f10-8d2ce35f652b" => Some("PasteFromClipboard"),
         "9d8a3915-de52-4227-91cd-2fce22e09972" => Some("Picture"),
+        "a0033f06-56f7-4855-b901-7ac66fe1bb99" => Some("BulletedList"),
         "a8483976-8b13-416a-9680-133b306dc6b0" => Some("Print"),
+        "a8631f01-318a-4da2-80a9-9075c7524463" => Some("Italic"),
+        "a8f6b59e-b712-4d3e-a974-55a3be4eb295" => Some("Font"),
         "ab0ebc39-68ee-4034-b2f4-43eee55bd651" => Some("AlignCenter"),
         "d0a4d953-115b-4059-a6cb-6e67f903a4f3" => Some("IncreaseIndent"),
+        "db1cd9b3-bdf4-43f5-abd6-c2e4bd85d709" => Some("Strikeout"),
         "e428af27-c4f7-4577-b80e-95a79f94322d" => Some("AlignRight"),
+        "ec647dcc-2be7-486c-9046-d8b371f9909e" => Some("DecreaseFontSize"),
+        "f20eefc2-f819-4ab1-be67-87b3ca2e26e6" => Some("Bold"),
+        "f5814962-2bef-43dd-b633-a193d4b0970e" => Some("Undo"),
         _ => None,
     }
 }
@@ -9566,6 +9737,46 @@ pub(super) fn form_spreadsheet_document_standard_command_suffix(
         "ff533ae0-46a9-4e1d-aa3a-6dffa27e076b" => Some("SearchEverywhere"),
         "7eae9c22-db31-4f27-a56a-b4dd62d21a2c" => Some("ClearContent"),
         "ff5c34f8-b172-4ef2-91d3-48283a66a725" => Some("CollapseAllGroups"),
+        "05e95a55-947e-4dde-a657-16ec11750a2f" => Some("Font"),
+        "08fdfb5b-192a-41a9-b57a-9781cd3ef7b6" => Some("ShowRowAndColumnNames"),
+        "0c66c888-7512-402c-941d-96bec0e5749a" => Some("ShowCellNames"),
+        "0e8c7cb4-f146-4208-af36-b3f8c7d71b66" => Some("RemoveRepeatOnEachPage"),
+        "14bd1c58-da9d-41db-a515-75f8b39fdc52" => Some("SendDrawingToBack"),
+        "17724105-6e59-4d52-8a42-cf0fb4838037" => Some("BackColor"),
+        "1c7e6bb5-54ac-4ebf-8823-e92b3cf629da" => Some("PageViewMode"),
+        "2da58c85-ae4d-403f-b0e2-c50027a5467f" => Some("HeaderFooter"),
+        "3a7ef674-f589-4734-9b22-954ea64dc79f" => Some("RemovePageBreak"),
+        "3e15759b-551a-46c4-8d24-8d6df22a1a64" => Some("NextComment"),
+        "41f3fbde-476a-4984-bd12-b32e990af811" => Some("RemovePrintArea"),
+        "4402cb7a-f68e-44cd-9478-52a695b18a25" => Some("CombineToGroup"),
+        "474180f3-c5bd-49bf-bfd4-fddb03918295" => Some("FindPrevious"),
+        "49a22a23-d2cf-4f84-97ae-66f94f863145" => Some("BringDrawingForward"),
+        "5ccf1fce-3fab-4fb6-ac04-a9b2cf689cee" => Some("EqualDrawingWidth"),
+        "60abcc40-dc62-4d03-833b-7b8ab8232d2c" => Some("DistributeDrawingsHorizontally"),
+        "6728e5c7-8f67-4b0d-bd6f-90b728218fe3" => Some("SetPrintArea"),
+        "69333d9f-28d1-446b-bd9a-cf8f85cf1704" => Some("RemoveFromGroup"),
+        "6f1ea963-0807-4de8-b544-b5666f500b05" => Some("Redo"),
+        "71007f7d-1995-44aa-9125-9926e70a35b5" => Some("TextColor"),
+        "719daaab-c2d0-473d-b373-faf18ebe7d9d" => Some("AlignDrawingMiddle"),
+        "7e79f8d3-6cab-49d5-aac0-43f5056ed958" => Some("SendDrawingBackward"),
+        "7f3f496d-506c-4239-98fb-58e1ea6ba54a" => Some("DistributeDrawingsVertically"),
+        "80a0b41c-24df-40e4-8269-683fb557214d" => Some("AlignDrawingRight"),
+        "83c3121e-60cc-4b47-a296-0c1976f0d766" => Some("ShowGrid"),
+        "952af05e-0771-4c26-adb6-a3418a262e4a" => Some("InsertPageBreak"),
+        "95dbc17e-d11e-4008-b9a9-24d5f5b1d061" => Some("ShowComments"),
+        "9e525e9b-99ed-4d89-9f02-2bf449ba65e6" => Some("BlackAndWhiteView"),
+        "9f71febd-8c22-4471-8410-31f455bb3c57" => Some("AlignDrawingBottom"),
+        "b383fa5a-2324-4e7e-a166-aabb5d64aea3" => Some("BringDrawingToFront"),
+        "c1c95e8a-37b4-477c-9df1-7bc0fdbc1bd3" => Some("BorderColor"),
+        "c50fd6b2-51a1-47e0-8cd3-84b16823287c" => Some("RepeatOnEachPage"),
+        "e1ae173a-22c3-4909-a72c-5454b64c6446" => Some("PreviousComment"),
+        "ee0aab77-fd5f-4594-9c5e-e989a953642f" => Some("AlignDrawingLeft"),
+        "f2b6b156-d929-4be2-af5b-9c9b792524bb" => Some("AlignDrawingCenter"),
+        "f5773ab5-4036-49ca-8286-7a4ea2c354d7" => Some("EqualDrawingHeight"),
+        "f5814962-2bef-43dd-b633-a193d4b0970e" => Some("Undo"),
+        "f9395bfa-9301-4cec-8c1e-e2b62fb3abd6" => Some("AlignDrawingTop"),
+        "fd523437-4160-4a52-a70b-9166c7eebcf0" => Some("EqualDrawingSize"),
+        "feb51db7-bc1f-4b9f-a6e6-db24d5f812ab" => Some("Names"),
         _ => None,
     }
 }
@@ -10792,6 +11003,26 @@ fn format_form_table_property_xml(
                 xml
             }
         }
+        FormTableXmlProperty::BackColor => item
+            .back_color
+            .as_ref()
+            .map(|value| format!("{tab}<BackColor>{}</BackColor>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::TextColor => item
+            .text_color
+            .as_ref()
+            .map(|value| format!("{tab}<TextColor>{}</TextColor>\r\n", escape_xml_text(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::BorderColor => item
+            .border_color
+            .as_ref()
+            .map(|value| {
+                format!(
+                    "{tab}<BorderColor>{}</BorderColor>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::Title => format_form_localized_section("Title", &item.title, indent),
         FormTableXmlProperty::CommandSet => {
             if item.command_set_excluded_commands.is_empty() {
@@ -10897,6 +11128,24 @@ fn format_form_table_property_xml(
             })
             .unwrap_or_default(),
     }
+}
+
+fn format_form_control_colors_xml(item: &FormChildItem, indent: usize) -> String {
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for (name, value) in [
+        ("TextColor", item.text_color.as_ref()),
+        ("BackColor", item.back_color.as_ref()),
+        ("BorderColor", item.border_color.as_ref()),
+    ] {
+        if let Some(value) = value {
+            xml.push_str(&format!(
+                "{tab}<{name}>{}</{name}>\r\n",
+                escape_xml_text(value)
+            ));
+        }
+    }
+    xml
 }
 
 pub(super) fn format_form_child_item_xml(
@@ -11063,8 +11312,10 @@ pub(super) fn format_form_child_item_xml(
     if read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
-    if item.tag == "InputField"
-        && let Some(skip_on_input) = item.skip_on_input
+    if !matches!(
+        item.tag,
+        "Button" | "Table" | "LabelDecoration" | "PictureDecoration"
+    ) && let Some(skip_on_input) = item.skip_on_input
     {
         xml.push_str(&format!(
             "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
@@ -11099,10 +11350,7 @@ pub(super) fn format_form_child_item_xml(
     if item.tag != "Table" && item.read_only == Some(true) && !read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
-    if item.tag != "LabelDecoration"
-        && item.tag != "PictureDecoration"
-        && item.tag != "Table"
-        && item.tag != "InputField"
+    if item.tag == "Button"
         && let Some(skip_on_input) = item.skip_on_input
     {
         xml.push_str(&format!(
@@ -11115,6 +11363,20 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
             escape_xml_text(title_location)
         ));
+    }
+    if matches!(
+        item.tag,
+        "SpreadSheetDocumentField" | "FormattedDocumentField"
+    ) && !item.command_set_excluded_commands.is_empty()
+    {
+        xml.push_str(&format!("{tab}\t<CommandSet>\r\n"));
+        for command in &item.command_set_excluded_commands {
+            xml.push_str(&format!(
+                "{tab}\t\t<ExcludedCommand>{}</ExcludedCommand>\r\n",
+                escape_xml_text(command)
+            ));
+        }
+        xml.push_str(&format!("{tab}\t</CommandSet>\r\n"));
     }
     if matches!(
         item.tag,
@@ -11161,24 +11423,18 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(edit_mode)
         ));
     }
+    if item.cell_hyperlink == Some(true) {
+        xml.push_str(&format!("{tab}\t<CellHyperlink>true</CellHyperlink>\r\n"));
+    }
     xml.push_str(&format_form_field_header_picture_xml(item, indent + 1));
-    if item.tag == "PictureField"
-        && let Some(reference) = &item.picture_ref
-    {
+    if item.show_in_footer == Some(false) {
+        xml.push_str(&format!("{tab}\t<ShowInFooter>false</ShowInFooter>\r\n"));
+    }
+    if let Some(footer_horizontal_align) = item.footer_horizontal_align {
         xml.push_str(&format!(
-            "{tab}\t<ValuesPicture>\r\n\
-{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
-{tab}\t</ValuesPicture>\r\n",
-            escape_xml_text(reference),
-            xml_bool(item.picture_load_transparent)
+            "{tab}\t<FooterHorizontalAlign>{}</FooterHorizontalAlign>\r\n",
+            escape_xml_text(footer_horizontal_align)
         ));
-        if let Some(file_drag_mode) = item.file_drag_mode {
-            xml.push_str(&format!(
-                "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
-                escape_xml_text(file_drag_mode)
-            ));
-        }
     }
     if let Some(check_box_type) = item.check_box_type {
         xml.push_str(&format!(
@@ -11195,18 +11451,6 @@ pub(super) fn format_form_child_item_xml(
     if let Some(columns_count) = item.columns_count {
         xml.push_str(&format!(
             "{tab}\t<ColumnsCount>{columns_count}</ColumnsCount>\r\n"
-        ));
-    }
-    if item.cell_hyperlink == Some(true) {
-        xml.push_str(&format!("{tab}\t<CellHyperlink>true</CellHyperlink>\r\n"));
-    }
-    if item.show_in_footer == Some(false) {
-        xml.push_str(&format!("{tab}\t<ShowInFooter>false</ShowInFooter>\r\n"));
-    }
-    if let Some(footer_horizontal_align) = item.footer_horizontal_align {
-        xml.push_str(&format!(
-            "{tab}\t<FooterHorizontalAlign>{}</FooterHorizontalAlign>\r\n",
-            escape_xml_text(footer_horizontal_align)
         ));
     }
     xml.push_str(&format_form_usual_group_properties_xml(
@@ -11299,6 +11543,9 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(command_name)
         ));
     }
+    if item.tag == "Button" {
+        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
+    }
     if item.tag == "Button"
         && let Some(data_path) = &item.data_path
     {
@@ -11323,6 +11570,7 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
     }
     if item.tag != "PictureDecoration"
+        && !matches!(item.tag, "Button" | "InputField" | "Table")
         && let Some(text_color) = &item.text_color
     {
         xml.push_str(&format!(
@@ -11392,6 +11640,18 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<PictureSize>{}</PictureSize>\r\n",
             escape_xml_text(picture_size)
         ));
+    }
+    if item.tag == "PictureField" {
+        if let Some(reference) = &item.picture_ref {
+            xml.push_str(&format!(
+                "{tab}\t<ValuesPicture>\r\n\
+{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</ValuesPicture>\r\n",
+                escape_xml_text(reference),
+                xml_bool(item.picture_load_transparent)
+            ));
+        }
     }
     if let Some(password_mode) = item.password_mode {
         xml.push_str(&format!(
@@ -11745,6 +12005,34 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(command_source)
         ));
     }
+    if item.tag == "InputField" {
+        xml.push_str(&format_form_control_colors_xml(item, indent + 1));
+    }
+    if item.tag == "PictureField"
+        && let Some(file_drag_mode) = item.file_drag_mode
+    {
+        xml.push_str(&format!(
+            "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
+            escape_xml_text(file_drag_mode)
+        ));
+    }
+    if matches!(
+        item.tag,
+        "LabelField" | "LabelDecoration" | "HTMLDocumentField" | "SpreadSheetDocumentField"
+    ) {
+        if let Some(back_color) = &item.back_color {
+            xml.push_str(&format!(
+                "{tab}\t<BackColor>{}</BackColor>\r\n",
+                escape_xml_text(back_color)
+            ));
+        }
+        if let Some(border_color) = &item.border_color {
+            xml.push_str(&format!(
+                "{tab}\t<BorderColor>{}</BorderColor>\r\n",
+                escape_xml_text(border_color)
+            ));
+        }
+    }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
     }
@@ -11771,6 +12059,14 @@ pub(super) fn format_form_child_item_xml(
         FormUsualGroupXmlAnchor::BeforeExtendedTooltip,
         indent + 1,
     ));
+    if matches!(item.tag, "Page" | "UsualGroup")
+        && let Some(back_color) = &item.back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<BackColor>{}</BackColor>\r\n",
+            escape_xml_text(back_color)
+        ));
+    }
     if item.tag != "Table"
         && let Some(extended_tooltip) = &item.extended_tooltip
     {
