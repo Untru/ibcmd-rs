@@ -521,6 +521,7 @@ pub(super) struct FormChildItem {
     pub(super) password_mode: Option<bool>,
     pub(super) multi_line: Option<bool>,
     pub(super) wrap: Option<bool>,
+    pub(super) extended_edit: Option<bool>,
     pub(super) text_edit: Option<bool>,
     pub(super) auto_cell_height: Option<bool>,
     pub(super) drop_list_button: Option<bool>,
@@ -3818,17 +3819,27 @@ pub(super) fn parse_form_child_item_count(value: &str) -> Option<usize> {
 }
 
 pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize> {
-    for index in 0..fields.len() {
-        let Some(count) = parse_form_child_item_count(fields[index]) else {
+    const ROOT_TRAILER_FIELDS: usize = 24;
+    if fields.first().map(|field| field.trim()) != Some("50") {
+        return None;
+    }
+    let tail_start = fields.len().checked_sub(ROOT_TRAILER_FIELDS)?;
+    let mut matched_tail = None;
+    let max_count = tail_start.saturating_sub(1) / 2;
+    for count in 0usize..=max_count {
+        let Some(count_index) = tail_start.checked_sub(1 + count * 2) else {
             continue;
         };
-        let tail_start = index + 1 + count * 2;
-        if tail_start >= fields.len() {
+        if fields
+            .get(count_index)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            != Some(count)
+        {
             continue;
         }
         let mut complete = true;
         for item_index in 0..count {
-            let uuid_index = index + 1 + item_index * 2;
+            let uuid_index = count_index + 1 + item_index * 2;
             let value_index = uuid_index + 1;
             if fields
                 .get(uuid_index)
@@ -3837,9 +3848,6 @@ pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize>
                 || fields
                     .get(value_index)
                     .and_then(|field| split_1c_braced_fields(field.trim(), 0))
-                    .and_then(|item_fields| {
-                        form_child_item_tag(item_fields.first()?.trim(), &item_fields)
-                    })
                     .is_none()
             {
                 complete = false;
@@ -3847,42 +3855,16 @@ pub(super) fn form_root_child_items_tail_start(fields: &[&str]) -> Option<usize>
             }
         }
         if complete {
-            return Some(tail_start);
+            if matched_tail.replace(tail_start).is_some() {
+                return None;
+            }
         }
     }
-    None
+    matched_tail
 }
 
 pub(super) fn form_root_child_item_pairs_tail_start(fields: &[&str]) -> Option<usize> {
-    for index in 0..fields.len() {
-        let Some(count) = parse_form_child_item_count(fields[index]) else {
-            continue;
-        };
-        let tail_start = index + 1 + count * 2;
-        if tail_start >= fields.len() {
-            continue;
-        }
-        let mut complete = true;
-        for item_index in 0..count {
-            let uuid_index = index + 1 + item_index * 2;
-            let value_index = uuid_index + 1;
-            if fields
-                .get(uuid_index)
-                .and_then(|field| parse_non_zero_uuid(field.trim()))
-                .is_none()
-                || !fields
-                    .get(value_index)
-                    .is_some_and(|field| field.trim().starts_with('{'))
-            {
-                complete = false;
-                break;
-            }
-        }
-        if complete {
-            return Some(tail_start);
-        }
-    }
-    None
+    form_root_child_items_tail_start(fields)
 }
 
 #[cfg(test)]
@@ -5028,6 +5010,11 @@ pub(super) fn parse_form_child_item_with_context(
         },
         wrap: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_wrap(input_field_extended_options.as_deref())
+        } else {
+            None
+        },
+        extended_edit: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+            parse_form_input_field_extended_edit(input_field_extended_options.as_deref())
         } else {
             None
         },
@@ -6296,6 +6283,20 @@ pub(super) fn parse_form_input_field_wrap(extended_options: Option<&[&str]>) -> 
         .map(|field| field.trim())?
     {
         "0" => Some(false),
+        _ => None,
+    }
+}
+
+pub(super) fn parse_form_input_field_extended_edit(
+    extended_options: Option<&[&str]>,
+) -> Option<bool> {
+    match extended_options?
+        .get(InputFieldSlot::ExtendedEdit.index())
+        .map(|field| field.trim())?
+    {
+        "0" => Some(false),
+        "1" => Some(true),
+        "2" => None,
         _ => None,
     }
 }
@@ -9257,11 +9258,14 @@ pub(super) fn format_form_body_xml(
             escape_xml_text(value)
         ));
     }
+    if let Some(value) = properties.auto_save_data_in_settings {
+        xml.push_str(&format!(
+            "\t<AutoSaveDataInSettings>{}</AutoSaveDataInSettings>\r\n",
+            escape_xml_text(value)
+        ));
+    }
     if properties.save_window_settings == Some(false) {
         xml.push_str("\t<SaveWindowSettings>false</SaveWindowSettings>\r\n");
-    }
-    if properties.auto_url == Some(false) {
-        xml.push_str("\t<AutoURL>false</AutoURL>\r\n");
     }
     if let Some(value) = properties.save_data_in_settings {
         xml.push_str(&format!(
@@ -9269,14 +9273,11 @@ pub(super) fn format_form_body_xml(
             escape_xml_text(value)
         ));
     }
-    if let Some(value) = properties.auto_save_data_in_settings {
-        xml.push_str(&format!(
-            "\t<AutoSaveDataInSettings>{}</AutoSaveDataInSettings>\r\n",
-            escape_xml_text(value)
-        ));
-    }
     if properties.auto_title == Some(false) {
         xml.push_str("\t<AutoTitle>false</AutoTitle>\r\n");
+    }
+    if properties.auto_url == Some(false) {
+        xml.push_str("\t<AutoURL>false</AutoURL>\r\n");
     }
     if let Some(group) = properties.group.filter(|group| *group != "Vertical") {
         xml.push_str(&format!("\t<Group>{}</Group>\r\n", escape_xml_text(group)));
@@ -10349,6 +10350,12 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.wrap == Some(false) {
         xml.push_str(&format!("{tab}\t<Wrap>false</Wrap>\r\n"));
+    }
+    if let Some(extended_edit) = item.extended_edit {
+        xml.push_str(&format!(
+            "{tab}\t<ExtendedEdit>{}</ExtendedEdit>\r\n",
+            if extended_edit { "true" } else { "false" }
+        ));
     }
     if item.auto_choice_incomplete == Some(true) {
         xml.push_str(&format!(
