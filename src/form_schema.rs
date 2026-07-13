@@ -687,6 +687,7 @@ enum FormTooltipRepresentation {
     Button,
     ShowAuto,
     ShowTop,
+    ShowLeft,
     ShowBottom,
     ShowRight,
 }
@@ -700,6 +701,7 @@ impl FormTooltipRepresentation {
             "3" => Some(Self::Button),
             "4" => Some(Self::ShowAuto),
             "5" => Some(Self::ShowTop),
+            "6" => Some(Self::ShowLeft),
             "7" => Some(Self::ShowBottom),
             "8" => Some(Self::ShowRight),
             _ => None,
@@ -714,6 +716,7 @@ impl FormTooltipRepresentation {
             Self::Button => Some("Button"),
             Self::ShowAuto => Some("ShowAuto"),
             Self::ShowTop => Some("ShowTop"),
+            Self::ShowLeft => Some("ShowLeft"),
             Self::ShowBottom => Some("ShowBottom"),
             Self::ShowRight => Some("ShowRight"),
         }
