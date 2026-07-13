@@ -708,6 +708,72 @@ impl FormChildItemVisibleSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormChildItemShowTitleSchema {
+    option_slot: usize,
+}
+
+impl FormChildItemShowTitleSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 20;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
+            return None;
+        }
+        let option_slot = match (
+            item_tag,
+            direct_discriminator,
+            options.len(),
+            options.first().map(|field| field.trim()),
+        ) {
+            ("ColumnGroup", Some("2"), 12, Some("2")) => 2,
+            ("Page", Some("4"), 20, Some("18")) => 6,
+            ("UsualGroup", Some("5"), 29, Some("29")) => 4,
+            _ => return None,
+        };
+        Some(Self { option_slot })
+    }
+
+    pub(crate) fn show_title(self, options: &[&str]) -> Option<bool> {
+        (options.get(self.option_slot)?.trim() == "0").then_some(false)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootVerticalScrollSchema {
+    qualifier_slot: usize,
+    mode_slot: usize,
+}
+
+impl FormRootVerticalScrollSchema {
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        trailer_field_count: usize,
+    ) -> Option<Self> {
+        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
+            qualifier_slot: 5,
+            mode_slot: 15,
+        })
+    }
+
+    pub(crate) fn vertical_scroll(self, trailer: &[&str]) -> Option<&'static str> {
+        match (
+            trailer.get(self.qualifier_slot).map(|field| field.trim()),
+            trailer.get(self.mode_slot).map(|field| field.trim()),
+        ) {
+            (Some("2"), Some("2")) => Some("useIfNecessary"),
+            (Some("0"), Some("3")) => Some("useWithoutStretch"),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormSpecialFieldKind {
     ProgressBar,
     TrackBar,

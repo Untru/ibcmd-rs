@@ -4,16 +4,17 @@ use crate::form_schema::{
     FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER,
     FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
-    FormChildItemAlignment, FormChildItemVisibleSchema, FormDecorationHeaderSchema,
-    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
-    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
-    FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
-    FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemVisibleSchema,
+    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
+    FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
+    FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
+    FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
-    FormLabelFieldOptionSlot as LabelFieldSlot, FormSpecialFieldSchema,
-    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    FormLabelFieldOptionSlot as LabelFieldSlot, FormRootVerticalScrollSchema,
+    FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
+    FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
+    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     decode_form_tooltip_representation, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
@@ -976,13 +977,12 @@ pub(super) fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'sta
 
 pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
     let tail_start = form_root_child_items_tail_start(fields)?;
-    match (
-        fields.get(tail_start + 5).map(|field| field.trim()),
-        fields.get(tail_start + 15).map(|field| field.trim()),
-    ) {
-        (Some("2"), Some("2")) => Some("useIfNecessary"),
-        _ => None,
-    }
+    let trailer = fields.get(tail_start..)?;
+    FormRootVerticalScrollSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+    )?
+    .vertical_scroll(trailer)
 }
 
 pub(super) fn extract_form_scaling_mode(fields: &[&str]) -> Option<&'static str> {
@@ -4004,6 +4004,25 @@ pub(super) fn parse_form_child_item_with_context(
     })
     .flatten()
     .unwrap_or(0);
+    let direct_discriminator = fields
+        .get(5 + input_field_top_level_offset)
+        .map(|field| field.trim());
+    let show_title_options = matches!(tag, "ColumnGroup" | "Page" | "UsualGroup")
+        .then(|| {
+            fields
+                .get(FormChildItemShowTitleSchema::OPTIONS_SLOT)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        })
+        .flatten();
+    let show_title_schema = show_title_options.as_deref().and_then(|options| {
+        FormChildItemShowTitleSchema::from_raw_layout(
+            wrapper,
+            fields.len(),
+            tag,
+            direct_discriminator,
+            options,
+        )
+    });
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
@@ -4123,9 +4142,6 @@ pub(super) fn parse_form_child_item_with_context(
             .filter(|options| options.first().map(|field| field.trim()) == Some(options_kind))
     });
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
-    let direct_discriminator = fields
-        .get(5 + input_field_top_level_offset)
-        .map(|field| field.trim());
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
             parse_form_button_command_name(
@@ -4521,9 +4537,11 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         scroll_on_compress: parse_form_page_scroll_on_compress(tag, &fields),
-        show_title: (tag == "UsualGroup")
-            .then(|| parse_form_usual_group_show_title(&fields))
-            .flatten(),
+        show_title: show_title_schema.and_then(|schema| {
+            show_title_options
+                .as_deref()
+                .and_then(|options| schema.show_title(options))
+        }),
         show_in_header: if tag == "ColumnGroup" {
             column_group_options
                 .as_ref()
@@ -5842,34 +5860,6 @@ pub(super) fn parse_form_child_item_show_title(field: &str) -> Option<bool> {
         "0" => Some(false),
         "1" => Some(true),
         _ => None,
-    }
-}
-
-pub(super) fn parse_form_usual_group_show_title(fields: &[&str]) -> Option<bool> {
-    let show_title = fields
-        .get(9)
-        .and_then(|field| parse_form_child_item_show_title(field))?;
-    if show_title {
-        return Some(true);
-    }
-    let options = fields
-        .get(20)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0));
-    match options
-        .as_deref()
-        .and_then(|values| values.first())
-        .map(|value| value.trim())
-    {
-        Some("29")
-            if options
-                .as_deref()
-                .and_then(|values| values.get(4))
-                .map(|value| value.trim())
-                == Some("1") =>
-        {
-            None
-        }
-        _ => Some(false),
     }
 }
 
@@ -9224,6 +9214,27 @@ pub(super) fn dedup_form_item_assets(assets: Vec<FormItemAsset>) -> Vec<FormItem
     deduped
 }
 
+fn append_form_document_properties_xml(xml: &mut String, properties: &FormBodyProperties) {
+    if let Some(value) = properties.auto_time {
+        xml.push_str(&format!(
+            "\t<AutoTime>{}</AutoTime>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.use_posting_mode {
+        xml.push_str(&format!(
+            "\t<UsePostingMode>{}</UsePostingMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.repost_on_write {
+        xml.push_str(&format!(
+            "\t<RepostOnWrite>{}</RepostOnWrite>\r\n",
+            if value { "true" } else { "false" }
+        ));
+    }
+}
+
 pub(super) fn format_form_body_xml(
     properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
@@ -9295,23 +9306,8 @@ pub(super) fn format_form_body_xml(
             escape_xml_text(value)
         ));
     }
-    if let Some(value) = properties.auto_time {
-        xml.push_str(&format!(
-            "\t<AutoTime>{}</AutoTime>\r\n",
-            escape_xml_text(value)
-        ));
-    }
-    if let Some(value) = properties.use_posting_mode {
-        xml.push_str(&format!(
-            "\t<UsePostingMode>{}</UsePostingMode>\r\n",
-            escape_xml_text(value)
-        ));
-    }
-    if let Some(value) = properties.repost_on_write {
-        xml.push_str(&format!(
-            "\t<RepostOnWrite>{}</RepostOnWrite>\r\n",
-            if value { "true" } else { "false" }
-        ));
+    if properties.vertical_scroll.is_none() {
+        append_form_document_properties_xml(&mut xml, properties);
     }
     if properties.auto_fill_check == Some(false) {
         xml.push_str("\t<AutoFillCheck>false</AutoFillCheck>\r\n");
@@ -9330,6 +9326,9 @@ pub(super) fn format_form_body_xml(
             "\t<VerticalScroll>{}</VerticalScroll>\r\n",
             escape_xml_text(vertical_scroll)
         ));
+    }
+    if properties.vertical_scroll.is_some() {
+        append_form_document_properties_xml(&mut xml, properties);
     }
     if let Some(horizontal_align) = properties.horizontal_align {
         xml.push_str(&format!(
