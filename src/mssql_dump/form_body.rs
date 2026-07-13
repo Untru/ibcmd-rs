@@ -10541,7 +10541,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
-    if item.show_title == Some(false) {
+    if item.tag != "Page" && item.show_title == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
     }
     if item.tag == "ColumnGroup" && item.show_in_header == Some(true) {
@@ -10577,6 +10577,9 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format_form_decoration_header_xml(item, indent + 1));
         } else {
             xml.push_str(&format_form_title_section(item, indent + 1));
+        }
+        if item.tag == "Page" && item.show_title == Some(false) {
+            xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
         }
         if item.tag == "LabelDecoration" && item.hiperlink == Some(true) {
             xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
