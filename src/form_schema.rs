@@ -690,6 +690,107 @@ impl FormChildItemVisibleSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormSpecialFieldKind {
+    ProgressBar,
+    TrackBar,
+    Chart,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormSpecialFieldSchema {
+    kind: FormSpecialFieldKind,
+}
+
+impl FormSpecialFieldSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 39;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        discriminator: Option<&str>,
+        option_count: usize,
+        option_kind: Option<&str>,
+    ) -> Option<Self> {
+        let kind = match (
+            wrapper,
+            field_count,
+            discriminator,
+            option_count,
+            option_kind,
+        ) {
+            ("37", 59, Some("9"), 16, Some("4")) => FormSpecialFieldKind::ProgressBar,
+            ("37", 59, Some("10"), 18, Some("2")) => FormSpecialFieldKind::TrackBar,
+            ("37", 59, Some("11"), 11, Some("1")) => FormSpecialFieldKind::Chart,
+            _ => return None,
+        };
+        Some(Self { kind })
+    }
+
+    pub(crate) const fn xml_tag(self) -> &'static str {
+        match self.kind {
+            FormSpecialFieldKind::ProgressBar => "ProgressBarField",
+            FormSpecialFieldKind::TrackBar => "TrackBarField",
+            FormSpecialFieldKind::Chart => "ChartField",
+        }
+    }
+
+    pub(crate) fn width(self, options: &[&str]) -> Option<String> {
+        let value = options.get(1)?.trim();
+        let is_non_default = match self.kind {
+            FormSpecialFieldKind::ProgressBar => value != "0" && value != "32",
+            FormSpecialFieldKind::TrackBar => value != "0",
+            FormSpecialFieldKind::Chart => false,
+        };
+        (is_non_default && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+
+    pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
+        match self.kind {
+            FormSpecialFieldKind::ProgressBar
+                if options.get(11).map(|field| field.trim()) == Some("0") =>
+            {
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
+        match self.kind {
+            FormSpecialFieldKind::TrackBar
+                if options.get(3).map(|field| field.trim()) == Some("0") =>
+            {
+                Some(false)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+        match (self.kind, fields.get(54).map(|field| field.trim())) {
+            (FormSpecialFieldKind::ProgressBar, Some("1")) => Some("Center"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn max_value(self, options: &[&str]) -> Option<String> {
+        if self.kind != FormSpecialFieldKind::ProgressBar {
+            return None;
+        }
+        let value = options.get(6)?.trim();
+        (value != "100" && value.parse::<i64>().is_ok()).then(|| value.to_string())
+    }
+
+    pub(crate) fn show_percent(self, options: &[&str]) -> Option<bool> {
+        matches!(
+            (self.kind, options.get(9).map(|field| field.trim())),
+            (FormSpecialFieldKind::ProgressBar, Some("1"))
+        )
+        .then_some(true)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {
     UsualGroup,
     LabelDecoration,
@@ -700,6 +801,9 @@ enum FormTooltipRepresentationItemKind {
     PictureField,
     RadioButtonField,
     CalendarField,
+    ProgressBarField,
+    TrackBarField,
+    ChartField,
     Button,
     Other,
 }
@@ -716,6 +820,9 @@ impl FormTooltipRepresentationItemKind {
             "PictureField" => Self::PictureField,
             "RadioButtonField" => Self::RadioButtonField,
             "CalendarField" => Self::CalendarField,
+            "ProgressBarField" => Self::ProgressBarField,
+            "TrackBarField" => Self::TrackBarField,
+            "ChartField" => Self::ChartField,
             "Button" => Self::Button,
             _ => Self::Other,
         }
@@ -768,7 +875,10 @@ pub(crate) fn form_tooltip_representation_schema(
         | ("37", 59, FormTooltipRepresentationItemKind::CheckBoxField, Some("3"))
         | ("37", 59, FormTooltipRepresentationItemKind::PictureField, Some("4"))
         | ("37", 59, FormTooltipRepresentationItemKind::RadioButtonField, Some("5"))
-        | ("37", 59, FormTooltipRepresentationItemKind::CalendarField, Some("8")) => 50,
+        | ("37", 59, FormTooltipRepresentationItemKind::CalendarField, Some("8"))
+        | ("37", 59, FormTooltipRepresentationItemKind::ProgressBarField, Some("9"))
+        | ("37", 59, FormTooltipRepresentationItemKind::TrackBarField, Some("10"))
+        | ("37", 59, FormTooltipRepresentationItemKind::ChartField, Some("11")) => 50,
         ("31", 52, FormTooltipRepresentationItemKind::Button, _) => 30,
         _ => return None,
     };
@@ -791,7 +901,10 @@ pub(crate) fn form_tooltip_representation_xml_order(
         | FormTooltipRepresentationItemKind::CheckBoxField
         | FormTooltipRepresentationItemKind::PictureField
         | FormTooltipRepresentationItemKind::RadioButtonField
-        | FormTooltipRepresentationItemKind::CalendarField => {
+        | FormTooltipRepresentationItemKind::CalendarField
+        | FormTooltipRepresentationItemKind::ProgressBarField
+        | FormTooltipRepresentationItemKind::TrackBarField
+        | FormTooltipRepresentationItemKind::ChartField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }
         FormTooltipRepresentationItemKind::Button => {

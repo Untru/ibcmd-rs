@@ -11,9 +11,9 @@ use crate::form_schema::{
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
-    FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
-    FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
-    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    FormLabelFieldOptionSlot as LabelFieldSlot, FormSpecialFieldSchema,
+    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     decode_form_tooltip_representation, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
@@ -486,6 +486,7 @@ pub(super) struct FormChildItem {
     pub(super) tooltip_representation: Option<&'static str>,
     pub(super) edit_mode: Option<&'static str>,
     pub(super) horizontal_align: Option<FormChildItemAlignment>,
+    pub(super) group_vertical_align: Option<&'static str>,
     pub(super) label_decoration_visual_tail: Option<FormLabelDecorationVisualTail>,
     pub(super) check_box_type: Option<&'static str>,
     pub(super) radio_button_type: Option<&'static str>,
@@ -515,6 +516,8 @@ pub(super) struct FormChildItem {
     pub(super) max_height: Option<String>,
     pub(super) horizontal_stretch: Option<bool>,
     pub(super) vertical_stretch: Option<bool>,
+    pub(super) max_value: Option<String>,
+    pub(super) show_percent: Option<bool>,
     pub(super) password_mode: Option<bool>,
     pub(super) multi_line: Option<bool>,
     pub(super) wrap: Option<bool>,
@@ -3993,6 +3996,9 @@ pub(super) fn parse_form_child_item_with_context(
     let check_box_field_layout = (tag == "CheckBoxField")
         .then(|| parse_form_check_box_field_layout(wrapper, &fields))
         .flatten();
+    let special_field_layout = matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField")
+        .then(|| parse_form_special_field_layout(wrapper, &fields))
+        .flatten();
     let input_field_top_level_offset = matches!(
         tag,
         "InputField"
@@ -4005,6 +4011,9 @@ pub(super) fn parse_form_child_item_with_context(
             | "GraphicalSchemaField"
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
+            | "ProgressBarField"
+            | "TrackBarField"
+            | "ChartField"
     )
     .then(|| {
         form_input_field_layout_is_extended(&fields)
@@ -4355,6 +4364,9 @@ pub(super) fn parse_form_child_item_with_context(
                     | "PictureField"
                     | "RadioButtonField"
                     | "TextDocumentField"
+                    | "ProgressBarField"
+                    | "TrackBarField"
+                    | "ChartField"
             )
         {
             fields
@@ -4608,6 +4620,9 @@ pub(super) fn parse_form_child_item_with_context(
                 | "GraphicalSchemaField"
                 | "SpreadSheetDocumentField"
                 | "HTMLDocumentField"
+                | "ProgressBarField"
+                | "TrackBarField"
+                | "ChartField"
         ) && form_input_field_layout_is_extended(&fields)
         {
             fields
@@ -4643,6 +4658,9 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
+        group_vertical_align: special_field_layout
+            .as_ref()
+            .and_then(|(schema, _)| schema.group_vertical_align(&fields)),
         label_decoration_visual_tail: label_decoration_options
             .as_ref()
             .map(|options| options.visual_tail.clone()),
@@ -4737,6 +4755,9 @@ pub(super) fn parse_form_child_item_with_context(
                     | "PictureField"
                     | "RadioButtonField"
                     | "TextDocumentField"
+                    | "ProgressBarField"
+                    | "TrackBarField"
+                    | "ChartField"
             )
         {
             fields
@@ -4789,6 +4810,8 @@ pub(super) fn parse_form_child_item_with_context(
                 .get(10)
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
+        } else if let Some((schema, options)) = special_field_layout.as_ref() {
+            schema.width(options)
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(16 + button_top_level_offset)
@@ -4899,6 +4922,8 @@ pub(super) fn parse_form_child_item_with_context(
                 .and_then(|options| options.geometry.auto_max_width())
         } else if tag == "PictureDecoration" {
             parse_form_decoration_auto_max_width(&fields)
+        } else if let Some((schema, options)) = special_field_layout.as_ref() {
+            schema.auto_max_width(options)
         } else if ordinary_table_layout {
             match fields.get(53).map(|field| field.trim()) {
                 Some("0") if fields.get(54).map(|field| field.trim()) == Some("2") => Some(false),
@@ -4969,6 +4994,8 @@ pub(super) fn parse_form_child_item_with_context(
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.horizontal_stretch)
+        } else if let Some((schema, options)) = special_field_layout.as_ref() {
+            schema.horizontal_stretch(options)
         } else {
             None
         },
@@ -4983,6 +5010,12 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
+        max_value: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.max_value(options)),
+        show_percent: special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.show_percent(options)),
         password_mode: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_password_mode(input_field_extended_options.as_deref())
         } else {
@@ -5227,6 +5260,9 @@ pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
             | "GraphicalSchemaField"
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
+            | "ProgressBarField"
+            | "TrackBarField"
+            | "ChartField"
             | "SearchStringAddition"
             | "ViewStatusAddition"
             | "SearchControlAddition"
@@ -7710,23 +7746,28 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
             }
         }
         "31" | "34" => Some("Button"),
-        "37" | "48" => match fields
-            .get(5 + form_input_field_top_level_offset(fields))
-            .map(|value| value.trim())?
-        {
-            "1" => Some("LabelField"),
-            "2" => Some("InputField"),
-            "3" => Some("CheckBoxField"),
-            "4" => Some("PictureField"),
-            "5" => Some("RadioButtonField"),
-            "6" => (wrapper == "37").then_some("SpreadSheetDocumentField"),
-            "7" => Some("TextDocumentField"),
-            "8" => (wrapper == "37").then_some("CalendarField"),
-            "14" => (wrapper == "37").then_some("GraphicalSchemaField"),
-            "15" => (wrapper == "37").then_some("HTMLDocumentField"),
-            "17" => Some("FormattedDocumentField"),
-            _ => None,
-        },
+        "37" | "48" => {
+            if let Some((schema, _)) = parse_form_special_field_layout(wrapper, fields) {
+                return Some(schema.xml_tag());
+            }
+            match fields
+                .get(5 + form_input_field_top_level_offset(fields))
+                .map(|value| value.trim())?
+            {
+                "1" => Some("LabelField"),
+                "2" => Some("InputField"),
+                "3" => Some("CheckBoxField"),
+                "4" => Some("PictureField"),
+                "5" => Some("RadioButtonField"),
+                "6" => (wrapper == "37").then_some("SpreadSheetDocumentField"),
+                "7" => Some("TextDocumentField"),
+                "8" => (wrapper == "37").then_some("CalendarField"),
+                "14" => (wrapper == "37").then_some("GraphicalSchemaField"),
+                "15" => (wrapper == "37").then_some("HTMLDocumentField"),
+                "17" => Some("FormattedDocumentField"),
+                _ => None,
+            }
+        }
         "5" | "6" => match fields.get(5).map(|value| value.trim())? {
             "0" => Some("SearchStringAddition"),
             "1" => Some("ViewStatusAddition"),
@@ -7737,6 +7778,23 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
         "55" => Some("Table"),
         _ => None,
     }
+}
+
+fn parse_form_special_field_layout<'a>(
+    wrapper: &str,
+    fields: &'a [&'a str],
+) -> Option<(FormSpecialFieldSchema, Vec<&'a str>)> {
+    let options = fields
+        .get(FormSpecialFieldSchema::OPTIONS_SLOT)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    let schema = FormSpecialFieldSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        fields.get(5).map(|field| field.trim()),
+        options.len(),
+        options.first().map(|field| field.trim()),
+    )?;
+    Some((schema, options))
 }
 
 pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Option<String> {
@@ -8319,6 +8377,9 @@ pub(super) fn parse_form_child_item_data_path(
             | "GraphicalSchemaField"
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
+            | "ProgressBarField"
+            | "TrackBarField"
+            | "ChartField"
     )
     .then(|| {
         form_input_field_layout_is_extended(fields)
@@ -8335,7 +8396,10 @@ pub(super) fn parse_form_child_item_data_path(
         | "CheckBoxField"
         | "PictureField"
         | "RadioButtonField"
-        | "FormattedDocumentField" => [11usize, 12]
+        | "FormattedDocumentField"
+        | "ProgressBarField"
+        | "TrackBarField"
+        | "ChartField" => [11usize, 12]
             .iter()
             .filter_map(|index| fields.get(*index + input_field_offset))
             .find_map(parse_bound)
@@ -9837,6 +9901,9 @@ pub(super) fn format_form_child_item_xml(
             | "GraphicalSchemaField"
             | "SpreadSheetDocumentField"
             | "HTMLDocumentField"
+            | "ProgressBarField"
+            | "TrackBarField"
+            | "ChartField"
             | "ColumnGroup"
     );
     let usual_group_title_first = matches!(item.tag, "UsualGroup" | "ButtonGroup");
@@ -10020,7 +10087,13 @@ pub(super) fn format_form_child_item_xml(
     }
     if matches!(
         item.tag,
-        "InputField" | "CheckBoxField" | "PictureField" | "CalendarField"
+        "InputField"
+            | "CheckBoxField"
+            | "PictureField"
+            | "CalendarField"
+            | "ProgressBarField"
+            | "TrackBarField"
+            | "ChartField"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -10033,6 +10106,12 @@ pub(super) fn format_form_child_item_xml(
         FormTooltipRepresentationXmlOrder::FieldProperties,
         indent + 1,
     ));
+    if let Some(group_vertical_align) = item.group_vertical_align {
+        xml.push_str(&format!(
+            "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+            escape_xml_text(group_vertical_align)
+        ));
+    }
     if item.tag != "LabelDecoration"
         && let Some(horizontal_align) = item
             .horizontal_align
@@ -10236,6 +10315,15 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
             if vertical_stretch { "true" } else { "false" }
         ));
+    }
+    if let Some(max_value) = &item.max_value {
+        xml.push_str(&format!(
+            "{tab}\t<MaxValue>{}</MaxValue>\r\n",
+            escape_xml_text(max_value)
+        ));
+    }
+    if item.show_percent == Some(true) {
+        xml.push_str(&format!("{tab}\t<ShowPercent>true</ShowPercent>\r\n"));
     }
     if item.tag == "PictureField"
         && let Some(picture_size) = item
@@ -10534,6 +10622,9 @@ pub(super) fn format_form_child_item_xml(
             | "CheckBoxField"
             | "PictureField"
             | "CalendarField"
+            | "ProgressBarField"
+            | "TrackBarField"
+            | "ChartField"
             | "LabelDecoration"
             | "PictureDecoration"
             | "UsualGroup"
