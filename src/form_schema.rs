@@ -636,6 +636,60 @@ impl FormCheckBoxFieldSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormChildItemVisibleSchema {
+    slot: usize,
+}
+
+impl FormChildItemVisibleSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        top_level_offset: usize,
+    ) -> Option<Self> {
+        let slot = match (wrapper, item_tag, direct_discriminator) {
+            ("22", "CommandBar", Some("0"))
+            | ("22", "Popup", Some("1"))
+            | ("22", "ColumnGroup", Some("2"))
+            | ("22", "Pages", Some("3"))
+            | ("22", "Page", Some("4"))
+            | ("22", "UsualGroup", Some("5"))
+            | ("22", "ButtonGroup", Some("6"))
+                if field_count >= 30 && (field_count - 30) % 2 == 0 =>
+            {
+                field_count.checked_sub(8)?
+            }
+            ("12", "LabelDecoration", Some("0")) | ("12", "PictureDecoration", Some("1"))
+                if field_count == 36 =>
+            {
+                21
+            }
+            ("31", "Button", _) if field_count == 52 => 26,
+            ("37", "LabelField", Some("1"))
+            | ("37", "InputField", Some("2"))
+            | ("37", "CheckBoxField", Some("3"))
+            | ("37", "PictureField", Some("4"))
+            | ("37", "RadioButtonField", Some("5"))
+            | ("37", "SpreadSheetDocumentField", Some("6"))
+                if matches!((field_count, top_level_offset), (59, 0) | (60, 1)) =>
+            {
+                43 + top_level_offset
+            }
+            ("55", "Table", _) if field_count >= 99 && (field_count - 99) % 2 == 0 => {
+                field_count.checked_sub(35)?
+            }
+            _ => return None,
+        };
+        Some(Self { slot })
+    }
+
+    pub(crate) fn visible(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(self.slot)?.trim() == "0").then_some(false)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {
     UsualGroup,
     LabelDecoration,
@@ -821,6 +875,7 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTableXmlProperty {
     Representation,
+    Visible,
     CommandBarLocation,
     DefaultItem,
     UseAlternationRowColor,
@@ -859,6 +914,7 @@ pub(crate) enum FormTableXmlProperty {
 
 pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Representation,
+    FormTableXmlProperty::Visible,
     FormTableXmlProperty::CommandBarLocation,
     FormTableXmlProperty::DefaultItem,
     FormTableXmlProperty::UseAlternationRowColor,

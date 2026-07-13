@@ -4,11 +4,12 @@ use crate::form_schema::{
     FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER,
     FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
-    FormChildItemAlignment, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
-    FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
-    FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FormChildItemAlignment, FormChildItemVisibleSchema, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
+    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
+    FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
@@ -4130,6 +4131,9 @@ pub(super) fn parse_form_child_item_with_context(
             .filter(|options| options.first().map(|field| field.trim()) == Some(options_kind))
     });
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
+    let direct_discriminator = fields
+        .get(5 + input_field_top_level_offset)
+        .map(|field| field.trim());
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
             parse_form_button_command_name(
@@ -4546,13 +4550,14 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        visible: if matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
-            && form_input_field_layout_is_extended(&fields)
-        {
-            parse_form_child_item_visible(&fields)
-        } else {
-            None
-        },
+        visible: FormChildItemVisibleSchema::from_raw_layout(
+            wrapper,
+            fields.len(),
+            tag,
+            direct_discriminator,
+            input_field_top_level_offset,
+        )
+        .and_then(|schema| schema.visible(&fields)),
         read_only: if matches!(
             tag,
             "InputField"
@@ -5848,14 +5853,6 @@ pub(super) fn parse_form_page_scroll_on_compress(tag: &str, fields: &[&str]) -> 
 
 pub(super) fn parse_form_child_item_show_in_header(fields: &[&str]) -> Option<bool> {
     let index = 20 + form_input_field_top_level_offset(fields);
-    match fields.get(index).map(|field| field.trim())? {
-        "0" => Some(false),
-        _ => None,
-    }
-}
-
-pub(super) fn parse_form_child_item_visible(fields: &[&str]) -> Option<bool> {
-    let index = 43 + form_input_field_top_level_offset(fields);
     match fields.get(index).map(|field| field.trim())? {
         "0" => Some(false),
         _ => None,
@@ -9563,6 +9560,10 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::Visible => match item.visible {
+            Some(false) => format!("{tab}<Visible>false</Visible>\r\n"),
+            _ => String::new(),
+        },
         FormTableXmlProperty::CommandBarLocation => item
             .table_command_bar_location
             .map(|value| {
@@ -9883,6 +9884,9 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(item_type)
         ));
     }
+    if item.tag == "Button" && item.visible == Some(false) {
+        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    }
     if item.tag == "Button"
         && let Some(representation) = item.button_representation.filter(|value| *value != "None")
     {
@@ -9941,7 +9945,7 @@ pub(super) fn format_form_child_item_xml(
     if item.tag != "Table" && item.tag != "Button" && item.default_item == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
-    if item.visible == Some(false) {
+    if !matches!(item.tag, "Button" | "Table") && item.visible == Some(false) {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
     if item.user_visible_common == Some(false) {
