@@ -4,12 +4,13 @@ use crate::form_schema::{
     FORM_INPUT_FIELD_BUTTON_XML_ORDER, FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER,
     FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
-    FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemVisibleSchema,
-    FormConditionalGroupSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
-    FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
-    FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
+    FormChildItemVisibleSchema, FormConditionalGroupSchema, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
+    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
+    FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
@@ -4017,6 +4018,31 @@ pub(super) fn parse_form_child_item_with_context(
     let direct_discriminator = fields
         .get(5 + input_field_top_level_offset)
         .map(|field| field.trim());
+    let user_visible_schema = if tag == "Button" {
+        FormChildItemUserVisibleSchema::from_raw_layout(
+            wrapper,
+            fields.len(),
+            tag,
+            button_top_level_offset,
+            fields.get(3).map(|field| field.trim()),
+            fields
+                .get(4)
+                .and_then(|field| parse_form_conditional_user_visible_common(field)),
+        )
+    } else if tag == "PictureField" {
+        FormChildItemUserVisibleSchema::from_raw_layout(
+            wrapper,
+            fields.len(),
+            tag,
+            input_field_top_level_offset,
+            fields.get(4).map(|field| field.trim()),
+            fields
+                .get(5)
+                .and_then(|field| parse_form_conditional_user_visible_common(field)),
+        )
+    } else {
+        None
+    };
     let show_title_options = matches!(tag, "ColumnGroup" | "Page" | "UsualGroup")
         .then(|| {
             fields
@@ -4562,18 +4588,20 @@ pub(super) fn parse_form_child_item_with_context(
             .then(|| parse_form_child_item_show_in_header(&fields))
             .flatten()
         },
-        user_visible_common: conditional_user_visible_common.or_else(|| {
-            (matches!(
-                tag,
-                "InputField"
-                    | "LabelField"
-                    | "CheckBoxField"
-                    | "RadioButtonField"
-                    | "TextDocumentField"
-            ) && form_input_field_layout_is_extended(&fields)
-                && input_field_top_level_offset > 0)
-                .then_some(false)
-        }),
+        user_visible_common: conditional_user_visible_common
+            .or_else(|| user_visible_schema.map(|_| false))
+            .or_else(|| {
+                (matches!(
+                    tag,
+                    "InputField"
+                        | "LabelField"
+                        | "CheckBoxField"
+                        | "RadioButtonField"
+                        | "TextDocumentField"
+                ) && form_input_field_layout_is_extended(&fields)
+                    && input_field_top_level_offset > 0)
+                    .then_some(false)
+            }),
         visible: FormChildItemVisibleSchema::from_raw_layout(
             wrapper,
             fields.len(),

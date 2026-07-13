@@ -646,6 +646,33 @@ impl FormCheckBoxFieldSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormChildItemUserVisibleSchema;
+
+impl FormChildItemUserVisibleSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        conditional_marker: Option<&str>,
+        user_visible_common: Option<bool>,
+    ) -> Option<Self> {
+        match (
+            wrapper,
+            field_count,
+            item_tag,
+            top_level_offset,
+            conditional_marker,
+            user_visible_common,
+        ) {
+            ("31", 53, "Button", 1, Some("1"), Some(false))
+            | ("37", 60, "PictureField", 1, Some("1"), Some(false)) => Some(Self),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormChildItemVisibleSchema {
     slot: usize,
 }
