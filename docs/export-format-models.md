@@ -3016,3 +3016,30 @@ is `0 files, -1418 additions, -36 deletions`, reducing total differing lines by
 1,454. Native/current InputHint counts are 164/164 and the InputHint diff is
 zero. InformationRegister roots and ConfigDumpInfo remain exact. Issue #98 was
 created from the accepted evidence and closed.
+
+## Form PagesRepresentation order acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+Native and generated BSP both contain 407 emitted `PagesRepresentation` nodes.
+In native XML, `ExtendedTooltip` is the immediate next sibling for all 407. The
+previous formatter emitted 403 of them before `Title`; only four already had no
+intervening property. Six independent value/owner residuals remain outside this
+order-only gate.
+
+Commit `12eef57` excludes Pages from the early generic Representation branch
+and emits it with the same stored value, default filter, and escaping directly
+before ExtendedTooltip. Parser, enum/default semantics, Popup, and non-Pages
+owners are unchanged. The commit changes one production file totaling
+`+12/-7`. Frozen review returned GO; `cargo fmt -- --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. Tests were not run by direct user instruction.
+
+The first controlled export attempt hit transient Windows file-lock error 32
+from a stale read process. After that reader was stopped, the identical export
+passed and wrote 12,197 files. The normalized full diff changed from
+`1259 files, +11947/-51144` to `1258 files, +11547/-50744`; Form changed from
+`997 files, +6709/-26548` to `996 files, +6309/-26148`. The exact delta is
+`-1 file, -400 additions, -400 deletions`. The closed path is
+`Catalogs/ВидыПроверок/Forms/ФормаЭлемента/Ext/Form.xml`. ConfigDumpInfo remains
+byte-exact. Issue #99 is closed after this serialized order gate.
