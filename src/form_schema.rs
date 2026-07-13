@@ -682,6 +682,11 @@ pub(crate) struct FormConditionalGroupSchema {
     prefix_slot: usize,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormConditionalTableSchema {
+    prefix_slot: usize,
+}
+
 impl FormConditionalGroupSchema {
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -697,6 +702,33 @@ impl FormConditionalGroupSchema {
         ) {
             ("22", field_count, Some(false), Some("2" | "3" | "5"))
                 if field_count >= 31 && (field_count - 31) % 2 == 0 =>
+            {
+                Some(Self { prefix_slot: 5 })
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn prefix_slot(self) -> usize {
+        self.prefix_slot
+    }
+}
+
+impl FormConditionalTableSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        user_visible_common: Option<bool>,
+        conditional_marker: Option<&str>,
+    ) -> Option<Self> {
+        match (
+            wrapper,
+            field_count,
+            user_visible_common,
+            conditional_marker,
+        ) {
+            ("55", field_count, Some(false), Some("1"))
+                if field_count >= 100 && (field_count - 100) % 2 == 0 =>
             {
                 Some(Self { prefix_slot: 5 })
             }
@@ -1131,6 +1163,7 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTableXmlProperty {
     Representation,
+    UserVisible,
     Visible,
     CommandBarLocation,
     DefaultItem,
@@ -1170,6 +1203,7 @@ pub(crate) enum FormTableXmlProperty {
 
 pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Representation,
+    FormTableXmlProperty::UserVisible,
     FormTableXmlProperty::Visible,
     FormTableXmlProperty::CommandBarLocation,
     FormTableXmlProperty::DefaultItem,

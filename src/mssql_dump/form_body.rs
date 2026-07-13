@@ -5,12 +5,12 @@ use crate::form_schema::{
     FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
     FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
-    FormChildItemVisibleSchema, FormConditionalGroupSchema, FormDecorationHeaderSchema,
-    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
-    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
-    FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
-    FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FormChildItemVisibleSchema, FormConditionalGroupSchema, FormConditionalTableSchema,
+    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
+    FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
+    FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
+    FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
@@ -3547,10 +3547,20 @@ pub(super) fn collect_form_child_item_indexes_from_field(
     attribute_names_by_id: &BTreeMap<String, String>,
     indexes: &mut FormChildItemIndexes,
 ) {
-    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+    let Some(raw_fields) = split_1c_braced_fields(field.trim(), 0) else {
         return;
     };
-    let wrapper = fields.first().map(|field| field.trim());
+    let wrapper = raw_fields.first().map(|field| field.trim());
+    let conditional_table_schema =
+        wrapper.and_then(|wrapper| form_conditional_table_schema(wrapper, &raw_fields));
+    let normalized_fields = conditional_table_schema.map(|schema| {
+        raw_fields
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| (index != schema.prefix_slot()).then_some(*field))
+            .collect::<Vec<_>>()
+    });
+    let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
     if let Some(wrapper) = wrapper
         && form_spreadsheet_document_field_layout(wrapper, &fields)
         && let Some(id) = form_child_item_id(&fields)
@@ -3943,12 +3953,18 @@ pub(super) fn parse_form_child_item_with_context(
     let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
     let wrapper = raw_fields.first()?.trim();
     let conditional_group_schema = form_conditional_group_schema(wrapper, &raw_fields);
-    let conditional_user_visible_common = conditional_group_schema.map(|_| false);
-    let normalized_fields = conditional_group_schema.map(|schema| {
+    let conditional_table_schema = form_conditional_table_schema(wrapper, &raw_fields);
+    let conditional_user_visible_common = conditional_group_schema
+        .map(|_| false)
+        .or_else(|| conditional_table_schema.map(|_| false));
+    let conditional_prefix_slot = conditional_group_schema
+        .map(|schema| schema.prefix_slot())
+        .or_else(|| conditional_table_schema.map(|schema| schema.prefix_slot()));
+    let normalized_fields = conditional_prefix_slot.map(|prefix_slot| {
         raw_fields
             .iter()
             .enumerate()
-            .filter_map(|(index, field)| (index != schema.prefix_slot()).then_some(*field))
+            .filter_map(|(index, field)| (index != prefix_slot).then_some(*field))
             .collect::<Vec<_>>()
     });
     let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
@@ -7809,6 +7825,20 @@ fn form_conditional_group_schema(
     )
 }
 
+fn form_conditional_table_schema(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<FormConditionalTableSchema> {
+    FormConditionalTableSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        fields
+            .get(5)
+            .and_then(|field| parse_form_conditional_user_visible_common(field)),
+        fields.get(4).map(|field| field.trim()),
+    )
+}
+
 pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
     match wrapper {
         "22" => match fields
@@ -8158,7 +8188,16 @@ pub(super) fn parse_form_html_document_field_option_events(
 }
 
 pub(super) fn is_form_extended_tooltip_name(name: &str) -> bool {
-    name.ends_with("ExtendedTooltip") || name.ends_with("РасширеннаяПодсказка")
+    ["ExtendedTooltip", "РасширеннаяПодсказка"]
+        .iter()
+        .any(|marker| {
+            let Some(marker_offset) = name.rfind(marker) else {
+                return false;
+            };
+            name[marker_offset + marker.len()..]
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+        })
 }
 
 pub(super) fn parse_form_picture_decoration_file_name(fields: &[&str]) -> Option<&'static str> {
@@ -9742,6 +9781,12 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::UserVisible => match item.user_visible_common {
+            Some(false) => format!(
+                "{tab}<UserVisible>\r\n{tab}\t<xr:Common>false</xr:Common>\r\n{tab}</UserVisible>\r\n"
+            ),
+            _ => String::new(),
+        },
         FormTableXmlProperty::Visible => match item.visible {
             Some(false) => format!("{tab}<Visible>false</Visible>\r\n"),
             _ => String::new(),
@@ -10137,7 +10182,7 @@ pub(super) fn format_form_child_item_xml(
     if !matches!(item.tag, "Button" | "Table") && item.visible == Some(false) {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
-    if item.user_visible_common == Some(false) {
+    if item.tag != "Table" && item.user_visible_common == Some(false) {
         xml.push_str(&format!(
             "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
         ));
