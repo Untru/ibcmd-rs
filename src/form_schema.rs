@@ -113,6 +113,7 @@ pub(crate) struct FormLabelDecorationSchema {
     height_slot: usize,
     horizontal_stretch_slot: usize,
     vertical_stretch_slot: usize,
+    skip_on_input_slot: usize,
     auto_max_width_slot: usize,
     max_width_slot: usize,
     auto_max_height_slot: usize,
@@ -147,6 +148,7 @@ impl FormLabelDecorationSchema {
                 height_slot: 11,
                 horizontal_stretch_slot: 12,
                 vertical_stretch_slot: 13,
+                skip_on_input_slot: 22,
                 auto_max_width_slot: 27,
                 max_width_slot: 28,
                 auto_max_height_slot: 30,
@@ -225,6 +227,14 @@ impl FormLabelDecorationSchema {
     pub(crate) fn visual_tail(self, options: &[&str]) -> FormLabelDecorationVisualTail {
         FormLabelDecorationVisualTail {
             title_height: Self::non_zero_u32(options, self.title_height_option_slot),
+        }
+    }
+
+    pub(crate) fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(self.skip_on_input_slot)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
         }
     }
 

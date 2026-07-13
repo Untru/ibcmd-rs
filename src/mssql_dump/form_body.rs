@@ -4536,7 +4536,9 @@ pub(super) fn parse_form_child_item_with_context(
                 .get(15 + input_field_top_level_offset)
                 .and_then(|field| parse_form_input_field_skip_on_input(field))
         } else if tag == "LabelDecoration" {
-            (fields.get(22).map(|field| field.trim()) == Some("0")).then_some(false)
+            label_decoration_options
+                .as_ref()
+                .and_then(|options| options.skip_on_input)
         } else {
             None
         },
@@ -5350,6 +5352,7 @@ pub(super) struct FormLabelDecorationOptions {
     pub(super) alignment: FormLabelDecorationAlignment,
     pub(super) geometry: FormLabelDecorationGeometry,
     pub(super) visual_tail: FormLabelDecorationVisualTail,
+    pub(super) skip_on_input: Option<bool>,
 }
 
 pub(super) fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOptions> {
@@ -5527,6 +5530,7 @@ pub(super) fn parse_form_label_decoration_options(
         alignment: schema.alignment(fields, &options),
         geometry: schema.geometry(fields),
         visual_tail: schema.visual_tail(&options),
+        skip_on_input: schema.skip_on_input(fields),
     })
 }
 
