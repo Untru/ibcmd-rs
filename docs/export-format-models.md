@@ -3556,3 +3556,70 @@ additions, -1160 deletions`, entirely in Form.xml. `ConfigDumpInfo.xml` remains
 byte-exact at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #108 is closed after this acceptance gate.
+
+## Schema-backed Table behavior and property order acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch audits all 1,108 Form body rows and all 751 Table owners, including
+86 tables in CommonForms and the one conditional wrapper `55` layout. The
+conditional layout is normalized from raw arity 112 to the ordinary arity 111
+before schema admission. Commit `47d96f1` extends the existing grid decoder
+into one fail-closed `FormTableSchema`. Admission requires item tag `Table`,
+wrapper and first field `55`, the `99 + 2n` arity family, and binary values in
+all ten modeled slots.
+
+The shared schema now owns the following exact mappings:
+
+- slot 12 `1` -> `Autofill=true` for 30 tables;
+- slot 18 `0` -> `ChangeRowOrder=false` for 188 tables;
+- slot 22 `1` -> `ChoiceMode=true` for 94 tables;
+- slot 24 `0` -> `SelectionMode=SingleRow` for 90 tables;
+- slot 25 `1` -> `RowSelectionMode=Row` for 88 tables;
+- slots 26, 32, and 33 `0` -> the previously accepted grid values for
+  208, 173, and 155 tables;
+- slots 52 and 53 `1` -> `EnableStartDrag=true` for 557 tables and
+  `EnableDrag=true` for 361 tables.
+
+Commit `2d96985` removes the former slot 26/29 drag guesses, the Drag/DragCheck
+event fallback, the slots 16/17/18/21 row-order formula, and the formatter
+suppression that hid 51 native hierarchical `EnableDrag` values. The exact
+slot model has zero false positives and zero false negatives for all 751
+tables. Wrapper `73` keeps its existing `RowSelectionMode=Cell` path; the Table
+formatter emits only the schema-backed `Row` value.
+
+The complete native matrix covers 83 direct Table properties and 2,469
+co-occurring property pairs with no mixed or reverse order. A frozen reviewer
+rejected the first candidate because `ChangeRowOrder` was still formatted
+after the height group. Commit `e2d9069` corrects both the property enum and
+runtime order to `ChangeRowSet`, `ChangeRowOrder`, `Height`, `AutoMaxHeight`,
+`HeightInTableRows`, `AutoMaxWidth`, and `ChoiceMode`. The rejected shadow
+affected 50 relevant table owners; the corrected frozen re-review returned GO.
+
+The three production commits change three files by `+138/-94`. Added
+production lines contain no database/server identity, object or form name,
+path, UUID, or corpus-specific fallback. `cargo fmt --all --check`, `cargo
+check --all-targets`, `git diff --check`, the hardcode scan, and the release
+build pass with the same two pre-existing warnings. Tests and native ConfigDump
+were not run by direct user instruction.
+
+The corrected selected shadow contains all 1,108 Form.xml files and is exact
+with the subsequent full export. `Autofill`, `ChoiceMode`, `SelectionMode`,
+`RowSelectionMode`, `Header`, `HorizontalLines`, `VerticalLines`, and
+`ChangeRowOrder` have residual tag starts `+0/-0`. `EnableStartDrag` and
+`EnableDrag` each retain `+0/-4` outside the Table cohort. Four Form.xml files
+become exact and no new differing file is opened:
+
+- `Catalogs/_ДемоГруппыДоступаНоменклатуры/Forms/ФормаСписка/Ext/Form.xml`
+- `Catalogs/_ДемоГруппыДоступаПартнеров/Forms/ФормаСписка/Ext/Form.xml`
+- `Catalogs/_ДемоФизическиеЛица/Forms/ФормаСписка/Ext/Form.xml`
+- `Catalogs/ЗакладкиВзаимодействий/Forms/ФормаСписка/Ext/Form.xml`
+
+The serialized release export writes 12,197 files. The normalized full diff
+changes from `1206 files, +9082/-40320` to `1202 files, +8823/-39704`; Form
+changes from `944 files, +3844/-15724` to `940 files, +3585/-15108`. The exact
+batch delta is `-4 files, -259 additions, -616 deletions`, entirely in
+Form.xml. `ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with
+SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #109 is closed after this acceptance gate.
