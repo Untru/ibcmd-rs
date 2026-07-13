@@ -297,10 +297,13 @@ pub(crate) struct FormLabelDecorationSchema {
     horizontal_align_option_slot: usize,
     vertical_align_option_slot: usize,
     title_height_option_slot: usize,
+    title_values_slot: usize,
+    title_formatted_slot: usize,
 }
 
 impl FormLabelDecorationSchema {
     pub(crate) const OPTIONS_SLOT: usize = 18;
+    pub(crate) const TITLE_SLOT: usize = 23;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -333,6 +336,8 @@ impl FormLabelDecorationSchema {
                 horizontal_align_option_slot: 2,
                 vertical_align_option_slot: 3,
                 title_height_option_slot: 4,
+                title_values_slot: 1,
+                title_formatted_slot: 2,
             }),
             _ => None,
         }
@@ -360,6 +365,23 @@ impl FormLabelDecorationSchema {
 
     pub(crate) const fn vertical_align_option_slot(self) -> usize {
         self.vertical_align_option_slot
+    }
+
+    pub(crate) fn title_schema(self, title: &[&str]) -> Option<FormLabelDecorationTitleSchema> {
+        matches!(
+            (
+                title.len(),
+                title.first().map(|field| field.trim()),
+                title
+                    .get(self.title_formatted_slot)
+                    .map(|field| field.trim()),
+            ),
+            (3, Some("1"), Some("0" | "1"))
+        )
+        .then_some(FormLabelDecorationTitleSchema {
+            values_slot: self.title_values_slot,
+            formatted_slot: self.title_formatted_slot,
+        })
     }
 
     pub(crate) fn alignment(
@@ -436,6 +458,22 @@ impl FormLabelDecorationSchema {
             "1" => Some(true),
             _ => None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormLabelDecorationTitleSchema {
+    values_slot: usize,
+    formatted_slot: usize,
+}
+
+impl FormLabelDecorationTitleSchema {
+    pub(crate) const fn values_slot(self) -> usize {
+        self.values_slot
+    }
+
+    pub(crate) const fn formatted_slot(self) -> usize {
+        self.formatted_slot
     }
 }
 
@@ -580,6 +618,60 @@ pub(crate) const FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER:
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormCheckBoxFieldSchema {
     top_level_offset: usize,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormFieldTitleSchema {
+    title_slot: usize,
+}
+
+impl FormFieldTitleSchema {
+    pub(crate) const OPTIONS_BASE_SLOT: usize = 39;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        let (discriminator, options_len, options_kind) = match item_tag {
+            "LabelField" => ("1", 20, "11"),
+            "InputField" => ("2", 66, "36"),
+            "CheckBoxField" => ("3", 13, "11"),
+            "PictureField" => ("4", 24, "10"),
+            "RadioButtonField" => ("5", 12, "8"),
+            "SpreadSheetDocumentField" => ("6", 32, "13"),
+            "TextDocumentField" => ("7", 16, "5"),
+            "CalendarField" => ("8", 24, "6"),
+            "GraphicalSchemaField" => ("14", 14, "3"),
+            "HTMLDocumentField" => ("15", 13, "3"),
+            "FormattedDocumentField" => ("17", 16, "1"),
+            _ => return None,
+        };
+        if wrapper != "37"
+            || field_count != 59 + top_level_offset
+            || top_level_offset > 1
+            || (top_level_offset == 1
+                && !matches!(
+                    item_tag,
+                    "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
+                ))
+            || direct_discriminator != Some(discriminator)
+            || options.len() != options_len
+            || options.first().map(|field| field.trim()) != Some(options_kind)
+        {
+            return None;
+        }
+        Some(Self {
+            title_slot: 9 + top_level_offset,
+        })
+    }
+
+    pub(crate) const fn title_slot(self) -> usize {
+        self.title_slot
+    }
 }
 
 impl FormCheckBoxFieldSchema {

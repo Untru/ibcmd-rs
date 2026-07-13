@@ -9,7 +9,7 @@ use crate::form_schema::{
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormConditionalGroupSchema, FormConditionalTableSchema,
     FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
-    FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FormExtendedTooltipXmlProperty, FormFieldTitleSchema, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
@@ -556,6 +556,7 @@ pub(super) struct FormChildItem {
     pub(super) picture_size: Option<&'static str>,
     pub(super) picture_file_name: Option<&'static str>,
     pub(super) title: Vec<(String, String)>,
+    pub(super) title_formatted: Option<bool>,
     pub(super) tooltip: Vec<(String, String)>,
     pub(super) input_hint: Vec<(String, String)>,
     pub(super) choice_list: Vec<FormChoiceListItem>,
@@ -4215,7 +4216,13 @@ pub(super) fn parse_form_child_item_with_context(
     } else {
         None
     };
-    let title = parse_form_child_item_title(tag, wrapper, &fields);
+    let (title, title_formatted) = parse_form_child_item_title(
+        tag,
+        wrapper,
+        &fields,
+        input_field_top_level_offset,
+        direct_discriminator,
+    );
     let input_hint = (tag == "InputField")
         .then(|| parse_form_input_field_input_hint(input_field_extended_options.as_deref()))
         .unwrap_or_default();
@@ -5264,6 +5271,7 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         title,
+        title_formatted,
         tooltip,
         input_hint,
         choice_list: if tag == "RadioButtonField" {
@@ -7963,7 +7971,34 @@ pub(super) fn parse_form_child_item_title(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
-) -> Vec<(String, String)> {
+    top_level_offset: usize,
+    direct_discriminator: Option<&str>,
+) -> (Vec<(String, String)>, Option<bool>) {
+    if tag == "LabelDecoration"
+        && let Some(title) = parse_form_label_decoration_title(fields)
+    {
+        return title;
+    }
+    if let Some(options) = fields
+        .get(FormFieldTitleSchema::OPTIONS_BASE_SLOT + top_level_offset)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        && let Some(schema) = FormFieldTitleSchema::from_raw_layout(
+            wrapper,
+            fields.len(),
+            tag,
+            top_level_offset,
+            direct_discriminator,
+            &options,
+        )
+    {
+        return (
+            fields
+                .get(schema.title_slot())
+                .map(|field| parse_form_localized_strings(field))
+                .unwrap_or_default(),
+            None,
+        );
+    }
     let indexes: &[usize] = match (tag, wrapper) {
         ("FormattedDocumentField", "37" | "48") => &[9],
         (_, "73" | "55") => &[9],
@@ -7971,7 +8006,7 @@ pub(super) fn parse_form_child_item_title(
         (_, "37" | "48") => &[9, 10],
         _ => &[7],
     };
-    indexes
+    let values = indexes
         .iter()
         .find_map(|index| {
             let values = fields
@@ -7980,7 +8015,37 @@ pub(super) fn parse_form_child_item_title(
                 .unwrap_or_default();
             (!values.is_empty()).then_some(values)
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    (values, None)
+}
+
+pub(super) fn parse_form_label_decoration_title(
+    fields: &[&str],
+) -> Option<(Vec<(String, String)>, Option<bool>)> {
+    let options = split_1c_braced_fields(
+        fields.get(FormLabelDecorationSchema::OPTIONS_SLOT)?.trim(),
+        0,
+    )?;
+    let schema = FormLabelDecorationSchema::from_raw_layout(
+        fields.first()?.trim(),
+        fields.len(),
+        "LabelDecoration",
+        fields.get(5).map(|field| field.trim()),
+        &options,
+    )?;
+    let title =
+        split_1c_braced_fields(fields.get(FormLabelDecorationSchema::TITLE_SLOT)?.trim(), 0)?;
+    let title_schema = schema.title_schema(&title)?;
+    let values = title
+        .get(title_schema.values_slot())
+        .map(|field| parse_form_localized_strings(field))
+        .unwrap_or_default();
+    let formatted = title
+        .get(title_schema.formatted_slot())
+        .map(|field| field.trim())
+        == Some("1");
+    let formatted = (formatted || !values.is_empty()).then_some(formatted);
+    Some((values, formatted))
 }
 
 pub(super) fn parse_form_child_item_tooltip(
@@ -11951,14 +12016,17 @@ pub(super) fn format_form_localized_section(
 }
 
 pub(super) fn format_form_title_section(item: &FormChildItem, indent: usize) -> String {
-    if item.title.is_empty() {
+    if item.title.is_empty() && item.title_formatted.is_none() {
         return String::new();
     }
     if !matches!(item.tag, "LabelDecoration" | "PictureDecoration") {
         return format_form_localized_section("Title", &item.title, indent);
     }
     let tab = "\t".repeat(indent);
-    let mut xml = format!("{tab}<Title formatted=\"false\">\r\n");
+    let mut xml = format!(
+        "{tab}<Title formatted=\"{}\">\r\n",
+        xml_bool(item.title_formatted.unwrap_or(false))
+    );
     for (lang, content) in &item.title {
         xml.push_str(&format!(
             "{tab}\t<v8:item>\r\n{tab}\t\t<v8:lang>{}</v8:lang>\r\n{tab}\t\t<v8:content>{}</v8:content>\r\n{tab}\t</v8:item>\r\n",
