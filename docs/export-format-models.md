@@ -2987,3 +2987,32 @@ delta is `-259 files, +0 additions, -31647 deletions`; all 259 root
 `997 files, +8127/-26584`. `ConfigDumpInfo.xml` remains byte-exact with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #63 is closed after this native acceptance gate.
+
+## Form InputHint typed-owner acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+Native BSP has 164 `InputHint` owners and every owner is an `InputField`. The
+previous generated export had 381 owners: 152 exact InputField values and 229
+false values under CheckBoxField (141), LabelField (54), PictureField (26), and
+RadioButtonField (8). The false values duplicated ToolTip because a generic
+wrapper-37/48 parser read slots 10/11 without an owner contract. Twelve native
+direct-layout InputField hints were also missing because they equal Title; that
+suppression is valid only for shifted layouts with a nonzero top-level offset.
+
+Commit `d5a42be` keeps the existing typed bag-36/38 slot-44 decoder only for
+InputField, limits title-equality suppression to shifted layouts, deletes the
+generic fallback, and adds an InputField guard to the serializer without moving
+the property. It changes two files totaling `+11/-41`. Two independent frozen
+reviews returned GO, and no production object/form/item name, UUID, path,
+database identity, or corpus branch was added. `cargo fmt -- --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. Tests were not run by direct user instruction.
+
+The release export wrote 12,197 files. The normalized full diff changed from
+`1259 files, +13365/-51180` to `1259 files, +11947/-51144`; Form changed from
+`997 files, +8127/-26584` to `997 files, +6709/-26548`. The exact batch delta
+is `0 files, -1418 additions, -36 deletions`, reducing total differing lines by
+1,454. Native/current InputHint counts are 164/164 and the InputHint diff is
+zero. InformationRegister roots and ConfigDumpInfo remain exact. Issue #98 was
+created from the accepted evidence and closed.
