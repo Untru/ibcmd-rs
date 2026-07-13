@@ -11201,7 +11201,7 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
             {
                 xml.push_str(&format!(
                     "\t\t\t\t<QueryText>{}</QueryText>\r\n",
-                    escape_xml_text(query_text)
+                    escape_xml_element_text(query_text)
                 ));
             }
             if let Some(server_state_xml) = &settings.server_state_xml {
