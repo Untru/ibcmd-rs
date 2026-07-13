@@ -8729,7 +8729,7 @@ pub(super) fn parse_form_bound_data_path(
                 .get(table_id)
                 .and_then(|columns| columns.get(&column))
                 .cloned()
-                .or_else(|| matches!(column.as_str(), "8" | "-8").then(|| "Ссылка".to_string()))?;
+                .or_else(|| (column == "8").then(|| "Ссылка".to_string()))?;
             let field_name = normalize_form_table_column_name(table_name, &field_name);
             Some(format!("{table_name}.{field_name}"))
         }
@@ -8741,9 +8741,7 @@ pub(super) fn parse_form_bound_data_path(
                 .get(&table_key)
                 .and_then(|columns| columns.get(&column_key))
                 .cloned()
-                .or_else(|| {
-                    matches!(column_key.as_str(), "8" | "-8").then(|| "Ссылка".to_string())
-                })?;
+                .or_else(|| (column_key == "8").then(|| "Ссылка".to_string()))?;
             let field_name = normalize_form_table_column_name(table_path, &field_name);
             Some(format!("{table_path}.{field_name}"))
         }
@@ -9479,6 +9477,10 @@ pub(super) fn parse_form_command_interface_attribute(
     let binding = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
     if attribute.len() != 1 || binding.len() != 1 {
         return None;
+    }
+    if binding.first()?.trim() == "-8" {
+        let attribute_name = attribute_names_by_id.get(attribute.first()?.trim())?;
+        return Some(Some(format!("{attribute_name}.Ref")));
     }
     parse_form_bound_data_path(
         field,
