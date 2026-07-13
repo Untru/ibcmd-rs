@@ -15,9 +15,9 @@ use crate::form_schema::{
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormRootVerticalScrollSchema,
-    FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
-    FormTablePropertyBagKey as TableBagKey, FormTableXmlProperty,
-    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    FormSpecialFieldSchema, FormTableGridSchema, FormTableGridSlot,
+    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     decode_form_tooltip_representation, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
@@ -469,6 +469,9 @@ pub(super) struct FormChildItem {
     pub(super) default_item: Option<bool>,
     pub(super) initial_tree_view: Option<&'static str>,
     pub(super) row_input_mode: Option<&'static str>,
+    pub(super) table_header: Option<bool>,
+    pub(super) table_horizontal_lines: Option<bool>,
+    pub(super) table_vertical_lines: Option<bool>,
     pub(super) show_root: Option<bool>,
     pub(super) allow_root_choice: Option<bool>,
     pub(super) choice_folders_and_items: Option<&'static str>,
@@ -4204,6 +4207,9 @@ pub(super) fn parse_form_child_item_with_context(
             .filter(|options| options.first().map(|field| field.trim()) == Some(options_kind))
     });
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
+    let table_grid_schema = (tag == "Table")
+        .then(|| FormTableGridSchema::from_raw_layout(wrapper, &fields))
+        .flatten();
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
             parse_form_button_command_name(
@@ -4460,6 +4466,21 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
+        table_header: parse_form_table_grid_property(
+            table_grid_schema,
+            &fields,
+            FormTableGridSlot::Header,
+        ),
+        table_horizontal_lines: parse_form_table_grid_property(
+            table_grid_schema,
+            &fields,
+            FormTableGridSlot::HorizontalLines,
+        ),
+        table_vertical_lines: parse_form_table_grid_property(
+            table_grid_schema,
+            &fields,
+            FormTableGridSlot::VerticalLines,
+        ),
         show_root: if tag == "Table" && !ordinary_table_layout {
             fields
                 .get(36)
@@ -6899,6 +6920,14 @@ pub(super) fn parse_form_table_row_input_mode(field: Option<&str>) -> Option<&'s
         Some("2") => Some("AfterCurrentRow"),
         _ => None,
     }
+}
+
+pub(super) fn parse_form_table_grid_property(
+    schema: Option<FormTableGridSchema>,
+    fields: &[&str],
+    slot: FormTableGridSlot,
+) -> Option<bool> {
+    schema?.explicit_false(fields, slot)
 }
 
 pub(super) fn parse_form_table_file_drag_mode(field: &str) -> Option<&'static str> {
@@ -10079,6 +10108,18 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::Header => match item.table_header {
+            Some(false) => format!("{tab}<Header>false</Header>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::HorizontalLines => match item.table_horizontal_lines {
+            Some(false) => format!("{tab}<HorizontalLines>false</HorizontalLines>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::VerticalLines => match item.table_vertical_lines {
+            Some(false) => format!("{tab}<VerticalLines>false</VerticalLines>\r\n"),
+            _ => String::new(),
+        },
         FormTableXmlProperty::AutoInsertNewRow => match item.auto_insert_new_row {
             Some(true) => format!("{tab}<AutoInsertNewRow>true</AutoInsertNewRow>\r\n"),
             _ => String::new(),

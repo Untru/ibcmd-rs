@@ -1341,9 +1341,6 @@ pub(crate) enum FormTableXmlProperty {
     Visible,
     CommandBarLocation,
     DefaultItem,
-    UseAlternationRowColor,
-    InitialTreeView,
-    AutoMarkIncomplete,
     SkipOnInput,
     ReadOnly,
     ChangeRowSet,
@@ -1353,7 +1350,13 @@ pub(crate) enum FormTableXmlProperty {
     ChangeRowOrder,
     AutoMaxWidth,
     RowInputMode,
+    Header,
+    HorizontalLines,
+    VerticalLines,
+    UseAlternationRowColor,
     AutoInsertNewRow,
+    AutoMarkIncomplete,
+    InitialTreeView,
     EnableStartDrag,
     EnableDrag,
     FileDragMode,
@@ -1381,9 +1384,6 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Visible,
     FormTableXmlProperty::CommandBarLocation,
     FormTableXmlProperty::DefaultItem,
-    FormTableXmlProperty::UseAlternationRowColor,
-    FormTableXmlProperty::InitialTreeView,
-    FormTableXmlProperty::AutoMarkIncomplete,
     FormTableXmlProperty::SkipOnInput,
     FormTableXmlProperty::ReadOnly,
     FormTableXmlProperty::ChangeRowSet,
@@ -1393,7 +1393,13 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::ChangeRowOrder,
     FormTableXmlProperty::AutoMaxWidth,
     FormTableXmlProperty::RowInputMode,
+    FormTableXmlProperty::Header,
+    FormTableXmlProperty::HorizontalLines,
+    FormTableXmlProperty::VerticalLines,
+    FormTableXmlProperty::UseAlternationRowColor,
     FormTableXmlProperty::AutoInsertNewRow,
+    FormTableXmlProperty::AutoMarkIncomplete,
+    FormTableXmlProperty::InitialTreeView,
     FormTableXmlProperty::EnableStartDrag,
     FormTableXmlProperty::EnableDrag,
     FormTableXmlProperty::FileDragMode,
@@ -1414,6 +1420,52 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::UserSettingsGroup,
     FormTableXmlProperty::AllowGettingCurrentRowURL,
 ];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableGridSlot {
+    Header,
+    HorizontalLines,
+    VerticalLines,
+}
+
+impl FormTableGridSlot {
+    const ALL: [Self; 3] = [Self::Header, Self::HorizontalLines, Self::VerticalLines];
+
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::Header => 26,
+            Self::HorizontalLines => 32,
+            Self::VerticalLines => 33,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormTableGridSchema;
+
+impl FormTableGridSchema {
+    const BASE_FIELD_COUNT: usize = 99;
+
+    pub(crate) fn from_raw_layout(wrapper: &str, fields: &[&str]) -> Option<Self> {
+        if wrapper != "55"
+            || fields.first().map(|field| field.trim()) != Some("55")
+            || fields.len() < Self::BASE_FIELD_COUNT
+            || (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0
+            || !FormTableGridSlot::ALL.iter().all(|slot| {
+                fields
+                    .get(slot.index())
+                    .is_some_and(|field| matches!(field.trim(), "0" | "1"))
+            })
+        {
+            return None;
+        }
+        Some(Self)
+    }
+
+    pub(crate) fn explicit_false(self, fields: &[&str], slot: FormTableGridSlot) -> Option<bool> {
+        (fields.get(slot.index())?.trim() == "0").then_some(false)
+    }
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTablePropertyBagKey {
