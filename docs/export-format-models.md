@@ -3097,3 +3097,58 @@ All 436 generated property-bearing blocks are byte-exact against native across
 byte-exact with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #100 is closed after this acceptance gate.
+
+## Form element-text quote escaping acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+Issue #101 is limited to XML element-text escaping in two existing typed
+serialization scopes. Commit `5b8dfe7` changes the `v8:lang` and `v8:content`
+values emitted by `format_form_localized_section` and
+`format_form_title_section`. Commit `cb121fe` applies the same rule to the
+nonempty `QueryText` value inside an admitted `Settings xsi:type="DynamicList"`
+record. The parser, owner admission, property order, attributes, empty-value
+rules, and all other XML nodes are unchanged. Element text still escapes XML
+markup characters, while quotes remain literal as required by native Form XML;
+attribute values continue to use attribute escaping.
+
+The pre-export matrix contained 258 localized/title line pairs and 46
+QueryText line pairs whose only difference was literal `"` versus `&quot;`.
+The final export writes 12,197 files and removes all 304 pairs. The normalized
+full diff changes from `1252 files, +11115/-46929` to
+`1242 files, +10811/-46625`; Form changes from
+`990 files, +5877/-22333` to `980 files, +5573/-22029`. The exact batch delta
+is `-10 files, -304 additions, -304 deletions`.
+
+The corrected set of ten newly exact Form files is:
+
+```text
+ChartsOfCharacteristicTypes/ДополнительныеРеквизитыИСведения/Forms/ИзменениеНастройкиСвойства/Ext/Form.xml
+CommonForms/ВыборПутиКАрхивуФайловТомов/Ext/Form.xml
+DataProcessors/_ДемоЗагрузкаДополнительныхОтчетовИОбработокИзМетаданных/Forms/ОсновнаяФорма/Ext/Form.xml
+DataProcessors/ИнформационныйЦентр/Forms/ФормаВводаКодаПользователя/Ext/Form.xml
+DataProcessors/НастройкиЦентраМониторинга/Forms/ЗапросНаСборИОтправкуОтчетовОбОшибках/Ext/Form.xml
+DataProcessors/НастройкиЦентраМониторинга/Forms/ОтправкаКонтактнойИнформации/Ext/Form.xml
+DataProcessors/НерекомендуемаяВерсияПлатформы/Forms/НерекомендуемаяВерсияПлатформы/Ext/Form.xml
+DataProcessors/ПереносВариантовОтчетов/Forms/Форма/Ext/Form.xml
+DataProcessors/РасширенныйВводКонтактнойИнформации/Forms/ЗагрузкаАдресногоКлассификатора/Ext/Form.xml
+InformationRegisters/ПравилаДляОбменаДанными/Forms/СообщениеОНеудачномОбновлении/Ext/Form.xml
+```
+
+The first closure heuristic incorrectly included
+`DataProcessors/СбросНастроекРезервногоКопирования/Forms/Форма/Ext/Form.xml`:
+its quote-bearing value belongs to an ExtendedTooltip Title already using
+element-text escaping before this batch. It also missed the multiline
+LabelDecoration Title in
+`DataProcessors/РасширенныйВводКонтактнойИнформации/Forms/ЗагрузкаАдресногоКлассификатора/Ext/Form.xml`.
+The corrected owner/call-path audit makes the one-for-one substitution above;
+the accepted counts do not change.
+
+There are zero remaining entity-versus-literal quote pairs in localized/title
+or QueryText element text and no inverse cases. The only remaining `&quot;` in
+generated Form XML is an unrelated `Font scale` attribute residual whose
+native schema uses `faceName`; it is outside this gate. Independent frozen
+reviews returned GO. `cargo fmt -- --check`, `cargo check --all-targets`, and
+`git diff --check` pass with the same two pre-existing warnings. Tests and
+native ConfigDump were not run by direct user instruction. Production adds no
+object/form name, path, UUID, database identity, or corpus-specific branch.
