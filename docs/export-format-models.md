@@ -2792,6 +2792,66 @@ BackColor, Border, visibility, enabled state, shortcuts, input skipping,
 title-empty and unreachable owners, ToolTipRepresentation code 6, and
 ExtendedTooltip also remain outside this gate.
 
+## Form LabelDecoration TitleHeight tail
+
+Status: integrated for the same 1,512 reachable, title-bearing owners as the
+other LabelDecoration gates; a new export was not run.
+
+The existing `FormLabelDecorationSchema` retains its exact wrapper-12,
+discriminator-0, length-36, options-kind-5/length-9 guard. It now owns only one
+additional visual-tail value: options slot 4 is TitleHeight. Zero and invalid
+values are omitted; a valid nonzero unsigned integer is emitted with its raw
+decimal representation. The full cohort has 34 positives and 1,478 omissions:
+value 1 occurs 10 times, 2 occurs 17 times, 3 occurs three times, 4 occurs
+twice, and 6 occurs twice. The immutable 492-owner subset independently has 13
+positives and 479 omissions. Both matrices have zero raw-only, native-only, or
+value contradictions.
+
+The native ordering evidence is exact and one-directional:
+
+```text
+VerticalAlign < TitleHeight < ContextMenu
+```
+
+VerticalAlign precedes TitleHeight in all 10 co-occurring owners with zero
+reverse pairs. TitleHeight precedes ContextMenu in all 34 positive owners, also
+with zero reverse pairs. Native and current duplicate counts are zero.
+`FormLabelDecorationVisualTail` and its typed XML order are separate from the
+alignment and geometry models. The formatter emits the tail once immediately
+after the existing HorizontalAlign/VerticalAlign helper; ContextMenu remains in
+the later child-item section.
+
+The apparent neighboring style properties are not admitted. Direct field 16
+cannot classify BackColor: the same raw control covers 1,495 absences and 16
+native positives. Direct field 17 is constant while only one owner has Border.
+BackColor, Border, and TitleHeight never co-occur, so their internal ordering is
+also unproven. Current TextColor has one missing value and one value mismatch
+among 236 native positives. Current Font has three missing values and 12 value
+mismatches among 79 native positives; the immutable subset reproduces five
+mismatches among 27 positives. Those reference, absolute-font, and compound
+layouts remain separate schema work rather than fallbacks in this scalar gate.
+
+Integrated commit `a58eabc` changes three files totaling `+72/-6`. The test
+module contains exactly three mechanical `label_decoration_visual_tail: None`
+additions in existing struct literals; no test, assertion, function, or fixture
+was added. The frozen 8,310-byte diff has SHA-256
+`EE9D4EB8F952EADDFC8E66067ACEB8DB178BD764B7927E763FCF0036845A7F54`.
+Independent frozen review returned GO. `cargo fmt --check`,
+`cargo check --all-targets`, and `git diff --check` pass with the same two
+pre-existing warnings. The diff adds no object/form/item name, path, UUID,
+database identity, or corpus branch. Tests, export, database access, ConfigDump,
+and ConfigDumpInfo were not run or changed.
+
+The exact shadow adds 34 native one-line properties in 24 reachable Form.xml
+files and makes one Form.xml path exact. It predicts Form
+`1000 files, +8121/-26588` and full `1521 files, +13359/-82831`. The last actual
+full diff remains `1529 files, +14239/-85386` pending a separately authorized
+export.
+
+BackColor, Border, TextColor, Font, Title values, ExtendedTooltip, visibility,
+enabled state, shortcuts, input skipping, title-empty and unreachable owners,
+and ToolTipRepresentation code 6 remain HOLD.
+
 ## ConfigDumpInfo aggregate
 
 Status: implemented and confirmed by raw corpus, independent-config checks, and
