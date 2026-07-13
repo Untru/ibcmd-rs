@@ -10429,6 +10429,15 @@ pub(super) fn format_form_child_item_xml(
                     xml_bool(item.picture_load_transparent)
                 ));
             }
+            if let Some(file_name) = item.picture_file_name {
+                xml.push_str(&format!(
+                    "{tab}\t<Picture>\r\n\
+{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
+{tab}\t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
+{tab}\t</Picture>\r\n",
+                    escape_xml_text(file_name)
+                ));
+            }
             if let Some(file_drag_mode) = item.file_drag_mode {
                 xml.push_str(&format!(
                     "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
@@ -10546,15 +10555,6 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format_form_extended_tooltip_xml(
             extended_tooltip,
             indent + 1,
-        ));
-    }
-    if let Some(file_name) = item.picture_file_name {
-        xml.push_str(&format!(
-            "{tab}\t<Picture>\r\n\
-{tab}\t\t<xr:Abs>{}</xr:Abs>\r\n\
-{tab}\t\t<xr:LoadTransparent>false</xr:LoadTransparent>\r\n\
-{tab}\t</Picture>\r\n",
-            escape_xml_text(file_name)
         ));
     }
     if item.tag != "Table" && !item.events.is_empty() {
