@@ -122,7 +122,8 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let child_item_indexes = collect_form_child_item_indexes(&form_fields, &attributes);
+    let child_item_indexes =
+        collect_form_child_item_indexes_with_object_refs(&form_fields, &attributes, object_refs);
     let child_item_indexes_cpu_ms = elapsed_ms(started);
 
     let started = Instant::now();
@@ -284,6 +285,13 @@ pub(super) struct FormAttribute {
     pub(super) settings: Option<FormDynamicListSettings>,
     pub(super) spreadsheet_document_settings: Option<String>,
     pub(super) type_description_settings: Option<Vec<ConstantValueType>>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormAttributeMetadataOwner {
+    name: String,
+    type_references: Vec<String>,
+    main_table: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1257,6 +1265,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
             None,
             None,
             None,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             table_name_by_id,
             standard_command_owner_name_by_id,
@@ -3433,12 +3442,14 @@ pub(super) fn extract_form_child_items(
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
+    let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
     let mut items = parse_form_child_item_pairs(
         fields,
         main_data_path,
         None,
         None,
         &attribute_names_by_id,
+        &attribute_metadata_owners_by_id,
         &indexes.table_name_by_id,
         &indexes.standard_command_owner_name_by_id,
         &indexes.command_source_owner_name_by_id,
@@ -3452,6 +3463,36 @@ pub(super) fn extract_form_child_items(
     .unwrap_or_default();
     apply_form_table_user_settings_groups(&mut items, &indexes.user_settings_group_by_table_id);
     items
+}
+
+fn form_attribute_metadata_owners_by_id(
+    attributes: &[FormAttribute],
+) -> BTreeMap<String, FormAttributeMetadataOwner> {
+    attributes
+        .iter()
+        .map(|attribute| {
+            let type_references = attribute
+                .value_types
+                .iter()
+                .filter_map(|value_type| match value_type {
+                    ConstantValueType::Reference { reference } => Some(reference.clone()),
+                    _ => None,
+                })
+                .collect();
+            let main_table = attribute
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.main_table.clone());
+            (
+                attribute.id.clone(),
+                FormAttributeMetadataOwner {
+                    name: attribute.name.clone(),
+                    type_references,
+                    main_table,
+                },
+            )
+        })
+        .collect()
 }
 
 pub(super) fn extend_form_attribute_special_columns(
@@ -3505,17 +3546,33 @@ pub(super) enum FormStandardCommandOwnerKind {
     FormattedDocument,
 }
 
+#[cfg(test)]
 pub(super) fn collect_form_child_item_indexes(
     fields: &[&str],
     attributes: &[FormAttribute],
+) -> FormChildItemIndexes {
+    collect_form_child_item_indexes_with_object_refs(fields, attributes, &BTreeMap::new())
+}
+
+fn collect_form_child_item_indexes_with_object_refs(
+    fields: &[&str],
+    attributes: &[FormAttribute],
+    object_refs: &BTreeMap<String, String>,
 ) -> FormChildItemIndexes {
     let mut indexes = FormChildItemIndexes::default();
     let attribute_names_by_id = attributes
         .iter()
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
+    let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
     for field in fields {
-        collect_form_child_item_indexes_from_field(field, &attribute_names_by_id, &mut indexes);
+        collect_form_child_item_indexes_from_field(
+            field,
+            &attribute_names_by_id,
+            &attribute_metadata_owners_by_id,
+            object_refs,
+            &mut indexes,
+        );
     }
     let unresolved_binding_paths = indexes
         .binding_names_by_key
@@ -3582,6 +3639,8 @@ pub(super) fn collect_form_child_item_indexes(
 pub(super) fn collect_form_child_item_indexes_from_field(
     field: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
     indexes: &mut FormChildItemIndexes,
 ) {
     let Some(raw_fields) = split_1c_braced_fields(field.trim(), 0) else {
@@ -3712,14 +3771,16 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         ) {
             for binding in form_child_item_binding_fields(tag, &fields) {
                 if let Some(binding_key) = parse_form_bound_data_binding_key(binding)
-                    && let Some(data_path) = parse_form_bound_data_path(
+                    && let Some(data_path) = parse_form_bound_data_path_with_metadata_owner(
                         binding,
                         &name,
                         attribute_names_by_id,
+                        attribute_metadata_owners_by_id,
                         &indexes.table_name_by_id,
                         &indexes.table_column_names_by_id,
                         &indexes.bound_table_path_by_binding_key,
                         &indexes.table_column_names_by_binding_key,
+                        object_refs,
                     )
                 {
                     indexes
@@ -3761,7 +3822,13 @@ pub(super) fn collect_form_child_item_indexes_from_field(
     }
     for nested in fields {
         if nested.trim_start().starts_with('{') {
-            collect_form_child_item_indexes_from_field(nested, attribute_names_by_id, indexes);
+            collect_form_child_item_indexes_from_field(
+                nested,
+                attribute_names_by_id,
+                attribute_metadata_owners_by_id,
+                object_refs,
+                indexes,
+            );
         }
     }
 }
@@ -3801,6 +3868,7 @@ pub(super) fn parse_form_child_item_pairs(
     parent_data_path: Option<&str>,
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
@@ -3832,12 +3900,13 @@ pub(super) fn parse_form_child_item_pairs(
                 complete = false;
                 break;
             };
-            if let Some(item) = parse_form_child_item_with_context(
+            if let Some(item) = parse_form_child_item_with_metadata_owners(
                 field,
                 main_data_path,
                 parent_data_path,
                 parent_tag,
                 attribute_names_by_id,
+                attribute_metadata_owners_by_id,
                 table_name_by_id,
                 standard_command_owner_name_by_id,
                 item_name_by_id,
@@ -3953,12 +4022,13 @@ pub(super) fn parse_form_child_item_with_attrs(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
-    parse_form_child_item_with_context(
+    parse_form_child_item_with_metadata_owners(
         field,
         main_data_path,
         parent_data_path,
         None,
         attribute_names_by_id,
+        &BTreeMap::new(),
         table_name_by_id,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -3971,12 +4041,49 @@ pub(super) fn parse_form_child_item_with_attrs(
     )
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_child_item_with_context(
+    field: &str,
+    main_data_path: Option<&str>,
+    parent_data_path: Option<&str>,
+    parent_tag: Option<&str>,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
+    item_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChildItem> {
+    parse_form_child_item_with_metadata_owners(
+        field,
+        main_data_path,
+        parent_data_path,
+        parent_tag,
+        attribute_names_by_id,
+        &BTreeMap::new(),
+        table_name_by_id,
+        standard_command_owner_name_by_id,
+        item_name_by_id,
+        table_column_names_by_id,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
+        commands,
+        object_refs,
+    )
+}
+
+fn parse_form_child_item_with_metadata_owners(
     field: &str,
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
     _parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
@@ -4023,11 +4130,13 @@ pub(super) fn parse_form_child_item_with_context(
         main_data_path,
         parent_data_path,
         attribute_names_by_id,
+        attribute_metadata_owners_by_id,
         table_name_by_id,
         table_column_names_by_id,
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
+        object_refs,
     );
     let child_parent_data_path = data_path.as_deref().or(parent_data_path);
     let input_field_extended_options = (matches!(tag, "InputField" | "TextDocumentField")
@@ -4118,6 +4227,7 @@ pub(super) fn parse_form_child_item_with_context(
         child_parent_data_path,
         Some(tag),
         attribute_names_by_id,
+        attribute_metadata_owners_by_id,
         table_name_by_id,
         standard_command_owner_name_by_id,
         item_name_by_id,
@@ -4137,6 +4247,7 @@ pub(super) fn parse_form_child_item_with_context(
             child_parent_data_path,
             Some(tag),
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             item_name_by_id,
@@ -4156,6 +4267,7 @@ pub(super) fn parse_form_child_item_with_context(
             child_parent_data_path,
             Some(tag),
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             item_name_by_id,
@@ -4175,6 +4287,7 @@ pub(super) fn parse_form_child_item_with_context(
             child_parent_data_path,
             Some(tag),
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             item_name_by_id,
@@ -4194,6 +4307,7 @@ pub(super) fn parse_form_child_item_with_context(
             child_parent_data_path,
             Some(tag),
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             item_name_by_id,
@@ -5348,6 +5462,7 @@ pub(super) fn append_form_table_service_child_items(
     parent_data_path: Option<&str>,
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
@@ -5372,6 +5487,7 @@ pub(super) fn append_form_table_service_child_items(
         parent_data_path,
         parent_tag,
         attribute_names_by_id,
+        attribute_metadata_owners_by_id,
         table_name_by_id,
         standard_command_owner_name_by_id,
         item_name_by_id,
@@ -5392,6 +5508,7 @@ pub(super) fn append_form_child_items_by_tag(
     parent_data_path: Option<&str>,
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
@@ -5403,12 +5520,13 @@ pub(super) fn append_form_child_items_by_tag(
     object_refs: &BTreeMap<String, String>,
 ) {
     for field in fields {
-        let Some(item) = parse_form_child_item_with_context(
+        let Some(item) = parse_form_child_item_with_metadata_owners(
             field,
             main_data_path,
             parent_data_path,
             parent_tag,
             attribute_names_by_id,
+            attribute_metadata_owners_by_id,
             table_name_by_id,
             standard_command_owner_name_by_id,
             item_name_by_id,
@@ -5450,6 +5568,7 @@ pub(super) fn parse_form_text_document_context_menu(
     parent_data_path: Option<&str>,
     parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     item_name_by_id: &BTreeMap<String, String>,
@@ -5463,12 +5582,13 @@ pub(super) fn parse_form_text_document_context_menu(
     if fields.get(41).map(|field| field.trim()) != Some("1") {
         return None;
     }
-    parse_form_child_item_with_context(
+    parse_form_child_item_with_metadata_owners(
         fields.get(42)?,
         main_data_path,
         parent_data_path,
         parent_tag,
         attribute_names_by_id,
+        attribute_metadata_owners_by_id,
         table_name_by_id,
         standard_command_owner_name_by_id,
         item_name_by_id,
@@ -7994,37 +8114,74 @@ pub(super) fn parse_form_child_item_data_path(
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
+    let owner_scoped_metadata = !matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField");
     let parse_bound = |field: &&str| {
-        parse_form_bound_data_path(
-            field,
-            name,
-            attribute_names_by_id,
-            table_name_by_id,
-            table_column_names_by_id,
-            bound_table_path_by_binding_key,
-            table_column_names_by_binding_key,
-        )
-        .or_else(|| {
-            parse_form_bound_data_binding_key(field)
-                .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned())
-        })
+        owner_scoped_metadata
+            .then(|| {
+                parse_form_bound_data_path_with_metadata_owner(
+                    field,
+                    name,
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    bound_table_path_by_binding_key,
+                    table_column_names_by_binding_key,
+                    object_refs,
+                )
+            })
+            .flatten()
+            .or_else(|| {
+                parse_form_bound_data_path(
+                    field,
+                    name,
+                    attribute_names_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    bound_table_path_by_binding_key,
+                    table_column_names_by_binding_key,
+                )
+            })
+            .or_else(|| {
+                parse_form_bound_data_binding_key(field)
+                    .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned())
+            })
     };
     let parse_direct_bound = |field: &&str| {
-        parse_form_bound_data_path(
-            field,
-            name,
-            attribute_names_by_id,
-            table_name_by_id,
-            table_column_names_by_id,
-            bound_table_path_by_binding_key,
-            table_column_names_by_binding_key,
-        )
+        owner_scoped_metadata
+            .then(|| {
+                parse_form_bound_data_path_with_metadata_owner(
+                    field,
+                    name,
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    bound_table_path_by_binding_key,
+                    table_column_names_by_binding_key,
+                    object_refs,
+                )
+            })
+            .flatten()
+            .or_else(|| {
+                parse_form_bound_data_path(
+                    field,
+                    name,
+                    attribute_names_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    bound_table_path_by_binding_key,
+                    table_column_names_by_binding_key,
+                )
+            })
     };
     let input_field_offset = matches!(
         tag,
@@ -8093,6 +8250,124 @@ pub(super) fn parse_form_child_item_data_path(
             }),
         _ => table_name_by_id.get(id).cloned(),
     }
+}
+
+fn parse_form_bound_data_path_with_metadata_owner(
+    field: &str,
+    name: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    bound_table_path_by_binding_key: &BTreeMap<String, String>,
+    table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    resolve_form_owner_scoped_metadata_data_path(
+        field,
+        attribute_metadata_owners_by_id,
+        object_refs,
+    )
+    .or_else(|| {
+        parse_form_bound_data_path(
+            field,
+            name,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
+        )
+    })
+}
+
+fn resolve_form_owner_scoped_metadata_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let (owner_field, terminal_field) = match fields.as_slice() {
+        [kind, owner, terminal] if kind.trim() == "2" => (*owner, *terminal),
+        [kind, owner, table, terminal]
+            if kind.trim() == "3" && parse_form_binding_key(table.trim()).is_some() =>
+        {
+            (*owner, *terminal)
+        }
+        _ => return None,
+    };
+    let owner = split_1c_braced_fields(owner_field.trim(), 0)?;
+    if owner.len() != 1 {
+        return None;
+    }
+    let attribute = attribute_metadata_owners_by_id.get(owner.first()?.trim())?;
+
+    let terminal = split_1c_braced_fields(terminal_field.trim(), 0)?;
+    if terminal.len() != 2 || terminal.first()?.trim().parse::<i64>().is_err() {
+        return None;
+    }
+    let uuid = parse_non_zero_uuid(terminal.get(1)?.trim())?;
+    let reference = object_refs.get(&uuid)?;
+    let (owner_base, relative_path) = form_metadata_data_path_route(reference)?;
+    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
+        return None;
+    }
+    Some(format!("{}.{}", attribute.name, relative_path))
+}
+
+fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
+    let mut parts = reference.split('.');
+    let owner_kind = parts.next()?;
+    let owner_name = parts.next()?;
+    if owner_kind.is_empty() || owner_name.is_empty() {
+        return None;
+    }
+    let owner_base = format!("{owner_kind}.{owner_name}");
+    let relative = reference.strip_prefix(&format!("{owner_base}."))?;
+    let route = relative.split('.').collect::<Vec<_>>();
+    let relative_path = match route.as_slice() {
+        ["Attribute" | "Dimension" | "Resource", name] if !name.is_empty() => (*name).to_string(),
+        ["TabularSection", table, "Attribute", name] if !table.is_empty() && !name.is_empty() => {
+            format!("{table}.{name}")
+        }
+        _ => return None,
+    };
+    Some((owner_base, relative_path))
+}
+
+fn form_attribute_matches_metadata_owner(
+    attribute: &FormAttributeMetadataOwner,
+    owner_base: &str,
+) -> bool {
+    let mut proven_bases = attribute
+        .type_references
+        .iter()
+        .filter_map(|reference| form_metadata_owner_base_from_type_reference(reference))
+        .collect::<BTreeSet<_>>();
+    if let Some(main_table) = attribute.main_table.as_ref() {
+        proven_bases.insert(main_table.clone());
+    }
+    proven_bases.len() == 1 && proven_bases.contains(owner_base)
+}
+
+fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
+    let reference = reference.strip_prefix("cfg:")?;
+    let (generated_type, owner_name) = reference.split_once('.')?;
+    if owner_name.is_empty() || owner_name.contains('.') {
+        return None;
+    }
+    let owner_kind = [
+        "RecordManager",
+        "RecordSet",
+        "RecordKey",
+        "Object",
+        "Record",
+        "Ref",
+    ]
+    .into_iter()
+    .find_map(|role| generated_type.strip_suffix(role))
+    .filter(|owner_kind| !owner_kind.is_empty())?;
+    Some(format!("{owner_kind}.{owner_name}"))
 }
 
 pub(super) fn parse_form_bound_data_path(
