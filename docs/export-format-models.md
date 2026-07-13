@@ -3297,3 +3297,64 @@ Button/Table scalar ordering requires coupled or structurally discriminated
 property models. Remaining Picture, Ref, and LoadTransparent residuals span
 six different owner schemas, and missing ExtendedTooltip/ContextMenu nodes are
 upstream owner-admission gaps. None are widened by this batch.
+
+## Form typed Visible, root-trailer, and special-field acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch starts from the complete raw corpus of all 1,108 Form body rows.
+Every base row and `.0` body is present once, with no missing, extra, or
+duplicate rows. Commit `d388099` replaces the broad `Visible` parser with
+owner schemas for wrapper `22` groups, wrapper `12` decorations, wrapper `31`
+buttons, wrapper `37` fields, and wrapper `55` tables. Commit `0b819be`
+preserves the previous wrapper `48` fallback only for LabelField, InputField,
+and CheckBoxField; the new schemas are not widened to that unproven layout.
+Unknown wrappers, arities, discriminators, and nonzero scalar values remain
+omitted.
+
+The admitted Visible matrix contains 23,650 owners: 493 native false values
+and 23,157 native omissions, with zero false positives or false negatives.
+The generated order is owner-specific: Visible follows Type for Button,
+Representation for Table, and DataPath for fields, while group and decoration
+layouts place it first. The batch restores 335 missing Visible lines. One
+native false ColumnGroup outside the admitted layout and other unsupported
+owner layouts remain deliberately omitted; the normalized Visible residual is
+now `+0/-65`.
+
+Commit `2bb3d7f` decodes InputField ExtendedEdit from the exact wrapper `37`,
+arity `59/60`, discriminator `2`, and 66-field option record. Across all 3,795
+InputField owners, the model reproduces 38 true values, six false values, and
+3,751 omissions. The same commit locates the fixed 24-field form-root trailer
+structurally after the counted child `(count, UUID, body)` pairs. It does not
+depend on supported child tags or impose a corpus-derived child-count limit.
+The trailer restores 14 SaveWindowSettings, four VerticalScroll, and one
+ShowTitle values and emits the root properties in their native order.
+ExtendedEdit and SaveWindowSettings are now `+0/-0`; unrelated
+VerticalScroll `+2/-3` and ShowTitle `+0/-144` residuals remain outside this
+admission.
+
+Commit `9913987` admits special fields only for wrapper `37`, arity `59`, and
+the exact discriminator/options pairs for ProgressBarField, TrackBarField, and
+ChartField. The complete corpus contains exactly 21 progress bars, two track
+bars, and one chart. All 24 generated subtrees are exact, including their
+owned properties, ContextMenu, ExtendedTooltip, and generated IDs. The three
+special-field tag residuals are now `+0/-0`; all 4,112 non-ancestor owners are
+unchanged.
+
+The four production commits change three files totaling `+386/-93`. Frozen
+reviews returned GO after the wrapper `48` compatibility correction. The
+changes add no object/form name, path, database identity, UUID, localized
+string, corpus-specific branch, panic, unwrap, or unsafe path. `cargo fmt
+--check`, `cargo check --all-targets`, `git diff --check`, and the release build
+pass with the same two pre-existing warnings. Tests and native ConfigDump were
+not run by direct user instruction.
+
+The exact combined shadow predicted `-14 files, -19 additions, -699
+deletions`. The serialized release export writes 12,197 files and reproduces
+that prediction exactly: the normalized full diff changes from `1241 files,
++10274/-46166` to `1227 files, +10255/-45467`; Form changes from `979 files,
++5036/-21570` to `965 files, +5017/-20871`. Fourteen Form.xml files become
+exact and no unexpected delta appears. `ConfigDumpInfo.xml` remains byte-exact
+at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #105 is closed after this acceptance gate.
