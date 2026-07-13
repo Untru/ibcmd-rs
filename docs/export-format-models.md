@@ -3479,3 +3479,80 @@ reference is still unresolved. `ConfigDumpInfo.xml` remains byte-exact at
 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #107 is closed after this acceptance gate.
+
+## Schema-backed Form titles, table grid, and command context acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch again uses the complete corpus of all 1,108 Form body rows. Commit
+`7ca3cb2` admits field Title only through the exact wrapper `37`, arity,
+discriminator, top-level-offset, and option-record schemas. All 7,193 reachable
+field owners match the native Title-presence matrix. The same commit decodes
+the exact LabelDecoration Title record for all 2,635 decorations, including its
+formatted flag. Commit `298eec7` preserves the native self-closing lexical form
+for the 11 empty `formatted="true"` titles. Together they remove all 332
+generated-only Title starts and restore 247 native starts. The remaining Title
+residual is `+0/-48`, entirely in unsupported AdditionalColumns owner trees.
+
+Commit `aa0e90d` adds a typed Table grid schema. Across all 751 tables, slots
+26, 32, and 33 reproduce Header=false for 208 owners, HorizontalLines=false
+for 173, and VerticalLines=false for 155, with no false positives or false
+negatives. Admission requires normalized wrapper `55`, at least 99 fields,
+the exact `99 + 2n` arity family, and binary values in all three grid slots.
+The native order is now RowInputMode, Header, HorizontalLines, VerticalLines,
+UseAlternationRowColor, AutoInsertNewRow, AutoMarkIncomplete, and
+InitialTreeView. A frozen review rejected the first wrapper-only admission;
+the stricter schema was applied before export.
+
+Commit `6479843` builds a generic InformationRegister field-reference index
+from typed metadata and derives each form owner from its source-reference
+model. A kind-3 CommandInterface item resolves OpenByValue only when the
+register contains exactly one field whose reference type includes that owner;
+zero or multiple matches remain omitted. This closes six OpenByValue commands.
+The same context decodes the three exact `{2,{id},{-8}}` Attribute records as
+`owner.Ref`. Commit `2db758e` scopes the `-8` sentinel to that exact
+CommandInterface layout. An earlier broad fallback changed one unrelated
+`Object.Code` DataPath to `Object.Ref`; the three-way shadow caught it, and the
+final gate has 16 closed Form.xml files and zero newly differing files.
+
+The five production commits have a total repository diff of nine files,
+`+649/-84`. Added production lines contain no database/server identity,
+object or form name, path, UUID, corpus-specific branch, panic, unwrap, expect,
+or unsafe path. Frozen reviews returned GO after both corrections. `cargo fmt
+--all --check`, `cargo check --all-targets`, `git diff --check`, and the release
+build pass with the same two pre-existing warnings. Tests and native ConfigDump
+were not run by direct user instruction. Selected export now prepares broad
+field metadata for a selected Form body; this is a non-blocking latency tradeoff
+required for generic owner/type resolution.
+
+The final selected shadow contains all 1,108 Form.xml files and is byte-exact
+with the subsequent full export. Residual tag starts are Header `+0/-0`,
+HorizontalLines `+0/-0`, VerticalLines `+0/-0`, Visible `+0/-0`, Attribute
+`+0/-0`, Command `+0/-0`, and Title `+0/-48`. The 16 Form.xml files closed by
+this batch are:
+
+- `Catalogs/_ДемоКонтрагенты/Forms/ФормаГруппы/Ext/Form.xml`
+- `Catalogs/ВариантыОтчетов/Forms/СбросНастроекРазмещения/Ext/Form.xml`
+- `Catalogs/ВариантыОтчетов/Forms/СбросПользовательскихНастроек/Ext/Form.xml`
+- `Catalogs/ПодписантыСервисаМобильнойПодписи/Forms/ПолучениеПодписей/Ext/Form.xml`
+- `Catalogs/ЯзыкиПечатныхФорм/Forms/ФормаСписка/Ext/Form.xml`
+- `CommonForms/БлокировкаРаботыСВнешнимиРесурсами/Ext/Form.xml`
+- `CommonForms/НастройкаДоступаКСервисуMorpher/Ext/Form.xml`
+- `DataProcessors/_ДемоОтключениеПодсистем/Forms/Форма/Ext/Form.xml`
+- `DataProcessors/ЗаявлениеНаВыпускНовогоКвалифицированногоСертификата/Forms/ТехническаяИнформация/Ext/Form.xml`
+- `DataProcessors/НастройкиПользователей/Forms/ПредупреждениеОКопированииНастроек/Ext/Form.xml`
+- `DataProcessors/НерекомендуемаяВерсияПлатформы/Forms/НеобходимоОбновитьПлатформу/Ext/Form.xml`
+- `DataProcessors/ОбновлениеНаИсправительнуюВерсиюБСП/Forms/Форма/Ext/Form.xml`
+- `DataProcessors/ПрограммыЭлектроннойПодписиИШифрования/Forms/УстановкаCryptoProCSPРегистрационныеДанные/Ext/Form.xml`
+- `DataProcessors/ПрограммыЭлектроннойПодписиИШифрования/Forms/УстановкаViPNetCSPРегистрационныеДанные/Ext/Form.xml`
+- `DataProcessors/РезультатыОбновленияПрограммы/Forms/ПредупреждениеБезопасности/Ext/Form.xml`
+- `InformationRegisters/АдресныеОбъекты/Forms/АктуализацияУстаревшегоКлассификатора/Ext/Form.xml`
+
+The serialized release export writes 12,197 files and reproduces the shadow
+exactly. The normalized full diff changes from `1222 files, +10221/-41480` to
+`1206 files, +9082/-40320`; Form changes from `960 files, +4983/-16884` to
+`944 files, +3844/-15724`. The exact batch delta is `-16 files, -1139
+additions, -1160 deletions`, entirely in Form.xml. `ConfigDumpInfo.xml` remains
+byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #108 is closed after this acceptance gate.
