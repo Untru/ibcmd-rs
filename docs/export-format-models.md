@@ -3685,3 +3685,72 @@ batch delta is `-4 files, -58 additions, -238 deletions`, entirely in Form.xml.
 `ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #110 is closed after this acceptance gate.
+
+## Form builtin types, Table CommandSet, and owner-scoped DataPath acceptance
+
+Status: accepted by independent frozen reviews, a selected shadow of every
+Form, and a fresh serialized full export.
+
+This batch combines three owner/schema-backed Form corrections. Commits
+`611a6c8` and `0e01145` add a Form-only resolver for platform builtin type
+patterns and enforce the native stable ordering rule: ordinary `v8:Type`
+entries precede `v8:TypeSet` entries while order inside each group is
+preserved. The generic metadata type parser and namespace formatter remain
+unchanged. The complete native corpus has zero reverse-order cases across
+10,651 type containers; the accepted output also has zero. Root-owned
+`cfg`, `v8`, `v8ui`, and `dcsset` namespaces and the local formatted-document,
+text-document, chart, and flowchart namespaces reproduce native output.
+
+Commit `d877fec` replaces 17 whole-list Table command signatures with a
+positional grammar attached to `FormTableSchema`. The grammar starts at the
+slot-54 counted property pairs, validates the counted event tuple, reads an
+exact counted nonzero-UUID list, and requires the following child-owner marker
+and wrapper `22`. The existing standard Table command resolver supplies the
+generic names; six Table-context platform command IDs supply the remaining
+names. Across all 751 Table owners the matrix is `TP=344`, `FP=0`, `FN=0`,
+`TN=407`; command names and lexical order are exact for all 344 emitted sets.
+Unknown shapes and UUIDs fail closed, and non-Table/root CommandSet handling is
+unchanged.
+
+Commit `cb4fe2a` resolves metadata-backed DataPath bindings only when all of
+the following are proven:
+
+- the raw binding has an exact kind-2 or kind-3 shape;
+- its Form Attribute ID identifies one owner;
+- the Attribute Type and optional MainTable reduce to exactly one canonical
+  metadata owner base;
+- the terminal nonzero UUID resolves through the existing in-memory
+  `object_refs` index to that same owner;
+- the child route is exactly `Attribute`, `Dimension`, `Resource`, or
+  `TabularSection.Attribute`.
+
+Ambiguous owners, owner mismatches, unsupported accounting/addressing roles,
+and unknown routes fall back to the prior parser. The serialized runtime proof
+is 195 exact corrections, comprising 145 replacements and 50 omissions in 86
+Form files, with zero false positives. A wider raw-only model predicts 218
+correct resolutions, but the 23 non-materialized references are deliberately
+HOLD and are not counted as accepted output. The selected and full exports are
+identical, confirming the accepted runtime boundary.
+
+The combined production diff changes three files by `+545/-652`. Individual
+frozen reviews and a final integrated review returned GO. All 15 added UUID
+literals are platform protocol identifiers: nine Form TypeIds and six Table
+standard-command IDs. Added production lines contain no database/server
+identity, object or form name, path, Cyrillic corpus literal, ConfigDumpInfo
+dependency, or improvement-only fallback. `cargo fmt --all --check`, `cargo
+check --all-targets`, `git diff --check`, the hardcode scan, and the release
+build pass with the same two pre-existing warnings. Tests and native
+ConfigDump were not run by direct user instruction.
+
+The selected shadow contains all 1,108 Form.xml files and is byte-identical to
+the subsequent full export. It changes 304 Form files from the accepted
+baseline; all 304 improve, none are equal or worse, 28 become exact, and no
+new differing file is opened. The serialized release export writes 12,197
+files. The normalized full diff changes from `1198 files, +8765/-39466` to
+`1170 files, +8490/-38010`; Form changes from `936 files, +3527/-14870` to
+`908 files, +3252/-13414`. The exact batch delta is `-28 files, -275
+additions, -1456 deletions`, entirely in Form.xml. `ConfigDumpInfo.xml`
+remains byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #111 is closed after this acceptance gate. Telegram selected and full
+reports were sent; an automatic email sender remains unavailable.
