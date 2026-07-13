@@ -9979,7 +9979,10 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(title_location)
         ));
     }
-    if matches!(item.tag, "InputField" | "PictureField" | "CalendarField") {
+    if matches!(
+        item.tag,
+        "InputField" | "CheckBoxField" | "PictureField" | "CalendarField"
+    ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
             &item.tooltip,
@@ -10480,6 +10483,7 @@ pub(super) fn format_form_child_item_xml(
     if !matches!(
         item.tag,
         "InputField"
+            | "CheckBoxField"
             | "PictureField"
             | "CalendarField"
             | "LabelDecoration"
