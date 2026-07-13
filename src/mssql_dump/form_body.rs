@@ -10191,18 +10191,13 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(behavior)
         ));
     }
-    if item.tag != "Popup"
+    if !matches!(item.tag, "Pages" | "Popup")
         && let Some(representation) = item.representation.filter(|representation| {
             !form_child_item_representation_is_default(item.tag, representation)
         })
     {
-        let tag_name = if item.tag == "Pages" {
-            "PagesRepresentation"
-        } else {
-            "Representation"
-        };
         xml.push_str(&format!(
-            "{tab}\t<{tag_name}>{}</{tag_name}>\r\n",
+            "{tab}\t<Representation>{}</Representation>\r\n",
             escape_xml_text(representation)
         ));
     }
@@ -10375,6 +10370,16 @@ pub(super) fn format_form_child_item_xml(
     }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
+    }
+    if item.tag == "Pages"
+        && let Some(representation) = item.representation.filter(|representation| {
+            !form_child_item_representation_is_default(item.tag, representation)
+        })
+    {
+        xml.push_str(&format!(
+            "{tab}\t<PagesRepresentation>{}</PagesRepresentation>\r\n",
+            escape_xml_text(representation)
+        ));
     }
     if item.tag != "Table"
         && let Some((name, id)) = &item.extended_tooltip
