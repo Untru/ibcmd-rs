@@ -9953,10 +9953,22 @@ pub(super) fn format_form_child_item_xml(
         && item.read_only == Some(true)
         && matches!(
             item.tag,
-            "InputField" | "LabelField" | "GraphicalSchemaField" | "HTMLDocumentField"
+            "InputField"
+                | "LabelField"
+                | "TextDocumentField"
+                | "GraphicalSchemaField"
+                | "HTMLDocumentField"
         );
     if read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
+    }
+    if item.tag == "InputField"
+        && let Some(skip_on_input) = item.skip_on_input
+    {
+        xml.push_str(&format!(
+            "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
+            if skip_on_input { "true" } else { "false" }
+        ));
     }
     if early_title_for_field {
         xml.push_str(&format_form_title_section(item, indent + 1));
@@ -9988,6 +10000,7 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.tag != "LabelDecoration"
         && item.tag != "Table"
+        && item.tag != "InputField"
         && let Some(skip_on_input) = item.skip_on_input
     {
         xml.push_str(&format!(
