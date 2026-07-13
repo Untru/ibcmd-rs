@@ -4181,7 +4181,7 @@ pub(super) fn parse_form_child_item_with_context(
         check_box_field_layout.as_ref().map(|(schema, _)| *schema),
     );
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
-    Some(FormChildItem {
+    let mut item = FormChildItem {
         tag,
         id: id.to_string(),
         name,
@@ -5262,7 +5262,30 @@ pub(super) fn parse_form_child_item_with_context(
             None
         },
         child_items,
-    })
+    };
+    if conditional_group_schema.is_some() {
+        sanitize_form_conditional_group_descendants(&mut item.child_items);
+    }
+    Some(item)
+}
+
+fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
+    for item in items {
+        item.data_path = None;
+        match item.tag {
+            "LabelField" => {
+                item.tooltip.clear();
+                item.show_in_header = None;
+                item.width = None;
+            }
+            "InputField" => {
+                item.title_location = None;
+                item.auto_cell_height = None;
+            }
+            _ => {}
+        }
+        sanitize_form_conditional_group_descendants(&mut item.child_items);
+    }
 }
 
 pub(super) fn is_form_field_direct_service_parent(tag: &str) -> bool {
