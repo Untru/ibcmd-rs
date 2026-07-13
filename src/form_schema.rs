@@ -666,6 +666,14 @@ impl FormChildItemVisibleSchema {
                 21
             }
             ("31", "Button", _) if field_count == 52 => 26,
+            // Preserve the three wrapper-48 field owners decoded by the legacy path.
+            ("48", "LabelField", Some("1"))
+            | ("48", "InputField", Some("2"))
+            | ("48", "CheckBoxField", Some("3"))
+                if field_count > 20 =>
+            {
+                43 + top_level_offset
+            }
             ("37", "LabelField", Some("1"))
             | ("37", "InputField", Some("2"))
             | ("37", "CheckBoxField", Some("3"))
