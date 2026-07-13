@@ -211,35 +211,21 @@ impl FormUsualGroupProperties {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormFieldHeaderPictureKind {
+pub(crate) enum FormPictureValueKind {
     Empty,
     Reference,
     Embedded,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormFieldHeaderPictureSchema {
-    picture_slot: usize,
-    kind: FormFieldHeaderPictureKind,
+pub(crate) struct FormPictureValueSchema {
+    kind: FormPictureValueKind,
     load_transparent: bool,
 }
 
-impl FormFieldHeaderPictureSchema {
-    pub(crate) fn from_raw_layout(
-        wrapper: &str,
-        field_count: usize,
-        item_tag: &str,
-        top_level_offset: usize,
-        value: &[&str],
-    ) -> Option<Self> {
-        if wrapper != "37"
-            || field_count != 59 + top_level_offset
-            || top_level_offset > 1
-            || !matches!(
-                item_tag,
-                "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
-            )
-            || value.first().map(|field| field.trim()) != Some("4")
+impl FormPictureValueSchema {
+    fn from_raw_layout(value: &[&str]) -> Option<Self> {
+        if value.first().map(|field| field.trim()) != Some("4")
             || value.get(3).map(|field| field.trim()) != Some("\"\"")
             || value.get(4).map(|field| field.trim()) != Some("-1")
             || value.get(5).map(|field| field.trim()) != Some("-1")
@@ -259,7 +245,7 @@ impl FormFieldHeaderPictureSchema {
                         && value.get(7).map(|field| field.trim()) == Some("0")
                         && value.get(8).map(|field| field.trim()) == Some("\"\"") =>
                 {
-                    FormFieldHeaderPictureKind::Empty
+                    FormPictureValueKind::Empty
                 }
                 Some("1")
                     if value.len() == 9
@@ -269,7 +255,7 @@ impl FormFieldHeaderPictureSchema {
                         && value.get(7).map(|field| field.trim()) == Some("0")
                         && value.get(8).map(|field| field.trim()) == Some("\"\"") =>
                 {
-                    FormFieldHeaderPictureKind::Reference
+                    FormPictureValueKind::Reference
                 }
                 Some("3")
                     if value.len() == 10
@@ -280,14 +266,53 @@ impl FormFieldHeaderPictureSchema {
                         && value.get(8).map(|field| field.trim()) == Some("0")
                         && value.get(9).map(|field| field.trim()) == Some("\"\"") =>
                 {
-                    FormFieldHeaderPictureKind::Embedded
+                    FormPictureValueKind::Embedded
                 }
                 _ => return None,
             };
         Some(Self {
-            picture_slot: 29 + top_level_offset,
             kind,
             load_transparent,
+        })
+    }
+
+    pub(crate) const fn kind(self) -> FormPictureValueKind {
+        self.kind
+    }
+
+    pub(crate) const fn load_transparent(self) -> bool {
+        self.load_transparent
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormFieldHeaderPictureSchema {
+    picture_slot: usize,
+    value: FormPictureValueSchema,
+}
+
+impl FormFieldHeaderPictureSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        value: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "37"
+            || field_count != 59 + top_level_offset
+            || top_level_offset > 1
+            || !matches!(
+                item_tag,
+                "LabelField" | "InputField" | "CheckBoxField" | "PictureField"
+            )
+        {
+            return None;
+        }
+        let value = FormPictureValueSchema::from_raw_layout(value)?;
+        Some(Self {
+            picture_slot: 29 + top_level_offset,
+            value,
         })
     }
 
@@ -295,12 +320,12 @@ impl FormFieldHeaderPictureSchema {
         self.picture_slot
     }
 
-    pub(crate) const fn kind(self) -> FormFieldHeaderPictureKind {
-        self.kind
+    pub(crate) const fn kind(self) -> FormPictureValueKind {
+        self.value.kind()
     }
 
     pub(crate) const fn load_transparent(self) -> bool {
-        self.load_transparent
+        self.value.load_transparent()
     }
 }
 
@@ -1963,6 +1988,9 @@ pub(crate) struct FormTableSchema;
 impl FormTableSchema {
     const BASE_FIELD_COUNT: usize = 99;
     const COMMAND_SET_PAIR_COUNT_SLOT: usize = 54;
+    const DATA_PATH_SLOT: usize = 11;
+    const ROW_PICTURE_DATA_PATH_SLOT: usize = 43;
+    const ROWS_PICTURE_SLOT: usize = 44;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -1983,6 +2011,22 @@ impl FormTableSchema {
 
     pub(crate) const fn command_set_pair_count_slot(self) -> usize {
         Self::COMMAND_SET_PAIR_COUNT_SLOT
+    }
+
+    pub(crate) const fn data_path_slot(self) -> usize {
+        Self::DATA_PATH_SLOT
+    }
+
+    pub(crate) const fn row_picture_data_path_slot(self) -> usize {
+        Self::ROW_PICTURE_DATA_PATH_SLOT
+    }
+
+    pub(crate) const fn rows_picture_slot(self) -> usize {
+        Self::ROWS_PICTURE_SLOT
+    }
+
+    pub(crate) fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
+        FormPictureValueSchema::from_raw_layout(value)
     }
 
     pub(crate) fn autofill(self, fields: &[&str]) -> Option<bool> {

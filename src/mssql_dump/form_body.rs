@@ -12,14 +12,14 @@ use crate::form_schema::{
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormConditionalGroupSchema, FormConditionalTableSchema,
     FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
-    FormExtendedTooltipXmlProperty, FormFieldHeaderPictureKind, FormFieldHeaderPictureSchema,
+    FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
     FormFieldHeaderPictureXmlProperty, FormFieldTitleSchema, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
-    FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema,
+    FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableSchema, FormTableXmlProperty,
@@ -526,6 +526,7 @@ pub(super) struct FormChildItem {
     pub(super) row_filter_nil: Option<bool>,
     pub(super) row_picture_data_path: Option<String>,
     pub(super) rows_picture_ref: Option<String>,
+    pub(super) rows_picture_file_name: Option<String>,
     pub(super) rows_picture_load_transparent: bool,
     pub(super) top_level_parent_nil: Option<bool>,
     pub(super) update_on_data_change: Option<&'static str>,
@@ -4595,6 +4596,8 @@ fn parse_form_child_item_with_metadata_owners(
         input_field_top_level_offset,
         object_refs,
     );
+    let rows_picture =
+        table_schema.and_then(|schema| parse_form_table_rows_picture(schema, &fields, object_refs));
     let mut item = FormChildItem {
         tag,
         id: id.to_string(),
@@ -4838,34 +4841,27 @@ fn parse_form_child_item_with_metadata_owners(
                     )
                 })
                 .or_else(|| {
-                    ordinary_table_layout.then(|| {
-                        parse_form_ordinary_table_row_picture_data_path(
+                    table_schema.and_then(|schema| {
+                        parse_form_table_row_picture_data_path(
+                            schema,
                             &fields,
                             data_path.as_deref(),
                             table_column_names_by_id,
                         )
-                    })?
+                    })
                 })
         } else {
             None
         },
-        rows_picture_ref: if tag == "Table" && ordinary_table_layout {
-            fields
-                .get(44)
-                .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
-                .map(|(reference, _)| reference)
-        } else {
-            None
-        },
-        rows_picture_load_transparent: if tag == "Table" && ordinary_table_layout {
-            fields
-                .get(44)
-                .and_then(|field| parse_form_child_item_picture_value(field, object_refs))
-                .map(|(_, load_transparent)| load_transparent)
-                .unwrap_or(false)
-        } else {
-            false
-        },
+        rows_picture_ref: rows_picture
+            .as_ref()
+            .and_then(|picture| picture.reference.clone()),
+        rows_picture_file_name: rows_picture
+            .as_ref()
+            .and_then(|picture| picture.file_name.clone()),
+        rows_picture_load_transparent: rows_picture
+            .as_ref()
+            .is_some_and(|picture| picture.load_transparent),
         top_level_parent_nil: if tag == "Table" && !ordinary_table_layout {
             parse_form_table_property_bag_undefined(&fields, TableBagKey::TopLevelParent)
                 .or_else(|| parse_form_table_default_top_level_parent_nil(wrapper, &fields))
@@ -8356,7 +8352,7 @@ pub(super) fn parse_form_picture_field_options<'a>(fields: &'a [&'a str]) -> Opt
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-struct FormFieldHeaderPicture {
+struct FormOwnedPicture {
     reference: Option<String>,
     file_name: Option<String>,
     load_transparent: bool,
@@ -8368,7 +8364,7 @@ fn parse_form_field_header_picture(
     fields: &[&str],
     top_level_offset: usize,
     object_refs: &BTreeMap<String, String>,
-) -> Option<FormFieldHeaderPicture> {
+) -> Option<FormOwnedPicture> {
     let picture_slot = 29 + top_level_offset;
     let raw = fields.get(picture_slot)?.trim();
     let value = split_1c_braced_fields(raw, 0)?;
@@ -8382,9 +8378,45 @@ fn parse_form_field_header_picture(
     if schema.picture_slot() != picture_slot {
         return None;
     }
-    match schema.kind() {
-        FormFieldHeaderPictureKind::Empty => None,
-        FormFieldHeaderPictureKind::Reference => {
+    parse_form_owned_picture(
+        raw,
+        &value,
+        schema.kind(),
+        schema.load_transparent(),
+        "HeaderPicture",
+        object_refs,
+    )
+}
+
+fn parse_form_table_rows_picture(
+    schema: FormTableSchema,
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormOwnedPicture> {
+    let raw = fields.get(schema.rows_picture_slot())?.trim();
+    let value = split_1c_braced_fields(raw, 0)?;
+    let value_schema = schema.rows_picture(&value)?;
+    parse_form_owned_picture(
+        raw,
+        &value,
+        value_schema.kind(),
+        value_schema.load_transparent(),
+        "RowsPicture",
+        object_refs,
+    )
+}
+
+fn parse_form_owned_picture(
+    raw: &str,
+    value: &[&str],
+    kind: FormPictureValueKind,
+    expected_load_transparent: bool,
+    property_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormOwnedPicture> {
+    match kind {
+        FormPictureValueKind::Empty => None,
+        FormPictureValueKind::Reference => {
             let reference_fields = split_1c_braced_fields(value.get(2)?.trim(), 0)?;
             let exact_reference = match reference_fields.as_slice() {
                 [code] => code.trim().parse::<i32>().is_ok_and(|code| code < 0),
@@ -8396,16 +8428,16 @@ fn parse_form_field_header_picture(
             }
             let (reference, load_transparent) =
                 parse_common_command_picture_value(raw, object_refs)?;
-            if load_transparent != schema.load_transparent() {
+            if load_transparent != expected_load_transparent {
                 return None;
             }
-            Some(FormFieldHeaderPicture {
+            Some(FormOwnedPicture {
                 reference: Some(reference?),
                 file_name: None,
                 load_transparent,
             })
         }
-        FormFieldHeaderPictureKind::Embedded => {
+        FormPictureValueKind::Embedded => {
             let payload = value
                 .get(7)
                 .and_then(|field| extract_base64_payload(field))?;
@@ -8413,10 +8445,10 @@ fn parse_form_field_header_picture(
             if !is_form_item_picture_content(&content) {
                 return None;
             }
-            Some(FormFieldHeaderPicture {
+            Some(FormOwnedPicture {
                 reference: None,
-                file_name: Some(form_item_picture_file_name("HeaderPicture", &content)),
-                load_transparent: schema.load_transparent(),
+                file_name: Some(form_item_picture_file_name(property_name, &content)),
+                load_transparent: expected_load_transparent,
             })
         }
     }
@@ -9091,14 +9123,16 @@ pub(super) fn parse_form_bound_data_path(
     }
 }
 
-pub(super) fn parse_form_ordinary_table_row_picture_data_path(
+pub(super) fn parse_form_table_row_picture_data_path(
+    schema: FormTableSchema,
     fields: &[&str],
     data_path: Option<&str>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
 ) -> Option<String> {
     let table_name = data_path?;
-    let table_id = parse_form_attribute_binding_id(fields.get(11)?.trim())?;
-    let column_id = parse_form_attribute_binding_id(fields.get(43)?.trim())?;
+    let table_id = parse_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())?;
+    let column_id =
+        parse_form_attribute_binding_id(fields.get(schema.row_picture_data_path_slot())?.trim())?;
     let column_name = table_column_names_by_id
         .get(&table_id)?
         .get(&column_id)?
@@ -10734,20 +10768,30 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
-        FormTableXmlProperty::RowsPicture => item
-            .rows_picture_ref
-            .as_ref()
-            .map(|reference| {
-                format!(
-                    "{tab}<RowsPicture>\r\n\
-{tab}\t<xr:Ref>{}</xr:Ref>\r\n\
-{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+        FormTableXmlProperty::RowsPicture => {
+            if item.rows_picture_ref.is_none() && item.rows_picture_file_name.is_none() {
+                String::new()
+            } else {
+                let mut xml = format!("{tab}<RowsPicture>\r\n");
+                if let Some(reference) = &item.rows_picture_ref {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Ref>{}</xr:Ref>\r\n",
+                        escape_xml_text(reference)
+                    ));
+                } else if let Some(file_name) = &item.rows_picture_file_name {
+                    xml.push_str(&format!(
+                        "{tab}\t<xr:Abs>{}</xr:Abs>\r\n",
+                        escape_xml_text(file_name)
+                    ));
+                }
+                xml.push_str(&format!(
+                    "{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
 {tab}</RowsPicture>\r\n",
-                    escape_xml_text(reference),
                     xml_bool(item.rows_picture_load_transparent)
-                )
-            })
-            .unwrap_or_default(),
+                ));
+                xml
+            }
+        }
         FormTableXmlProperty::Title => format_form_localized_section("Title", &item.title, indent),
         FormTableXmlProperty::CommandSet => {
             if item.command_set_excluded_commands.is_empty() {
