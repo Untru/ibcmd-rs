@@ -1199,6 +1199,76 @@ pub(super) fn build_metadata_field_reference_index_from_texts(
     index
 }
 
+pub(super) fn build_information_register_field_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+) -> InformationRegisterFieldReferenceIndex {
+    let mut fields_by_register = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
+    for row in rows {
+        let (Some("InformationRegister"), Some(register)) =
+            (row.kind.as_deref(), row.header.as_ref())
+        else {
+            continue;
+        };
+        for (field, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            let Some(tag) =
+                register_child_object_tag("InformationRegister", &row.text, marker_start)
+            else {
+                continue;
+            };
+            let Some(value_types) = parse_information_register_child_value_types(
+                &row.text,
+                marker_start,
+                &field,
+                tag,
+                type_index,
+            ) else {
+                continue;
+            };
+            let value_owner_references = value_types
+                .iter()
+                .filter_map(|value_type| match value_type {
+                    ConstantValueType::Reference { reference } => {
+                        metadata_reference_type_owner_reference(reference)
+                    }
+                    _ => None,
+                })
+                .collect::<BTreeSet<_>>();
+            if value_owner_references.is_empty() {
+                continue;
+            }
+            fields_by_register
+                .entry(register.uuid.clone())
+                .or_default()
+                .entry(format!(
+                    "InformationRegister.{}.{tag}.{}",
+                    register.name, field.name
+                ))
+                .or_default()
+                .extend(value_owner_references);
+        }
+    }
+    fields_by_register
+        .into_iter()
+        .map(|(register_uuid, fields)| {
+            (
+                register_uuid,
+                fields
+                    .into_iter()
+                    .map(|(field_reference, value_owner_references)| {
+                        InformationRegisterFieldReference {
+                            field_reference,
+                            value_owner_references,
+                        }
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 #[allow(dead_code)]
 pub(super) fn build_form_source_reference_index(
     rows: &[ConfigRow],

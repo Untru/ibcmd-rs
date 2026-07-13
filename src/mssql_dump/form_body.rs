@@ -57,13 +57,22 @@ pub(super) fn extract_form_body_xml_from_body(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    extract_form_body_xml_from_body_timed(body, type_index, object_refs, None)
+    extract_form_body_xml_from_body_timed(
+        body,
+        type_index,
+        object_refs,
+        &BTreeMap::new(),
+        None,
+        None,
+    )
 }
 
 pub(super) fn extract_form_body_xml_from_body_timed(
     body: &ParsedFormBodyBlob,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    form_owner_reference: Option<&str>,
     mut timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<String> {
     let started = Instant::now();
@@ -155,8 +164,15 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let command_interface =
-        extract_form_command_interface_with_commands(&body.trailing, &commands, object_refs);
+    let command_interface = extract_form_command_interface_with_context(
+        &body.trailing,
+        &commands,
+        object_refs,
+        information_register_field_refs,
+        form_owner_reference,
+        &attributes,
+        &child_item_indexes,
+    );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_command_interface_cpu_ms += elapsed_ms(started);
     }
@@ -378,6 +394,7 @@ pub(super) struct FormCommandInterface {
 pub(super) struct FormCommandInterfaceItem {
     pub(super) command: String,
     pub(super) item_type: &'static str,
+    pub(super) attribute: Option<String>,
     pub(super) command_group: Option<String>,
     pub(super) index: Option<usize>,
     pub(super) default_visible: Option<bool>,
@@ -8712,7 +8729,7 @@ pub(super) fn parse_form_bound_data_path(
                 .get(table_id)
                 .and_then(|columns| columns.get(&column))
                 .cloned()
-                .or_else(|| (column == "8").then(|| "Ссылка".to_string()))?;
+                .or_else(|| matches!(column.as_str(), "8" | "-8").then(|| "Ссылка".to_string()))?;
             let field_name = normalize_form_table_column_name(table_name, &field_name);
             Some(format!("{table_name}.{field_name}"))
         }
@@ -8724,7 +8741,9 @@ pub(super) fn parse_form_bound_data_path(
                 .get(&table_key)
                 .and_then(|columns| columns.get(&column_key))
                 .cloned()
-                .or_else(|| (column_key == "8").then(|| "Ссылка".to_string()))?;
+                .or_else(|| {
+                    matches!(column_key.as_str(), "8" | "-8").then(|| "Ссылка".to_string())
+                })?;
             let field_name = normalize_form_table_column_name(table_path, &field_name);
             Some(format!("{table_path}.{field_name}"))
         }
@@ -9299,16 +9318,49 @@ pub(super) fn extract_form_command_interface(
     extract_form_command_interface_with_commands(trailing, &[], object_refs)
 }
 
+#[cfg(test)]
 pub(super) fn extract_form_command_interface_with_commands(
     trailing: &[String],
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormCommandInterface> {
+    extract_form_command_interface_with_context(
+        trailing,
+        commands,
+        object_refs,
+        &BTreeMap::new(),
+        None,
+        &[],
+        &FormChildItemIndexes::default(),
+    )
+}
+
+pub(super) fn extract_form_command_interface_with_context(
+    trailing: &[String],
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+    information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    form_owner_reference: Option<&str>,
+    attributes: &[FormAttribute],
+    child_item_indexes: &FormChildItemIndexes,
+) -> Option<FormCommandInterface> {
+    let attribute_names_by_id = attributes
+        .iter()
+        .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let context = FormCommandInterfaceParseContext {
+        commands,
+        object_refs,
+        information_register_field_refs,
+        form_owner_reference,
+        attribute_names_by_id: &attribute_names_by_id,
+        child_item_indexes,
+    };
     let mut command_bar = Vec::new();
     let mut navigation_panel = Vec::new();
     for (trailing_slot, field) in trailing.iter().enumerate() {
         let Some(container) =
-            parse_form_command_interface_container(trailing_slot, field, commands, object_refs)
+            parse_form_command_interface_container(trailing_slot, field, &context)
         else {
             continue;
         };
@@ -9321,11 +9373,19 @@ pub(super) fn extract_form_command_interface_with_commands(
     })
 }
 
+pub(super) struct FormCommandInterfaceParseContext<'a> {
+    commands: &'a [FormCommand],
+    object_refs: &'a BTreeMap<String, String>,
+    information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+    form_owner_reference: Option<&'a str>,
+    attribute_names_by_id: &'a BTreeMap<String, String>,
+    child_item_indexes: &'a FormChildItemIndexes,
+}
+
 pub(super) fn parse_form_command_interface_container(
     trailing_slot: usize,
     field: &str,
-    commands: &[FormCommand],
-    object_refs: &BTreeMap<String, String>,
+    context: &FormCommandInterfaceParseContext<'_>,
 ) -> Option<FormCommandInterface> {
     let fields = split_1c_braced_fields(field, 0)?;
     let declared_item_count = fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -9344,7 +9404,7 @@ pub(super) fn parse_form_command_interface_container(
     let mut command_bar = Vec::new();
     let mut navigation_panel = Vec::new();
     for field in fields.iter().skip(2) {
-        if let Some(item) = parse_form_command_interface_item(field, commands, object_refs) {
+        if let Some(item) = parse_form_command_interface_item(field, context) {
             match schema.owner() {
                 FormCommandInterfaceContainerOwner::CommandBar => command_bar.push(item),
                 FormCommandInterfaceContainerOwner::NavigationPanel => navigation_panel.push(item),
@@ -9362,8 +9422,7 @@ pub(super) fn parse_form_command_interface_container(
 
 pub(super) fn parse_form_command_interface_item(
     field: &str,
-    commands: &[FormCommand],
-    object_refs: &BTreeMap<String, String>,
+    context: &FormCommandInterfaceParseContext<'_>,
 ) -> Option<FormCommandInterfaceItem> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     FormCommandInterfaceItemSchema::from_raw_layout(
@@ -9373,11 +9432,16 @@ pub(super) fn parse_form_command_interface_item(
         fields.get(7)?.trim(),
     )?;
     form_command_interface_visibility_schema(fields.get(8)?)?;
-    let command = parse_form_command_interface_command(fields.get(2)?, commands, object_refs)?;
+    let command = parse_form_command_interface_command(fields.get(2)?, context)?;
     let item_type = parse_form_command_interface_item_type(fields.get(4).copied())?;
+    let attribute = parse_form_command_interface_attribute(
+        fields.get(3)?,
+        context.attribute_names_by_id,
+        context.child_item_indexes,
+    )?;
     let command_group = fields
         .get(5)
-        .and_then(|field| parse_form_command_group_reference(field, object_refs));
+        .and_then(|field| parse_form_command_group_reference(field, context.object_refs));
     let index = fields
         .get(6)
         .and_then(|value| value.trim().parse::<usize>().ok())
@@ -9391,11 +9455,41 @@ pub(super) fn parse_form_command_interface_item(
     Some(FormCommandInterfaceItem {
         command,
         item_type,
+        attribute,
         command_group,
         index,
         default_visible,
-        visible: parse_form_command_interface_visibility(fields.get(8)?, object_refs)?,
+        visible: parse_form_command_interface_visibility(fields.get(8)?, context.object_refs)?,
     })
+}
+
+pub(super) fn parse_form_command_interface_attribute(
+    field: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    child_item_indexes: &FormChildItemIndexes,
+) -> Option<Option<String>> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() == 1 && fields.first()?.trim() == "0" {
+        return Some(None);
+    }
+    if fields.len() != 3 || fields.first()?.trim() != "2" {
+        return None;
+    }
+    let attribute = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let binding = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    if attribute.len() != 1 || binding.len() != 1 {
+        return None;
+    }
+    parse_form_bound_data_path(
+        field,
+        "",
+        attribute_names_by_id,
+        &child_item_indexes.table_name_by_id,
+        &child_item_indexes.table_column_names_by_id,
+        &child_item_indexes.bound_table_path_by_binding_key,
+        &child_item_indexes.table_column_names_by_binding_key,
+    )
+    .map(Some)
 }
 
 pub(super) fn form_command_interface_item_schema(
@@ -9481,15 +9575,15 @@ pub(super) fn parse_form_command_interface_item_type(field: Option<&str>) -> Opt
 
 pub(super) fn parse_form_command_interface_command(
     field: &str,
-    commands: &[FormCommand],
-    object_refs: &BTreeMap<String, String>,
+    context: &FormCommandInterfaceParseContext<'_>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let kind = fields.first()?.trim();
     let target = fields.get(1).map(|value| value.trim());
     if kind != "0"
         && let Some(uuid) = target.and_then(parse_non_zero_uuid)
-        && let Some(command) = commands
+        && let Some(command) = context
+            .commands
             .iter()
             .find(|command| command.id == kind && command.reference_uuid == uuid)
     {
@@ -9503,31 +9597,61 @@ pub(super) fn parse_form_command_interface_command(
             if target == "0" || target == "00000000-0000-0000-0000-000000000000" {
                 Some("0".to_string())
             } else {
-                parse_non_zero_uuid(target).and_then(|uuid| object_refs.get(&uuid).cloned())
+                parse_non_zero_uuid(target).and_then(|uuid| context.object_refs.get(&uuid).cloned())
             }
         }
         "2" => {
             let uuid = parse_non_zero_uuid(target?)?;
-            object_refs
+            context
+                .object_refs
                 .get(&uuid)
                 .map(|reference| format!("{reference}.StandardCommand.CreateBasedOn"))
         }
         "3" => {
             let uuid = parse_non_zero_uuid(target?)?;
-            let reference = object_refs.get(&uuid)?;
-            form_information_register_open_by_value_reference(reference).or_else(|| {
-                (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
-                    .then(|| reference.clone())
-            })
+            let reference = context.object_refs.get(&uuid)?;
+            form_information_register_open_by_value_reference(reference)
+                .or_else(|| {
+                    let form_owner_reference = context.form_owner_reference?;
+                    let field_reference = resolve_information_register_field_reference(
+                        context.information_register_field_refs,
+                        &uuid,
+                        form_owner_reference,
+                    )?;
+                    field_reference
+                        .strip_prefix(reference)
+                        .filter(|suffix| suffix.starts_with('.'))?;
+                    form_information_register_open_by_value_reference(field_reference)
+                })
+                .or_else(|| {
+                    (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
+                        .then(|| reference.clone())
+                })
         }
         "4" => {
             let uuid = parse_non_zero_uuid(target?)?;
-            let reference = object_refs.get(&uuid)?;
+            let reference = context.object_refs.get(&uuid)?;
             (reference.starts_with("Catalog.") && reference.matches('.').count() == 1)
                 .then(|| format!("{reference}.StandardCommand.OpenByValue"))
         }
         _ => None,
     }
+}
+
+pub(super) fn resolve_information_register_field_reference<'a>(
+    index: &'a InformationRegisterFieldReferenceIndex,
+    register_uuid: &str,
+    form_owner_reference: &str,
+) -> Option<&'a str> {
+    let mut matches = index
+        .get(register_uuid)?
+        .iter()
+        .filter(|field| field.value_owner_references.contains(form_owner_reference));
+    let field = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+    Some(&field.field_reference)
 }
 
 pub(super) fn form_information_register_open_by_value_reference(reference: &str) -> Option<String> {
@@ -12095,6 +12219,12 @@ pub(super) fn format_form_command_interface_xml(
                 "\t\t\t\t<Type>{}</Type>\r\n",
                 escape_xml_text(item.item_type)
             ));
+            if let Some(attribute) = item.attribute.as_deref() {
+                xml.push_str(&format!(
+                    "\t\t\t\t<Attribute>{}</Attribute>\r\n",
+                    escape_xml_text(attribute)
+                ));
+            }
             if let Some(command_group) = item.command_group.as_deref() {
                 xml.push_str(&format!(
                     "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
@@ -12141,6 +12271,12 @@ pub(super) fn format_form_command_interface_xml(
                 "\t\t\t\t<Type>{}</Type>\r\n",
                 escape_xml_text(item.item_type)
             ));
+            if let Some(attribute) = item.attribute.as_deref() {
+                xml.push_str(&format!(
+                    "\t\t\t\t<Attribute>{}</Attribute>\r\n",
+                    escape_xml_text(attribute)
+                ));
+            }
             if let Some(command_group) = item.command_group.as_deref() {
                 xml.push_str(&format!(
                     "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",

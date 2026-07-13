@@ -204,6 +204,14 @@ pub(super) fn form_source_reference_name(form_ref: &FormSourceReference) -> Opti
     }
     None
 }
+pub(super) fn form_owner_reference_name(form_ref: &FormSourceReference) -> Option<String> {
+    let reference = form_source_reference_name(form_ref)?;
+    let parts = reference.split('.').collect::<Vec<_>>();
+    match parts.as_slice() {
+        [owner_kind, owner_name, "Form", _] => Some(format!("{owner_kind}.{owner_name}")),
+        _ => None,
+    }
+}
 pub(super) fn metadata_kind_for_source_folder(folder: &str) -> Option<&'static str> {
     match folder {
         "Catalogs" => Some("Catalog"),

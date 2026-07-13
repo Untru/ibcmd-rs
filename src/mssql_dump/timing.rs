@@ -420,7 +420,7 @@ impl MssqlDumpTimingReport {
 
     pub(crate) fn add_source_asset_kind(&mut self, kind: &SourceAssetKind, elapsed_ms: u64) {
         match kind {
-            SourceAssetKind::Form => self.source_asset_form_cpu_ms += elapsed_ms,
+            SourceAssetKind::Form { .. } => self.source_asset_form_cpu_ms += elapsed_ms,
             SourceAssetKind::Help => self.source_asset_help_cpu_ms += elapsed_ms,
             SourceAssetKind::MoxelSpreadsheet => self.source_asset_moxel_cpu_ms += elapsed_ms,
             SourceAssetKind::DataCompositionSchema

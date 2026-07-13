@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{
     ConfigRow, MetadataCommandReference, MetadataTextRow, command_interface_placement_name,
     command_interface_reference_entries_from_text, command_interface_standard_command, decode_hex,
-    inflate_raw_deflate, is_template_metadata_text, is_uuid_text,
+    inflate_raw_deflate, is_form_metadata_text, is_template_metadata_text, is_uuid_text,
     metadata_kind_needs_form_template_reference_indexes, metadata_text_row_from_text,
     nested_command_headers_from_text, parse_command_interface_common_flag,
     parse_generated_type_entries_from_text, recalculation_object_fields, split_1c_braced_fields,
@@ -156,6 +156,14 @@ pub(super) fn selected_configuration_source_asset_index_needs_with_metadata(
         .iter()
         .map(|row| (row.file_name.as_str(), row))
         .collect::<BTreeMap<_, _>>();
+    if file_names.iter().any(|file_name| {
+        file_name
+            .strip_suffix(".0")
+            .and_then(|metadata_id| metadata_by_id.get(metadata_id))
+            .is_some_and(|row| is_form_metadata_text(&row.text, &row.file_name))
+    }) {
+        needs.field_refs = true;
+    }
     if file_names.iter().any(|file_name| {
         let Some(metadata_id) = file_name.strip_suffix(".0") else {
             return false;

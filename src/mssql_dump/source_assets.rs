@@ -451,7 +451,7 @@ pub(crate) enum SourceAssetKind {
     BusinessProcessFlowchart,
     DataCompositionSchema,
     ExtPicture,
-    Form,
+    Form { owner_reference: Option<String> },
     Help,
     HomePageWorkArea,
     InflatedBase64OrBinary,
@@ -659,7 +659,9 @@ pub(super) fn form_body_asset_paths(
             body_id,
             SourceAsset {
                 primary_path: form_dir.join("Ext").join("Form.xml"),
-                kind: SourceAssetKind::Form,
+                kind: SourceAssetKind::Form {
+                    owner_reference: form_owner_reference_name(form_ref),
+                },
             },
         );
     }
@@ -1041,7 +1043,7 @@ pub(super) fn write_source_asset(
             }
             write_source_xml_file(&path, xml, context.source_version)?;
         }
-        SourceAssetKind::Form => {
+        SourceAssetKind::Form { owner_reference } => {
             let form_xml_started = Instant::now();
             let owned_body;
             let body = if let Some(body) = parsed_form_body {
@@ -1059,6 +1061,8 @@ pub(super) fn write_source_asset(
                 body,
                 context.type_index,
                 context.object_refs,
+                context.information_register_field_refs,
+                owner_reference.as_deref(),
                 Some(timings),
             )
             .with_context(|| {
