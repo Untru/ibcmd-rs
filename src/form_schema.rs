@@ -650,6 +650,38 @@ pub(crate) struct FormChildItemVisibleSchema {
     slot: usize,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormConditionalGroupSchema {
+    prefix_slot: usize,
+}
+
+impl FormConditionalGroupSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        user_visible_common: Option<bool>,
+        shifted_discriminator: Option<&str>,
+    ) -> Option<Self> {
+        match (
+            wrapper,
+            field_count,
+            user_visible_common,
+            shifted_discriminator,
+        ) {
+            ("22", field_count, Some(false), Some("2" | "3" | "5"))
+                if field_count >= 31 && (field_count - 31) % 2 == 0 =>
+            {
+                Some(Self { prefix_slot: 5 })
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn prefix_slot(self) -> usize {
+        self.prefix_slot
+    }
+}
+
 impl FormChildItemVisibleSchema {
     pub(crate) fn from_raw_layout(
         wrapper: &str,

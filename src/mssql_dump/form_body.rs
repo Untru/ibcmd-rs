@@ -5,8 +5,8 @@ use crate::form_schema::{
     FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
     FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemVisibleSchema,
-    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
-    FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
+    FormConditionalGroupSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
@@ -3939,15 +3939,25 @@ pub(super) fn parse_form_child_item_with_context(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let wrapper = fields.first()?.trim();
+    let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
+    let wrapper = raw_fields.first()?.trim();
+    let conditional_group_schema = form_conditional_group_schema(wrapper, &raw_fields);
+    let conditional_user_visible_common = conditional_group_schema.map(|_| false);
+    let normalized_fields = conditional_group_schema.map(|schema| {
+        raw_fields
+            .iter()
+            .enumerate()
+            .filter_map(|(index, field)| (index != schema.prefix_slot()).then_some(*field))
+            .collect::<Vec<_>>()
+    });
+    let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
     if id == "0" {
         return None;
     }
-    let tag = form_child_item_tag(wrapper, &fields)?;
-    let name = parse_form_child_item_name(wrapper, &fields)?;
+    let tag = form_child_item_tag(wrapper, fields)?;
+    let name = parse_form_child_item_name(wrapper, fields)?;
     let button_top_level_offset = (tag == "Button")
         .then(|| form_button_top_level_offset(&fields))
         .unwrap_or(0);
@@ -4552,20 +4562,18 @@ pub(super) fn parse_form_child_item_with_context(
             .then(|| parse_form_child_item_show_in_header(&fields))
             .flatten()
         },
-        user_visible_common: if matches!(
-            tag,
-            "InputField"
-                | "LabelField"
-                | "CheckBoxField"
-                | "RadioButtonField"
-                | "TextDocumentField"
-        ) && form_input_field_layout_is_extended(&fields)
-            && input_field_top_level_offset > 0
-        {
-            Some(false)
-        } else {
-            None
-        },
+        user_visible_common: conditional_user_visible_common.or_else(|| {
+            (matches!(
+                tag,
+                "InputField"
+                    | "LabelField"
+                    | "CheckBoxField"
+                    | "RadioButtonField"
+                    | "TextDocumentField"
+            ) && form_input_field_layout_is_extended(&fields)
+                && input_field_top_level_offset > 0)
+                .then_some(false)
+        }),
         visible: FormChildItemVisibleSchema::from_raw_layout(
             wrapper,
             fields.len(),
@@ -7713,9 +7721,53 @@ pub(super) fn parse_form_table_command_set_excluded_commands(fields: &[&str]) ->
     Vec::new()
 }
 
+fn parse_form_conditional_user_visible_common(field: &str) -> Option<bool> {
+    let outer = split_1c_braced_fields(field.trim(), 0)?;
+    if outer.len() != 2 || outer.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let condition = split_1c_braced_fields(outer.get(1)?.trim(), 0)?;
+    if condition.len() != 3
+        || condition.first().map(|value| value.trim()) != Some("0")
+        || condition.get(2).map(|value| value.trim()) != Some("0")
+    {
+        return None;
+    }
+    let value = split_1c_braced_fields(condition.get(1)?.trim(), 0)?;
+    if value.len() != 2 || value.first().and_then(|value| parse_1c_string(value))? != "B" {
+        return None;
+    }
+    match value.get(1).map(|value| value.trim()) {
+        Some("0") => Some(false),
+        Some("1") => Some(true),
+        _ => None,
+    }
+}
+
+fn form_conditional_group_schema(
+    wrapper: &str,
+    fields: &[&str],
+) -> Option<FormConditionalGroupSchema> {
+    FormConditionalGroupSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        fields
+            .get(5)
+            .and_then(|field| parse_form_conditional_user_visible_common(field)),
+        fields.get(6).map(|field| field.trim()),
+    )
+}
+
 pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
     match wrapper {
-        "22" => match fields.get(5).map(|value| value.trim())? {
+        "22" => match fields
+            .get(
+                5 + form_conditional_group_schema(wrapper, fields)
+                    .map(|_| 1)
+                    .unwrap_or_default(),
+            )
+            .map(|value| value.trim())?
+        {
             "0" => Some("CommandBar"),
             "1" => Some("Popup"),
             "2" => Some("ColumnGroup"),
@@ -7796,6 +7848,14 @@ fn parse_form_special_field_layout<'a>(
 }
 
 pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Option<String> {
+    if wrapper == "22" {
+        let index = 6 + form_conditional_group_schema(wrapper, fields)
+            .map(|_| 1)
+            .unwrap_or_default();
+        return parse_1c_quoted_string_with_len(fields.get(index)?.trim())
+            .map(|(value, _)| value)
+            .filter(|value| !value.is_empty());
+    }
     let indexes: &[usize] = match wrapper {
         "73" | "55" => &[5],
         "31" | "34" => &[5, 6],
