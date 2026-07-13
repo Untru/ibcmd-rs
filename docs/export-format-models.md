@@ -3242,3 +3242,58 @@ Related Table FileDragMode and ExcludedCommand audits remain HOLD. Their raw
 cohorts contain native-positive and native-negative owners with identical
 available structural signatures, so accepting only the improving owners would
 require a path/name or corpus-specific fallback.
+
+## Form PictureDecoration and scalar-field order acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch changes only the order of already decoded Form properties. Commit
+`f82cdd2` moves the existing embedded `PictureDecoration` `Picture/xr:Abs`
+formatter into the typed Picture position, after an optional `xr:Ref` Picture
+and before `FileDragMode`, `ContextMenu`, `ExtendedTooltip`, and `Events`.
+Commit `201889d` emits an existing `InputField` `SkipOnInput` value after an
+early `ReadOnly` and before `Title`, and adds `TextDocumentField` to the
+existing early-ReadOnly owner set. The former late scalar call sites suppress
+duplicates. Parser logic, owner admission, decoded values, picture content,
+asset names, and reference resolution are unchanged.
+
+Native contains 40 embedded PictureDecoration owners. Every owner places
+Picture before ContextMenu and ExtendedTooltip, all 16 co-occurring
+FileDragMode nodes, and all three co-occurring Events blocks; reverse counts
+are zero. Generated contains 39 reachable owners and now has the same
+relations in `39/39`, `15/15`, and `3/3`, with zero reverse cases. The one
+native-only owner remains an upstream admission gap. A separate control of
+651 native and 582 generated reference-picture owners confirms that the
+existing `xr:Ref` Picture order remains unchanged and exact.
+
+For scalar fields, native has 53 InputField owners where SkipOnInput and Title
+co-occur, all with SkipOnInput first. Generated now has 54 such owners, all in
+the native order; the additional owner is a pre-existing generated-only value
+residual, not introduced by this move. Native and generated each have seven
+TextDocumentField owners with ReadOnly before Title, with zero reverse cases.
+
+The two production commits change one file totaling `+23/-10`. Independent
+reviews returned GO with no findings. The changes add no object/form name,
+path, database identity, UUID, corpus-specific branch, panic, unwrap, or unsafe
+path. `cargo fmt -- --check`, `cargo check --all-targets`, and
+`git diff --check` pass with the same two pre-existing warnings. Tests and
+native ConfigDump were not run by direct user instruction.
+
+The exact combined shadow predicted `0 files, -155 additions, -155 deletions`.
+The release export writes 12,197 files and reproduces that prediction exactly:
+the normalized full diff changes from `1241 files, +10429/-46321` to
+`1241 files, +10274/-46166`; Form changes from
+`979 files, +5191/-21725` to `979 files, +5036/-21570`. No files close or
+become newly different. Residual tag starts improve to ContextMenu `+0/-447`,
+ExtendedTooltip `+0/-496`, SkipOnInput `+88/-315`, and ReadOnly `+11/-172`.
+`ConfigDumpInfo.xml` remains canonically exact with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #104 is closed after this acceptance gate.
+
+The broader audits deliberately remain HOLD. DataPath has no order-only
+cohort: its residual is 405 value mismatches, 227 native-only occurrences, and
+five generated-only occurrences. Visible lacks a complete raw matrix.
+Button/Table scalar ordering requires coupled or structurally discriminated
+property models. Remaining Picture, Ref, and LoadTransparent residuals span
+six different owner schemas, and missing ExtendedTooltip/ContextMenu nodes are
+upstream owner-admission gaps. None are widened by this batch.
