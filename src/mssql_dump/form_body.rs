@@ -5,7 +5,9 @@ use crate::form_schema::{
     FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_TABLE_XML_ORDER, FORM_USUAL_GROUP_HEADER_XML_ORDER, FormCheckBoxFieldSchema,
     FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
-    FormChildItemVisibleSchema, FormConditionalGroupSchema, FormConditionalTableSchema,
+    FormChildItemVisibleSchema, FormCommandInterfaceContainerOwner,
+    FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
+    FormCommandInterfaceVisibilitySchema, FormConditionalGroupSchema, FormConditionalTableSchema,
     FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
     FormExtendedTooltipXmlProperty, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
@@ -153,7 +155,8 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let command_interface = extract_form_command_interface(&body.trailing, object_refs);
+    let command_interface =
+        extract_form_command_interface_with_commands(&body.trailing, &commands, object_refs);
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_command_interface_cpu_ms += elapsed_ms(started);
     }
@@ -378,7 +381,13 @@ pub(super) struct FormCommandInterfaceItem {
     pub(super) command_group: Option<String>,
     pub(super) index: Option<usize>,
     pub(super) default_visible: Option<bool>,
-    pub(super) visible_common: Option<bool>,
+    pub(super) visible: Option<FormCommandInterfaceVisibility>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormCommandInterfaceVisibility {
+    pub(super) common: bool,
+    pub(super) role_values: Vec<(String, bool)>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -9188,42 +9197,63 @@ pub(super) fn parse_form_button_data_path(
     Some(format!("Items.{table_name}.CurrentData.{field_name}"))
 }
 
+#[cfg(test)]
 pub(super) fn extract_form_command_interface(
     trailing: &[String],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormCommandInterface> {
-    trailing
-        .get(3)
-        .and_then(|field| parse_form_command_interface_container(field, object_refs))
-        .or_else(|| {
-            trailing
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| *index != 3)
-                .find_map(|(_, field)| parse_form_command_interface_container(field, object_refs))
-        })
+    extract_form_command_interface_with_commands(trailing, &[], object_refs)
+}
+
+pub(super) fn extract_form_command_interface_with_commands(
+    trailing: &[String],
+    commands: &[FormCommand],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormCommandInterface> {
+    let mut command_bar = Vec::new();
+    let mut navigation_panel = Vec::new();
+    for (trailing_slot, field) in trailing.iter().enumerate() {
+        let Some(container) =
+            parse_form_command_interface_container(trailing_slot, field, commands, object_refs)
+        else {
+            continue;
+        };
+        command_bar.extend(container.command_bar);
+        navigation_panel.extend(container.navigation_panel);
+    }
+    (!command_bar.is_empty() || !navigation_panel.is_empty()).then_some(FormCommandInterface {
+        command_bar,
+        navigation_panel,
+    })
 }
 
 pub(super) fn parse_form_command_interface_container(
+    trailing_slot: usize,
     field: &str,
+    commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormCommandInterface> {
     let fields = split_1c_braced_fields(field, 0)?;
-    if fields.first().map(|value| value.trim()) != Some("0") {
-        return None;
-    }
+    let declared_item_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let typed_item_count = fields
+        .iter()
+        .skip(2)
+        .filter(|field| form_command_interface_item_schema(field).is_some())
+        .count();
+    let schema = FormCommandInterfaceContainerSchema::from_raw_layout(
+        trailing_slot,
+        fields.first()?.trim(),
+        fields.len(),
+        declared_item_count,
+        typed_item_count,
+    )?;
     let mut command_bar = Vec::new();
     let mut navigation_panel = Vec::new();
     for field in fields.iter().skip(2) {
-        if let Some(item) = parse_form_command_interface_item(field, object_refs) {
-            if item
-                .command_group
-                .as_deref()
-                .is_some_and(|group| group.starts_with("FormNavigationPanel"))
-            {
-                navigation_panel.push(item);
-            } else {
-                command_bar.push(item);
+        if let Some(item) = parse_form_command_interface_item(field, commands, object_refs) {
+            match schema.owner() {
+                FormCommandInterfaceContainerOwner::CommandBar => command_bar.push(item),
+                FormCommandInterfaceContainerOwner::NavigationPanel => navigation_panel.push(item),
             }
         }
     }
@@ -9238,13 +9268,18 @@ pub(super) fn parse_form_command_interface_container(
 
 pub(super) fn parse_form_command_interface_item(
     field: &str,
+    commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormCommandInterfaceItem> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    if fields.first().map(|value| value.trim()) != Some("3") {
-        return None;
-    }
-    let command = parse_form_command_interface_command(fields.get(2)?, object_refs)?;
+    FormCommandInterfaceItemSchema::from_raw_layout(
+        fields.first()?.trim(),
+        fields.len(),
+        fields.get(4)?.trim(),
+        fields.get(7)?.trim(),
+    )?;
+    form_command_interface_visibility_schema(fields.get(8)?)?;
+    let command = parse_form_command_interface_command(fields.get(2)?, commands, object_refs)?;
     let item_type = parse_form_command_interface_item_type(fields.get(4).copied())?;
     let command_group = fields
         .get(5)
@@ -9265,11 +9300,81 @@ pub(super) fn parse_form_command_interface_item(
         command_group,
         index,
         default_visible,
-        visible_common: fields
-            .get(8)
-            .and_then(|value| parse_form_nested_common_bool(value))
-            .filter(|common| !*common),
+        visible: parse_form_command_interface_visibility(fields.get(8)?, object_refs)?,
     })
+}
+
+pub(super) fn form_command_interface_item_schema(
+    field: &str,
+) -> Option<FormCommandInterfaceItemSchema> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let schema = FormCommandInterfaceItemSchema::from_raw_layout(
+        fields.first()?.trim(),
+        fields.len(),
+        fields.get(4)?.trim(),
+        fields.get(7)?.trim(),
+    )?;
+    form_command_interface_visibility_schema(fields.get(8)?)?;
+    Some(schema)
+}
+
+pub(super) fn form_command_interface_visibility_schema(
+    field: &str,
+) -> Option<FormCommandInterfaceVisibilitySchema> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let scope = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    parse_form_typed_bool(scope.get(1)?)?;
+    let role_count = scope.get(2)?.trim().parse::<usize>().ok()?;
+    let typed_role_count = scope
+        .get(3..)?
+        .chunks_exact(2)
+        .filter(|pair| {
+            parse_non_zero_uuid(pair[0].trim()).is_some()
+                && parse_form_typed_bool(pair[1]).is_some()
+        })
+        .count();
+    FormCommandInterfaceVisibilitySchema::from_raw_layout(
+        fields.first()?.trim(),
+        fields.len(),
+        scope.first()?.trim(),
+        scope.len(),
+        role_count,
+        typed_role_count,
+    )
+}
+
+pub(super) fn parse_form_command_interface_visibility(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<FormCommandInterfaceVisibility>> {
+    let schema = form_command_interface_visibility_schema(field)?;
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let scope = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    let common = parse_form_typed_bool(scope.get(1)?)?;
+    let mut role_values = Vec::with_capacity(schema.role_count());
+    for pair in scope.get(3..)?.chunks_exact(2) {
+        let uuid = parse_non_zero_uuid(pair[0].trim())?;
+        let role = object_refs.get(&uuid)?.strip_prefix("Role.")?;
+        role_values.push((format!("Role.{role}"), parse_form_typed_bool(pair[1])?));
+    }
+    Some(
+        (!common || !role_values.is_empty()).then_some(FormCommandInterfaceVisibility {
+            common,
+            role_values,
+        }),
+    )
+}
+
+pub(super) fn parse_form_typed_bool(field: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.len() != 2 || fields.first().map(|value| value.trim()) != Some(r#""B""#) {
+        return None;
+    }
+    match fields.get(1)?.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
 }
 
 pub(super) fn parse_form_command_interface_item_type(field: Option<&str>) -> Option<&'static str> {
@@ -9282,12 +9387,23 @@ pub(super) fn parse_form_command_interface_item_type(field: Option<&str>) -> Opt
 
 pub(super) fn parse_form_command_interface_command(
     field: &str,
+    commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    match fields.first().map(|value| value.trim()) {
-        Some("0") => {
-            let Some(target) = fields.get(1).map(|value| value.trim()) else {
+    let kind = fields.first()?.trim();
+    let target = fields.get(1).map(|value| value.trim());
+    if kind != "0"
+        && let Some(uuid) = target.and_then(parse_non_zero_uuid)
+        && let Some(command) = commands
+            .iter()
+            .find(|command| command.id == kind && command.reference_uuid == uuid)
+    {
+        return Some(format!("Form.Command.{}", command.name));
+    }
+    match kind {
+        "0" => {
+            let Some(target) = target else {
                 return Some("0".to_string());
             };
             if target == "0" || target == "00000000-0000-0000-0000-000000000000" {
@@ -9296,14 +9412,45 @@ pub(super) fn parse_form_command_interface_command(
                 parse_non_zero_uuid(target).and_then(|uuid| object_refs.get(&uuid).cloned())
             }
         }
-        Some("2") => {
-            let uuid = parse_non_zero_uuid(fields.get(1)?.trim())?;
+        "2" => {
+            let uuid = parse_non_zero_uuid(target?)?;
             object_refs
                 .get(&uuid)
                 .map(|reference| format!("{reference}.StandardCommand.CreateBasedOn"))
         }
-        _ => parse_form_object_reference(field, object_refs),
+        "3" => {
+            let uuid = parse_non_zero_uuid(target?)?;
+            let reference = object_refs.get(&uuid)?;
+            form_information_register_open_by_value_reference(reference).or_else(|| {
+                (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
+                    .then(|| reference.clone())
+            })
+        }
+        "4" => {
+            let uuid = parse_non_zero_uuid(target?)?;
+            let reference = object_refs.get(&uuid)?;
+            (reference.starts_with("Catalog.") && reference.matches('.').count() == 1)
+                .then(|| format!("{reference}.StandardCommand.OpenByValue"))
+        }
+        _ => None,
     }
+}
+
+pub(super) fn form_information_register_open_by_value_reference(reference: &str) -> Option<String> {
+    let parts = reference.split('.').collect::<Vec<_>>();
+    if parts.len() != 4
+        || parts.first().copied() != Some("InformationRegister")
+        || !matches!(
+            parts.get(2).copied(),
+            Some("Dimension" | "Resource" | "Attribute")
+        )
+    {
+        return None;
+    }
+    Some(format!(
+        "{}.{}.StandardCommand.OpenByValue.{}",
+        parts[0], parts[1], parts[3]
+    ))
 }
 
 pub(super) fn parse_form_object_reference(
@@ -9340,16 +9487,6 @@ pub(super) fn form_standard_command_group_name(uuid: &str) -> Option<&'static st
         "8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8" => Some("FormNavigationPanelSeeAlso"),
         "dc11a6be-de1f-4b64-a7a5-9b17bf4ec9f2" => Some("FormNavigationPanelImportant"),
         _ => None,
-    }
-}
-
-pub(super) fn parse_form_nested_common_bool(field: &str) -> Option<bool> {
-    if field.contains(r#"{"B",1}"#) {
-        Some(true)
-    } else if field.contains(r#"{"B",0}"#) {
-        Some(false)
-    } else {
-        None
     }
 }
 
@@ -11837,45 +11974,6 @@ pub(super) fn format_form_command_interface_xml(
     command_interface: &FormCommandInterface,
 ) -> String {
     let mut xml = "\t<CommandInterface>\r\n".to_string();
-    if !command_interface.command_bar.is_empty() {
-        xml.push_str("\t\t<CommandBar>\r\n");
-        for item in &command_interface.command_bar {
-            xml.push_str("\t\t\t<Item>\r\n");
-            xml.push_str(&format!(
-                "\t\t\t\t<Command>{}</Command>\r\n",
-                escape_xml_text(&item.command)
-            ));
-            xml.push_str(&format!(
-                "\t\t\t\t<Type>{}</Type>\r\n",
-                escape_xml_text(item.item_type)
-            ));
-            if let Some(command_group) = item.command_group.as_deref() {
-                xml.push_str(&format!(
-                    "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
-                    escape_xml_text(command_group)
-                ));
-            }
-            if let Some(index) = item.index {
-                xml.push_str(&format!("\t\t\t\t<Index>{index}</Index>\r\n"));
-            }
-            if let Some(default_visible) = item.default_visible {
-                xml.push_str(&format!(
-                    "\t\t\t\t<DefaultVisible>{}</DefaultVisible>\r\n",
-                    xml_bool(default_visible)
-                ));
-            }
-            if let Some(common) = item.visible_common {
-                xml.push_str("\t\t\t\t<Visible>\r\n");
-                xml.push_str(&format!(
-                    "\t\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
-                    xml_bool(common)
-                ));
-                xml.push_str("\t\t\t\t</Visible>\r\n");
-            }
-            xml.push_str("\t\t\t</Item>\r\n");
-        }
-        xml.push_str("\t\t</CommandBar>\r\n");
-    }
     if !command_interface.navigation_panel.is_empty() {
         xml.push_str("\t\t<NavigationPanel>\r\n");
         for item in &command_interface.navigation_panel {
@@ -11903,17 +12001,70 @@ pub(super) fn format_form_command_interface_xml(
                     xml_bool(default_visible)
                 ));
             }
-            if let Some(common) = item.visible_common {
+            if let Some(visible) = &item.visible {
                 xml.push_str("\t\t\t\t<Visible>\r\n");
                 xml.push_str(&format!(
                     "\t\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
-                    xml_bool(common)
+                    xml_bool(visible.common)
                 ));
+                for (role, value) in &visible.role_values {
+                    xml.push_str(&format!(
+                        "\t\t\t\t\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+                        escape_xml_text(role),
+                        xml_bool(*value)
+                    ));
+                }
                 xml.push_str("\t\t\t\t</Visible>\r\n");
             }
             xml.push_str("\t\t\t</Item>\r\n");
         }
         xml.push_str("\t\t</NavigationPanel>\r\n");
+    }
+    if !command_interface.command_bar.is_empty() {
+        xml.push_str("\t\t<CommandBar>\r\n");
+        for item in &command_interface.command_bar {
+            xml.push_str("\t\t\t<Item>\r\n");
+            xml.push_str(&format!(
+                "\t\t\t\t<Command>{}</Command>\r\n",
+                escape_xml_text(&item.command)
+            ));
+            xml.push_str(&format!(
+                "\t\t\t\t<Type>{}</Type>\r\n",
+                escape_xml_text(item.item_type)
+            ));
+            if let Some(command_group) = item.command_group.as_deref() {
+                xml.push_str(&format!(
+                    "\t\t\t\t<CommandGroup>{}</CommandGroup>\r\n",
+                    escape_xml_text(command_group)
+                ));
+            }
+            if let Some(index) = item.index {
+                xml.push_str(&format!("\t\t\t\t<Index>{index}</Index>\r\n"));
+            }
+            if let Some(default_visible) = item.default_visible {
+                xml.push_str(&format!(
+                    "\t\t\t\t<DefaultVisible>{}</DefaultVisible>\r\n",
+                    xml_bool(default_visible)
+                ));
+            }
+            if let Some(visible) = &item.visible {
+                xml.push_str("\t\t\t\t<Visible>\r\n");
+                xml.push_str(&format!(
+                    "\t\t\t\t\t<xr:Common>{}</xr:Common>\r\n",
+                    xml_bool(visible.common)
+                ));
+                for (role, value) in &visible.role_values {
+                    xml.push_str(&format!(
+                        "\t\t\t\t\t<xr:Value name=\"{}\">{}</xr:Value>\r\n",
+                        escape_xml_text(role),
+                        xml_bool(*value)
+                    ));
+                }
+                xml.push_str("\t\t\t\t</Visible>\r\n");
+            }
+            xml.push_str("\t\t\t</Item>\r\n");
+        }
+        xml.push_str("\t\t</CommandBar>\r\n");
     }
     xml.push_str("\t</CommandInterface>\r\n");
     xml

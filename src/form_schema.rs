@@ -687,6 +687,88 @@ pub(crate) struct FormConditionalTableSchema {
     prefix_slot: usize,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormCommandInterfaceContainerOwner {
+    CommandBar,
+    NavigationPanel,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormCommandInterfaceContainerSchema {
+    owner: FormCommandInterfaceContainerOwner,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormCommandInterfaceItemSchema;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormCommandInterfaceVisibilitySchema {
+    role_count: usize,
+}
+
+impl FormCommandInterfaceContainerSchema {
+    pub(crate) fn from_raw_layout(
+        trailing_slot: usize,
+        wrapper: &str,
+        field_count: usize,
+        declared_item_count: usize,
+        typed_item_count: usize,
+    ) -> Option<Self> {
+        let owner = match trailing_slot {
+            3 => FormCommandInterfaceContainerOwner::NavigationPanel,
+            4 => FormCommandInterfaceContainerOwner::CommandBar,
+            _ => return None,
+        };
+        (wrapper == "0"
+            && declared_item_count > 0
+            && field_count == declared_item_count.checked_add(2)?
+            && typed_item_count == declared_item_count)
+            .then_some(Self { owner })
+    }
+
+    pub(crate) const fn owner(self) -> FormCommandInterfaceContainerOwner {
+        self.owner
+    }
+}
+
+impl FormCommandInterfaceItemSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_type: &str,
+        default_visible: &str,
+    ) -> Option<Self> {
+        (wrapper == "3"
+            && field_count == 9
+            && matches!(item_type, "0" | "1")
+            && matches!(default_visible, "0" | "1"))
+        .then_some(Self)
+    }
+}
+
+impl FormCommandInterfaceVisibilitySchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        scope_wrapper: &str,
+        scope_field_count: usize,
+        role_count: usize,
+        typed_role_count: usize,
+    ) -> Option<Self> {
+        let expected_scope_fields = role_count.checked_mul(2)?.checked_add(3)?;
+        (wrapper == "0"
+            && field_count == 2
+            && scope_wrapper == "0"
+            && scope_field_count == expected_scope_fields
+            && typed_role_count == role_count)
+            .then_some(Self { role_count })
+    }
+
+    pub(crate) const fn role_count(self) -> usize {
+        self.role_count
+    }
+}
+
 impl FormConditionalGroupSchema {
     pub(crate) fn from_raw_layout(
         wrapper: &str,
