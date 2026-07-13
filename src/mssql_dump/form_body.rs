@@ -15,9 +15,9 @@ use crate::form_schema::{
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormRootVerticalScrollSchema,
-    FormSpecialFieldSchema, FormTableGridSchema, FormTableGridSlot,
-    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
+    FormTablePropertyBagKey as TableBagKey, FormTableSchema, FormTableXmlProperty,
+    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     decode_form_tooltip_representation, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
@@ -486,6 +486,8 @@ pub(super) struct FormChildItem {
     pub(super) default_item: Option<bool>,
     pub(super) initial_tree_view: Option<&'static str>,
     pub(super) row_input_mode: Option<&'static str>,
+    pub(super) table_choice_mode: Option<bool>,
+    pub(super) table_selection_mode: Option<&'static str>,
     pub(super) table_header: Option<bool>,
     pub(super) table_horizontal_lines: Option<bool>,
     pub(super) table_vertical_lines: Option<bool>,
@@ -4224,9 +4226,7 @@ pub(super) fn parse_form_child_item_with_context(
             .filter(|options| options.first().map(|field| field.trim()) == Some(options_kind))
     });
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
-    let table_grid_schema = (tag == "Table")
-        .then(|| FormTableGridSchema::from_raw_layout(wrapper, &fields))
-        .flatten();
+    let table_schema = FormTableSchema::from_raw_layout(wrapper, tag, &fields);
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
             parse_form_button_command_name(
@@ -4272,7 +4272,9 @@ pub(super) fn parse_form_child_item_with_context(
         auto_command_bar_empty_element: is_raw_empty_nested_auto_command_bar(
             wrapper, tag, id, &fields,
         ),
-        autofill: if tag == "ContextMenu" {
+        autofill: if let Some(schema) = table_schema {
+            schema.autofill(&fields)
+        } else if tag == "ContextMenu" {
             fields
                 .get(20)
                 .and_then(|field| parse_form_context_menu_autofill(field))
@@ -4342,7 +4344,9 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        row_selection_mode: if tag == "Table" {
+        row_selection_mode: if wrapper == "55" {
+            table_schema.and_then(|schema| schema.row_selection_mode(&fields))
+        } else if tag == "Table" {
             if ordinary_table_layout {
                 None
             } else {
@@ -4483,21 +4487,11 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        table_header: parse_form_table_grid_property(
-            table_grid_schema,
-            &fields,
-            FormTableGridSlot::Header,
-        ),
-        table_horizontal_lines: parse_form_table_grid_property(
-            table_grid_schema,
-            &fields,
-            FormTableGridSlot::HorizontalLines,
-        ),
-        table_vertical_lines: parse_form_table_grid_property(
-            table_grid_schema,
-            &fields,
-            FormTableGridSlot::VerticalLines,
-        ),
+        table_choice_mode: table_schema.and_then(|schema| schema.choice_mode(&fields)),
+        table_selection_mode: table_schema.and_then(|schema| schema.selection_mode(&fields)),
+        table_header: table_schema.and_then(|schema| schema.header(&fields)),
+        table_horizontal_lines: table_schema.and_then(|schema| schema.horizontal_lines(&fields)),
+        table_vertical_lines: table_schema.and_then(|schema| schema.vertical_lines(&fields)),
         show_root: if tag == "Table" && !ordinary_table_layout {
             fields
                 .get(36)
@@ -6937,14 +6931,6 @@ pub(super) fn parse_form_table_row_input_mode(field: Option<&str>) -> Option<&'s
         Some("2") => Some("AfterCurrentRow"),
         _ => None,
     }
-}
-
-pub(super) fn parse_form_table_grid_property(
-    schema: Option<FormTableGridSchema>,
-    fields: &[&str],
-    slot: FormTableGridSlot,
-) -> Option<bool> {
-    schema?.explicit_false(fields, slot)
 }
 
 pub(super) fn parse_form_table_file_drag_mode(field: &str) -> Option<&'static str> {
@@ -10157,6 +10143,10 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::Autofill => match item.autofill {
+            Some(true) => format!("{tab}<Autofill>true</Autofill>\r\n"),
+            _ => String::new(),
+        },
         FormTableXmlProperty::DefaultItem => match item.default_item {
             Some(true) => format!("{tab}<DefaultItem>true</DefaultItem>\r\n"),
             _ => String::new(),
@@ -10225,6 +10215,10 @@ fn format_form_table_property_xml(
             }
             _ => String::new(),
         },
+        FormTableXmlProperty::ChoiceMode => match item.table_choice_mode {
+            Some(true) => format!("{tab}<ChoiceMode>true</ChoiceMode>\r\n"),
+            _ => String::new(),
+        },
         FormTableXmlProperty::RowInputMode => item
             .row_input_mode
             .map(|value| {
@@ -10234,6 +10228,19 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::SelectionMode => item
+            .table_selection_mode
+            .map(|value| {
+                format!(
+                    "{tab}<SelectionMode>{}</SelectionMode>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::RowSelectionMode => match item.row_selection_mode {
+            Some("Row") => format!("{tab}<RowSelectionMode>Row</RowSelectionMode>\r\n"),
+            _ => String::new(),
+        },
         FormTableXmlProperty::Header => match item.table_header {
             Some(false) => format!("{tab}<Header>false</Header>\r\n"),
             _ => String::new(),

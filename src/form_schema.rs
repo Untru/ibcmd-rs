@@ -1340,6 +1340,7 @@ pub(crate) enum FormTableXmlProperty {
     UserVisible,
     Visible,
     CommandBarLocation,
+    Autofill,
     DefaultItem,
     SkipOnInput,
     ReadOnly,
@@ -1349,7 +1350,10 @@ pub(crate) enum FormTableXmlProperty {
     HeightInTableRows,
     ChangeRowOrder,
     AutoMaxWidth,
+    ChoiceMode,
     RowInputMode,
+    SelectionMode,
+    RowSelectionMode,
     Header,
     HorizontalLines,
     VerticalLines,
@@ -1383,6 +1387,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::UserVisible,
     FormTableXmlProperty::Visible,
     FormTableXmlProperty::CommandBarLocation,
+    FormTableXmlProperty::Autofill,
     FormTableXmlProperty::DefaultItem,
     FormTableXmlProperty::SkipOnInput,
     FormTableXmlProperty::ReadOnly,
@@ -1392,7 +1397,10 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::HeightInTableRows,
     FormTableXmlProperty::ChangeRowOrder,
     FormTableXmlProperty::AutoMaxWidth,
+    FormTableXmlProperty::ChoiceMode,
     FormTableXmlProperty::RowInputMode,
+    FormTableXmlProperty::SelectionMode,
+    FormTableXmlProperty::RowSelectionMode,
     FormTableXmlProperty::Header,
     FormTableXmlProperty::HorizontalLines,
     FormTableXmlProperty::VerticalLines,
@@ -1422,17 +1430,33 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableGridSlot {
+enum FormTableSlot {
+    Autofill,
+    ChoiceMode,
+    SelectionMode,
+    RowSelectionMode,
     Header,
     HorizontalLines,
     VerticalLines,
 }
 
-impl FormTableGridSlot {
-    const ALL: [Self; 3] = [Self::Header, Self::HorizontalLines, Self::VerticalLines];
+impl FormTableSlot {
+    const ALL: [Self; 7] = [
+        Self::Autofill,
+        Self::ChoiceMode,
+        Self::SelectionMode,
+        Self::RowSelectionMode,
+        Self::Header,
+        Self::HorizontalLines,
+        Self::VerticalLines,
+    ];
 
-    pub(crate) const fn index(self) -> usize {
+    const fn index(self) -> usize {
         match self {
+            Self::Autofill => 12,
+            Self::ChoiceMode => 22,
+            Self::SelectionMode => 24,
+            Self::RowSelectionMode => 25,
             Self::Header => 26,
             Self::HorizontalLines => 32,
             Self::VerticalLines => 33,
@@ -1441,17 +1465,18 @@ impl FormTableGridSlot {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormTableGridSchema;
+pub(crate) struct FormTableSchema;
 
-impl FormTableGridSchema {
+impl FormTableSchema {
     const BASE_FIELD_COUNT: usize = 99;
 
-    pub(crate) fn from_raw_layout(wrapper: &str, fields: &[&str]) -> Option<Self> {
+    pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
+            || item_tag != "Table"
             || fields.first().map(|field| field.trim()) != Some("55")
             || fields.len() < Self::BASE_FIELD_COUNT
             || (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0
-            || !FormTableGridSlot::ALL.iter().all(|slot| {
+            || !FormTableSlot::ALL.iter().all(|slot| {
                 fields
                     .get(slot.index())
                     .is_some_and(|field| matches!(field.trim(), "0" | "1"))
@@ -1462,7 +1487,39 @@ impl FormTableGridSchema {
         Some(Self)
     }
 
-    pub(crate) fn explicit_false(self, fields: &[&str], slot: FormTableGridSlot) -> Option<bool> {
+    pub(crate) fn autofill(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::Autofill)
+    }
+
+    pub(crate) fn choice_mode(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::ChoiceMode)
+    }
+
+    pub(crate) fn selection_mode(self, fields: &[&str]) -> Option<&'static str> {
+        (fields.get(FormTableSlot::SelectionMode.index())?.trim() == "0").then_some("SingleRow")
+    }
+
+    pub(crate) fn row_selection_mode(self, fields: &[&str]) -> Option<&'static str> {
+        (fields.get(FormTableSlot::RowSelectionMode.index())?.trim() == "1").then_some("Row")
+    }
+
+    pub(crate) fn header(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_false(fields, FormTableSlot::Header)
+    }
+
+    pub(crate) fn horizontal_lines(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_false(fields, FormTableSlot::HorizontalLines)
+    }
+
+    pub(crate) fn vertical_lines(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_false(fields, FormTableSlot::VerticalLines)
+    }
+
+    fn explicit_true(self, fields: &[&str], slot: FormTableSlot) -> Option<bool> {
+        (fields.get(slot.index())?.trim() == "1").then_some(true)
+    }
+
+    fn explicit_false(self, fields: &[&str], slot: FormTableSlot) -> Option<bool> {
         (fields.get(slot.index())?.trim() == "0").then_some(false)
     }
 }
