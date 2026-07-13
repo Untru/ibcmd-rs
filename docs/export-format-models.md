@@ -3623,3 +3623,65 @@ Form.xml. `ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with
 SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #109 is closed after this acceptance gate.
+
+## Schema-backed Table scalar and geometry acceptance
+
+Status: corrected and accepted by a fresh serialized full export.
+
+This batch again audits all 1,108 Form body rows and all 751 Table owners,
+including 86 tables in CommonForms and the one normalized conditional wrapper
+`55` layout. Commit `ec0070f` corrects the existing Table property order so
+`SkipOnInput` follows `ReadOnly` and precedes `DefaultItem`. The complete native
+pair matrix contains no reverse case. Its decoder is deliberately unchanged:
+the native cohort is 191 false, 8 true, and 552 omitted values, but neither a
+fixed slot nor a property-bag discriminator separates it exactly.
+
+Commit `3926553` extends the same fail-closed `FormTableSchema` with five exact
+scalar mappings:
+
+- slot 14 `1` -> `ReadOnly=true` for 130 tables;
+- slot 16 `1` -> `DefaultItem=true` for 236 tables;
+- slot 23 `2` -> `RowInputMode=AfterCurrentRow` for 9 tables;
+- slot 36 `1` -> `UseAlternationRowColor=true` for 366 tables;
+- slot 37 `1` -> `AutoInsertNewRow=true` for 349 tables.
+
+All five mappings have zero false positives and zero false negatives across
+the complete Table cohort. The former property-bag rules for DefaultItem and
+UseAlternationRowColor are contradicted by the corpus and are removed together
+with the related ordinary-table fallbacks. Non-Table parsing branches remain
+unchanged.
+
+Commit `5104a15` adds numeric slot 19 `Width` and slot 20 `Height` to the same
+schema. Width reproduces all 41 native values and Height all 86, with zero
+false positives, false negatives, invalid values, or value mismatches. The
+native geometry chain is `ChangeRowOrder`, `Width`, `AutoMaxWidth`, `Height`,
+`AutoMaxHeight`, `HeightInTableRows`, and `ChoiceMode`; the enum and runtime
+order now follow that chain. The existing AutoMaxWidth behavior is only moved,
+not broadened. AutoMaxWidth, AutoMaxHeight, SkipOnInput decoding, and
+FileDragMode remain explicit HOLD items because no exact structural decoder is
+known.
+
+The combined production diff changes two files by `+93/-75`. Mutual frozen
+reviews and an independent combined review returned GO. Added production lines
+contain no database/server identity, object or form name, path, UUID, corpus
+value, or new fallback heuristic. `cargo fmt --all --check`, `cargo check
+--all-targets`, `git diff --check`, the hardcode scan, and the release build
+pass with the same two pre-existing warnings. Tests and native ConfigDump were
+not run by direct user instruction.
+
+The selected shadow contains all 1,108 Form.xml files and is exact with the
+subsequent full export. Four Form.xml files become exact and no new differing
+file is opened:
+
+- `DataProcessors/УправлениеПодключениемDSS/Forms/ВыборУчетнойЗаписи/Ext/Form.xml`
+- `DataProcessors/УправлениеПодключениемDSS/Forms/ВыборЭкземпляровСервераDSS/Ext/Form.xml`
+- `DataProcessors/УправлениеПодключениемDSS/Forms/СписокУчетныхЗаписей/Ext/Form.xml`
+- `DataProcessors/УправлениеПодключениемDSS/Forms/СписокЭкземпляровСервераDSS/Ext/Form.xml`
+
+The serialized release export writes 12,197 files. The normalized full diff
+changes from `1202 files, +8823/-39704` to `1198 files, +8765/-39466`; Form
+changes from `940 files, +3585/-15108` to `936 files, +3527/-14870`. The exact
+batch delta is `-4 files, -58 additions, -238 deletions`, entirely in Form.xml.
+`ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #110 is closed after this acceptance gate.
