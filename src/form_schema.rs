@@ -1432,34 +1432,43 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTableSlot {
     Autofill,
+    ChangeRowOrder,
     ChoiceMode,
     SelectionMode,
     RowSelectionMode,
     Header,
     HorizontalLines,
     VerticalLines,
+    EnableStartDrag,
+    EnableDrag,
 }
 
 impl FormTableSlot {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 10] = [
         Self::Autofill,
+        Self::ChangeRowOrder,
         Self::ChoiceMode,
         Self::SelectionMode,
         Self::RowSelectionMode,
         Self::Header,
         Self::HorizontalLines,
         Self::VerticalLines,
+        Self::EnableStartDrag,
+        Self::EnableDrag,
     ];
 
     const fn index(self) -> usize {
         match self {
             Self::Autofill => 12,
+            Self::ChangeRowOrder => 18,
             Self::ChoiceMode => 22,
             Self::SelectionMode => 24,
             Self::RowSelectionMode => 25,
             Self::Header => 26,
             Self::HorizontalLines => 32,
             Self::VerticalLines => 33,
+            Self::EnableStartDrag => 52,
+            Self::EnableDrag => 53,
         }
     }
 }
@@ -1491,6 +1500,10 @@ impl FormTableSchema {
         self.explicit_true(fields, FormTableSlot::Autofill)
     }
 
+    pub(crate) fn change_row_order(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_false(fields, FormTableSlot::ChangeRowOrder)
+    }
+
     pub(crate) fn choice_mode(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::ChoiceMode)
     }
@@ -1513,6 +1526,14 @@ impl FormTableSchema {
 
     pub(crate) fn vertical_lines(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::VerticalLines)
+    }
+
+    pub(crate) fn enable_start_drag(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::EnableStartDrag)
+    }
+
+    pub(crate) fn enable_drag(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_true(fields, FormTableSlot::EnableDrag)
     }
 
     fn explicit_true(self, fields: &[&str], slot: FormTableSlot) -> Option<bool> {

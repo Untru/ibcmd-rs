@@ -4357,37 +4357,8 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        enable_start_drag: if tag == "Table" {
-            if ordinary_table_layout {
-                fields
-                    .get(26)
-                    .and_then(|field| parse_form_child_item_show_title(field))
-                    .filter(|value| *value)
-            } else {
-                fields
-                    .get(26)
-                    .and_then(|field| parse_form_child_item_show_title(field))
-                    .filter(|value| *value)
-            }
-        } else {
-            None
-        },
-        enable_drag: if tag == "Table" {
-            if ordinary_table_layout {
-                fields
-                    .get(29)
-                    .and_then(|field| parse_form_child_item_show_title(field))
-                    .filter(|value| *value)
-                    .or_else(|| parse_form_table_has_drag_events(&fields).then_some(true))
-            } else {
-                fields
-                    .get(29)
-                    .and_then(|field| parse_form_child_item_show_title(field))
-                    .filter(|value| *value)
-            }
-        } else {
-            None
-        },
+        enable_start_drag: table_schema.and_then(|schema| schema.enable_start_drag(&fields)),
+        enable_drag: table_schema.and_then(|schema| schema.enable_drag(&fields)),
         file_drag_mode: if tag == "Table" {
             parse_form_table_file_drag_mode_from_fields(wrapper, &fields)
         } else if tag == "PictureDecoration" {
@@ -4417,17 +4388,7 @@ pub(super) fn parse_form_child_item_with_context(
         } else {
             None
         },
-        change_row_order: if ordinary_table_layout {
-            let field_16 = fields.get(16).map(|field| field.trim());
-            let field_17 = fields.get(17).map(|field| field.trim());
-            let field_18 = fields.get(18).map(|field| field.trim());
-            let field_21 = fields.get(21).map(|field| field.trim());
-            ((field_17 == Some("0") && field_18 != Some("1"))
-                || (field_16 == Some("1") && field_17 == Some("1") && field_21 == Some("0")))
-            .then_some(false)
-        } else {
-            None
-        },
+        change_row_order: table_schema.and_then(|schema| schema.change_row_order(&fields)),
         command_set_excluded_commands: if tag == "Table" {
             parse_form_table_command_set_excluded_commands(&fields)
         } else {
@@ -6145,12 +6106,6 @@ pub(super) fn parse_form_input_field_title_location(field: &str) -> Option<&'sta
 pub(super) fn parse_form_input_field_horizontal_align(fields: &[&str]) -> Option<&'static str> {
     let index = 23 + form_input_field_top_level_offset(fields);
     (fields.get(index)?.trim() == "2").then_some("Right")
-}
-
-pub(super) fn parse_form_table_has_drag_events(fields: &[&str]) -> bool {
-    parse_form_child_item_event_fields(fields)
-        .into_iter()
-        .any(|event| matches!(event.name.as_str(), "Drag" | "DragCheck"))
 }
 
 pub(super) fn parse_form_view_status_addition_horizontal_location(
@@ -10262,9 +10217,7 @@ fn format_form_table_property_xml(
             _ => String::new(),
         },
         FormTableXmlProperty::EnableDrag => match item.enable_drag {
-            Some(true) if !hierarchical_table || item.read_only == Some(true) => {
-                format!("{tab}<EnableDrag>true</EnableDrag>\r\n")
-            }
+            Some(true) => format!("{tab}<EnableDrag>true</EnableDrag>\r\n"),
             _ => String::new(),
         },
         FormTableXmlProperty::FileDragMode => item
