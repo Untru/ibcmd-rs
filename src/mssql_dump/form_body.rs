@@ -4,7 +4,7 @@ use crate::form_schema::{
     FORM_FIELD_HEADER_PICTURE_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER,
     FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER,
     FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
-    FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER,
+    FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER, FORM_PAGE_XML_ORDER,
     FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER, FORM_TABLE_XML_ORDER,
     FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER, FormButtonColorSchema,
     FormCheckBoxFieldSchema, FormChildItemAlignment, FormChildItemShowTitleSchema,
@@ -19,9 +19,9 @@ use crate::form_schema::{
     FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
-    FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
-    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
-    FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
+    FormPageSchema, FormPageXmlProperty, FormPictureDecorationGeometryXmlProperty,
+    FormPictureDecorationSchema, FormPictureValueKind, FormRootMobileDeviceCommandBarContentSchema,
+    FormRootVerticalScrollSchema, FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableSchema, FormTableXmlProperty,
     FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema,
     FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty, decode_form_tooltip_representation,
@@ -4397,6 +4397,14 @@ fn parse_form_child_item_with_metadata_owners(
             options,
         )
     });
+    let page_schema = show_title_options.as_deref().and_then(|options| {
+        FormPageSchema::from_raw_layout(wrapper, fields.len(), tag, direct_discriminator, options)
+    });
+    let page_properties = page_schema.and_then(|schema| {
+        show_title_options
+            .as_deref()
+            .map(|options| schema.properties(&fields, options))
+    });
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
@@ -4581,6 +4589,11 @@ fn parse_form_child_item_with_metadata_owners(
         input_field_top_level_offset,
         object_refs,
     );
+    let page_picture = page_schema.and_then(|schema| {
+        show_title_options
+            .as_deref()
+            .and_then(|options| parse_form_page_picture(schema, options, object_refs))
+    });
     let rows_picture =
         table_schema.and_then(|schema| parse_form_table_rows_picture(schema, &fields, object_refs));
     let mut item = FormChildItem {
@@ -4620,14 +4633,7 @@ fn parse_form_child_item_with_metadata_owners(
                         .and_then(|field| parse_form_child_item_group(field))
                 })
         } else if tag == "Page" {
-            fields
-                .get(8)
-                .and_then(|field| parse_form_child_item_group(field))
-                .or_else(|| {
-                    fields
-                        .get(9)
-                        .and_then(|field| parse_form_child_item_group(field))
-                })
+            page_properties.and_then(|properties| properties.group())
         } else {
             None
         },
@@ -4647,24 +4653,40 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.representation)
         },
-        enable_content_change: extended_group_options
-            .as_ref()
-            .and_then(|options| options.enable_content_change),
-        child_items_width: extended_group_options
-            .as_ref()
-            .and_then(|options| options.child_items_width),
+        enable_content_change: page_properties
+            .and_then(|properties| properties.enable_content_change())
+            .or_else(|| {
+                extended_group_options
+                    .as_ref()
+                    .and_then(|options| options.enable_content_change)
+            }),
+        child_items_width: page_properties
+            .and_then(|properties| properties.child_items_width())
+            .or_else(|| {
+                extended_group_options
+                    .as_ref()
+                    .and_then(|options| options.child_items_width)
+            }),
         control_representation: extended_group_options
             .as_ref()
             .and_then(|options| options.control_representation),
         collapsed: extended_group_options
             .as_ref()
             .and_then(|options| options.collapsed),
-        usual_group_horizontal_align: extended_group_options
-            .as_ref()
-            .and_then(|options| options.horizontal_align),
-        usual_group_vertical_align: extended_group_options
-            .as_ref()
-            .and_then(|options| options.vertical_align),
+        usual_group_horizontal_align: page_properties
+            .and_then(|properties| properties.horizontal_align())
+            .or_else(|| {
+                extended_group_options
+                    .as_ref()
+                    .and_then(|options| options.horizontal_align)
+            }),
+        usual_group_vertical_align: page_properties
+            .and_then(|properties| properties.vertical_align())
+            .or_else(|| {
+                extended_group_options
+                    .as_ref()
+                    .and_then(|options| options.vertical_align)
+            }),
         through_align: extended_group_options
             .as_ref()
             .and_then(|options| options.through_align),
@@ -5475,6 +5497,8 @@ fn parse_form_child_item_with_metadata_owners(
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.horizontal_stretch)
+        } else if tag == "Page" {
+            page_properties.and_then(|properties| properties.horizontal_stretch())
         } else if let Some((schema, options)) = special_field_layout.as_ref() {
             schema.horizontal_stretch(options)
         } else {
@@ -5492,6 +5516,8 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|properties| properties.vertical_stretch())
         } else if tag == "UsualGroup" {
             parse_form_usual_group_vertical_stretch(&fields)
+        } else if tag == "Page" {
+            page_properties.and_then(|properties| properties.vertical_stretch())
         } else {
             None
         },
@@ -5641,6 +5667,10 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(20)
                 .and_then(|field| parse_form_popup_picture_value(field, object_refs))
                 .map(|(reference, _)| reference)
+        } else if tag == "Page" {
+            page_picture
+                .as_ref()
+                .and_then(|picture| picture.reference.clone())
         } else {
             None
         },
@@ -5664,6 +5694,10 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|field| parse_form_popup_picture_value(field, object_refs))
                 .map(|(_, load_transparent)| load_transparent)
                 .unwrap_or(false)
+        } else if tag == "Page" {
+            page_picture
+                .as_ref()
+                .is_some_and(|picture| picture.load_transparent)
         } else {
             false
         },
@@ -8518,6 +8552,24 @@ struct FormOwnedPicture {
     reference: Option<String>,
     file_name: Option<String>,
     load_transparent: bool,
+}
+
+fn parse_form_page_picture(
+    schema: FormPageSchema,
+    options: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormOwnedPicture> {
+    let raw = options.get(schema.picture_option_slot())?.trim();
+    let value = split_1c_braced_fields(raw, 0)?;
+    let value_schema = schema.picture(&value)?;
+    parse_form_owned_picture(
+        raw,
+        &value,
+        value_schema.kind(),
+        value_schema.load_transparent(),
+        "Picture",
+        object_refs,
+    )
 }
 
 fn parse_form_field_header_picture(
@@ -11596,6 +11648,7 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
+        && item.tag != "Page"
         && let Some(horizontal_stretch) = item.horizontal_stretch
         && !usual_group_title_first
     {
@@ -11614,6 +11667,7 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
+        && item.tag != "Page"
         && let Some(vertical_stretch) = item.vertical_stretch
         && !usual_group_title_first
     {
@@ -11766,9 +11820,8 @@ pub(super) fn format_form_child_item_xml(
             ));
         }
     }
-    if let Some(group) = item
-        .group
-        .filter(|group| !(item.tag == "Page" && *group == "Vertical"))
+    if item.tag != "Page"
+        && let Some(group) = item.group
     {
         xml.push_str(&format!(
             "{tab}\t<Group>{}</Group>\r\n",
@@ -11853,14 +11906,13 @@ pub(super) fn format_form_child_item_xml(
             xml_bool(skip_on_input)
         ));
     }
-    if !early_title_for_field && !usual_group_title_first && item.tag != "Table" {
+    if item.tag == "Page" {
+        xml.push_str(&format_form_page_properties_xml(item, indent + 1));
+    } else if !early_title_for_field && !usual_group_title_first && item.tag != "Table" {
         if matches!(item.tag, "LabelDecoration" | "PictureDecoration") {
             xml.push_str(&format_form_decoration_header_xml(item, indent + 1));
         } else {
             xml.push_str(&format_form_title_section(item, indent + 1));
-        }
-        if item.tag == "Page" && item.show_title == Some(false) {
-            xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
         }
         if item.tag == "LabelDecoration" && item.hiperlink == Some(true) {
             xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
@@ -11990,6 +12042,7 @@ pub(super) fn format_form_child_item_xml(
             | "PictureDecoration"
             | "UsualGroup"
             | "ButtonGroup"
+            | "Page"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -12059,7 +12112,7 @@ pub(super) fn format_form_child_item_xml(
         FormUsualGroupXmlAnchor::BeforeExtendedTooltip,
         indent + 1,
     ));
-    if matches!(item.tag, "Page" | "UsualGroup")
+    if item.tag == "UsualGroup"
         && let Some(back_color) = &item.back_color
     {
         xml.push_str(&format!(
@@ -12148,6 +12201,118 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format_form_child_items_xml(&item.child_items, indent + 1));
     }
     xml.push_str(&format!("{tab}</{}>\r\n", item.tag));
+    xml
+}
+
+fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "Page" {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_PAGE_XML_ORDER {
+        match property {
+            FormPageXmlProperty::EnableContentChange => {
+                if let Some(enable_content_change) = item.enable_content_change {
+                    xml.push_str(&format!(
+                        "{tab}<EnableContentChange>{}</EnableContentChange>\r\n",
+                        xml_bool(enable_content_change)
+                    ));
+                }
+            }
+            FormPageXmlProperty::Title => {
+                xml.push_str(&format_form_title_section(item, indent));
+            }
+            FormPageXmlProperty::ToolTip => {
+                xml.push_str(&format_form_localized_section(
+                    "ToolTip",
+                    &item.tooltip,
+                    indent,
+                ));
+            }
+            FormPageXmlProperty::ToolTipRepresentation => {
+                if let Some(tooltip_representation) = item.tooltip_representation {
+                    xml.push_str(&format!(
+                        "{tab}<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
+                        escape_xml_text(tooltip_representation)
+                    ));
+                }
+            }
+            FormPageXmlProperty::Picture => {
+                if let Some(reference) = &item.picture_ref {
+                    xml.push_str(&format!(
+                        "{tab}<Picture>\r\n\
+{tab}\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}</Picture>\r\n",
+                        escape_xml_text(reference),
+                        xml_bool(item.picture_load_transparent)
+                    ));
+                }
+            }
+            FormPageXmlProperty::HorizontalStretch => {
+                if let Some(horizontal_stretch) = item.horizontal_stretch {
+                    xml.push_str(&format!(
+                        "{tab}<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                        xml_bool(horizontal_stretch)
+                    ));
+                }
+            }
+            FormPageXmlProperty::VerticalStretch => {
+                if let Some(vertical_stretch) = item.vertical_stretch {
+                    xml.push_str(&format!(
+                        "{tab}<VerticalStretch>{}</VerticalStretch>\r\n",
+                        xml_bool(vertical_stretch)
+                    ));
+                }
+            }
+            FormPageXmlProperty::Group => {
+                if let Some(group) = item.group {
+                    xml.push_str(&format!(
+                        "{tab}<Group>{}</Group>\r\n",
+                        escape_xml_text(group)
+                    ));
+                }
+            }
+            FormPageXmlProperty::HorizontalAlign => {
+                if let Some(horizontal_align) = item.usual_group_horizontal_align {
+                    xml.push_str(&format!(
+                        "{tab}<HorizontalAlign>{}</HorizontalAlign>\r\n",
+                        escape_xml_text(horizontal_align)
+                    ));
+                }
+            }
+            FormPageXmlProperty::VerticalAlign => {
+                if let Some(vertical_align) = item.usual_group_vertical_align {
+                    xml.push_str(&format!(
+                        "{tab}<VerticalAlign>{}</VerticalAlign>\r\n",
+                        escape_xml_text(vertical_align)
+                    ));
+                }
+            }
+            FormPageXmlProperty::ChildItemsWidth => {
+                if let Some(child_items_width) = item.child_items_width {
+                    xml.push_str(&format!(
+                        "{tab}<ChildItemsWidth>{}</ChildItemsWidth>\r\n",
+                        escape_xml_text(child_items_width)
+                    ));
+                }
+            }
+            FormPageXmlProperty::ShowTitle => {
+                if item.show_title == Some(false) {
+                    xml.push_str(&format!("{tab}<ShowTitle>false</ShowTitle>\r\n"));
+                }
+            }
+            FormPageXmlProperty::BackColor => {
+                if let Some(back_color) = &item.back_color {
+                    xml.push_str(&format!(
+                        "{tab}<BackColor>{}</BackColor>\r\n",
+                        escape_xml_text(back_color)
+                    ));
+                }
+            }
+        }
+    }
     xml
 }
 

@@ -42,6 +42,162 @@ pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) 
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormPageXmlProperty {
+    EnableContentChange,
+    Title,
+    ToolTip,
+    ToolTipRepresentation,
+    Picture,
+    HorizontalStretch,
+    VerticalStretch,
+    Group,
+    HorizontalAlign,
+    VerticalAlign,
+    ChildItemsWidth,
+    ShowTitle,
+    BackColor,
+}
+
+pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
+    FormPageXmlProperty::EnableContentChange,
+    FormPageXmlProperty::Title,
+    FormPageXmlProperty::ToolTip,
+    FormPageXmlProperty::ToolTipRepresentation,
+    FormPageXmlProperty::Picture,
+    FormPageXmlProperty::HorizontalStretch,
+    FormPageXmlProperty::VerticalStretch,
+    FormPageXmlProperty::Group,
+    FormPageXmlProperty::HorizontalAlign,
+    FormPageXmlProperty::VerticalAlign,
+    FormPageXmlProperty::ChildItemsWidth,
+    FormPageXmlProperty::ShowTitle,
+    FormPageXmlProperty::BackColor,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormPageSchema;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormPageProperties {
+    enable_content_change: Option<bool>,
+    horizontal_stretch: Option<bool>,
+    vertical_stretch: Option<bool>,
+    group: Option<&'static str>,
+    horizontal_align: Option<&'static str>,
+    vertical_align: Option<&'static str>,
+    child_items_width: Option<&'static str>,
+}
+
+impl FormPageSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 20;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        (wrapper == "22"
+            && field_count >= 30
+            && (field_count - 30) % 2 == 0
+            && item_tag == "Page"
+            && direct_discriminator == Some("4")
+            && options.len() == 20
+            && options.first().map(|field| field.trim()) == Some("18"))
+        .then_some(Self)
+    }
+
+    pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormPageProperties {
+        let group = match (
+            options.get(2).map(|field| field.trim()),
+            options.get(16).map(|field| field.trim()),
+            options.get(17).map(|field| field.trim()),
+        ) {
+            (Some("0"), Some("0"), Some("0")) => None,
+            (Some("1"), Some("1"), Some("1")) => Some("Horizontal"),
+            (Some("1"), Some("2"), Some("2")) => Some("HorizontalIfPossible"),
+            (Some("1"), Some("1"), Some("3")) => Some("AlwaysHorizontal"),
+            _ => None,
+        };
+        FormPageProperties {
+            enable_content_change: match fields.get(9).map(|field| field.trim()) {
+                Some("1") => Some(true),
+                _ => None,
+            },
+            horizontal_stretch: match fields.get(14).map(|field| field.trim()) {
+                Some("0") => Some(false),
+                Some("1") => Some(true),
+                _ => None,
+            },
+            vertical_stretch: match fields.get(15).map(|field| field.trim()) {
+                Some("0") => Some(false),
+                Some("1") => Some(true),
+                _ => None,
+            },
+            group,
+            horizontal_align: match options.get(12).map(|field| field.trim()) {
+                Some("1") => Some("Center"),
+                _ => None,
+            },
+            vertical_align: match options.get(13).map(|field| field.trim()) {
+                Some("1") => Some("Center"),
+                Some("2") => Some("Bottom"),
+                _ => None,
+            },
+            child_items_width: match options.get(3).map(|field| field.trim()) {
+                Some("3") => Some("LeftWidest"),
+                Some("5") => Some("LeftNarrowest"),
+                _ => None,
+            },
+        }
+    }
+
+    pub(crate) const fn picture_option_slot(self) -> usize {
+        1
+    }
+
+    pub(crate) fn picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
+        let picture = FormPictureValueSchema::from_raw_layout(value)?;
+        matches!(
+            picture.kind(),
+            FormPictureValueKind::Empty | FormPictureValueKind::Reference
+        )
+        .then_some(picture)
+    }
+}
+
+impl FormPageProperties {
+    pub(crate) const fn enable_content_change(self) -> Option<bool> {
+        self.enable_content_change
+    }
+
+    pub(crate) const fn horizontal_stretch(self) -> Option<bool> {
+        self.horizontal_stretch
+    }
+
+    pub(crate) const fn vertical_stretch(self) -> Option<bool> {
+        self.vertical_stretch
+    }
+
+    pub(crate) const fn group(self) -> Option<&'static str> {
+        self.group
+    }
+
+    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+        self.horizontal_align
+    }
+
+    pub(crate) const fn vertical_align(self) -> Option<&'static str> {
+        self.vertical_align
+    }
+
+    pub(crate) const fn child_items_width(self) -> Option<&'static str> {
+        self.child_items_width
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormUsualGroupHeaderXmlProperty {
     Title,
     TitleTextColor,
@@ -1518,7 +1674,7 @@ pub(crate) struct FormChildItemShowTitleSchema {
 }
 
 impl FormChildItemShowTitleSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 20;
+    pub(crate) const OPTIONS_SLOT: usize = FormPageSchema::OPTIONS_SLOT;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -1527,6 +1683,19 @@ impl FormChildItemShowTitleSchema {
         direct_discriminator: Option<&str>,
         options: &[&str],
     ) -> Option<Self> {
+        if item_tag == "Page" {
+            FormPageSchema::from_raw_layout(
+                wrapper,
+                field_count,
+                item_tag,
+                direct_discriminator,
+                options,
+            )?;
+            return Some(Self {
+                option_slot: 6,
+                back_color_option_slot: Some(9),
+            });
+        }
         if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
             return None;
         }
@@ -1537,7 +1706,6 @@ impl FormChildItemShowTitleSchema {
             options.first().map(|field| field.trim()),
         ) {
             ("ColumnGroup", Some("2"), 12, Some("2")) => (2, None),
-            ("Page", Some("4"), 20, Some("18")) => (6, Some(9)),
             ("UsualGroup", Some("5"), 29, Some("29")) => (4, Some(9)),
             _ => return None,
         };
