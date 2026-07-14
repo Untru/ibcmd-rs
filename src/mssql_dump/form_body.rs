@@ -22,11 +22,11 @@ use crate::form_schema::{
     FormPageSchema, FormPageXmlProperty, FormPictureDecorationGeometryXmlProperty,
     FormPictureDecorationSchema, FormPictureValueKind, FormRootMobileDeviceCommandBarContentSchema,
     FormRootVerticalScrollSchema, FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
-    FormTablePropertyBagKey as TableBagKey, FormTableSchema, FormTableXmlProperty,
-    FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema,
-    FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty, decode_form_tooltip_representation,
-    form_child_item_representation_is_default, form_tooltip_representation_schema,
-    form_tooltip_representation_xml_order,
+    FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    FormUsualGroupSchema, FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty,
+    decode_form_tooltip_representation, form_child_item_representation_is_default,
+    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -300,6 +300,7 @@ pub(super) struct FormAttribute {
 pub(super) struct FormAttributeMetadataOwner {
     name: String,
     type_references: Vec<String>,
+    has_dynamic_list_settings: bool,
     main_table: Option<String>,
 }
 
@@ -3567,12 +3568,29 @@ fn form_attribute_metadata_owners_by_id(
                 FormAttributeMetadataOwner {
                     name: attribute.name.clone(),
                     type_references,
+                    has_dynamic_list_settings: attribute.settings.is_some(),
                     main_table,
                 },
             )
         })
         .collect()
 }
+
+struct FormAttributePlatformColumn {
+    id: &'static str,
+    name: &'static str,
+}
+
+// Platform-owned columns of built-in value types, independent of infobase metadata.
+const FORM_VALUE_LIST_PICTURE_COLUMN: FormAttributePlatformColumn = FormAttributePlatformColumn {
+    id: "3",
+    name: "Picture",
+};
+const FORM_SETTINGS_COMPOSER_FIELD_PICTURE_COLUMN: FormAttributePlatformColumn =
+    FormAttributePlatformColumn {
+        id: "10001",
+        name: "FieldPicture",
+    };
 
 pub(super) fn extend_form_attribute_special_columns(
     table_column_names_by_id: &mut BTreeMap<String, BTreeMap<String, String>>,
@@ -3594,6 +3612,19 @@ pub(super) fn extend_form_attribute_special_columns(
                 ("2".to_string(), "EndDate".to_string()),
             ]);
     }
+    let platform_column = if form_attribute_is_value_list(attribute) {
+        Some(&FORM_VALUE_LIST_PICTURE_COLUMN)
+    } else if form_attribute_is_settings_composer(attribute) {
+        Some(&FORM_SETTINGS_COMPOSER_FIELD_PICTURE_COLUMN)
+    } else {
+        None
+    };
+    if let Some(column) = platform_column {
+        table_column_names_by_id
+            .entry(attribute.id.clone())
+            .or_default()
+            .insert(column.id.to_string(), column.name.to_string());
+    }
 }
 
 fn form_attribute_is_value_list(attribute: &FormAttribute) -> bool {
@@ -3602,6 +3633,16 @@ fn form_attribute_is_value_list(attribute: &FormAttribute) -> bool {
             value_type,
             ConstantValueType::Reference { reference }
                 if matches!(reference.as_str(), "v8:ValueListType" | "ValueListType")
+        )
+    })
+}
+
+fn form_attribute_is_settings_composer(attribute: &FormAttribute) -> bool {
+    attribute.value_types.iter().any(|value_type| {
+        matches!(
+            value_type,
+            ConstantValueType::Reference { reference }
+                if reference == DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME
         )
     })
 }
@@ -4845,19 +4886,14 @@ fn parse_form_child_item_with_metadata_owners(
             parse_form_table_property_bag_string(&fields, TableBagKey::RowPictureDataPath)
                 .filter(|value| !value.is_empty())
                 .or_else(|| {
-                    parse_form_table_default_row_picture_data_path(
-                        wrapper,
-                        &fields,
-                        data_path.as_deref(),
-                    )
-                })
-                .or_else(|| {
                     table_schema.and_then(|schema| {
                         parse_form_table_row_picture_data_path(
                             schema,
                             &fields,
                             data_path.as_deref(),
                             table_column_names_by_id,
+                            attribute_metadata_owners_by_id,
+                            object_refs,
                         )
                     })
                 })
@@ -7561,19 +7597,6 @@ pub(super) fn parse_form_table_initial_tree_view(
     }
 }
 
-pub(super) fn parse_form_table_default_row_picture_data_path(
-    wrapper: &str,
-    fields: &[&str],
-    data_path: Option<&str>,
-) -> Option<String> {
-    let data_path = data_path?;
-    (wrapper == "55"
-        && fields
-            .get(43)
-            .is_some_and(|field| form_table_default_picture_marker(field)))
-    .then(|| format!("{data_path}.DefaultPicture"))
-}
-
 pub(super) fn parse_form_table_default_top_level_parent_nil(
     wrapper: &str,
     fields: &[&str],
@@ -7588,22 +7611,6 @@ pub(super) fn form_table_wrapper55_root_defaults(wrapper: &str, fields: &[&str])
     wrapper == "55"
         && fields.get(36).map(|field| field.trim()) == Some("1")
         && fields.get(37).map(|field| field.trim()) == Some("0")
-}
-
-pub(super) fn form_table_default_picture_marker(field: &str) -> bool {
-    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
-        return false;
-    };
-    if fields.first().map(|field| field.trim()) != Some("1") {
-        return false;
-    }
-    let Some(payload) = fields.get(1) else {
-        return false;
-    };
-    let Some(payload_fields) = split_1c_braced_fields(payload.trim(), 0) else {
-        return false;
-    };
-    payload_fields.first().map(|field| field.trim()) == Some("10000000")
 }
 
 pub(super) fn parse_form_table_row_selection_mode(field: &str) -> Option<&'static str> {
@@ -9333,17 +9340,56 @@ pub(super) fn parse_form_table_row_picture_data_path(
     fields: &[&str],
     data_path: Option<&str>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let table_name = data_path?;
-    let table_id = parse_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())?;
-    let column_id =
-        parse_form_attribute_binding_id(fields.get(schema.row_picture_data_path_slot())?.trim())?;
-    let column_name = table_column_names_by_id
-        .get(&table_id)?
-        .get(&column_id)?
-        .as_str();
+    let encoded =
+        split_1c_braced_fields(fields.get(schema.row_picture_data_path_slot())?.trim(), 0)?;
+    let payload = match schema.row_picture_data_path(&encoded)? {
+        FormTableRowPictureDataPath::Empty => return None,
+        FormTableRowPictureDataPath::Payload(payload) => payload,
+    };
+    let payload = split_1c_braced_fields(payload, 0)?;
+    let column_name = match payload.as_slice() {
+        [column_id] if column_id.trim() == "10000000" => {
+            let hidden =
+                parse_exact_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())
+                    .and_then(|attribute_id| attribute_metadata_owners_by_id.get(&attribute_id))
+                    .is_some_and(|attribute| {
+                        attribute.has_dynamic_list_settings && attribute.main_table.is_none()
+                    });
+            let prefix = if hidden && !table_name.starts_with('~') {
+                "~"
+            } else {
+                ""
+            };
+            return Some(format!("{prefix}{table_name}.DefaultPicture"));
+        }
+        [column_id] if column_id.trim().parse::<u64>().is_ok() => {
+            let table_id =
+                parse_exact_form_attribute_binding_id(fields.get(schema.data_path_slot())?.trim())?;
+            table_column_names_by_id
+                .get(&table_id)?
+                .get(column_id.trim())?
+                .as_str()
+        }
+        [kind, uuid] if matches!(kind.trim(), "0" | "4") => {
+            let uuid = parse_non_zero_uuid(uuid.trim())?;
+            let reference = object_refs.get(&uuid)?;
+            form_metadata_attribute_suffix(reference)?
+        }
+        _ => return None,
+    };
     let column_name = normalize_form_table_column_name(table_name, column_name);
     Some(format!("{table_name}.{column_name}"))
+}
+
+fn form_metadata_attribute_suffix(reference: &str) -> Option<&str> {
+    let mut parts = reference.rsplit('.');
+    let name = parts.next()?;
+    let kind = parts.next()?;
+    (kind == "Attribute" && !name.is_empty()).then_some(name)
 }
 
 pub(super) fn normalize_form_table_column_name(table_name: &str, field_name: &str) -> String {

@@ -2226,6 +2226,12 @@ impl FormTableSlot {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableRowPictureDataPath<'a> {
+    Empty,
+    Payload(&'a str),
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormTableSchema;
 
 impl FormTableSchema {
@@ -2265,6 +2271,19 @@ impl FormTableSchema {
 
     pub(crate) const fn row_picture_data_path_slot(self) -> usize {
         Self::ROW_PICTURE_DATA_PATH_SLOT
+    }
+
+    pub(crate) fn row_picture_data_path<'a>(
+        self,
+        value: &[&'a str],
+    ) -> Option<FormTableRowPictureDataPath<'a>> {
+        match value {
+            [marker] if marker.trim() == "0" => Some(FormTableRowPictureDataPath::Empty),
+            [marker, payload] if marker.trim() == "1" => {
+                Some(FormTableRowPictureDataPath::Payload(payload.trim()))
+            }
+            _ => None,
+        }
     }
 
     pub(crate) const fn rows_picture_slot(self) -> usize {
