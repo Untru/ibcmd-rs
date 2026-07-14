@@ -3953,3 +3953,70 @@ residual stays `262 files, +5238/-24596`. `ConfigDumpInfo.xml` remains
 byte-exact at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #114 is closed after this acceptance gate.
+
+## Schema-backed Form additional columns, pictures, and command tail acceptance
+
+Status: accepted by frozen reviews, an all-Form selected gate, and one fresh
+serialized full export.
+
+Additional Form attribute columns now use one counted positional model. The
+native corpus contains 68 `AdditionalColumns` groups with 165 columns in 42
+forms. Every admitted group has marker `0` and target marker `2`; every column
+has marker `5` and arity `10`. Numeric column identifiers resolve only inside
+the owning Form Attribute, while UUID identifiers must resolve through
+`object_refs` to one valid metadata `Attribute` or `TabularSection.Attribute`
+route under the proven metadata owner. Ambiguous, mismatched, and unsupported
+routes fail closed. Empty groups are preserved. The shared Form type
+normalizer also applies the native `Characteristic` `ReferenceTypeSet` rule to
+both Attributes and Additional Columns instead of treating columns as a
+special case.
+
+Pictures extend the shared semantic platform registry with 65 audited
+`StdPicture` identifiers. Across the accepted corpus it resolves 207 missing
+reference pictures in 114 forms, including Form commands, PictureDecoration,
+Button, Popup, Page, and supported field header pictures. The negative
+standard-picture code `-14` follows the same resolver. Each UUID and numeric
+code maps uniquely to a native `StdPicture` name; no database metadata UUID,
+object name, form name, or path is used. Embedded Button pictures,
+PictureField `ValuesPicture`, and the two observed `CommonPicture` header
+references remain HOLD because they use different payload and ownership
+models.
+
+All 3,018 commands in the 1,108-form corpus have marker `9` and arity `19`.
+The strict parser also retains the previously supported platform marker `11`
+variant rather than narrowing the general schema to this corpus. Slot 18 maps
+its audited three-state value to `CurrentRowUse`: `0` is `Use`, `1` is
+`DontUse`, and `2` omits the property. A nonzero slot 14 is serialized as
+`AssociatedTableElementId` only when it uniquely resolves to a child item in
+the same form. Command pictures use the same strict descriptor and platform
+registry. Native XML order places `CurrentRowUse` before
+`AssociatedTableElementId`. Unknown layouts and unresolved references retain
+the previous fail-closed behavior.
+
+The production code diff before this documentation change is three files,
+`+394/-66`. Exactly 66 UUID literals were added: 65 platform `StdPicture`
+identifiers and the platform DCS filter TypeId. The added production lines
+contain no database/server identity, current object or form name, filesystem
+path, Cyrillic corpus literal, ConfigDumpInfo dependency, panic, unwrap,
+expect, unsafe block, or improvement-only fallback. `cargo fmt --all -- --check`,
+`cargo check --all-targets`, `git diff --check`, the added-line
+hardcode scan, and `cargo build --release` pass with the same two pre-existing
+warnings. Tests and native ConfigDump were not run by direct user instruction.
+
+The selected gate contains all 1,108 Form.xml files. Relative to Batch114,
+146 forms change; all 146 improve, none are equal or worse, 20 become exact,
+and no new differing file opens. The selected and subsequent full export are
+byte-identical for all 1,108 forms. The normalized Form diff changes from
+`835 files, +2735/-8557` to `815 files, +2718/-6834`.
+
+The fresh full export writes 12,197 files including `ConfigDumpInfo.xml`, or
+12,196 files excluding it. This corrects the prior report's off-by-one source
+file wording; the already-known missing
+`DataProcessors/ЗагрузкаКурсовВалют.xml` remains part of the unchanged
+non-Form residual and is not a Batch115 regression. The normalized full diff
+changes from `1097 files, +7973/-33153` to `1077 files, +7956/-31430`; the
+exact batch delta is `-20 files, -17 additions, -1723 deletions`, entirely in
+Form.xml. The non-Form residual stays `262 files, +5238/-24596`.
+`ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #115 is closed after this acceptance gate.
