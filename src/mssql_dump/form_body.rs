@@ -11869,6 +11869,7 @@ pub(super) fn format_form_child_item_xml(
     if matches!(
         item.tag,
         "InputField"
+            | "LabelField"
             | "CheckBoxField"
             | "PictureField"
             | "CalendarField"
@@ -12492,6 +12493,7 @@ pub(super) fn format_form_child_item_xml(
     if !matches!(
         item.tag,
         "InputField"
+            | "LabelField"
             | "CheckBoxField"
             | "PictureField"
             | "CalendarField"
