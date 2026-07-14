@@ -1522,6 +1522,7 @@ pub(crate) struct FormFieldSchema {
     text_color_option_slot: Option<usize>,
     back_color_option_slot: Option<usize>,
     border_color_option_slot: Option<usize>,
+    extended_edit_multiple_values_option_slot: Option<usize>,
 }
 
 impl FormFieldSchema {
@@ -1569,6 +1570,8 @@ impl FormFieldSchema {
             text_color_option_slot: text,
             back_color_option_slot: back,
             border_color_option_slot: border,
+            extended_edit_multiple_values_option_slot: (item_tag == "InputField")
+                .then_some(FormInputFieldExtendedOptionSlot::ExtendedEditMultipleValues.index()),
         })
     }
 
@@ -1590,6 +1593,17 @@ impl FormFieldSchema {
 
     pub(crate) fn picture_field_file_drag_mode(self, options: &[&str]) -> Option<&'static str> {
         (options.get(22)?.trim() == "0").then_some("AsFile")
+    }
+
+    pub(crate) fn extended_edit_multiple_values(self, options: &[&str]) -> Option<bool> {
+        match options
+            .get(self.extended_edit_multiple_values_option_slot?)?
+            .trim()
+        {
+            "1" => Some(true),
+            "0" => None,
+            _ => None,
+        }
     }
 
     pub(crate) const fn text_color_option_slot(self) -> Option<usize> {
@@ -2442,6 +2456,19 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormInputFieldTailXmlProperty {
+    ListChoiceMode,
+    ExtendedEditMultipleValues,
+    AutoMarkIncomplete,
+}
+
+pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlProperty] = &[
+    FormInputFieldTailXmlProperty::ListChoiceMode,
+    FormInputFieldTailXmlProperty::ExtendedEditMultipleValues,
+    FormInputFieldTailXmlProperty::AutoMarkIncomplete,
+];
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTableXmlProperty {
     Representation,
     UserVisible,
@@ -2972,6 +2999,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     MaxWidth,
     AutoMaxHeight,
     MaxHeight,
+    ExtendedEditMultipleValues,
 }
 
 impl FormInputFieldExtendedOptionSlot {
@@ -3010,6 +3038,7 @@ impl FormInputFieldExtendedOptionSlot {
             Self::MaxWidth => 50,
             Self::AutoMaxHeight => 52,
             Self::MaxHeight => 53,
+            Self::ExtendedEditMultipleValues => 65,
         }
     }
 }

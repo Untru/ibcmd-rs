@@ -2,8 +2,8 @@ use super::*;
 use crate::form_schema::{
     FORM_DECORATION_HEADER_XML_ORDER, FORM_EXTENDED_TOOLTIP_XML_ORDER,
     FORM_FIELD_HEADER_PICTURE_XML_ORDER, FORM_INPUT_FIELD_BUTTON_XML_ORDER,
-    FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER, FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER,
-    FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
+    FORM_INPUT_FIELD_TAIL_XML_ORDER, FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER,
+    FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER, FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER, FORM_PAGE_XML_ORDER,
     FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER, FORM_TABLE_XML_ORDER,
     FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER,
@@ -17,7 +17,7 @@ use crate::form_schema::{
     FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
     FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
     FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -616,6 +616,7 @@ pub(super) struct FormChildItem {
     pub(super) choice_list_button: Option<bool>,
     pub(super) spin_button: Option<bool>,
     pub(super) list_choice_mode: Option<bool>,
+    pub(super) extended_edit_multiple_values: Option<bool>,
     pub(super) quick_choice: Option<bool>,
     pub(super) choose_type: Option<bool>,
     pub(super) auto_choice_incomplete: Option<bool>,
@@ -5764,6 +5765,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        extended_edit_multiple_values: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| schema.extended_edit_multiple_values(options)),
         quick_choice: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_quick_choice(input_field_extended_options.as_deref())
         } else {
@@ -11024,6 +11028,42 @@ fn format_form_input_field_button_option_xml(
     }
 }
 
+fn format_form_input_field_tail_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "InputField" {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    for property in FORM_INPUT_FIELD_TAIL_XML_ORDER {
+        match property {
+            FormInputFieldTailXmlProperty::ListChoiceMode
+                if item.list_choice_mode == Some(true) =>
+            {
+                xml.push_str(&format!("{tab}<ListChoiceMode>true</ListChoiceMode>\r\n"));
+            }
+            FormInputFieldTailXmlProperty::ExtendedEditMultipleValues
+                if item.extended_edit_multiple_values == Some(true) =>
+            {
+                xml.push_str(&format!(
+                    "{tab}<ExtendedEditMultipleValues>true</ExtendedEditMultipleValues>\r\n"
+                ));
+            }
+            FormInputFieldTailXmlProperty::AutoMarkIncomplete
+                if item.extended_edit_multiple_values == Some(true)
+                    && item.auto_mark_incomplete.is_some() =>
+            {
+                let value = item.auto_mark_incomplete == Some(true);
+                xml.push_str(&format!(
+                    "{tab}<AutoMarkIncomplete>{}</AutoMarkIncomplete>\r\n",
+                    xml_bool(value)
+                ));
+            }
+            _ => {}
+        }
+    }
+    xml
+}
+
 fn format_form_table_properties_xml(item: &FormChildItem, indent: usize) -> String {
     if item.tag != "Table" {
         return String::new();
@@ -11952,6 +11992,7 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if item.tag != "Table"
+        && !(item.tag == "InputField" && item.extended_edit_multiple_values == Some(true))
         && let Some(auto_mark_incomplete) = item.auto_mark_incomplete
     {
         xml.push_str(&format!(
@@ -11970,9 +12011,7 @@ pub(super) fn format_form_child_item_xml(
         item,
         indent + 1,
     ));
-    if item.list_choice_mode == Some(true) {
-        xml.push_str(&format!("{tab}\t<ListChoiceMode>true</ListChoiceMode>\r\n"));
-    }
+    xml.push_str(&format_form_input_field_tail_xml(item, indent + 1));
     if !item.choice_list.is_empty() {
         xml.push_str(&format_form_choice_list_xml(&item.choice_list, indent + 1));
     }
