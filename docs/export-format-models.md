@@ -4144,3 +4144,63 @@ the pre-existing `DataProcessors/ЗагрузкаКурсовВалют.xml`. `C
 remains byte-exact at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #117 is closed after this acceptance gate.
+
+## Schema-backed Form input, button, and attribute-save acceptance
+
+Status: accepted by a full-corpus audit, an independent frozen review, an
+all-Form zero-regression gate, and one fresh serialized full export.
+
+`Button.ShapeRepresentation` is decoded only for the exact ordinary Button
+layout: wrapper `31`, 52 outer fields, direct Button discriminator, and zero
+top-level offset. Slot `45` maps `0 -> omit`, `1 -> Always`, `2 ->
+WhenActive`, and `3 -> None`. This matrix covers all 5,647 Buttons: 5,557
+omissions and 79 explicit values in the admitted layout, plus 11 shifted
+conditional-layout negative controls that remain rejected. Native order
+places the property after the post-title tooltip representation and before
+the remaining Button tail.
+
+All 3,795 InputFields pass the existing wrapper-`37` `FormFieldSchema`: 3,690
+use the 59-field outer layout and 105 use its one-field shifted variant. Their
+kind-`36`, 66-field options record has one exact tail slot: `65` maps `0 ->
+omit` for 3,727 fields and `1 -> ExtendedEditMultipleValues=true` for 68.
+Unknown values fail closed. A typed InputField tail preserves the previous
+output for every negative control while ordering positive records as
+`ListChoiceMode`, `ExtendedEditMultipleValues`, `AutoMarkIncomplete`.
+
+Form Attribute `Save` now uses one counted entry model instead of treating
+every one-entry list as a self-save. Across 1,108 forms, raw and native
+attributes match `7,257/7,257`. There are 6,941 empty lists, 307 exact self
+entries `{0}`, and 75 exact metadata bindings `{1,{0,uuid}}`; no other entry
+shape occurs. A self entry emits the Form Attribute name. A metadata UUID is
+retained separately from the existing binding key, resolved through
+`object_refs`, and admitted only when the existing metadata-route grammar and
+the unique owner proven by the Form Attribute type agree. Existing UI binding
+paths retain precedence. Final fields are deduplicated and lexicographically
+sorted, matching all 382 native fields with no unknown or unresolved entry.
+
+The frozen range is three files, `+262/-78`: production is two files,
+`+245/-74`, and compile-facing fixtures are one file, `+17/-4`. Added
+production lines contain no UUID, database/server identity, object or form
+name, filesystem path, Cyrillic corpus literal, ConfigDumpInfo dependency,
+panic, unwrap, expect, or unsafe block. Independent frozen review returned
+GO. `cargo fmt --all -- --check`, `cargo check --all-targets`,
+`git diff --check`, the hardcode scan, and `cargo build --release` pass with
+the same two pre-existing check warnings. Tests and native ConfigDump were
+not run by direct user instruction.
+
+The selected gate contains all 1,108 Form.xml files. Thirty-four forms
+change; all 34 improve, none worsen, six become exact, and no new differing
+file opens. The normalized Form diff changes from `797 files,+2624/-6314` to
+`791 files,+2594/-6105`. The exact Batch118 Form delta is `-6 files,-30
+additions,-209 deletions`. Selected and full exports are byte-identical for
+all 1,108 forms.
+
+The fresh full export writes 12,197 source files including
+`ConfigDumpInfo.xml`, or 12,196 excluding it. All 11,089 emitted non-Form
+paths are byte-identical to Batch117, so the accepted non-Form residual stays
+`262 files,+5238/-24596`. The normalized full diff is therefore `1053
+files,+7832/-30701`, with the same exact Batch118 delta of `-6 files,-30
+additions,-209 deletions`. The only absent native path remains
+`DataProcessors/ЗагрузкаКурсовВалют.xml`. `ConfigDumpInfo.xml` remains
+byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
