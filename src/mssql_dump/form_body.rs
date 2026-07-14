@@ -26,11 +26,11 @@ use crate::form_schema::{
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
-    FormUsualGroupSchema, FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty,
-    decode_form_tooltip_representation, form_attribute_column_builtin_type_reference,
-    form_child_item_representation_is_default, form_tooltip_representation_schema,
-    form_tooltip_representation_xml_order,
+    FormTableSearchStringLocation, FormTableXmlProperty, FormTooltipRepresentationXmlOrder,
+    FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
+    FormUsualGroupXmlProperty, decode_form_tooltip_representation,
+    form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
+    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -511,6 +511,7 @@ pub(super) struct FormChildItem {
     pub(super) united: Option<bool>,
     pub(super) table_representation: Option<&'static str>,
     pub(super) table_command_bar_location: Option<&'static str>,
+    pub(super) table_search_string_location: Option<FormTableSearchStringLocation>,
     pub(super) height_in_table_rows: Option<String>,
     pub(super) row_selection_mode: Option<&'static str>,
     pub(super) enable_start_drag: Option<bool>,
@@ -4837,6 +4838,8 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        table_search_string_location: table_schema
+            .and_then(|schema| schema.search_string_location(&fields)),
         height_in_table_rows: if tag == "Table" {
             fields
                 .get(21)
@@ -11241,6 +11244,15 @@ fn format_form_table_property_xml(
                 xml
             }
         }
+        FormTableXmlProperty::SearchStringLocation => item
+            .table_search_string_location
+            .map(|value| {
+                format!(
+                    "{tab}<SearchStringLocation>{}</SearchStringLocation>\r\n",
+                    value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::AutoRefresh => item
             .auto_refresh
             .map(|value| format!("{tab}<AutoRefresh>{}</AutoRefresh>\r\n", xml_bool(value)))

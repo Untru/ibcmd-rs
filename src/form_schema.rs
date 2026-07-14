@@ -2345,6 +2345,7 @@ pub(crate) enum FormTableXmlProperty {
     BorderColor,
     Title,
     CommandSet,
+    SearchStringLocation,
     AutoRefresh,
     AutoRefreshPeriod,
     Period,
@@ -2396,6 +2397,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::BorderColor,
     FormTableXmlProperty::Title,
     FormTableXmlProperty::CommandSet,
+    FormTableXmlProperty::SearchStringLocation,
     FormTableXmlProperty::AutoRefresh,
     FormTableXmlProperty::AutoRefreshPeriod,
     FormTableXmlProperty::Period,
@@ -2489,6 +2491,23 @@ pub(crate) enum FormTableRowPictureDataPath<'a> {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableSearchStringLocation {
+    None,
+    CommandBar,
+    Top,
+}
+
+impl FormTableSearchStringLocation {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::CommandBar => "CommandBar",
+            Self::Top => "Top",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormTableSchema;
 
 impl FormTableSchema {
@@ -2500,6 +2519,7 @@ impl FormTableSchema {
     const BACK_COLOR_SLOT: usize = 45;
     const TEXT_COLOR_SLOT: usize = 46;
     const BORDER_COLOR_SLOT: usize = 47;
+    const SEARCH_STRING_LOCATION_REVERSE_OFFSET: usize = 25;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -2557,6 +2577,21 @@ impl FormTableSchema {
 
     pub(crate) const fn border_color_slot(self) -> usize {
         Self::BORDER_COLOR_SLOT
+    }
+
+    pub(crate) fn search_string_location(
+        self,
+        fields: &[&str],
+    ) -> Option<FormTableSearchStringLocation> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::SEARCH_STRING_LOCATION_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "1" => Some(FormTableSearchStringLocation::None),
+            "2" => Some(FormTableSearchStringLocation::CommandBar),
+            "3" => Some(FormTableSearchStringLocation::Top),
+            _ => None,
+        }
     }
 
     pub(crate) fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
