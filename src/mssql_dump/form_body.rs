@@ -518,15 +518,21 @@ pub(super) struct FormChildItem {
     pub(super) group: Option<&'static str>,
     pub(super) behavior: Option<&'static str>,
     pub(super) representation: Option<&'static str>,
+    pub(super) usual_group_enabled: Option<bool>,
     pub(super) enable_content_change: Option<bool>,
     pub(super) child_items_width: Option<&'static str>,
     pub(super) control_representation: Option<&'static str>,
     pub(super) collapsed: Option<bool>,
+    pub(super) usual_group_collapsed_representation_title: Vec<(String, String)>,
+    pub(super) usual_group_children_align: Option<&'static str>,
+    pub(super) usual_group_horizontal_spacing: Option<&'static str>,
+    pub(super) usual_group_vertical_spacing: Option<&'static str>,
     pub(super) usual_group_horizontal_align: Option<&'static str>,
     pub(super) usual_group_vertical_align: Option<&'static str>,
     pub(super) usual_group_group_vertical_align: Option<FormUsualGroupGroupVerticalAlign>,
     pub(super) through_align: Option<&'static str>,
     pub(super) united: Option<bool>,
+    pub(super) usual_group_show_left_margin: Option<bool>,
     pub(super) table_representation: Option<&'static str>,
     pub(super) table_command_bar_location: Option<&'static str>,
     pub(super) table_search_string_location: Option<FormTableSearchStringLocation>,
@@ -647,6 +653,7 @@ pub(super) struct FormChildItem {
     pub(super) picture_size: Option<&'static str>,
     pub(super) picture_file_name: Option<&'static str>,
     pub(super) title: Vec<(String, String)>,
+    pub(super) usual_group_shortcut: Option<String>,
     pub(super) title_formatted: Option<bool>,
     pub(super) tooltip: Vec<(String, String)>,
     pub(super) input_hint: Vec<(String, String)>,
@@ -4895,6 +4902,9 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.representation)
         },
+        usual_group_enabled: extended_group_options
+            .as_ref()
+            .and_then(|options| options.enabled),
         enable_content_change: page_properties
             .and_then(|properties| properties.enable_content_change())
             .or_else(|| {
@@ -4915,6 +4925,19 @@ fn parse_form_child_item_with_metadata_owners(
         collapsed: extended_group_options
             .as_ref()
             .and_then(|options| options.collapsed),
+        usual_group_collapsed_representation_title: extended_group_options
+            .as_ref()
+            .map(|options| options.collapsed_representation_title.clone())
+            .unwrap_or_default(),
+        usual_group_children_align: extended_group_options
+            .as_ref()
+            .and_then(|options| options.children_align),
+        usual_group_horizontal_spacing: extended_group_options
+            .as_ref()
+            .and_then(|options| options.horizontal_spacing),
+        usual_group_vertical_spacing: extended_group_options
+            .as_ref()
+            .and_then(|options| options.vertical_spacing),
         usual_group_horizontal_align: page_properties
             .and_then(|properties| properties.horizontal_align())
             .or_else(|| {
@@ -4938,6 +4961,9 @@ fn parse_form_child_item_with_metadata_owners(
         united: extended_group_options
             .as_ref()
             .and_then(|options| options.united),
+        usual_group_show_left_margin: extended_group_options
+            .as_ref()
+            .and_then(|options| options.show_left_margin),
         table_representation: if tag == "Table" {
             parse_form_table_representation_from_fields(wrapper, &fields)
         } else {
@@ -5150,7 +5176,11 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        group_horizontal_align: if tag == "Button" && form_button_layout_is_extended(&fields) {
+        group_horizontal_align: if tag == "UsualGroup" {
+            extended_group_options
+                .as_ref()
+                .and_then(|options| options.group_horizontal_align)
+        } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(41 + button_top_level_offset)
                 .and_then(|field| parse_form_button_group_horizontal_align(field))
@@ -5226,7 +5256,11 @@ fn parse_form_child_item_with_metadata_owners(
             input_field_top_level_offset,
         )
         .and_then(|schema| schema.visible(&fields)),
-        read_only: if tag == "Table" {
+        read_only: if tag == "UsualGroup" {
+            extended_group_options
+                .as_ref()
+                .and_then(|options| options.read_only)
+        } else if tag == "Table" {
             table_schema.and_then(|schema| schema.read_only(&fields))
         } else if matches!(
             tag,
@@ -5467,7 +5501,12 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
-        format: if tag == "LabelField" {
+        format: if tag == "UsualGroup" {
+            extended_group_options
+                .as_ref()
+                .map(|options| options.format.clone())
+                .unwrap_or_default()
+        } else if tag == "LabelField" {
             label_field_options
                 .as_ref()
                 .map(|options| options.format.clone())
@@ -5559,7 +5598,11 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        height: if tag == "CalendarField" {
+        height: if tag == "UsualGroup" {
+            extended_group_options
+                .as_ref()
+                .and_then(|options| options.height.clone())
+        } else if tag == "CalendarField" {
             document_field_options
                 .as_deref()
                 .and_then(|options| options.get(2))
@@ -5970,6 +6013,9 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         title,
+        usual_group_shortcut: extended_group_options
+            .as_ref()
+            .and_then(|options| options.shortcut.clone()),
         title_formatted,
         tooltip,
         input_hint,
@@ -6254,15 +6300,26 @@ pub(super) struct FormUsualGroupExtendedOptions {
     pub(super) behavior: Option<&'static str>,
     pub(super) representation: Option<&'static str>,
     pub(super) horizontal_stretch: Option<bool>,
+    pub(super) enabled: Option<bool>,
+    pub(super) read_only: Option<bool>,
+    pub(super) height: Option<String>,
+    pub(super) shortcut: Option<String>,
     pub(super) enable_content_change: Option<bool>,
+    pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) group_vertical_align: Option<FormUsualGroupGroupVerticalAlign>,
+    pub(super) children_align: Option<&'static str>,
+    pub(super) horizontal_spacing: Option<&'static str>,
+    pub(super) vertical_spacing: Option<&'static str>,
     pub(super) child_items_width: Option<&'static str>,
     pub(super) control_representation: Option<&'static str>,
     pub(super) collapsed: Option<bool>,
+    pub(super) collapsed_representation_title: Vec<(String, String)>,
     pub(super) horizontal_align: Option<&'static str>,
     pub(super) vertical_align: Option<&'static str>,
+    pub(super) format: Vec<(String, String)>,
     pub(super) through_align: Option<&'static str>,
     pub(super) united: Option<bool>,
+    pub(super) show_left_margin: Option<bool>,
 }
 
 pub(super) struct FormColumnGroupOptions {
@@ -6611,6 +6668,7 @@ pub(super) fn parse_form_usual_group_extended_options(
         "29" => {
             let schema = FormUsualGroupSchema::from_raw_layout(
                 fields.first()?.trim(),
+                fields.len(),
                 "UsualGroup",
                 fields.get(5).map(|field| field.trim()),
                 &options,
@@ -6623,15 +6681,34 @@ pub(super) fn parse_form_usual_group_extended_options(
                     .get(3)
                     .and_then(|field| parse_form_child_item_representation(field)),
                 horizontal_stretch: parse_form_usual_group_horizontal_stretch(fields),
+                enabled: properties.enabled(),
+                read_only: properties.read_only(),
+                height: schema.height(fields),
+                shortcut: schema
+                    .shortcut_field(fields)
+                    .and_then(|field| parse_common_command_shortcut_value(field)),
                 enable_content_change: properties.enable_content_change(),
+                group_horizontal_align: properties.group_horizontal_align(),
                 group_vertical_align: properties.group_vertical_align(),
+                children_align: properties.children_align(),
+                horizontal_spacing: properties.horizontal_spacing(),
+                vertical_spacing: properties.vertical_spacing(),
                 child_items_width: properties.child_items_width(),
                 control_representation: properties.control_representation(),
                 collapsed: properties.collapsed(),
+                collapsed_representation_title: schema
+                    .collapsed_representation_title_field(&options)
+                    .map(parse_form_localized_strings)
+                    .unwrap_or_default(),
                 horizontal_align: properties.horizontal_align(),
                 vertical_align: properties.vertical_align(),
+                format: schema
+                    .format_field(&options)
+                    .map(parse_form_localized_strings)
+                    .unwrap_or_default(),
                 through_align: properties.through_align(),
                 united: properties.united(),
+                show_left_margin: properties.show_left_margin(),
             })
         }
         "38" => {
@@ -6657,15 +6734,26 @@ pub(super) fn parse_form_usual_group_extended_options(
                 behavior,
                 representation,
                 horizontal_stretch: None,
+                enabled: None,
+                read_only: None,
+                height: None,
+                shortcut: None,
                 enable_content_change: None,
+                group_horizontal_align: None,
                 group_vertical_align: None,
+                children_align: None,
+                horizontal_spacing: None,
+                vertical_spacing: None,
                 child_items_width: None,
                 control_representation: None,
                 collapsed: None,
+                collapsed_representation_title: Vec::new(),
                 horizontal_align: None,
                 vertical_align: None,
+                format: Vec::new(),
                 through_align: None,
                 united: None,
+                show_left_margin: None,
             })
         }
         _ => None,
@@ -11736,7 +11824,10 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "Button" && item.default_item == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
-    if item.tag != "Table" && item.read_only == Some(true) && !read_only_before_title {
+    if !matches!(item.tag, "Table" | "UsualGroup")
+        && item.read_only == Some(true)
+        && !read_only_before_title
+    {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
     }
     if item.tag == "Button"
@@ -12211,10 +12302,15 @@ pub(super) fn format_form_child_item_xml(
     if item.tag != "Page" && item.show_title == Some(false) {
         xml.push_str(&format!("{tab}\t<ShowTitle>false</ShowTitle>\r\n"));
     }
+    xml.push_str(&format_form_usual_group_properties_xml(
+        item,
+        FormUsualGroupXmlAnchor::AfterShowTitle,
+        indent + 1,
+    ));
     if item.tag == "ColumnGroup" && item.show_in_header == Some(true) {
         xml.push_str(&format!("{tab}\t<ShowInHeader>true</ShowInHeader>\r\n"));
     }
-    if !item.format.is_empty() {
+    if item.tag != "UsualGroup" && !item.format.is_empty() {
         xml.push_str(&format_form_localized_section(
             "Format",
             &item.format,
@@ -12462,19 +12558,6 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<TitleDataPath>{}</TitleDataPath>\r\n",
             escape_xml_text(title_data_path)
-        ));
-    }
-    xml.push_str(&format_form_usual_group_properties_xml(
-        item,
-        FormUsualGroupXmlAnchor::BeforeExtendedTooltip,
-        indent + 1,
-    ));
-    if item.tag == "UsualGroup"
-        && let Some(back_color) = &item.back_color
-    {
-        xml.push_str(&format!(
-            "{tab}\t<BackColor>{}</BackColor>\r\n",
-            escape_xml_text(back_color)
         ));
     }
     if item.tag != "Table"
@@ -12935,10 +13018,28 @@ fn format_form_usual_group_properties_xml(
             continue;
         }
         match property {
+            FormUsualGroupXmlProperty::ReadOnly => {
+                if item.read_only == Some(true) {
+                    xml.push_str(&format!("{tab}<ReadOnly>true</ReadOnly>\r\n"));
+                }
+            }
+            FormUsualGroupXmlProperty::Enabled => {
+                if item.usual_group_enabled == Some(false) {
+                    xml.push_str(&format!("{tab}<Enabled>false</Enabled>\r\n"));
+                }
+            }
             FormUsualGroupXmlProperty::EnableContentChange => {
                 if item.enable_content_change == Some(true) {
                     xml.push_str(&format!(
                         "{tab}<EnableContentChange>true</EnableContentChange>\r\n"
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::GroupHorizontalAlign => {
+                if let Some(value) = item.group_horizontal_align {
+                    xml.push_str(&format!(
+                        "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                        escape_xml_text(value)
                     ));
                 }
             }
@@ -12947,6 +13048,30 @@ fn format_form_usual_group_properties_xml(
                     xml.push_str(&format!(
                         "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
                         value.xml_value()
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::ChildrenAlign => {
+                if let Some(value) = item.usual_group_children_align {
+                    xml.push_str(&format!(
+                        "{tab}<ChildrenAlign>{}</ChildrenAlign>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::HorizontalSpacing => {
+                if let Some(value) = item.usual_group_horizontal_spacing {
+                    xml.push_str(&format!(
+                        "{tab}<HorizontalSpacing>{}</HorizontalSpacing>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::VerticalSpacing => {
+                if let Some(value) = item.usual_group_vertical_spacing {
+                    xml.push_str(&format!(
+                        "{tab}<VerticalSpacing>{}</VerticalSpacing>\r\n",
+                        escape_xml_text(value)
                     ));
                 }
             }
@@ -12966,6 +13091,13 @@ fn format_form_usual_group_properties_xml(
                     ));
                 }
             }
+            FormUsualGroupXmlProperty::CollapsedRepresentationTitle => {
+                xml.push_str(&format_form_localized_section(
+                    "CollapsedRepresentationTitle",
+                    &item.usual_group_collapsed_representation_title,
+                    indent,
+                ));
+            }
             FormUsualGroupXmlProperty::Collapsed => {
                 if item.collapsed == Some(true) {
                     xml.push_str(&format!("{tab}<Collapsed>true</Collapsed>\r\n"));
@@ -12979,6 +13111,18 @@ fn format_form_usual_group_properties_xml(
                     ));
                 }
             }
+            FormUsualGroupXmlProperty::Format => {
+                xml.push_str(&format_form_localized_section(
+                    "Format",
+                    &item.format,
+                    indent,
+                ));
+            }
+            FormUsualGroupXmlProperty::ShowLeftMargin => {
+                if item.usual_group_show_left_margin == Some(false) {
+                    xml.push_str(&format!("{tab}<ShowLeftMargin>false</ShowLeftMargin>\r\n"));
+                }
+            }
             FormUsualGroupXmlProperty::United => {
                 if item.united == Some(false) {
                     xml.push_str(&format!("{tab}<United>false</United>\r\n"));
@@ -12988,6 +13132,14 @@ fn format_form_usual_group_properties_xml(
                 if let Some(value) = item.child_items_width {
                     xml.push_str(&format!(
                         "{tab}<ChildItemsWidth>{}</ChildItemsWidth>\r\n",
+                        escape_xml_text(value)
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::BackColor => {
+                if let Some(value) = &item.back_color {
+                    xml.push_str(&format!(
+                        "{tab}<BackColor>{}</BackColor>\r\n",
                         escape_xml_text(value)
                     ));
                 }
@@ -13015,6 +13167,14 @@ fn format_form_usual_group_header_xml(item: &FormChildItem, indent: usize) -> St
         match property {
             FormUsualGroupHeaderXmlProperty::Title => {
                 xml.push_str(&format_form_localized_section("Title", &item.title, indent));
+            }
+            FormUsualGroupHeaderXmlProperty::Shortcut => {
+                if let Some(shortcut) = &item.usual_group_shortcut {
+                    xml.push_str(&format!(
+                        "{tab}<Shortcut>{}</Shortcut>\r\n",
+                        escape_xml_text(shortcut)
+                    ));
+                }
             }
             FormUsualGroupHeaderXmlProperty::TitleTextColor => {
                 if let Some(title_text_color) = &item.title_text_color {

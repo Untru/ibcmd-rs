@@ -339,6 +339,7 @@ impl FormPageProperties {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormUsualGroupHeaderXmlProperty {
     Title,
+    Shortcut,
     TitleTextColor,
     TitleFont,
     ToolTip,
@@ -347,6 +348,7 @@ pub(crate) enum FormUsualGroupHeaderXmlProperty {
 
 pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlProperty] = &[
     FormUsualGroupHeaderXmlProperty::Title,
+    FormUsualGroupHeaderXmlProperty::Shortcut,
     FormUsualGroupHeaderXmlProperty::TitleTextColor,
     FormUsualGroupHeaderXmlProperty::TitleFont,
     FormUsualGroupHeaderXmlProperty::ToolTip,
@@ -360,43 +362,75 @@ pub(crate) enum FormUsualGroupXmlAnchor {
     BeforeBehavior,
     AfterBehavior,
     AfterRepresentation,
-    BeforeExtendedTooltip,
+    AfterShowTitle,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormUsualGroupXmlProperty {
+    ReadOnly,
+    Enabled,
     EnableContentChange,
+    GroupHorizontalAlign,
     GroupVerticalAlign,
+    ChildrenAlign,
+    HorizontalSpacing,
+    VerticalSpacing,
     HorizontalAlign,
     VerticalAlign,
+    CollapsedRepresentationTitle,
     Collapsed,
     ControlRepresentation,
+    Format,
+    ShowLeftMargin,
     United,
     ChildItemsWidth,
+    BackColor,
     ThroughAlign,
 }
 
 pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
+    FormUsualGroupXmlProperty::ReadOnly,
+    FormUsualGroupXmlProperty::Enabled,
     FormUsualGroupXmlProperty::EnableContentChange,
+    FormUsualGroupXmlProperty::GroupHorizontalAlign,
     FormUsualGroupXmlProperty::GroupVerticalAlign,
+    FormUsualGroupXmlProperty::ChildrenAlign,
+    FormUsualGroupXmlProperty::HorizontalSpacing,
+    FormUsualGroupXmlProperty::VerticalSpacing,
     FormUsualGroupXmlProperty::HorizontalAlign,
     FormUsualGroupXmlProperty::VerticalAlign,
+    FormUsualGroupXmlProperty::CollapsedRepresentationTitle,
     FormUsualGroupXmlProperty::Collapsed,
     FormUsualGroupXmlProperty::ControlRepresentation,
+    FormUsualGroupXmlProperty::Format,
+    FormUsualGroupXmlProperty::ShowLeftMargin,
     FormUsualGroupXmlProperty::United,
     FormUsualGroupXmlProperty::ChildItemsWidth,
+    FormUsualGroupXmlProperty::BackColor,
     FormUsualGroupXmlProperty::ThroughAlign,
 ];
 
 impl FormUsualGroupXmlProperty {
     pub(crate) const fn anchor(self) -> FormUsualGroupXmlAnchor {
         match self {
-            Self::EnableContentChange => FormUsualGroupXmlAnchor::BeforeTitle,
-            Self::GroupVerticalAlign => FormUsualGroupXmlAnchor::BeforeGroup,
-            Self::HorizontalAlign | Self::VerticalAlign => FormUsualGroupXmlAnchor::BeforeBehavior,
-            Self::Collapsed | Self::ControlRepresentation => FormUsualGroupXmlAnchor::AfterBehavior,
-            Self::United | Self::ChildItemsWidth => FormUsualGroupXmlAnchor::AfterRepresentation,
-            Self::ThroughAlign => FormUsualGroupXmlAnchor::BeforeExtendedTooltip,
+            Self::ReadOnly | Self::Enabled | Self::EnableContentChange => {
+                FormUsualGroupXmlAnchor::BeforeTitle
+            }
+            Self::GroupHorizontalAlign | Self::GroupVerticalAlign => {
+                FormUsualGroupXmlAnchor::BeforeGroup
+            }
+            Self::ChildrenAlign
+            | Self::HorizontalSpacing
+            | Self::VerticalSpacing
+            | Self::HorizontalAlign
+            | Self::VerticalAlign => FormUsualGroupXmlAnchor::BeforeBehavior,
+            Self::CollapsedRepresentationTitle | Self::Collapsed | Self::ControlRepresentation => {
+                FormUsualGroupXmlAnchor::AfterBehavior
+            }
+            Self::Format | Self::ShowLeftMargin | Self::United | Self::ChildItemsWidth => {
+                FormUsualGroupXmlAnchor::AfterRepresentation
+            }
+            Self::BackColor | Self::ThroughAlign => FormUsualGroupXmlAnchor::AfterShowTitle,
         }
     }
 }
@@ -406,8 +440,14 @@ pub(crate) struct FormUsualGroupSchema;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormUsualGroupProperties {
+    enabled: Option<bool>,
+    read_only: Option<bool>,
     enable_content_change: Option<bool>,
+    group_horizontal_align: Option<&'static str>,
     group_vertical_align: Option<FormUsualGroupGroupVerticalAlign>,
+    children_align: Option<&'static str>,
+    horizontal_spacing: Option<&'static str>,
+    vertical_spacing: Option<&'static str>,
     child_items_width: Option<&'static str>,
     control_representation: Option<&'static str>,
     collapsed: Option<bool>,
@@ -415,6 +455,7 @@ pub(crate) struct FormUsualGroupProperties {
     vertical_align: Option<&'static str>,
     through_align: Option<&'static str>,
     united: Option<bool>,
+    show_left_margin: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -436,15 +477,20 @@ impl FormUsualGroupGroupVerticalAlign {
 
 impl FormUsualGroupSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
+    const GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET: usize = 3;
     const GROUP_VERTICAL_ALIGN_REVERSE_OFFSET: usize = 2;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
+        field_count: usize,
         item_tag: &str,
         direct_discriminator: Option<&str>,
         options: &[&str],
     ) -> Option<Self> {
-        matches!(
+        (matches!(
+            field_count,
+            30 | 32 | 34 | 36 | 38 | 40 | 42 | 44 | 46 | 48 | 50 | 52 | 54 | 60
+        ) && matches!(
             (
                 wrapper,
                 item_tag,
@@ -453,15 +499,38 @@ impl FormUsualGroupSchema {
                 options.first().map(|field| field.trim()),
             ),
             ("22", "UsualGroup", Some("5"), 29, Some("29"))
-        )
+        ))
         .then_some(Self)
     }
 
     pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormUsualGroupProperties {
         FormUsualGroupProperties {
+            enabled: (fields.get(10).map(|field| field.trim()) == Some("0")).then_some(false),
+            read_only: (fields.get(11).map(|field| field.trim()) == Some("1")).then_some(true),
             enable_content_change: (fields.get(9).map(|field| field.trim()) == Some("1"))
                 .then_some(true),
+            group_horizontal_align: self.group_horizontal_align(fields),
             group_vertical_align: self.group_vertical_align(fields),
+            children_align: options.get(20).and_then(|field| match field.trim() {
+                "1" => Some("None"),
+                "2" => Some("ItemsLeftTitlesLeft"),
+                "3" => Some("ItemsRightTitlesLeft"),
+                "6" => Some("TitlesLeftDataAuto"),
+                _ => None,
+            }),
+            horizontal_spacing: options.get(15).and_then(|field| match field.trim() {
+                "1" => Some("None"),
+                "2" => Some("Half"),
+                "3" => Some("Single"),
+                "5" => Some("Double"),
+                _ => None,
+            }),
+            vertical_spacing: options.get(16).and_then(|field| match field.trim() {
+                "1" => Some("None"),
+                "2" => Some("Half"),
+                "4" => Some("OneAndHalf"),
+                _ => None,
+            }),
             child_items_width: options.get(2).and_then(|field| match field.trim() {
                 "1" => Some("Equal"),
                 "2" => Some("LeftWide"),
@@ -491,6 +560,40 @@ impl FormUsualGroupSchema {
                 _ => None,
             }),
             united: (options.get(21).map(|field| field.trim()) == Some("0")).then_some(false),
+            show_left_margin: (options.get(13).map(|field| field.trim()) == Some("0"))
+                .then_some(false),
+        }
+    }
+
+    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+        let value = fields.get(13)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+
+    pub(crate) fn shortcut_field<'a>(self, fields: &'a [&'a str]) -> Option<&'a str> {
+        fields.get(18).copied()
+    }
+
+    pub(crate) fn format_field<'a>(self, options: &'a [&'a str]) -> Option<&'a str> {
+        options.get(6).copied()
+    }
+
+    pub(crate) fn collapsed_representation_title_field<'a>(
+        self,
+        options: &'a [&'a str],
+    ) -> Option<&'a str> {
+        options.get(14).copied()
+    }
+
+    fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "0" => Some("Left"),
+            "1" => Some("Center"),
+            "2" => Some("Right"),
+            _ => None,
         }
     }
 
@@ -508,8 +611,20 @@ impl FormUsualGroupSchema {
 }
 
 impl FormUsualGroupProperties {
+    pub(crate) const fn enabled(self) -> Option<bool> {
+        self.enabled
+    }
+
+    pub(crate) const fn read_only(self) -> Option<bool> {
+        self.read_only
+    }
+
     pub(crate) const fn enable_content_change(self) -> Option<bool> {
         self.enable_content_change
+    }
+
+    pub(crate) const fn group_horizontal_align(self) -> Option<&'static str> {
+        self.group_horizontal_align
     }
 
     pub(crate) const fn group_vertical_align(self) -> Option<FormUsualGroupGroupVerticalAlign> {
@@ -518,6 +633,18 @@ impl FormUsualGroupProperties {
 
     pub(crate) const fn child_items_width(self) -> Option<&'static str> {
         self.child_items_width
+    }
+
+    pub(crate) const fn children_align(self) -> Option<&'static str> {
+        self.children_align
+    }
+
+    pub(crate) const fn horizontal_spacing(self) -> Option<&'static str> {
+        self.horizontal_spacing
+    }
+
+    pub(crate) const fn vertical_spacing(self) -> Option<&'static str> {
+        self.vertical_spacing
     }
 
     pub(crate) const fn control_representation(self) -> Option<&'static str> {
@@ -542,6 +669,10 @@ impl FormUsualGroupProperties {
 
     pub(crate) const fn united(self) -> Option<bool> {
         self.united
+    }
+
+    pub(crate) const fn show_left_margin(self) -> Option<bool> {
+        self.show_left_margin
     }
 }
 

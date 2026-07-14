@@ -10185,6 +10185,13 @@ fn formats_table_search_additions_as_direct_sections() {
         group: None,
         behavior: None,
         representation: None,
+        usual_group_enabled: None,
+        usual_group_collapsed_representation_title: Vec::new(),
+        usual_group_children_align: None,
+        usual_group_horizontal_spacing: None,
+        usual_group_vertical_spacing: None,
+        usual_group_show_left_margin: None,
+        usual_group_shortcut: None,
         enable_content_change: None,
         child_items_width: None,
         control_representation: None,
@@ -10337,6 +10344,13 @@ fn formats_table_search_additions_as_direct_sections() {
                 group: None,
                 behavior: None,
                 representation: None,
+                usual_group_enabled: None,
+                usual_group_collapsed_representation_title: Vec::new(),
+                usual_group_children_align: None,
+                usual_group_horizontal_spacing: None,
+                usual_group_vertical_spacing: None,
+                usual_group_show_left_margin: None,
+                usual_group_shortcut: None,
                 enable_content_change: None,
                 child_items_width: None,
                 control_representation: None,
@@ -10490,6 +10504,13 @@ fn formats_table_search_additions_as_direct_sections() {
                 group: None,
                 behavior: None,
                 representation: None,
+                usual_group_enabled: None,
+                usual_group_collapsed_representation_title: Vec::new(),
+                usual_group_children_align: None,
+                usual_group_horizontal_spacing: None,
+                usual_group_vertical_spacing: None,
+                usual_group_show_left_margin: None,
+                usual_group_shortcut: None,
                 enable_content_change: None,
                 child_items_width: None,
                 control_representation: None,
@@ -10856,7 +10877,7 @@ fn omits_unresolved_and_ordinary_usual_group_title_style_slots() {
 }
 
 #[test]
-fn preserves_unstyled_usual_group_width_before_title_order() {
+fn preserves_unstyled_usual_group_title_before_width_order() {
     let base = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
     let mut fields = split_1c_braced_fields(base, 0)
         .unwrap()
@@ -10879,7 +10900,7 @@ fn preserves_unstyled_usual_group_width_before_title_order() {
 
     let width_at = xml.find("<Width>43</Width>").unwrap();
     let title_at = xml.find("<Title>").unwrap();
-    assert!(width_at < title_at);
+    assert!(title_at < width_at);
     assert!(!xml.contains("<TitleTextColor>"));
     assert!(!xml.contains("<TitleFont"));
 }
