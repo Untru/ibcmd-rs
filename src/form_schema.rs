@@ -1708,6 +1708,7 @@ pub(crate) struct FormFieldSchema {
     height_option_slot: Option<usize>,
     horizontal_stretch_option_slot: Option<usize>,
     vertical_stretch_option_slot: Option<usize>,
+    show_in_header_slot: Option<usize>,
     text_color_option_slot: Option<usize>,
     back_color_option_slot: Option<usize>,
     border_color_option_slot: Option<usize>,
@@ -1760,6 +1761,11 @@ impl FormFieldSchema {
             height_option_slot: (item_tag == "PictureField").then_some(2),
             horizontal_stretch_option_slot: (item_tag == "PictureField").then_some(3),
             vertical_stretch_option_slot: (item_tag == "PictureField").then_some(4),
+            show_in_header_slot: matches!(
+                item_tag,
+                "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+            )
+            .then_some(20 + top_level_offset),
             text_color_option_slot: text,
             back_color_option_slot: back,
             border_color_option_slot: border,
@@ -1790,6 +1796,10 @@ impl FormFieldSchema {
 
     pub(crate) fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
         (options.get(self.vertical_stretch_option_slot?)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn show_in_header(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(self.show_in_header_slot?)?.trim() == "0").then_some(false)
     }
 
     pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {

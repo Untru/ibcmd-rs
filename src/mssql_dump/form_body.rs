@@ -5230,10 +5230,15 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .and_then(|options| options.show_in_header)
         } else {
-            (matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
-                && form_input_field_layout_is_extended(&fields))
-            .then(|| parse_form_child_item_show_in_header(&fields))
-            .flatten()
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, _)| schema.show_in_header(&fields))
+                .or_else(|| {
+                    (matches!(tag, "InputField" | "LabelField" | "CheckBoxField")
+                        && form_input_field_layout_is_extended(&fields))
+                    .then(|| parse_form_child_item_show_in_header(&fields))
+                    .flatten()
+                })
         },
         user_visible_common: conditional_user_visible_common
             .or_else(|| user_visible_schema.map(|_| false))
@@ -6122,7 +6127,6 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
         match item.tag {
             "LabelField" => {
                 item.tooltip.clear();
-                item.show_in_header = None;
                 item.width = None;
             }
             "InputField" => {
@@ -11825,11 +11829,6 @@ pub(super) fn format_form_child_item_xml(
     }
     if early_title_for_field {
         xml.push_str(&format_form_title_section(item, indent + 1));
-        if matches!(item.tag, "InputField" | "LabelField" | "CheckBoxField")
-            && item.show_in_header == Some(false)
-        {
-            xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
-        }
     }
     if item.tag != "UsualGroup"
         && let Some(title_font_xml) = &item.title_font_xml
@@ -11892,6 +11891,7 @@ pub(super) fn format_form_child_item_xml(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            | "ColumnGroup"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -11930,6 +11930,16 @@ pub(super) fn format_form_child_item_xml(
     }
     if item.cell_hyperlink == Some(true) {
         xml.push_str(&format!("{tab}\t<CellHyperlink>true</CellHyperlink>\r\n"));
+    }
+    if item.auto_cell_height == Some(true) {
+        xml.push_str(&format!("{tab}\t<AutoCellHeight>true</AutoCellHeight>\r\n"));
+    }
+    if matches!(
+        item.tag,
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+    ) && item.show_in_header == Some(false)
+    {
+        xml.push_str(&format!("{tab}\t<ShowInHeader>false</ShowInHeader>\r\n"));
     }
     xml.push_str(&format_form_field_header_picture_xml(item, indent + 1));
     if item.show_in_footer == Some(false) {
@@ -12198,9 +12208,6 @@ pub(super) fn format_form_child_item_xml(
                 "false"
             }
         ));
-    }
-    if item.auto_cell_height == Some(true) {
-        xml.push_str(&format!("{tab}\t<AutoCellHeight>true</AutoCellHeight>\r\n"));
     }
     xml.push_str(&format_form_input_field_button_options_xml(
         item,
@@ -12516,6 +12523,7 @@ pub(super) fn format_form_child_item_xml(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            | "ColumnGroup"
             | "LabelDecoration"
             | "PictureDecoration"
             | "UsualGroup"
