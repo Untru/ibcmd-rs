@@ -26,11 +26,12 @@ use crate::form_schema::{
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
-    FormTableSearchStringLocation, FormTableXmlProperty, FormTooltipRepresentationXmlOrder,
-    FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
-    FormUsualGroupXmlProperty, decode_form_tooltip_representation,
-    form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
+    FormUsualGroupSchema, FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty,
+    decode_form_tooltip_representation, form_attribute_column_builtin_type_reference,
+    form_child_item_representation_is_default, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -512,6 +513,8 @@ pub(super) struct FormChildItem {
     pub(super) table_representation: Option<&'static str>,
     pub(super) table_command_bar_location: Option<&'static str>,
     pub(super) table_search_string_location: Option<FormTableSearchStringLocation>,
+    pub(super) table_view_status_location: Option<FormTableViewStatusLocation>,
+    pub(super) table_search_control_location: Option<FormTableSearchControlLocation>,
     pub(super) height_in_table_rows: Option<String>,
     pub(super) row_selection_mode: Option<&'static str>,
     pub(super) enable_start_drag: Option<bool>,
@@ -4840,6 +4843,10 @@ fn parse_form_child_item_with_metadata_owners(
         },
         table_search_string_location: table_schema
             .and_then(|schema| schema.search_string_location(&fields)),
+        table_view_status_location: table_schema
+            .and_then(|schema| schema.view_status_location(&fields)),
+        table_search_control_location: table_schema
+            .and_then(|schema| schema.search_control_location(&fields)),
         height_in_table_rows: if tag == "Table" {
             fields
                 .get(21)
@@ -4889,11 +4896,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        change_row_set: if ordinary_table_layout {
-            (fields.get(17).map(|field| field.trim()) == Some("0")).then_some(false)
-        } else {
-            None
-        },
+        change_row_set: table_schema.and_then(|schema| schema.change_row_set(&fields)),
         change_row_order: table_schema.and_then(|schema| schema.change_row_order(&fields)),
         command_set_excluded_commands: table_schema
             .map(|schema| parse_form_table_command_set_excluded_commands_for_table(schema, &fields))
@@ -11249,6 +11252,24 @@ fn format_form_table_property_xml(
             .map(|value| {
                 format!(
                     "{tab}<SearchStringLocation>{}</SearchStringLocation>\r\n",
+                    value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::ViewStatusLocation => item
+            .table_view_status_location
+            .map(|value| {
+                format!(
+                    "{tab}<ViewStatusLocation>{}</ViewStatusLocation>\r\n",
+                    value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::SearchControlLocation => item
+            .table_search_control_location
+            .map(|value| {
+                format!(
+                    "{tab}<SearchControlLocation>{}</SearchControlLocation>\r\n",
                     value.xml_value()
                 )
             })

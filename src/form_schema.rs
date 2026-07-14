@@ -2346,6 +2346,8 @@ pub(crate) enum FormTableXmlProperty {
     Title,
     CommandSet,
     SearchStringLocation,
+    ViewStatusLocation,
+    SearchControlLocation,
     AutoRefresh,
     AutoRefreshPeriod,
     Period,
@@ -2398,6 +2400,8 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Title,
     FormTableXmlProperty::CommandSet,
     FormTableXmlProperty::SearchStringLocation,
+    FormTableXmlProperty::ViewStatusLocation,
+    FormTableXmlProperty::SearchControlLocation,
     FormTableXmlProperty::AutoRefresh,
     FormTableXmlProperty::AutoRefreshPeriod,
     FormTableXmlProperty::Period,
@@ -2416,6 +2420,7 @@ enum FormTableSlot {
     Autofill,
     ReadOnly,
     DefaultItem,
+    ChangeRowSet,
     ChangeRowOrder,
     Width,
     Height,
@@ -2433,10 +2438,11 @@ enum FormTableSlot {
 }
 
 impl FormTableSlot {
-    const ALL: [Self; 17] = [
+    const ALL: [Self; 18] = [
         Self::Autofill,
         Self::ReadOnly,
         Self::DefaultItem,
+        Self::ChangeRowSet,
         Self::ChangeRowOrder,
         Self::Width,
         Self::Height,
@@ -2458,6 +2464,7 @@ impl FormTableSlot {
             Self::Autofill => 12,
             Self::ReadOnly => 14,
             Self::DefaultItem => 16,
+            Self::ChangeRowSet => 17,
             Self::ChangeRowOrder => 18,
             Self::Width => 19,
             Self::Height => 20,
@@ -2508,6 +2515,36 @@ impl FormTableSearchStringLocation {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableViewStatusLocation {
+    None,
+    Top,
+}
+
+impl FormTableViewStatusLocation {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Top => "Top",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableSearchControlLocation {
+    None,
+    CommandBar,
+}
+
+impl FormTableSearchControlLocation {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::CommandBar => "CommandBar",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormTableSchema;
 
 impl FormTableSchema {
@@ -2520,6 +2557,8 @@ impl FormTableSchema {
     const TEXT_COLOR_SLOT: usize = 46;
     const BORDER_COLOR_SLOT: usize = 47;
     const SEARCH_STRING_LOCATION_REVERSE_OFFSET: usize = 25;
+    const VIEW_STATUS_LOCATION_REVERSE_OFFSET: usize = 24;
+    const SEARCH_CONTROL_LOCATION_REVERSE_OFFSET: usize = 23;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -2594,6 +2633,34 @@ impl FormTableSchema {
         }
     }
 
+    pub(crate) fn view_status_location(
+        self,
+        fields: &[&str],
+    ) -> Option<FormTableViewStatusLocation> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::VIEW_STATUS_LOCATION_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "1" => Some(FormTableViewStatusLocation::None),
+            "2" => Some(FormTableViewStatusLocation::Top),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn search_control_location(
+        self,
+        fields: &[&str],
+    ) -> Option<FormTableSearchControlLocation> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::SEARCH_CONTROL_LOCATION_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "1" => Some(FormTableSearchControlLocation::None),
+            "2" => Some(FormTableSearchControlLocation::CommandBar),
+            _ => None,
+        }
+    }
+
     pub(crate) fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
         FormPictureValueSchema::from_raw_layout(value)
     }
@@ -2608,6 +2675,10 @@ impl FormTableSchema {
 
     pub(crate) fn default_item(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::DefaultItem)
+    }
+
+    pub(crate) fn change_row_set(self, fields: &[&str]) -> Option<bool> {
+        self.explicit_false(fields, FormTableSlot::ChangeRowSet)
     }
 
     pub(crate) fn change_row_order(self, fields: &[&str]) -> Option<bool> {
