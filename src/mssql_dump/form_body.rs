@@ -27,11 +27,11 @@ use crate::form_schema::{
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
     FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
-    FormUsualGroupSchema, FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty,
-    decode_form_tooltip_representation, form_attribute_column_builtin_type_reference,
-    form_child_item_representation_is_default, form_tooltip_representation_schema,
-    form_tooltip_representation_xml_order,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
+    FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
+    FormUsualGroupXmlProperty, decode_form_tooltip_representation,
+    form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
+    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -508,6 +508,7 @@ pub(super) struct FormChildItem {
     pub(super) collapsed: Option<bool>,
     pub(super) usual_group_horizontal_align: Option<&'static str>,
     pub(super) usual_group_vertical_align: Option<&'static str>,
+    pub(super) usual_group_group_vertical_align: Option<FormUsualGroupGroupVerticalAlign>,
     pub(super) through_align: Option<&'static str>,
     pub(super) united: Option<bool>,
     pub(super) table_representation: Option<&'static str>,
@@ -4843,6 +4844,9 @@ fn parse_form_child_item_with_metadata_owners(
                     .as_ref()
                     .and_then(|options| options.vertical_align)
             }),
+        usual_group_group_vertical_align: extended_group_options
+            .as_ref()
+            .and_then(|options| options.group_vertical_align),
         through_align: extended_group_options
             .as_ref()
             .and_then(|options| options.through_align),
@@ -6161,6 +6165,7 @@ pub(super) struct FormUsualGroupExtendedOptions {
     pub(super) representation: Option<&'static str>,
     pub(super) horizontal_stretch: Option<bool>,
     pub(super) enable_content_change: Option<bool>,
+    pub(super) group_vertical_align: Option<FormUsualGroupGroupVerticalAlign>,
     pub(super) child_items_width: Option<&'static str>,
     pub(super) control_representation: Option<&'static str>,
     pub(super) collapsed: Option<bool>,
@@ -6531,6 +6536,7 @@ pub(super) fn parse_form_usual_group_extended_options(
                     .and_then(|field| parse_form_child_item_representation(field)),
                 horizontal_stretch: parse_form_usual_group_horizontal_stretch(fields),
                 enable_content_change: properties.enable_content_change(),
+                group_vertical_align: properties.group_vertical_align(),
                 child_items_width: properties.child_items_width(),
                 control_representation: properties.control_representation(),
                 collapsed: properties.collapsed(),
@@ -6564,6 +6570,7 @@ pub(super) fn parse_form_usual_group_extended_options(
                 representation,
                 horizontal_stretch: None,
                 enable_content_change: None,
+                group_vertical_align: None,
                 child_items_width: None,
                 control_representation: None,
                 collapsed: None,
@@ -12021,6 +12028,11 @@ pub(super) fn format_form_child_item_xml(
             ));
         }
     }
+    xml.push_str(&format_form_usual_group_properties_xml(
+        item,
+        FormUsualGroupXmlAnchor::BeforeGroup,
+        indent + 1,
+    ));
     if item.tag != "Page"
         && let Some(group) = item.group
     {
@@ -12791,6 +12803,14 @@ fn format_form_usual_group_properties_xml(
                 if item.enable_content_change == Some(true) {
                     xml.push_str(&format!(
                         "{tab}<EnableContentChange>true</EnableContentChange>\r\n"
+                    ));
+                }
+            }
+            FormUsualGroupXmlProperty::GroupVerticalAlign => {
+                if let Some(value) = item.usual_group_group_vertical_align {
+                    xml.push_str(&format!(
+                        "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                        value.xml_value()
                     ));
                 }
             }

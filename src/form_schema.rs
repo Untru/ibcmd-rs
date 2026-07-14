@@ -356,6 +356,7 @@ pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlPro
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormUsualGroupXmlAnchor {
     BeforeTitle,
+    BeforeGroup,
     BeforeBehavior,
     AfterBehavior,
     AfterRepresentation,
@@ -365,6 +366,7 @@ pub(crate) enum FormUsualGroupXmlAnchor {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormUsualGroupXmlProperty {
     EnableContentChange,
+    GroupVerticalAlign,
     HorizontalAlign,
     VerticalAlign,
     Collapsed,
@@ -376,6 +378,7 @@ pub(crate) enum FormUsualGroupXmlProperty {
 
 pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
     FormUsualGroupXmlProperty::EnableContentChange,
+    FormUsualGroupXmlProperty::GroupVerticalAlign,
     FormUsualGroupXmlProperty::HorizontalAlign,
     FormUsualGroupXmlProperty::VerticalAlign,
     FormUsualGroupXmlProperty::Collapsed,
@@ -389,6 +392,7 @@ impl FormUsualGroupXmlProperty {
     pub(crate) const fn anchor(self) -> FormUsualGroupXmlAnchor {
         match self {
             Self::EnableContentChange => FormUsualGroupXmlAnchor::BeforeTitle,
+            Self::GroupVerticalAlign => FormUsualGroupXmlAnchor::BeforeGroup,
             Self::HorizontalAlign | Self::VerticalAlign => FormUsualGroupXmlAnchor::BeforeBehavior,
             Self::Collapsed | Self::ControlRepresentation => FormUsualGroupXmlAnchor::AfterBehavior,
             Self::United | Self::ChildItemsWidth => FormUsualGroupXmlAnchor::AfterRepresentation,
@@ -403,6 +407,7 @@ pub(crate) struct FormUsualGroupSchema;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormUsualGroupProperties {
     enable_content_change: Option<bool>,
+    group_vertical_align: Option<FormUsualGroupGroupVerticalAlign>,
     child_items_width: Option<&'static str>,
     control_representation: Option<&'static str>,
     collapsed: Option<bool>,
@@ -412,8 +417,26 @@ pub(crate) struct FormUsualGroupProperties {
     united: Option<bool>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormUsualGroupGroupVerticalAlign {
+    Top,
+    Center,
+    Bottom,
+}
+
+impl FormUsualGroupGroupVerticalAlign {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Top => "Top",
+            Self::Center => "Center",
+            Self::Bottom => "Bottom",
+        }
+    }
+}
+
 impl FormUsualGroupSchema {
     pub(crate) const OPTIONS_SLOT: usize = 20;
+    const GROUP_VERTICAL_ALIGN_REVERSE_OFFSET: usize = 2;
 
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -438,6 +461,7 @@ impl FormUsualGroupSchema {
         FormUsualGroupProperties {
             enable_content_change: (fields.get(9).map(|field| field.trim()) == Some("1"))
                 .then_some(true),
+            group_vertical_align: self.group_vertical_align(fields),
             child_items_width: options.get(2).and_then(|field| match field.trim() {
                 "1" => Some("Equal"),
                 "2" => Some("LeftWide"),
@@ -469,11 +493,27 @@ impl FormUsualGroupSchema {
             united: (options.get(21).map(|field| field.trim()) == Some("0")).then_some(false),
         }
     }
+
+    fn group_vertical_align(self, fields: &[&str]) -> Option<FormUsualGroupGroupVerticalAlign> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::GROUP_VERTICAL_ALIGN_REVERSE_OFFSET)?;
+        match fields.get(slot)?.trim() {
+            "0" => Some(FormUsualGroupGroupVerticalAlign::Top),
+            "1" => Some(FormUsualGroupGroupVerticalAlign::Center),
+            "2" => Some(FormUsualGroupGroupVerticalAlign::Bottom),
+            _ => None,
+        }
+    }
 }
 
 impl FormUsualGroupProperties {
     pub(crate) const fn enable_content_change(self) -> Option<bool> {
         self.enable_content_change
+    }
+
+    pub(crate) const fn group_vertical_align(self) -> Option<FormUsualGroupGroupVerticalAlign> {
+        self.group_vertical_align
     }
 
     pub(crate) const fn child_items_width(self) -> Option<&'static str> {
