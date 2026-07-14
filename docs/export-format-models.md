@@ -4076,3 +4076,71 @@ the pre-existing `DataProcessors/ЗагрузкаКурсовВалют.xml`. `C
 remains byte-exact at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #116 is closed after this acceptance gate.
+
+## Schema-backed Form table locations, Popup, and UsualGroup placement acceptance
+
+Status: accepted by an independent frozen review, an all-Form selected gate,
+and one fresh serialized full export.
+
+Three Table properties extend the existing wrapper-`55` `FormTableSchema`.
+The corpus contains 751 native tables; 750 have unique raw/native matches and
+pass the schema, while the one native-only table omits all three properties.
+The checked tail slots are consecutive: `fields[len - 24]` maps `0 -> omit`,
+`1 -> None`, and `2 -> Top` for `ViewStatusLocation`; `fields[len - 23]`
+maps `0 -> omit`, `1 -> None`, and `2 -> CommandBar` for
+`SearchControlLocation`. The first matrix is exact for 703/46/1 records and
+the second for 704/45/1 records. Absolute slot `17` maps `0 ->
+ChangeRowSet=false` for 181 records and `1 -> omit` for 569. Unknown values
+fail closed. Native XML order is `SearchStringLocation`,
+`ViewStatusLocation`, `SearchControlLocation`, then `AutoRefresh`;
+`ChangeRowSet` remains after `DefaultItem` and before `ChangeRowOrder`.
+`FileDragMode`, `SkipOnInput`, and `ShowRoot` remain explicit HOLD.
+
+All 259 Popup records use one strict wrapper-`22`, discriminator-`1` schema
+with `fields.len() = 30 + 2 * child_count` and a nine-field marker-`7`
+options record in slot `20`. Options slot `4` is exact: `0 -> Text` for four
+records, `1 -> Picture` for 56, `2 -> PictureAndText` for 28, and `3 -> omit`
+for 171. The model is independent of whether the Popup belongs to an
+AutoCommandBar, ButtonGroup, CommandBar, ContextMenu, or another Popup.
+Native order is `Title`, `ToolTip`, `ToolTipRepresentation`, `Picture`,
+`CommandSource`, `Representation`, then `ExtendedTooltip`; the scoped Popup
+formatter moves 21 existing tooltips before their pictures without changing
+other item types.
+
+`UsualGroup.GroupVerticalAlign` belongs to the admitted wrapper-`22`,
+discriminator-`5`, 29-option group schema. Of 3,878 native groups, 3,854 have
+unique admitted raw/native matches and the remaining 24 native-only groups
+all omit the property. The checked `fields[len - 2]` matrix is exact:
+`3 -> omit` for 3,795 records, `0 -> Top` for eight, `1 -> Center` for 33,
+and `2 -> Bottom` for 18. A dedicated typed property and XML anchor place it
+after the group header/geometry/stretch fields and immediately before
+`Group`. The separate existing `VerticalAlign` in options slot `18` is
+unchanged.
+
+The frozen code range is three files, `+263/-9`: production is two files,
+`+254/-9`, and nine neutral fixture initializers are required by
+`cargo check --all-targets`. Added lines contain no UUID, database/server
+identity, object or form name, filesystem path, Cyrillic corpus literal,
+ConfigDumpInfo dependency, panic, unwrap, expect, unsafe block, or
+improvement-only fallback. The independent review returned GO.
+`cargo fmt --all -- --check`, `cargo check --all-targets`, `git diff --check`,
+the hardcode scan, and `cargo build --release` pass with the same two
+pre-existing warnings. Tests and native ConfigDump were not run by direct user
+instruction.
+
+The selected gate contains all 1,108 Form.xml files. Relative to Batch116,
+179 forms change; all 179 improve, none are equal or worse, six become exact,
+and no new differing file opens. The selected and subsequent full exports are
+byte-identical for all 1,108 forms. The normalized Form diff changes from
+`803 files, +2708/-6698` to `797 files, +2624/-6314`.
+
+The fresh full export writes 12,197 files including `ConfigDumpInfo.xml`, or
+12,196 files excluding it. The normalized full diff changes from `1065 files,
++7946/-31294` to `1059 files, +7862/-30910`; the exact batch delta is `-6
+files, -84 additions, -384 deletions`, entirely in Form.xml. All 11,090
+non-Form source paths retain the same status and candidate hash, leaving the
+non-Form residual at `262 files, +5238/-24596`. The only absent output remains
+the pre-existing `DataProcessors/ЗагрузкаКурсовВалют.xml`. `ConfigDumpInfo.xml`
+remains byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #117 is closed after this acceptance gate.
