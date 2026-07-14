@@ -1630,6 +1630,34 @@ impl FormButtonColorSchema {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormButtonShapeRepresentationSchema {
+    slot: usize,
+}
+
+impl FormButtonShapeRepresentationSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+    ) -> Option<Self> {
+        match (wrapper, field_count, item_tag, top_level_offset) {
+            ("31", 52, "Button", 0) => Some(Self { slot: 45 }),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn shape_representation(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(self.slot)?.trim() {
+            "1" => Some("Always"),
+            "2" => Some("WhenActive"),
+            "3" => Some("None"),
+            _ => None,
+        }
+    }
+}
+
 impl FormCheckBoxFieldSchema {
     pub(crate) fn top_level_offset_for_raw_layout(
         wrapper: &str,

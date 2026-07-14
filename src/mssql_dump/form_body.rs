@@ -8,17 +8,18 @@ use crate::form_schema::{
     FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER, FORM_TABLE_XML_ORDER,
     FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER,
     FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
-    FormAttributeColumnSchema, FormButtonColorSchema, FormCheckBoxFieldSchema,
-    FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
-    FormChildItemVisibleSchema, FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
-    FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
-    FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
-    FormConditionalTableSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
-    FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTopLevelSlot as FieldSlot,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
-    FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
-    FormLabelDecorationGeometry, FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
+    FormAttributeColumnSchema, FormButtonColorSchema, FormButtonShapeRepresentationSchema,
+    FormCheckBoxFieldSchema, FormChildItemAlignment, FormChildItemShowTitleSchema,
+    FormChildItemUserVisibleSchema, FormChildItemVisibleSchema, FormCommandCurrentRowUse,
+    FormCommandInterfaceContainerOwner, FormCommandInterfaceContainerSchema,
+    FormCommandInterfaceItemSchema, FormCommandInterfaceVisibilitySchema, FormCommandSchema,
+    FormConditionalGroupSchema, FormConditionalTableSchema, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
+    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
+    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
+    FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormPageSchema, FormPageXmlProperty, FormPictureDecorationGeometryXmlProperty,
@@ -550,6 +551,7 @@ pub(super) struct FormChildItem {
     pub(super) user_settings_group: Option<String>,
     pub(super) allow_getting_current_row_url: Option<bool>,
     pub(super) button_representation: Option<&'static str>,
+    pub(super) shape_representation: Option<&'static str>,
     pub(super) representation_in_context_menu: Option<&'static str>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) horizontal_location: Option<&'static str>,
@@ -4495,6 +4497,12 @@ fn parse_form_child_item_with_metadata_owners(
             .map(|schema| (schema, options))
         });
     let button_color_schema = FormButtonColorSchema::from_raw_layout(wrapper, fields.len(), tag);
+    let button_shape_representation_schema = FormButtonShapeRepresentationSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        tag,
+        button_top_level_offset,
+    );
     let user_visible_schema = if tag == "Button" {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,
@@ -5054,6 +5062,8 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        shape_representation: button_shape_representation_schema
+            .and_then(|schema| schema.shape_representation(&fields)),
         representation_in_context_menu: if tag == "Button"
             && form_button_layout_is_extended(&fields)
         {
@@ -12189,6 +12199,14 @@ pub(super) fn format_form_child_item_xml(
         FormTooltipRepresentationXmlOrder::AfterTitle,
         indent + 1,
     ));
+    if item.tag == "Button"
+        && let Some(shape_representation) = item.shape_representation
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ShapeRepresentation>{}</ShapeRepresentation>\r\n",
+            escape_xml_text(shape_representation)
+        ));
+    }
     if item.tag == "Button"
         && let Some(representation) = item.representation_in_context_menu
     {
