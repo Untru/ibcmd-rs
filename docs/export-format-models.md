@@ -3964,8 +3964,8 @@ native corpus contains 68 `AdditionalColumns` groups with 165 columns in 42
 forms. Every admitted group has marker `0` and target marker `2`; every column
 has marker `5` and arity `10`. Numeric column identifiers resolve only inside
 the owning Form Attribute, while UUID identifiers must resolve through
-`object_refs` to one valid metadata `Attribute` or `TabularSection.Attribute`
-route under the proven metadata owner. Ambiguous, mismatched, and unsupported
+`object_refs` to one valid metadata `Attribute` or `TabularSection` route
+under the proven metadata owner. Ambiguous, mismatched, and unsupported
 routes fail closed. Empty groups are preserved. The shared Form type
 normalizer also applies the native `Characteristic` `ReferenceTypeSet` rule to
 both Attributes and Additional Columns instead of treating columns as a
