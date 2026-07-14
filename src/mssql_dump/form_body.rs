@@ -9,15 +9,16 @@ use crate::form_schema::{
     FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER,
     FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
     FormAttributeColumnSchema, FormButtonColorSchema, FormButtonShapeRepresentationSchema,
-    FormCheckBoxFieldSchema, FormChildItemAlignment, FormChildItemShowTitleSchema,
-    FormChildItemUserVisibleSchema, FormChildItemVisibleSchema, FormCommandCurrentRowUse,
-    FormCommandInterfaceContainerOwner, FormCommandInterfaceContainerSchema,
-    FormCommandInterfaceItemSchema, FormCommandInterfaceVisibilitySchema, FormCommandSchema,
-    FormConditionalGroupSchema, FormConditionalTableSchema, FormDecorationHeaderSchema,
-    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
-    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
-    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormCheckBoxFieldSchema, FormChildItemAlignment, FormChildItemDisplayImportanceSchema,
+    FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema, FormChildItemVisibleSchema,
+    FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
+    FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
+    FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
+    FormConditionalTableSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
+    FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTopLevelSlot as FieldSlot,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -282,6 +283,7 @@ pub(super) struct FormBodyEvent {
 pub(super) struct FormAutoCommandBar {
     pub(super) id: String,
     pub(super) name: String,
+    pub(super) display_importance: Option<&'static str>,
     pub(super) horizontal_align: Option<&'static str>,
     pub(super) autofill: Option<bool>,
     pub(super) child_items: Vec<FormChildItem>,
@@ -1378,6 +1380,13 @@ pub(super) fn parse_form_auto_command_bar_fields(
     Some(FormAutoCommandBar {
         id: id.to_string(),
         name,
+        display_importance: FormChildItemDisplayImportanceSchema::from_raw_layout(
+            "22",
+            fields.len(),
+            "AutoCommandBar",
+            0,
+        )
+        .and_then(|schema| schema.display_importance(fields)),
         horizontal_align: fields
             .get(20)
             .and_then(|field| parse_form_auto_command_bar_horizontal_align(field)),
@@ -4537,6 +4546,17 @@ fn parse_form_child_item_with_metadata_owners(
     })
     .flatten()
     .unwrap_or(0);
+    let display_importance_top_level_offset = if tag == "Button" {
+        button_top_level_offset
+    } else {
+        input_field_top_level_offset
+    };
+    let display_importance_schema = FormChildItemDisplayImportanceSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        tag,
+        display_importance_top_level_offset,
+    );
     let direct_discriminator = fields
         .get(5 + input_field_top_level_offset)
         .map(|field| field.trim());
@@ -4821,9 +4841,8 @@ fn parse_form_child_item_with_metadata_owners(
         tag,
         id: id.to_string(),
         name,
-        display_importance: label_decoration_options
-            .as_ref()
-            .and_then(|options| options.display_importance),
+        display_importance: display_importance_schema
+            .and_then(|schema| schema.display_importance(&fields)),
         auto_command_bar_empty_element: is_raw_empty_nested_auto_command_bar(
             wrapper, tag, id, &fields,
         ),
@@ -6269,7 +6288,6 @@ pub(super) struct FormLabelDecorationOptions {
     pub(super) font_xml: Option<String>,
     pub(super) text_color: Option<String>,
     pub(super) back_color: Option<String>,
-    pub(super) display_importance: Option<&'static str>,
     pub(super) group_horizontal_align: Option<&'static str>,
     pub(super) alignment: FormLabelDecorationAlignment,
     pub(super) geometry: FormLabelDecorationGeometry,
@@ -6514,7 +6532,6 @@ pub(super) fn parse_form_label_decoration_options(
         back_color: options
             .get(6)
             .and_then(|field| parse_form_control_color(field, object_refs)),
-        display_importance: schema.display_importance(fields),
         group_horizontal_align: fields
             .get(schema.group_horizontal_align_slot())
             .and_then(|field| parse_form_label_decoration_group_horizontal_align(field)),
@@ -10872,12 +10889,17 @@ pub(super) fn format_form_body_xml(
         ));
     }
     if let Some(command_bar) = auto_command_bar {
-        if command_bar.horizontal_align.is_some()
+        let display_importance = command_bar
+            .display_importance
+            .map(|value| format!(" DisplayImportance=\"{}\"", escape_xml_text(value)))
+            .unwrap_or_default();
+        if command_bar.display_importance.is_some()
+            || command_bar.horizontal_align.is_some()
             || command_bar.autofill == Some(false)
             || !command_bar.child_items.is_empty()
         {
             xml.push_str(&format!(
-                "\t<AutoCommandBar name=\"{}\" id=\"{}\">\r\n",
+                "\t<AutoCommandBar name=\"{}\" id=\"{}\"{display_importance}>\r\n",
                 escape_xml_text(&command_bar.name),
                 escape_xml_text(&command_bar.id)
             ));
@@ -11524,9 +11546,13 @@ pub(super) fn format_form_child_item_xml(
         return format_form_context_menu_xml(item, indent);
     }
     let tab = "\t".repeat(indent);
+    let display_importance = item
+        .display_importance
+        .map(|value| format!(" DisplayImportance=\"{}\"", escape_xml_text(value)))
+        .unwrap_or_default();
     if item.tag == "AutoCommandBar" && item.auto_command_bar_empty_element {
         return format!(
-            "{tab}<AutoCommandBar name=\"{}\" id=\"{}\"/>\r\n",
+            "{tab}<AutoCommandBar name=\"{}\" id=\"{}\"{display_importance}/>\r\n",
             escape_xml_text(&item.name),
             escape_xml_text(&item.id)
         );
@@ -11564,10 +11590,6 @@ pub(super) fn format_form_child_item_xml(
             }
         }
     }
-    let display_importance = item
-        .display_importance
-        .map(|value| format!(" DisplayImportance=\"{}\"", escape_xml_text(value)))
-        .unwrap_or_default();
     let mut xml = format!(
         "{tab}<{} name=\"{}\" id=\"{}\"{display_importance}>\r\n",
         item.tag,

@@ -1176,6 +1176,70 @@ impl FormPictureDecorationProperties {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormChildItemDisplayImportanceSchema {
+    slot: usize,
+}
+
+impl FormChildItemDisplayImportanceSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+    ) -> Option<Self> {
+        let slot = match (wrapper, field_count, item_tag, top_level_offset) {
+            (
+                "22",
+                field_count,
+                "CommandBar" | "Popup" | "ColumnGroup" | "Pages" | "Page" | "UsualGroup"
+                | "ButtonGroup" | "AutoCommandBar",
+                0,
+            ) if field_count >= 29 => field_count.checked_sub(1)?,
+            ("12", 36, "LabelDecoration" | "PictureDecoration", 0) => 34,
+            ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => field_count.checked_sub(4)?,
+            (
+                "37",
+                59,
+                "LabelField"
+                | "InputField"
+                | "CheckBoxField"
+                | "PictureField"
+                | "RadioButtonField"
+                | "SpreadSheetDocumentField"
+                | "TextDocumentField"
+                | "CalendarField"
+                | "GraphicalSchemaField"
+                | "HTMLDocumentField"
+                | "FormattedDocumentField"
+                | "ProgressBarField"
+                | "TrackBarField"
+                | "ChartField",
+                0,
+            )
+            | ("37", 60, "LabelField" | "InputField" | "CheckBoxField" | "PictureField", 1) => {
+                field_count.checked_sub(4)?
+            }
+            ("55", field_count, "Table", 0) if field_count >= 99 && (field_count - 99) % 2 == 0 => {
+                field_count.checked_sub(3)?
+            }
+            _ => return None,
+        };
+        Some(Self { slot })
+    }
+
+    pub(crate) fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(self.slot)?.trim() {
+            "1" => Some("VeryHigh"),
+            "2" => Some("High"),
+            "3" => Some("Usual"),
+            "4" => Some("Low"),
+            "5" => Some("VeryLow"),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormLabelDecorationSchema {
     width_slot: usize,
     height_slot: usize,
@@ -1188,7 +1252,6 @@ pub(crate) struct FormLabelDecorationSchema {
     max_height_slot: usize,
     group_horizontal_align_slot: usize,
     group_vertical_align_slot: usize,
-    display_importance_slot: usize,
     horizontal_align_option_slot: usize,
     vertical_align_option_slot: usize,
     title_height_option_slot: usize,
@@ -1227,7 +1290,6 @@ impl FormLabelDecorationSchema {
                 max_height_slot: 31,
                 group_horizontal_align_slot: 32,
                 group_vertical_align_slot: 33,
-                display_importance_slot: 34,
                 horizontal_align_option_slot: 2,
                 vertical_align_option_slot: 3,
                 title_height_option_slot: 4,
@@ -1244,14 +1306,6 @@ impl FormLabelDecorationSchema {
 
     pub(crate) const fn group_vertical_align_slot(self) -> usize {
         self.group_vertical_align_slot
-    }
-
-    pub(crate) fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
-        match fields.get(self.display_importance_slot)?.trim() {
-            "1" => Some("VeryHigh"),
-            "5" => Some("VeryLow"),
-            _ => None,
-        }
     }
 
     pub(crate) const fn horizontal_align_option_slot(self) -> usize {
