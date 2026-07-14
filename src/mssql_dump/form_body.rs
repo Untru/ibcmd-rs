@@ -2227,7 +2227,7 @@ pub(super) fn parse_form_attribute_additional_columns_group(
     attributes: &[FormAttribute],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-    child_item_indexes: &FormChildItemIndexes,
+    _child_item_indexes: &FormChildItemIndexes,
 ) -> Option<ParsedFormAttributeAdditionalColumnsGroup> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let target = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
@@ -2237,10 +2237,9 @@ pub(super) fn parse_form_attribute_additional_columns_group(
         &fields, &target, &owner, &binding,
     )?;
     let attribute_id = owner.first()?.trim().to_string();
-    attributes
+    let attribute = attributes
         .iter()
-        .any(|attribute| attribute.id == attribute_id)
-        .then_some(())?;
+        .find(|attribute| attribute.id == attribute_id)?;
     let columns = fields
         .iter()
         .skip(3)
@@ -2249,11 +2248,12 @@ pub(super) fn parse_form_attribute_additional_columns_group(
         .collect::<Option<Vec<_>>>()?;
     let table = match schema.binding_kind() {
         FormAttributeAdditionalColumnsBindingKind::Numeric => {
-            let binding_key = parse_form_binding_key(target.get(2)?.trim())?;
-            child_item_indexes
-                .bound_table_path_by_binding_key
-                .get(&binding_key)
-                .cloned()
+            let column_id = binding.first()?.trim();
+            attribute
+                .columns
+                .iter()
+                .find(|column| column.id == column_id)
+                .map(|column| format!("{}.{}", attribute.name, column.name))
         }
         FormAttributeAdditionalColumnsBindingKind::MetadataReference => {
             resolve_form_attribute_additional_columns_metadata_table_path(
@@ -2343,21 +2343,8 @@ pub(super) fn parse_form_attribute_column_type_pattern(
     field: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    let value_types = parse_form_type_pattern(field.trim(), type_index)
-        .or_else(|| parse_form_attribute_column_builtin_type_pattern(field))?;
-    Some(normalize_form_type_pattern(
-        value_types
-            .into_iter()
-            .map(|value_type| match value_type {
-                ConstantValueType::Reference { reference }
-                    if metadata_reference_is_type_set(&reference) =>
-                {
-                    ConstantValueType::ReferenceTypeSet { reference }
-                }
-                other => other,
-            })
-            .collect(),
-    ))
+    parse_form_type_pattern(field.trim(), type_index)
+        .or_else(|| parse_form_attribute_column_builtin_type_pattern(field))
 }
 
 fn parse_form_attribute_column_builtin_type_pattern(field: &str) -> Option<Vec<ConstantValueType>> {
@@ -3546,6 +3533,11 @@ pub(super) fn normalize_form_type_pattern(
     let normalized = value_types
         .into_iter()
         .map(|value_type| match value_type {
+            ConstantValueType::Reference { reference }
+                if metadata_reference_is_type_set(&reference) =>
+            {
+                ConstantValueType::ReferenceTypeSet { reference }
+            }
             ConstantValueType::String {
                 length,
                 allowed_length_flag,
