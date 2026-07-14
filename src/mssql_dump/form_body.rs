@@ -10,11 +10,11 @@ use crate::form_schema::{
     FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
     FormAttributeColumnSchema, FormButtonColorSchema, FormCheckBoxFieldSchema,
     FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
-    FormChildItemVisibleSchema, FormCommandInterfaceContainerOwner,
+    FormChildItemVisibleSchema, FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
-    FormCommandInterfaceVisibilitySchema, FormConditionalGroupSchema, FormConditionalTableSchema,
-    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
-    FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
+    FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
+    FormConditionalTableSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
     FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldXmlProperty,
     FormLabelDecorationAlignment, FormLabelDecorationAlignmentTailXmlProperty,
@@ -126,12 +126,6 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let commands = extract_form_body_commands(&body.trailing, object_refs);
-    if let Some(timings) = timings.as_deref_mut() {
-        timings.source_asset_form_commands_cpu_ms += elapsed_ms(started);
-    }
-
-    let started = Instant::now();
     let child_item_indexes =
         collect_form_child_item_indexes_with_object_refs(&form_fields, &attributes, object_refs);
     properties.mobile_device_command_bar_content = extract_form_mobile_device_command_bar_content(
@@ -139,6 +133,16 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &child_item_indexes.item_name_by_id,
     );
     let child_item_indexes_cpu_ms = elapsed_ms(started);
+
+    let started = Instant::now();
+    let commands = extract_form_body_commands(
+        &body.trailing,
+        object_refs,
+        &child_item_indexes.item_name_by_id,
+    );
+    if let Some(timings) = timings.as_deref_mut() {
+        timings.source_asset_form_commands_cpu_ms += elapsed_ms(started);
+    }
 
     let started = Instant::now();
     let auto_command_bar = extract_form_auto_command_bar(
@@ -402,7 +406,13 @@ pub(super) struct FormCommand {
     pub(super) representation: Option<&'static str>,
     pub(super) functional_options: Vec<String>,
     pub(super) modifies_saved_data: Option<bool>,
-    pub(super) current_row_use: Option<&'static str>,
+    pub(super) current_row_use: Option<FormCommandCurrentRowProperties>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormCommandCurrentRowProperties {
+    pub(super) value: Option<FormCommandCurrentRowUse>,
+    pub(super) associated_table_element_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3414,6 +3424,7 @@ pub(super) fn parse_form_parameter(
 pub(super) fn extract_form_body_commands(
     trailing: &[String],
     object_refs: &BTreeMap<String, String>,
+    item_name_by_id: &BTreeMap<String, String>,
 ) -> Vec<FormCommand> {
     let Some(fields) = trailing
         .get(2)
@@ -3424,7 +3435,7 @@ pub(super) fn extract_form_body_commands(
     fields
         .iter()
         .skip(2)
-        .filter_map(|field| parse_form_command(field, object_refs))
+        .filter_map(|field| parse_form_command_with_items(field, object_refs, item_name_by_id))
         .collect()
 }
 
@@ -3432,10 +3443,18 @@ pub(super) fn parse_form_command(
     field: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormCommand> {
+    parse_form_command_with_items(field, object_refs, &BTreeMap::new())
+}
+
+fn parse_form_command_with_items(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    item_name_by_id: &BTreeMap<String, String>,
+) -> Option<FormCommand> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    if !matches!(fields.first().map(|value| value.trim()), Some("9" | "11")) {
-        return None;
-    }
+    let picture_value = split_1c_braced_fields(fields.get(7)?.trim(), 0)?;
+    let picture_reference = split_1c_braced_fields(picture_value.get(2)?.trim(), 0)?;
+    let schema = FormCommandSchema::from_raw_layout(&fields, &picture_value, &picture_reference)?;
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
     let reference_uuid = identity
@@ -3446,6 +3465,24 @@ pub(super) fn parse_form_command(
     if id.is_empty() || name.is_empty() {
         return None;
     }
+    let picture = schema.picture();
+    let picture_ref = match picture.kind() {
+        FormPictureValueKind::Empty => None,
+        FormPictureValueKind::Reference => {
+            parse_common_command_picture_value(fields.get(7)?, object_refs)?.0
+        }
+        _ => return None,
+    };
+    let current_row_use = schema.current_row_use();
+    let associated_table_element_id = schema
+        .associated_table_element_id()
+        .and_then(|id| item_name_by_id.get(id))
+        .cloned();
+    let current_row_use = (current_row_use.is_some() || associated_table_element_id.is_some())
+        .then_some(FormCommandCurrentRowProperties {
+            value: current_row_use,
+            associated_table_element_id,
+        });
     Some(FormCommand {
         id: id.to_string(),
         reference_uuid,
@@ -3458,15 +3495,8 @@ pub(super) fn parse_form_command(
             .get(4)
             .map(|field| parse_form_localized_strings(field))
             .unwrap_or_default(),
-        picture_ref: fields
-            .get(7)
-            .and_then(|field| parse_common_command_picture_value(field, object_refs))
-            .and_then(|(reference, _)| reference),
-        picture_load_transparent: fields
-            .get(7)
-            .and_then(|field| parse_common_command_picture_value(field, object_refs))
-            .map(|(_, load_transparent)| load_transparent)
-            .unwrap_or(false),
+        picture_ref,
+        picture_load_transparent: picture.load_transparent(),
         shortcut: fields
             .get(6)
             .and_then(|field| parse_common_command_shortcut_value(field)),
@@ -3477,7 +3507,7 @@ pub(super) fn parse_form_command(
             .map(|field| parse_form_reference_list(field, object_refs))
             .unwrap_or_default(),
         modifies_saved_data: parse_form_command_modifies_saved_data(fields.get(10).copied()),
-        current_row_use: parse_form_current_row_use(&fields),
+        current_row_use,
     })
 }
 
@@ -3514,10 +3544,6 @@ pub(super) fn parse_form_reference_list(
             parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
         })
         .collect()
-}
-
-pub(super) fn parse_form_current_row_use(fields: &[&str]) -> Option<&'static str> {
-    matches!(fields.last().map(|field| field.trim()), Some("1")).then_some("DontUse")
 }
 
 pub(super) fn parse_form_type_pattern(
@@ -10831,11 +10857,22 @@ pub(super) fn format_form_body_xml(
                 }
                 xml.push_str("\t\t\t</FunctionalOptions>\r\n");
             }
-            if let Some(current_row_use) = command.current_row_use {
-                xml.push_str(&format!(
-                    "\t\t\t<CurrentRowUse>{}</CurrentRowUse>\r\n",
-                    escape_xml_text(current_row_use)
-                ));
+            if let Some(current_row_properties) = command.current_row_use.as_ref() {
+                if let Some(current_row_use) = current_row_properties.value {
+                    xml.push_str(&format!(
+                        "\t\t\t<CurrentRowUse>{}</CurrentRowUse>\r\n",
+                        escape_xml_text(current_row_use.xml_value())
+                    ));
+                }
+                if let Some(associated_table_element_id) = current_row_properties
+                    .associated_table_element_id
+                    .as_deref()
+                {
+                    xml.push_str(&format!(
+                        "\t\t\t<AssociatedTableElementId xsi:type=\"xs:string\">{}</AssociatedTableElementId>\r\n",
+                        escape_xml_text(associated_table_element_id)
+                    ));
+                }
             }
             xml.push_str("\t\t</Command>\r\n");
         }

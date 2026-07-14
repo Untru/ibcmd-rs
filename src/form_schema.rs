@@ -514,6 +514,88 @@ impl FormPictureValueSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormCommandCurrentRowUse {
+    Use,
+    DontUse,
+}
+
+impl FormCommandCurrentRowUse {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Use => "Use",
+            Self::DontUse => "DontUse",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormCommandSchema<'a> {
+    picture: FormPictureValueSchema,
+    current_row_use: Option<FormCommandCurrentRowUse>,
+    associated_table_element_id: Option<&'a str>,
+}
+
+impl<'a> FormCommandSchema<'a> {
+    pub(crate) fn from_raw_layout(
+        fields: &'a [&'a str],
+        picture_value: &[&str],
+        picture_reference: &[&str],
+    ) -> Option<Self> {
+        if fields.len() != 19
+            || !matches!(fields.first().map(|field| field.trim()), Some("9" | "11"))
+        {
+            return None;
+        }
+
+        let picture = FormPictureValueSchema::from_raw_layout(picture_value)?;
+        let picture_reference_is_exact = match picture.kind() {
+            FormPictureValueKind::Empty => {
+                matches!(picture_reference, [kind] if kind.trim() == "0")
+            }
+            FormPictureValueKind::Reference => match picture_reference {
+                [kind, uuid] => kind.trim() == "0" && !uuid.trim().is_empty(),
+                [code] => code.trim().parse::<i32>().ok().is_some_and(|code| code < 0),
+                _ => false,
+            },
+            _ => false,
+        };
+        if !picture_reference_is_exact {
+            return None;
+        }
+
+        let current_row_use = match fields.get(18).map(|field| field.trim()) {
+            Some("0") => Some(FormCommandCurrentRowUse::Use),
+            Some("1") => Some(FormCommandCurrentRowUse::DontUse),
+            Some("2") => None,
+            _ => return None,
+        };
+        let associated_table_element_id = match fields.get(14).map(|field| field.trim()) {
+            Some("0") => None,
+            Some(id) if id.parse::<u64>().ok().is_some_and(|id| id != 0) => Some(id),
+            _ => return None,
+        };
+
+        Some(Self {
+            picture,
+            current_row_use,
+            associated_table_element_id,
+        })
+    }
+
+    pub(crate) const fn picture(self) -> FormPictureValueSchema {
+        self.picture
+    }
+
+    pub(crate) const fn current_row_use(self) -> Option<FormCommandCurrentRowUse> {
+        self.current_row_use
+    }
+
+    pub(crate) const fn associated_table_element_id(self) -> Option<&'a str> {
+        self.associated_table_element_id
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormFieldHeaderPictureSchema {
     picture_slot: usize,
     value: FormPictureValueSchema,

@@ -16040,6 +16040,12 @@ fn parse_common_command_picture_value(
         if ref_fields.first()?.trim() == "-13" {
             return Some((Some("StdPicture.Print".to_string()), load_transparent));
         }
+        if ref_fields.first()?.trim() == "-14" {
+            return Some((
+                Some("StdPicture.InputFieldChooseType".to_string()),
+                load_transparent,
+            ));
+        }
         if ref_fields.first()?.trim() == "0" {
             let uuid = ref_fields.get(1)?.trim();
             if let Some(reference) = common_command_standard_picture_name(uuid) {
@@ -16088,6 +16094,7 @@ fn parse_common_command_shortcut_value(value: &str) -> Option<String> {
 }
 
 fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
+    // Platform standard picture UUIDs; these identifiers are independent of a configuration.
     match uuid.to_ascii_lowercase().as_str() {
         STD_PICTURE_INFORMATION_UUID => Some("StdPicture.Information"),
         STD_PICTURE_SAVE_FILE_UUID => Some("StdPicture.SaveFile"),
@@ -16157,6 +16164,75 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "03665ff1-3a05-41d1-96d3-04bda2d8ede3" => Some("StdPicture.SpreadsheetInsertComment"),
         "2846af8d-af84-47e3-82b9-01b01f960426" => Some("StdPicture.SpreadsheetReadOnly"),
         "3bdc16c8-6a96-4467-9442-a8e4804b3fa2" => Some("StdPicture.SyncContents"),
+        "8bdf1079-8fad-4d21-ad7f-4b2e4ecdce3d" => Some("StdPicture.DialogInformation"),
+        "60643198-e4b2-4c39-9de1-53cca3fff382" => Some("StdPicture.DeleteDirectly"),
+        "9fecbaff-2a05-4da6-9ef1-807e754b928d" => Some("StdPicture.BusinessProcessStart"),
+        "83db1f8a-41bd-4016-bdb2-a28e3a8d6dcc" => Some("StdPicture.DialogStop"),
+        "01ec9d9a-7497-4d88-b93f-066c633a4866" => Some("StdPicture.InputOnBasis"),
+        "c7cdd3c0-3879-436a-b145-5e2615e9b3e1" => Some("StdPicture.FindInList"),
+        "984b0a3e-daa2-4a9e-b75c-1f230a6e592a" => {
+            Some("StdPicture.DataCompositionConditionalAppearance")
+        }
+        "ef27ae9e-7040-4374-b93c-0d276de2ea23" => Some("StdPicture.DialogQuestion"),
+        "9c96aa25-d656-4b3d-ab3e-81d9718da238" => Some("StdPicture.ShowInList"),
+        "549a2c45-4fce-493f-94ee-9a3a4f426551" => Some("StdPicture.ListViewMode"),
+        "b39aa431-a32f-4447-984a-45606474c82d" => Some("StdPicture.AppearanceExclamationMarkIcon"),
+        "c757209d-a87f-4410-b1a3-76000178f1f0" => Some("StdPicture.ListViewModeList"),
+        "501b8c1d-8062-408e-bde8-b6549324713e" => Some("StdPicture.AppearanceExclamationMark"),
+        "ed0bec43-4633-416c-8c08-0384ca444e32" => Some("StdPicture.EndEdit"),
+        "0abdab67-5c90-4296-8168-239d22024d11" => Some("StdPicture.PrintImmediately"),
+        "31b93f03-0ba2-4631-a171-0d3a3d2ecc48" => Some("StdPicture.ListSettings"),
+        "37e91e77-93ce-4c3b-8d30-a9d8cfd3d3b0" => Some("StdPicture.MoveItem"),
+        "5182f57f-e834-4d11-9c9f-4aedc002b6e9" => Some("StdPicture.FixTable"),
+        "affb1617-24bc-4170-9c84-0902cc3ef206" => Some("StdPicture.DataCompositionSettingsWizard"),
+        "ad8cb448-a6bb-43b4-886a-7d6a8367eef2" => Some("StdPicture.DataCompositionGroupFields"),
+        "7df3febb-2640-41b7-ad8b-7a23b7ad4aec" => {
+            Some("StdPicture.QueryWizardCreateTempTableDropQuery")
+        }
+        "8ac19694-383a-457a-b050-0a3ee937f5f3" => Some("StdPicture.DataCompositionNewNestedScheme"),
+        "6cb69e7f-fe19-4f64-bfb5-1a4fad6c2ef9" => Some("StdPicture.Replace"),
+        "6c2759b1-2b63-4fa5-8d13-75786c7e1e89" => Some("StdPicture.DataCompositionNewTable"),
+        "caf2e58b-ca3d-4b63-82c9-f21f1c9bc9eb" => Some("StdPicture.Setting"),
+        "069b8324-7c51-4c73-a6a8-c06d4fc383b5" => Some("StdPicture.Catalog"),
+        "31bf709f-3b50-4137-9b51-ebc7fb802a7c" => Some("StdPicture.GotoExternalURL"),
+        "1377931c-5744-4948-bade-cb35117b5f63" => Some("StdPicture.Close"),
+        "d90a7482-9a1d-4d3d-ae96-6db440214d96" => Some("StdPicture.DataCompositionFilter"),
+        "2a0c2238-cb59-4473-ada6-352b60f3c0a9" => Some("StdPicture.AddListItem"),
+        "b7c81c62-d6ad-4eae-9cea-0e203182db67" => Some("StdPicture.FormHelp"),
+        "c2e2d966-5b7f-4699-903b-28a6f50d5471" => Some("StdPicture.OutputList"),
+        "9e808d29-787b-4825-863a-13c6844ce91d" => Some("StdPicture.CancelSearch"),
+        "eb47324b-85f9-4172-9315-bba8015d9970" => Some("StdPicture.NewWindow"),
+        "dcd23a32-5c7c-43f2-9021-80d98128556f" => Some("StdPicture.CheckSyntax"),
+        "e93f538e-dfaf-4a91-a9b6-c053555bcf60" => Some("StdPicture.Constant"),
+        "a075c3ef-bc4e-4c96-bdad-2245ec09c28e" => Some("StdPicture.DataCompositionDataParameters"),
+        "b0dd988f-2d9f-4364-b1f4-a4d5f45ffb78" => Some("StdPicture.AppearanceFlagRed"),
+        "b68eb29c-2372-46e1-b84e-13843899ccf6" => Some("StdPicture.DataCompositionUserFields"),
+        "9ef73565-2250-4a35-9fb3-470bd19ca9ca" => Some("StdPicture.AppearanceCrossIcon"),
+        "c78c9f3d-e92c-4f38-bb72-d8bd7fa5dbe3" => Some("StdPicture.Dimension"),
+        "7c75b1df-1fdc-471f-aae6-6b7870318cd4" => Some("StdPicture.SpreadsheetDeleteComment"),
+        "892196a9-c94f-4e50-8224-3c0cea4ea6b8" => Some("StdPicture.GoBack"),
+        "1001ae3e-9289-4303-9699-3c0c17e20e61" => Some("StdPicture.AddToFavorites"),
+        "14b24498-e49c-4713-be64-75101d0abfb9" => Some("StdPicture.GoToEnd"),
+        "167a160b-fa48-4337-87ab-7e0fe95c4b5a" => Some("StdPicture.DeleteListItem"),
+        "1f046bc2-d6c5-46a3-a459-b2c0508f86fb" => Some("StdPicture.QueryWizard"),
+        "2c732bfa-f734-48bc-a18b-7554db8a3888" => Some("StdPicture.DataCompositionSelection"),
+        "38bbcebe-e456-461b-8457-07c9a72344a3" => Some("StdPicture.FindInTree"),
+        "4bf588d5-b8d8-47fd-8f41-eb9b668981ce" => Some("StdPicture.SetListItemDeletionMark"),
+        "5b612c21-e223-4997-9e61-86f7a67ec945" => Some("StdPicture.ExternalDataSourceTable"),
+        "6206a729-16e5-4e32-b53c-122de4e30c8d" => Some("StdPicture.ScheduledJobs"),
+        "6511326b-20c3-4bf8-8503-c2c2c9072c6c" => Some("StdPicture.CustomizeForm"),
+        "6b909f65-95a4-4697-8ca0-c8f331227b9a" => Some("StdPicture.SettingsStorage"),
+        "6ecee038-9722-4d80-bb91-7ee7046ec4c7" => Some("StdPicture.Help"),
+        "7168f070-087c-448e-ae3a-6740f424076a" => Some("StdPicture.ChooseFromList"),
+        "732f9dd3-5baf-47ff-af7b-edfe16dac2a1" => Some("StdPicture.DataCompositionNewChart"),
+        "7562cef7-0e57-4f63-a754-b61128a4f3ae" => Some("StdPicture.GoForward"),
+        "75a40cc4-c719-4c3f-91ea-fc5787bc34ca" => Some("StdPicture.UserWithAuthentication"),
+        "77180b5e-8faa-4712-a788-e9f8903e3419" => Some("StdPicture.DataCompositionNewGroup"),
+        "efda7350-6cd7-4416-b188-f5ca9baf66c2" => Some("StdPicture.DataCompositionOrder"),
+        "83c8f18d-8701-41f3-bef4-53f88adbb868" => Some("StdPicture.ReadChanges"),
+        "85cc7dd0-44fc-41aa-967f-f52f202ee2e6" => Some("StdPicture.GoToBegin"),
+        "928075d1-b90b-416c-b0b2-c3104cf084aa" => Some("StdPicture.Notifications"),
+        "fc34a694-e99b-4d1c-a526-63f5571bdb09" => Some("StdPicture.Form"),
         _ => None,
     }
 }
