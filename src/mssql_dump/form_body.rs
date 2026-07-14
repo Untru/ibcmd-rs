@@ -3439,6 +3439,7 @@ pub(super) fn extract_form_body_commands(
         .collect()
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_command(
     field: &str,
     object_refs: &BTreeMap<String, String>,
