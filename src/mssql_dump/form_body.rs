@@ -4827,6 +4827,7 @@ fn parse_form_child_item_with_metadata_owners(
         tag,
         wrapper,
         &fields,
+        field_schema_and_options.as_ref().map(|(schema, _)| *schema),
         check_box_field_layout.as_ref().map(|(schema, _)| *schema),
     );
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
@@ -8600,8 +8601,15 @@ pub(super) fn parse_form_child_item_tooltip(
     tag: &str,
     wrapper: &str,
     fields: &[&str],
+    field_schema: Option<FormFieldSchema>,
     check_box_schema: Option<FormCheckBoxFieldSchema>,
 ) -> Vec<(String, String)> {
+    if let Some(schema) = field_schema {
+        return fields
+            .get(schema.tooltip_slot())
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default();
+    }
     if tag == "CheckBoxField" {
         return check_box_schema
             .and_then(|schema| fields.get(schema.tooltip_slot()))

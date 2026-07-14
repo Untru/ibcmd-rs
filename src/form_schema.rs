@@ -1764,6 +1764,10 @@ impl FormFieldSchema {
         self.title_slot
     }
 
+    pub(crate) const fn tooltip_slot(self) -> usize {
+        10 + self.top_level_offset
+    }
+
     pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
         (fields.get(25 + self.top_level_offset)?.trim() == "0").then_some("Left")
     }
