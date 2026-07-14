@@ -5575,6 +5575,10 @@ fn parse_form_child_item_with_metadata_owners(
                 .filter(|value| value != "0" && value.parse::<u32>().is_ok())
         } else if tag == "UsualGroup" {
             parse_form_usual_group_width(&fields)
+        } else if tag == "PictureField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| schema.width(options))
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_width(input_field_extended_options.as_deref())
         } else if tag == "LabelField" {
@@ -5603,6 +5607,10 @@ fn parse_form_child_item_with_metadata_owners(
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.height.clone())
+        } else if tag == "PictureField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| schema.height(options))
         } else if tag == "CalendarField" {
             document_field_options
                 .as_deref()
@@ -5781,6 +5789,10 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.horizontal_stretch())
+        } else if tag == "PictureField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| schema.horizontal_stretch(options))
         } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
@@ -5802,6 +5814,10 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.vertical_stretch())
+        } else if tag == "PictureField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| schema.vertical_stretch(options))
         } else if tag == "UsualGroup" {
             parse_form_usual_group_vertical_stretch(&fields)
         } else if tag == "Page" {

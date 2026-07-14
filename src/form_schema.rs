@@ -1704,6 +1704,10 @@ pub(crate) struct FormCheckBoxFieldSchema {
 pub(crate) struct FormFieldSchema {
     top_level_offset: usize,
     title_slot: usize,
+    width_option_slot: Option<usize>,
+    height_option_slot: Option<usize>,
+    horizontal_stretch_option_slot: Option<usize>,
+    vertical_stretch_option_slot: Option<usize>,
     text_color_option_slot: Option<usize>,
     back_color_option_slot: Option<usize>,
     border_color_option_slot: Option<usize>,
@@ -1752,6 +1756,10 @@ impl FormFieldSchema {
         Some(Self {
             top_level_offset,
             title_slot: 9 + top_level_offset,
+            width_option_slot: (item_tag == "PictureField").then_some(1),
+            height_option_slot: (item_tag == "PictureField").then_some(2),
+            horizontal_stretch_option_slot: (item_tag == "PictureField").then_some(3),
+            vertical_stretch_option_slot: (item_tag == "PictureField").then_some(4),
             text_color_option_slot: text,
             back_color_option_slot: back,
             border_color_option_slot: border,
@@ -1766,6 +1774,22 @@ impl FormFieldSchema {
 
     pub(crate) const fn tooltip_slot(self) -> usize {
         10 + self.top_level_offset
+    }
+
+    pub(crate) fn width(self, options: &[&str]) -> Option<String> {
+        self.dimension(options, self.width_option_slot?)
+    }
+
+    pub(crate) fn height(self, options: &[&str]) -> Option<String> {
+        self.dimension(options, self.height_option_slot?)
+    }
+
+    pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
+        (options.get(self.horizontal_stretch_option_slot?)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
+        (options.get(self.vertical_stretch_option_slot?)?.trim() == "0").then_some(false)
     }
 
     pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
@@ -1805,6 +1829,11 @@ impl FormFieldSchema {
 
     pub(crate) const fn border_color_option_slot(self) -> Option<usize> {
         self.border_color_option_slot
+    }
+
+    fn dimension(self, options: &[&str], slot: usize) -> Option<String> {
+        let value = options.get(slot)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 }
 
