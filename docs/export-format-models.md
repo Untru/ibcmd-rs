@@ -4020,3 +4020,59 @@ Form.xml. The non-Form residual stays `262 files, +5238/-24596`.
 `ConfigDumpInfo.xml` remains byte-exact at 3,110,746 bytes with SHA-256
 `F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
 Issue #115 is closed after this acceptance gate.
+
+## Schema-backed Form root trailer and table search location acceptance
+
+Status: accepted by an independent frozen review, an all-Form selected gate,
+and one fresh serialized full export.
+
+Root `AutoURL` and `Group` now use the same uniquely admitted marker-`50`
+child-item trailer instead of absolute offsets. All 1,108 root records have one
+unambiguous 24-field trailer. Trailer slot `3` is exact for `AutoURL`: `0`
+emits `false` in 44 forms and `1` omits the property in 1,064 forms. `Group`
+requires the header marker and two trailer fields to agree. The four admitted
+tuples are `(0,0,0) -> omit`, `(1,1,1) -> Horizontal`, `(1,2,2) ->
+HorizontalIfPossible`, and `(1,1,3) -> AlwaysHorizontal`; they cover all
+1,108 forms with no crossover. Unknown marker, arity, scalar, and redundant
+tuple combinations fail closed. A separate narrow marker-`59` path preserves
+the previously serialized legacy fixtures without broadening marker-`50`
+admission. Native root order remains unchanged.
+
+Table `SearchStringLocation` is decoded only after the existing wrapper-`55`
+`FormTableSchema` admits a Table record. The checked reverse slot
+`fields[len - 25]` has a complete matrix across the 750 matched tables:
+`0 -> omit` for 673 records, `1 -> None` for 26, `2 -> CommandBar` for seven,
+and `3 -> Top` for 44. The one unmatched native table omits the property.
+The XML model places `SearchStringLocation` after `CommandSet` and before
+`AutoRefresh`. This restores all 77 native tags in 64 forms. Table
+`FileDragMode` remains explicit HOLD: its current exact residual is 209
+missing and 101 extra values, and no audited scalar or low-cardinality field
+separates presence from omission. Table `SkipOnInput` remains HOLD for the
+same mixed-layout reason.
+
+The frozen code range is three files, `+188/-22`, including three neutral
+fixture initializers required by `cargo check --all-targets`. Added lines
+contain no UUID, database/server identity, object or form name, filesystem
+path, Cyrillic corpus literal, ConfigDumpInfo dependency, panic, unwrap,
+expect, unsafe block, or improvement-only fallback. The independent final
+review returned GO. `cargo fmt --all -- --check`, `cargo check --all-targets`,
+`git diff --check`, the hardcode scan, and `cargo build --release` pass with
+the same two pre-existing warnings. Tests and native ConfigDump were not run
+by direct user instruction.
+
+The selected gate contains all 1,108 Form.xml files. Relative to Batch115,
+124 forms change; all 124 improve, none are equal or worse, 12 become exact,
+and no new differing file opens. The selected and subsequent full exports are
+byte-identical for all 1,108 forms. The normalized Form diff changes from
+`815 files, +2718/-6834` to `803 files, +2708/-6698`.
+
+The fresh full export writes 12,197 files including `ConfigDumpInfo.xml`, or
+12,196 files excluding it. The normalized full diff changes from `1077 files,
++7956/-31430` to `1065 files, +7946/-31294`; the exact batch delta is `-12
+files, -10 additions, -136 deletions`, entirely in Form.xml. All 11,090
+non-Form source paths retain the same status and candidate hash, leaving the
+non-Form residual at `262 files, +5238/-24596`. The only absent output remains
+the pre-existing `DataProcessors/ЗагрузкаКурсовВалют.xml`. `ConfigDumpInfo.xml`
+remains byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #116 is closed after this acceptance gate.
