@@ -3884,3 +3884,72 @@ instruction. Added UUID literals are audited platform protocol identifiers;
 added production lines contain no database/server identity, object or form
 name, filesystem path, Cyrillic corpus literal, ConfigDumpInfo dependency, or
 case-specific fallback. Issue #113 is closed after this acceptance gate.
+
+## Schema-backed Page properties and table row-picture data paths acceptance
+
+Status: accepted by two frozen reviews, an all-Form selected gate, and a fresh
+serialized full export.
+
+Page now has one fail-closed schema for its shared raw layout. Admission
+requires wrapper `22`, discriminator `4`, a `30 + 2n` outer arity, and the
+exact kind-`18`/length-`20` options record at slot `20`. The schema decodes
+`EnableContentChange`, horizontal and vertical stretch, `Group`, horizontal
+and vertical alignment, and `ChildItemsWidth`. `Group` additionally requires
+the three redundant raw fields to agree on one of the four audited states.
+All seven scalar property groups now agree with native output on all 1,184
+Page records.
+
+The Page serializer follows one explicit native order:
+`EnableContentChange`, `Title`, `ToolTip`, `ToolTipRepresentation`, `Picture`,
+horizontal stretch, vertical stretch, `Group`, horizontal alignment, vertical
+alignment, `ChildItemsWidth`, `ShowTitle`, and `BackColor`. Existing
+`TitleDataPath`, `ExtendedTooltip`, events, and child items retain their later
+anchors. Page pictures reuse the shared strict picture descriptor and
+`object_refs`/standard-picture resolver. Fifteen of the 25 native Page
+pictures now resolve exactly; the remaining ten references fail closed and
+produce no false picture.
+
+Table `RowPictureDataPath` is read only after the existing wrapper-`55`
+`FormTableSchema` admits the record. Normalized slot `43` has an exact
+presence grammar across all 751 tables: `{0}` for the 354 absent values and
+`{1,{payload}}` for the 397 present values, with no crossover. Payloads use
+the bound Attribute from slot `11` and the existing scoped column indexes.
+The resolver covers ordinary numeric columns, the platform ValueList column
+`3` (`Picture`), the SettingsComposer column `10001` (`FieldPicture`), and
+metadata Attribute references encoded as `{0, UUID}` or `{4, UUID}` through
+`object_refs`. The platform numeric identifiers are type-scoped and are not
+database metadata IDs.
+
+The `DefaultPicture` prefix is also owner-derived. Of 230 native default
+picture paths, 225 DynamicList settings with `MainTable` are unprefixed and
+five settings without `MainTable` use one leading `~`; the matrix has no
+crossover and the formatter prevents a duplicate prefix. Property-bag values
+still take precedence. Three metadata-backed row-picture paths remain
+unresolved at the serialized runtime boundary, so the accepted residual is
+`RowPictureDataPath +0/-3`, with no false additions. Table `SkipOnInput` and
+`FileDragMode` remain HOLD and are unchanged.
+
+The production code diff before this documentation change is two files,
+`+480/-82`. The Page and integrated frozen reviews returned GO. Added
+production lines contain no UUID literal, database/server identity, object or
+form name, filesystem path, Cyrillic corpus literal, ConfigDumpInfo
+dependency, panic, unwrap, expect, unsafe block, or improvement-only fallback.
+`cargo fmt --all -- --check`, `cargo check --all-targets`, `git diff --check`,
+the hardcode scan, and `cargo build --release` pass with the same two
+pre-existing warnings. Tests and native ConfigDump were not run by direct user
+instruction.
+
+The selected gate contains all 1,108 Form.xml files. Relative to the issue
+#113 baseline, 145 files change; every changed file improves, ten become
+exact, none are equal or worse, and no new differing file opens. Form changes
+from `845 files, +2763/-8970` to `835 files, +2735/-8557`. The selected and
+subsequent full exports are byte-identical for all 1,108 forms.
+
+The fresh full export contains 12,197 source files excluding
+`ConfigDumpInfo.xml`. The normalized full diff changes from `1107 files,
++8001/-33566` to `1097 files, +7973/-33153`; the exact batch delta is `-10
+files, -28 additions, -413 deletions`, entirely in Form.xml. The non-Form
+residual stays `262 files, +5238/-24596`. `ConfigDumpInfo.xml` remains
+byte-exact at 3,110,746 bytes with SHA-256
+`F187FA4F131F9C5DCBD2E41FE630585B1D6C74FB2809D62F4B3B3F0563425A2F`.
+Issue #114 is closed after this acceptance gate.
