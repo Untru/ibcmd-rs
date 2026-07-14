@@ -172,6 +172,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &mut attributes,
         &attribute_save_field_bindings,
         &child_item_indexes.data_path_by_binding_key,
+        object_refs,
     );
     let child_items = extract_form_child_items(
         &form_fields,
@@ -312,6 +313,18 @@ pub(super) struct FormAttributeMetadataOwner {
     type_references: Vec<String>,
     has_dynamic_list_settings: bool,
     main_table: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormAttributeSaveFieldBinding {
+    pub(super) key: String,
+    pub(super) metadata_uuid: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum FormAttributeSaveEntry {
+    SelfValue,
+    Binding(FormAttributeSaveFieldBinding),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1873,7 +1886,7 @@ pub(super) fn extract_form_body_attribute_save_field_bindings(
     trailing: &[String],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-) -> BTreeMap<String, Vec<String>> {
+) -> BTreeMap<String, Vec<FormAttributeSaveFieldBinding>> {
     let Some(fields) = trailing
         .first()
         .and_then(|field| split_1c_braced_fields(field, 0))
@@ -2118,76 +2131,116 @@ pub(super) fn parse_form_attribute_save_fields(
     field: Option<&str>,
     attribute_name: &str,
 ) -> Vec<String> {
-    let Some(fields) = field.and_then(|value| split_1c_braced_fields(value.trim(), 0)) else {
+    let Some(entries) = field.and_then(parse_form_attribute_save_entries) else {
         return Vec::new();
     };
-    if fields.first().map(|value| value.trim()) != Some("0") {
-        return Vec::new();
-    }
-    match fields.get(1).map(|value| value.trim()) {
-        Some("0") | None => Vec::new(),
-        // The native blob shape `{0,1,{0}}` means "save this attribute itself".
-        Some("1") => vec![attribute_name.to_string()],
-        _ => Vec::new(),
-    }
+    entries
+        .iter()
+        .any(|entry| matches!(entry, FormAttributeSaveEntry::SelfValue))
+        .then(|| vec![attribute_name.to_string()])
+        .unwrap_or_default()
 }
 
-pub(super) fn parse_form_attribute_save_field_bindings(field: Option<&str>) -> Vec<String> {
+fn parse_form_attribute_save_entries(field: &str) -> Option<Vec<FormAttributeSaveEntry>> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first().map(|value| value.trim()) != Some("0") {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != 2 + count {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|field| {
+            let entry = split_1c_braced_fields(field.trim(), 0)?;
+            match entry.as_slice() {
+                [kind] if kind.trim() == "0" => Some(FormAttributeSaveEntry::SelfValue),
+                [kind, payload] if kind.trim() == "1" => {
+                    let key = parse_form_binding_key(payload.trim())?;
+                    let payload_fields = split_1c_braced_fields(payload.trim(), 0)?;
+                    let metadata_uuid = match payload_fields.as_slice() {
+                        [kind, uuid] if kind.trim() == "0" => parse_non_zero_uuid(uuid.trim()),
+                        _ => None,
+                    };
+                    Some(FormAttributeSaveEntry::Binding(
+                        FormAttributeSaveFieldBinding { key, metadata_uuid },
+                    ))
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+pub(super) fn parse_form_attribute_save_field_bindings(
+    field: Option<&str>,
+) -> Vec<FormAttributeSaveFieldBinding> {
     let Some(fields) = field.and_then(|value| split_1c_braced_fields(value.trim(), 0)) else {
         return Vec::new();
     };
-    let Some(save_fields) = fields
+    let Some(entries) = fields
         .get(9)
-        .and_then(|value| split_1c_braced_fields(value.trim(), 0))
+        .and_then(|value| parse_form_attribute_save_entries(value))
     else {
         return Vec::new();
     };
-    if save_fields.first().map(|value| value.trim()) != Some("0") {
-        return Vec::new();
-    }
-    let Some(count) = save_fields
-        .get(1)
-        .and_then(|value| value.trim().parse::<usize>().ok())
-    else {
-        return Vec::new();
-    };
-    save_fields
-        .iter()
-        .skip(2)
-        .take(count)
-        .filter_map(|field| {
-            let nested = split_1c_braced_fields(field.trim(), 0)?;
-            if nested.first().map(|value| value.trim()) != Some("1") {
-                return None;
-            }
-            parse_form_binding_key(nested.get(1)?.trim())
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            FormAttributeSaveEntry::SelfValue => None,
+            FormAttributeSaveEntry::Binding(binding) => Some(binding),
         })
         .collect()
 }
 
 pub(super) fn apply_form_attribute_save_field_bindings(
     attributes: &mut [FormAttribute],
-    save_field_bindings: &BTreeMap<String, Vec<String>>,
+    save_field_bindings: &BTreeMap<String, Vec<FormAttributeSaveFieldBinding>>,
     data_path_by_binding_key: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
 ) {
     for attribute in attributes {
-        let Some(bindings) = save_field_bindings.get(&attribute.name) else {
-            continue;
-        };
+        let metadata_owner = form_attribute_metadata_owner(attribute);
         let mut seen = attribute
             .save_fields
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        for binding in bindings {
-            let Some(data_path) = data_path_by_binding_key.get(binding) else {
-                continue;
-            };
-            if seen.insert(data_path.clone()) {
-                attribute.save_fields.push(data_path.clone());
+        if let Some(bindings) = save_field_bindings.get(&attribute.name) {
+            for binding in bindings {
+                let data_path = data_path_by_binding_key
+                    .get(&binding.key)
+                    .cloned()
+                    .or_else(|| {
+                        resolve_form_attribute_save_metadata_path(
+                            &metadata_owner,
+                            binding.metadata_uuid.as_deref()?,
+                            object_refs,
+                        )
+                    });
+                if let Some(data_path) = data_path
+                    && seen.insert(data_path.clone())
+                {
+                    attribute.save_fields.push(data_path);
+                }
             }
         }
+        attribute.save_fields.sort();
+        attribute.save_fields.dedup();
     }
+}
+
+fn resolve_form_attribute_save_metadata_path(
+    attribute: &FormAttributeMetadataOwner,
+    metadata_uuid: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let reference = object_refs.get(metadata_uuid)?;
+    let (owner_base, relative_path) = form_metadata_data_path_route(reference)?;
+    form_attribute_matches_metadata_owner(attribute, &owner_base)
+        .then(|| format!("{}.{}", attribute.name, relative_path))
 }
 
 pub(super) fn parse_form_attribute_columns(
@@ -3652,29 +3705,33 @@ fn form_attribute_metadata_owners_by_id(
     attributes
         .iter()
         .map(|attribute| {
-            let type_references = attribute
-                .value_types
-                .iter()
-                .filter_map(|value_type| match value_type {
-                    ConstantValueType::Reference { reference } => Some(reference.clone()),
-                    _ => None,
-                })
-                .collect();
-            let main_table = attribute
-                .settings
-                .as_ref()
-                .and_then(|settings| settings.main_table.clone());
             (
                 attribute.id.clone(),
-                FormAttributeMetadataOwner {
-                    name: attribute.name.clone(),
-                    type_references,
-                    has_dynamic_list_settings: attribute.settings.is_some(),
-                    main_table,
-                },
+                form_attribute_metadata_owner(attribute),
             )
         })
         .collect()
+}
+
+fn form_attribute_metadata_owner(attribute: &FormAttribute) -> FormAttributeMetadataOwner {
+    let type_references = attribute
+        .value_types
+        .iter()
+        .filter_map(|value_type| match value_type {
+            ConstantValueType::Reference { reference } => Some(reference.clone()),
+            _ => None,
+        })
+        .collect();
+    let main_table = attribute
+        .settings
+        .as_ref()
+        .and_then(|settings| settings.main_table.clone());
+    FormAttributeMetadataOwner {
+        name: attribute.name.clone(),
+        type_references,
+        has_dynamic_list_settings: attribute.settings.is_some(),
+        main_table,
+    }
 }
 
 struct FormAttributePlatformColumn {

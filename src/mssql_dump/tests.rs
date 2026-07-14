@@ -4032,8 +4032,14 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
     assert_eq!(
         save_field_bindings.get("Объект"),
         Some(&vec![
-            "0|11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
-            "0|ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string()
+            FormAttributeSaveFieldBinding {
+                key: "0|11a93e3a-3c5b-4242-913c-02474a383344".to_string(),
+                metadata_uuid: Some("11a93e3a-3c5b-4242-913c-02474a383344".to_string()),
+            },
+            FormAttributeSaveFieldBinding {
+                key: "0|ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string(),
+                metadata_uuid: Some("ddd2861c-592b-4879-b9de-4b05a22c0b43".to_string()),
+            }
         ])
     );
 
@@ -4069,6 +4075,7 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
         &mut attributes,
         &save_field_bindings,
         &data_path_by_binding_key,
+        &BTreeMap::new(),
     );
 
     let object_attribute = attributes
@@ -4078,8 +4085,8 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
     assert_eq!(
         object_attribute.save_fields,
         vec![
-            "Объект.РезультатВыгрузкиXDTO".to_string(),
-            "Объект.ВерсияФормата".to_string()
+            "Объект.ВерсияФормата".to_string(),
+            "Объект.РезультатВыгрузкиXDTO".to_string()
         ]
     );
 
