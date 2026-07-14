@@ -22,8 +22,8 @@ use crate::form_schema::{
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormPageSchema, FormPageXmlProperty, FormPictureDecorationGeometryXmlProperty,
-    FormPictureDecorationSchema, FormPictureValueKind, FormRootAutoUrlSchema, FormRootGroupSchema,
-    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
+    FormPictureDecorationSchema, FormPictureValueKind, FormPopupSchema, FormRootAutoUrlSchema,
+    FormRootGroupSchema, FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
     FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
@@ -4543,6 +4543,22 @@ fn parse_form_child_item_with_metadata_owners(
             .as_deref()
             .map(|options| schema.properties(&fields, options))
     });
+    let popup_schema = (tag == "Popup")
+        .then(|| {
+            fields
+                .get(FormPopupSchema::OPTIONS_SLOT)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        })
+        .flatten()
+        .and_then(|options| {
+            FormPopupSchema::from_raw_layout(
+                wrapper,
+                fields.len(),
+                tag,
+                direct_discriminator,
+                &options,
+            )
+        });
     let mut child_items = parse_form_child_item_pairs(
         &fields,
         main_data_path,
@@ -4786,6 +4802,8 @@ fn parse_form_child_item_with_metadata_owners(
             fields
                 .get(20)
                 .and_then(|field| parse_form_pages_representation(field))
+        } else if tag == "Popup" {
+            popup_schema.and_then(FormPopupSchema::representation)
         } else {
             extended_group_options
                 .as_ref()
@@ -12147,6 +12165,13 @@ pub(super) fn format_form_child_item_xml(
             }
         }
     }
+    if item.tag == "Popup" {
+        xml.push_str(&format_form_localized_section(
+            "ToolTip",
+            &item.tooltip,
+            indent + 1,
+        ));
+    }
     xml.push_str(&format_form_tooltip_representation_xml(
         item,
         FormTooltipRepresentationXmlOrder::AfterTitle,
@@ -12225,6 +12250,7 @@ pub(super) fn format_form_child_item_xml(
             | "PictureDecoration"
             | "UsualGroup"
             | "ButtonGroup"
+            | "Popup"
             | "Page"
     ) {
         xml.push_str(&format_form_localized_section(

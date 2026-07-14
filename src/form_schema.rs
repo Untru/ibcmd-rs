@@ -147,6 +147,73 @@ pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormPopupRepresentation {
+    Text,
+    Picture,
+    PictureAndText,
+    Default,
+}
+
+impl FormPopupRepresentation {
+    fn from_raw_scalar(value: &str) -> Option<Self> {
+        match value {
+            "0" => Some(Self::Text),
+            "1" => Some(Self::Picture),
+            "2" => Some(Self::PictureAndText),
+            "3" => Some(Self::Default),
+            _ => None,
+        }
+    }
+
+    const fn xml_value(self) -> Option<&'static str> {
+        match self {
+            Self::Text => Some("Text"),
+            Self::Picture => Some("Picture"),
+            Self::PictureAndText => Some("PictureAndText"),
+            Self::Default => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormPopupSchema {
+    representation: FormPopupRepresentation,
+}
+
+impl FormPopupSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 20;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "22"
+            || field_count < 30
+            || (field_count - 30) % 2 != 0
+            || item_tag != "Popup"
+            || direct_discriminator != Some("1")
+            || options.len() != 9
+            || options.first().map(|field| field.trim()) != Some("7")
+            || options.get(3).map(|field| field.trim()) != Some("2")
+            || options.get(5).map(|field| field.trim()) != Some("0")
+            || options.get(6).map(|field| field.trim()) != Some("0")
+        {
+            return None;
+        }
+        Some(Self {
+            representation: FormPopupRepresentation::from_raw_scalar(options.get(4)?.trim())?,
+        })
+    }
+
+    pub(crate) const fn representation(self) -> Option<&'static str> {
+        self.representation.xml_value()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormPageSchema;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
