@@ -1955,6 +1955,62 @@ impl FormRootAutoUrlSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootGroupSchema {
+    group: Option<&'static str>,
+}
+
+impl FormRootGroupSchema {
+    const GROUP_KIND_SLOT: usize = 14;
+    const GROUP_VALUE_SLOT: usize = 21;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        header_group_marker: Option<&str>,
+        trailer: &[&str],
+    ) -> Option<Self> {
+        if root_discriminator != Some("50") || trailer.len() != 24 {
+            return None;
+        }
+        let group = match (
+            header_group_marker.map(str::trim),
+            trailer.get(Self::GROUP_KIND_SLOT).map(|field| field.trim()),
+            trailer
+                .get(Self::GROUP_VALUE_SLOT)
+                .map(|field| field.trim()),
+        ) {
+            (Some("0"), Some("0"), Some("0")) => None,
+            (Some("1"), Some("1"), Some("1")) => Some("Horizontal"),
+            (Some("1"), Some("2"), Some("2")) => Some("HorizontalIfPossible"),
+            (Some("1"), Some("1"), Some("3")) => Some("AlwaysHorizontal"),
+            _ => return None,
+        };
+        Some(Self { group })
+    }
+
+    pub(crate) fn from_legacy_raw_layout(
+        root_discriminator: Option<&str>,
+        fields: &[&str],
+    ) -> Option<Self> {
+        matches!(
+            (
+                root_discriminator,
+                fields.get(11).map(|field| field.trim()),
+                fields.get(13).map(|field| field.trim()),
+                fields.get(14).map(|field| field.trim()),
+            ),
+            (Some("59"), Some("1"), Some("0"), Some("0"))
+        )
+        .then_some(Self {
+            group: Some("Horizontal"),
+        })
+    }
+
+    pub(crate) const fn group(self) -> Option<&'static str> {
+        self.group
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormSpecialFieldKind {
     ProgressBar,
     TrackBar,

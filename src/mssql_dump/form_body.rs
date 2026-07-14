@@ -22,7 +22,7 @@ use crate::form_schema::{
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormPageSchema, FormPageXmlProperty, FormPictureDecorationGeometryXmlProperty,
-    FormPictureDecorationSchema, FormPictureValueKind, FormRootAutoUrlSchema,
+    FormPictureDecorationSchema, FormPictureValueKind, FormRootAutoUrlSchema, FormRootGroupSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
@@ -795,13 +795,20 @@ pub(super) fn extract_form_auto_save_data_in_settings(fields: &[&str]) -> Option
 }
 
 pub(super) fn extract_form_root_group(fields: &[&str]) -> Option<&'static str> {
-    match (
-        fields.get(11).map(|field| field.trim())?,
-        fields.get(13).map(|field| field.trim()),
-        fields.get(14).map(|field| field.trim()),
-    ) {
-        ("0", _, _) => Some("Vertical"),
-        ("1", Some("0"), Some("0")) => Some("Horizontal"),
+    let root_discriminator = fields.first().map(|field| field.trim());
+    match root_discriminator {
+        Some("50") => {
+            let tail_start = form_root_child_items_tail_start(fields)?;
+            FormRootGroupSchema::from_raw_layout(
+                root_discriminator,
+                fields.get(11).copied(),
+                fields.get(tail_start..)?,
+            )?
+            .group()
+        }
+        Some("59") => {
+            FormRootGroupSchema::from_legacy_raw_layout(root_discriminator, fields)?.group()
+        }
         _ => None,
     }
 }
