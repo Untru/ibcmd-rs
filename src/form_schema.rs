@@ -1908,6 +1908,53 @@ impl FormRootVerticalScrollSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootAutoUrlSchema {
+    auto_url: Option<bool>,
+}
+
+impl FormRootAutoUrlSchema {
+    const AUTO_URL_SLOT: usize = 3;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        trailer: &[&str],
+    ) -> Option<Self> {
+        if root_discriminator != Some("50") || trailer.len() != 24 {
+            return None;
+        }
+        let auto_url = match trailer.get(Self::AUTO_URL_SLOT)?.trim() {
+            "0" => Some(false),
+            "1" => None,
+            _ => return None,
+        };
+        Some(Self { auto_url })
+    }
+
+    pub(crate) fn from_legacy_raw_layout(
+        root_discriminator: Option<&str>,
+        fields: &[&str],
+        uses_property_bag: bool,
+    ) -> Option<Self> {
+        if root_discriminator != Some("59") || uses_property_bag {
+            return None;
+        }
+        let auto_url = match (
+            fields.get(11).map(|field| field.trim()),
+            fields.get(13).map(|field| field.trim()),
+        ) {
+            (Some("0"), Some("0")) => Some(false),
+            (Some("0"), Some("1")) => None,
+            _ => return None,
+        };
+        Some(Self { auto_url })
+    }
+
+    pub(crate) const fn auto_url(self) -> Option<bool> {
+        self.auto_url
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormSpecialFieldKind {
     ProgressBar,
     TrackBar,

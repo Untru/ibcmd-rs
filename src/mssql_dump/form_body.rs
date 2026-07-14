@@ -22,8 +22,9 @@ use crate::form_schema::{
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormPageSchema, FormPageXmlProperty, FormPictureDecorationGeometryXmlProperty,
-    FormPictureDecorationSchema, FormPictureValueKind, FormRootMobileDeviceCommandBarContentSchema,
-    FormRootVerticalScrollSchema, FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
+    FormPictureDecorationSchema, FormPictureValueKind, FormRootAutoUrlSchema,
+    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
+    FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
     FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     FormUsualGroupSchema, FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty,
@@ -759,14 +760,19 @@ pub(super) fn extract_form_auto_title(fields: &[&str]) -> Option<bool> {
 }
 
 pub(super) fn extract_form_auto_url(fields: &[&str]) -> Option<bool> {
-    if form_root_uses_property_bag(fields) {
-        return None;
-    }
-    match (
-        fields.get(11).map(|field| field.trim())?,
-        fields.get(13).map(|field| field.trim())?,
-    ) {
-        ("0", "0") => Some(false),
+    let root_discriminator = fields.first().map(|field| field.trim());
+    match root_discriminator {
+        Some("50") => {
+            let tail_start = form_root_child_items_tail_start(fields)?;
+            FormRootAutoUrlSchema::from_raw_layout(root_discriminator, fields.get(tail_start..)?)?
+                .auto_url()
+        }
+        Some("59") => FormRootAutoUrlSchema::from_legacy_raw_layout(
+            root_discriminator,
+            fields,
+            form_root_uses_property_bag(fields),
+        )?
+        .auto_url(),
         _ => None,
     }
 }
