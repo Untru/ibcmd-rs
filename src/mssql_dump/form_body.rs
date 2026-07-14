@@ -5861,11 +5861,14 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        auto_cell_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_auto_cell_height(&fields)
-        } else {
-            None
-        },
+        auto_cell_height: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.auto_cell_height(&fields))
+            .or_else(|| {
+                (tag == "InputField" && form_input_field_layout_is_extended(&fields))
+                    .then(|| parse_form_input_field_auto_cell_height(&fields))
+                    .flatten()
+            }),
         drop_list_button: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_drop_list_button(input_field_extended_options.as_deref())
         } else {
@@ -6131,7 +6134,6 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
             }
             "InputField" => {
                 item.title_location = None;
-                item.auto_cell_height = None;
             }
             _ => {}
         }
