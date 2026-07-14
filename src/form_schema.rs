@@ -41,6 +41,78 @@ pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) 
     )
 }
 
+// Platform type ID used by serialized Form column patterns for a DCS filter.
+const FORM_DATA_COMPOSITION_FILTER_TYPE_UUID: &str = "f6841c6b-6c71-4c82-ae9e-d08b49db326c";
+
+pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Option<&'static str> {
+    type_id
+        .eq_ignore_ascii_case(FORM_DATA_COMPOSITION_FILTER_TYPE_UUID)
+        .then_some("dcsset:Filter")
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormAttributeAdditionalColumnsBindingKind {
+    Numeric,
+    MetadataReference,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormAttributeAdditionalColumnsGroupSchema {
+    column_count: usize,
+    binding_kind: FormAttributeAdditionalColumnsBindingKind,
+}
+
+impl FormAttributeAdditionalColumnsGroupSchema {
+    pub(crate) fn from_raw_layout(
+        fields: &[&str],
+        target: &[&str],
+        owner: &[&str],
+        binding: &[&str],
+    ) -> Option<Self> {
+        let column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
+        if fields.len() != 3 + column_count
+            || fields.first().map(|field| field.trim()) != Some("0")
+            || target.len() != 3
+            || target.first().map(|field| field.trim()) != Some("2")
+            || owner.len() != 1
+            || owner.first()?.trim().is_empty()
+        {
+            return None;
+        }
+        let binding_kind = match binding {
+            [number] if number.trim().parse::<u64>().is_ok() => {
+                FormAttributeAdditionalColumnsBindingKind::Numeric
+            }
+            [prefix, uuid] if prefix.trim() == "0" && !uuid.trim().is_empty() => {
+                FormAttributeAdditionalColumnsBindingKind::MetadataReference
+            }
+            _ => return None,
+        };
+        Some(Self {
+            column_count,
+            binding_kind,
+        })
+    }
+
+    pub(crate) const fn column_count(self) -> usize {
+        self.column_count
+    }
+
+    pub(crate) const fn binding_kind(self) -> FormAttributeAdditionalColumnsBindingKind {
+        self.binding_kind
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormAttributeColumnSchema;
+
+impl FormAttributeColumnSchema {
+    pub(crate) fn from_raw_layout(fields: &[&str]) -> Option<Self> {
+        (fields.len() == 10 && fields.first().map(|field| field.trim()) == Some("5"))
+            .then_some(Self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormPageXmlProperty {
     EnableContentChange,

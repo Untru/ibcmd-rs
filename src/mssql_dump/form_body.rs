@@ -6,9 +6,11 @@ use crate::form_schema::{
     FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER,
     FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER, FORM_PAGE_XML_ORDER,
     FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER, FORM_TABLE_XML_ORDER,
-    FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER, FormButtonColorSchema,
-    FormCheckBoxFieldSchema, FormChildItemAlignment, FormChildItemShowTitleSchema,
-    FormChildItemUserVisibleSchema, FormChildItemVisibleSchema, FormCommandInterfaceContainerOwner,
+    FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER,
+    FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
+    FormAttributeColumnSchema, FormButtonColorSchema, FormCheckBoxFieldSchema,
+    FormChildItemAlignment, FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema,
+    FormChildItemVisibleSchema, FormCommandInterfaceContainerOwner,
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormConditionalGroupSchema, FormConditionalTableSchema,
     FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
@@ -25,8 +27,9 @@ use crate::form_schema::{
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
     FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupHeaderXmlProperty,
     FormUsualGroupSchema, FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty,
-    decode_form_tooltip_representation, form_child_item_representation_is_default,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    decode_form_tooltip_representation, form_attribute_column_builtin_type_reference,
+    form_child_item_representation_is_default, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -2227,47 +2230,77 @@ pub(super) fn parse_form_attribute_additional_columns_group(
     child_item_indexes: &FormChildItemIndexes,
 ) -> Option<ParsedFormAttributeAdditionalColumnsGroup> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    if fields.first().map(|value| value.trim()) != Some("0") {
-        return None;
-    }
     let target = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
-    if target.first().map(|value| value.trim()) != Some("2") {
-        return None;
-    }
-    let attribute_id = split_1c_braced_fields(target.get(1)?.trim(), 0)?
-        .first()?
-        .trim()
-        .to_string();
-    let column_id = parse_form_binding_key(target.get(2)?.trim())?;
-    let attribute = attributes
+    let owner = split_1c_braced_fields(target.get(1)?.trim(), 0)?;
+    let binding = split_1c_braced_fields(target.get(2)?.trim(), 0)?;
+    let schema = FormAttributeAdditionalColumnsGroupSchema::from_raw_layout(
+        &fields, &target, &owner, &binding,
+    )?;
+    let attribute_id = owner.first()?.trim().to_string();
+    attributes
         .iter()
-        .find(|attribute| attribute.id == attribute_id)?;
-    let count = fields.get(2)?.trim().parse::<usize>().ok()?;
+        .any(|attribute| attribute.id == attribute_id)
+        .then_some(())?;
     let columns = fields
         .iter()
         .skip(3)
-        .take(count)
-        .filter_map(|field| parse_form_attribute_column(field, type_index, object_refs))
-        .collect::<Vec<_>>();
-    if columns.is_empty() {
-        return None;
-    }
-    let table = child_item_indexes
-        .bound_table_path_by_binding_key
-        .get(&column_id)
-        .cloned()
-        .or_else(|| {
-            attribute
-                .columns
-                .iter()
-                .find(|column| column.id == column_id)
-                .map(|column| format!("{}.{}", attribute.name, column.name))
-        })?;
+        .take(schema.column_count())
+        .map(|field| parse_form_attribute_column(field, type_index, object_refs))
+        .collect::<Option<Vec<_>>>()?;
+    let table = match schema.binding_kind() {
+        FormAttributeAdditionalColumnsBindingKind::Numeric => {
+            let binding_key = parse_form_binding_key(target.get(2)?.trim())?;
+            child_item_indexes
+                .bound_table_path_by_binding_key
+                .get(&binding_key)
+                .cloned()
+        }
+        FormAttributeAdditionalColumnsBindingKind::MetadataReference => {
+            resolve_form_attribute_additional_columns_metadata_table_path(
+                &attribute_id,
+                binding.get(1)?.trim(),
+                attributes,
+                object_refs,
+            )
+        }
+    }?;
     Some(ParsedFormAttributeAdditionalColumnsGroup {
         attribute_id,
         table,
         columns,
     })
+}
+
+fn resolve_form_attribute_additional_columns_metadata_table_path(
+    attribute_id: &str,
+    type_id: &str,
+    attributes: &[FormAttribute],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let type_id = parse_non_zero_uuid(type_id)?;
+    let reference = object_refs.get(&type_id)?;
+    let (owner_base, relative_path) = form_attribute_additional_columns_metadata_route(reference)?;
+    let attribute_owners = form_attribute_metadata_owners_by_id(attributes);
+    let attribute = attribute_owners.get(attribute_id)?;
+    form_attribute_matches_metadata_owner(attribute, &owner_base)
+        .then(|| format!("{}.{}", attribute.name, relative_path))
+}
+
+fn form_attribute_additional_columns_metadata_route(reference: &str) -> Option<(String, String)> {
+    let route = reference.split('.').collect::<Vec<_>>();
+    let (owner_kind, owner_name, relative_path) = match route.as_slice() {
+        [owner_kind, owner_name, "TabularSection", table] if !table.is_empty() => {
+            (*owner_kind, *owner_name, (*table).to_string())
+        }
+        [owner_kind, owner_name, "Attribute", attribute] if !attribute.is_empty() => {
+            (*owner_kind, *owner_name, (*attribute).to_string())
+        }
+        _ => return None,
+    };
+    if owner_kind.is_empty() || owner_name.is_empty() {
+        return None;
+    }
+    Some((format!("{owner_kind}.{owner_name}"), relative_path))
 }
 
 pub(super) fn parse_form_attribute_column(
@@ -2276,9 +2309,7 @@ pub(super) fn parse_form_attribute_column(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormAttributeColumn> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
-    if fields.first().map(|value| value.trim()) != Some("5") {
-        return None;
-    }
+    FormAttributeColumnSchema::from_raw_layout(&fields)?;
     let id = fields.get(1)?.trim();
     if id.is_empty() {
         return None;
@@ -2312,7 +2343,37 @@ pub(super) fn parse_form_attribute_column_type_pattern(
     field: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    parse_form_type_pattern(field.trim(), type_index)
+    let value_types = parse_form_type_pattern(field.trim(), type_index)
+        .or_else(|| parse_form_attribute_column_builtin_type_pattern(field))?;
+    Some(normalize_form_type_pattern(
+        value_types
+            .into_iter()
+            .map(|value_type| match value_type {
+                ConstantValueType::Reference { reference }
+                    if metadata_reference_is_type_set(&reference) =>
+                {
+                    ConstantValueType::ReferenceTypeSet { reference }
+                }
+                other => other,
+            })
+            .collect(),
+    ))
+}
+
+fn parse_form_attribute_column_builtin_type_pattern(field: &str) -> Option<Vec<ConstantValueType>> {
+    let pattern = split_1c_braced_fields(field.trim(), 0)?;
+    if pattern.len() != 2 || pattern.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    let value_type = split_1c_braced_fields(pattern.get(1)?.trim(), 0)?;
+    if value_type.len() != 2 || value_type.first()?.trim() != r##""#""## {
+        return None;
+    }
+    let type_id = parse_non_zero_uuid(value_type.get(1)?.trim())?;
+    let reference = form_attribute_column_builtin_type_reference(&type_id)?;
+    Some(vec![ConstantValueType::Reference {
+        reference: reference.to_string(),
+    }])
 }
 
 pub(super) fn parse_form_dynamic_list_settings(
@@ -13140,6 +13201,13 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
                 xml.push_str(&format_form_attribute_column_xml(column, "\t\t\t\t"));
             }
             for additional in &attribute.additional_columns {
+                if additional.columns.is_empty() {
+                    xml.push_str(&format!(
+                        "\t\t\t\t<AdditionalColumns table=\"{}\"/>\r\n",
+                        escape_xml_text(&additional.table)
+                    ));
+                    continue;
+                }
                 xml.push_str(&format!(
                     "\t\t\t\t<AdditionalColumns table=\"{}\">\r\n",
                     escape_xml_text(&additional.table)
