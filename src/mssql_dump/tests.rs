@@ -10251,6 +10251,7 @@ fn formats_table_search_additions_as_direct_sections() {
         show_in_header: None,
         user_visible_common: None,
         visible: None,
+        enabled: None,
         read_only: None,
         skip_on_input: None,
         title_location: None,
@@ -10411,6 +10412,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 show_in_header: None,
                 user_visible_common: None,
                 visible: None,
+                enabled: None,
                 read_only: None,
                 skip_on_input: None,
                 title_location: None,
@@ -10572,6 +10574,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 show_in_header: None,
                 user_visible_common: None,
                 visible: None,
+                enabled: None,
                 read_only: None,
                 skip_on_input: None,
                 title_location: None,
@@ -25888,6 +25891,7 @@ fn parses_information_register_variable_collections_without_partial_results() {
 
     let links = parse_information_register_choice_parameter_links(
         &format!("{{5006,2,\"First\",2,{{-2}},{{0,{path_uuid}}},0,\"Second\",1,{{-3}},1}}"),
+        "InformationRegister",
         "Rates",
         &object_refs,
         false,
@@ -25907,6 +25911,7 @@ fn parses_information_register_variable_collections_without_partial_results() {
 
     let raw_links = parse_information_register_choice_parameter_links(
         &format!("{{5006,1,\"First\",1,{{0,{path_uuid}}},0}}"),
+        "InformationRegister",
         "Rates",
         &object_refs,
         true,
@@ -25916,6 +25921,7 @@ fn parses_information_register_variable_collections_without_partial_results() {
 
     let link_by_type = parse_information_register_link_by_type(
         &format!("{{3,2,{{0,{unresolved_path_uuid}}},{{0}},3}}"),
+        "InformationRegister",
         "Rates",
         &object_refs,
         false,
@@ -25929,6 +25935,7 @@ fn parses_information_register_variable_collections_without_partial_results() {
     assert_eq!(link_by_type.link_item, 3);
     let raw_link_by_type = parse_information_register_link_by_type(
         &format!("{{3,1,{{0,{path_uuid}}},0}}"),
+        "InformationRegister",
         "Rates",
         &object_refs,
         true,
@@ -26290,6 +26297,7 @@ fn information_register_collection_counts_fail_closed_on_overflow() {
     assert!(
         parse_information_register_choice_parameter_links(
             &format!("{{5006,{max}}}"),
+            "InformationRegister",
             "Rates",
             &BTreeMap::new(),
             false,
@@ -26299,6 +26307,7 @@ fn information_register_collection_counts_fail_closed_on_overflow() {
     assert!(
         parse_information_register_choice_parameter_links(
             &format!("{{5006,1,\"Link\",{max},{{0}},0}}"),
+            "InformationRegister",
             "Rates",
             &BTreeMap::new(),
             false,
@@ -26308,6 +26317,7 @@ fn information_register_collection_counts_fail_closed_on_overflow() {
     assert!(
         parse_information_register_link_by_type(
             &format!("{{3,{max},0}}"),
+            "InformationRegister",
             "Rates",
             &BTreeMap::new(),
             false,
@@ -26357,6 +26367,7 @@ fn information_register_child_payload_fails_closed_on_shape_errors() {
     assert!(
         parse_information_register_choice_parameter_links(
             "{5006,1,\"Broken\",2,{0},0}",
+            "InformationRegister",
             "Rates",
             &BTreeMap::new(),
             false,
@@ -36738,6 +36749,7 @@ fn formats_data_processor_attribute_without_resolved_type_as_empty_type_node() {
                 value_types: Vec::new(),
                 emit_empty_type: true,
                 properties: None,
+                register_properties: None,
                 tabular_section_properties: None,
                 child_objects: Vec::new(),
             }],
@@ -40579,6 +40591,7 @@ fn document_formatter_stably_orders_root_child_groups() {
         value_types: Vec::new(),
         emit_empty_type: tag == "Attribute",
         properties: None,
+        register_properties: None,
         tabular_section_properties: None,
         header: MetadataHeader {
             uuid: uuid.to_string(),
@@ -45841,6 +45854,7 @@ fn calculation_recalculation_root_emits_exact_ordered_escaped_references() {
         value_types: Vec::new(),
         emit_empty_type: true,
         properties: None,
+        register_properties: None,
         tabular_section_properties: None,
         child_objects: Vec::new(),
     });
@@ -46293,6 +46307,7 @@ fn calculation_recalculation_root_has_one_line_target_and_no_corpus_literals() {
         value_types: Vec::new(),
         emit_empty_type: true,
         properties: None,
+        register_properties: None,
         tabular_section_properties: None,
         child_objects: Vec::new(),
     });

@@ -4070,8 +4070,19 @@ struct MetadataChildObject {
     value_types: Vec<ConstantValueType>,
     emit_empty_type: bool,
     properties: Option<MetadataChildProperties>,
+    register_properties: Option<RegisterMetadataChildProperties>,
     tabular_section_properties: Option<MetadataTabularSectionProperties>,
     child_objects: Vec<MetadataChildObject>,
+}
+
+#[derive(Clone)]
+struct RegisterMetadataChildProperties {
+    deny_incomplete_values: Option<bool>,
+    base_dimension: Option<bool>,
+    schedule_link: Option<String>,
+    indexing: Option<&'static str>,
+    full_text_search: &'static str,
+    use_in_totals: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -6820,6 +6831,7 @@ fn parse_exchange_plan_child_objects(
                 value_types,
                 emit_empty_type: tag == "Attribute",
                 properties,
+                register_properties: None,
                 tabular_section_properties: None,
                 child_objects: Vec::new(),
             })
@@ -8103,8 +8115,30 @@ fn parse_register_properties_from_text(
     let mut child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
-            let tag = register_child_object_tag(kind, text, marker_start)?;
-            let (value_types, properties, emit_empty_type) = if kind == "InformationRegister" {
+            let strict_tag = parse_accumulation_calculation_register_child_tag(
+                kind,
+                text,
+                marker_start,
+                &header,
+            );
+            let strict_payload = parse_accumulation_calculation_register_child_payload(
+                kind,
+                text,
+                marker_start,
+                &header,
+                &owner_name,
+                calculation_schedule.as_ref(),
+                type_index,
+                object_refs,
+                form_refs,
+                source_version == InfobaseConfigSourceVersion::V2_21,
+            );
+            let tag = strict_tag
+                .or_else(|| strict_payload.as_ref().map(|payload| payload.tag))
+                .or_else(|| register_child_object_tag(kind, text, marker_start))?;
+            let (value_types, properties, register_properties, emit_empty_type) = if kind
+                == "InformationRegister"
+            {
                 match parse_information_register_child_payload(
                     text,
                     marker_start,
@@ -8118,10 +8152,17 @@ fn parse_register_properties_from_text(
                 ) {
                     Some((value_types, properties)) => {
                         let emit_empty_type = tag == "Attribute" && value_types.is_empty();
-                        (value_types, Some(properties), emit_empty_type)
+                        (value_types, Some(properties), None, emit_empty_type)
                     }
-                    None => (Vec::new(), None, false),
+                    None => (Vec::new(), None, None, false),
                 }
+            } else if let Some(payload) = strict_payload {
+                (
+                    payload.value_types,
+                    Some(payload.properties),
+                    Some(payload.register_properties),
+                    false,
+                )
             } else {
                 let value_types =
                     parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
@@ -8144,7 +8185,7 @@ fn parse_register_properties_from_text(
                         properties,
                     )
                 });
-                (value_types, properties, tag == "Attribute")
+                (value_types, properties, None, tag == "Attribute")
             };
             Some(MetadataChildObject {
                 tag,
@@ -8153,6 +8194,7 @@ fn parse_register_properties_from_text(
                 value_types,
                 emit_empty_type,
                 properties,
+                register_properties,
                 tabular_section_properties: None,
                 child_objects: Vec::new(),
             })
@@ -9432,6 +9474,7 @@ fn parse_attribute_tabular_section_child_objects(
             value_types,
             emit_empty_type: tag == "Attribute",
             properties,
+            register_properties: None,
             tabular_section_properties,
             header,
             child_objects: Vec::new(),
@@ -9985,6 +10028,254 @@ fn parse_metadata_child_properties(
     None
 }
 
+struct AccumulationCalculationRegisterChildPayload {
+    tag: &'static str,
+    value_types: Vec<ConstantValueType>,
+    properties: MetadataChildProperties,
+    register_properties: RegisterMetadataChildProperties,
+}
+
+fn parse_accumulation_calculation_register_child_tag(
+    owner_kind: &str,
+    text: &str,
+    marker_start: usize,
+    child_header: &MetadataHeader,
+) -> Option<&'static str> {
+    let mut parsed =
+        metadata_object_field_candidates_around_header(text, marker_start, &child_header.uuid)
+            .into_iter()
+            .filter_map(|fields| {
+                parse_accumulation_calculation_register_child_tag_from_fields(
+                    owner_kind,
+                    &fields,
+                    child_header,
+                )
+            });
+    let tag = parsed.next()?;
+    parsed.next().is_none().then_some(tag)
+}
+
+fn parse_accumulation_calculation_register_child_tag_from_fields(
+    owner_kind: &str,
+    fields: &[&str],
+    child_header: &MetadataHeader,
+) -> Option<&'static str> {
+    let tag = match (owner_kind, fields.first()?.trim(), fields.len()) {
+        ("AccumulationRegister", "5", 3) | ("CalculationRegister", "4", 3) => "Resource",
+        ("AccumulationRegister", "8", 6) | ("CalculationRegister", "5", 7) => "Dimension",
+        _ => return None,
+    };
+    let common_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    register_common_child_header_matches(&common_fields, child_header).then_some(tag)
+}
+
+fn parse_accumulation_calculation_register_child_payload(
+    owner_kind: &str,
+    text: &str,
+    marker_start: usize,
+    child_header: &MetadataHeader,
+    owner_name: &str,
+    calculation_schedule: Option<&CalculationRegisterScheduleProperties>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> Option<AccumulationCalculationRegisterChildPayload> {
+    if !matches!(owner_kind, "AccumulationRegister" | "CalculationRegister") {
+        return None;
+    }
+    let mut parsed =
+        metadata_object_field_candidates_around_header(text, marker_start, &child_header.uuid)
+            .into_iter()
+            .filter_map(|fields| {
+                parse_accumulation_calculation_register_child_payload_from_fields(
+                    owner_kind,
+                    &fields,
+                    child_header,
+                    owner_name,
+                    calculation_schedule,
+                    type_index,
+                    object_refs,
+                    form_refs,
+                    preserve_raw_data_paths,
+                )
+            });
+    let value = parsed.next()?;
+    if parsed.next().is_some() {
+        return None;
+    }
+    Some(value)
+}
+
+fn parse_accumulation_calculation_register_child_payload_from_fields(
+    owner_kind: &str,
+    fields: &[&str],
+    child_header: &MetadataHeader,
+    owner_name: &str,
+    calculation_schedule: Option<&CalculationRegisterScheduleProperties>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> Option<AccumulationCalculationRegisterChildPayload> {
+    let (tag, register_properties) = match (owner_kind, fields.first()?.trim(), fields.len()) {
+        ("AccumulationRegister", "5", 3) => (
+            "Resource",
+            RegisterMetadataChildProperties {
+                deny_incomplete_values: None,
+                base_dimension: None,
+                schedule_link: None,
+                indexing: None,
+                full_text_search: register_child_full_text_search_xml(fields.get(2)?.trim())?,
+                use_in_totals: None,
+            },
+        ),
+        ("AccumulationRegister", "8", 6) => (
+            "Dimension",
+            RegisterMetadataChildProperties {
+                deny_incomplete_values: Some(information_register_bool(fields.get(2)?)?),
+                base_dimension: None,
+                schedule_link: None,
+                indexing: Some(metadata_attribute_indexing_xml(fields.get(3)?.trim())?),
+                full_text_search: register_child_full_text_search_xml(fields.get(4)?.trim())?,
+                use_in_totals: Some(information_register_bool(fields.get(5)?)?),
+            },
+        ),
+        ("CalculationRegister", "4", 3) => (
+            "Resource",
+            RegisterMetadataChildProperties {
+                deny_incomplete_values: None,
+                base_dimension: None,
+                schedule_link: None,
+                indexing: None,
+                full_text_search: register_child_full_text_search_xml(fields.get(2)?.trim())?,
+                use_in_totals: None,
+            },
+        ),
+        ("CalculationRegister", "5", 7) => {
+            let schedule_link = parse_calculation_register_dimension_reference(
+                fields.get(4)?,
+                calculation_schedule,
+                object_refs,
+            )?;
+            (
+                "Dimension",
+                RegisterMetadataChildProperties {
+                    deny_incomplete_values: Some(information_register_bool(fields.get(2)?)?),
+                    base_dimension: Some(information_register_bool(fields.get(3)?)?),
+                    schedule_link: Some(schedule_link),
+                    indexing: Some(metadata_attribute_indexing_xml(fields.get(5)?.trim())?),
+                    full_text_search: register_child_full_text_search_xml(fields.get(6)?.trim())?,
+                    use_in_totals: None,
+                },
+            )
+        }
+        _ => return None,
+    };
+    let common_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+    let value_types =
+        parse_register_common_child_value_types(&common_fields, child_header, type_index)?;
+    let mut properties = parse_information_register_common_child_properties(
+        &common_fields,
+        owner_kind,
+        owner_name,
+        type_index,
+        object_refs,
+        form_refs,
+        preserve_raw_data_paths,
+    )?;
+    properties.emit_fill_from_filling_value = false;
+    properties.emit_fill_value = false;
+    Some(AccumulationCalculationRegisterChildPayload {
+        tag,
+        value_types,
+        properties,
+        register_properties,
+    })
+}
+
+fn parse_calculation_register_dimension_reference(
+    value: &str,
+    calculation_schedule: Option<&CalculationRegisterScheduleProperties>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let uuid = parse_uuid_field(value.trim())?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(String::new());
+    }
+    let schedule = calculation_schedule?;
+    let reference = unique_case_insensitive_object_reference(&uuid, object_refs)?.to_string();
+    let schedule_parts = schedule.schedule.split('.').collect::<Vec<_>>();
+    let parts = reference.split('.').collect::<Vec<_>>();
+    let ["InformationRegister", schedule_owner] = schedule_parts.as_slice() else {
+        return None;
+    };
+    let [
+        "InformationRegister",
+        candidate_owner,
+        "Dimension",
+        dimension,
+    ] = parts.as_slice()
+    else {
+        return None;
+    };
+    (!dimension.is_empty() && candidate_owner == schedule_owner).then_some(reference)
+}
+
+fn parse_register_common_child_value_types(
+    common_fields: &[&str],
+    child_header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    if !register_common_child_header_matches(common_fields, child_header) {
+        return None;
+    }
+    let typed_header = split_1c_braced_fields(common_fields.get(1)?, 0)?;
+    Some(stable_partition_metadata_types(
+        parse_information_register_type_pattern(typed_header.get(2)?, type_index)?,
+    ))
+}
+
+fn register_common_child_header_matches(
+    common_fields: &[&str],
+    child_header: &MetadataHeader,
+) -> bool {
+    if common_fields.len() != 23 || common_fields.first().map(|field| field.trim()) != Some("27") {
+        return false;
+    }
+    let Some(typed_header) = common_fields
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return false;
+    };
+    if typed_header.len() != 3 || typed_header.first().map(|field| field.trim()) != Some("2") {
+        return false;
+    }
+    let Some(header_fields) = typed_header
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field, 0))
+    else {
+        return false;
+    };
+    if header_fields.len() != 9
+        || header_fields.first().map(|field| field.trim()) != Some("3")
+        || metadata_header_field_index(&header_fields, &child_header.uuid) != Some(1)
+    {
+        return false;
+    }
+    let Some(parsed_header) = typed_header
+        .get(1)
+        .and_then(|field| parse_metadata_header_from_text(field, &child_header.uuid))
+    else {
+        return false;
+    };
+    parsed_header.uuid == child_header.uuid
+        && parsed_header.name == child_header.name
+        && parsed_header.synonyms == child_header.synonyms
+        && parsed_header.comment == child_header.comment
+}
+
 fn parse_information_register_child_payload(
     text: &str,
     marker_start: usize,
@@ -10038,6 +10329,7 @@ fn parse_information_register_child_payload_from_fields(
     let common_fields = split_1c_braced_fields(common_field, 0)?;
     let mut properties = parse_information_register_common_child_properties(
         &common_fields,
+        "InformationRegister",
         owner_name,
         type_index,
         object_refs,
@@ -10270,6 +10562,7 @@ fn stable_partition_metadata_types(value_types: Vec<ConstantValueType>) -> Vec<C
 
 fn parse_information_register_common_child_properties(
     fields: &[&str],
+    owner_kind: &str,
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
@@ -10283,6 +10576,7 @@ fn parse_information_register_common_child_properties(
     let max_value = parse_information_register_bound(fields.get(9)?)?;
     let link_by_type = parse_information_register_link_by_type(
         fields.get(15)?,
+        owner_kind,
         owner_name,
         object_refs,
         preserve_raw_data_paths,
@@ -10319,6 +10613,7 @@ fn parse_information_register_common_child_properties(
         }),
         choice_parameter_links: Some(parse_information_register_choice_parameter_links(
             fields.get(14)?,
+            owner_kind,
             owner_name,
             object_refs,
             preserve_raw_data_paths,
@@ -10685,6 +10980,7 @@ fn information_register_uuid_is_zero(value: &str) -> bool {
 
 fn parse_information_register_choice_parameter_links(
     value: &str,
+    owner_kind: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
     preserve_raw_data_paths: bool,
@@ -10714,6 +11010,7 @@ fn parse_information_register_choice_parameter_links(
         let path_end = index.checked_add(path_count)?;
         let path = parse_information_register_data_path(
             fields.get(index..path_end)?,
+            owner_kind,
             owner_name,
             object_refs,
             preserve_raw_data_paths,
@@ -10736,6 +11033,7 @@ fn parse_information_register_choice_parameter_links(
 
 fn parse_information_register_link_by_type(
     value: &str,
+    owner_kind: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
     preserve_raw_data_paths: bool,
@@ -10760,6 +11058,7 @@ fn parse_information_register_link_by_type(
     Some(Some(MetadataChildLinkByType {
         data_path: parse_information_register_data_path(
             fields.get(2..path_end)?,
+            owner_kind,
             owner_name,
             object_refs,
             preserve_raw_data_paths,
@@ -10770,6 +11069,7 @@ fn parse_information_register_link_by_type(
 
 fn parse_information_register_data_path(
     fields: &[&str],
+    owner_kind: &str,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
     preserve_raw_data_paths: bool,
@@ -10793,10 +11093,10 @@ fn parse_information_register_data_path(
                         )
                     }
                 }
-                ("-2", 1) => Some(format!(
+                ("-2", 1) if owner_kind == "InformationRegister" => Some(format!(
                     "InformationRegister.{owner_name}.StandardAttribute.Period"
                 )),
-                ("-3", 1) => Some(format!(
+                ("-3", 1) if owner_kind == "InformationRegister" => Some(format!(
                     "InformationRegister.{owner_name}.StandardAttribute.Recorder"
                 )),
                 _ => None,
@@ -20096,6 +20396,7 @@ fn push_metadata_header_child_object_xml(
             value_types: Vec::new(),
             emit_empty_type: tag == "Attribute",
             properties: None,
+            register_properties: None,
             tabular_section_properties: None,
             child_objects: Vec::new(),
         },
@@ -20199,6 +20500,9 @@ fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject)
     if let Some(properties) = &child.properties {
         push_metadata_child_properties_xml(xml, "\t\t\t\t\t", properties);
     }
+    if let Some(properties) = &child.register_properties {
+        push_register_metadata_child_properties_xml(xml, "\t\t\t\t\t", properties);
+    }
     if let Some(properties) = &child.tabular_section_properties {
         push_metadata_tabular_section_properties_xml(xml, "\t\t\t\t\t", properties);
     }
@@ -20254,6 +20558,9 @@ fn push_nested_metadata_child_object_xml(
     }
     if let Some(properties) = &child.properties {
         push_metadata_child_properties_xml(xml, &format!("{tab}\t\t"), properties);
+    }
+    if let Some(properties) = &child.register_properties {
+        push_register_metadata_child_properties_xml(xml, &format!("{tab}\t\t"), properties);
     }
     if let Some(properties) = &child.tabular_section_properties {
         push_metadata_tabular_section_properties_xml(xml, &format!("{tab}\t\t"), properties);
@@ -20443,6 +20750,48 @@ fn push_metadata_child_properties_xml(
         xml.push_str(&format!(
             "{indent}<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
             xml_bool(execute_after_write)
+        ));
+    }
+}
+
+fn push_register_metadata_child_properties_xml(
+    xml: &mut String,
+    indent: &str,
+    properties: &RegisterMetadataChildProperties,
+) {
+    if let Some(deny_incomplete_values) = properties.deny_incomplete_values {
+        xml.push_str(&format!(
+            "{indent}<DenyIncompleteValues>{}</DenyIncompleteValues>\r\n",
+            xml_bool(deny_incomplete_values)
+        ));
+    }
+    if let Some(base_dimension) = properties.base_dimension {
+        xml.push_str(&format!(
+            "{indent}<BaseDimension>{}</BaseDimension>\r\n",
+            xml_bool(base_dimension)
+        ));
+    }
+    if let Some(schedule_link) = &properties.schedule_link {
+        if schedule_link.is_empty() {
+            xml.push_str(&format!("{indent}<ScheduleLink/>\r\n"));
+        } else {
+            xml.push_str(&format!(
+                "{indent}<ScheduleLink>{}</ScheduleLink>\r\n",
+                escape_xml_element_text(schedule_link)
+            ));
+        }
+    }
+    if let Some(indexing) = properties.indexing {
+        xml.push_str(&format!("{indent}<Indexing>{indexing}</Indexing>\r\n"));
+    }
+    xml.push_str(&format!(
+        "{indent}<FullTextSearch>{}</FullTextSearch>\r\n",
+        properties.full_text_search
+    ));
+    if let Some(use_in_totals) = properties.use_in_totals {
+        xml.push_str(&format!(
+            "{indent}<UseInTotals>{}</UseInTotals>\r\n",
+            xml_bool(use_in_totals)
         ));
     }
 }

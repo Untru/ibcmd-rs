@@ -583,6 +583,7 @@ pub(super) struct FormChildItem {
     pub(super) show_in_header: Option<bool>,
     pub(super) user_visible_common: Option<bool>,
     pub(super) visible: Option<bool>,
+    pub(super) enabled: Option<bool>,
     pub(super) read_only: Option<bool>,
     pub(super) skip_on_input: Option<bool>,
     pub(super) title_location: Option<&'static str>,
@@ -5264,6 +5265,9 @@ fn parse_form_child_item_with_metadata_owners(
             input_field_top_level_offset,
         )
         .and_then(|schema| schema.visible(&fields)),
+        enabled: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.enabled(&fields)),
         read_only: if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
@@ -11832,6 +11836,13 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<UserVisible>\r\n{tab}\t\t<xr:Common>false</xr:Common>\r\n{tab}\t</UserVisible>\r\n"
         ));
+    }
+    if matches!(
+        item.tag,
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+    ) && item.enabled == Some(false)
+    {
+        xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
     }
     let read_only_before_title = item.tag != "Table"
         && item.read_only == Some(true)
