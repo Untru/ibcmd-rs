@@ -2319,7 +2319,7 @@ fn parse_exchange_plan_content_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
-    metadata_order: &BTreeMap<String, usize>,
+    _metadata_order: &BTreeMap<String, usize>,
 ) -> Result<Vec<ExchangePlanContentItem>> {
     let inflated = inflate_raw_deflate(bytes).context("failed to inflate ExchangePlanContent")?;
     let text = String::from_utf8(inflated).context("ExchangePlanContent is not valid UTF-8")?;
@@ -2371,12 +2371,7 @@ fn parse_exchange_plan_content_blob(
         index += 2;
     }
 
-    items.sort_by_key(|item| {
-        metadata_order
-            .get(&item.metadata_id)
-            .copied()
-            .unwrap_or(usize::MAX)
-    });
+    items.sort_by(|left, right| left.metadata_id.cmp(&right.metadata_id));
 
     Ok(items)
 }
@@ -6034,8 +6029,12 @@ fn extract_metadata_source_xml_from_text_row(
         format_functional_options_parameter_source_xml(&header, &properties, source_version)
             .into_bytes()
     } else if kind == "Subsystem" {
-        let subsystem =
-            parse_subsystem_properties_from_text(text, uuid, object_refs, subsystem_refs)?;
+        let subsystem = parse_subsystem_properties_from_text(
+            text,
+            uuid,
+            configuration_root_object_refs,
+            subsystem_refs,
+        )?;
         format_subsystem_source_xml(&header, &subsystem, source_version).into_bytes()
     } else if kind == "ExchangePlan" {
         let exchange_plan = parse_exchange_plan_properties_from_text(
