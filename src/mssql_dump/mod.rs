@@ -111,8 +111,13 @@ const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
+// Document collection and descriptor IDs below are platform schema IDs, not infobase object IDs.
 const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f80211";
 const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
+const DOCUMENT_TABULAR_SECTION_COLLECTION_UUID: &str = "21c53e09-8950-4b5e-a6a0-1054f1bbc274";
+const DOCUMENT_COMMAND_COLLECTION_UUID: &str = "b544fc6a-2ba3-4885-8fb2-cb289fb6d65e";
+const DOCUMENT_FORM_COLLECTION_UUID: &str = "fb880e93-47d7-4127-9357-a20e69c17545";
+const DOCUMENT_CHARACTERISTIC_TYPE_UUID: &str = "fe839d42-d094-40ba-b903-75bccc21ba30";
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
 const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
@@ -4196,6 +4201,7 @@ struct MetadataTabularSectionProperties {
     tooltip: Vec<(String, String)>,
     fill_checking: &'static str,
     line_number_fill_checking: &'static str,
+    line_number_fill_value: Option<MetadataChildFillValue>,
     use_mode: Option<&'static str>,
     line_number_length: Option<u32>,
 }
@@ -4344,18 +4350,46 @@ struct MetadataChildCommand {
 struct DocumentProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
-    numbering: Option<DocumentNumberingProperties>,
-    standard_attributes: Option<DocumentStandardAttributes>,
+    numbering: DocumentNumberingProperties,
+    standard_attributes: Option<Vec<MetadataStandardAttribute>>,
+    characteristics: Vec<DocumentCharacteristic>,
+    based_on: Vec<String>,
+    input_by_string: Vec<String>,
+    create_on_input: &'static str,
+    search_string_mode_on_input_by_string: &'static str,
+    full_text_search_on_input_by_string: &'static str,
+    choice_data_get_mode_on_input_by_string: &'static str,
     default_object_form: Option<String>,
     default_list_form: Option<String>,
     default_choice_form: Option<String>,
     auxiliary_object_form: Option<String>,
     auxiliary_list_form: Option<String>,
     auxiliary_choice_form: Option<String>,
+    posting: &'static str,
+    real_time_posting: &'static str,
+    register_records_deletion: &'static str,
+    register_records_writing_on_post: &'static str,
+    sequence_filling: &'static str,
+    register_records: Vec<String>,
+    post_in_privileged_mode: bool,
+    unpost_in_privileged_mode: bool,
     include_help_in_contents: bool,
+    data_lock_fields: Vec<String>,
+    data_lock_control_mode: &'static str,
+    full_text_search: &'static str,
+    object_presentation: Vec<(String, String)>,
+    extended_object_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    choice_history_on_input: &'static str,
+    data_history: &'static str,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
     child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 struct DocumentNumberingProperties {
@@ -4368,9 +4402,19 @@ struct DocumentNumberingProperties {
     autonumbering: bool,
 }
 
-struct DocumentStandardAttributes {
-    number_type: &'static str,
-    details: BTreeMap<&'static str, CatalogStandardAttributeDetails>,
+struct DocumentCharacteristic {
+    types_from: String,
+    key_field: String,
+    types_filter_field: String,
+    types_filter_value: MetadataChildFillValue,
+    data_path_field: String,
+    multiple_values_use_field: String,
+    values_from: String,
+    object_field: String,
+    type_field: String,
+    value_field: String,
+    multiple_values_key_field: String,
+    multiple_values_order_field: String,
 }
 
 struct BusinessProcessProperties {
@@ -4393,7 +4437,7 @@ struct TaskProperties {
     main_addressing_attribute: Option<String>,
     current_performer: Option<String>,
     based_on: Vec<String>,
-    standard_attributes: Vec<TaskStandardAttribute>,
+    standard_attributes: Vec<MetadataStandardAttribute>,
     default_presentation: &'static str,
     edit_type: &'static str,
     input_by_string: Vec<String>,
@@ -4426,7 +4470,7 @@ struct TaskProperties {
     child_commands: Vec<MetadataChildCommand>,
 }
 
-struct TaskStandardAttribute {
+struct MetadataStandardAttribute {
     attribute: RegisterStandardAttribute,
     comment: String,
 }
@@ -6040,7 +6084,12 @@ fn extract_metadata_source_xml_from_text_row(
     let nested_commands = if metadata_kind_can_own_commands(kind)
         && !matches!(
             kind,
-            "Report" | "DataProcessor" | "DocumentJournal" | "InformationRegister" | "Task"
+            "Report"
+                | "DataProcessor"
+                | "Document"
+                | "DocumentJournal"
+                | "InformationRegister"
+                | "Task"
         ) {
         nested_command_headers_for_owner_from_text(kind, text, uuid)
     } else {
@@ -9771,11 +9820,24 @@ fn parse_attribute_tabular_section_child_objects(
         ) else {
             continue;
         };
-        let value_types = if tag == "Attribute" {
+        let mut value_types = if tag == "Attribute" {
             parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index)
         } else {
             Vec::new()
         };
+        if owner_kind == "Document" {
+            value_types = value_types
+                .into_iter()
+                .map(|value_type| match value_type {
+                    ConstantValueType::Reference { reference }
+                        if metadata_reference_is_type_set(&reference) =>
+                    {
+                        ConstantValueType::ReferenceTypeSet { reference }
+                    }
+                    other => other,
+                })
+                .collect();
+        }
         let properties = if tag == "Attribute" && owner_kind == "Catalog" {
             let expected_wrapper_code = if parent_tabular_section.is_some() {
                 8
@@ -10403,7 +10465,7 @@ fn parse_exact_metadata_tabular_section(
         "1" => "ShowError",
         _ => return None,
     };
-    let emit_standard_attributes =
+    let line_number_fill_value =
         parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?;
     let tooltip = parse_information_register_owner_localized_value(fields.get(8)?)?;
     let use_mode = match owner_kind {
@@ -10443,11 +10505,12 @@ fn parse_exact_metadata_tabular_section(
         properties: MetadataTabularSectionProperties {
             tooltip,
             fill_checking,
-            line_number_fill_checking: if emit_standard_attributes {
+            line_number_fill_checking: if line_number_fill_value.is_some() {
                 "DontCheck"
             } else {
                 ""
             },
+            line_number_fill_value,
             use_mode,
             line_number_length,
         },
@@ -10457,10 +10520,10 @@ fn parse_exact_metadata_tabular_section(
 fn parse_exact_tabular_section_standard_attributes_presence(
     owner_kind: &str,
     value: &str,
-) -> Option<bool> {
+) -> Option<Option<MetadataChildFillValue>> {
     let outer = split_information_register_braced_fields(value)?;
     match outer.as_slice() {
-        [marker] if marker.trim() == "0" => Some(false),
+        [marker] if marker.trim() == "0" => Some(None),
         [marker, payload] if marker.trim() == "1" => {
             let expected_attribute_marker = match owner_kind {
                 "Catalog" | "Document" | "ExchangePlan" | "ChartOfCharacteristicTypes" => "-10",
@@ -10484,8 +10547,21 @@ fn parse_exact_tabular_section_standard_attributes_presence(
             {
                 return None;
             }
-            parse_information_register_standard_attribute_bag(payload.get(4)?)?;
-            Some(true)
+            let bag = parse_information_register_standard_attribute_bag(payload.get(4)?)?;
+            let fill_value = split_information_register_braced_fields(
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
+            )?;
+            let fill_value = match fill_value.as_slice() {
+                [kind] if kind.trim() == r#""U""# => MetadataChildFillValue::Nil,
+                [kind, value]
+                    if kind.trim() == r#""N""#
+                        && information_register_decimal_is_valid(value.trim()) =>
+                {
+                    MetadataChildFillValue::Decimal(value.trim().to_string())
+                }
+                _ => return None,
+            };
+            Some(Some(fill_value))
         }
         _ => None,
     }
@@ -13269,6 +13345,7 @@ fn parse_metadata_tabular_section_properties(
             tooltip,
             fill_checking,
             line_number_fill_checking: fill_checking,
+            line_number_fill_value: None,
             use_mode: fields
                 .get(header_index + 4)
                 .and_then(|field| metadata_attribute_use_mode_xml(field.trim())),
@@ -13283,6 +13360,7 @@ fn parse_metadata_tabular_section_properties(
             tooltip: Vec::new(),
             fill_checking: "DontCheck",
             line_number_fill_checking: "DontCheck",
+            line_number_fill_value: None,
             use_mode: None,
             line_number_length: None,
         });
@@ -13305,6 +13383,7 @@ fn parse_data_processor_tabular_section_properties_from_fields(
         tooltip: parse_1c_synonyms(fields.get(8).copied().unwrap_or("{0}")),
         fill_checking: metadata_fill_checking_xml(fields.get(6).copied()),
         line_number_fill_checking: "DontCheck",
+        line_number_fill_value: None,
         use_mode: None,
         line_number_length: None,
     })
@@ -13827,91 +13906,777 @@ fn parse_document_properties_from_text(
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DocumentProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("40") {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
+        return None;
+    }
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    let parsed_header = parse_wrapped_register_owner_header(fields.get(9)?)?;
+    if fields.len() != 53
+        || fields.first()?.trim() != "40"
+        || metadata_header_field_index(&fields, uuid) != Some(9)
+        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+    {
         return None;
     }
 
-    let mut generated_types = Vec::new();
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        1,
-        2,
-        &format!("DocumentObject.{}", header.name),
-        "Object",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        3,
-        4,
-        &format!("DocumentRef.{}", header.name),
-        "Ref",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        26,
-        27,
-        &format!("DocumentManager.{}", header.name),
-        "Manager",
-    );
+    let collections = root[3..]
+        .iter()
+        .map(|value| parse_task_root_collection(value))
+        .collect::<Option<Vec<_>>>()?;
+    let expected_markers = [
+        DOCUMENT_TABULAR_SECTION_COLLECTION_UUID,
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        DOCUMENT_ATTRIBUTE_GROUP_UUID,
+        DOCUMENT_COMMAND_COLLECTION_UUID,
+        DOCUMENT_FORM_COLLECTION_UUID,
+    ];
+    if collections.len() != expected_markers.len()
+        || collections
+            .iter()
+            .zip(expected_markers)
+            .any(|(collection, expected)| !collection.marker.eq_ignore_ascii_case(expected))
+    {
+        return None;
+    }
 
-    let header_index = metadata_header_field_index(&fields, uuid)?;
-    Some(DocumentProperties {
-        generated_types,
-        use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
-            .unwrap_or(true),
-        numbering: parse_document_numbering_properties(&fields, header_index, object_refs),
-        standard_attributes: parse_document_standard_attributes(&fields, uuid),
-        default_object_form: parse_catalog_form_ref(
-            fields.get(header_index + 14).copied(),
-            form_refs,
-        ),
-        default_list_form: parse_default_list_form_ref(
-            &fields,
-            &[header_index + 15],
-            form_refs,
+    let generated_types = parse_document_generated_types(&fields, &header.name)?;
+    let form_uuids = parse_task_form_uuids(&collections.get(4)?.items)?;
+    let child_forms = parse_document_child_forms(&form_uuids, &header.name, form_refs)?;
+    if child_forms
+        != owned_metadata_form_names_in_text_order(text, "Documents", &header.name, form_refs)
+    {
+        return None;
+    }
+    let template_uuids = parse_task_form_uuids(&collections.get(1)?.items)?;
+    let child_templates =
+        parse_document_child_templates(&template_uuids, &header.name, template_refs)?;
+    if child_templates
+        != owned_metadata_template_names_in_text_order(
+            text,
             "Documents",
             &header.name,
-        ),
-        default_choice_form: parse_catalog_form_ref(
-            fields.get(header_index + 16).copied(),
-            form_refs,
-        ),
-        auxiliary_object_form: parse_catalog_form_ref(
-            fields.get(header_index + 17).copied(),
-            form_refs,
-        ),
-        auxiliary_list_form: parse_catalog_form_ref(
-            fields.get(header_index + 18).copied(),
-            form_refs,
-        ),
-        auxiliary_choice_form: parse_catalog_form_ref(
-            fields.get(header_index + 19).copied(),
-            form_refs,
-        ),
-        include_help_in_contents: parse_1c_bool_field(fields.get(header_index + 20).copied())
-            .unwrap_or(false),
-        child_metadata_objects: parse_attribute_tabular_section_child_objects(
-            "Document",
-            &header.name,
-            text,
-            uuid,
-            None,
-            type_index,
-            object_refs,
-            metadata_object_refs,
-            form_refs,
-        ),
-        child_forms: owned_document_form_names_in_text_order(text, &header.name, form_refs),
-        child_templates: owned_document_template_names_in_text_order(
-            text,
-            &header.name,
             template_refs,
-        ),
+        )
+    {
+        return None;
+    }
+
+    let direct_attribute_uuids =
+        parse_document_attribute_collection(&collections.get(2)?.items, 5)?;
+    let tabular_sections =
+        parse_document_tabular_sections(&collections.get(0)?.items, &header.name, object_refs)?;
+    let child_metadata_objects = parse_attribute_tabular_section_child_objects(
+        "Document",
+        &header.name,
+        text,
+        uuid,
+        None,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        form_refs,
+    );
+    if !validate_document_child_objects(
+        &child_metadata_objects,
+        &direct_attribute_uuids,
+        &tabular_sections,
+    ) {
+        return None;
+    }
+    let child_commands = parse_task_commands(
+        &collections.get(3)?.items,
+        text,
+        uuid,
+        type_index,
+        object_refs,
+    )?;
+
+    let attribute_references = child_metadata_objects
+        .iter()
+        .filter(|child| child.tag == "Attribute")
+        .map(|child| format!("Document.{}.Attribute.{}", header.name, child.header.name))
+        .collect::<BTreeSet<_>>();
+    let input_by_string = parse_document_field_references(
+        fields.get(29)?,
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-2", "Number")],
+    )?;
+    let data_lock_fields = parse_document_field_references(
+        fields.get(47)?,
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[],
+    )?;
+    let (
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+    ) = parse_task_input_modes(fields.get(48)?)?;
+
+    let mut child_uuids = BTreeSet::new();
+    if form_uuids
+        .iter()
+        .chain(&template_uuids)
+        .chain(&direct_attribute_uuids)
+        .chain(tabular_sections.iter().flat_map(|section| {
+            std::iter::once(&section.uuid).chain(section.attribute_uuids.iter())
+        }))
+        .chain(child_commands.iter().map(|command| &command.header.uuid))
+        .any(|child_uuid| !child_uuids.insert(child_uuid.to_ascii_lowercase()))
+    {
+        return None;
+    }
+
+    Some(DocumentProperties {
+        generated_types,
+        use_standard_commands: information_register_bool(fields.get(23)?)?,
+        numbering: DocumentNumberingProperties {
+            numerator: parse_document_optional_object_reference(fields.get(10)?, object_refs)?,
+            number_type: match fields.get(11)?.trim() {
+                "0" => "Number",
+                "1" => "String",
+                _ => return None,
+            },
+            number_length: parse_exchange_plan_u32(fields.get(12)?)?,
+            number_allowed_length: match fields.get(44)?.trim() {
+                "0" => "Fixed",
+                "1" => "Variable",
+                _ => return None,
+            },
+            number_periodicity: match fields.get(13)?.trim() {
+                "0" => "Nonperiodical",
+                "1" => "Year",
+                _ => return None,
+            },
+            check_unique: information_register_bool(fields.get(14)?)?,
+            autonumbering: information_register_bool(fields.get(15)?)?,
+        },
+        standard_attributes: parse_document_standard_attributes(
+            fields.get(32)?,
+            type_index,
+            metadata_object_refs,
+        )?,
+        characteristics: parse_document_characteristics(
+            fields.get(45)?,
+            type_index,
+            metadata_object_refs,
+            object_refs,
+        )?,
+        based_on: parse_document_reference_collection(
+            fields.get(22)?,
+            object_refs,
+            &["Document."],
+        )?,
+        input_by_string,
+        create_on_input: metadata_create_on_input_xml(fields.get(46)?.trim())?,
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+        default_object_form: parse_document_form_ref(
+            fields.get(16)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_list_form: parse_document_form_ref(
+            fields.get(17)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_choice_form: parse_document_form_ref(
+            fields.get(18)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_object_form: parse_document_form_ref(
+            fields.get(35)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: parse_document_form_ref(
+            fields.get(36)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_choice_form: parse_document_form_ref(
+            fields.get(37)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        posting: match fields.get(19)?.trim() {
+            "0" => "Allow",
+            "1" => "Deny",
+            _ => return None,
+        },
+        real_time_posting: match fields.get(21)?.trim() {
+            "0" => "Allow",
+            "1" => "Deny",
+            _ => return None,
+        },
+        register_records_deletion: match fields.get(20)?.trim() {
+            "0" => "AutoDelete",
+            "1" => "AutoDeleteOff",
+            "2" => "AutoDeleteOnUnpost",
+            _ => return None,
+        },
+        register_records_writing_on_post: match fields.get(43)?.trim() {
+            "0" => "WriteSelected",
+            "1" => "WriteModified",
+            _ => return None,
+        },
+        sequence_filling: match fields.get(28)?.trim() {
+            "0" => "AutoFill",
+            "1" => "AutoFillOff",
+            _ => return None,
+        },
+        register_records: parse_document_reference_collection(
+            fields.get(24)?,
+            object_refs,
+            &[
+                "InformationRegister.",
+                "AccumulationRegister.",
+                "AccountingRegister.",
+                "CalculationRegister.",
+            ],
+        )?,
+        post_in_privileged_mode: information_register_bool(fields.get(33)?)?,
+        unpost_in_privileged_mode: information_register_bool(fields.get(34)?)?,
+        include_help_in_contents: information_register_bool(fields.get(25)?)?,
+        data_lock_fields,
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(30)?)?,
+        full_text_search: register_child_full_text_search_xml(fields.get(31)?.trim())?,
+        object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,
+        extended_object_presentation: parse_information_register_owner_localized_value(
+            fields.get(39)?,
+        )?,
+        list_presentation: parse_information_register_owner_localized_value(fields.get(40)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            fields.get(41)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(fields.get(42)?)?,
+        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(49)?.trim())?,
+        data_history: metadata_data_history_xml(fields.get(50)?.trim())?,
+        update_data_history_immediately_after_write: information_register_bool(fields.get(51)?)?,
+        execute_after_write_data_history_version_processing: information_register_bool(
+            fields.get(52)?,
+        )?,
+        child_metadata_objects,
+        child_forms,
+        child_templates,
+        child_commands,
     })
+}
+
+fn parse_document_generated_types(
+    fields: &[&str],
+    owner_name: &str,
+) -> Option<Vec<GeneratedTypeEntry>> {
+    let definitions = [
+        (1, 2, "DocumentObject", "Object"),
+        (3, 4, "DocumentRef", "Ref"),
+        (5, 6, "DocumentSelection", "Selection"),
+        (7, 8, "DocumentList", "List"),
+        (26, 27, "DocumentManager", "Manager"),
+    ];
+    let mut seen = BTreeSet::new();
+    definitions
+        .into_iter()
+        .map(|(type_slot, value_slot, prefix, category)| {
+            let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
+            let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
+            if !seen.insert(type_id.to_ascii_lowercase())
+                || !seen.insert(value_id.to_ascii_lowercase())
+            {
+                return None;
+            }
+            Some(GeneratedTypeEntry {
+                name: format!("{prefix}.{owner_name}"),
+                category,
+                type_id,
+                value_id,
+            })
+        })
+        .collect()
+}
+
+fn parse_document_optional_object_reference(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+    let name = reference.strip_prefix("DocumentNumerator.")?;
+    if name.is_empty() || name.contains('.') {
+        return None;
+    }
+    Some(Some(reference))
+}
+
+fn parse_document_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if !information_register_uuid_is_zero(&uuid)
+        && !form_uuids
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
+    {
+        return None;
+    }
+    parse_exact_register_owned_form_ref(value, "Document", owner_name, form_refs)
+}
+
+fn parse_document_child_forms(
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("Document.{owner_name}.Form.");
+    let mut seen = BTreeSet::new();
+    form_uuids
+        .iter()
+        .map(|uuid| {
+            let reference =
+                parse_exact_register_owned_form_ref(uuid, "Document", owner_name, form_refs)??;
+            let name = reference.strip_prefix(&prefix)?;
+            (!name.is_empty() && !name.contains('.') && seen.insert(name.to_lowercase()))
+                .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn parse_document_child_templates(
+    template_uuids: &[String],
+    owner_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("Document.{owner_name}.Template.");
+    let mut seen = BTreeSet::new();
+    template_uuids
+        .iter()
+        .map(|uuid| {
+            let mut matches = template_refs
+                .iter()
+                .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+            let (_, template_ref) = matches.next()?;
+            if matches.next().is_some()
+                || template_ref.kind != "Template"
+                || !is_owned_metadata_child_path(
+                    &template_ref.relative_path,
+                    "Documents",
+                    owner_name,
+                    "Templates",
+                )
+            {
+                return None;
+            }
+            let reference = template_source_reference_name(template_ref)?;
+            let name = reference.strip_prefix(&prefix)?;
+            (source_path_file_stem(&template_ref.relative_path)? == name
+                && !name.is_empty()
+                && !name.contains('.')
+                && seen.insert(name.to_lowercase()))
+            .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn parse_document_attribute_collection(items: &[&str], code: u32) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let item = split_information_register_braced_fields(item)?;
+            if item.len() != 2 || item.get(1)?.trim() != "0" {
+                return None;
+            }
+            let wrapper = split_information_register_braced_fields(item.first()?)?;
+            let (_, _, wrapper_code, child_uuid) =
+                parse_document_attribute_wrapper_fields(&wrapper, None)?;
+            (wrapper_code == code && seen.insert(child_uuid.to_ascii_lowercase()))
+                .then_some(child_uuid)
+        })
+        .collect()
+}
+
+struct DocumentTabularSectionLayout {
+    uuid: String,
+    attribute_uuids: Vec<String>,
+}
+
+fn parse_document_tabular_sections(
+    items: &[&str],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<DocumentTabularSectionLayout>> {
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_names = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let item = split_information_register_braced_fields(item)?;
+            if item.len() != 3 || item.get(1)?.trim() != "1" {
+                return None;
+            }
+            let wrapper = split_information_register_braced_fields(item.first()?)?;
+            if wrapper.len() != 2 || wrapper.first()?.trim() != "1" {
+                return None;
+            }
+            let fields = split_information_register_braced_fields(wrapper.get(1)?)?;
+            if fields.len() != 9 || fields.first()?.trim() != "11" {
+                return None;
+            }
+            let header = parse_wrapped_register_owner_header(fields.get(5)?)?;
+            let expected_reference =
+                format!("Document.{owner_name}.TabularSection.{}", header.name);
+            if header.name.is_empty()
+                || header.name.contains('.')
+                || resolve_exchange_plan_index_reference(&header.uuid, object_refs)?
+                    != expected_reference
+                || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+                || !seen_names.insert(header.name.to_lowercase())
+                || fields[1..5]
+                    .iter()
+                    .map(|value| parse_information_register_non_zero_uuid(value))
+                    .collect::<Option<Vec<_>>>()?
+                    .into_iter()
+                    .any(|uuid| !seen_uuids.insert(uuid.to_ascii_lowercase()))
+            {
+                return None;
+            }
+            let collection = parse_task_root_collection(item.get(2)?)?;
+            if !collection
+                .marker
+                .eq_ignore_ascii_case(DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID)
+            {
+                return None;
+            }
+            let attribute_uuids = parse_document_attribute_collection(&collection.items, 8)?;
+            Some(DocumentTabularSectionLayout {
+                uuid: header.uuid,
+                attribute_uuids,
+            })
+        })
+        .collect()
+}
+
+fn validate_document_child_objects(
+    children: &[MetadataChildObject],
+    direct_attribute_uuids: &[String],
+    tabular_sections: &[DocumentTabularSectionLayout],
+) -> bool {
+    let direct = children
+        .iter()
+        .filter(|child| child.tag == "Attribute")
+        .collect::<Vec<_>>();
+    let sections = children
+        .iter()
+        .filter(|child| child.tag == "TabularSection")
+        .collect::<Vec<_>>();
+    children.len() == direct.len() + sections.len()
+        && direct.len() == direct_attribute_uuids.len()
+        && direct
+            .iter()
+            .zip(direct_attribute_uuids)
+            .all(|(child, uuid)| {
+                child.header.uuid.eq_ignore_ascii_case(uuid)
+                    && child.properties.is_some()
+                    && child.child_objects.is_empty()
+            })
+        && sections.len() == tabular_sections.len()
+        && sections
+            .iter()
+            .zip(tabular_sections)
+            .all(|(child, expected)| {
+                child.header.uuid.eq_ignore_ascii_case(&expected.uuid)
+                    && child.tabular_section_properties.is_some()
+                    && child.child_objects.len() == expected.attribute_uuids.len()
+                    && child
+                        .child_objects
+                        .iter()
+                        .zip(&expected.attribute_uuids)
+                        .all(|(attribute, uuid)| {
+                            attribute.tag == "Attribute"
+                                && attribute.header.uuid.eq_ignore_ascii_case(uuid)
+                                && attribute.properties.is_some()
+                        })
+            })
+}
+
+fn parse_document_field_references(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    attribute_references: &BTreeSet<String>,
+    standard_attributes: &[(&str, &str)],
+) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|value| {
+            let payload = parse_exchange_plan_field_ref_payload(value)?;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    let (_, name) = standard_attributes
+                        .iter()
+                        .find(|(candidate, _)| marker.trim() == *candidate)?;
+                    format!("Document.{owner_name}.StandardAttribute.{name}")
+                }
+                [kind, uuid] if kind.trim() == "0" => {
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
+                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+                    attribute_references
+                        .contains(&reference)
+                        .then_some(reference)?
+                }
+                _ => return None,
+            };
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
+        })
+        .collect()
+}
+
+fn parse_document_reference_collection(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    allowed_prefixes: &[&str],
+) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    fields[2..]
+        .iter()
+        .map(|value| {
+            let typed = split_information_register_braced_fields(value)?;
+            if typed.len() != 3
+                || typed.first()?.trim() != r##""#""##
+                || !information_register_uuid_matches(typed.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
+            {
+                return None;
+            }
+            let payload = split_information_register_braced_fields(typed.get(2)?)?;
+            if payload.len() != 2 || payload.first()?.trim() != "1" {
+                return None;
+            }
+            let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
+            let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+            let valid = allowed_prefixes.iter().any(|prefix| {
+                reference
+                    .strip_prefix(prefix)
+                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+            });
+            (valid && seen.insert(reference.to_ascii_lowercase())).then_some(reference)
+        })
+        .collect()
+}
+
+const DOCUMENT_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
+    ("-7", "Posted"),
+    ("-5", "Ref"),
+    ("-4", "DeletionMark"),
+    ("-3", "Date"),
+    ("-2", "Number"),
+];
+
+fn parse_document_standard_attributes(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<Vec<MetadataStandardAttribute>>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(None);
+    }
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.first()?.trim() != "1"
+        || parse_information_register_usize(payload.get(1)?)? != DOCUMENT_STANDARD_ATTRIBUTES.len()
+        || payload.len()
+            != DOCUMENT_STANDARD_ATTRIBUTES
+                .len()
+                .checked_mul(3)?
+                .checked_add(2)?
+    {
+        return None;
+    }
+    let mut bag_shape = None;
+    let attributes = DOCUMENT_STANDARD_ATTRIBUTES
+        .iter()
+        .copied()
+        .zip(payload[2..].chunks_exact(3))
+        .map(|((expected_marker, name), triplet)| {
+            let marker = split_information_register_braced_fields(triplet[0])?;
+            if marker.len() != 1
+                || marker.first()?.trim() != expected_marker
+                || !information_register_uuid_matches(
+                    triplet[1],
+                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+                )
+            {
+                return None;
+            }
+            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
+                return None;
+            }
+            bag_shape = Some(bag.has_type_reduction_mode);
+            let fill_value =
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value =
+                parse_information_register_fill_value(fill_value, type_index, object_refs)?;
+            let (attribute, comment) =
+                parse_register_standard_attribute_with_comment(name, &bag, fill_value)?;
+            Some(MetadataStandardAttribute { attribute, comment })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(Some(attributes))
+}
+
+fn parse_document_characteristics(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<DocumentCharacteristic>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "0" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    let count = parse_information_register_usize(payload.first()?)?;
+    if payload.len() != count.checked_add(1)? {
+        return None;
+    }
+    payload[1..]
+        .iter()
+        .map(|value| {
+            let typed = split_information_register_braced_fields(value)?;
+            if typed.len() != 3
+                || typed.first()?.trim() != r##""#""##
+                || !information_register_uuid_matches(
+                    typed.get(1)?,
+                    DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+                )
+            {
+                return None;
+            }
+            let fields = split_information_register_braced_fields(typed.get(2)?)?;
+            if fields.len() != 13 || fields.first()?.trim() != "4" {
+                return None;
+            }
+            let types_from = parse_document_characteristic_source(fields.get(1)?, object_refs)?;
+            let values_from = parse_document_characteristic_source(fields.get(2)?, object_refs)?;
+            Some(DocumentCharacteristic {
+                object_field: parse_document_characteristic_field(
+                    fields.get(3)?,
+                    object_refs,
+                    Some(&values_from),
+                )?,
+                type_field: parse_document_characteristic_field(fields.get(4)?, object_refs, None)?,
+                value_field: parse_document_characteristic_field(
+                    fields.get(5)?,
+                    object_refs,
+                    None,
+                )?,
+                types_filter_field: parse_document_characteristic_field(
+                    fields.get(6)?,
+                    object_refs,
+                    None,
+                )?,
+                types_filter_value: parse_information_register_fill_value(
+                    fields.get(7)?,
+                    type_index,
+                    metadata_object_refs,
+                )?,
+                key_field: parse_document_characteristic_field(fields.get(8)?, object_refs, None)?,
+                data_path_field: parse_document_characteristic_field(
+                    fields.get(9)?,
+                    object_refs,
+                    None,
+                )?,
+                multiple_values_use_field: parse_document_characteristic_field(
+                    fields.get(10)?,
+                    object_refs,
+                    None,
+                )?,
+                multiple_values_key_field: parse_document_characteristic_field(
+                    fields.get(11)?,
+                    object_refs,
+                    None,
+                )?,
+                multiple_values_order_field: parse_document_characteristic_field(
+                    fields.get(12)?,
+                    object_refs,
+                    None,
+                )?,
+                types_from,
+                values_from,
+            })
+        })
+        .collect()
+}
+
+fn parse_document_characteristic_source(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 2 || fields.first()?.trim() != "1" {
+        return None;
+    }
+    let uuid = parse_information_register_non_zero_uuid(fields.get(1)?)?;
+    resolve_exchange_plan_index_reference(&uuid, object_refs)
+}
+
+fn parse_document_characteristic_field(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    standard_attribute_owner: Option<&str>,
+) -> Option<String> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3 || fields.first()?.trim() != "1" || fields.get(2)?.trim() != "0" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(fields.get(1)?)?;
+    match payload.as_slice() {
+        [marker] if matches!(marker.trim(), "-1" | "0") => Some(marker.trim().to_string()),
+        [marker] if marker.trim() == "-5" => Some(format!(
+            "{}.StandardAttribute.Ref",
+            standard_attribute_owner?
+        )),
+        [kind, uuid] if kind.trim() == "0" => {
+            let uuid = parse_information_register_non_zero_uuid(uuid)?;
+            resolve_exchange_plan_index_reference(&uuid, object_refs)
+        }
+        _ => None,
+    }
 }
 
 fn parse_business_process_properties_from_text(
@@ -14642,7 +15407,7 @@ fn parse_task_standard_attributes(
     value: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<TaskStandardAttribute>> {
+) -> Option<Vec<MetadataStandardAttribute>> {
     let outer = split_information_register_braced_fields(value)?;
     if outer.len() != 2 || outer.first()?.trim() != "1" {
         return None;
@@ -14686,7 +15451,7 @@ fn parse_task_standard_attributes(
                 parse_information_register_fill_value(fill_value, type_index, object_refs)?;
             let (attribute, comment) =
                 parse_register_standard_attribute_with_comment(name, &bag, fill_value)?;
-            Some(TaskStandardAttribute { attribute, comment })
+            Some(MetadataStandardAttribute { attribute, comment })
         })
         .collect()
 }
@@ -16030,22 +16795,6 @@ fn owned_report_form_names_in_text_order(
     owned_metadata_form_names_in_text_order(text, "Reports", report_name, form_refs)
 }
 
-fn owned_document_form_names_in_text_order(
-    text: &str,
-    document_name: &str,
-    form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Vec<String> {
-    owned_metadata_form_names_in_text_order(text, "Documents", document_name, form_refs)
-}
-
-fn owned_document_template_names_in_text_order(
-    text: &str,
-    document_name: &str,
-    template_refs: &BTreeMap<String, TemplateSourceReference>,
-) -> Vec<String> {
-    owned_metadata_template_names_in_text_order(text, "Documents", document_name, template_refs)
-}
-
 fn owned_catalog_form_names_in_text_order(
     text: &str,
     catalog_name: &str,
@@ -16154,17 +16903,6 @@ fn catalog_standard_attribute_name(code: &str) -> Option<&'static str> {
     }
 }
 
-fn document_standard_attribute_name(code: &str) -> Option<&'static str> {
-    match code {
-        "-7" => Some("Posted"),
-        "-5" => Some("Ref"),
-        "-4" => Some("DeletionMark"),
-        "-3" => Some("Date"),
-        "-2" => Some("Number"),
-        _ => None,
-    }
-}
-
 fn parse_1c_bool_field(value: Option<&str>) -> Option<bool> {
     parse_1c_bool_flag(value?.trim())
 }
@@ -16218,69 +16956,6 @@ fn enum_choice_mode_xml(value: u32) -> &'static str {
         1 => "QuickChoice",
         2 => "BothWays",
         _ => "BothWays",
-    }
-}
-
-fn parse_document_standard_attributes(
-    fields: &[&str],
-    uuid: &str,
-) -> Option<DocumentStandardAttributes> {
-    let header_index = metadata_header_field_index(fields, uuid)?;
-    let number_type =
-        document_number_type_xml(parse_1c_u32_field(fields.get(header_index + 3).copied())?);
-    let details = parse_standard_attribute_details(
-        fields.get(header_index + 23).copied(),
-        document_standard_attribute_name,
-    );
-    Some(DocumentStandardAttributes {
-        number_type,
-        details,
-    })
-}
-
-fn parse_document_numbering_properties(
-    fields: &[&str],
-    header_index: usize,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<DocumentNumberingProperties> {
-    Some(DocumentNumberingProperties {
-        numerator: parse_metadata_object_ref(fields.get(header_index + 2).copied(), object_refs),
-        number_type: document_number_type_xml(parse_1c_u32_field(
-            fields.get(header_index + 3).copied(),
-        )?),
-        number_length: parse_1c_u32_field(fields.get(header_index + 4).copied())?,
-        number_allowed_length: document_number_allowed_length_xml(parse_1c_u32_field(
-            fields.get(header_index + 5).copied(),
-        )?),
-        number_periodicity: document_number_periodicity_xml(parse_1c_u32_field(
-            fields.get(header_index + 6).copied(),
-        )?),
-        check_unique: parse_1c_bool_field(fields.get(header_index + 7).copied())?,
-        autonumbering: parse_1c_bool_field(fields.get(header_index + 8).copied())?,
-    })
-}
-
-fn document_number_type_xml(value: u32) -> &'static str {
-    match value {
-        0 => "Number",
-        _ => "String",
-    }
-}
-
-fn document_number_allowed_length_xml(value: u32) -> &'static str {
-    match value {
-        0 => "Fixed",
-        _ => "Variable",
-    }
-}
-
-fn document_number_periodicity_xml(value: u32) -> &'static str {
-    match value {
-        1 => "Month",
-        2 => "Quarter",
-        3 => "Day",
-        4 => "None",
-        _ => "Year",
     }
 }
 
@@ -20927,99 +21602,244 @@ fn format_document_source_xml(
             "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
             xml_bool(document.use_standard_commands)
         );
-        if let Some(numbering) = &document.numbering {
-            push_document_numbering_xml(&mut properties, numbering);
+        push_document_numbering_xml(&mut properties, &document.numbering);
+        if let Some(standard_attributes) = &document.standard_attributes {
+            push_metadata_standard_attributes_xml(&mut properties, standard_attributes);
         }
-        xml.insert_str(index, &properties);
-    }
-    if let Some(standard_attributes) = &document.standard_attributes
-        && let Some(index) = xml.find("\t\t</Properties>")
-    {
-        let mut properties = String::new();
-        push_document_standard_attributes_xml(&mut properties, standard_attributes);
-        xml.insert_str(index, &properties);
-    }
-    if let Some(index) = xml.find("\t\t</Properties>") {
-        let mut properties = String::new();
-        push_optional_text_element(
+        push_document_characteristics_xml(&mut properties, &document.characteristics);
+        push_task_based_on_xml(&mut properties, &document.based_on);
+        push_catalog_input_by_string_xml(&mut properties, &document.input_by_string);
+        properties.push_str(&format!(
+            "\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
+\t\t\t<SearchStringModeOnInputByString>{}</SearchStringModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>{}</FullTextSearchOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>{}</ChoiceDataGetModeOnInputByString>\r\n",
+            document.create_on_input,
+            document.search_string_mode_on_input_by_string,
+            document.full_text_search_on_input_by_string,
+            document.choice_data_get_mode_on_input_by_string,
+        ));
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
             "DefaultObjectForm",
             document.default_object_form.as_deref(),
         );
-        push_optional_text_element(
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
             "DefaultListForm",
             document.default_list_form.as_deref(),
         );
-        push_optional_text_element(
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
             "DefaultChoiceForm",
             document.default_choice_form.as_deref(),
         );
-        push_optional_text_element(
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
             "AuxiliaryObjectForm",
             document.auxiliary_object_form.as_deref(),
         );
-        push_optional_text_element(
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
             "AuxiliaryListForm",
             document.auxiliary_list_form.as_deref(),
         );
-        push_optional_text_element(
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
             "AuxiliaryChoiceForm",
             document.auxiliary_choice_form.as_deref(),
         );
         properties.push_str(&format!(
-            "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
-            xml_bool(document.include_help_in_contents)
+            "\t\t\t<Posting>{}</Posting>\r\n\
+\t\t\t<RealTimePosting>{}</RealTimePosting>\r\n\
+\t\t\t<RegisterRecordsDeletion>{}</RegisterRecordsDeletion>\r\n\
+\t\t\t<RegisterRecordsWritingOnPost>{}</RegisterRecordsWritingOnPost>\r\n\
+\t\t\t<SequenceFilling>{}</SequenceFilling>\r\n",
+            document.posting,
+            document.real_time_posting,
+            document.register_records_deletion,
+            document.register_records_writing_on_post,
+            document.sequence_filling,
+        ));
+        push_document_reference_collection_xml(
+            &mut properties,
+            "RegisterRecords",
+            &document.register_records,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<PostInPrivilegedMode>{}</PostInPrivilegedMode>\r\n\
+\t\t\t<UnpostInPrivilegedMode>{}</UnpostInPrivilegedMode>\r\n\
+\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+            xml_bool(document.post_in_privileged_mode),
+            xml_bool(document.unpost_in_privileged_mode),
+            xml_bool(document.include_help_in_contents),
+        ));
+        push_exchange_plan_field_collection_xml(
+            &mut properties,
+            "DataLockFields",
+            &document.data_lock_fields,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n",
+            document.data_lock_control_mode, document.full_text_search,
+        ));
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ObjectPresentation",
+            &document.object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedObjectPresentation",
+            &document.extended_object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ListPresentation",
+            &document.list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedListPresentation",
+            &document.extended_list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "Explanation",
+            &document.explanation,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
+\t\t\t<DataHistory>{}</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+            document.choice_history_on_input,
+            document.data_history,
+            xml_bool(document.update_data_history_immediately_after_write),
+            xml_bool(document.execute_after_write_data_history_version_processing),
         ));
         xml.insert_str(index, &properties);
     }
-    if !document.child_metadata_objects.is_empty()
-        || !document.child_forms.is_empty()
-        || !document.child_templates.is_empty()
-    {
-        let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
-        for child in document
-            .child_metadata_objects
-            .iter()
-            .filter(|child| child.tag == "Attribute")
+    if let Some(index) = xml.find("\t</Document>") {
+        if document.child_metadata_objects.is_empty()
+            && document.child_forms.is_empty()
+            && document.child_templates.is_empty()
+            && document.child_commands.is_empty()
         {
-            push_metadata_child_object_xml(&mut child_objects, child);
-        }
-        for form in &document.child_forms {
-            child_objects.push_str(&format!(
-                "\t\t\t<Form>{}</Form>\r\n",
-                escape_xml_element_text(form)
-            ));
-        }
-        for child in document
-            .child_metadata_objects
-            .iter()
-            .filter(|child| child.tag == "TabularSection")
-        {
-            push_metadata_child_object_xml(&mut child_objects, child);
-        }
-        for template in &document.child_templates {
-            child_objects.push_str(&format!(
-                "\t\t\t<Template>{}</Template>\r\n",
-                escape_xml_element_text(template)
-            ));
-        }
-        child_objects.push_str("\t\t</ChildObjects>\r\n");
-        if let Some(index) = xml.find("\t</Document>") {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        } else {
+            let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+            for child in document
+                .child_metadata_objects
+                .iter()
+                .filter(|child| child.tag == "Attribute")
+            {
+                push_metadata_child_object_xml(&mut child_objects, child);
+            }
+            for form in &document.child_forms {
+                child_objects.push_str(&format!(
+                    "\t\t\t<Form>{}</Form>\r\n",
+                    escape_xml_element_text(form)
+                ));
+            }
+            for child in document
+                .child_metadata_objects
+                .iter()
+                .filter(|child| child.tag == "TabularSection")
+            {
+                push_metadata_child_object_xml(&mut child_objects, child);
+            }
+            for template in &document.child_templates {
+                child_objects.push_str(&format!(
+                    "\t\t\t<Template>{}</Template>\r\n",
+                    escape_xml_element_text(template)
+                ));
+            }
+            for command in &document.child_commands {
+                push_metadata_child_command_xml(&mut child_objects, command);
+            }
+            child_objects.push_str("\t\t</ChildObjects>\r\n");
             xml.insert_str(index, &child_objects);
         }
     }
     xml
+}
+
+fn push_document_reference_collection_xml(xml: &mut String, name: &str, references: &[String]) {
+    if references.is_empty() {
+        xml.push_str(&format!("\t\t\t<{name}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("\t\t\t<{name}>\r\n"));
+    for reference in references {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+            escape_xml_element_text(reference)
+        ));
+    }
+    xml.push_str(&format!("\t\t\t</{name}>\r\n"));
+}
+
+fn push_document_characteristics_xml(xml: &mut String, characteristics: &[DocumentCharacteristic]) {
+    if characteristics.is_empty() {
+        xml.push_str("\t\t\t<Characteristics/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<Characteristics>\r\n");
+    for characteristic in characteristics {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Characteristic>\r\n\
+\t\t\t\t\t<xr:CharacteristicTypes from=\"{}\">\r\n\
+\t\t\t\t\t\t<xr:KeyField>{}</xr:KeyField>\r\n\
+\t\t\t\t\t\t<xr:TypesFilterField>{}</xr:TypesFilterField>\r\n",
+            escape_xml_text(&characteristic.types_from),
+            escape_xml_element_text(&characteristic.key_field),
+            escape_xml_element_text(&characteristic.types_filter_field),
+        ));
+        push_document_characteristic_value_xml(
+            xml,
+            &characteristic.types_filter_value,
+            "\t\t\t\t\t\t",
+        );
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t<xr:DataPathField>{}</xr:DataPathField>\r\n\
+\t\t\t\t\t\t<xr:MultipleValuesUseField>{}</xr:MultipleValuesUseField>\r\n\
+\t\t\t\t\t</xr:CharacteristicTypes>\r\n\
+\t\t\t\t\t<xr:CharacteristicValues from=\"{}\">\r\n\
+\t\t\t\t\t\t<xr:ObjectField>{}</xr:ObjectField>\r\n\
+\t\t\t\t\t\t<xr:TypeField>{}</xr:TypeField>\r\n\
+\t\t\t\t\t\t<xr:ValueField>{}</xr:ValueField>\r\n\
+\t\t\t\t\t\t<xr:MultipleValuesKeyField>{}</xr:MultipleValuesKeyField>\r\n\
+\t\t\t\t\t\t<xr:MultipleValuesOrderField>{}</xr:MultipleValuesOrderField>\r\n\
+\t\t\t\t\t</xr:CharacteristicValues>\r\n\
+\t\t\t\t</xr:Characteristic>\r\n",
+            escape_xml_element_text(&characteristic.data_path_field),
+            escape_xml_element_text(&characteristic.multiple_values_use_field),
+            escape_xml_text(&characteristic.values_from),
+            escape_xml_element_text(&characteristic.object_field),
+            escape_xml_element_text(&characteristic.type_field),
+            escape_xml_element_text(&characteristic.value_field),
+            escape_xml_element_text(&characteristic.multiple_values_key_field),
+            escape_xml_element_text(&characteristic.multiple_values_order_field),
+        ));
+    }
+    xml.push_str("\t\t\t</Characteristics>\r\n");
+}
+
+fn push_document_characteristic_value_xml(
+    xml: &mut String,
+    value: &MetadataChildFillValue,
+    indent: &str,
+) {
+    let value_xml = format_register_standard_attribute_fill_value_xml(value)
+        .replace("xr:FillValue", "xr:TypesFilterValue");
+    xml.push_str(&format!("{indent}{value_xml}\r\n"));
 }
 
 fn format_business_process_source_xml(
@@ -21089,7 +21909,7 @@ fn format_task_source_xml(
             task.current_performer.as_deref(),
         );
         push_task_based_on_xml(&mut properties, &task.based_on);
-        push_task_standard_attributes_xml(&mut properties, &task.standard_attributes);
+        push_metadata_standard_attributes_xml(&mut properties, &task.standard_attributes);
         properties.push_str("\t\t\t<Characteristics/>\r\n");
         properties.push_str(&format!(
             "\t\t\t<DefaultPresentation>{}</DefaultPresentation>\r\n\
@@ -21234,10 +22054,13 @@ fn push_task_based_on_xml(xml: &mut String, references: &[String]) {
     xml.push_str("\t\t\t</BasedOn>\r\n");
 }
 
-fn push_task_standard_attributes_xml(xml: &mut String, attributes: &[TaskStandardAttribute]) {
+fn push_metadata_standard_attributes_xml(
+    xml: &mut String,
+    attributes: &[MetadataStandardAttribute],
+) {
     xml.push_str("\t\t\t<StandardAttributes>\r\n");
-    for task_attribute in attributes {
-        let attribute = &task_attribute.attribute;
+    for parsed_attribute in attributes {
+        let attribute = &parsed_attribute.attribute;
         xml.push_str(&format!(
             "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n",
             escape_xml_text(attribute.name),
@@ -21281,12 +22104,12 @@ fn push_task_standard_attributes_xml(xml: &mut String, attributes: &[TaskStandar
             attribute.data_history,
         ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Synonym", &attribute.synonym);
-        if task_attribute.comment.is_empty() {
+        if parsed_attribute.comment.is_empty() {
             xml.push_str("\t\t\t\t\t<xr:Comment/>\r\n");
         } else {
             xml.push_str(&format!(
                 "\t\t\t\t\t<xr:Comment>{}</xr:Comment>\r\n",
-                escape_xml_element_text(&task_attribute.comment)
+                escape_xml_element_text(&parsed_attribute.comment)
             ));
         }
         xml.push_str(&format!(
@@ -21969,148 +22792,6 @@ fn push_document_numbering_xml(xml: &mut String, numbering: &DocumentNumberingPr
         xml_bool(numbering.check_unique),
         xml_bool(numbering.autonumbering)
     ));
-}
-
-fn push_document_standard_attributes_xml(
-    xml: &mut String,
-    standard_attributes: &DocumentStandardAttributes,
-) {
-    xml.push_str("\t\t\t<StandardAttributes>\r\n");
-    for attribute in document_standard_attributes() {
-        push_document_standard_attribute_xml(xml, attribute, standard_attributes);
-    }
-    xml.push_str("\t\t\t</StandardAttributes>\r\n");
-}
-
-struct DocumentStandardAttribute {
-    name: &'static str,
-    fill_checking: &'static str,
-    fill_value: DocumentStandardAttributeFillValue,
-}
-
-enum DocumentStandardAttributeFillValue {
-    Nil,
-    BooleanFalse,
-    DateTimeZero,
-    Number,
-}
-
-fn document_standard_attributes() -> &'static [DocumentStandardAttribute] {
-    &[
-        DocumentStandardAttribute {
-            name: "Posted",
-            fill_checking: "DontCheck",
-            fill_value: DocumentStandardAttributeFillValue::Nil,
-        },
-        DocumentStandardAttribute {
-            name: "Ref",
-            fill_checking: "DontCheck",
-            fill_value: DocumentStandardAttributeFillValue::Nil,
-        },
-        DocumentStandardAttribute {
-            name: "DeletionMark",
-            fill_checking: "DontCheck",
-            fill_value: DocumentStandardAttributeFillValue::BooleanFalse,
-        },
-        DocumentStandardAttribute {
-            name: "Date",
-            fill_checking: "ShowError",
-            fill_value: DocumentStandardAttributeFillValue::DateTimeZero,
-        },
-        DocumentStandardAttribute {
-            name: "Number",
-            fill_checking: "DontCheck",
-            fill_value: DocumentStandardAttributeFillValue::Number,
-        },
-    ]
-}
-
-fn push_document_standard_attribute_xml(
-    xml: &mut String,
-    attribute: &DocumentStandardAttribute,
-    standard_attributes: &DocumentStandardAttributes,
-) {
-    xml.push_str(&format!(
-        "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
-\t\t\t\t\t<xr:LinkByType/>\r\n\
-\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
-\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
-\t\t\t\t\t<xr:FillFromFillingValue>false</xr:FillFromFillingValue>\r\n\
-\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
-\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
-\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
-        escape_xml_text(attribute.name),
-        attribute.fill_checking,
-    ));
-    let details = standard_attributes.details.get(attribute.name);
-    push_xr_localized_property_xml(
-        xml,
-        "\t\t\t\t\t",
-        "ToolTip",
-        details
-            .map(|details| details.tooltip.as_slice())
-            .unwrap_or_default(),
-    );
-    xml.push_str(
-        "\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
-\t\t\t\t\t<xr:Format/>\r\n\
-\t\t\t\t\t<xr:ChoiceForm/>\r\n\
-\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
-\t\t\t\t\t<xr:EditFormat/>\r\n\
-\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
-\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
-\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
-    );
-    push_xr_localized_property_xml(
-        xml,
-        "\t\t\t\t\t",
-        "Synonym",
-        details
-            .map(|details| details.synonym.as_slice())
-            .unwrap_or_default(),
-    );
-    xml.push_str(
-        "\t\t\t\t\t<xr:Comment/>\r\n\
-\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
-\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n",
-    );
-    push_document_standard_attribute_fill_value(xml, attribute, standard_attributes);
-    xml.push_str(
-        "\t\t\t\t\t<xr:Mask/>\r\n\
-\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
-\t\t\t\t</xr:StandardAttribute>\r\n",
-    );
-}
-
-fn push_document_standard_attribute_fill_value(
-    xml: &mut String,
-    attribute: &DocumentStandardAttribute,
-    standard_attributes: &DocumentStandardAttributes,
-) {
-    match attribute.fill_value {
-        DocumentStandardAttributeFillValue::Nil => {
-            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
-        }
-        DocumentStandardAttributeFillValue::BooleanFalse => {
-            xml.push_str(
-                "\t\t\t\t\t<xr:FillValue xsi:type=\"xs:boolean\">false</xr:FillValue>\r\n",
-            );
-        }
-        DocumentStandardAttributeFillValue::DateTimeZero => {
-            xml.push_str(
-                "\t\t\t\t\t<xr:FillValue xsi:type=\"xs:dateTime\">0001-01-01T00:00:00</xr:FillValue>\r\n",
-            );
-        }
-        DocumentStandardAttributeFillValue::Number => {
-            if standard_attributes.number_type == "String" {
-                xml.push_str("\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\"/>\r\n");
-            } else {
-                xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
-            }
-        }
-    }
 }
 
 fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
@@ -23010,6 +23691,7 @@ fn push_metadata_tabular_section_properties_xml(
             xml,
             indent,
             properties.line_number_fill_checking,
+            properties.line_number_fill_value.as_ref(),
         );
     }
     if let Some(use_mode) = properties.use_mode {
@@ -23026,6 +23708,7 @@ fn push_metadata_line_number_standard_attribute_xml(
     xml: &mut String,
     indent: &str,
     fill_checking: &str,
+    fill_value: Option<&MetadataChildFillValue>,
 ) {
     xml.push_str(&format!(
         "{indent}<StandardAttributes>\r\n\
@@ -23051,9 +23734,16 @@ fn push_metadata_line_number_standard_attribute_xml(
 {indent}\t\t<xr:Synonym/>\r\n\
 {indent}\t\t<xr:Comment/>\r\n\
 {indent}\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
-{indent}\t\t<xr:ChoiceParameterLinks/>\r\n\
-{indent}\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n\
-{indent}\t\t<xr:Mask/>\r\n\
+{indent}\t\t<xr:ChoiceParameterLinks/>\r\n"
+    ));
+    xml.push_str(&format!(
+        "{indent}\t\t{}\r\n",
+        format_register_standard_attribute_fill_value_xml(
+            fill_value.unwrap_or(&MetadataChildFillValue::Nil)
+        )
+    ));
+    xml.push_str(&format!(
+        "{indent}\t\t<xr:Mask/>\r\n\
 {indent}\t\t<xr:ChoiceParameters/>\r\n\
 {indent}\t</xr:StandardAttribute>\r\n\
 {indent}</StandardAttributes>\r\n"

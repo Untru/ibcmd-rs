@@ -14085,6 +14085,7 @@ fn formats_data_processor_tabular_section_defaults_without_use_or_line_number_le
             tooltip: Vec::new(),
             fill_checking: "DontCheck",
             line_number_fill_checking: "DontCheck",
+            line_number_fill_value: None,
             use_mode: None,
             line_number_length: None,
         },
@@ -14107,6 +14108,7 @@ fn formats_tabular_section_with_distinct_line_number_fill_checking() {
             tooltip: Vec::new(),
             fill_checking: "ShowError",
             line_number_fill_checking: "DontCheck",
+            line_number_fill_value: None,
             use_mode: None,
             line_number_length: None,
         },
@@ -40648,15 +40650,50 @@ fn document_formatter_stably_orders_root_child_groups() {
     let document = DocumentProperties {
         generated_types: Vec::new(),
         use_standard_commands: true,
-        numbering: None,
+        numbering: DocumentNumberingProperties {
+            numerator: None,
+            number_type: "String",
+            number_length: 11,
+            number_allowed_length: "Fixed",
+            number_periodicity: "Year",
+            check_unique: true,
+            autonumbering: true,
+        },
         standard_attributes: None,
+        characteristics: Vec::new(),
+        based_on: Vec::new(),
+        input_by_string: Vec::new(),
+        create_on_input: "Use",
+        search_string_mode_on_input_by_string: "Begin",
+        full_text_search_on_input_by_string: "DontUse",
+        choice_data_get_mode_on_input_by_string: "Directly",
         default_object_form: None,
         default_list_form: None,
         default_choice_form: None,
         auxiliary_object_form: None,
         auxiliary_list_form: None,
         auxiliary_choice_form: None,
+        posting: "Deny",
+        real_time_posting: "Allow",
+        register_records_deletion: "AutoDeleteOnUnpost",
+        register_records_writing_on_post: "WriteSelected",
+        sequence_filling: "AutoFill",
+        register_records: Vec::new(),
+        post_in_privileged_mode: false,
+        unpost_in_privileged_mode: false,
         include_help_in_contents: false,
+        data_lock_fields: Vec::new(),
+        data_lock_control_mode: "Managed",
+        full_text_search: "Use",
+        object_presentation: Vec::new(),
+        extended_object_presentation: Vec::new(),
+        list_presentation: Vec::new(),
+        extended_list_presentation: Vec::new(),
+        explanation: Vec::new(),
+        choice_history_on_input: "DontUse",
+        data_history: "DontUse",
+        update_data_history_immediately_after_write: false,
+        execute_after_write_data_history_version_processing: false,
         child_metadata_objects: vec![
             child(
                 "TabularSection",
@@ -40681,6 +40718,16 @@ fn document_formatter_stably_orders_root_child_groups() {
         ],
         child_forms: vec!["Main".to_string()],
         child_templates: vec!["Print".to_string()],
+        child_commands: vec![MetadataChildCommand {
+            header: MetadataHeader {
+                uuid: "55555555-5555-4555-8555-555555555555".to_string(),
+                name: "Post".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            },
+            properties: None,
+        }],
     };
     let header = MetadataHeader {
         uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
@@ -40689,19 +40736,7 @@ fn document_formatter_stably_orders_root_child_groups() {
         comment: String::new(),
         template_type_code: None,
     };
-    let mut xml =
-        format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21);
-    insert_metadata_child_commands_xml(
-        &mut xml,
-        "Document",
-        &[MetadataHeader {
-            uuid: "55555555-5555-4555-8555-555555555555".to_string(),
-            name: "Post".to_string(),
-            synonyms: Vec::new(),
-            comment: String::new(),
-            template_type_code: None,
-        }],
-    );
+    let xml = format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21);
     let field1 = xml.find("<Name>Field1</Name>").unwrap();
     let field2 = xml.find("<Name>Field2</Name>").unwrap();
     let form = xml.find("<Form>Main</Form>").unwrap();
