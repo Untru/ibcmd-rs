@@ -214,6 +214,47 @@ impl FormPopupSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormNestedAutoCommandBarSchema {
+    horizontal_align: Option<&'static str>,
+}
+
+impl FormNestedAutoCommandBarSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        item_id: &str,
+        direct_discriminator: Option<&str>,
+        marker: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "22"
+            || field_count < 29
+            || (field_count - 29) % 2 != 0
+            || item_tag != "AutoCommandBar"
+            || item_id == "-1"
+            || direct_discriminator != Some("9")
+            || marker.len() != 3
+            || marker.first().map(|field| field.trim()) != Some("0")
+            || !matches!(marker.get(2).map(|field| field.trim()), Some("0" | "1"))
+        {
+            return None;
+        }
+        let horizontal_align = match marker.get(1).map(|field| field.trim())? {
+            "0" => None,
+            "1" => Some("Center"),
+            "2" => Some("Right"),
+            "3" => Some("Auto"),
+            _ => return None,
+        };
+        Some(Self { horizontal_align })
+    }
+
+    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+        self.horizontal_align
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormPageSchema;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -1775,12 +1816,17 @@ impl FormFieldSchema {
                 .then_some(28 + top_level_offset),
             read_only_slot: matches!(
                 item_tag,
-                "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+                "InputField"
+                    | "LabelField"
+                    | "CheckBoxField"
+                    | "PictureField"
+                    | "SpreadSheetDocumentField"
+                    | "FormattedDocumentField"
             )
             .then_some(14 + top_level_offset),
             title_height_slot: matches!(
                 item_tag,
-                "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+                "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
             )
             .then_some(8 + top_level_offset),
             horizontal_align_slot: matches!(
@@ -1902,6 +1948,32 @@ impl FormFieldSchema {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormButtonColorSchema;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormButtonTitleHeightSchema {
+    slot: usize,
+}
+
+impl FormButtonTitleHeightSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+    ) -> Option<Self> {
+        match (wrapper, field_count, item_tag, top_level_offset) {
+            ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => Some(Self {
+                slot: 18 + top_level_offset,
+            }),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn title_height(self, fields: &[&str]) -> Option<String> {
+        let value = fields.get(self.slot)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+}
 
 impl FormButtonColorSchema {
     pub(crate) fn from_raw_layout(
@@ -2255,6 +2327,38 @@ impl FormChildItemVisibleSchema {
 pub(crate) struct FormChildItemShowTitleSchema {
     option_slot: usize,
     back_color_option_slot: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormContainerReadOnlySchema;
+
+impl FormContainerReadOnlySchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
+            return None;
+        }
+        match (
+            item_tag,
+            direct_discriminator,
+            options.len(),
+            options.first().map(|field| field.trim()),
+        ) {
+            ("ColumnGroup", Some("2"), 12, Some("2")) | ("Page", Some("4"), 20, Some("18")) => {
+                Some(Self)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn read_only(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(11).map(|field| field.trim()) == Some("1")).then_some(true)
+    }
 }
 
 impl FormChildItemShowTitleSchema {

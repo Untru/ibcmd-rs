@@ -9,13 +9,14 @@ use crate::form_schema::{
     FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER,
     FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
     FormAttributeColumnSchema, FormButtonColorSchema, FormButtonShapeRepresentationSchema,
-    FormCheckBoxFieldSchema, FormChildItemAlignment, FormChildItemDisplayImportanceSchema,
-    FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema, FormChildItemVisibleSchema,
-    FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
-    FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
-    FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
-    FormConditionalTableSchema, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
+    FormButtonTitleHeightSchema, FormCheckBoxFieldSchema, FormChildItemAlignment,
+    FormChildItemDisplayImportanceSchema, FormChildItemShowTitleSchema,
+    FormChildItemUserVisibleSchema, FormChildItemVisibleSchema, FormCommandCurrentRowUse,
+    FormCommandInterfaceContainerOwner, FormCommandInterfaceContainerSchema,
+    FormCommandInterfaceItemSchema, FormCommandInterfaceVisibilitySchema, FormCommandSchema,
+    FormConditionalGroupSchema, FormConditionalTableSchema, FormContainerReadOnlySchema,
+    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
+    FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
     FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTopLevelSlot as FieldSlot,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
     FormInputFieldXmlProperty, FormLabelDecorationAlignment,
@@ -23,9 +24,10 @@ use crate::form_schema::{
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
-    FormPageSchema, FormPageXmlProperty, FormPictureDecorationGeometryXmlProperty,
-    FormPictureDecorationSchema, FormPictureValueKind, FormPopupSchema, FormRootAutoUrlSchema,
-    FormRootGroupSchema, FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
+    FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
+    FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
+    FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
+    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
     FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
     FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
@@ -4590,6 +4592,12 @@ fn parse_form_child_item_with_metadata_owners(
         tag,
         button_top_level_offset,
     );
+    let button_title_height_schema = FormButtonTitleHeightSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        tag,
+        button_top_level_offset,
+    );
     let user_visible_schema = if tag == "Button" {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,
@@ -4631,6 +4639,41 @@ fn parse_form_child_item_with_metadata_owners(
             options,
         )
     });
+    let container_read_only_schema = matches!(tag, "ColumnGroup" | "Page")
+        .then(|| {
+            let options_text = fields
+                .get(FormChildItemShowTitleSchema::OPTIONS_SLOT)?
+                .trim();
+            if scan_1c_braced_value(options_text, 0) != Some(options_text.len()) {
+                return None;
+            }
+            let options = split_1c_braced_fields(options_text, 0)?;
+            FormContainerReadOnlySchema::from_raw_layout(
+                wrapper,
+                fields.len(),
+                tag,
+                direct_discriminator,
+                &options,
+            )
+        })
+        .flatten();
+    let nested_auto_command_bar_schema = (tag == "AutoCommandBar")
+        .then(|| {
+            let marker_text = fields.get(20)?.trim();
+            if scan_1c_braced_value(marker_text, 0) != Some(marker_text.len()) {
+                return None;
+            }
+            let marker = split_1c_braced_fields(marker_text, 0)?;
+            FormNestedAutoCommandBarSchema::from_raw_layout(
+                wrapper,
+                fields.len(),
+                tag,
+                id,
+                direct_discriminator,
+                &marker,
+            )
+        })
+        .flatten();
     let page_schema = show_title_options.as_deref().and_then(|options| {
         FormPageSchema::from_raw_layout(wrapper, fields.len(), tag, direct_discriminator, options)
     });
@@ -5268,7 +5311,9 @@ fn parse_form_child_item_with_metadata_owners(
         enabled: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.enabled(&fields)),
-        read_only: if tag == "UsualGroup" {
+        read_only: if let Some(schema) = container_read_only_schema {
+            schema.read_only(&fields)
+        } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.read_only)
@@ -5341,7 +5386,8 @@ fn parse_form_child_item_with_metadata_owners(
         },
         title_height: field_schema_and_options
             .as_ref()
-            .and_then(|(schema, _)| schema.title_height(&fields)),
+            .and_then(|(schema, _)| schema.title_height(&fields))
+            .or_else(|| button_title_height_schema.and_then(|schema| schema.title_height(&fields))),
         tooltip_representation,
         edit_mode: if matches!(
             tag,
@@ -5358,6 +5404,11 @@ fn parse_form_child_item_with_metadata_owners(
             .as_ref()
             .and_then(|(schema, _)| schema.horizontal_align(&fields))
             .map(FormChildItemAlignment::Horizontal)
+            .or_else(|| {
+                nested_auto_command_bar_schema
+                    .and_then(FormNestedAutoCommandBarSchema::horizontal_align)
+                    .map(FormChildItemAlignment::Horizontal)
+            })
             .or_else(|| {
                 if matches!(tag, "InputField" | "LabelField")
                     && form_input_field_layout_is_extended(&fields)
@@ -11768,6 +11819,14 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(item_type)
         ));
     }
+    if item.tag == "Button"
+        && let Some(title_height) = &item.title_height
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TitleHeight>{}</TitleHeight>\r\n",
+            escape_xml_text(title_height)
+        ));
+    }
     if item.tag == "Button" && item.visible == Some(false) {
         xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
     }
@@ -11811,8 +11870,19 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(command_name)
         ));
     }
-    if item.tag == "AutoCommandBar" && item.autofill == Some(false) {
-        xml.push_str(&format!("{tab}\t<Autofill>false</Autofill>\r\n"));
+    if item.tag == "AutoCommandBar" {
+        if let Some(horizontal_align) = item
+            .horizontal_align
+            .and_then(FormChildItemAlignment::horizontal_align)
+        {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+                escape_xml_text(horizontal_align)
+            ));
+        }
+        if item.autofill == Some(false) {
+            xml.push_str(&format!("{tab}\t<Autofill>false</Autofill>\r\n"));
+        }
     }
     if item.tag == "Table" {
         xml.push_str(&format_form_table_properties_xml(item, indent + 1));
@@ -11855,6 +11925,10 @@ pub(super) fn format_form_child_item_xml(
                 | "TextDocumentField"
                 | "GraphicalSchemaField"
                 | "HTMLDocumentField"
+                | "SpreadSheetDocumentField"
+                | "FormattedDocumentField"
+                | "ColumnGroup"
+                | "Page"
         );
     if read_only_before_title {
         xml.push_str(&format!("{tab}\t<ReadOnly>true</ReadOnly>\r\n"));
@@ -11911,7 +11985,7 @@ pub(super) fn format_form_child_item_xml(
     }
     if matches!(
         item.tag,
-        "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "RadioButtonField"
     ) && let Some(title_height) = &item.title_height
     {
         xml.push_str(&format!(
@@ -11964,7 +12038,7 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(group_vertical_align)
         ));
     }
-    if item.tag != "LabelDecoration"
+    if !matches!(item.tag, "LabelDecoration" | "AutoCommandBar")
         && let Some(horizontal_align) = item
             .horizontal_align
             .and_then(FormChildItemAlignment::horizontal_align)
