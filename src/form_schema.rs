@@ -1762,6 +1762,141 @@ pub(crate) struct FormFieldSchema {
     extended_edit_multiple_values_option_slot: Option<usize>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormChildItemEventCollectionOwner {
+    LabelField,
+    PictureField,
+    SpreadSheetDocumentField,
+    CalendarField,
+    GraphicalSchemaField,
+    Pages,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormChildItemEventCollectionSchema {
+    owner: FormChildItemEventCollectionOwner,
+    collection_slot: usize,
+}
+
+// Platform event type IDs stored in the strict managed-form event collections below.
+const FORM_LABEL_FIELD_CLICK_EVENT_UUID: &str = "eba5f295-c611-4dd9-84b5-22911ad60c53";
+const FORM_LABEL_FIELD_URL_PROCESSING_EVENT_UUID: &str = "509eca20-d6e4-4fef-a0f8-3a6b44c64178";
+const FORM_PICTURE_FIELD_CLICK_EVENT_UUID: &str = "996b8c30-7a89-4973-8d56-2c9ce2976695";
+const FORM_SPREADSHEET_ADDITIONAL_DETAIL_PROCESSING_EVENT_UUID: &str =
+    "0b8dc702-d001-4637-a215-9f35613e096c";
+const FORM_SPREADSHEET_BEFORE_WRITE_EVENT_UUID: &str = "b7646583-04d3-4905-8f04-8985914bd1b7";
+const FORM_SPREADSHEET_DETAIL_PROCESSING_EVENT_UUID: &str = "2988b2a5-c887-4928-94ae-5d0c9c31e999";
+const FORM_SPREADSHEET_DRAG_EVENT_UUID: &str = "8ad48496-8d0b-4f6c-ae48-99d95227884b";
+const FORM_SPREADSHEET_DRAG_CHECK_EVENT_UUID: &str = "0d644ff6-443b-4390-86fa-7f9105e42711";
+const FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID: &str = "2042ec93-3108-4190-b767-ec6c10dd9ff4";
+const FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID: &str =
+    "411a4578-276c-4f4a-b56a-b3b01181c997";
+const FORM_SPREADSHEET_SELECTION_EVENT_UUID: &str = "22287505-97d8-4258-a318-209e2493f7eb";
+const FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID: &str = "1490ede6-6f33-4c6d-b971-53b2541331ea";
+const FORM_CALENDAR_SELECTION_EVENT_UUID: &str = "2feb1ee9-b750-4352-bb4c-67ba1c608dc6";
+const FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID: &str = "3c3da18f-fc18-4f77-8c2d-96c25bec40a5";
+const FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID: &str = "526c501f-ed3f-4db4-8731-fd0324707501";
+
+impl FormChildItemEventCollectionSchema {
+    pub(crate) fn from_field_schema(
+        _field_schema: FormFieldSchema,
+        item_tag: &str,
+    ) -> Option<Self> {
+        let (owner, collection_slot) = match item_tag {
+            "LabelField" => (FormChildItemEventCollectionOwner::LabelField, 12),
+            "PictureField" => (FormChildItemEventCollectionOwner::PictureField, 16),
+            "SpreadSheetDocumentField" => (
+                FormChildItemEventCollectionOwner::SpreadSheetDocumentField,
+                18,
+            ),
+            "CalendarField" => (FormChildItemEventCollectionOwner::CalendarField, 14),
+            "GraphicalSchemaField" => (FormChildItemEventCollectionOwner::GraphicalSchemaField, 6),
+            _ => return None,
+        };
+        Some(Self {
+            owner,
+            collection_slot,
+        })
+    }
+
+    pub(crate) fn from_pages_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        container: &[&str],
+    ) -> Option<Self> {
+        (wrapper == "22"
+            && field_count >= 30
+            && (field_count - 30) % 2 == 0
+            && item_tag == "Pages"
+            && direct_discriminator == Some("3")
+            && container.len() == 6
+            && container.first().map(|field| field.trim()) == Some("4")
+            && matches!(
+                container.get(1).map(|field| field.trim()),
+                Some("0" | "1" | "2" | "3" | "5")
+            )
+            && container.get(3).map(|field| field.trim()) == Some("2")
+            && container.get(4).map(|field| field.trim()) == Some("0")
+            && container.get(5).map(|field| field.trim())
+                == container.get(1).map(|field| field.trim()))
+        .then_some(Self {
+            owner: FormChildItemEventCollectionOwner::Pages,
+            collection_slot: 2,
+        })
+    }
+
+    pub(crate) const fn collection_slot(self) -> usize {
+        self.collection_slot
+    }
+
+    pub(crate) fn event_name(self, event_id: &str) -> Option<&'static str> {
+        let mappings: &[(&str, &str)] = match self.owner {
+            FormChildItemEventCollectionOwner::LabelField => &[
+                (FORM_LABEL_FIELD_CLICK_EVENT_UUID, "Click"),
+                (FORM_LABEL_FIELD_URL_PROCESSING_EVENT_UUID, "URLProcessing"),
+            ],
+            FormChildItemEventCollectionOwner::PictureField => {
+                &[(FORM_PICTURE_FIELD_CLICK_EVENT_UUID, "Click")]
+            }
+            FormChildItemEventCollectionOwner::SpreadSheetDocumentField => &[
+                (
+                    FORM_SPREADSHEET_ADDITIONAL_DETAIL_PROCESSING_EVENT_UUID,
+                    "AdditionalDetailProcessing",
+                ),
+                (FORM_SPREADSHEET_BEFORE_WRITE_EVENT_UUID, "BeforeWrite"),
+                (
+                    FORM_SPREADSHEET_DETAIL_PROCESSING_EVENT_UUID,
+                    "DetailProcessing",
+                ),
+                (FORM_SPREADSHEET_DRAG_EVENT_UUID, "Drag"),
+                (FORM_SPREADSHEET_DRAG_CHECK_EVENT_UUID, "DragCheck"),
+                (FORM_SPREADSHEET_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
+                (
+                    FORM_SPREADSHEET_ON_CHANGE_AREA_CONTENT_EVENT_UUID,
+                    "OnChangeAreaContent",
+                ),
+                (FORM_SPREADSHEET_SELECTION_EVENT_UUID, "Selection"),
+            ],
+            FormChildItemEventCollectionOwner::CalendarField => &[
+                (FORM_CALENDAR_ON_PERIOD_OUTPUT_EVENT_UUID, "OnPeriodOutput"),
+                (FORM_CALENDAR_SELECTION_EVENT_UUID, "Selection"),
+            ],
+            FormChildItemEventCollectionOwner::GraphicalSchemaField => {
+                &[(FORM_GRAPHICAL_SCHEMA_SELECTION_EVENT_UUID, "Selection")]
+            }
+            FormChildItemEventCollectionOwner::Pages => &[(
+                FORM_PAGES_CURRENT_PAGE_CHANGE_EVENT_UUID,
+                "OnCurrentPageChange",
+            )],
+        };
+        mappings
+            .iter()
+            .find_map(|(id, name)| id.eq_ignore_ascii_case(event_id).then_some(*name))
+    }
+}
+
 impl FormFieldSchema {
     pub(crate) const OPTIONS_BASE_SLOT: usize = 39;
 
@@ -2349,6 +2484,52 @@ impl FormChildItemVisibleSchema {
 pub(crate) struct FormChildItemShowTitleSchema {
     option_slot: usize,
     back_color_option_slot: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormSharedContainerContentChangeSchema {
+    enable_content_change: Option<bool>,
+}
+
+impl FormSharedContainerContentChangeSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        marker: Option<&str>,
+    ) -> Option<Self> {
+        if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
+            return None;
+        }
+        match (item_tag, direct_discriminator) {
+            ("CommandBar", Some("0"))
+            | ("Popup", Some("1"))
+            | ("ColumnGroup", Some("2"))
+            | ("Pages", Some("3"))
+            | ("ButtonGroup", Some("6")) => {}
+            _ => return None,
+        }
+        let enable_content_change = match marker {
+            Some("0") => None,
+            Some("1") => Some(true),
+            _ => return None,
+        };
+        Some(Self {
+            enable_content_change,
+        })
+    }
+
+    pub(crate) const fn enable_content_change(self) -> Option<bool> {
+        self.enable_content_change
+    }
+
+    pub(crate) fn supports_xml_tag(item_tag: &str) -> bool {
+        matches!(
+            item_tag,
+            "CommandBar" | "Popup" | "ColumnGroup" | "Pages" | "ButtonGroup"
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

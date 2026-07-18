@@ -10,16 +10,16 @@ use crate::form_schema::{
     FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
     FormAttributeColumnSchema, FormButtonColorSchema, FormButtonShapeRepresentationSchema,
     FormButtonTitleHeightSchema, FormCheckBoxFieldSchema, FormChildItemAlignment,
-    FormChildItemDisplayImportanceSchema, FormChildItemShowTitleSchema,
-    FormChildItemUserVisibleSchema, FormChildItemVisibleSchema, FormCommandCurrentRowUse,
-    FormCommandInterfaceContainerOwner, FormCommandInterfaceContainerSchema,
-    FormCommandInterfaceItemSchema, FormCommandInterfaceVisibilitySchema, FormCommandSchema,
-    FormConditionalGroupSchema, FormConditionalTableSchema, FormContainerReadOnlySchema,
-    FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema,
-    FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
-    FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTopLevelSlot as FieldSlot,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
-    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormChildItemDisplayImportanceSchema, FormChildItemEventCollectionSchema,
+    FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema, FormChildItemVisibleSchema,
+    FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
+    FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
+    FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
+    FormConditionalTableSchema, FormContainerReadOnlySchema, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
+    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
+    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -28,10 +28,11 @@ use crate::form_schema::{
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
     FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
-    FormSpecialFieldSchema, FormTableOrdinaryTailKey as TableTailKey,
-    FormTablePropertyBagKey as TableBagKey, FormTableRowPictureDataPath, FormTableSchema,
-    FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
+    FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
+    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
+    FormTableRowPictureDataPath, FormTableSchema, FormTableSearchControlLocation,
+    FormTableSearchStringLocation, FormTableViewStatusLocation, FormTableXmlProperty,
+    FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
@@ -4584,6 +4585,14 @@ fn parse_form_child_item_with_metadata_owners(
     let direct_discriminator = fields
         .get(5 + input_field_top_level_offset)
         .map(|field| field.trim());
+    let shared_container_content_change_schema =
+        FormSharedContainerContentChangeSchema::from_raw_layout(
+            wrapper,
+            fields.len(),
+            tag,
+            direct_discriminator,
+            fields.get(9).map(|field| field.trim()),
+        );
     let field_schema_and_options = fields
         .get(FormFieldSchema::OPTIONS_BASE_SLOT + input_field_top_level_offset)
         .and_then(|field| {
@@ -4981,6 +4990,10 @@ fn parse_form_child_item_with_metadata_owners(
                 extended_group_options
                     .as_ref()
                     .and_then(|options| options.enable_content_change)
+            })
+            .or_else(|| {
+                shared_container_content_change_schema
+                    .and_then(|schema| schema.enable_content_change())
             }),
         child_items_width: page_properties
             .and_then(|properties| properties.child_items_width())
@@ -6201,6 +6214,16 @@ fn parse_form_child_item_with_metadata_owners(
         extended_tooltip: parse_form_child_item_extended_tooltip(&fields, object_refs),
         events: {
             let mut events = parse_form_child_item_event_fields(&fields);
+            append_unique_form_body_events(
+                &mut events,
+                parse_form_schema_backed_child_item_events(
+                    wrapper,
+                    tag,
+                    &fields,
+                    direct_discriminator,
+                    field_schema_and_options.as_ref(),
+                ),
+            );
             if tag == "InputField" {
                 if let Some(extended_options) = input_field_extended_options.as_deref() {
                     append_unique_form_body_events(
@@ -7337,6 +7360,7 @@ pub(super) fn parse_form_pages_representation(field: &str) -> Option<&'static st
         Some("0") => Some("None"),
         Some("1") => Some("TabsOnTop"),
         Some("2") => Some("TabsOnBottom"),
+        Some("3") => Some("TabsOnLeftHorizontal"),
         Some("5") => Some("Swipe"),
         _ => None,
     }
@@ -9376,6 +9400,101 @@ pub(super) fn parse_form_popup_picture_value(
 ) -> Option<(String, bool)> {
     let nested = split_1c_braced_fields(field.trim(), 0)?;
     parse_form_child_item_picture_value(nested.get(1)?.trim(), object_refs)
+}
+
+fn parse_form_schema_backed_child_item_events(
+    wrapper: &str,
+    tag: &str,
+    fields: &[&str],
+    direct_discriminator: Option<&str>,
+    field_schema_and_options: Option<&(FormFieldSchema, Vec<&str>)>,
+) -> Vec<FormBodyEvent> {
+    if let Some((field_schema, options)) = field_schema_and_options
+        && let Some(schema) =
+            FormChildItemEventCollectionSchema::from_field_schema(*field_schema, tag)
+        && let Some(record) = options
+            .get(schema.collection_slot())
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    {
+        return parse_form_schema_backed_event_record(schema, &record);
+    }
+
+    if tag == "Pages"
+        && let Some(container) = fields
+            .get(20)
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        && let Some(schema) = FormChildItemEventCollectionSchema::from_pages_layout(
+            wrapper,
+            fields.len(),
+            tag,
+            direct_discriminator,
+            &container,
+        )
+        && let Some(record) = container
+            .get(schema.collection_slot())
+            .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    {
+        return parse_form_schema_backed_event_record(schema, &record);
+    }
+
+    Vec::new()
+}
+
+fn parse_form_schema_backed_event_record(
+    schema: FormChildItemEventCollectionSchema,
+    fields: &[&str],
+) -> Vec<FormBodyEvent> {
+    let Some(count) = fields
+        .first()
+        .and_then(|field| field.trim().parse::<usize>().ok())
+    else {
+        return Vec::new();
+    };
+    let Some(expected_fields) = count.checked_mul(5).and_then(|value| value.checked_add(3)) else {
+        return Vec::new();
+    };
+    if fields.len() != expected_fields {
+        return Vec::new();
+    }
+
+    let trailer_start = 1 + count * 2;
+    if fields.get(trailer_start).map(|field| field.trim()) != Some("1")
+        || fields.get(trailer_start + 1).map(|field| field.trim()) != Some("0")
+    {
+        return Vec::new();
+    }
+
+    let mut events = Vec::with_capacity(count);
+    for event_index in 0..count {
+        let event_id = fields[1 + event_index * 2].trim();
+        let handler_field = fields[2 + event_index * 2].trim();
+        let Some(name) = schema.event_name(event_id) else {
+            return Vec::new();
+        };
+        let Some((handler, consumed)) = parse_1c_quoted_string_with_len(handler_field) else {
+            return Vec::new();
+        };
+        let handler = handler.trim();
+        if consumed != handler_field.len()
+            || handler.is_empty()
+            || !is_probable_form_event_handler(handler)
+        {
+            return Vec::new();
+        }
+
+        let metadata_start = trailer_start + 2 + event_index * 3;
+        if !fields[metadata_start].trim().eq_ignore_ascii_case(event_id)
+            || fields[metadata_start + 1].trim() != "0"
+            || fields[metadata_start + 2].trim() != "1"
+        {
+            return Vec::new();
+        }
+        events.push(FormBodyEvent {
+            name: name.to_string(),
+            handler: handler.to_string(),
+        });
+    }
+    events
 }
 
 pub(super) fn parse_form_child_item_event_fields(fields: &[&str]) -> Vec<FormBodyEvent> {
@@ -12226,6 +12345,10 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if early_title_for_field {
+        xml.push_str(&format_form_shared_container_content_change_xml(
+            item,
+            indent + 1,
+        ));
         xml.push_str(&format_form_title_section(item, indent + 1));
     }
     if item.tag != "UsualGroup"
@@ -12720,6 +12843,10 @@ pub(super) fn format_form_child_item_xml(
     }
     if usual_group_title_first {
         if item.tag == "ButtonGroup" {
+            xml.push_str(&format_form_shared_container_content_change_xml(
+                item,
+                indent + 1,
+            ));
             xml.push_str(&format_form_localized_section(
                 "Title",
                 &item.title,
@@ -12849,6 +12976,10 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "Page" {
         xml.push_str(&format_form_page_properties_xml(item, indent + 1));
     } else if !early_title_for_field && !usual_group_title_first && item.tag != "Table" {
+        xml.push_str(&format_form_shared_container_content_change_xml(
+            item,
+            indent + 1,
+        ));
         if matches!(item.tag, "LabelDecoration" | "PictureDecoration") {
             xml.push_str(&format_form_decoration_header_xml(item, indent + 1));
         } else {
@@ -13266,6 +13397,16 @@ fn format_form_page_properties_xml(item: &FormChildItem, indent: usize) -> Strin
         }
     }
     xml
+}
+
+fn format_form_shared_container_content_change_xml(item: &FormChildItem, indent: usize) -> String {
+    if !FormSharedContainerContentChangeSchema::supports_xml_tag(item.tag)
+        || item.enable_content_change != Some(true)
+    {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    format!("{tab}<EnableContentChange>true</EnableContentChange>\r\n")
 }
 
 fn format_form_decoration_header_xml(item: &FormChildItem, indent: usize) -> String {
