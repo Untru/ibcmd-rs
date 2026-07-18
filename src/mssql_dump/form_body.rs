@@ -586,6 +586,7 @@ pub(super) struct FormChildItem {
     pub(super) read_only: Option<bool>,
     pub(super) skip_on_input: Option<bool>,
     pub(super) title_location: Option<&'static str>,
+    pub(super) title_height: Option<String>,
     pub(super) tooltip_representation: Option<&'static str>,
     pub(super) edit_mode: Option<&'static str>,
     pub(super) horizontal_align: Option<FormChildItemAlignment>,
@@ -5334,6 +5335,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        title_height: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.title_height(&fields)),
         tooltip_representation,
         edit_mode: if matches!(
             tag,
@@ -11885,6 +11889,16 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
             escape_xml_text(title_location)
+        ));
+    }
+    if matches!(
+        item.tag,
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+    ) && let Some(title_height) = &item.title_height
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TitleHeight>{}</TitleHeight>\r\n",
+            escape_xml_text(title_height)
         ));
     }
     if matches!(
