@@ -111,6 +111,9 @@ const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
+const CATALOG_COMMAND_COLLECTION_UUID: &str = "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6";
+const CATALOG_TABULAR_SECTION_COLLECTION_UUID: &str = "932159f9-95b2-4e76-a8dd-8849fe5c5ded";
+const CATALOG_FORM_COLLECTION_UUID: &str = "fdf816d2-1ead-11d5-b975-0050bae0a95d";
 // Document collection and descriptor IDs below are platform schema IDs, not infobase object IDs.
 const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f80211";
 const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
@@ -4258,6 +4261,7 @@ struct MetadataTabularSectionProperties {
     fill_checking: &'static str,
     line_number_fill_checking: &'static str,
     line_number_fill_value: Option<MetadataChildFillValue>,
+    line_number_synonym: Vec<(String, String)>,
     use_mode: Option<&'static str>,
     line_number_length: Option<u32>,
 }
@@ -4318,6 +4322,8 @@ enum ReturnValuesReuseValue {
 struct CatalogProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     hierarchical: bool,
+    hierarchy_type: &'static str,
+    limit_level_count: bool,
     level_count: u32,
     folders_on_top: bool,
     owners: Option<Vec<String>>,
@@ -4331,9 +4337,16 @@ struct CatalogProperties {
     check_unique: bool,
     autonumbering: bool,
     default_presentation: Option<&'static str>,
+    standard_attributes: Option<Vec<MetadataStandardAttribute>>,
+    characteristics: Vec<DocumentCharacteristic>,
+    predefined_data_update: &'static str,
+    edit_type: &'static str,
     quick_choice: bool,
     choice_mode: &'static str,
     input_by_string_fields: Vec<String>,
+    search_string_mode_on_input_by_string: &'static str,
+    full_text_search_on_input_by_string: &'static str,
+    choice_data_get_mode_on_input_by_string: &'static str,
     default_object_form: Option<String>,
     default_folder_form: Option<String>,
     default_list_form: Option<String>,
@@ -4345,6 +4358,10 @@ struct CatalogProperties {
     auxiliary_choice_form: Option<String>,
     auxiliary_folder_choice_form: Option<String>,
     include_help_in_contents: bool,
+    based_on: Vec<String>,
+    data_lock_fields: Vec<String>,
+    data_lock_control_mode: &'static str,
+    full_text_search: &'static str,
     object_presentation: Vec<(String, String)>,
     extended_object_presentation: Vec<(String, String)>,
     list_presentation: Vec<(String, String)>,
@@ -4355,16 +4372,10 @@ struct CatalogProperties {
     data_history: &'static str,
     update_data_history_immediately_after_write: bool,
     execute_after_write_data_history_version_processing: bool,
-    standard_attribute_details: BTreeMap<&'static str, CatalogStandardAttributeDetails>,
     child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
-}
-
-#[derive(Default)]
-struct CatalogStandardAttributeDetails {
-    tooltip: Vec<(String, String)>,
-    synonym: Vec<(String, String)>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 struct ReportProperties {
@@ -4568,6 +4579,8 @@ struct TaskProperties {
 struct MetadataStandardAttribute {
     attribute: RegisterStandardAttribute,
     comment: String,
+    type_reduction_mode: &'static str,
+    choice_parameter_links: Vec<MetadataChoiceParameterLink>,
 }
 
 struct TaskAddressingAttribute {
@@ -6180,6 +6193,7 @@ fn extract_metadata_source_xml_from_text_row(
         && !matches!(
             kind,
             "Report"
+                | "Catalog"
                 | "DataProcessor"
                 | "Document"
                 | "DocumentJournal"
@@ -6204,7 +6218,7 @@ fn extract_metadata_source_xml_from_text_row(
     } else if kind == "Role" {
         format_full_metadata_source_xml(kind, &header, source_version).into_bytes()
     } else if kind == "Catalog" {
-        let catalog = parse_catalog_properties_from_text(
+        let catalog = parse_strict_catalog_properties_from_text(
             text,
             uuid,
             type_index,
@@ -6213,7 +6227,7 @@ fn extract_metadata_source_xml_from_text_row(
             form_refs,
             template_refs,
         )?;
-        format_catalog_source_xml(&header, &catalog).into_bytes()
+        format_catalog_source_xml(&header, &catalog, source_version).into_bytes()
     } else if kind == "Report" {
         let report = parse_report_properties_from_text(
             text,
@@ -7923,7 +7937,29 @@ fn parse_register_standard_attribute_with_comment<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
     fill_value: MetadataChildFillValue,
+    expected_type_reduction_mode: &str,
 ) -> Option<(RegisterStandardAttribute, String)> {
+    let (attribute, comment, choice_parameter_links) =
+        parse_register_standard_attribute_with_comment_and_choice_parameter_links(
+            name,
+            bag,
+            fill_value,
+            expected_type_reduction_mode,
+        )?;
+    information_register_standard_attribute_nested_values_are(
+        choice_parameter_links,
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+        &["5006", "0"],
+    )
+    .then_some((attribute, comment))
+}
+
+fn parse_register_standard_attribute_with_comment_and_choice_parameter_links<'a>(
+    name: &'static str,
+    bag: &InformationRegisterStandardAttributeBag<'a>,
+    fill_value: MetadataChildFillValue,
+    expected_type_reduction_mode: &str,
+) -> Option<(RegisterStandardAttribute, String, &'a str)> {
     let link_by_type =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
     let fill_checking =
@@ -7979,7 +8015,7 @@ fn parse_register_standard_attribute_with_comment<'a>(
             && parse_information_register_standard_attribute_nested_enum(
                 type_reduction_mode?,
                 INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
-            )? != "0")
+            )? != expected_type_reduction_mode)
         || !information_register_standard_attribute_nil_is_valid(max_value)
         || parse_information_register_standard_attribute_bool(extended_edit)?
         || !information_register_standard_attribute_choice_form_is_valid(choice_form)
@@ -7994,11 +8030,6 @@ fn parse_register_standard_attribute_with_comment<'a>(
         || parse_information_register_standard_attribute_bool(password_mode)?
         || parse_information_register_standard_attribute_bool(mark_negatives)?
         || !information_register_standard_attribute_nil_is_valid(min_value)
-        || !information_register_standard_attribute_nested_values_are(
-            choice_parameter_links,
-            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
-            &["5006", "0"],
-        )
         || !parse_information_register_standard_attribute_string(mask)?.is_empty()
         || !information_register_standard_attribute_nested_values_are(
             choice_parameters,
@@ -8050,6 +8081,7 @@ fn parse_register_standard_attribute_with_comment<'a>(
             link_by_type: None,
         },
         parse_information_register_standard_attribute_string(comment)?,
+        choice_parameter_links,
     ))
 }
 
@@ -8059,7 +8091,7 @@ fn parse_register_standard_attribute<'a>(
     fill_value: MetadataChildFillValue,
 ) -> Option<RegisterStandardAttribute> {
     let (attribute, comment) =
-        parse_register_standard_attribute_with_comment(name, bag, fill_value)?;
+        parse_register_standard_attribute_with_comment(name, bag, fill_value, "0")?;
     comment.is_empty().then_some(attribute)
 }
 
@@ -9912,7 +9944,15 @@ fn parse_attribute_tabular_section_child_objects(
         ) else {
             continue;
         };
-        let mut value_types = if tag == "Attribute" {
+        let mut value_types = if tag == "Attribute" && owner_kind == "Catalog" {
+            parse_metadata_child_value_types_with_builtin(
+                text,
+                marker_start,
+                &header.uuid,
+                type_index,
+                platform_reference_family_type_reference,
+            )
+        } else if tag == "Attribute" {
             parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index)
         } else {
             Vec::new()
@@ -9929,7 +9969,7 @@ fn parse_attribute_tabular_section_child_objects(
                     other => other,
                 })
                 .collect();
-        } else if owner_kind == "BusinessProcess" {
+        } else if matches!(owner_kind, "BusinessProcess" | "Catalog") {
             value_types =
                 stable_partition_metadata_types(classify_metadata_reference_type_sets(value_types));
         }
@@ -10083,6 +10123,32 @@ fn parse_metadata_child_value_types(
     fields
         .iter()
         .filter_map(|field| parse_metadata_type_pattern_from_child_field(field, type_index))
+        .find(|value_types| !value_types.is_empty())
+        .unwrap_or_default()
+}
+
+fn parse_metadata_child_value_types_with_builtin(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    builtin_reference: fn(&str) -> Option<&'static str>,
+) -> Vec<ConstantValueType> {
+    let Some((_, _, fields)) =
+        innermost_metadata_object_fields_around_header(text, marker_start, child_uuid)
+    else {
+        return Vec::new();
+    };
+
+    fields
+        .iter()
+        .filter_map(|field| {
+            parse_metadata_type_pattern_from_child_field_with_builtin(
+                field,
+                type_index,
+                builtin_reference,
+            )
+        })
         .find(|value_types| !value_types.is_empty())
         .unwrap_or_default()
 }
@@ -10569,8 +10635,12 @@ fn parse_exact_metadata_tabular_section(
         "1" => "ShowError",
         _ => return None,
     };
-    let line_number_fill_value =
-        parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?;
+    let (line_number_fill_value, line_number_synonym) =
+        match parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?
+        {
+            Some((fill_value, synonym)) => (Some(fill_value), synonym),
+            None => (None, Vec::new()),
+        };
     let tooltip = parse_information_register_owner_localized_value(fields.get(8)?)?;
     let use_mode = match owner_kind {
         "Catalog" => Some(parse_exact_catalog_tabular_section_use(
@@ -10615,6 +10685,7 @@ fn parse_exact_metadata_tabular_section(
                 ""
             },
             line_number_fill_value,
+            line_number_synonym,
             use_mode,
             line_number_length,
         },
@@ -10624,7 +10695,7 @@ fn parse_exact_metadata_tabular_section(
 fn parse_exact_tabular_section_standard_attributes_presence(
     owner_kind: &str,
     value: &str,
-) -> Option<Option<MetadataChildFillValue>> {
+) -> Option<Option<(MetadataChildFillValue, Vec<(String, String)>)>> {
     let outer = split_information_register_braced_fields(value)?;
     match outer.as_slice() {
         [marker] if marker.trim() == "0" => Some(None),
@@ -10665,7 +10736,10 @@ fn parse_exact_tabular_section_standard_attributes_presence(
                 }
                 _ => return None,
             };
-            Some(Some(fill_value))
+            let synonym = parse_information_register_standard_attribute_localized(
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID)?,
+            )?;
+            Some(Some((fill_value, synonym)))
         }
         _ => None,
     }
@@ -12910,6 +12984,29 @@ fn parse_catalog_choice_parameter_links(
     (index == fields.len()).then_some(links)
 }
 
+fn parse_catalog_standard_attribute_choice_parameter_links(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChoiceParameterLink>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3
+        || fields.first()?.trim() != r##""#""##
+        || !information_register_uuid_matches(
+            fields.get(1)?,
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
+        )
+    {
+        return None;
+    }
+    let links =
+        parse_catalog_choice_parameter_links(fields.get(2)?, owner_name, false, object_refs)?;
+    links
+        .iter()
+        .all(|link| link.value_change == "Clear")
+        .then_some(links)
+}
+
 fn parse_catalog_link_by_type(
     value: &str,
     owner_name: &str,
@@ -12973,6 +13070,7 @@ fn resolve_catalog_data_path_segment(
         [code] => {
             let standard_attribute = match code.trim() {
                 "-3" => "Description",
+                "-4" => "Parent",
                 "-5" => "Owner",
                 "-8" => "Ref",
                 _ => return None,
@@ -13466,6 +13564,7 @@ fn parse_metadata_tabular_section_properties(
             fill_checking,
             line_number_fill_checking: fill_checking,
             line_number_fill_value: None,
+            line_number_synonym: Vec::new(),
             use_mode: fields
                 .get(header_index + 4)
                 .and_then(|field| metadata_attribute_use_mode_xml(field.trim())),
@@ -13481,6 +13580,7 @@ fn parse_metadata_tabular_section_properties(
             fill_checking: "DontCheck",
             line_number_fill_checking: "DontCheck",
             line_number_fill_value: None,
+            line_number_synonym: Vec::new(),
             use_mode: None,
             line_number_length: None,
         });
@@ -13504,6 +13604,7 @@ fn parse_data_processor_tabular_section_properties_from_fields(
         fill_checking: metadata_fill_checking_xml(fields.get(6).copied()),
         line_number_fill_checking: "DontCheck",
         line_number_fill_value: None,
+        line_number_synonym: Vec::new(),
         use_mode: None,
         line_number_length: None,
     })
@@ -13652,7 +13753,21 @@ fn parse_metadata_type_pattern_from_child_field(
     field: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
-    if let Some(value_types) = parse_metadata_type_pattern(field, type_index) {
+    parse_metadata_type_pattern_from_child_field_with_builtin(
+        field,
+        type_index,
+        builtin_type_reference,
+    )
+}
+
+fn parse_metadata_type_pattern_from_child_field_with_builtin(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    builtin_reference: fn(&str) -> Option<&'static str>,
+) -> Option<Vec<ConstantValueType>> {
+    if let Some(value_types) =
+        parse_metadata_type_pattern_with_builtin(field, type_index, builtin_reference)
+    {
         return Some(value_types);
     }
     let fields = split_1c_braced_fields(field, 0)?;
@@ -13662,7 +13777,9 @@ fn parse_metadata_type_pattern_from_child_field(
     fields
         .iter()
         .skip(1)
-        .filter_map(|field| parse_metadata_type_pattern(field, type_index))
+        .filter_map(|field| {
+            parse_metadata_type_pattern_with_builtin(field, type_index, builtin_reference)
+        })
         .next()
 }
 
@@ -14463,10 +14580,14 @@ fn parse_cct_tabular_sections(
             {
                 return None;
             }
-            let line_number_fill_value = parse_exact_tabular_section_standard_attributes_presence(
-                "ChartOfCharacteristicTypes",
-                payload.get(7)?,
-            )?;
+            let (line_number_fill_value, line_number_synonym) =
+                match parse_exact_tabular_section_standard_attributes_presence(
+                    "ChartOfCharacteristicTypes",
+                    payload.get(7)?,
+                )? {
+                    Some((fill_value, synonym)) => (Some(fill_value), synonym),
+                    None => (None, Vec::new()),
+                };
             let nested_items =
                 parse_cct_collection(fields.get(2)?, CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID)?;
             let mut nested_names = BTreeSet::new();
@@ -14528,6 +14649,7 @@ fn parse_cct_tabular_sections(
                         ""
                     },
                     line_number_fill_value,
+                    line_number_synonym,
                     use_mode: Some("ForItem"),
                     line_number_length: Some(5),
                 }),
@@ -14537,7 +14659,7 @@ fn parse_cct_tabular_sections(
         .collect()
 }
 
-fn parse_catalog_properties_from_text(
+fn parse_strict_catalog_properties_from_text(
     text: &str,
     uuid: &str,
     type_index: &BTreeMap<String, String>,
@@ -14547,223 +14669,858 @@ fn parse_catalog_properties_from_text(
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<CatalogProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let fields = metadata_object_fields(text)?;
-    if !matches!(fields.first().map(|value| value.trim()), Some("56" | "57")) {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
         return None;
     }
-    let mut generated_types = Vec::new();
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        1,
-        2,
-        &format!("CatalogObject.{}", header.name),
-        "Object",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        3,
-        4,
-        &format!("CatalogRef.{}", header.name),
-        "Ref",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        5,
-        6,
-        &format!("CatalogSelection.{}", header.name),
-        "Selection",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        7,
-        8,
-        &format!("CatalogList.{}", header.name),
-        "List",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        34,
-        35,
-        &format!("CatalogManager.{}", header.name),
-        "Manager",
-    );
-    let hierarchical = parse_catalog_hierarchical_flag(fields.get(9).copied()).unwrap_or(false);
-    let level_count = parse_1c_u32_field(fields.get(10).copied()).unwrap_or(2);
-    let folders_on_top = parse_1c_bool_field(fields.get(11).copied()).unwrap_or(true);
-    let owners = parse_catalog_owners(fields.get(12).copied(), object_refs);
-    let subordination_use =
-        catalog_subordination_use_xml(parse_1c_u32_field(fields.get(13).copied()).unwrap_or(1));
-    let check_unique = parse_1c_bool_field(fields.get(14).copied()).unwrap_or(false);
-    let autonumbering = parse_1c_bool_field(fields.get(15).copied()).unwrap_or(false);
-    let code_series =
-        catalog_code_series_xml(parse_1c_u32_field(fields.get(16).copied()).unwrap_or(0));
-    let code_length = parse_1c_u32_field(fields.get(17).copied()).unwrap_or(0);
-    let code_type = catalog_code_type_xml(parse_1c_u32_field(fields.get(18).copied()).unwrap_or(1));
-    let description_length = parse_1c_u32_field(fields.get(19).copied()).unwrap_or(0);
-    let code_allowed_length =
-        catalog_code_allowed_length_xml(parse_1c_u32_field(fields.get(20).copied()).unwrap_or(1));
-    let use_standard_commands = parse_1c_bool_field(fields.get(33).copied()).unwrap_or(true);
-    let include_help_in_contents = parse_1c_bool_field(fields.get(31).copied()).unwrap_or(false);
-    let exact_code56_layout = validate_exact_catalog_code56_layout(&fields, &header)?;
-    let default_presentation = parse_catalog_default_presentation(&fields, exact_code56_layout)?;
-    let (create_on_input, choice_history_on_input) =
-        parse_catalog_input_history_tail(&fields, exact_code56_layout)?;
-
-    Some(CatalogProperties {
-        generated_types,
-        hierarchical,
-        level_count,
-        folders_on_top,
-        owners,
-        subordination_use,
-        use_standard_commands,
-        code_length,
-        description_length,
-        code_type,
-        code_allowed_length,
-        code_series,
-        check_unique,
-        autonumbering,
-        default_presentation: Some(default_presentation),
-        quick_choice: parse_1c_bool_field(fields.get(41).copied()).unwrap_or(true),
-        choice_mode: enum_choice_mode_xml(parse_1c_u32_field(fields.get(40).copied()).unwrap_or(2)),
-        input_by_string_fields: parse_catalog_input_by_string_fields(
-            fields.get(42).copied(),
-            &header.name,
-        ),
-        default_object_form: parse_catalog_form_ref(fields.get(21).copied(), form_refs),
-        default_folder_form: parse_catalog_form_ref(fields.get(22).copied(), form_refs),
-        default_list_form: parse_catalog_form_ref(fields.get(23).copied(), form_refs),
-        default_choice_form: parse_catalog_form_ref(fields.get(24).copied(), form_refs),
-        default_folder_choice_form: parse_catalog_form_ref(fields.get(25).copied(), form_refs),
-        auxiliary_object_form: parse_catalog_form_ref(fields.get(26).copied(), form_refs),
-        auxiliary_folder_form: parse_catalog_form_ref(fields.get(27).copied(), form_refs),
-        auxiliary_list_form: parse_catalog_form_ref(fields.get(28).copied(), form_refs),
-        auxiliary_choice_form: parse_catalog_form_ref(fields.get(29).copied(), form_refs),
-        auxiliary_folder_choice_form: parse_catalog_form_ref(fields.get(30).copied(), form_refs),
-        include_help_in_contents,
-        object_presentation: parse_1c_synonyms(fields.get(46).copied().unwrap_or("{0}")),
-        extended_object_presentation: parse_1c_synonyms(fields.get(47).copied().unwrap_or("{0}")),
-        list_presentation: parse_1c_synonyms(fields.get(48).copied().unwrap_or("{0}")),
-        extended_list_presentation: parse_1c_synonyms(fields.get(49).copied().unwrap_or("{0}")),
-        explanation: parse_1c_synonyms(fields.get(50).copied().unwrap_or("{0}")),
-        create_on_input,
-        choice_history_on_input,
-        data_history: fields
-            .get(53)
-            .and_then(|field| metadata_data_history_xml(field.trim()))
-            .unwrap_or("DontUse"),
-        update_data_history_immediately_after_write: fields
-            .get(54)
-            .and_then(|field| parse_1c_bool_flag(field.trim()))
-            .unwrap_or(false),
-        execute_after_write_data_history_version_processing: fields
-            .get(55)
-            .and_then(|field| parse_1c_bool_flag(field.trim()))
-            .unwrap_or(false),
-        standard_attribute_details: parse_catalog_standard_attribute_details(
-            fields.get(45).copied(),
-        ),
-        child_metadata_objects: parse_attribute_tabular_section_child_objects(
-            "Catalog",
-            &header.name,
-            text,
-            uuid,
-            Some(catalog_direct_attribute_wrapper_code(
-                fields.first()?.trim(),
-            )?),
-            type_index,
-            object_refs,
-            metadata_object_refs,
-            form_refs,
-        ),
-        child_forms: owned_catalog_form_names_in_text_order(text, &header.name, form_refs),
-        child_templates: owned_catalog_template_names_in_text_order(
-            text,
-            &header.name,
-            template_refs,
-        ),
-    })
-}
-
-fn validate_exact_catalog_code56_layout(
-    fields: &[&str],
-    expected_header: &MetadataHeader,
-) -> Option<bool> {
-    if fields.first().map(|field| field.trim()) != Some("56") || fields.len() != 61 {
-        return Some(false);
-    }
-
-    let header_wrapper = split_information_register_braced_fields(fields.get(9)?)?;
-    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
-    let mut owner_header_indexes = fields.iter().enumerate().filter_map(|(index, field)| {
-        (metadata_header_field_index(&[*field], &expected_header.uuid) == Some(0)).then_some(index)
-    });
-    if header_wrapper.len() != 2
-        || header_wrapper.first()?.trim() != "0"
-        || owner_header_indexes.next() != Some(9)
-        || owner_header_indexes.next().is_some()
-        || !parsed_header
-            .uuid
-            .eq_ignore_ascii_case(&expected_header.uuid)
-        || parsed_header.name != expected_header.name
-        || parsed_header.synonyms != expected_header.synonyms
-        || parsed_header.comment != expected_header.comment
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    let owner_code = fields.first()?.trim();
+    let parsed_header = parse_wrapped_register_owner_header(fields.get(9)?)?;
+    let header_occurrences = fields
+        .iter()
+        .filter(|field| metadata_header_field_index(&[**field], uuid) == Some(0))
+        .count();
+    if fields.len() != 61
+        || !matches!(owner_code, "56" | "57")
+        || metadata_header_field_index(&fields, uuid) != Some(9)
+        || header_occurrences != 1
+        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+        || fields.get(39)?.trim() != "0"
     {
         return None;
     }
 
-    Some(true)
-}
-
-fn parse_catalog_default_presentation(
-    fields: &[&str],
-    exact_code56_layout: bool,
-) -> Option<&'static str> {
-    if !exact_code56_layout {
-        return Some("AsDescription");
+    let collections = root[3..]
+        .iter()
+        .map(|value| parse_task_root_collection(value))
+        .collect::<Option<Vec<_>>>()?;
+    let expected_markers = [
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        CATALOG_COMMAND_COLLECTION_UUID,
+        CATALOG_TABULAR_SECTION_COLLECTION_UUID,
+        CATALOG_ATTRIBUTE_GROUP_UUID,
+        CATALOG_FORM_COLLECTION_UUID,
+    ];
+    if collections.len() != expected_markers.len()
+        || collections
+            .iter()
+            .zip(expected_markers)
+            .any(|(collection, expected)| !collection.marker.eq_ignore_ascii_case(expected))
+    {
+        return None;
     }
 
-    Some(if parse_1c_u32_field(fields.get(19).copied())? == 0 {
-        "AsCode"
-    } else {
-        "AsDescription"
+    let mut generated_ids = BTreeSet::new();
+    let generated_types = parse_catalog_generated_types(&fields, &header.name, &mut generated_ids)?;
+    let direct_wrapper_code = catalog_direct_attribute_wrapper_code(owner_code)?;
+    let direct_attribute_uuids =
+        parse_catalog_attribute_collection(&collections.get(3)?.items, direct_wrapper_code)?;
+    let tabular_sections = parse_catalog_tabular_sections(
+        &collections.get(2)?.items,
+        &header.name,
+        object_refs,
+        &mut generated_ids,
+    )?;
+    let child_metadata_objects = parse_attribute_tabular_section_child_objects(
+        "Catalog",
+        &header.name,
+        text,
+        uuid,
+        Some(direct_wrapper_code),
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        form_refs,
+    );
+    validate_catalog_child_objects(
+        &child_metadata_objects,
+        &direct_attribute_uuids,
+        &tabular_sections,
+        &header.name,
+        object_refs,
+    )?;
+
+    let form_uuids = parse_task_form_uuids(&collections.get(4)?.items)?;
+    let child_forms = parse_catalog_child_forms(&form_uuids, &header.name, form_refs)?;
+    if child_forms != owned_catalog_form_names_in_text_order(text, &header.name, form_refs) {
+        return None;
+    }
+    let template_uuids = parse_task_form_uuids(&collections.get(0)?.items)?;
+    let child_templates =
+        parse_catalog_child_templates(&template_uuids, &header.name, template_refs)?;
+    if child_templates
+        != owned_catalog_template_names_in_text_order(text, &header.name, template_refs)
+    {
+        return None;
+    }
+    let child_commands = parse_task_commands(
+        &collections.get(1)?.items,
+        text,
+        uuid,
+        type_index,
+        object_refs,
+    )?;
+
+    let mut child_ids = BTreeSet::new();
+    if form_uuids
+        .iter()
+        .chain(&template_uuids)
+        .chain(&direct_attribute_uuids)
+        .chain(tabular_sections.iter().flat_map(|section| {
+            std::iter::once(&section.uuid).chain(section.attribute_uuids.iter())
+        }))
+        .chain(child_commands.iter().map(|command| &command.header.uuid))
+        .any(|child_uuid| {
+            let child_uuid = child_uuid.to_ascii_lowercase();
+            generated_ids.contains(&child_uuid) || !child_ids.insert(child_uuid)
+        })
+    {
+        return None;
+    }
+
+    let direct_attribute_references = child_metadata_objects
+        .iter()
+        .filter(|child| child.tag == "Attribute")
+        .map(|child| format!("Catalog.{}.Attribute.{}", header.name, child.header.name))
+        .collect::<BTreeSet<_>>();
+    let input_by_string_fields = parse_catalog_field_references(
+        fields.get(42)?,
+        &header.name,
+        object_refs,
+        &direct_attribute_references,
+        &[("-3", "Description"), ("-2", "Code")],
+    )?;
+    let data_lock_fields = parse_catalog_field_references(
+        fields.get(54)?,
+        &header.name,
+        object_refs,
+        &direct_attribute_references,
+        &CATALOG_STANDARD_ATTRIBUTES,
+    )?;
+    let (
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+    ) = parse_catalog_input_modes(fields.get(56)?)?;
+
+    let owners = parse_document_reference_collection(
+        fields.get(12)?,
+        object_refs,
+        &["Catalog.", "ChartOfCharacteristicTypes."],
+    )?;
+    let based_on =
+        parse_document_reference_collection(fields.get(32)?, object_refs, &["Document."])?;
+
+    Some(CatalogProperties {
+        generated_types,
+        hierarchical: information_register_bool(fields.get(37)?)?,
+        hierarchy_type: match fields.get(36)?.trim() {
+            "0" => "HierarchyFoldersAndItems",
+            "1" => "HierarchyOfItems",
+            _ => return None,
+        },
+        limit_level_count: information_register_bool(fields.get(38)?)?,
+        level_count: parse_exchange_plan_u32(fields.get(10)?)?,
+        folders_on_top: information_register_bool(fields.get(13)?)?,
+        owners: Some(owners),
+        subordination_use: Some("ToItems"),
+        use_standard_commands: information_register_bool(fields.get(31)?)?,
+        code_length: parse_exchange_plan_u32(fields.get(17)?)?,
+        description_length: parse_exchange_plan_u32(fields.get(19)?)?,
+        code_type: Some(catalog_code_type_xml(parse_exchange_plan_u32(
+            fields.get(18)?,
+        )?)?),
+        code_allowed_length: Some(catalog_code_allowed_length_xml(parse_exchange_plan_u32(
+            fields.get(51)?,
+        )?)?),
+        code_series: Some(catalog_code_series_xml(parse_exchange_plan_u32(
+            fields.get(16)?,
+        )?)?),
+        check_unique: information_register_bool(fields.get(14)?)?,
+        autonumbering: information_register_bool(fields.get(15)?)?,
+        default_presentation: Some(match fields.get(20)?.trim() {
+            "0" => "AsCode",
+            "1" => "AsDescription",
+            _ => return None,
+        }),
+        standard_attributes: parse_catalog_standard_attributes(
+            fields.get(45)?,
+            owner_code,
+            &header.name,
+            type_index,
+            metadata_object_refs,
+            object_refs,
+        )?,
+        characteristics: parse_catalog_characteristics(
+            fields.get(52)?,
+            type_index,
+            metadata_object_refs,
+            object_refs,
+        )?,
+        predefined_data_update: match fields.get(55)?.trim() {
+            "0" => "Auto",
+            "1" => "AutoUpdate",
+            "2" => "DontAutoUpdate",
+            _ => return None,
+        },
+        edit_type: match fields.get(11)?.trim() {
+            "0" => "InList",
+            "1" => "InDialog",
+            "2" => "BothWays",
+            _ => return None,
+        },
+        quick_choice: information_register_bool(fields.get(41)?)?,
+        choice_mode: match fields.get(40)?.trim() {
+            "0" => "FromForm",
+            "1" => "QuickChoice",
+            "2" => "BothWays",
+            _ => return None,
+        },
+        input_by_string_fields,
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+        default_object_form: parse_catalog_owned_form_ref(
+            fields.get(21)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_folder_form: parse_catalog_owned_form_ref(
+            fields.get(22)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_list_form: parse_catalog_owned_form_ref(
+            fields.get(23)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_choice_form: parse_catalog_owned_form_ref(
+            fields.get(24)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_folder_choice_form: parse_catalog_owned_form_ref(
+            fields.get(25)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_object_form: parse_catalog_owned_form_ref(
+            fields.get(26)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_folder_form: parse_catalog_owned_form_ref(
+            fields.get(27)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: parse_catalog_owned_form_ref(
+            fields.get(28)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_choice_form: parse_catalog_owned_form_ref(
+            fields.get(29)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_folder_choice_form: parse_catalog_owned_form_ref(
+            fields.get(30)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        include_help_in_contents: information_register_bool(fields.get(33)?)?,
+        based_on,
+        data_lock_fields,
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(43)?)?,
+        full_text_search: register_child_full_text_search_xml(fields.get(44)?.trim())?,
+        object_presentation: parse_information_register_owner_localized_value(fields.get(46)?)?,
+        extended_object_presentation: parse_information_register_owner_localized_value(
+            fields.get(47)?,
+        )?,
+        list_presentation: parse_information_register_owner_localized_value(fields.get(48)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            fields.get(49)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(fields.get(50)?)?,
+        create_on_input: metadata_create_on_input_xml(fields.get(53)?.trim())?,
+        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(57)?.trim())?,
+        data_history: metadata_data_history_xml(fields.get(58)?.trim())?,
+        update_data_history_immediately_after_write: information_register_bool(fields.get(59)?)?,
+        execute_after_write_data_history_version_processing: information_register_bool(
+            fields.get(60)?,
+        )?,
+        child_metadata_objects,
+        child_forms,
+        child_templates,
+        child_commands,
     })
 }
 
-fn parse_catalog_input_history_tail(
+fn parse_catalog_generated_types(
     fields: &[&str],
-    exact_code56_layout: bool,
-) -> Option<(&'static str, &'static str)> {
-    if exact_code56_layout {
-        let create_on_input = match fields.get(53)?.trim() {
-            "1" => "DontUse",
-            "2" => "Use",
-            _ => return None,
-        };
-        let choice_history_on_input = match fields.get(57)?.trim() {
-            "0" => "Auto",
-            "1" => "DontUse",
-            _ => return None,
-        };
-        return Some((create_on_input, choice_history_on_input));
-    }
+    owner_name: &str,
+    seen: &mut BTreeSet<String>,
+) -> Option<Vec<GeneratedTypeEntry>> {
+    [
+        (1, 2, "CatalogObject", "Object"),
+        (3, 4, "CatalogRef", "Ref"),
+        (5, 6, "CatalogSelection", "Selection"),
+        (7, 8, "CatalogList", "List"),
+        (34, 35, "CatalogManager", "Manager"),
+    ]
+    .into_iter()
+    .map(|(type_slot, value_slot, prefix, category)| {
+        let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
+        let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
+        if !seen.insert(type_id.to_ascii_lowercase()) || !seen.insert(value_id.to_ascii_lowercase())
+        {
+            return None;
+        }
+        Some(GeneratedTypeEntry {
+            name: format!("{prefix}.{owner_name}"),
+            category,
+            type_id,
+            value_id,
+        })
+    })
+    .collect()
+}
 
+fn parse_catalog_attribute_collection(items: &[&str], expected_code: u32) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let item = split_information_register_braced_fields(item)?;
+            if item.len() != 2 || item.get(1)?.trim() != "0" {
+                return None;
+            }
+            let wrapper = split_information_register_braced_fields(item.first()?)?;
+            let (_, _, wrapper_code, child_uuid) =
+                parse_catalog_attribute_wrapper_fields(&wrapper, None)?;
+            (wrapper_code == expected_code && seen.insert(child_uuid.to_ascii_lowercase()))
+                .then_some(child_uuid)
+        })
+        .collect()
+}
+
+struct CatalogTabularSectionLayout {
+    uuid: String,
+    attribute_uuids: Vec<String>,
+}
+
+fn parse_catalog_tabular_sections(
+    items: &[&str],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    generated_ids: &mut BTreeSet<String>,
+) -> Option<Vec<CatalogTabularSectionLayout>> {
+    let mut child_ids = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let item = split_information_register_braced_fields(item)?;
+            if item.len() != 3 || item.get(1)?.trim() != "1" {
+                return None;
+            }
+            let wrapper = split_information_register_braced_fields(item.first()?)?;
+            if wrapper.len() != 3
+                || wrapper.first()?.trim() != "1"
+                || !matches!(wrapper.get(2)?.trim(), "0" | "2")
+            {
+                return None;
+            }
+            let payload = split_information_register_braced_fields(wrapper.get(1)?)?;
+            if payload.len() != 9 || payload.first()?.trim() != "11" {
+                return None;
+            }
+            let header = parse_wrapped_register_owner_header(payload.get(5)?)?;
+            let expected_reference = format!("Catalog.{owner_name}.TabularSection.{}", header.name);
+            if header.name.is_empty()
+                || header.name.contains('.')
+                || resolve_exchange_plan_index_reference(&header.uuid, object_refs)?
+                    != expected_reference
+                || !child_ids.insert(header.uuid.to_ascii_lowercase())
+                || !names.insert(header.name.to_lowercase())
+                || !matches!(payload.get(6)?.trim(), "0" | "1")
+                || parse_exact_tabular_section_standard_attributes_presence(
+                    "Catalog",
+                    payload.get(7)?,
+                )
+                .is_none()
+                || parse_information_register_owner_localized_value(payload.get(8)?).is_none()
+            {
+                return None;
+            }
+            for value in &payload[1..5] {
+                let generated_id = parse_information_register_non_zero_uuid(value)?;
+                if !generated_ids.insert(generated_id.to_ascii_lowercase()) {
+                    return None;
+                }
+            }
+            let nested = parse_task_root_collection(item.get(2)?)?;
+            if !nested
+                .marker
+                .eq_ignore_ascii_case(CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID)
+            {
+                return None;
+            }
+            Some(CatalogTabularSectionLayout {
+                uuid: header.uuid,
+                attribute_uuids: parse_catalog_attribute_collection(&nested.items, 8)?,
+            })
+        })
+        .collect()
+}
+
+fn validate_catalog_child_objects(
+    children: &[MetadataChildObject],
+    direct_attribute_uuids: &[String],
+    tabular_sections: &[CatalogTabularSectionLayout],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<()> {
+    let direct = children
+        .iter()
+        .filter(|child| child.tag == "Attribute")
+        .collect::<Vec<_>>();
+    let sections = children
+        .iter()
+        .filter(|child| child.tag == "TabularSection")
+        .collect::<Vec<_>>();
+    if children.len() != direct.len() + sections.len()
+        || direct.len() != direct_attribute_uuids.len()
+        || sections.len() != tabular_sections.len()
+    {
+        return None;
+    }
+    for (child, uuid) in direct.iter().zip(direct_attribute_uuids) {
+        let expected_reference = format!("Catalog.{owner_name}.Attribute.{}", child.header.name);
+        if !child.header.uuid.eq_ignore_ascii_case(uuid)
+            || child.properties.is_none()
+            || !child.child_objects.is_empty()
+            || resolve_exchange_plan_index_reference(&child.header.uuid, object_refs)?
+                != expected_reference
+        {
+            return None;
+        }
+    }
+    for (child, expected) in sections.iter().zip(tabular_sections) {
+        let section_reference =
+            format!("Catalog.{owner_name}.TabularSection.{}", child.header.name);
+        if !child.header.uuid.eq_ignore_ascii_case(&expected.uuid)
+            || child.tabular_section_properties.is_none()
+            || child.child_objects.len() != expected.attribute_uuids.len()
+            || resolve_exchange_plan_index_reference(&child.header.uuid, object_refs)?
+                != section_reference
+        {
+            return None;
+        }
+        for (attribute, uuid) in child.child_objects.iter().zip(&expected.attribute_uuids) {
+            let expected_reference =
+                format!("{section_reference}.Attribute.{}", attribute.header.name);
+            if attribute.tag != "Attribute"
+                || !attribute.header.uuid.eq_ignore_ascii_case(uuid)
+                || attribute.properties.is_none()
+                || resolve_exchange_plan_index_reference(&attribute.header.uuid, object_refs)?
+                    != expected_reference
+            {
+                return None;
+            }
+        }
+    }
+    Some(())
+}
+
+fn parse_catalog_child_forms(
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("Catalog.{owner_name}.Form.");
+    let mut seen = BTreeSet::new();
+    form_uuids
+        .iter()
+        .map(|uuid| {
+            let reference =
+                parse_exact_register_owned_form_ref(uuid, "Catalog", owner_name, form_refs)??;
+            let name = reference.strip_prefix(&prefix)?;
+            (!name.is_empty() && !name.contains('.') && seen.insert(name.to_lowercase()))
+                .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn parse_catalog_owned_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if !information_register_uuid_is_zero(&uuid)
+        && !form_uuids
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
+    {
+        return None;
+    }
+    parse_exact_register_owned_form_ref(value, "Catalog", owner_name, form_refs)
+}
+
+fn parse_catalog_child_templates(
+    template_uuids: &[String],
+    owner_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("Catalog.{owner_name}.Template.");
+    let mut seen = BTreeSet::new();
+    template_uuids
+        .iter()
+        .map(|uuid| {
+            let mut matches = template_refs
+                .iter()
+                .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+            let (_, template_ref) = matches.next()?;
+            if matches.next().is_some()
+                || template_ref.kind != "Template"
+                || !is_owned_metadata_child_path(
+                    &template_ref.relative_path,
+                    "Catalogs",
+                    owner_name,
+                    "Templates",
+                )
+            {
+                return None;
+            }
+            let reference = template_source_reference_name(template_ref)?;
+            let name = reference.strip_prefix(&prefix)?;
+            (source_path_file_stem(&template_ref.relative_path)? == name
+                && !name.is_empty()
+                && !name.contains('.')
+                && seen.insert(name.to_lowercase()))
+            .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn parse_catalog_field_references(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    attribute_references: &BTreeSet<String>,
+    standard_attributes: &[(&str, &str)],
+) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|value| {
+            let payload = parse_exchange_plan_field_ref_payload(value)?;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    let (_, name) = standard_attributes
+                        .iter()
+                        .find(|(candidate, _)| marker.trim() == *candidate)?;
+                    format!("Catalog.{owner_name}.StandardAttribute.{name}")
+                }
+                [kind, uuid] if kind.trim() == "0" => {
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
+                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+                    attribute_references
+                        .contains(&reference)
+                        .then_some(reference)?
+                }
+                _ => return None,
+            };
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
+        })
+        .collect()
+}
+
+fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3 || fields.get(1)?.trim() != "2" || fields.get(2)?.trim() != "0" {
+        return None;
+    }
     Some((
-        fields
-            .get(51)
-            .and_then(|field| metadata_create_on_input_xml(field.trim()))
-            .unwrap_or("DontUse"),
-        fields
-            .get(52)
-            .and_then(|field| metadata_choice_history_on_input_xml(field.trim()))
-            .unwrap_or("Auto"),
+        match fields.first()?.trim() {
+            "1" => "Begin",
+            "2" => "AnyPart",
+            _ => return None,
+        },
+        "DontUse",
+        "Directly",
     ))
+}
+
+const CATALOG_STANDARD_ATTRIBUTES: [(&str, &str); 9] = [
+    ("-13", "PredefinedDataName"),
+    ("-10", "Predefined"),
+    ("-8", "Ref"),
+    ("-7", "DeletionMark"),
+    ("-6", "IsFolder"),
+    ("-5", "Owner"),
+    ("-4", "Parent"),
+    ("-3", "Description"),
+    ("-2", "Code"),
+];
+
+fn parse_catalog_standard_attributes(
+    value: &str,
+    owner_code: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<Vec<MetadataStandardAttribute>>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() == 1 && outer.first()?.trim() == "0" {
+        return Some(None);
+    }
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.first()?.trim() != "1"
+        || parse_information_register_usize(payload.get(1)?)? != CATALOG_STANDARD_ATTRIBUTES.len()
+        || payload.len()
+            != CATALOG_STANDARD_ATTRIBUTES
+                .len()
+                .checked_mul(3)?
+                .checked_add(2)?
+    {
+        return None;
+    }
+    let expected_modern_bag = match owner_code {
+        "56" => false,
+        "57" => true,
+        _ => return None,
+    };
+    CATALOG_STANDARD_ATTRIBUTES
+        .iter()
+        .copied()
+        .zip(payload[2..].chunks_exact(3))
+        .map(|((expected_marker, name), triplet)| {
+            let marker = split_information_register_braced_fields(triplet[0])?;
+            if marker.len() != 1
+                || marker.first()?.trim() != expected_marker
+                || !information_register_uuid_matches(
+                    triplet[1],
+                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+                )
+            {
+                return None;
+            }
+            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            if bag.has_type_reduction_mode != expected_modern_bag {
+                return None;
+            }
+            let fill_value =
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value = parse_information_register_fill_value(
+                fill_value,
+                type_index,
+                metadata_object_refs,
+            )?;
+            let expected_raw_reduction = if name == "Owner" { "2" } else { "0" };
+            let (attribute, comment, choice_parameter_links) =
+                parse_register_standard_attribute_with_comment_and_choice_parameter_links(
+                    name,
+                    &bag,
+                    fill_value,
+                    expected_raw_reduction,
+                )?;
+            let choice_parameter_links = parse_catalog_standard_attribute_choice_parameter_links(
+                choice_parameter_links,
+                owner_name,
+                object_refs,
+            )?;
+            Some(MetadataStandardAttribute {
+                attribute,
+                comment,
+                type_reduction_mode: if name == "Owner" {
+                    "Deny"
+                } else {
+                    "TransformValues"
+                },
+                choice_parameter_links,
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(Some)
+}
+
+fn parse_catalog_characteristics(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<DocumentCharacteristic>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "0" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    let count = parse_information_register_usize(payload.first()?)?;
+    if payload.len() != count.checked_add(1)? {
+        return None;
+    }
+    payload[1..]
+        .iter()
+        .map(|value| {
+            let typed = split_information_register_braced_fields(value)?;
+            if typed.len() != 3
+                || typed.first()?.trim() != r##""#""##
+                || !information_register_uuid_matches(
+                    typed.get(1)?,
+                    DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+                )
+            {
+                return None;
+            }
+            let fields = split_information_register_braced_fields(typed.get(2)?)?;
+            if fields.len() != 13 || fields.first()?.trim() != "4" {
+                return None;
+            }
+            let types_from = parse_catalog_characteristic_source(fields.get(1)?, object_refs)?;
+            let values_from = parse_catalog_characteristic_source(fields.get(2)?, object_refs)?;
+            Some(DocumentCharacteristic {
+                object_field: parse_catalog_characteristic_field(
+                    fields.get(3)?,
+                    object_refs,
+                    &values_from,
+                )?,
+                type_field: parse_catalog_characteristic_field(
+                    fields.get(4)?,
+                    object_refs,
+                    &values_from,
+                )?,
+                value_field: parse_catalog_characteristic_field(
+                    fields.get(5)?,
+                    object_refs,
+                    &values_from,
+                )?,
+                types_filter_field: parse_catalog_characteristic_field(
+                    fields.get(6)?,
+                    object_refs,
+                    &types_from,
+                )?,
+                types_filter_value: parse_information_register_fill_value(
+                    fields.get(7)?,
+                    type_index,
+                    metadata_object_refs,
+                )?,
+                key_field: parse_catalog_characteristic_field(
+                    fields.get(8)?,
+                    object_refs,
+                    &types_from,
+                )?,
+                data_path_field: parse_catalog_characteristic_field(
+                    fields.get(9)?,
+                    object_refs,
+                    &types_from,
+                )?,
+                multiple_values_use_field: parse_catalog_characteristic_field(
+                    fields.get(10)?,
+                    object_refs,
+                    &types_from,
+                )?,
+                multiple_values_key_field: parse_catalog_characteristic_field(
+                    fields.get(11)?,
+                    object_refs,
+                    &values_from,
+                )?,
+                multiple_values_order_field: parse_catalog_characteristic_field(
+                    fields.get(12)?,
+                    object_refs,
+                    &values_from,
+                )?,
+                types_from,
+                values_from,
+            })
+        })
+        .collect()
+}
+
+fn parse_catalog_characteristic_source(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 2 || fields.first()?.trim() != "1" {
+        return None;
+    }
+    let uuid = parse_information_register_non_zero_uuid(fields.get(1)?)?;
+    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+    catalog_characteristic_source_is_valid(&reference).then_some(reference)
+}
+
+fn catalog_characteristic_source_is_valid(reference: &str) -> bool {
+    let parts = reference.split('.').collect::<Vec<_>>();
+    match parts.as_slice() {
+        [kind, owner] => !kind.is_empty() && !owner.is_empty(),
+        [kind, owner, "TabularSection", section] => {
+            !kind.is_empty() && !owner.is_empty() && !section.is_empty()
+        }
+        _ => false,
+    }
+}
+
+fn parse_catalog_characteristic_field(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    source: &str,
+) -> Option<String> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() != 3 || fields.first()?.trim() != "1" || fields.get(2)?.trim() != "0" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(fields.get(1)?)?;
+    match payload.as_slice() {
+        [marker] if matches!(marker.trim(), "-1" | "0") => Some(marker.trim().to_string()),
+        [marker] => {
+            match source.split('.').collect::<Vec<_>>().as_slice() {
+                ["Catalog", owner] if !owner.is_empty() => CATALOG_STANDARD_ATTRIBUTES
+                    .iter()
+                    .find_map(|(raw_marker, name)| {
+                        (marker.trim() == *raw_marker)
+                            .then(|| format!("{source}.StandardAttribute.{name}"))
+                    }),
+                ["Catalog", owner, "TabularSection", section]
+                    if !owner.is_empty() && !section.is_empty() && marker.trim() == "-8" =>
+                {
+                    Some(format!("{source}.StandardAttribute.Ref"))
+                }
+                _ => None,
+            }
+        }
+        [kind, uuid] if kind.trim() == "0" => {
+            let uuid = parse_information_register_non_zero_uuid(uuid)?;
+            let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+            reference
+                .strip_prefix(source)
+                .is_some_and(|suffix| suffix.starts_with('.') && suffix.len() > 1)
+                .then_some(reference)
+        }
+        _ => None,
+    }
 }
 
 fn parse_report_properties_from_text(
@@ -15492,8 +16249,13 @@ fn parse_document_standard_attributes(
             let fill_value =
                 parse_information_register_fill_value(fill_value, type_index, object_refs)?;
             let (attribute, comment) =
-                parse_register_standard_attribute_with_comment(name, &bag, fill_value)?;
-            Some(MetadataStandardAttribute { attribute, comment })
+                parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
+            Some(MetadataStandardAttribute {
+                attribute,
+                comment,
+                type_reduction_mode: "TransformValues",
+                choice_parameter_links: Vec::new(),
+            })
         })
         .collect::<Option<Vec<_>>>()?;
     Some(Some(attributes))
@@ -16078,8 +16840,13 @@ fn parse_business_process_standard_attributes(
             let fill_value =
                 parse_information_register_fill_value(fill_value, type_index, object_refs)?;
             let (attribute, comment) =
-                parse_register_standard_attribute_with_comment(name, &bag, fill_value)?;
-            Some(MetadataStandardAttribute { attribute, comment })
+                parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
+            Some(MetadataStandardAttribute {
+                attribute,
+                comment,
+                type_reduction_mode: "TransformValues",
+                choice_parameter_links: Vec::new(),
+            })
         })
         .collect()
 }
@@ -16832,8 +17599,13 @@ fn parse_task_standard_attributes(
             let fill_value =
                 parse_information_register_fill_value(fill_value, type_index, object_refs)?;
             let (attribute, comment) =
-                parse_register_standard_attribute_with_comment(name, &bag, fill_value)?;
-            Some(MetadataStandardAttribute { attribute, comment })
+                parse_register_standard_attribute_with_comment(name, &bag, fill_value, "0")?;
+            Some(MetadataStandardAttribute {
+                attribute,
+                comment,
+                type_reduction_mode: "TransformValues",
+                choice_parameter_links: Vec::new(),
+            })
         })
         .collect()
 }
@@ -17780,53 +18552,6 @@ fn push_generated_type_entry(
     });
 }
 
-fn parse_catalog_hierarchical_flag(header_field: Option<&str>) -> Option<bool> {
-    let outer = split_1c_braced_fields(header_field?, 0)?;
-    let header = split_1c_braced_fields(outer.get(1)?, 0)?;
-    parse_1c_bool_field(header.get(5).copied())
-}
-
-fn parse_catalog_owners(
-    field: Option<&str>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<String>> {
-    let field = field?;
-    if field
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .collect::<String>()
-        == "{0,0}"
-    {
-        return Some(Vec::new());
-    }
-
-    let mut owners = Vec::new();
-    let mut seen = BTreeSet::new();
-    collect_catalog_owner_refs(field, object_refs, &mut seen, &mut owners);
-    (!owners.is_empty()).then_some(owners)
-}
-
-fn collect_catalog_owner_refs(
-    field: &str,
-    object_refs: &BTreeMap<String, String>,
-    seen: &mut BTreeSet<String>,
-    owners: &mut Vec<String>,
-) {
-    if let Some(uuid) = parse_non_zero_uuid(field.trim())
-        && seen.insert(uuid.clone())
-        && let Some(reference) = object_refs.get(&uuid)
-    {
-        owners.push(reference.clone());
-    }
-
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return;
-    };
-    for nested in fields {
-        collect_catalog_owner_refs(nested, object_refs, seen, owners);
-    }
-}
-
 fn parse_catalog_form_ref(
     field: Option<&str>,
     form_refs: &BTreeMap<String, FormSourceReference>,
@@ -17888,6 +18613,7 @@ fn owned_default_list_form_ref(
 
 fn metadata_source_folder_for_kind(kind: &str) -> Option<&'static str> {
     match kind {
+        "Catalog" => Some("Catalogs"),
         "Document" => Some("Documents"),
         "DocumentJournal" => Some("DocumentJournals"),
         "InformationRegister" => Some("InformationRegisters"),
@@ -17920,106 +18646,6 @@ fn parse_metadata_object_ref(
 ) -> Option<String> {
     let uuid = parse_non_zero_uuid(field?)?;
     object_refs.get(&uuid).cloned()
-}
-
-fn parse_catalog_input_by_string_fields(field: Option<&str>, catalog_name: &str) -> Vec<String> {
-    let Some(field) = field else {
-        return Vec::new();
-    };
-    let mut values = Vec::new();
-    for code in ["-3", "-2"] {
-        let marker = format!("{{{code}}}");
-        if field.contains(&marker) {
-            if let Some(name) = catalog_standard_attribute_name(code) {
-                values.push(format!("Catalog.{catalog_name}.StandardAttribute.{name}"));
-            }
-        }
-    }
-    values
-}
-
-const CATALOG_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID: &str =
-    "4690ff70-e3fa-4914-9127-6a9acc5fc949";
-const CATALOG_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID: &str =
-    "cf4abea3-37b2-11d4-940f-008048da11f9";
-
-fn parse_catalog_standard_attribute_details(
-    field: Option<&str>,
-) -> BTreeMap<&'static str, CatalogStandardAttributeDetails> {
-    parse_standard_attribute_details(field, catalog_standard_attribute_name)
-}
-
-fn parse_standard_attribute_details(
-    field: Option<&str>,
-    name_by_code: fn(&str) -> Option<&'static str>,
-) -> BTreeMap<&'static str, CatalogStandardAttributeDetails> {
-    let mut details = BTreeMap::new();
-    if let Some(field) = field {
-        parse_standard_attribute_details_from_field(field, &mut details, name_by_code);
-    }
-    details
-}
-
-fn parse_standard_attribute_details_from_field(
-    field: &str,
-    details: &mut BTreeMap<&'static str, CatalogStandardAttributeDetails>,
-    name_by_code: fn(&str) -> Option<&'static str>,
-) {
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return;
-    };
-
-    for index in 0..fields.len().saturating_sub(2) {
-        let Some(code_fields) = split_1c_braced_fields(fields[index], 0) else {
-            continue;
-        };
-        let Some(name) = code_fields
-            .first()
-            .and_then(|code| name_by_code(code.trim()))
-        else {
-            continue;
-        };
-        let detail = parse_standard_attribute_detail(fields[index + 2]);
-        if !detail.tooltip.is_empty() || !detail.synonym.is_empty() {
-            details.insert(name, detail);
-        }
-    }
-
-    for nested in fields {
-        if nested.starts_with('{') {
-            parse_standard_attribute_details_from_field(nested, details, name_by_code);
-        }
-    }
-}
-
-fn parse_standard_attribute_detail(field: &str) -> CatalogStandardAttributeDetails {
-    let mut detail = CatalogStandardAttributeDetails::default();
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return detail;
-    };
-
-    for pair in fields.get(2..).unwrap_or_default().chunks(2) {
-        let [key, value] = pair else {
-            continue;
-        };
-        match key.trim() {
-            CATALOG_STANDARD_ATTRIBUTE_TOOLTIP_PROPERTY_UUID => {
-                detail.tooltip = parse_wrapped_1c_synonyms(value);
-            }
-            CATALOG_STANDARD_ATTRIBUTE_SYNONYM_PROPERTY_UUID => {
-                detail.synonym = parse_wrapped_1c_synonyms(value);
-            }
-            _ => {}
-        }
-    }
-
-    detail
-}
-
-fn parse_wrapped_1c_synonyms(value: &str) -> Vec<(String, String)> {
-    split_1c_braced_fields(value, 0)
-        .and_then(|fields| fields.get(2).map(|field| parse_1c_synonyms(field)))
-        .unwrap_or_else(|| parse_1c_synonyms(value))
 }
 
 fn parse_report_child_templates_from_text(
@@ -18270,21 +18896,6 @@ fn owned_metadata_template_names_in_text_order(
     names
 }
 
-fn catalog_standard_attribute_name(code: &str) -> Option<&'static str> {
-    match code {
-        "-13" => Some("PredefinedDataName"),
-        "-10" => Some("Predefined"),
-        "-8" => Some("Ref"),
-        "-7" => Some("DeletionMark"),
-        "-6" => Some("IsFolder"),
-        "-5" => Some("Owner"),
-        "-4" => Some("Parent"),
-        "-3" => Some("Description"),
-        "-2" => Some("Code"),
-        _ => None,
-    }
-}
-
 fn parse_1c_bool_field(value: Option<&str>) -> Option<bool> {
     parse_1c_bool_flag(value?.trim())
 }
@@ -18297,15 +18908,6 @@ fn braced_field_has_entries(field: Option<&str>) -> bool {
 
 fn parse_1c_u32_field(value: Option<&str>) -> Option<u32> {
     value?.trim().parse().ok()
-}
-
-fn catalog_subordination_use_xml(value: u32) -> Option<&'static str> {
-    match value {
-        0 => Some("ToFolders"),
-        1 => Some("ToItems"),
-        2 => Some("ToFoldersAndItems"),
-        _ => None,
-    }
 }
 
 fn catalog_code_type_xml(value: u32) -> Option<&'static str> {
@@ -18327,7 +18929,8 @@ fn catalog_code_allowed_length_xml(value: u32) -> Option<&'static str> {
 fn catalog_code_series_xml(value: u32) -> Option<&'static str> {
     match value {
         0 => Some("WholeCatalog"),
-        1 => Some("WithinOwner"),
+        1 => Some("WithinSubordination"),
+        2 => Some("WithinOwnerSubordination"),
         _ => None,
     }
 }
@@ -22759,11 +23362,21 @@ fn format_chart_of_characteristic_types_source_xml(
     xml
 }
 
-fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogProperties) -> String {
+fn format_catalog_source_xml(
+    header: &MetadataHeader,
+    catalog: &CatalogProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let palette_namespace = if source_version == InfobaseConfigSourceVersion::V2_21 {
+        " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""
+    } else {
+        ""
+    };
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:cmi=\"http://v8.1c.ru/8.2/managed-application/cmi\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\"{palette_namespace} xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xen=\"http://v8.1c.ru/8.3/xcf/enums\" xmlns:xpr=\"http://v8.1c.ru/8.3/xcf/predef\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{source_version}\">\r\n\
 \t<Catalog uuid=\"{uuid}\">\r\n",
+        source_version = source_version.as_str(),
         uuid = escape_xml_text(&header.uuid),
     );
 
@@ -22804,12 +23417,14 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
     }
     xml.push_str(&format!(
         "\t\t\t<Hierarchical>{}</Hierarchical>\r\n\
-\t\t\t<HierarchyType>HierarchyFoldersAndItems</HierarchyType>\r\n\
-\t\t\t<LimitLevelCount>false</LimitLevelCount>\r\n\
+\t\t\t<HierarchyType>{}</HierarchyType>\r\n\
+\t\t\t<LimitLevelCount>{}</LimitLevelCount>\r\n\
 \t\t\t<LevelCount>{}</LevelCount>\r\n\
 \t\t\t<FoldersOnTop>{}</FoldersOnTop>\r\n\
 \t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
         xml_bool(catalog.hierarchical),
+        catalog.hierarchy_type,
+        xml_bool(catalog.limit_level_count),
         catalog.level_count,
         xml_bool(catalog.folders_on_top),
         xml_bool(catalog.use_standard_commands),
@@ -22860,13 +23475,15 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
             "\t\t\t<DefaultPresentation>{value}</DefaultPresentation>\r\n"
         ));
     }
-    push_catalog_standard_attributes_xml(&mut xml, catalog);
-    xml.push_str(
-        "\t\t\t<Characteristics/>\r\n\
-\t\t\t<PredefinedDataUpdate>Auto</PredefinedDataUpdate>\r\n\
-\t\t\t<EditType>InDialog</EditType>\r\n\
-",
-    );
+    if let Some(standard_attributes) = &catalog.standard_attributes {
+        push_metadata_standard_attributes_xml(&mut xml, standard_attributes);
+    }
+    push_document_characteristics_xml(&mut xml, &catalog.characteristics);
+    xml.push_str(&format!(
+        "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
+\t\t\t<EditType>{}</EditType>\r\n",
+        catalog.predefined_data_update, catalog.edit_type,
+    ));
     xml.push_str(&format!(
         "\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
 \t\t\t<ChoiceMode>{}</ChoiceMode>\r\n",
@@ -22874,11 +23491,14 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
         catalog.choice_mode
     ));
     push_catalog_input_by_string_xml(&mut xml, &catalog.input_by_string_fields);
-    xml.push_str(
-        "\t\t\t<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>\r\n\
-\t\t\t<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>\r\n\
-\t\t\t<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>\r\n",
-    );
+    xml.push_str(&format!(
+        "\t\t\t<SearchStringModeOnInputByString>{}</SearchStringModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>{}</FullTextSearchOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>{}</ChoiceDataGetModeOnInputByString>\r\n",
+        catalog.search_string_mode_on_input_by_string,
+        catalog.full_text_search_on_input_by_string,
+        catalog.choice_data_get_mode_on_input_by_string,
+    ));
     push_optional_text_element(
         &mut xml,
         "\t\t\t",
@@ -22940,12 +23560,15 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
         catalog.auxiliary_folder_choice_form.as_deref(),
     );
     xml.push_str(&format!(
-        "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
-\t\t\t<BasedOn/>\r\n\
-\t\t\t<DataLockFields/>\r\n\
-\t\t\t<DataLockControlMode>Managed</DataLockControlMode>\r\n\
-\t\t\t<FullTextSearch>Use</FullTextSearch>\r\n",
+        "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
         xml_bool(catalog.include_help_in_contents),
+    ));
+    push_task_based_on_xml(&mut xml, &catalog.based_on);
+    push_exchange_plan_field_collection_xml(&mut xml, "DataLockFields", &catalog.data_lock_fields);
+    xml.push_str(&format!(
+        "\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n",
+        catalog.data_lock_control_mode, catalog.full_text_search,
     ));
     push_localized_property(
         &mut xml,
@@ -22985,10 +23608,13 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
         xml_bool(catalog.execute_after_write_data_history_version_processing)
     ));
     xml.push_str("\t\t</Properties>\r\n");
-    if !catalog.child_metadata_objects.is_empty()
-        || !catalog.child_forms.is_empty()
-        || !catalog.child_templates.is_empty()
+    if catalog.child_metadata_objects.is_empty()
+        && catalog.child_forms.is_empty()
+        && catalog.child_templates.is_empty()
+        && catalog.child_commands.is_empty()
     {
+        xml.push_str("\t\t<ChildObjects/>\r\n");
+    } else {
         xml.push_str("\t\t<ChildObjects>\r\n");
         for child in &catalog.child_metadata_objects {
             push_metadata_child_object_xml(&mut xml, child);
@@ -23004,6 +23630,9 @@ fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogPropertie
                 "\t\t\t<Template>{}</Template>\r\n",
                 escape_xml_element_text(template)
             ));
+        }
+        for command in &catalog.child_commands {
+            push_metadata_child_command_xml(&mut xml, command);
         }
         xml.push_str("\t\t</ChildObjects>\r\n");
     }
@@ -23775,10 +24404,11 @@ fn push_metadata_standard_attributes_xml(
 \t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
 \t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
 \t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
-\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
 \t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
             attribute.fill_checking,
             xml_bool(attribute.fill_from_filling_value),
+            parsed_attribute.type_reduction_mode,
         ));
         push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
         xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
@@ -23806,17 +24436,46 @@ fn push_metadata_standard_attributes_xml(
             ));
         }
         xml.push_str(&format!(
-            "\t\t\t\t\t<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n\
-\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
-\t\t\t\t\t{}\r\n\
+            "\t\t\t\t\t<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n",
+            attribute.full_text_search,
+        ));
+        push_metadata_standard_attribute_choice_parameter_links_xml(
+            xml,
+            &parsed_attribute.choice_parameter_links,
+        );
+        xml.push_str(&format!(
+            "\t\t\t\t\t{}\r\n\
 \t\t\t\t\t<xr:Mask/>\r\n\
 \t\t\t\t\t<xr:ChoiceParameters/>\r\n\
 \t\t\t\t</xr:StandardAttribute>\r\n",
-            attribute.full_text_search,
             format_register_standard_attribute_fill_value_xml(&attribute.fill_value),
         ));
     }
     xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+fn push_metadata_standard_attribute_choice_parameter_links_xml(
+    xml: &mut String,
+    links: &[MetadataChoiceParameterLink],
+) {
+    if links.is_empty() {
+        xml.push_str("\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t\t\t<xr:ChoiceParameterLinks>\r\n");
+    for link in links {
+        xml.push_str(&format!(
+            "\t\t\t\t\t\t<xr:Link>\r\n\
+\t\t\t\t\t\t\t<xr:Name>{}</xr:Name>\r\n\
+\t\t\t\t\t\t\t<xr:DataPath xsi:type=\"xs:string\">{}</xr:DataPath>\r\n\
+\t\t\t\t\t\t\t<xr:ValueChange>{}</xr:ValueChange>\r\n\
+\t\t\t\t\t\t</xr:Link>\r\n",
+            escape_xml_element_text(&link.name),
+            escape_xml_element_text(&link.data_path),
+            link.value_change,
+        ));
+    }
+    xml.push_str("\t\t\t\t\t</xr:ChoiceParameterLinks>\r\n");
 }
 
 fn push_task_addressing_attribute_xml(xml: &mut String, attribute: &TaskAddressingAttribute) {
@@ -24503,182 +25162,6 @@ fn push_catalog_input_by_string_xml(xml: &mut String, fields: &[String]) {
         ));
     }
     xml.push_str("\t\t\t</InputByString>\r\n");
-}
-
-fn push_catalog_standard_attributes_xml(xml: &mut String, catalog: &CatalogProperties) {
-    xml.push_str("\t\t\t<StandardAttributes>\r\n");
-    for attribute in catalog_standard_attributes() {
-        push_catalog_standard_attribute_xml(xml, attribute, catalog);
-    }
-    xml.push_str("\t\t\t</StandardAttributes>\r\n");
-}
-
-struct CatalogStandardAttribute {
-    name: &'static str,
-    fill_checking: &'static str,
-    fill_from_filling_value: bool,
-    type_reduction_mode: &'static str,
-    fill_value: CatalogStandardAttributeFillValue,
-}
-
-enum CatalogStandardAttributeFillValue {
-    Nil,
-    EmptyString,
-    CodeString,
-}
-
-fn catalog_standard_attributes() -> &'static [CatalogStandardAttribute] {
-    &[
-        CatalogStandardAttribute {
-            name: "PredefinedDataName",
-            fill_checking: "DontCheck",
-            fill_from_filling_value: false,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::Nil,
-        },
-        CatalogStandardAttribute {
-            name: "Predefined",
-            fill_checking: "DontCheck",
-            fill_from_filling_value: false,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::Nil,
-        },
-        CatalogStandardAttribute {
-            name: "Ref",
-            fill_checking: "DontCheck",
-            fill_from_filling_value: false,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::Nil,
-        },
-        CatalogStandardAttribute {
-            name: "DeletionMark",
-            fill_checking: "DontCheck",
-            fill_from_filling_value: false,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::Nil,
-        },
-        CatalogStandardAttribute {
-            name: "IsFolder",
-            fill_checking: "DontCheck",
-            fill_from_filling_value: false,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::Nil,
-        },
-        CatalogStandardAttribute {
-            name: "Owner",
-            fill_checking: "ShowError",
-            fill_from_filling_value: true,
-            type_reduction_mode: "Deny",
-            fill_value: CatalogStandardAttributeFillValue::Nil,
-        },
-        CatalogStandardAttribute {
-            name: "Parent",
-            fill_checking: "DontCheck",
-            fill_from_filling_value: true,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::Nil,
-        },
-        CatalogStandardAttribute {
-            name: "Description",
-            fill_checking: "ShowError",
-            fill_from_filling_value: false,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::EmptyString,
-        },
-        CatalogStandardAttribute {
-            name: "Code",
-            fill_checking: "ShowError",
-            fill_from_filling_value: false,
-            type_reduction_mode: "TransformValues",
-            fill_value: CatalogStandardAttributeFillValue::CodeString,
-        },
-    ]
-}
-
-fn push_catalog_standard_attribute_xml(
-    xml: &mut String,
-    attribute: &CatalogStandardAttribute,
-    catalog: &CatalogProperties,
-) {
-    let details = catalog.standard_attribute_details.get(attribute.name);
-    xml.push_str(&format!(
-        "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n\
-\t\t\t\t\t<xr:LinkByType/>\r\n\
-\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
-\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
-\t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
-\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
-\t\t\t\t\t<xr:TypeReductionMode>{}</xr:TypeReductionMode>\r\n\
-\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
-        escape_xml_text(attribute.name),
-        attribute.fill_checking,
-        xml_bool(attribute.fill_from_filling_value),
-        attribute.type_reduction_mode
-    ));
-    push_localized_property(
-        xml,
-        "\t\t\t\t\t",
-        "xr:ToolTip",
-        details
-            .map(|detail| detail.tooltip.as_slice())
-            .unwrap_or(&[]),
-    );
-    xml.push_str(
-        "\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n\
-\t\t\t\t\t<xr:Format/>\r\n\
-\t\t\t\t\t<xr:ChoiceForm/>\r\n\
-\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
-\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n\
-\t\t\t\t\t<xr:EditFormat/>\r\n\
-\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
-\t\t\t\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
-\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
-    );
-    push_localized_property(
-        xml,
-        "\t\t\t\t\t",
-        "xr:Synonym",
-        details
-            .map(|detail| detail.synonym.as_slice())
-            .unwrap_or(&[]),
-    );
-    xml.push_str(
-        "\t\t\t\t\t<xr:Comment/>\r\n\
-\t\t\t\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
-\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n",
-    );
-    push_catalog_standard_attribute_fill_value(xml, attribute, catalog);
-    xml.push_str(
-        "\t\t\t\t\t<xr:Mask/>\r\n\
-\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
-\t\t\t\t</xr:StandardAttribute>\r\n",
-    );
-}
-
-fn push_catalog_standard_attribute_fill_value(
-    xml: &mut String,
-    attribute: &CatalogStandardAttribute,
-    catalog: &CatalogProperties,
-) {
-    match attribute.fill_value {
-        CatalogStandardAttributeFillValue::Nil => {
-            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
-        }
-        CatalogStandardAttributeFillValue::EmptyString => {
-            xml.push_str("\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\"/>\r\n");
-        }
-        CatalogStandardAttributeFillValue::CodeString => {
-            if catalog.code_type == Some("String") {
-                xml.push_str(&format!(
-                    "\t\t\t\t\t<xr:FillValue xsi:type=\"xs:string\">{}</xr:FillValue>\r\n",
-                    " ".repeat(catalog.code_length as usize)
-                ));
-            } else {
-                xml.push_str("\t\t\t\t\t<xr:FillValue xsi:nil=\"true\"/>\r\n");
-            }
-        }
-    }
 }
 
 fn push_optional_text_element(xml: &mut String, indent: &str, name: &str, value: Option<&str>) {
@@ -25434,6 +25917,7 @@ fn push_metadata_tabular_section_properties_xml(
             indent,
             properties.line_number_fill_checking,
             properties.line_number_fill_value.as_ref(),
+            &properties.line_number_synonym,
         );
     }
     if let Some(use_mode) = properties.use_mode {
@@ -25451,6 +25935,7 @@ fn push_metadata_line_number_standard_attribute_xml(
     indent: &str,
     fill_checking: &str,
     fill_value: Option<&MetadataChildFillValue>,
+    synonym: &[(String, String)],
 ) {
     xml.push_str(&format!(
         "{indent}<StandardAttributes>\r\n\
@@ -25472,9 +25957,11 @@ fn push_metadata_line_number_standard_attribute_xml(
 {indent}\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
 {indent}\t\t<xr:DataHistory>Use</xr:DataHistory>\r\n\
 {indent}\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
-{indent}\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n\
-{indent}\t\t<xr:Synonym/>\r\n\
-{indent}\t\t<xr:Comment/>\r\n\
+{indent}\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n"
+    ));
+    push_xr_localized_property_xml(xml, &format!("{indent}\t\t"), "Synonym", synonym);
+    xml.push_str(&format!(
+        "{indent}\t\t<xr:Comment/>\r\n\
 {indent}\t\t<xr:FullTextSearch>Use</xr:FullTextSearch>\r\n\
 {indent}\t\t<xr:ChoiceParameterLinks/>\r\n"
     ));
