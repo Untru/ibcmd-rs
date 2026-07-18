@@ -96,7 +96,7 @@ const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
         "151f8778-e2d0-496a-9f02-d9ffd93b57ec",
         "fd:FormattedDocument",
     ),
-    ("f5c65050-3bbb-11d5-b988-0050bae0a95d", "v8:TypeDescription"),
+    (TYPE_DESCRIPTION_TYPE_UUID, "v8:TypeDescription"),
     ("ebf766b1-f32c-11d3-9851-008048da1252", "d5p1:TextDocument"),
     ("e6f51714-91cb-4dce-94fe-90ae3e3e1ad1", "v8ui:Picture"),
     ("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb", "cfg:ReportObject"),
@@ -118,6 +118,11 @@ const DOCUMENT_TABULAR_SECTION_COLLECTION_UUID: &str = "21c53e09-8950-4b5e-a6a0-
 const DOCUMENT_COMMAND_COLLECTION_UUID: &str = "b544fc6a-2ba3-4885-8fb2-cb289fb6d65e";
 const DOCUMENT_FORM_COLLECTION_UUID: &str = "fb880e93-47d7-4127-9357-a20e69c17545";
 const DOCUMENT_CHARACTERISTIC_TYPE_UUID: &str = "fe839d42-d094-40ba-b903-75bccc21ba30";
+const CCT_ATTRIBUTE_COLLECTION_UUID: &str = "31182525-9346-4595-81f8-6f91a72ebe06";
+const CCT_TABULAR_SECTION_COLLECTION_UUID: &str = "54e36536-7863-42fd-bea3-c5edd3122fdc";
+const CCT_COMMAND_COLLECTION_UUID: &str = "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73";
+const CCT_FORM_COLLECTION_UUID: &str = "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94";
+const TYPE_DESCRIPTION_TYPE_UUID: &str = "f5c65050-3bbb-11d5-b988-0050bae0a95d";
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
 const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
@@ -3907,6 +3912,52 @@ struct DefaultListFormMetadataProperties {
     default_list_form: Option<String>,
 }
 
+struct ChartOfCharacteristicTypesProperties {
+    generated_types: Vec<GeneratedTypeEntry>,
+    use_standard_commands: bool,
+    include_help_in_contents: bool,
+    characteristic_ext_values: Option<String>,
+    value_types: Vec<ConstantValueType>,
+    hierarchical: bool,
+    folders_on_top: bool,
+    code_length: u32,
+    code_allowed_length: &'static str,
+    description_length: u32,
+    code_series: &'static str,
+    check_unique: bool,
+    autonumbering: bool,
+    default_presentation: &'static str,
+    standard_attributes: Vec<RegisterStandardAttribute>,
+    predefined_data_update: &'static str,
+    edit_type: &'static str,
+    quick_choice: bool,
+    input_by_string: Vec<String>,
+    create_on_input: &'static str,
+    choice_history_on_input: &'static str,
+    default_object_form: Option<String>,
+    default_folder_form: Option<String>,
+    default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    default_folder_choice_form: Option<String>,
+    auxiliary_object_form: Option<String>,
+    auxiliary_folder_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
+    auxiliary_folder_choice_form: Option<String>,
+    data_lock_control_mode: &'static str,
+    full_text_search: &'static str,
+    object_presentation: Vec<(String, String)>,
+    extended_object_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    data_history: &'static str,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
+    child_metadata_objects: Vec<MetadataChildObject>,
+    child_forms: Vec<String>,
+}
+
 struct DocumentJournalProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     default_form: Option<String>,
@@ -4219,6 +4270,7 @@ enum MetadataChildFillValue {
     DateTime(String),
     DesignTimeRef(String),
     String(String),
+    TypeDescription,
 }
 
 struct RegisterStandardAttribute {
@@ -6090,6 +6142,7 @@ fn extract_metadata_source_xml_from_text_row(
                 | "DocumentJournal"
                 | "InformationRegister"
                 | "Task"
+                | "ChartOfCharacteristicTypes"
         ) {
         nested_command_headers_for_owner_from_text(kind, text, uuid)
     } else {
@@ -6149,6 +6202,16 @@ fn extract_metadata_source_xml_from_text_row(
             template_refs,
         )?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
+    } else if kind == "ChartOfCharacteristicTypes" {
+        let chart = parse_chart_of_characteristic_types_properties_from_text(
+            text,
+            header,
+            type_index,
+            object_refs,
+            metadata_object_refs,
+            form_refs,
+        )?;
+        format_chart_of_characteristic_types_source_xml(header, &chart, source_version).into_bytes()
     } else if kind == "DocumentJournal" {
         let document_journal = parse_document_journal_properties_from_text(
             text,
@@ -6272,30 +6335,30 @@ fn extract_metadata_source_xml_from_text_row(
     } else {
         format_metadata_source_xml(kind, &header, source_version).into_bytes()
     };
-    let additional_tabular_section_child_objects =
-        if matches!(kind, "ChartOfCharacteristicTypes" | "BusinessProcess") {
-            let mut child_objects = String::new();
-            for child in parse_attribute_tabular_section_child_objects(
-                kind,
-                &header.name,
-                text,
-                uuid,
-                None,
-                type_index,
-                object_refs,
-                metadata_object_refs,
-                form_refs,
-            )
-            .into_iter()
-            .filter(|child| child.tag == "TabularSection" && !child.generated_types.is_empty())
-            {
-                push_metadata_child_object_xml(&mut child_objects, &child);
-            }
-            child_objects
-        } else {
-            String::new()
-        };
-    let owned_form_template_child_objects = if kind == "Task" {
+    let additional_tabular_section_child_objects = if kind == "BusinessProcess" {
+        let mut child_objects = String::new();
+        for child in parse_attribute_tabular_section_child_objects(
+            kind,
+            &header.name,
+            text,
+            uuid,
+            None,
+            type_index,
+            object_refs,
+            metadata_object_refs,
+            form_refs,
+        )
+        .into_iter()
+        .filter(|child| child.tag == "TabularSection" && !child.generated_types.is_empty())
+        {
+            push_metadata_child_object_xml(&mut child_objects, &child);
+        }
+        child_objects
+    } else {
+        String::new()
+    };
+    let owned_form_template_child_objects = if matches!(kind, "Task" | "ChartOfCharacteristicTypes")
+    {
         String::new()
     } else {
         simple_metadata_form_template_child_objects_xml(
@@ -6486,10 +6549,7 @@ fn parse_functional_option_properties_from_text(
 }
 
 fn metadata_kind_uses_default_list_form_properties(kind: &str) -> bool {
-    matches!(
-        kind,
-        "ChartOfAccounts" | "ChartOfCalculationTypes" | "ChartOfCharacteristicTypes"
-    )
+    matches!(kind, "ChartOfAccounts" | "ChartOfCalculationTypes")
 }
 
 fn parse_default_list_form_metadata_properties_from_text(
@@ -11211,6 +11271,22 @@ fn metadata_reference_is_type_set(reference: &str) -> bool {
         || (reference.starts_with("cfg:") && reference.ends_with("Ref") && !reference.contains('.'))
 }
 
+fn classify_metadata_reference_type_sets(
+    value_types: Vec<ConstantValueType>,
+) -> Vec<ConstantValueType> {
+    value_types
+        .into_iter()
+        .map(|value_type| match value_type {
+            ConstantValueType::Reference { reference }
+                if metadata_reference_is_type_set(&reference) =>
+            {
+                ConstantValueType::ReferenceTypeSet { reference }
+            }
+            other => other,
+        })
+        .collect()
+}
+
 fn stable_partition_metadata_types(value_types: Vec<ConstantValueType>) -> Vec<ConstantValueType> {
     let (mut ordinary, type_sets): (Vec<_>, Vec<_>) = value_types
         .into_iter()
@@ -13597,6 +13673,787 @@ fn attribute_tabular_section_child_object_tag(
     None
 }
 
+fn parse_chart_of_characteristic_types_properties_from_text(
+    text: &str,
+    header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<ChartOfCharacteristicTypesProperties> {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
+        return None;
+    }
+    let direct_attribute_items = parse_cct_collection(root.get(3)?, CCT_ATTRIBUTE_COLLECTION_UUID)?;
+    if !parse_cct_collection(root.get(4)?, METADATA_TEMPLATE_COLLECTION_UUID)?.is_empty()
+        || !parse_cct_collection(root.get(6)?, CCT_COMMAND_COLLECTION_UUID)?.is_empty()
+    {
+        return None;
+    }
+    let tabular_section_items =
+        parse_cct_collection(root.get(5)?, CCT_TABULAR_SECTION_COLLECTION_UUID)?;
+    let form_uuids = parse_cct_uuid_collection(root.get(7)?, CCT_FORM_COLLECTION_UUID)?;
+
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    let parsed_header = parse_wrapped_register_owner_header(fields.get(13)?)?;
+    let header_occurrences = fields
+        .iter()
+        .filter(|field| metadata_header_field_index(&[**field], &header.uuid) == Some(0))
+        .count();
+    if fields.len() != 59
+        || fields.first()?.trim() != "34"
+        || metadata_header_field_index(&fields, &header.uuid) != Some(13)
+        || header_occurrences != 1
+        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+    {
+        return None;
+    }
+
+    let mut generated_ids = BTreeSet::new();
+    let mut generated_types = Vec::with_capacity(6);
+    for (type_slot, value_slot, prefix, category) in [
+        (1, 2, "ChartOfCharacteristicTypesObject", "Object"),
+        (3, 4, "ChartOfCharacteristicTypesRef", "Ref"),
+        (5, 6, "ChartOfCharacteristicTypesSelection", "Selection"),
+        (7, 8, "ChartOfCharacteristicTypesList", "List"),
+        (9, 10, "Characteristic", "Characteristic"),
+        (11, 12, "ChartOfCharacteristicTypesManager", "Manager"),
+    ] {
+        let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
+        let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
+        if !generated_ids.insert(type_id.to_ascii_lowercase())
+            || !generated_ids.insert(value_id.to_ascii_lowercase())
+        {
+            return None;
+        }
+        generated_types.push(GeneratedTypeEntry {
+            name: format!("{prefix}.{}", header.name),
+            category,
+            type_id,
+            value_id,
+        });
+    }
+
+    if !cct_pair_is(fields.get(15)?, "0", "0")
+        || !cct_based_on_is_empty(fields.get(50)?)
+        || !cct_data_lock_fields_are_empty(fields.get(52)?)
+        || !matches!(fields.get(36)?.trim(), "0" | "1")
+    {
+        return None;
+    }
+    let input_modes = split_information_register_braced_fields(fields.get(54)?)?;
+    if input_modes
+        .as_slice()
+        .iter()
+        .map(|field| field.trim())
+        .collect::<Vec<_>>()
+        != ["1", "2", "0"]
+    {
+        return None;
+    }
+
+    let child_forms = parse_cct_child_forms(text, &header.name, &form_uuids, form_refs)?;
+    let mut child_ids = BTreeSet::new();
+    let mut child_metadata_objects = parse_cct_direct_attributes(
+        &direct_attribute_items,
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        &mut child_ids,
+    )?;
+    child_metadata_objects.extend(parse_cct_tabular_sections(
+        &tabular_section_items,
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        &mut generated_ids,
+        &mut child_ids,
+    )?);
+
+    let code_length = fields.get(21)?.trim().parse::<u32>().ok()?;
+    Some(ChartOfCharacteristicTypesProperties {
+        generated_types,
+        use_standard_commands: information_register_bool(fields.get(14)?)?,
+        include_help_in_contents: information_register_bool(fields.get(16)?)?,
+        characteristic_ext_values: parse_cct_characteristic_ext_values(
+            fields.get(17)?,
+            object_refs,
+        )?,
+        value_types: stable_partition_metadata_types(classify_metadata_reference_type_sets(
+            parse_metadata_type_pattern(fields.get(18)?, type_index)?,
+        )),
+        hierarchical: information_register_bool(fields.get(19)?)?,
+        folders_on_top: information_register_bool(fields.get(20)?)?,
+        code_length,
+        code_allowed_length: match fields.get(49)?.trim() {
+            "0" => "Fixed",
+            "1" => "Variable",
+            _ => return None,
+        },
+        description_length: fields.get(23)?.trim().parse::<u32>().ok()?,
+        code_series: (fields.get(24)?.trim() == "1").then_some("WholeCharacteristicKind")?,
+        check_unique: information_register_bool(fields.get(34)?)?,
+        autonumbering: information_register_bool(fields.get(22)?)?,
+        default_presentation: (fields.get(25)?.trim() == "1").then_some("AsDescription")?,
+        standard_attributes: parse_cct_standard_attributes(
+            fields.get(38)?,
+            &header.name,
+            type_index,
+            metadata_object_refs,
+        )?,
+        predefined_data_update: match fields.get(53)?.trim() {
+            "0" => "Auto",
+            "2" => "DontAutoUpdate",
+            _ => return None,
+        },
+        edit_type: (fields.get(31)?.trim() == "2").then_some("InDialog")?,
+        quick_choice: information_register_bool(fields.get(32)?)?,
+        input_by_string: parse_cct_input_by_string(fields.get(33)?, &header.name)?,
+        create_on_input: (fields.get(35)?.trim() == "0").then_some("DontUse")?,
+        choice_history_on_input: match fields.get(55)?.trim() {
+            "0" => "Auto",
+            "1" => "DontUse",
+            _ => return None,
+        },
+        default_object_form: parse_cct_owned_form_ref(
+            fields.get(26)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_folder_form: parse_cct_owned_form_ref(
+            fields.get(27)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_list_form: parse_cct_owned_form_ref(
+            fields.get(28)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_choice_form: parse_cct_owned_form_ref(
+            fields.get(29)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_folder_choice_form: parse_cct_owned_form_ref(
+            fields.get(30)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_object_form: parse_cct_owned_form_ref(
+            fields.get(39)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_folder_form: parse_cct_owned_form_ref(
+            fields.get(40)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: parse_cct_owned_form_ref(
+            fields.get(41)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_choice_form: parse_cct_owned_form_ref(
+            fields.get(42)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_folder_choice_form: parse_cct_owned_form_ref(
+            fields.get(43)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        data_lock_control_mode: match fields.get(51)?.trim() {
+            "0" => "Automatic",
+            "1" => "Managed",
+            _ => return None,
+        },
+        full_text_search: match fields.get(37)?.trim() {
+            "0" => "DontUse",
+            "1" => "Use",
+            _ => return None,
+        },
+        object_presentation: parse_information_register_owner_localized_value(fields.get(44)?)?,
+        extended_object_presentation: parse_information_register_owner_localized_value(
+            fields.get(45)?,
+        )?,
+        list_presentation: parse_information_register_owner_localized_value(fields.get(46)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            fields.get(47)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(fields.get(48)?)?,
+        data_history: metadata_data_history_xml(fields.get(56)?.trim())?,
+        update_data_history_immediately_after_write: information_register_bool(fields.get(57)?)?,
+        execute_after_write_data_history_version_processing: information_register_bool(
+            fields.get(58)?,
+        )?,
+        child_metadata_objects,
+        child_forms,
+    })
+}
+
+fn parse_cct_collection<'a>(value: &'a str, expected_uuid: &str) -> Option<Vec<&'a str>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() < 2 || !information_register_uuid_matches(fields.first()?, expected_uuid) {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    (fields.len() == count.checked_add(2)?).then(|| fields[2..].to_vec())
+}
+
+fn parse_cct_uuid_collection(value: &str, expected_uuid: &str) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    parse_cct_collection(value, expected_uuid)?
+        .into_iter()
+        .map(|field| {
+            let uuid = parse_information_register_non_zero_uuid(field)?.to_ascii_lowercase();
+            seen.insert(uuid.clone()).then_some(uuid)
+        })
+        .collect()
+}
+
+fn cct_pair_is(value: &str, first: &str, second: &str) -> bool {
+    split_information_register_braced_fields(value).is_some_and(|fields| {
+        fields.len() == 2 && fields[0].trim() == first && fields[1].trim() == second
+    })
+}
+
+fn cct_based_on_is_empty(value: &str) -> bool {
+    split_information_register_braced_fields(value).is_some_and(|fields| {
+        fields.len() == 2
+            && fields[0].trim() == "0"
+            && split_information_register_braced_fields(fields[1])
+                .is_some_and(|nested| nested.len() == 1 && nested[0].trim() == "0")
+    })
+}
+
+fn cct_data_lock_fields_are_empty(value: &str) -> bool {
+    split_information_register_braced_fields(value).is_some_and(|fields| {
+        fields.len() == 2 && fields[0].trim() == "1" && cct_pair_is(fields[1], "0", "0")
+    })
+}
+
+fn parse_cct_characteristic_ext_values(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+    let name = reference.strip_prefix("Catalog.")?;
+    (!name.is_empty() && !name.contains('.')).then_some(Some(reference))
+}
+
+fn parse_cct_input_by_string(value: &str, owner_name: &str) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    let fields = parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|field| {
+            let payload = parse_exchange_plan_field_ref_payload(field)?;
+            let marker = match payload.as_slice() {
+                [marker] => marker.trim(),
+                _ => return None,
+            };
+            let name = match marker {
+                "-9" => "Description",
+                "-8" => "Code",
+                _ => return None,
+            };
+            seen.insert(marker).then(|| {
+                format!("ChartOfCharacteristicTypes.{owner_name}.StandardAttribute.{name}")
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let names = fields
+        .iter()
+        .filter_map(|field| field.rsplit('.').next())
+        .collect::<Vec<_>>();
+    matches!(names.as_slice(), ["Description"] | ["Description", "Code"]).then_some(fields)
+}
+
+fn parse_cct_owned_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if !information_register_uuid_is_zero(&uuid)
+        && !form_uuids.iter().any(|candidate| candidate == &uuid)
+    {
+        return None;
+    }
+    parse_exact_register_owned_form_ref(value, "ChartOfCharacteristicTypes", owner_name, form_refs)
+}
+
+fn parse_cct_child_forms(
+    text: &str,
+    owner_name: &str,
+    form_uuids: &[String],
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("ChartOfCharacteristicTypes.{owner_name}.Form.");
+    let mut names = Vec::with_capacity(form_uuids.len());
+    let mut seen = BTreeSet::new();
+    for uuid in form_uuids {
+        let reference = parse_exact_register_owned_form_ref(
+            uuid,
+            "ChartOfCharacteristicTypes",
+            owner_name,
+            form_refs,
+        )??;
+        let name = reference.strip_prefix(&prefix)?;
+        if name.is_empty() || name.contains('.') || !seen.insert(name.to_ascii_lowercase()) {
+            return None;
+        }
+        names.push(name.to_string());
+    }
+    let owned = owned_metadata_form_names_in_text_order(
+        text,
+        "ChartsOfCharacteristicTypes",
+        owner_name,
+        form_refs,
+    );
+    let owned_set = owned
+        .iter()
+        .map(|name| name.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>();
+    (owned.len() == names.len() && owned_set == seen).then_some(names)
+}
+
+const CCT_STANDARD_ATTRIBUTES: [(&str, &str); 9] = [
+    ("-14", "PredefinedDataName"),
+    ("-11", "ValueType"),
+    ("-9", "Description"),
+    ("-8", "Code"),
+    ("-7", "IsFolder"),
+    ("-6", "Parent"),
+    ("-5", "Predefined"),
+    ("-4", "DeletionMark"),
+    ("-2", "Ref"),
+];
+
+fn parse_cct_standard_attributes(
+    value: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<RegisterStandardAttribute>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.first()?.trim() != "1"
+        || parse_information_register_usize(payload.get(1)?)? != CCT_STANDARD_ATTRIBUTES.len()
+        || payload.len()
+            != CCT_STANDARD_ATTRIBUTES
+                .len()
+                .checked_mul(3)?
+                .checked_add(2)?
+    {
+        return None;
+    }
+
+    let mut attributes = Vec::with_capacity(CCT_STANDARD_ATTRIBUTES.len());
+    for ((expected_marker, name), triplet) in CCT_STANDARD_ATTRIBUTES
+        .iter()
+        .copied()
+        .zip(payload[2..].chunks_exact(3))
+    {
+        let marker = split_information_register_braced_fields(triplet[0])?;
+        if marker.len() != 1
+            || marker.first()?.trim() != expected_marker
+            || !information_register_uuid_matches(
+                triplet[1],
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+            )
+        {
+            return None;
+        }
+        let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+        if bag.has_type_reduction_mode {
+            return None;
+        }
+        let fill_value = parse_cct_standard_attribute_fill_value(
+            bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?,
+            expected_marker,
+            owner_name,
+            type_index,
+            object_refs,
+        )?;
+        attributes.push(parse_register_standard_attribute(name, &bag, fill_value)?);
+    }
+    Some(attributes)
+}
+
+fn parse_cct_standard_attribute_fill_value(
+    value: &str,
+    marker: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChildFillValue> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() == 1 && fields.first()?.trim() == r#""U""# {
+        return Some(MetadataChildFillValue::Nil);
+    }
+    match marker {
+        "-11"
+            if fields.len() == 3
+                && fields.first()?.trim() == r##""#""##
+                && information_register_uuid_matches(
+                    fields.get(1)?,
+                    TYPE_DESCRIPTION_TYPE_UUID,
+                ) =>
+        {
+            let pattern = split_information_register_braced_fields(fields.get(2)?)?;
+            (pattern.len() == 1 && pattern.first()?.trim() == r#""Pattern""#)
+                .then_some(MetadataChildFillValue::TypeDescription)
+        }
+        "-9" if fields.len() == 2 && fields.first()?.trim() == r#""S""# => {
+            let value = parse_information_register_quoted_string(fields.get(1)?)?;
+            value
+                .is_empty()
+                .then_some(MetadataChildFillValue::String(value))
+        }
+        "-8" if fields.len() == 2 && fields.first()?.trim() == r#""S""# => {
+            let value = parse_information_register_quoted_string(fields.get(1)?)?;
+            value
+                .chars()
+                .all(|character| character == ' ')
+                .then_some(MetadataChildFillValue::String(value))
+        }
+        "-6" if fields.len() == 3 && fields.first()?.trim() == r##""#""## => {
+            let reference =
+                parse_information_register_design_time_ref(value, type_index, object_refs)?;
+            (reference == format!("ChartOfCharacteristicTypes.{owner_name}.EmptyRef"))
+                .then_some(MetadataChildFillValue::DesignTimeRef(reference))
+        }
+        _ => None,
+    }
+}
+
+fn parse_cct_direct_attributes(
+    items: &[&str],
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    child_ids: &mut BTreeSet<String>,
+) -> Option<Vec<MetadataChildObject>> {
+    let mut names = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let child = parse_cct_attribute(
+                item,
+                false,
+                owner_name,
+                type_index,
+                object_refs,
+                metadata_object_refs,
+                child_ids,
+            )?;
+            names
+                .insert(child.header.name.to_ascii_lowercase())
+                .then_some(child)
+        })
+        .collect()
+}
+
+fn parse_cct_attribute(
+    value: &str,
+    nested: bool,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    child_ids: &mut BTreeSet<String>,
+) -> Option<MetadataChildObject> {
+    let item = split_information_register_braced_fields(value)?;
+    if item.len() != 2 || item.get(1)?.trim() != "0" {
+        return None;
+    }
+    let wrapper = split_information_register_braced_fields(item.first()?)?;
+    let expected_code = if nested { "8" } else { "2" };
+    let expected_len = if nested { 5 } else { 6 };
+    if wrapper.len() != expected_len || wrapper.first()?.trim() != expected_code {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(wrapper.get(1)?)?;
+    let (_, child_uuid) = parse_metadata_code27_payload_fields(payload.clone())?;
+    let detail = split_information_register_braced_fields(payload.get(1)?)?;
+    let header = parse_metadata_header_from_text(detail.get(1)?, &child_uuid)?;
+    if !child_ids.insert(header.uuid.to_ascii_lowercase()) {
+        return None;
+    }
+    let value_types = stable_partition_metadata_types(classify_metadata_reference_type_sets(
+        parse_metadata_type_pattern(detail.get(2)?, type_index)?,
+    ));
+    let properties = parse_cct_attribute_properties(
+        &payload,
+        &wrapper,
+        nested,
+        owner_name,
+        &value_types,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+    )?;
+    Some(MetadataChildObject {
+        tag: "Attribute",
+        header,
+        generated_types: Vec::new(),
+        value_types,
+        emit_empty_type: true,
+        properties: Some(properties),
+        register_properties: None,
+        tabular_section_properties: None,
+        child_objects: Vec::new(),
+    })
+}
+
+fn parse_cct_attribute_properties(
+    payload: &[&str],
+    wrapper: &[&str],
+    nested: bool,
+    _owner_name: &str,
+    _value_types: &[ConstantValueType],
+    type_index: &BTreeMap<String, String>,
+    _object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChildProperties> {
+    if payload.len() != 23 || payload.first()?.trim() != "27" {
+        return None;
+    }
+    let choice_form_uuid = parse_information_register_uuid(payload.get(11)?)?;
+    let choice_parameter_links = split_information_register_braced_fields(payload.get(14)?)?;
+    let link_by_type = split_information_register_braced_fields(payload.get(15)?)?;
+    let choice_parameters = parse_information_register_choice_parameters(
+        payload.get(16)?,
+        type_index,
+        metadata_object_refs,
+    )?;
+    if !information_register_uuid_is_zero(&choice_form_uuid)
+        || choice_parameter_links.len() != 2
+        || choice_parameter_links.first()?.trim() != "5006"
+        || choice_parameter_links.get(1)?.trim() != "0"
+        || link_by_type.len() != 3
+        || link_by_type.first()?.trim() != "3"
+        || link_by_type.get(1)?.trim() != "0"
+        || link_by_type.get(2)?.trim() != "0"
+        || !choice_parameters.is_empty()
+    {
+        return None;
+    }
+    let fill_value =
+        parse_information_register_fill_value(payload.get(19)?, type_index, metadata_object_refs)?;
+    let fill_from_filling_value = information_register_bool(payload.get(20)?)?;
+    if nested
+        && (fill_from_filling_value
+            || !matches!(&fill_value, MetadataChildFillValue::String(value) if value.is_empty()))
+    {
+        return None;
+    }
+
+    let use_mode = if nested {
+        None
+    } else {
+        Some(catalog_attribute_use_mode_xml(wrapper.get(3)?.trim())?)
+    };
+    let full_text_search_index = if nested { 3 } else { 4 };
+    let data_history_index = if nested { 4 } else { 5 };
+    Some(MetadataChildProperties {
+        password_mode: information_register_bool(payload.get(2)?)?,
+        format: parse_metadata_child_localized_value(payload.get(3)?)?,
+        edit_format: parse_metadata_child_localized_value(payload.get(18)?)?,
+        tooltip: parse_metadata_child_localized_value(payload.get(4)?)?,
+        mark_negatives: information_register_bool(payload.get(5)?)?,
+        mask: parse_information_register_quoted_string(payload.get(6)?)?,
+        multi_line: information_register_bool(payload.get(7)?)?,
+        extended_edit: information_register_bool(payload.get(17)?)?,
+        min_value: parse_information_register_bound(payload.get(8)?)?,
+        max_value: parse_information_register_bound(payload.get(9)?)?,
+        fill_from_filling_value,
+        emit_fill_from_filling_value: !nested,
+        fill_value: Some(fill_value),
+        emit_fill_value: !nested,
+        fill_checking: match payload.get(13)?.trim() {
+            "0" => "DontCheck",
+            "1" => "ShowError",
+            _ => return None,
+        },
+        choice_folders_and_items: Some(catalog_choice_folders_and_items_xml(
+            payload.get(10)?.trim(),
+        )?),
+        choice_parameter_links: Some(Vec::new()),
+        choice_parameters: Some(Vec::new()),
+        self_close_empty_choice_parameter_refs: false,
+        quick_choice: Some(catalog_quick_choice_xml(payload.get(12)?.trim())?),
+        create_on_input: Some(catalog_create_on_input_xml(payload.get(21)?.trim())?),
+        choice_form: Some(MetadataChoiceForm::Empty),
+        link_by_type_empty: true,
+        link_by_type: None,
+        choice_history_on_input: Some(catalog_choice_history_on_input_xml(
+            payload.get(22)?.trim(),
+        )?),
+        master: None,
+        main_filter: None,
+        balance: None,
+        accounting_flag: None,
+        ext_dimension_accounting_flag: None,
+        deny_incomplete_values: None,
+        use_mode,
+        indexing: Some(metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?),
+        full_text_search: Some(catalog_attribute_full_text_search_xml(
+            wrapper.get(full_text_search_index)?.trim(),
+        )?),
+        data_history: Some(metadata_data_history_xml(
+            wrapper.get(data_history_index)?.trim(),
+        )?),
+        type_reduction_mode: None,
+        update_data_history_immediately_after_write: None,
+        execute_after_write_data_history_version_processing: None,
+    })
+}
+
+fn parse_cct_tabular_sections(
+    items: &[&str],
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    generated_ids: &mut BTreeSet<String>,
+    child_ids: &mut BTreeSet<String>,
+) -> Option<Vec<MetadataChildObject>> {
+    let mut names = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let fields = split_information_register_braced_fields(item)?;
+            if fields.len() != 3 || fields.get(1)?.trim() != "1" {
+                return None;
+            }
+            let wrapper = split_information_register_braced_fields(fields.first()?)?;
+            if wrapper.len() != 3 || wrapper.first()?.trim() != "0" || wrapper.get(2)?.trim() != "0"
+            {
+                return None;
+            }
+            let payload = split_information_register_braced_fields(wrapper.get(1)?)?;
+            if payload.len() != 9 || payload.first()?.trim() != "11" {
+                return None;
+            }
+            let header = parse_wrapped_register_owner_header(payload.get(5)?)?;
+            if !child_ids.insert(header.uuid.to_ascii_lowercase())
+                || !names.insert(header.name.to_ascii_lowercase())
+            {
+                return None;
+            }
+            let ids = payload[1..5]
+                .iter()
+                .map(|field| parse_information_register_non_zero_uuid(field))
+                .collect::<Option<Vec<_>>>()?;
+            if ids
+                .iter()
+                .any(|uuid| !generated_ids.insert(uuid.to_ascii_lowercase()))
+            {
+                return None;
+            }
+            let line_number_fill_value = parse_exact_tabular_section_standard_attributes_presence(
+                "ChartOfCharacteristicTypes",
+                payload.get(7)?,
+            )?;
+            let nested_items =
+                parse_cct_collection(fields.get(2)?, CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID)?;
+            let mut nested_names = BTreeSet::new();
+            let child_objects = nested_items
+                .into_iter()
+                .map(|nested_item| {
+                    let child = parse_cct_attribute(
+                        nested_item,
+                        true,
+                        owner_name,
+                        type_index,
+                        object_refs,
+                        metadata_object_refs,
+                        child_ids,
+                    )?;
+                    nested_names
+                        .insert(child.header.name.to_ascii_lowercase())
+                        .then_some(child)
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let fill_checking = match payload.get(6)?.trim() {
+                "0" => "DontCheck",
+                "1" => "ShowError",
+                _ => return None,
+            };
+            Some(MetadataChildObject {
+                tag: "TabularSection",
+                header,
+                generated_types: vec![
+                    GeneratedTypeEntry {
+                        name: format!(
+                            "ChartOfCharacteristicTypesTabularSection.{owner_name}.{}",
+                            parse_wrapped_register_owner_header(payload.get(5)?)?.name
+                        ),
+                        category: "TabularSection",
+                        type_id: ids[0].clone(),
+                        value_id: ids[1].clone(),
+                    },
+                    GeneratedTypeEntry {
+                        name: format!(
+                            "ChartOfCharacteristicTypesTabularSectionRow.{owner_name}.{}",
+                            parse_wrapped_register_owner_header(payload.get(5)?)?.name
+                        ),
+                        category: "TabularSectionRow",
+                        type_id: ids[2].clone(),
+                        value_id: ids[3].clone(),
+                    },
+                ],
+                value_types: Vec::new(),
+                emit_empty_type: false,
+                properties: None,
+                register_properties: None,
+                tabular_section_properties: Some(MetadataTabularSectionProperties {
+                    tooltip: parse_information_register_owner_localized_value(payload.get(8)?)?,
+                    fill_checking,
+                    line_number_fill_checking: if line_number_fill_value.is_some() {
+                        "DontCheck"
+                    } else {
+                        ""
+                    },
+                    line_number_fill_value,
+                    use_mode: Some("ForItem"),
+                    line_number_length: Some(5),
+                }),
+                child_objects,
+            })
+        })
+        .collect()
+}
+
 fn parse_catalog_properties_from_text(
     text: &str,
     uuid: &str,
@@ -15259,19 +16116,7 @@ fn parse_task_child_type_pattern(
         type_index,
         platform_reference_family_type_reference,
     )
-    .map(|value_types| {
-        value_types
-            .into_iter()
-            .map(|value_type| match value_type {
-                ConstantValueType::Reference { reference }
-                    if metadata_reference_is_type_set(&reference) =>
-                {
-                    ConstantValueType::ReferenceTypeSet { reference }
-                }
-                other => other,
-            })
-            .collect()
-    })
+    .map(classify_metadata_reference_type_sets)
 }
 
 fn validate_task_addressing_dimensions(
@@ -21212,6 +22057,171 @@ fn format_register_source_xml(
     xml
 }
 
+fn format_chart_of_characteristic_types_source_xml(
+    header: &MetadataHeader,
+    chart: &ChartOfCharacteristicTypesProperties,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let mut xml =
+        format_full_metadata_source_xml("ChartOfCharacteristicTypes", header, source_version);
+    if let Some(index) = xml.find("\t\t<Properties>\r\n") {
+        xml.insert_str(
+            index,
+            &format_generated_types_internal_info_xml(&chart.generated_types),
+        );
+    }
+
+    let mut properties = String::new();
+    properties.push_str(&format!(
+        "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n\
+\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+        xml_bool(chart.use_standard_commands),
+        xml_bool(chart.include_help_in_contents),
+    ));
+    push_optional_text_element(
+        &mut properties,
+        "\t\t\t",
+        "CharacteristicExtValues",
+        chart.characteristic_ext_values.as_deref(),
+    );
+    properties.push_str(&format_metadata_types_xml_with_indent(
+        &chart.value_types,
+        "\t\t\t",
+    ));
+    properties.push_str(&format!(
+        "\t\t\t<Hierarchical>{}</Hierarchical>\r\n\
+\t\t\t<FoldersOnTop>{}</FoldersOnTop>\r\n\
+\t\t\t<CodeLength>{}</CodeLength>\r\n\
+\t\t\t<CodeAllowedLength>{}</CodeAllowedLength>\r\n\
+\t\t\t<DescriptionLength>{}</DescriptionLength>\r\n\
+\t\t\t<CodeSeries>{}</CodeSeries>\r\n\
+\t\t\t<CheckUnique>{}</CheckUnique>\r\n\
+\t\t\t<Autonumbering>{}</Autonumbering>\r\n\
+\t\t\t<DefaultPresentation>{}</DefaultPresentation>\r\n",
+        xml_bool(chart.hierarchical),
+        xml_bool(chart.folders_on_top),
+        chart.code_length,
+        chart.code_allowed_length,
+        chart.description_length,
+        chart.code_series,
+        xml_bool(chart.check_unique),
+        xml_bool(chart.autonumbering),
+        chart.default_presentation,
+    ));
+    push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
+    properties.push_str(&format!(
+        "\t\t\t<Characteristics/>\r\n\
+\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
+\t\t\t<EditType>{}</EditType>\r\n\
+\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
+\t\t\t<ChoiceMode>BothWays</ChoiceMode>\r\n",
+        chart.predefined_data_update,
+        chart.edit_type,
+        xml_bool(chart.quick_choice),
+    ));
+    push_catalog_input_by_string_xml(&mut properties, &chart.input_by_string);
+    properties.push_str(&format!(
+        "\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
+\t\t\t<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>\r\n\
+\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n",
+        chart.create_on_input, chart.choice_history_on_input,
+    ));
+    for (name, value) in [
+        ("DefaultObjectForm", chart.default_object_form.as_deref()),
+        ("DefaultFolderForm", chart.default_folder_form.as_deref()),
+        ("DefaultListForm", chart.default_list_form.as_deref()),
+        ("DefaultChoiceForm", chart.default_choice_form.as_deref()),
+        (
+            "DefaultFolderChoiceForm",
+            chart.default_folder_choice_form.as_deref(),
+        ),
+        (
+            "AuxiliaryObjectForm",
+            chart.auxiliary_object_form.as_deref(),
+        ),
+        (
+            "AuxiliaryFolderForm",
+            chart.auxiliary_folder_form.as_deref(),
+        ),
+        ("AuxiliaryListForm", chart.auxiliary_list_form.as_deref()),
+        (
+            "AuxiliaryChoiceForm",
+            chart.auxiliary_choice_form.as_deref(),
+        ),
+        (
+            "AuxiliaryFolderChoiceForm",
+            chart.auxiliary_folder_choice_form.as_deref(),
+        ),
+    ] {
+        push_optional_text_element(&mut properties, "\t\t\t", name, value);
+    }
+    properties.push_str(&format!(
+        "\t\t\t<BasedOn/>\r\n\
+\t\t\t<DataLockFields/>\r\n\
+\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n",
+        chart.data_lock_control_mode, chart.full_text_search,
+    ));
+    push_localized_property(
+        &mut properties,
+        "\t\t\t",
+        "ObjectPresentation",
+        &chart.object_presentation,
+    );
+    push_localized_property(
+        &mut properties,
+        "\t\t\t",
+        "ExtendedObjectPresentation",
+        &chart.extended_object_presentation,
+    );
+    push_localized_property(
+        &mut properties,
+        "\t\t\t",
+        "ListPresentation",
+        &chart.list_presentation,
+    );
+    push_localized_property(
+        &mut properties,
+        "\t\t\t",
+        "ExtendedListPresentation",
+        &chart.extended_list_presentation,
+    );
+    push_localized_property(&mut properties, "\t\t\t", "Explanation", &chart.explanation);
+    properties.push_str(&format!(
+        "\t\t\t<DataHistory>{}</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+        chart.data_history,
+        xml_bool(chart.update_data_history_immediately_after_write),
+        xml_bool(chart.execute_after_write_data_history_version_processing),
+    ));
+    insert_metadata_properties_xml(&mut xml, &properties);
+
+    let mut children = if chart.child_metadata_objects.is_empty() && chart.child_forms.is_empty() {
+        String::from("\t\t<ChildObjects/>\r\n")
+    } else {
+        String::from("\t\t<ChildObjects>\r\n")
+    };
+    if !chart.child_metadata_objects.is_empty() || !chart.child_forms.is_empty() {
+        for child in &chart.child_metadata_objects {
+            push_cct_metadata_child_object_xml(&mut children, child);
+        }
+        for form in &chart.child_forms {
+            children.push_str(&format!(
+                "\t\t\t<Form>{}</Form>\r\n",
+                escape_xml_element_text(form),
+            ));
+        }
+        children.push_str("\t\t</ChildObjects>\r\n");
+    }
+    if let Some(index) = xml.find("\t</ChartOfCharacteristicTypes>\r\n") {
+        xml.insert_str(index, &children);
+    }
+    xml
+}
+
 fn format_catalog_source_xml(header: &MetadataHeader, catalog: &CatalogProperties) -> String {
     let mut xml = format!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
@@ -22747,6 +23757,9 @@ fn format_register_standard_attribute_fill_value_xml(value: &MetadataChildFillVa
             "<xr:FillValue xsi:type=\"xs:string\">{}</xr:FillValue>",
             escape_xml_element_text(value)
         ),
+        MetadataChildFillValue::TypeDescription => {
+            "<xr:FillValue xsi:type=\"v8:TypeDescription\"/>".to_string()
+        }
     }
 }
 
@@ -23200,6 +24213,18 @@ fn push_metadata_child_command_properties_xml(
 }
 
 fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject) {
+    push_metadata_child_object_xml_with_tail_order(xml, child, false);
+}
+
+fn push_cct_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject) {
+    push_metadata_child_object_xml_with_tail_order(xml, child, true);
+}
+
+fn push_metadata_child_object_xml_with_tail_order(
+    xml: &mut String,
+    child: &MetadataChildObject,
+    indexing_before_use: bool,
+) {
     xml.push_str(&format!(
         "\t\t\t<{tag} uuid=\"{}\">\r\n",
         escape_xml_text(&child.header.uuid),
@@ -23234,7 +24259,12 @@ fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject)
         xml.push_str("\t\t\t\t\t<Type/>\r\n");
     }
     if let Some(properties) = &child.properties {
-        push_metadata_child_properties_xml(xml, "\t\t\t\t\t", properties);
+        push_metadata_child_properties_xml_with_tail_order(
+            xml,
+            "\t\t\t\t\t",
+            properties,
+            indexing_before_use,
+        );
     }
     if let Some(properties) = &child.register_properties {
         push_register_metadata_child_properties_xml(xml, "\t\t\t\t\t", properties);
@@ -23246,7 +24276,7 @@ fn push_metadata_child_object_xml(xml: &mut String, child: &MetadataChildObject)
     if !child.child_objects.is_empty() {
         xml.push_str("\t\t\t\t<ChildObjects>\r\n");
         for nested_child in &child.child_objects {
-            push_nested_metadata_child_object_xml(xml, nested_child, 5);
+            push_nested_metadata_child_object_xml(xml, nested_child, 5, indexing_before_use);
         }
         xml.push_str("\t\t\t\t</ChildObjects>\r\n");
     }
@@ -23257,6 +24287,7 @@ fn push_nested_metadata_child_object_xml(
     xml: &mut String,
     child: &MetadataChildObject,
     indent: usize,
+    indexing_before_use: bool,
 ) {
     let tab = "\t".repeat(indent);
     xml.push_str(&format!(
@@ -23293,7 +24324,12 @@ fn push_nested_metadata_child_object_xml(
         xml.push_str(&format!("{tab}\t\t<Type/>\r\n"));
     }
     if let Some(properties) = &child.properties {
-        push_metadata_child_properties_xml(xml, &format!("{tab}\t\t"), properties);
+        push_metadata_child_properties_xml_with_tail_order(
+            xml,
+            &format!("{tab}\t\t"),
+            properties,
+            indexing_before_use,
+        );
     }
     if let Some(properties) = &child.register_properties {
         push_register_metadata_child_properties_xml(xml, &format!("{tab}\t\t"), properties);
@@ -23305,7 +24341,12 @@ fn push_nested_metadata_child_object_xml(
     if !child.child_objects.is_empty() {
         xml.push_str(&format!("{tab}\t<ChildObjects>\r\n"));
         for nested_child in &child.child_objects {
-            push_nested_metadata_child_object_xml(xml, nested_child, indent + 2);
+            push_nested_metadata_child_object_xml(
+                xml,
+                nested_child,
+                indent + 2,
+                indexing_before_use,
+            );
         }
         xml.push_str(&format!("{tab}\t</ChildObjects>\r\n"));
     }
@@ -23316,6 +24357,15 @@ fn push_metadata_child_properties_xml(
     xml: &mut String,
     indent: &str,
     properties: &MetadataChildProperties,
+) {
+    push_metadata_child_properties_xml_with_tail_order(xml, indent, properties, false);
+}
+
+fn push_metadata_child_properties_xml_with_tail_order(
+    xml: &mut String,
+    indent: &str,
+    properties: &MetadataChildProperties,
+    indexing_before_use: bool,
 ) {
     xml.push_str(&format!(
         "{indent}<PasswordMode>{}</PasswordMode>\r\n",
@@ -23453,11 +24503,20 @@ fn push_metadata_child_properties_xml(
             xml_bool(deny_incomplete_values)
         ));
     }
-    if let Some(use_mode) = properties.use_mode {
-        xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
-    }
-    if let Some(indexing) = properties.indexing {
-        xml.push_str(&format!("{indent}<Indexing>{indexing}</Indexing>\r\n"));
+    if indexing_before_use {
+        if let Some(indexing) = properties.indexing {
+            xml.push_str(&format!("{indent}<Indexing>{indexing}</Indexing>\r\n"));
+        }
+        if let Some(use_mode) = properties.use_mode {
+            xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
+        }
+    } else {
+        if let Some(use_mode) = properties.use_mode {
+            xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
+        }
+        if let Some(indexing) = properties.indexing {
+            xml.push_str(&format!("{indent}<Indexing>{indexing}</Indexing>\r\n"));
+        }
     }
     if let Some(full_text_search) = properties.full_text_search {
         xml.push_str(&format!(
@@ -23781,6 +24840,9 @@ fn format_metadata_child_fill_value_xml(value: &MetadataChildFillValue) -> Strin
             "<FillValue xsi:type=\"xs:string\">{}</FillValue>",
             escape_xml_element_text(value)
         ),
+        MetadataChildFillValue::TypeDescription => {
+            "<FillValue xsi:type=\"v8:TypeDescription\"/>".to_string()
+        }
     }
 }
 
