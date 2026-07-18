@@ -2107,11 +2107,11 @@ impl FormFieldSchema {
 pub(crate) struct FormButtonColorSchema;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormButtonTitleHeightSchema {
-    slot: usize,
+pub(crate) struct FormButtonCommonSchema {
+    top_level_offset: usize,
 }
 
-impl FormButtonTitleHeightSchema {
+impl FormButtonCommonSchema {
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -2119,15 +2119,48 @@ impl FormButtonTitleHeightSchema {
         top_level_offset: usize,
     ) -> Option<Self> {
         match (wrapper, field_count, item_tag, top_level_offset) {
-            ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => Some(Self {
-                slot: 18 + top_level_offset,
-            }),
+            ("31", 52, "Button", 0) | ("31", 53, "Button", 1) => Some(Self { top_level_offset }),
             _ => None,
         }
     }
 
+    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(7 + self.top_level_offset)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+        self.non_zero_dimension(fields, 17)
+    }
+
     pub(crate) fn title_height(self, fields: &[&str]) -> Option<String> {
-        let value = fields.get(self.slot)?.trim();
+        self.non_zero_dimension(fields, 18)
+    }
+
+    pub(crate) fn font<'a>(self, fields: &'a [&'a str]) -> Option<&'a str> {
+        let value = fields.get(22 + self.top_level_offset)?.trim();
+        (value != "{7,3,0,1,100}").then_some(value)
+    }
+
+    pub(crate) fn horizontal_stretch(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(39 + self.top_level_offset)?.trim() == "1").then_some(true)
+    }
+
+    pub(crate) fn vertical_stretch(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(40 + self.top_level_offset)?.trim() == "1").then_some(true)
+    }
+
+    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(42 + self.top_level_offset)?.trim() {
+            "0" => Some("Top"),
+            "1" => Some("Center"),
+            "2" => Some("Bottom"),
+            "3" => None,
+            _ => None,
+        }
+    }
+
+    fn non_zero_dimension(self, fields: &[&str], slot: usize) -> Option<String> {
+        let value = fields.get(slot + self.top_level_offset)?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 }

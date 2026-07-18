@@ -8,8 +8,8 @@ use crate::form_schema::{
     FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER, FORM_TABLE_XML_ORDER,
     FORM_USUAL_GROUP_HEADER_XML_ORDER, FORM_USUAL_GROUP_XML_ORDER,
     FormAttributeAdditionalColumnsBindingKind, FormAttributeAdditionalColumnsGroupSchema,
-    FormAttributeColumnSchema, FormButtonColorSchema, FormButtonShapeRepresentationSchema,
-    FormButtonTitleHeightSchema, FormCheckBoxFieldSchema, FormChildItemAlignment,
+    FormAttributeColumnSchema, FormButtonColorSchema, FormButtonCommonSchema,
+    FormButtonShapeRepresentationSchema, FormCheckBoxFieldSchema, FormChildItemAlignment,
     FormChildItemDisplayImportanceSchema, FormChildItemEventCollectionSchema,
     FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema, FormChildItemVisibleSchema,
     FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
@@ -4619,7 +4619,7 @@ fn parse_form_child_item_with_metadata_owners(
         tag,
         button_top_level_offset,
     );
-    let button_title_height_schema = FormButtonTitleHeightSchema::from_raw_layout(
+    let button_common_schema = FormButtonCommonSchema::from_raw_layout(
         wrapper,
         fields.len(),
         tag,
@@ -5346,7 +5346,8 @@ fn parse_form_child_item_with_metadata_owners(
         .and_then(|schema| schema.visible(&fields)),
         enabled: field_schema_and_options
             .as_ref()
-            .and_then(|(schema, _)| schema.enabled(&fields)),
+            .and_then(|(schema, _)| schema.enabled(&fields))
+            .or_else(|| button_common_schema.and_then(|schema| schema.enabled(&fields))),
         read_only: if let Some(schema) = container_read_only_schema {
             schema.read_only(&fields)
         } else if tag == "UsualGroup" {
@@ -5423,7 +5424,7 @@ fn parse_form_child_item_with_metadata_owners(
         title_height: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.title_height(&fields))
-            .or_else(|| button_title_height_schema.and_then(|schema| schema.title_height(&fields))),
+            .or_else(|| button_common_schema.and_then(|schema| schema.title_height(&fields))),
         tooltip_representation,
         edit_mode: if matches!(
             tag,
@@ -5463,7 +5464,9 @@ fn parse_form_child_item_with_metadata_owners(
                     None
                 }
             }),
-        group_vertical_align: if tag == "PictureDecoration" {
+        group_vertical_align: if let Some(schema) = button_common_schema {
+            schema.group_vertical_align(&fields)
+        } else if tag == "PictureDecoration" {
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.group_vertical_align())
@@ -5670,6 +5673,8 @@ fn parse_form_child_item_with_metadata_owners(
             parse_form_input_field_font_xml(input_field_extended_options.as_deref(), object_refs)
         } else if tag == "RadioButtonField" {
             parse_form_radio_button_font_xml(radio_button_options.as_deref(), object_refs)
+        } else if let Some(field) = button_common_schema.and_then(|schema| schema.font(&fields)) {
+            parse_form_button_font_tuple_xml(field, object_refs)
         } else {
             None
         },
@@ -5768,6 +5773,8 @@ fn parse_form_child_item_with_metadata_owners(
                 .get(13)
                 .map(|field| field.trim().to_string())
                 .filter(|value| value != "0")
+        } else if let Some(schema) = button_common_schema {
+            schema.height(&fields)
         } else {
             None
         },
@@ -5889,7 +5896,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        horizontal_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        horizontal_stretch: if let Some(schema) = button_common_schema {
+            schema.horizontal_stretch(&fields)
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_horizontal_stretch(input_field_extended_options.as_deref())
         } else if tag == "LabelField" {
             label_field_options
@@ -5918,7 +5927,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        vertical_stretch: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        vertical_stretch: if let Some(schema) = button_common_schema {
+            schema.vertical_stretch(&fields)
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_vertical_stretch(input_field_extended_options.as_deref())
         } else if tag == "LabelDecoration" {
             label_decoration_options
@@ -7462,12 +7473,58 @@ pub(super) fn parse_form_font_tuple_xml_tag(
     object_refs: &BTreeMap<String, String>,
     tag_name: &str,
 ) -> Option<String> {
+    parse_form_font_tuple_xml_tag_with_absolute(field, object_refs, tag_name, false)
+}
+
+fn parse_form_button_font_tuple_xml(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let parsed = parse_form_font_tuple_xml_tag_with_absolute(field, object_refs, "Font", true);
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let style_relative = fields.len() == 8
+        && fields.first().map(|value| value.trim()) == Some("7")
+        && fields.get(1).map(|value| value.trim()) == Some("2")
+        && fields.get(2).map(|value| value.trim()) == Some("3")
+        && fields.get(6).map(|value| value.trim()) == Some("1")
+        && fields.get(7).map(|value| value.trim()) == Some("100");
+    if !style_relative {
+        return parsed;
+    }
+
+    let Some(style_ref) = parse_form_font_style_ref(&fields, object_refs) else {
+        return parsed;
+    };
+    let Some(height) = font_height_xml(fields.get(4).map(|value| value.trim())) else {
+        return parsed;
+    };
+    let Some(face_name) = fields
+        .get(5)
+        .and_then(|value| parse_1c_quoted_string(value.trim()))
+    else {
+        return parsed;
+    };
+    Some(format!(
+        r#"<Font ref="{}" faceName="{}" height="{}" kind="StyleItem"/>"#,
+        escape_xml_text(&style_ref),
+        escape_xml_text(&face_name),
+        escape_xml_text(&height)
+    ))
+}
+
+fn parse_form_font_tuple_xml_tag_with_absolute(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    tag_name: &str,
+    allow_absolute: bool,
+) -> Option<String> {
     let trimmed = field.trim();
     let fields = split_1c_braced_fields(trimmed, 0)?;
     if fields.first()?.trim() != "7" {
         return None;
     }
     match fields.get(1).map(|value| value.trim()) {
+        Some("0") if allow_absolute => {}
         Some("1" | "2") => {}
         _ => return None,
     }
@@ -7494,6 +7551,10 @@ pub(super) fn parse_form_font_style_ref(
         return None;
     }
     let style_slot = split_1c_braced_fields(fields.get(3)?.trim(), 0)?;
+    if style_slot.len() == 1 {
+        let code = style_slot.first()?.trim().parse::<i32>().ok()?;
+        return standard_style_item_for_code(code).map(|(_, name)| format!("style:{name}"));
+    }
     if style_slot.first().map(|value| value.trim()) != Some("0") {
         return None;
     }
@@ -12239,14 +12300,6 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
-    if item.tag == "Button"
-        && let Some(group_horizontal_align) = item.group_horizontal_align
-    {
-        xml.push_str(&format!(
-            "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
-            escape_xml_text(group_horizontal_align)
-        ));
-    }
     if item.tag != "CommandBar"
         && let Some(horizontal_location) = item.horizontal_location
     {
@@ -12365,9 +12418,6 @@ pub(super) fn format_form_child_item_xml(
     if item.default_button == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultButton>true</DefaultButton>\r\n"));
     }
-    if item.tag == "Button" && item.default_item == Some(true) {
-        xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
-    }
     if !matches!(item.tag, "Table" | "UsualGroup")
         && item.read_only == Some(true)
         && !read_only_before_title
@@ -12381,6 +12431,12 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<SkipOnInput>{}</SkipOnInput>\r\n",
             if skip_on_input { "true" } else { "false" }
         ));
+    }
+    if item.tag == "Button" && item.enabled == Some(false) {
+        xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
+    }
+    if item.tag == "Button" && item.default_item == Some(true) {
+        xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
     if let Some(title_location) = item.title_location {
         xml.push_str(&format!(
@@ -12435,7 +12491,8 @@ pub(super) fn format_form_child_item_xml(
         FormTooltipRepresentationXmlOrder::FieldProperties,
         indent + 1,
     ));
-    if item.tag != "PictureDecoration"
+    if item.tag != "Button"
+        && item.tag != "PictureDecoration"
         && let Some(group_vertical_align) = item.group_vertical_align
     {
         xml.push_str(&format!(
@@ -12529,6 +12586,7 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<AutoMaxWidth>false</AutoMaxWidth>\r\n"));
     }
     if item.tag != "Table"
+        && item.tag != "Button"
         && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && let Some(height) = &item.height
@@ -12580,6 +12638,38 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<MaxWidth>{}</MaxWidth>\r\n",
             escape_xml_text(max_width)
         ));
+    }
+    if item.tag == "Button" {
+        if let Some(height) = &item.height {
+            xml.push_str(&format!(
+                "{tab}\t<Height>{}</Height>\r\n",
+                escape_xml_text(height)
+            ));
+        }
+        if let Some(horizontal_stretch) = item.horizontal_stretch {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
+                xml_bool(horizontal_stretch)
+            ));
+        }
+        if let Some(vertical_stretch) = item.vertical_stretch {
+            xml.push_str(&format!(
+                "{tab}\t<VerticalStretch>{}</VerticalStretch>\r\n",
+                xml_bool(vertical_stretch)
+            ));
+        }
+        if let Some(group_horizontal_align) = item.group_horizontal_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                escape_xml_text(group_horizontal_align)
+            ));
+        }
+        if let Some(group_vertical_align) = item.group_vertical_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                escape_xml_text(group_vertical_align)
+            ));
+        }
     }
     if item.tag == "Button"
         && let Some(command_name) = &item.command_name
@@ -12640,7 +12730,8 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(max_height)
         ));
     }
-    if item.tag != "LabelDecoration"
+    if item.tag != "Button"
+        && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && item.tag != "Page"
         && let Some(horizontal_stretch) = item.horizontal_stretch
@@ -12659,7 +12750,8 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(choice_folders_and_items)
         ));
     }
-    if item.tag != "LabelDecoration"
+    if item.tag != "Button"
+        && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && item.tag != "Page"
         && let Some(vertical_stretch) = item.vertical_stretch
