@@ -4829,6 +4829,7 @@ fn parse_form_child_item_with_metadata_owners(
         &fields,
         field_schema_and_options.as_ref().map(|(schema, _)| *schema),
         check_box_field_layout.as_ref().map(|(schema, _)| *schema),
+        table_schema,
     );
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
     let header_picture = parse_form_field_header_picture(
@@ -6129,7 +6130,6 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
         item.title_data_path = None;
         match item.tag {
             "LabelField" => {
-                item.tooltip.clear();
                 item.width = None;
             }
             "InputField" => {
@@ -8625,6 +8625,7 @@ pub(super) fn parse_form_child_item_tooltip(
     fields: &[&str],
     field_schema: Option<FormFieldSchema>,
     check_box_schema: Option<FormCheckBoxFieldSchema>,
+    table_schema: Option<FormTableSchema>,
 ) -> Vec<(String, String)> {
     if let Some(schema) = field_schema {
         return fields
@@ -8635,6 +8636,12 @@ pub(super) fn parse_form_child_item_tooltip(
     if tag == "CheckBoxField" {
         return check_box_schema
             .and_then(|schema| fields.get(schema.tooltip_slot()))
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default();
+    }
+    if let Some(schema) = table_schema {
+        return fields
+            .get(schema.tooltip_slot())
             .map(|field| parse_form_localized_strings(field))
             .unwrap_or_default();
     }
@@ -11519,6 +11526,9 @@ fn format_form_table_property_xml(
                 xml
             }
         }
+        FormTableXmlProperty::ToolTip => {
+            format_form_localized_section("ToolTip", &item.tooltip, indent)
+        }
         FormTableXmlProperty::SearchStringLocation => item
             .table_search_string_location
             .map(|value| {
@@ -12526,6 +12536,7 @@ pub(super) fn format_form_child_item_xml(
             | "TrackBarField"
             | "ChartField"
             | "ColumnGroup"
+            | "Table"
             | "LabelDecoration"
             | "PictureDecoration"
             | "UsualGroup"

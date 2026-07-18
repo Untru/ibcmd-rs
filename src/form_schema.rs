@@ -2742,6 +2742,7 @@ pub(crate) enum FormTableXmlProperty {
     BorderColor,
     Title,
     CommandSet,
+    ToolTip,
     SearchStringLocation,
     ViewStatusLocation,
     SearchControlLocation,
@@ -2796,6 +2797,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::BorderColor,
     FormTableXmlProperty::Title,
     FormTableXmlProperty::CommandSet,
+    FormTableXmlProperty::ToolTip,
     FormTableXmlProperty::SearchStringLocation,
     FormTableXmlProperty::ViewStatusLocation,
     FormTableXmlProperty::SearchControlLocation,
@@ -2976,6 +2978,10 @@ impl FormTableSchema {
 
     pub(crate) const fn command_set_pair_count_slot(self) -> usize {
         Self::COMMAND_SET_PAIR_COUNT_SLOT
+    }
+
+    pub(crate) const fn tooltip_slot(self) -> usize {
+        10
     }
 
     pub(crate) const fn data_path_slot(self) -> usize {
