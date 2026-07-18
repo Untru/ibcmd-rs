@@ -1712,6 +1712,7 @@ pub(crate) struct FormFieldSchema {
     auto_cell_height_slot: Option<usize>,
     read_only_slot: Option<usize>,
     title_height_slot: Option<usize>,
+    horizontal_align_slot: Option<usize>,
     text_color_option_slot: Option<usize>,
     back_color_option_slot: Option<usize>,
     border_color_option_slot: Option<usize>,
@@ -1781,6 +1782,11 @@ impl FormFieldSchema {
                 "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
             )
             .then_some(8 + top_level_offset),
+            horizontal_align_slot: matches!(
+                item_tag,
+                "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+            )
+            .then_some(23 + top_level_offset),
             text_color_option_slot: text,
             back_color_option_slot: back,
             border_color_option_slot: border,
@@ -1827,6 +1833,16 @@ impl FormFieldSchema {
 
     pub(crate) fn title_height(self, fields: &[&str]) -> Option<String> {
         self.dimension(fields, self.title_height_slot?)
+    }
+
+    pub(crate) fn horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(self.horizontal_align_slot?)?.trim() {
+            "0" => Some("Left"),
+            "1" => Some("Center"),
+            "2" => Some("Right"),
+            "3" => None,
+            _ => None,
+        }
     }
 
     pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {

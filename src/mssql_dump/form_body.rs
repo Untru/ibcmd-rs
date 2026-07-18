@@ -5350,21 +5350,28 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        horizontal_align: if matches!(tag, "InputField" | "LabelField")
-            && form_input_field_layout_is_extended(&fields)
-        {
-            parse_form_input_field_horizontal_align(&fields).map(FormChildItemAlignment::Horizontal)
-        } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
-            schema
-                .horizontal_align(&fields)
-                .map(FormChildItemAlignment::Horizontal)
-        } else if tag == "LabelDecoration" {
-            label_decoration_options
-                .as_ref()
-                .map(|options| FormChildItemAlignment::LabelDecoration(options.alignment))
-        } else {
-            None
-        },
+        horizontal_align: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.horizontal_align(&fields))
+            .map(FormChildItemAlignment::Horizontal)
+            .or_else(|| {
+                if matches!(tag, "InputField" | "LabelField")
+                    && form_input_field_layout_is_extended(&fields)
+                {
+                    parse_form_input_field_horizontal_align(&fields)
+                        .map(FormChildItemAlignment::Horizontal)
+                } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
+                    schema
+                        .horizontal_align(&fields)
+                        .map(FormChildItemAlignment::Horizontal)
+                } else if tag == "LabelDecoration" {
+                    label_decoration_options
+                        .as_ref()
+                        .map(|options| FormChildItemAlignment::LabelDecoration(options.alignment))
+                } else {
+                    None
+                }
+            }),
         group_vertical_align: if tag == "PictureDecoration" {
             picture_decoration_properties
                 .as_ref()
