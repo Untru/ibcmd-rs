@@ -4382,7 +4382,58 @@ struct BusinessProcessProperties {
 struct TaskProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    number_type: &'static str,
+    number_length: u32,
+    number_allowed_length: &'static str,
+    check_unique: bool,
+    autonumbering: bool,
+    task_number_auto_prefix: &'static str,
+    description_length: u32,
+    addressing: Option<String>,
+    main_addressing_attribute: Option<String>,
+    current_performer: Option<String>,
+    based_on: Vec<String>,
+    standard_attributes: Vec<TaskStandardAttribute>,
+    default_presentation: &'static str,
+    edit_type: &'static str,
+    input_by_string: Vec<String>,
+    search_string_mode_on_input_by_string: &'static str,
+    full_text_search_on_input_by_string: &'static str,
+    choice_data_get_mode_on_input_by_string: &'static str,
+    create_on_input: &'static str,
+    default_object_form: Option<String>,
     default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    auxiliary_object_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
+    choice_history_on_input: &'static str,
+    include_help_in_contents: bool,
+    data_lock_fields: Vec<String>,
+    data_lock_control_mode: &'static str,
+    full_text_search: &'static str,
+    object_presentation: Vec<(String, String)>,
+    extended_object_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    data_history: &'static str,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
+    child_attributes: Vec<MetadataChildObject>,
+    child_forms: Vec<String>,
+    addressing_attributes: Vec<TaskAddressingAttribute>,
+    child_commands: Vec<MetadataChildCommand>,
+}
+
+struct TaskStandardAttribute {
+    attribute: RegisterStandardAttribute,
+    comment: String,
+}
+
+struct TaskAddressingAttribute {
+    child: MetadataChildObject,
+    addressing_dimension: String,
 }
 
 struct SettingsStorageProperties {
@@ -5989,7 +6040,7 @@ fn extract_metadata_source_xml_from_text_row(
     let nested_commands = if metadata_kind_can_own_commands(kind)
         && !matches!(
             kind,
-            "Report" | "DataProcessor" | "DocumentJournal" | "InformationRegister"
+            "Report" | "DataProcessor" | "DocumentJournal" | "InformationRegister" | "Task"
         ) {
         nested_command_headers_for_owner_from_text(kind, text, uuid)
     } else {
@@ -6066,7 +6117,14 @@ fn extract_metadata_source_xml_from_text_row(
         let business_process = parse_business_process_properties_from_text(text, uuid, form_refs)?;
         format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
     } else if kind == "Task" {
-        let task = parse_task_properties_from_text(text, uuid, form_refs)?;
+        let task = parse_task_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            object_refs,
+            metadata_object_refs,
+            form_refs,
+        )?;
         format_task_source_xml(&header, &task, source_version).into_bytes()
     } else if kind == "SettingsStorage" {
         let settings_storage = parse_settings_storage_properties_from_text(text, uuid, form_refs)?;
@@ -6188,14 +6246,18 @@ fn extract_metadata_source_xml_from_text_row(
         } else {
             String::new()
         };
-    let owned_form_template_child_objects = simple_metadata_form_template_child_objects_xml(
-        kind,
-        folder,
-        &header.name,
-        text,
-        form_refs,
-        template_refs,
-    );
+    let owned_form_template_child_objects = if kind == "Task" {
+        String::new()
+    } else {
+        simple_metadata_form_template_child_objects_xml(
+            kind,
+            folder,
+            &header.name,
+            text,
+            form_refs,
+            template_refs,
+        )
+    };
     if !nested_commands.is_empty()
         || !document_journal_child_commands.is_empty()
         || !information_register_child_commands.is_empty()
@@ -7716,11 +7778,11 @@ fn parse_information_register_standard_attribute_fill_value(
     }
 }
 
-fn parse_register_standard_attribute<'a>(
+fn parse_register_standard_attribute_with_comment<'a>(
     name: &'static str,
     bag: &InformationRegisterStandardAttributeBag<'a>,
     fill_value: MetadataChildFillValue,
-) -> Option<RegisterStandardAttribute> {
+) -> Option<(RegisterStandardAttribute, String)> {
     let link_by_type =
         bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LINK_BY_TYPE_PROPERTY_UUID)?;
     let fill_checking =
@@ -7791,7 +7853,6 @@ fn parse_register_standard_attribute<'a>(
         || parse_information_register_standard_attribute_bool(password_mode)?
         || parse_information_register_standard_attribute_bool(mark_negatives)?
         || !information_register_standard_attribute_nil_is_valid(min_value)
-        || !parse_information_register_standard_attribute_string(comment)?.is_empty()
         || !information_register_standard_attribute_nested_values_are(
             choice_parameter_links,
             INFORMATION_REGISTER_STANDARD_ATTRIBUTE_CHOICE_PARAMETER_LINKS_UUID,
@@ -7831,21 +7892,34 @@ fn parse_register_standard_attribute<'a>(
         "1" => "Use",
         _ => return None,
     };
-    Some(RegisterStandardAttribute {
-        name,
-        fill_checking,
-        fill_from_filling_value: parse_information_register_standard_attribute_bool(
-            fill_from_filling_value,
-        )?,
-        tooltip: parse_information_register_standard_attribute_localized(tooltip)?,
-        format: parse_information_register_standard_attribute_localized(format)?,
-        edit_format: parse_information_register_standard_attribute_localized(edit_format)?,
-        synonym: parse_information_register_standard_attribute_localized(synonym)?,
-        data_history,
-        full_text_search,
-        fill_value,
-        link_by_type: None,
-    })
+    Some((
+        RegisterStandardAttribute {
+            name,
+            fill_checking,
+            fill_from_filling_value: parse_information_register_standard_attribute_bool(
+                fill_from_filling_value,
+            )?,
+            tooltip: parse_information_register_standard_attribute_localized(tooltip)?,
+            format: parse_information_register_standard_attribute_localized(format)?,
+            edit_format: parse_information_register_standard_attribute_localized(edit_format)?,
+            synonym: parse_information_register_standard_attribute_localized(synonym)?,
+            data_history,
+            full_text_search,
+            fill_value,
+            link_by_type: None,
+        },
+        parse_information_register_standard_attribute_string(comment)?,
+    ))
+}
+
+fn parse_register_standard_attribute<'a>(
+    name: &'static str,
+    bag: &InformationRegisterStandardAttributeBag<'a>,
+    fill_value: MetadataChildFillValue,
+) -> Option<RegisterStandardAttribute> {
+    let (attribute, comment) =
+        parse_register_standard_attribute_with_comment(name, bag, fill_value)?;
+    comment.is_empty().then_some(attribute)
 }
 
 fn parse_information_register_standard_attribute<'a>(
@@ -13919,71 +13993,772 @@ fn parse_business_process_properties_from_text(
 fn parse_task_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<TaskProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("33")
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 9 || root.first()?.trim() != "1" || root.get(2)?.trim() != "6" {
+        return None;
+    }
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    let parsed_header = parse_information_register_owner_header(fields.get(1)?)?;
+    if fields.len() != 52
+        || fields.first()?.trim() != "33"
         || metadata_header_field_index(&fields, uuid) != Some(1)
+        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
     {
         return None;
     }
 
-    let mut generated_types = Vec::new();
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        3,
-        4,
-        &format!("TaskObject.{}", header.name),
-        "Object",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        5,
-        6,
-        &format!("TaskRef.{}", header.name),
-        "Ref",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        7,
-        8,
-        &format!("TaskSelection.{}", header.name),
-        "Selection",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        9,
-        10,
-        &format!("TaskList.{}", header.name),
-        "List",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        11,
-        12,
-        &format!("TaskManager.{}", header.name),
-        "Manager",
-    );
+    let collections = root[3..]
+        .iter()
+        .map(|value| parse_task_root_collection(value))
+        .collect::<Option<Vec<_>>>()?;
+    let collection_markers = collections
+        .iter()
+        .map(|collection| collection.marker.clone())
+        .collect::<BTreeSet<_>>();
+    if collection_markers.len() != collections.len()
+        || !collections.get(0)?.items.is_empty()
+        || !collections.get(4)?.items.is_empty()
+    {
+        return None;
+    }
 
-    let header_index = metadata_header_field_index(&fields, uuid)?;
+    let generated_types = parse_task_generated_types(&fields, &header.name)?;
+    let form_uuids = parse_task_form_uuids(&collections.get(1)?.items)?;
+    let child_forms = parse_task_child_forms(&form_uuids, &header.name, form_refs)?;
+    if child_forms
+        != owned_metadata_form_names_in_text_order(text, "Tasks", &header.name, form_refs)
+    {
+        return None;
+    }
+
+    let child_attributes = parse_task_child_attributes(
+        &collections.get(2)?.items,
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        form_refs,
+    )?;
+    let addressing_attributes = parse_task_addressing_attributes(
+        &collections.get(3)?.items,
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        form_refs,
+    )?;
+    let child_commands = parse_task_commands(
+        &collections.get(5)?.items,
+        text,
+        uuid,
+        type_index,
+        object_refs,
+    )?;
+
+    let addressing =
+        parse_task_optional_reference(fields.get(25)?, object_refs, "InformationRegister.")?;
+    if !validate_task_addressing_dimensions(addressing.as_deref(), &addressing_attributes) {
+        return None;
+    }
+    let addressing_references = addressing_attributes
+        .iter()
+        .map(|attribute| {
+            format!(
+                "Task.{}.AddressingAttribute.{}",
+                header.name, attribute.child.header.name
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let main_addressing_attribute =
+        parse_task_member_reference(fields.get(26)?, object_refs, &addressing_references)?;
+    if addressing.is_none()
+        && (main_addressing_attribute.is_some() || !addressing_attributes.is_empty())
+    {
+        return None;
+    }
+
+    let attribute_references = child_attributes
+        .iter()
+        .map(|attribute| format!("Task.{}.Attribute.{}", header.name, attribute.header.name))
+        .collect::<BTreeSet<_>>();
+    let input_by_string = parse_task_field_references(
+        fields.get(28)?,
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-9", "Description"), ("-2", "Number")],
+    )?;
+    let data_lock_fields = parse_task_field_references(
+        fields.get(46)?,
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-7", "BusinessProcess")],
+    )?;
+
+    let default_object_form =
+        parse_task_form_ref(fields.get(15)?, &form_uuids, &header.name, form_refs)?;
+    let default_list_form =
+        parse_task_form_ref(fields.get(16)?, &form_uuids, &header.name, form_refs)?;
+    let default_choice_form =
+        parse_task_form_ref(fields.get(17)?, &form_uuids, &header.name, form_refs)?;
+    let auxiliary_object_form =
+        parse_task_form_ref(fields.get(35)?, &form_uuids, &header.name, form_refs)?;
+    let auxiliary_list_form =
+        parse_task_form_ref(fields.get(36)?, &form_uuids, &header.name, form_refs)?;
+    let auxiliary_choice_form =
+        parse_task_form_ref(fields.get(37)?, &form_uuids, &header.name, form_refs)?;
+
+    let (
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+    ) = parse_task_input_modes(fields.get(47)?)?;
+
+    if !settings_storage_uuid_is_zero(fields.get(13)?)
+        || !settings_storage_uuid_is_zero(fields.get(14)?)
+        || !task_characteristics_is_empty(fields.get(44)?)
+        || fields[48..52].iter().any(|field| field.trim() != "0")
+    {
+        return None;
+    }
+
+    let mut child_uuids = BTreeSet::new();
+    if form_uuids
+        .iter()
+        .chain(child_attributes.iter().map(|child| &child.header.uuid))
+        .chain(
+            addressing_attributes
+                .iter()
+                .map(|attribute| &attribute.child.header.uuid),
+        )
+        .chain(child_commands.iter().map(|command| &command.header.uuid))
+        .any(|uuid| !child_uuids.insert(uuid.to_ascii_lowercase()))
+    {
+        return None;
+    }
+
     Some(TaskProperties {
         generated_types,
-        use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
-            .unwrap_or(true),
-        default_list_form: parse_default_list_form_ref(
-            &fields,
-            &[header_index + 9],
-            form_refs,
-            "Tasks",
-            &header.name,
-        ),
+        use_standard_commands: information_register_bool(fields.get(2)?)?,
+        number_type: match fields.get(18)?.trim() {
+            "0" => "Number",
+            "1" => "String",
+            _ => return None,
+        },
+        number_length: parse_exchange_plan_u32(fields.get(19)?)?,
+        number_allowed_length: match fields.get(20)?.trim() {
+            "0" => "Variable",
+            "1" => "Fixed",
+            _ => return None,
+        },
+        check_unique: information_register_bool(fields.get(21)?)?,
+        autonumbering: information_register_bool(fields.get(23)?)?,
+        task_number_auto_prefix: match fields.get(24)?.trim() {
+            "1" => "BusinessProcessNumber",
+            _ => return None,
+        },
+        description_length: parse_exchange_plan_u32(fields.get(22)?)?,
+        addressing,
+        main_addressing_attribute,
+        current_performer: parse_task_optional_reference(
+            fields.get(29)?,
+            object_refs,
+            "SessionParameter.",
+        )?,
+        based_on: parse_task_based_on(fields.get(30)?, object_refs)?,
+        standard_attributes: parse_task_standard_attributes(
+            fields.get(34)?,
+            type_index,
+            metadata_object_refs,
+        )?,
+        default_presentation: match fields.get(27)?.trim() {
+            "1" => "AsDescription",
+            _ => return None,
+        },
+        edit_type: match fields.get(31)?.trim() {
+            "0" => "InDialog",
+            _ => return None,
+        },
+        input_by_string,
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+        create_on_input: "DontUse",
+        default_object_form,
+        default_list_form,
+        default_choice_form,
+        auxiliary_object_form,
+        auxiliary_list_form,
+        auxiliary_choice_form,
+        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(43)?.trim())?,
+        include_help_in_contents: information_register_bool(fields.get(45)?)?,
+        data_lock_fields,
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(32)?)?,
+        full_text_search: register_child_full_text_search_xml(fields.get(33)?.trim())?,
+        object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,
+        extended_object_presentation: parse_information_register_owner_localized_value(
+            fields.get(39)?,
+        )?,
+        list_presentation: parse_information_register_owner_localized_value(fields.get(40)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            fields.get(41)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(fields.get(42)?)?,
+        data_history: "DontUse",
+        update_data_history_immediately_after_write: false,
+        execute_after_write_data_history_version_processing: false,
+        child_attributes,
+        child_forms,
+        addressing_attributes,
+        child_commands,
     })
+}
+
+fn parse_task_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    let fields = split_information_register_braced_fields(value)?;
+    (fields.len() == 3
+        && fields.first()?.trim() == "1"
+        && fields.get(1)?.trim() == "2"
+        && fields.get(2)?.trim() == "0")
+        .then_some(("Begin", "DontUse", "Directly"))
+}
+
+fn task_characteristics_is_empty(value: &str) -> bool {
+    exchange_plan_characteristics_is_empty(value)
+}
+
+struct TaskRootCollection<'a> {
+    marker: String,
+    items: Vec<&'a str>,
+}
+
+fn parse_task_root_collection(value: &str) -> Option<TaskRootCollection<'_>> {
+    let fields = split_information_register_braced_fields(value)?;
+    let marker = parse_information_register_non_zero_uuid(fields.first()?)?.to_ascii_lowercase();
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    Some(TaskRootCollection {
+        marker,
+        items: fields[2..].to_vec(),
+    })
+}
+
+fn parse_task_generated_types(
+    fields: &[&str],
+    owner_name: &str,
+) -> Option<Vec<GeneratedTypeEntry>> {
+    let definitions = [
+        (3, 4, "TaskObject", "Object"),
+        (5, 6, "TaskRef", "Ref"),
+        (7, 8, "TaskSelection", "Selection"),
+        (9, 10, "TaskList", "List"),
+        (11, 12, "TaskManager", "Manager"),
+    ];
+    let mut seen = BTreeSet::new();
+    definitions
+        .into_iter()
+        .map(|(type_slot, value_slot, prefix, category)| {
+            let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
+            let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
+            if !seen.insert(type_id.to_ascii_lowercase())
+                || !seen.insert(value_id.to_ascii_lowercase())
+            {
+                return None;
+            }
+            Some(GeneratedTypeEntry {
+                name: format!("{prefix}.{owner_name}"),
+                category,
+                type_id,
+                value_id,
+            })
+        })
+        .collect()
+}
+
+fn parse_task_form_uuids(items: &[&str]) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    items
+        .iter()
+        .map(|value| {
+            let uuid = parse_information_register_non_zero_uuid(value)?.to_ascii_lowercase();
+            seen.insert(uuid.clone()).then_some(uuid)
+        })
+        .collect()
+}
+
+fn parse_task_child_forms(
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("Task.{owner_name}.Form.");
+    let mut seen = BTreeSet::new();
+    form_uuids
+        .iter()
+        .map(|uuid| {
+            let reference =
+                parse_exact_register_owned_form_ref(uuid, "Task", owner_name, form_refs)??;
+            let name = reference.strip_prefix(&prefix)?;
+            (!name.is_empty() && !name.contains('.') && seen.insert(name.to_lowercase()))
+                .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn parse_task_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if !information_register_uuid_is_zero(&uuid)
+        && !form_uuids
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
+    {
+        return None;
+    }
+    parse_exact_register_owned_form_ref(value, "Task", owner_name, form_refs)
+}
+
+fn parse_task_child_attributes(
+    items: &[&str],
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<MetadataChildObject>> {
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_names = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let (child, dimension) = parse_task_wrapped_child(
+                item,
+                false,
+                owner_name,
+                type_index,
+                object_refs,
+                metadata_object_refs,
+                form_refs,
+            )?;
+            if dimension.is_some()
+                || !seen_uuids.insert(child.header.uuid.to_ascii_lowercase())
+                || !seen_names.insert(child.header.name.to_lowercase())
+            {
+                return None;
+            }
+            Some(child)
+        })
+        .collect()
+}
+
+fn parse_task_addressing_attributes(
+    items: &[&str],
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<TaskAddressingAttribute>> {
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_names = BTreeSet::new();
+    let mut seen_dimensions = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let (child, addressing_dimension) = parse_task_wrapped_child(
+                item,
+                true,
+                owner_name,
+                type_index,
+                object_refs,
+                metadata_object_refs,
+                form_refs,
+            )?;
+            let addressing_dimension = addressing_dimension?;
+            if !seen_uuids.insert(child.header.uuid.to_ascii_lowercase())
+                || !seen_names.insert(child.header.name.to_lowercase())
+                || !seen_dimensions.insert(addressing_dimension.to_lowercase())
+            {
+                return None;
+            }
+            Some(TaskAddressingAttribute {
+                child,
+                addressing_dimension,
+            })
+        })
+        .collect()
+}
+
+fn parse_task_wrapped_child(
+    value: &str,
+    addressing: bool,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<(MetadataChildObject, Option<String>)> {
+    let item = split_information_register_braced_fields(value)?;
+    if item.len() != 2 || item.get(1)?.trim() != "0" {
+        return None;
+    }
+    let wrapper = split_information_register_braced_fields(item.first()?)?;
+    let expected_code = if addressing { "4" } else { "2" };
+    let expected_len = if addressing { 6 } else { 5 };
+    if wrapper.len() != expected_len || wrapper.first()?.trim() != expected_code {
+        return None;
+    }
+    let (payload, child_uuid) = parse_metadata_code27_payload(wrapper.get(1)?)?;
+    let detail = split_information_register_braced_fields(payload.get(1)?)?;
+    let header = parse_information_register_owner_header(detail.get(1)?)?;
+    if !header.uuid.eq_ignore_ascii_case(&child_uuid)
+        || header.name.is_empty()
+        || header.name.contains('.')
+    {
+        return None;
+    }
+    let tag = if addressing {
+        "AddressingAttribute"
+    } else {
+        "Attribute"
+    };
+    let expected_reference = format!("Task.{owner_name}.{tag}.{}", header.name);
+    if resolve_exchange_plan_index_reference(&header.uuid, object_refs)? != expected_reference {
+        return None;
+    }
+
+    let value_types = parse_task_child_type_pattern(detail.get(2)?, type_index)?;
+    let mut properties = parse_information_register_common_child_properties(
+        &payload,
+        "Task",
+        owner_name,
+        type_index,
+        metadata_object_refs,
+        form_refs,
+        false,
+    )?;
+    properties.indexing = Some(metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?);
+    let full_text_search_index = if addressing { 4 } else { 3 };
+    let data_history_index = if addressing { 5 } else { 4 };
+    properties.full_text_search = Some(register_child_full_text_search_xml(
+        wrapper.get(full_text_search_index)?.trim(),
+    )?);
+    properties.data_history = Some(metadata_data_history_xml(
+        wrapper.get(data_history_index)?.trim(),
+    )?);
+
+    let addressing_dimension = if addressing {
+        let uuid = parse_information_register_non_zero_uuid(wrapper.get(3)?)?;
+        Some(resolve_exchange_plan_index_reference(&uuid, object_refs)?)
+    } else {
+        None
+    };
+    Some((
+        MetadataChildObject {
+            tag,
+            header,
+            generated_types: Vec::new(),
+            emit_empty_type: value_types.is_empty(),
+            value_types,
+            properties: Some(properties),
+            register_properties: None,
+            tabular_section_properties: None,
+            child_objects: Vec::new(),
+        },
+        addressing_dimension,
+    ))
+}
+
+fn parse_task_child_type_pattern(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    parse_metadata_type_pattern_with_builtin(
+        value,
+        type_index,
+        platform_reference_family_type_reference,
+    )
+    .map(|value_types| {
+        value_types
+            .into_iter()
+            .map(|value_type| match value_type {
+                ConstantValueType::Reference { reference }
+                    if metadata_reference_is_type_set(&reference) =>
+                {
+                    ConstantValueType::ReferenceTypeSet { reference }
+                }
+                other => other,
+            })
+            .collect()
+    })
+}
+
+fn validate_task_addressing_dimensions(
+    addressing: Option<&str>,
+    attributes: &[TaskAddressingAttribute],
+) -> bool {
+    let Some(addressing) = addressing else {
+        return attributes.is_empty();
+    };
+    let Some(register_name) = addressing.strip_prefix("InformationRegister.") else {
+        return false;
+    };
+    if register_name.is_empty() || register_name.contains('.') {
+        return false;
+    }
+    let prefix = format!("InformationRegister.{register_name}.Dimension.");
+    attributes.iter().all(|attribute| {
+        attribute
+            .addressing_dimension
+            .strip_prefix(&prefix)
+            .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+    })
+}
+
+fn parse_task_optional_reference(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    prefix: &str,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+    reference
+        .strip_prefix(prefix)
+        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+        .then_some(Some(reference))
+}
+
+fn parse_task_member_reference(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    members: &BTreeSet<String>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+    members.contains(&reference).then_some(Some(reference))
+}
+
+fn parse_task_based_on(value: &str, object_refs: &BTreeMap<String, String>) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    fields[2..]
+        .iter()
+        .map(|value| {
+            let typed = split_information_register_braced_fields(value)?;
+            if typed.len() != 3
+                || typed.first()?.trim() != r##""#""##
+                || !information_register_uuid_matches(typed.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
+            {
+                return None;
+            }
+            let payload = split_information_register_braced_fields(typed.get(2)?)?;
+            if payload.len() != 2 || payload.first()?.trim() != "1" {
+                return None;
+            }
+            let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
+            let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+            let name = reference.strip_prefix("BusinessProcess.")?;
+            (!name.is_empty() && !name.contains('.') && seen.insert(reference.to_ascii_lowercase()))
+                .then_some(reference)
+        })
+        .collect()
+}
+
+fn parse_task_field_references(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    attribute_references: &BTreeSet<String>,
+    standard_attributes: &[(&str, &str)],
+) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|value| {
+            let payload = parse_exchange_plan_field_ref_payload(value)?;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    let (_, name) = standard_attributes
+                        .iter()
+                        .find(|(candidate, _)| marker.trim() == *candidate)?;
+                    format!("Task.{owner_name}.StandardAttribute.{name}")
+                }
+                [kind, uuid] if kind.trim() == "0" => {
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
+                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+                    attribute_references
+                        .contains(&reference)
+                        .then_some(reference)?
+                }
+                _ => return None,
+            };
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
+        })
+        .collect()
+}
+
+const TASK_STANDARD_ATTRIBUTES: [(&str, &str); 8] = [
+    ("-10", "Executed"),
+    ("-9", "Description"),
+    ("-8", "RoutePoint"),
+    ("-7", "BusinessProcess"),
+    ("-5", "Ref"),
+    ("-4", "DeletionMark"),
+    ("-3", "Date"),
+    ("-2", "Number"),
+];
+
+fn parse_task_standard_attributes(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<TaskStandardAttribute>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.first()?.trim() != "1"
+        || parse_information_register_usize(payload.get(1)?)? != TASK_STANDARD_ATTRIBUTES.len()
+        || payload.len()
+            != TASK_STANDARD_ATTRIBUTES
+                .len()
+                .checked_mul(3)?
+                .checked_add(2)?
+    {
+        return None;
+    }
+
+    let mut bag_shape = None;
+    TASK_STANDARD_ATTRIBUTES
+        .iter()
+        .copied()
+        .zip(payload[2..].chunks_exact(3))
+        .map(|((expected_marker, name), triplet)| {
+            let marker = split_information_register_braced_fields(triplet[0])?;
+            if marker.len() != 1
+                || marker.first()?.trim() != expected_marker
+                || !information_register_uuid_matches(
+                    triplet[1],
+                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+                )
+            {
+                return None;
+            }
+            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
+                return None;
+            }
+            bag_shape = Some(bag.has_type_reduction_mode);
+            let fill_value =
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value =
+                parse_information_register_fill_value(fill_value, type_index, object_refs)?;
+            let (attribute, comment) =
+                parse_register_standard_attribute_with_comment(name, &bag, fill_value)?;
+            Some(TaskStandardAttribute { attribute, comment })
+        })
+        .collect()
+}
+
+fn parse_task_commands(
+    items: &[&str],
+    text: &str,
+    owner_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChildCommand>> {
+    let mut raw_headers = Vec::with_capacity(items.len());
+    let mut seen_uuids = BTreeSet::new();
+    let mut shared_value_uuid = None::<String>;
+    let mut seen_names = BTreeSet::new();
+    for value in items {
+        let item = split_information_register_braced_fields(value)?;
+        if item.len() != 2 || item.get(1)?.trim() != "0" {
+            return None;
+        }
+        let wrapper = split_information_register_braced_fields(item.first()?)?;
+        if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
+            return None;
+        }
+        let nested = split_information_register_braced_fields(wrapper.get(1)?)?;
+        if nested.len() != 4 || nested[0..3].iter().any(|field| field.trim() != "0") {
+            return None;
+        }
+        let body = split_information_register_braced_fields(nested.get(3)?)?;
+        if body.len() != 3 || body.first()?.trim() != "1" {
+            return None;
+        }
+        let identity = split_information_register_braced_fields(body.get(1)?)?;
+        if identity.len() != 3 || identity.first()?.trim() != "2" {
+            return None;
+        }
+        let identity_uuid = parse_information_register_non_zero_uuid(identity.get(1)?)?;
+        let value_uuid = parse_information_register_non_zero_uuid(identity.get(2)?)?;
+        let properties = split_information_register_braced_fields(body.get(2)?)?;
+        if properties.len() != 13 || properties.first()?.trim() != "9" {
+            return None;
+        }
+        let header = parse_information_register_owner_header(properties.get(9)?)?;
+        if !identity_uuid.eq_ignore_ascii_case(&header.uuid)
+            || metadata_header_field_index(&properties, &header.uuid) != Some(9)
+            || header.name.is_empty()
+            || header.name.contains('.')
+            || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+            || shared_value_uuid
+                .as_ref()
+                .is_some_and(|shared| !shared.eq_ignore_ascii_case(&value_uuid))
+            || !seen_names.insert(header.name.to_lowercase())
+        {
+            return None;
+        }
+        shared_value_uuid.get_or_insert(value_uuid);
+        raw_headers.push(header);
+    }
+
+    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    if commands.len() != raw_headers.len()
+        || commands.iter().zip(&raw_headers).any(|(command, raw)| {
+            command.properties.is_none()
+                || !command.header.uuid.eq_ignore_ascii_case(&raw.uuid)
+                || command.header.name != raw.name
+                || command.header.synonyms != raw.synonyms
+                || command.header.comment != raw.comment
+        })
+    {
+        return None;
+    }
+    Some(commands)
 }
 
 fn parse_settings_storage_properties_from_text(
@@ -18484,14 +19259,16 @@ fn form_builtin_type_reference(type_id: &str) -> Option<&'static str> {
                 .eq_ignore_ascii_case(type_id)
                 .then_some(*reference)
         })
-        .or_else(|| {
-            DCS_BUILTIN_REFERENCE_TYPE_SETS
-                .iter()
-                .find_map(|(candidate, reference)| {
-                    candidate
-                        .eq_ignore_ascii_case(type_id)
-                        .then_some(*reference)
-                })
+        .or_else(|| platform_reference_family_type_reference(type_id))
+}
+
+fn platform_reference_family_type_reference(type_id: &str) -> Option<&'static str> {
+    DCS_BUILTIN_REFERENCE_TYPE_SETS
+        .iter()
+        .find_map(|(candidate, reference)| {
+            candidate
+                .eq_ignore_ascii_case(type_id)
+                .then_some(*reference)
         })
         .or_else(|| builtin_type_reference(type_id))
 }
@@ -20283,18 +21060,301 @@ fn format_task_source_xml(
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
         let mut properties = format!(
-            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-            xml_bool(task.use_standard_commands)
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n\
+\t\t\t<NumberType>{}</NumberType>\r\n\
+\t\t\t<NumberLength>{}</NumberLength>\r\n\
+\t\t\t<NumberAllowedLength>{}</NumberAllowedLength>\r\n\
+\t\t\t<CheckUnique>{}</CheckUnique>\r\n\
+\t\t\t<Autonumbering>{}</Autonumbering>\r\n\
+\t\t\t<TaskNumberAutoPrefix>{}</TaskNumberAutoPrefix>\r\n\
+\t\t\t<DescriptionLength>{}</DescriptionLength>\r\n",
+            xml_bool(task.use_standard_commands),
+            task.number_type,
+            task.number_length,
+            task.number_allowed_length,
+            xml_bool(task.check_unique),
+            xml_bool(task.autonumbering),
+            task.task_number_auto_prefix,
+            task.description_length,
         );
-        push_optional_text_element(
+        push_exchange_plan_form_xml(&mut properties, "Addressing", task.addressing.as_deref());
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
+            "MainAddressingAttribute",
+            task.main_addressing_attribute.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "CurrentPerformer",
+            task.current_performer.as_deref(),
+        );
+        push_task_based_on_xml(&mut properties, &task.based_on);
+        push_task_standard_attributes_xml(&mut properties, &task.standard_attributes);
+        properties.push_str("\t\t\t<Characteristics/>\r\n");
+        properties.push_str(&format!(
+            "\t\t\t<DefaultPresentation>{}</DefaultPresentation>\r\n\
+\t\t\t<EditType>{}</EditType>\r\n",
+            task.default_presentation, task.edit_type,
+        ));
+        push_catalog_input_by_string_xml(&mut properties, &task.input_by_string);
+        properties.push_str(&format!(
+            "\t\t\t<SearchStringModeOnInputByString>{}</SearchStringModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>{}</FullTextSearchOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>{}</ChoiceDataGetModeOnInputByString>\r\n\
+\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n",
+            task.search_string_mode_on_input_by_string,
+            task.full_text_search_on_input_by_string,
+            task.choice_data_get_mode_on_input_by_string,
+            task.create_on_input,
+        ));
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "DefaultObjectForm",
+            task.default_object_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
             "DefaultListForm",
             task.default_list_form.as_deref(),
         );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "DefaultChoiceForm",
+            task.default_choice_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryObjectForm",
+            task.auxiliary_object_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryListForm",
+            task.auxiliary_list_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryChoiceForm",
+            task.auxiliary_choice_form.as_deref(),
+        );
+        properties.push_str(&format!(
+            "\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
+\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+            task.choice_history_on_input,
+            xml_bool(task.include_help_in_contents),
+        ));
+        push_exchange_plan_field_collection_xml(
+            &mut properties,
+            "DataLockFields",
+            &task.data_lock_fields,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n",
+            task.data_lock_control_mode, task.full_text_search,
+        ));
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ObjectPresentation",
+            &task.object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedObjectPresentation",
+            &task.extended_object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ListPresentation",
+            &task.list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedListPresentation",
+            &task.extended_list_presentation,
+        );
+        push_localized_property(&mut properties, "\t\t\t", "Explanation", &task.explanation);
+        properties.push_str(&format!(
+            "\t\t\t<DataHistory>{}</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+            task.data_history,
+            xml_bool(task.update_data_history_immediately_after_write),
+            xml_bool(task.execute_after_write_data_history_version_processing),
+        ));
         xml.insert_str(index, &properties);
     }
+    if let Some(index) = xml.find("\t</Task>") {
+        if task.child_attributes.is_empty()
+            && task.child_forms.is_empty()
+            && task.addressing_attributes.is_empty()
+            && task.child_commands.is_empty()
+        {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        } else {
+            let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+            for child in &task.child_attributes {
+                push_metadata_child_object_xml(&mut child_objects, child);
+            }
+            for form in &task.child_forms {
+                child_objects.push_str(&format!(
+                    "\t\t\t<Form>{}</Form>\r\n",
+                    escape_xml_element_text(form)
+                ));
+            }
+            for attribute in &task.addressing_attributes {
+                push_task_addressing_attribute_xml(&mut child_objects, attribute);
+            }
+            for command in &task.child_commands {
+                push_metadata_child_command_xml(&mut child_objects, command);
+            }
+            child_objects.push_str("\t\t</ChildObjects>\r\n");
+            xml.insert_str(index, &child_objects);
+        }
+    }
     xml
+}
+
+fn push_task_based_on_xml(xml: &mut String, references: &[String]) {
+    if references.is_empty() {
+        xml.push_str("\t\t\t<BasedOn/>\r\n");
+        return;
+    }
+    xml.push_str("\t\t\t<BasedOn>\r\n");
+    for reference in references {
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+            escape_xml_element_text(reference)
+        ));
+    }
+    xml.push_str("\t\t\t</BasedOn>\r\n");
+}
+
+fn push_task_standard_attributes_xml(xml: &mut String, attributes: &[TaskStandardAttribute]) {
+    xml.push_str("\t\t\t<StandardAttributes>\r\n");
+    for task_attribute in attributes {
+        let attribute = &task_attribute.attribute;
+        xml.push_str(&format!(
+            "\t\t\t\t<xr:StandardAttribute name=\"{}\">\r\n",
+            escape_xml_text(attribute.name),
+        ));
+        if let Some(link_by_type) = &attribute.link_by_type {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<xr:LinkByType>\r\n\
+\t\t\t\t\t\t<xr:DataPath>{}</xr:DataPath>\r\n\
+\t\t\t\t\t\t<xr:LinkItem>{}</xr:LinkItem>\r\n\
+\t\t\t\t\t</xr:LinkByType>\r\n",
+                escape_xml_element_text(&link_by_type.data_path),
+                link_by_type.link_item
+            ));
+        } else {
+            xml.push_str("\t\t\t\t\t<xr:LinkByType/>\r\n");
+        }
+        xml.push_str(&format!(
+            "\t\t\t\t\t<xr:FillChecking>{}</xr:FillChecking>\r\n\
+\t\t\t\t\t<xr:MultiLine>false</xr:MultiLine>\r\n\
+\t\t\t\t\t<xr:FillFromFillingValue>{}</xr:FillFromFillingValue>\r\n\
+\t\t\t\t\t<xr:CreateOnInput>Auto</xr:CreateOnInput>\r\n\
+\t\t\t\t\t<xr:TypeReductionMode>TransformValues</xr:TypeReductionMode>\r\n\
+\t\t\t\t\t<xr:MaxValue xsi:nil=\"true\"/>\r\n",
+            attribute.fill_checking,
+            xml_bool(attribute.fill_from_filling_value),
+        ));
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "ToolTip", &attribute.tooltip);
+        xml.push_str("\t\t\t\t\t<xr:ExtendedEdit>false</xr:ExtendedEdit>\r\n");
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Format", &attribute.format);
+        xml.push_str(
+            "\t\t\t\t\t<xr:ChoiceForm/>\r\n\
+\t\t\t\t\t<xr:QuickChoice>Auto</xr:QuickChoice>\r\n\
+\t\t\t\t\t<xr:ChoiceHistoryOnInput>Auto</xr:ChoiceHistoryOnInput>\r\n",
+        );
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "EditFormat", &attribute.edit_format);
+        xml.push_str(&format!(
+            "\t\t\t\t\t<xr:PasswordMode>false</xr:PasswordMode>\r\n\
+\t\t\t\t\t<xr:DataHistory>{}</xr:DataHistory>\r\n\
+\t\t\t\t\t<xr:MarkNegatives>false</xr:MarkNegatives>\r\n\
+\t\t\t\t\t<xr:MinValue xsi:nil=\"true\"/>\r\n",
+            attribute.data_history,
+        ));
+        push_xr_localized_property_xml(xml, "\t\t\t\t\t", "Synonym", &attribute.synonym);
+        if task_attribute.comment.is_empty() {
+            xml.push_str("\t\t\t\t\t<xr:Comment/>\r\n");
+        } else {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<xr:Comment>{}</xr:Comment>\r\n",
+                escape_xml_element_text(&task_attribute.comment)
+            ));
+        }
+        xml.push_str(&format!(
+            "\t\t\t\t\t<xr:FullTextSearch>{}</xr:FullTextSearch>\r\n\
+\t\t\t\t\t<xr:ChoiceParameterLinks/>\r\n\
+\t\t\t\t\t{}\r\n\
+\t\t\t\t\t<xr:Mask/>\r\n\
+\t\t\t\t\t<xr:ChoiceParameters/>\r\n\
+\t\t\t\t</xr:StandardAttribute>\r\n",
+            attribute.full_text_search,
+            format_register_standard_attribute_fill_value_xml(&attribute.fill_value),
+        ));
+    }
+    xml.push_str("\t\t\t</StandardAttributes>\r\n");
+}
+
+fn push_task_addressing_attribute_xml(xml: &mut String, attribute: &TaskAddressingAttribute) {
+    let child = &attribute.child;
+    let mut properties = child
+        .properties
+        .clone()
+        .expect("validated Task addressing attribute properties");
+    let indexing = properties
+        .indexing
+        .take()
+        .expect("validated Task addressing attribute indexing");
+    let full_text_search = properties
+        .full_text_search
+        .take()
+        .expect("validated Task addressing attribute full-text search");
+    let data_history = properties
+        .data_history
+        .take()
+        .expect("validated Task addressing attribute data history");
+    xml.push_str(&format!(
+        "\t\t\t<AddressingAttribute uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&child.header.uuid),
+        escape_xml_element_text(&child.header.name),
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &child.header.synonyms);
+    if child.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&child.header.comment)
+        ));
+    }
+    if child.value_types.is_empty() {
+        xml.push_str("\t\t\t\t\t<Type/>\r\n");
+    } else {
+        xml.push_str(&format_metadata_types_xml_with_indent(
+            &child.value_types,
+            "\t\t\t\t\t",
+        ));
+    }
+    push_metadata_child_properties_xml(xml, "\t\t\t\t\t", &properties);
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Indexing>{indexing}</Indexing>\r\n\
+\t\t\t\t\t<AddressingDimension>{}</AddressingDimension>\r\n\
+\t\t\t\t\t<FullTextSearch>{full_text_search}</FullTextSearch>\r\n\
+\t\t\t\t\t<DataHistory>{data_history}</DataHistory>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t</AddressingAttribute>\r\n",
+        escape_xml_element_text(&attribute.addressing_dimension),
+    ));
 }
 
 fn format_settings_storage_source_xml(
