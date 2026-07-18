@@ -16777,6 +16777,12 @@ fn parse_common_command_picture_value(
     }
     if picture_kind == 1 {
         let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+        if ref_fields.first()?.trim() == "-1" {
+            return Some((
+                Some("StdPicture.InputFieldSelect".to_string()),
+                load_transparent,
+            ));
+        }
         if ref_fields.first()?.trim() == "-2" {
             return Some((
                 Some("StdPicture.InputFieldClear".to_string()),

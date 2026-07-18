@@ -12367,11 +12367,19 @@ fn parses_common_command_load_report_settings_picture() {
 }
 
 #[test]
-fn parses_common_command_input_field_open_picture_and_shortcut() {
+fn parses_common_command_input_field_pictures_and_shortcut() {
+    let (select_reference, select_load_transparent) =
+        parse_common_command_picture_value(r#"{4,1,{-1},"",-1,-1,1,0,""}"#, &BTreeMap::new())
+            .unwrap();
     let (reference, load_transparent) =
         parse_common_command_picture_value(r#"{4,1,{-7},"",-1,-1,1,0,""}"#, &BTreeMap::new())
             .unwrap();
 
+    assert_eq!(
+        select_reference,
+        Some("StdPicture.InputFieldSelect".to_string())
+    );
+    assert!(select_load_transparent);
     assert_eq!(reference, Some("StdPicture.InputFieldOpen".to_string()));
     assert!(load_transparent);
     assert_eq!(
