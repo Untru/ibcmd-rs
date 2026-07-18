@@ -685,6 +685,7 @@ pub(super) struct FormChildItem {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct FormChoiceListItem {
+    pub(super) presentation_present: bool,
     pub(super) presentation: Vec<(String, String)>,
     pub(super) value: FormChoiceListValue,
 }
@@ -8041,14 +8042,45 @@ pub(super) fn parse_form_input_field_choice_list_item(
     }
     let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
     let value = parse_form_input_field_choice_list_value(&payload_fields, object_refs)?;
-    let presentation = payload_fields
-        .get(5)
-        .map(|field| parse_form_localized_strings(field))
-        .unwrap_or_default();
+    let presentation = parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?;
     Some(FormChoiceListItem {
+        presentation_present: true,
         presentation,
         value,
     })
+}
+
+fn parse_form_input_field_choice_list_presentation(field: &str) -> Option<Vec<(String, String)>> {
+    let field = field.trim();
+    if scan_1c_braced_value(field, 0) != Some(field.len()) {
+        return None;
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let item_count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != item_count.checked_add(2)? {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|item| {
+            let item = item.trim();
+            if scan_1c_braced_value(item, 0) != Some(item.len()) {
+                return None;
+            }
+            let values = split_1c_braced_fields(item, 0)?;
+            match values.as_slice() {
+                [lang, content] => Some((
+                    parse_exact_1c_quoted_string(lang.trim())?,
+                    parse_exact_1c_quoted_string(content.trim())?,
+                )),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 fn parse_form_input_field_choice_list_value(
@@ -8100,6 +8132,7 @@ pub(super) fn parse_form_radio_button_choice_list_item(
         .map(|field| parse_form_localized_strings(field))
         .unwrap_or_default();
     Some(FormChoiceListItem {
+        presentation_present: false,
         presentation,
         value,
     })
@@ -13914,7 +13947,9 @@ pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: 
 {tab}\t\t<xr:CheckState>0</xr:CheckState>\r\n\
 {tab}\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"
         ));
-        if !item.presentation.is_empty() {
+        if item.presentation_present && item.presentation.is_empty() {
+            xml.push_str(&format!("{tab}\t\t\t<Presentation/>\r\n"));
+        } else if !item.presentation.is_empty() {
             xml.push_str(&format_form_localized_section(
                 "Presentation",
                 &item.presentation,
