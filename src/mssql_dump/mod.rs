@@ -3993,6 +3993,19 @@ struct RegisterProperties {
     recalculations: Vec<String>,
 }
 
+struct ExactAccumulationRegisterOwnerProperties {
+    use_standard_commands: bool,
+    register_type: &'static str,
+    default_list_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    standard_attributes: Vec<RegisterStandardAttribute>,
+}
+
+struct ExactCalculationRegisterOwnerProperties {
+    data_lock_control_mode: &'static str,
+    standard_attributes: Vec<RegisterStandardAttribute>,
+}
+
 struct CalculationRegisterFormPair {
     default_list_form: String,
 }
@@ -7953,6 +7966,10 @@ fn parse_register_properties_from_text(
     }
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
+    let mut exact_accumulation_register =
+        parse_exact_accumulation_register_owner_properties(kind, &fields, &header, form_refs)?;
+    let mut exact_calculation_register =
+        parse_exact_calculation_register_owner_properties(kind, &fields, &header)?;
     let exact_calculation_generated_types = if kind == "CalculationRegister" {
         parse_exact_calculation_register_generated_types(&fields, &header)?
     } else {
@@ -8049,10 +8066,15 @@ fn parse_register_properties_from_text(
             .as_ref()
             .map(|properties| properties.use_standard_commands)
             .unwrap_or(true)
+    } else if let Some(properties) = exact_accumulation_register.as_ref() {
+        properties.use_standard_commands
     } else {
         parse_register_use_standard_commands(&fields, uuid)
     };
-    let register_type = parse_register_type(kind, &fields, uuid);
+    let register_type = exact_accumulation_register
+        .as_ref()
+        .map(|properties| properties.register_type)
+        .or_else(|| parse_register_type(kind, &fields, uuid));
     let include_help_in_contents = if kind == "InformationRegister" {
         information_register
             .as_ref()
@@ -8069,6 +8091,8 @@ fn parse_register_properties_from_text(
         information_register
             .as_ref()
             .map(|properties| properties.data_lock_control_mode)
+    } else if let Some(properties) = exact_calculation_register.as_ref() {
+        Some(properties.data_lock_control_mode)
     } else {
         parse_register_data_lock_control_mode(kind, &fields, uuid)
     };
@@ -8084,6 +8108,11 @@ fn parse_register_properties_from_text(
     };
     let register_form_refs = if kind == "InformationRegister" {
         (None, None)
+    } else if let Some(properties) = exact_accumulation_register.as_ref() {
+        (
+            properties.default_list_form.clone(),
+            properties.auxiliary_list_form.clone(),
+        )
     } else {
         parse_register_form_refs(kind, &fields, uuid, &header.name, form_refs)
     };
@@ -8094,6 +8123,10 @@ fn parse_register_properties_from_text(
         parse_calculation_register_fixed_schedule(kind, &fields, &header, object_refs)?;
     let standard_attributes = if kind == "InformationRegister" {
         Vec::new()
+    } else if let Some(properties) = exact_accumulation_register.as_mut() {
+        std::mem::take(&mut properties.standard_attributes)
+    } else if let Some(properties) = exact_calculation_register.as_mut() {
+        std::mem::take(&mut properties.standard_attributes)
     } else {
         register_standard_attributes(kind, &header.name, register_type, &fields, uuid)
     };
@@ -8639,6 +8672,173 @@ fn validate_exact_accumulation_code28_layout(
     expected_header: &MetadataHeader,
 ) -> Option<bool> {
     validate_exact_wrapped_register_owner_layout(fields, expected_header, "28", 26, 13)
+}
+
+const ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES: [(&str, &str); 5] = [
+    ("-9", "RecordType"),
+    ("-5", "Active"),
+    ("-4", "LineNumber"),
+    ("-3", "Recorder"),
+    ("-2", "Period"),
+];
+const ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES: [(&str, &str); 4] = [
+    ("-5", "Active"),
+    ("-4", "LineNumber"),
+    ("-3", "Recorder"),
+    ("-2", "Period"),
+];
+const CALCULATION_REGISTER_STANDARD_ATTRIBUTES: [(&str, &str); 11] = [
+    ("-13", "RegistrationPeriod"),
+    ("-11", "ReversingEntry"),
+    ("-10", "Active"),
+    ("-9", "EndOfBasePeriod"),
+    ("-8", "BegOfBasePeriod"),
+    ("-7", "EndOfActionPeriod"),
+    ("-6", "BegOfActionPeriod"),
+    ("-5", "ActionPeriod"),
+    ("-4", "CalculationType"),
+    ("-3", "LineNumber"),
+    ("-2", "Recorder"),
+];
+
+fn parse_exact_register_standard_attributes(
+    value: &str,
+    definitions: &[(&'static str, &'static str)],
+) -> Option<Vec<RegisterStandardAttribute>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.first()?.trim() != "1"
+        || parse_information_register_usize(payload.get(1)?)? != definitions.len()
+        || payload.len() != definitions.len().checked_mul(3)?.checked_add(2)?
+    {
+        return None;
+    }
+
+    let mut attributes = Vec::with_capacity(definitions.len());
+    let mut bag_shape = None;
+    for ((expected_marker, name), triplet) in definitions
+        .iter()
+        .copied()
+        .zip(payload[2..].chunks_exact(3))
+    {
+        let marker = split_information_register_braced_fields(triplet[0])?;
+        if marker.len() != 1
+            || marker.first()?.trim() != expected_marker
+            || !information_register_uuid_matches(
+                triplet[1],
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+            )
+        {
+            return None;
+        }
+        let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+        if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
+            return None;
+        }
+        bag_shape = Some(bag.has_type_reduction_mode);
+        attributes.push(parse_information_register_standard_attribute(name, &bag)?);
+    }
+    Some(attributes)
+}
+
+fn parse_exact_register_owned_form_ref(
+    value: &str,
+    owner_kind: &str,
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Some(None);
+    }
+
+    let owner_folder = metadata_source_folder_for_kind(owner_kind)?;
+    let mut matches = form_refs
+        .iter()
+        .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(&uuid));
+    let (_, form) = matches.next()?;
+    if matches.next().is_some()
+        || form.kind != "Form"
+        || !is_owned_metadata_child_path(&form.relative_path, owner_folder, owner_name, "Forms")
+    {
+        return None;
+    }
+
+    let reference = form_source_reference_name(form)?;
+    let prefix = format!("{owner_kind}.{owner_name}.Form.");
+    reference
+        .strip_prefix(&prefix)
+        .is_some_and(|name| !name.is_empty() && !name.contains('.'))
+        .then_some(Some(reference))
+}
+
+fn parse_exact_accumulation_register_owner_properties(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<ExactAccumulationRegisterOwnerProperties>> {
+    if kind != "AccumulationRegister"
+        || !validate_exact_accumulation_code28_layout(fields, expected_header)?
+    {
+        return Some(None);
+    }
+
+    let register_type =
+        accumulation_register_type_xml(parse_1c_u32_field(fields.get(15).copied())?)?;
+    let definitions = match register_type {
+        "Balance" => ACCUMULATION_REGISTER_BALANCE_STANDARD_ATTRIBUTES.as_slice(),
+        "Turnovers" => ACCUMULATION_REGISTER_TURNOVERS_STANDARD_ATTRIBUTES.as_slice(),
+        _ => return None,
+    };
+    Some(Some(ExactAccumulationRegisterOwnerProperties {
+        use_standard_commands: parse_1c_bool_field(fields.get(16).copied())?,
+        register_type,
+        default_list_form: parse_exact_register_owned_form_ref(
+            fields.get(14)?,
+            kind,
+            &expected_header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: parse_exact_register_owned_form_ref(
+            fields.get(22)?,
+            kind,
+            &expected_header.name,
+            form_refs,
+        )?,
+        standard_attributes: parse_exact_register_standard_attributes(
+            fields.get(21)?,
+            definitions,
+        )?,
+    }))
+}
+
+fn parse_exact_calculation_register_owner_properties(
+    kind: &str,
+    fields: &[&str],
+    expected_header: &MetadataHeader,
+) -> Option<Option<ExactCalculationRegisterOwnerProperties>> {
+    if kind != "CalculationRegister"
+        || !validate_exact_wrapped_register_owner_layout(fields, expected_header, "21", 33, 15)?
+    {
+        return Some(None);
+    }
+
+    let data_lock_control_mode = match fields.get(26)?.trim() {
+        "0" => "Automatic",
+        "1" => "Managed",
+        _ => return None,
+    };
+    Some(Some(ExactCalculationRegisterOwnerProperties {
+        data_lock_control_mode,
+        standard_attributes: parse_exact_register_standard_attributes(
+            fields.get(28)?,
+            &CALCULATION_REGISTER_STANDARD_ATTRIBUTES,
+        )?,
+    }))
 }
 
 fn parse_register_enable_totals_splitting(
