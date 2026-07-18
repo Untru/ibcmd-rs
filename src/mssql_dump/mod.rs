@@ -4180,6 +4180,11 @@ struct MetadataTabularSectionProperties {
     line_number_length: Option<u32>,
 }
 
+struct ExactMetadataTabularSection {
+    generated_types: Vec<GeneratedTypeEntry>,
+    properties: MetadataTabularSectionProperties,
+}
+
 #[derive(Clone)]
 enum MetadataChildFillValue {
     Nil,
@@ -6127,6 +6132,29 @@ fn extract_metadata_source_xml_from_text_row(
     } else {
         format_metadata_source_xml(kind, &header, source_version).into_bytes()
     };
+    let additional_tabular_section_child_objects =
+        if matches!(kind, "ChartOfCharacteristicTypes" | "BusinessProcess") {
+            let mut child_objects = String::new();
+            for child in parse_attribute_tabular_section_child_objects(
+                kind,
+                &header.name,
+                text,
+                uuid,
+                None,
+                type_index,
+                object_refs,
+                metadata_object_refs,
+                form_refs,
+            )
+            .into_iter()
+            .filter(|child| child.tag == "TabularSection" && !child.generated_types.is_empty())
+            {
+                push_metadata_child_object_xml(&mut child_objects, &child);
+            }
+            child_objects
+        } else {
+            String::new()
+        };
     let owned_form_template_child_objects = simple_metadata_form_template_child_objects_xml(
         kind,
         folder,
@@ -6137,9 +6165,15 @@ fn extract_metadata_source_xml_from_text_row(
     );
     if !nested_commands.is_empty()
         || !information_register_child_commands.is_empty()
+        || !additional_tabular_section_child_objects.is_empty()
         || !owned_form_template_child_objects.is_empty()
     {
         let mut xml_text = String::from_utf8(xml).ok()?;
+        insert_metadata_child_objects_xml(
+            &mut xml_text,
+            kind,
+            &additional_tabular_section_child_objects,
+        );
         insert_metadata_child_objects_xml(&mut xml_text, kind, &owned_form_template_child_objects);
         insert_metadata_child_command_objects_xml(
             &mut xml_text,
@@ -6813,16 +6847,26 @@ fn parse_exchange_plan_properties_from_text(
         data_history: "DontUse",
         update_data_history_immediately_after_write: false,
         execute_after_write_data_history_version_processing: false,
-        child_objects: parse_exchange_plan_child_objects(text, uuid, type_index),
+        child_objects: parse_exchange_plan_child_objects(
+            text,
+            uuid,
+            &header.name,
+            type_index,
+            object_refs,
+            form_refs,
+        ),
     })
 }
 
 fn parse_exchange_plan_child_objects(
     text: &str,
     uuid: &str,
+    owner_name: &str,
     type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Vec<MetadataChildObject> {
-    nested_headers_with_offsets_from_text(text, uuid, |_| true)
+    let mut child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
         .into_iter()
         .filter_map(|(header, marker_start)| {
             let tag = exchange_plan_child_object_tag(text, marker_start)?;
@@ -6848,7 +6892,23 @@ fn parse_exchange_plan_child_objects(
                 child_objects: Vec::new(),
             })
         })
-        .collect()
+        .collect::<Vec<_>>();
+    child_objects.extend(
+        parse_attribute_tabular_section_child_objects(
+            "ExchangePlan",
+            owner_name,
+            text,
+            uuid,
+            None,
+            type_index,
+            object_refs,
+            &BTreeMap::new(),
+            form_refs,
+        )
+        .into_iter()
+        .filter(|child| child.tag == "TabularSection" && !child.generated_types.is_empty()),
+    );
+    child_objects
 }
 
 fn exchange_plan_child_object_tag(text: &str, marker_start: usize) -> Option<&'static str> {
@@ -9652,20 +9712,36 @@ fn parse_attribute_tabular_section_child_objects(
         } else {
             None
         };
-        let tabular_section_properties = if tag == "TabularSection" {
-            parse_metadata_tabular_section_properties(owner_kind, text, marker_start, &header.uuid)
-        } else {
-            None
-        };
-        let generated_types = if owner_kind == "DataProcessor" && tag == "TabularSection" {
-            parse_data_processor_tabular_section_generated_types(
+        let (generated_types, tabular_section_properties) = if tag == "TabularSection" {
+            match parse_exact_metadata_tabular_section(
+                owner_kind,
+                owner_name,
                 text,
                 marker_start,
                 &header,
-                owner_name,
-            )
+            ) {
+                Some(Some(exact)) => (exact.generated_types, Some(exact.properties)),
+                Some(None) | None => (
+                    (owner_kind == "DataProcessor")
+                        .then(|| {
+                            parse_data_processor_tabular_section_generated_types(
+                                text,
+                                marker_start,
+                                &header,
+                                owner_name,
+                            )
+                        })
+                        .unwrap_or_default(),
+                    parse_metadata_tabular_section_properties(
+                        owner_kind,
+                        text,
+                        marker_start,
+                        &header.uuid,
+                    ),
+                ),
+            }
         } else {
-            Vec::new()
+            (Vec::new(), None)
         };
         let child = MetadataChildObject {
             tag,
@@ -10149,6 +10225,201 @@ fn apply_data_processor_settings_composer_types_inner(
         }
     }
     true
+}
+
+fn parse_exact_metadata_tabular_section(
+    owner_kind: &str,
+    owner_name: &str,
+    text: &str,
+    marker_start: usize,
+    header: &MetadataHeader,
+) -> Option<Option<ExactMetadataTabularSection>> {
+    if !matches!(
+        owner_kind,
+        "Catalog"
+            | "Document"
+            | "ExchangePlan"
+            | "ChartOfCharacteristicTypes"
+            | "Report"
+            | "BusinessProcess"
+            | "DataProcessor"
+    ) {
+        return Some(None);
+    }
+
+    let mut candidates =
+        metadata_object_field_candidates_around_header(text, marker_start, &header.uuid)
+            .into_iter()
+            .filter(|fields| {
+                fields.len() == 9
+                    && fields.first().map(|field| field.trim()) == Some("11")
+                    && metadata_header_field_index(fields, &header.uuid) == Some(5)
+            });
+    let Some(fields) = candidates.next() else {
+        return Some(None);
+    };
+    if candidates.next().is_some() {
+        return None;
+    }
+
+    let parsed_header = parse_wrapped_register_owner_header(fields.get(5)?)?;
+    if !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+    {
+        return None;
+    }
+
+    let generated_ids = fields[1..5]
+        .iter()
+        .map(|field| parse_information_register_non_zero_uuid(field))
+        .collect::<Option<Vec<_>>>()?;
+    if generated_ids
+        .iter()
+        .map(|uuid| uuid.to_ascii_lowercase())
+        .collect::<BTreeSet<_>>()
+        .len()
+        != generated_ids.len()
+    {
+        return None;
+    }
+
+    let fill_checking = match fields.get(6)?.trim() {
+        "0" => "DontCheck",
+        "1" => "ShowError",
+        _ => return None,
+    };
+    let emit_standard_attributes =
+        parse_exact_tabular_section_standard_attributes_presence(owner_kind, fields.get(7)?)?;
+    let tooltip = parse_information_register_owner_localized_value(fields.get(8)?)?;
+    let use_mode = match owner_kind {
+        "Catalog" => Some(parse_exact_catalog_tabular_section_use(
+            text,
+            marker_start,
+            &header.uuid,
+        )?),
+        "ChartOfCharacteristicTypes" => Some("ForItem"),
+        _ => None,
+    };
+    let line_number_length = match owner_kind {
+        "Catalog"
+        | "Document"
+        | "ExchangePlan"
+        | "ChartOfCharacteristicTypes"
+        | "BusinessProcess" => Some(5),
+        "Report" | "DataProcessor" => None,
+        _ => return None,
+    };
+
+    Some(Some(ExactMetadataTabularSection {
+        generated_types: vec![
+            GeneratedTypeEntry {
+                name: format!("{owner_kind}TabularSection.{owner_name}.{}", header.name),
+                category: "TabularSection",
+                type_id: generated_ids[0].clone(),
+                value_id: generated_ids[1].clone(),
+            },
+            GeneratedTypeEntry {
+                name: format!("{owner_kind}TabularSectionRow.{owner_name}.{}", header.name),
+                category: "TabularSectionRow",
+                type_id: generated_ids[2].clone(),
+                value_id: generated_ids[3].clone(),
+            },
+        ],
+        properties: MetadataTabularSectionProperties {
+            tooltip,
+            fill_checking,
+            line_number_fill_checking: if emit_standard_attributes {
+                "DontCheck"
+            } else {
+                ""
+            },
+            use_mode,
+            line_number_length,
+        },
+    }))
+}
+
+fn parse_exact_tabular_section_standard_attributes_presence(
+    owner_kind: &str,
+    value: &str,
+) -> Option<bool> {
+    let outer = split_information_register_braced_fields(value)?;
+    match outer.as_slice() {
+        [marker] if marker.trim() == "0" => Some(false),
+        [marker, payload] if marker.trim() == "1" => {
+            let expected_attribute_marker = match owner_kind {
+                "Catalog" | "Document" | "ExchangePlan" | "ChartOfCharacteristicTypes" => "-10",
+                "Report" | "DataProcessor" => "-3",
+                _ => return None,
+            };
+            let payload = split_information_register_braced_fields(payload)?;
+            if payload.len() != 5
+                || payload.first()?.trim() != "1"
+                || parse_information_register_usize(payload.get(1)?)? != 1
+            {
+                return None;
+            }
+            let attribute_marker = split_information_register_braced_fields(payload.get(2)?)?;
+            if attribute_marker.len() != 1
+                || attribute_marker.first()?.trim() != expected_attribute_marker
+                || !information_register_uuid_matches(
+                    payload.get(3)?,
+                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+                )
+            {
+                return None;
+            }
+            parse_information_register_standard_attribute_bag(payload.get(4)?)?;
+            Some(true)
+        }
+        _ => None,
+    }
+}
+
+fn parse_exact_catalog_tabular_section_use(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+) -> Option<&'static str> {
+    let mut search_end = marker_start;
+    let mut matches = Vec::<(usize, &'static str)>::new();
+    while let Some(start) = text[..search_end].rfind('{') {
+        search_end = start;
+        let Some(end) = scan_1c_braced_value(text, start) else {
+            continue;
+        };
+        if marker_start >= end {
+            continue;
+        }
+        let Some(fields) = split_information_register_braced_fields(&text[start..end]) else {
+            continue;
+        };
+        if fields.len() != 3 || fields.first().map(|field| field.trim()) != Some("1") {
+            continue;
+        }
+        let Some(section) = split_information_register_braced_fields(fields.get(1)?) else {
+            continue;
+        };
+        if section.len() != 9
+            || section.first().map(|field| field.trim()) != Some("11")
+            || metadata_header_field_index(&section, child_uuid) != Some(5)
+        {
+            continue;
+        }
+        let use_mode = match fields.get(2)?.trim() {
+            "0" => "ForItem",
+            "2" => "ForFolderAndItem",
+            _ => return None,
+        };
+        matches.push((end.saturating_sub(start), use_mode));
+    }
+    matches.sort_by_key(|(span, _)| *span);
+    match matches.as_slice() {
+        [(_, use_mode)] => Some(*use_mode),
+        _ => None,
+    }
 }
 
 fn parse_data_processor_tabular_section_generated_types(
@@ -21149,11 +21420,13 @@ fn push_metadata_tabular_section_properties_xml(
         "{indent}<FillChecking>{}</FillChecking>\r\n",
         properties.fill_checking
     ));
-    push_metadata_line_number_standard_attribute_xml(
-        xml,
-        indent,
-        properties.line_number_fill_checking,
-    );
+    if !properties.line_number_fill_checking.is_empty() {
+        push_metadata_line_number_standard_attribute_xml(
+            xml,
+            indent,
+            properties.line_number_fill_checking,
+        );
+    }
     if let Some(use_mode) = properties.use_mode {
         xml.push_str(&format!("{indent}<Use>{use_mode}</Use>\r\n"));
     }
