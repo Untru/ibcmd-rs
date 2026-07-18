@@ -34221,7 +34221,15 @@ fn rejects_non_exact_document_journal_generated_type_cohorts_atomically() {
             template_type_code: None,
         };
         assert!(
-            parse_document_journal_properties_from_text(&valid, &mismatched_header).is_none(),
+            parse_document_journal_properties_from_text(
+                &valid,
+                &mismatched_header,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
             "accepted {case} mismatch"
         );
     }

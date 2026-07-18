@@ -116,6 +116,9 @@ const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
 const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
+const DOCUMENT_JOURNAL_COLUMN_COLLECTION_UUID: &str = "5aee69df-0513-4c6c-9815-103102471712";
+const DOCUMENT_JOURNAL_COMMAND_COLLECTION_UUID: &str = "a49a35ce-120a-4c80-8eea-b0618479cd70";
+const DOCUMENT_JOURNAL_FORM_COLLECTION_UUID: &str = "ec81ad10-ca07-11d5-b9a5-0050bae0a95d";
 const SETTINGS_STORAGE_FORM_COLLECTION_UUID: &str = "b8533c0c-2342-4db3-91a2-c2b08cbf6b23";
 const XDTO_XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const XDTO_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
@@ -3901,6 +3904,23 @@ struct DefaultListFormMetadataProperties {
 
 struct DocumentJournalProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    default_form: Option<String>,
+    auxiliary_form: Option<String>,
+    use_standard_commands: bool,
+    registered_documents: Vec<String>,
+    include_help_in_contents: bool,
+    standard_attributes: Vec<RegisterStandardAttribute>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    columns: Vec<DocumentJournalColumn>,
+    child_commands: Vec<MetadataChildCommand>,
+}
+
+struct DocumentJournalColumn {
+    header: MetadataHeader,
+    indexing: &'static str,
+    references: Vec<String>,
 }
 
 struct SubsystemProperties {
@@ -5967,12 +5987,15 @@ fn extract_metadata_source_xml_from_text_row(
             .with_extension("xml")
     };
     let nested_commands = if metadata_kind_can_own_commands(kind)
-        && !matches!(kind, "Report" | "DataProcessor" | "InformationRegister")
-    {
+        && !matches!(
+            kind,
+            "Report" | "DataProcessor" | "DocumentJournal" | "InformationRegister"
+        ) {
         nested_command_headers_for_owner_from_text(kind, text, uuid)
     } else {
         Vec::new()
     };
+    let mut document_journal_child_commands = Vec::new();
     let information_register_child_commands = if kind == "InformationRegister" {
         parse_information_register_child_commands(text, uuid, type_index, object_refs)
     } else {
@@ -6027,8 +6050,18 @@ fn extract_metadata_source_xml_from_text_row(
         )?;
         format_document_source_xml(&header, &document, source_version).into_bytes()
     } else if kind == "DocumentJournal" {
-        let document_journal = parse_document_journal_properties_from_text(text, header)?;
-        format_document_journal_source_xml(header, &document_journal, source_version).into_bytes()
+        let document_journal = parse_document_journal_properties_from_text(
+            text,
+            header,
+            type_index,
+            object_refs,
+            form_refs,
+            template_refs,
+        )?;
+        let formatted =
+            format_document_journal_source_xml(header, &document_journal, source_version);
+        document_journal_child_commands = document_journal.child_commands;
+        formatted.into_bytes()
     } else if kind == "BusinessProcess" {
         let business_process = parse_business_process_properties_from_text(text, uuid, form_refs)?;
         format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
@@ -6164,6 +6197,7 @@ fn extract_metadata_source_xml_from_text_row(
         template_refs,
     );
     if !nested_commands.is_empty()
+        || !document_journal_child_commands.is_empty()
         || !information_register_child_commands.is_empty()
         || !additional_tabular_section_child_objects.is_empty()
         || !owned_form_template_child_objects.is_empty()
@@ -6179,6 +6213,11 @@ fn extract_metadata_source_xml_from_text_row(
             &mut xml_text,
             kind,
             &information_register_child_commands,
+        );
+        insert_metadata_child_command_objects_xml(
+            &mut xml_text,
+            kind,
+            &document_journal_child_commands,
         );
         insert_metadata_child_commands_xml(&mut xml_text, kind, &nested_commands);
         xml = xml_text.into_bytes();
@@ -14018,9 +14057,22 @@ fn parse_settings_storage_properties_from_text(
     })
 }
 
+const DOCUMENT_JOURNAL_STANDARD_ATTRIBUTES: [(&str, &str); 6] = [
+    ("-60003", "Type"),
+    ("-101", "Ref"),
+    ("-100", "Date"),
+    ("-7", "Posted"),
+    ("-4", "DeletionMark"),
+    ("-2", "Number"),
+];
+
 fn parse_document_journal_properties_from_text(
     text: &str,
     header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<DocumentJournalProperties> {
     let root_fields = split_information_register_braced_fields(text)?;
     if root_fields.len() != 7
@@ -14039,7 +14091,13 @@ fn parse_document_journal_properties_from_text(
         return None;
     }
     let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
-    if !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+    let header_occurrences = owner_fields
+        .iter()
+        .filter(|field| metadata_header_field_index(&[**field], &header.uuid) == Some(0))
+        .count();
+    if metadata_header_field_index(&owner_fields, &header.uuid) != Some(3)
+        || header_occurrences != 1
+        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
         || parsed_header.name != header.name
         || parsed_header.synonyms != header.synonyms
         || parsed_header.comment != header.comment
@@ -14068,7 +14126,366 @@ fn parse_document_journal_properties_from_text(
         });
     }
 
-    Some(DocumentJournalProperties { generated_types })
+    let template_uuids =
+        parse_settings_storage_collection(root_fields.get(3)?, METADATA_TEMPLATE_COLLECTION_UUID)?;
+    let form_uuids = parse_settings_storage_collection(
+        root_fields.get(6)?,
+        DOCUMENT_JOURNAL_FORM_COLLECTION_UUID,
+    )?;
+    let child_templates =
+        parse_document_journal_child_templates(&template_uuids, &header.name, template_refs)?;
+    if child_templates
+        != owned_metadata_template_names_in_text_order(
+            text,
+            "DocumentJournals",
+            &header.name,
+            template_refs,
+        )
+    {
+        return None;
+    }
+    let child_forms = parse_document_journal_child_forms(&form_uuids, &header.name, form_refs)?;
+    if child_forms
+        != owned_metadata_form_names_in_text_order(
+            text,
+            "DocumentJournals",
+            &header.name,
+            form_refs,
+        )
+    {
+        return None;
+    }
+
+    let default_form = parse_document_journal_form_ref(
+        owner_fields.get(4)?,
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let auxiliary_form = parse_document_journal_form_ref(
+        owner_fields.get(13)?,
+        &form_uuids,
+        &header.name,
+        form_refs,
+    )?;
+    let registered_documents =
+        parse_document_journal_registered_documents(owner_fields.get(6)?, object_refs)?;
+    let standard_attributes = parse_document_journal_standard_attributes(owner_fields.get(12)?)?;
+    let columns =
+        parse_document_journal_columns(root_fields.get(4)?, object_refs, &registered_documents)?;
+    let child_commands = parse_document_journal_commands(
+        root_fields.get(5)?,
+        text,
+        &header.uuid,
+        type_index,
+        object_refs,
+    )?;
+
+    Some(DocumentJournalProperties {
+        generated_types,
+        default_form,
+        auxiliary_form,
+        use_standard_commands: information_register_bool(owner_fields.get(5)?)?,
+        registered_documents,
+        include_help_in_contents: information_register_bool(owner_fields.get(7)?)?,
+        standard_attributes,
+        list_presentation: parse_information_register_owner_localized_value(owner_fields.get(14)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            owner_fields.get(15)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(owner_fields.get(16)?)?,
+        columns,
+        child_commands,
+    })
+}
+
+fn parse_document_journal_standard_attributes(
+    value: &str,
+) -> Option<Vec<RegisterStandardAttribute>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() == 1 && fields.first()?.trim() == "0" {
+        return Some(Vec::new());
+    }
+    parse_exact_register_standard_attributes(value, &DOCUMENT_JOURNAL_STANDARD_ATTRIBUTES)
+}
+
+fn parse_document_journal_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if !information_register_uuid_is_zero(&uuid)
+        && !form_uuids
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
+    {
+        return None;
+    }
+    parse_exact_register_owned_form_ref(value, "DocumentJournal", owner_name, form_refs)
+}
+
+fn parse_document_journal_child_forms(
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("DocumentJournal.{owner_name}.Form.");
+    let mut seen = BTreeSet::new();
+    let mut forms = Vec::with_capacity(form_uuids.len());
+    for uuid in form_uuids {
+        let reference =
+            parse_exact_register_owned_form_ref(uuid, "DocumentJournal", owner_name, form_refs)??;
+        let name = reference.strip_prefix(&prefix)?;
+        if name.is_empty() || name.contains('.') || !seen.insert(name.to_lowercase()) {
+            return None;
+        }
+        forms.push(name.to_string());
+    }
+    Some(forms)
+}
+
+fn parse_document_journal_child_templates(
+    template_uuids: &[String],
+    owner_name: &str,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("DocumentJournal.{owner_name}.Template.");
+    let mut seen = BTreeSet::new();
+    let mut templates = Vec::with_capacity(template_uuids.len());
+    for uuid in template_uuids {
+        let mut matches = template_refs
+            .iter()
+            .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
+        let (_, template_ref) = matches.next()?;
+        if matches.next().is_some()
+            || template_ref.kind != "Template"
+            || !is_owned_metadata_child_path(
+                &template_ref.relative_path,
+                "DocumentJournals",
+                owner_name,
+                "Templates",
+            )
+        {
+            return None;
+        }
+        let reference = template_source_reference_name(template_ref)?;
+        let name = reference.strip_prefix(&prefix)?;
+        if name.is_empty()
+            || name.contains('.')
+            || source_path_file_stem(&template_ref.relative_path)? != name
+            || !seen.insert(name.to_lowercase())
+        {
+            return None;
+        }
+        templates.push(name.to_string());
+    }
+    Some(templates)
+}
+
+fn parse_document_journal_registered_documents(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut documents = Vec::with_capacity(count);
+    for field in fields.iter().skip(2) {
+        let reference = parse_document_journal_typed_reference(field, object_refs)?;
+        let name = reference.strip_prefix("Document.")?;
+        if name.is_empty() || name.contains('.') || !seen.insert(reference.to_lowercase()) {
+            return None;
+        }
+        documents.push(reference);
+    }
+    Some(documents)
+}
+
+fn parse_document_journal_typed_reference(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let typed = split_information_register_braced_fields(value)?;
+    if typed.len() != 3
+        || parse_information_register_quoted_string(typed.first()?)? != "#"
+        || !information_register_uuid_matches(typed.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
+    {
+        return None;
+    }
+    let target = split_information_register_braced_fields(typed.get(2)?)?;
+    if target.len() != 2 || target.first()?.trim() != "1" {
+        return None;
+    }
+    let uuid = parse_information_register_non_zero_uuid(target.get(1)?)?;
+    resolve_exchange_plan_index_reference(&uuid, object_refs)
+}
+
+fn parse_document_journal_columns(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    registered_documents: &[String],
+) -> Option<Vec<DocumentJournalColumn>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if !information_register_uuid_matches(fields.first()?, DOCUMENT_JOURNAL_COLUMN_COLLECTION_UUID)
+    {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_names = BTreeSet::new();
+    let mut columns = Vec::with_capacity(count);
+    for field in fields.iter().skip(2) {
+        let entry = split_information_register_braced_fields(field)?;
+        if entry.len() != 2 || entry.get(1)?.trim() != "0" {
+            return None;
+        }
+        let payload = split_information_register_braced_fields(entry.first()?)?;
+        if payload.len() != 4 || payload.first()?.trim() != "4" {
+            return None;
+        }
+        let header = parse_information_register_owner_header(payload.get(1)?)?;
+        if header.name.is_empty()
+            || header.name.contains('.')
+            || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+            || !seen_names.insert(header.name.to_lowercase())
+        {
+            return None;
+        }
+        let references = parse_document_journal_column_references(
+            payload.get(2)?,
+            object_refs,
+            registered_documents,
+        )?;
+        columns.push(DocumentJournalColumn {
+            header,
+            indexing: metadata_attribute_indexing_xml(payload.get(3)?.trim())?,
+            references,
+        });
+    }
+    Some(columns)
+}
+
+fn parse_document_journal_column_references(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+    registered_documents: &[String],
+) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut references = Vec::with_capacity(count);
+    for field in fields.iter().skip(2) {
+        let reference = parse_document_journal_typed_reference(field, object_refs)?;
+        let path = reference.strip_prefix("Document.")?;
+        let (document, attribute) = path.split_once(".Attribute.")?;
+        let document_reference = format!("Document.{document}");
+        if document.is_empty()
+            || document.contains('.')
+            || attribute.is_empty()
+            || attribute.contains('.')
+            || !registered_documents
+                .iter()
+                .any(|registered| registered.eq_ignore_ascii_case(&document_reference))
+            || !seen.insert(reference.to_lowercase())
+        {
+            return None;
+        }
+        references.push(reference);
+    }
+    Some(references)
+}
+
+fn parse_document_journal_commands(
+    value: &str,
+    text: &str,
+    owner_uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataChildCommand>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if !information_register_uuid_matches(fields.first()?, DOCUMENT_JOURNAL_COMMAND_COLLECTION_UUID)
+    {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+
+    let mut raw_headers = Vec::with_capacity(count);
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_names = BTreeSet::new();
+    for field in fields.iter().skip(2) {
+        let entry = split_information_register_braced_fields(field)?;
+        if entry.len() != 2 || entry.get(1)?.trim() != "0" {
+            return None;
+        }
+        let wrapper = split_information_register_braced_fields(entry.first()?)?;
+        if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
+            return None;
+        }
+        let body = split_information_register_braced_fields(wrapper.get(1)?)?;
+        if body.len() != 3 || body.first()?.trim() != "1" {
+            return None;
+        }
+        let identity = split_information_register_braced_fields(body.get(1)?)?;
+        if identity.len() != 3
+            || identity.first()?.trim() != "2"
+            || parse_information_register_non_zero_uuid(identity.get(2)?).is_none()
+        {
+            return None;
+        }
+        let properties = split_information_register_braced_fields(body.get(2)?)?;
+        if properties.len() != 13 || properties.first()?.trim() != "9" {
+            return None;
+        }
+        let header = parse_information_register_owner_header(properties.get(9)?)?;
+        let identity_uuid = parse_information_register_non_zero_uuid(identity.get(1)?)?;
+        if !identity_uuid.eq_ignore_ascii_case(&header.uuid)
+            || metadata_header_field_index(&properties, &header.uuid) != Some(9)
+            || header.name.is_empty()
+            || header.name.contains('.')
+            || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+            || !seen_names.insert(header.name.to_lowercase())
+        {
+            return None;
+        }
+        raw_headers.push(header);
+    }
+
+    let commands = nested_child_commands_from_text(text, owner_uuid, type_index, object_refs);
+    if commands.len() != raw_headers.len()
+        || commands.iter().zip(&raw_headers).any(|(command, raw)| {
+            command.properties.is_none()
+                || !command.header.uuid.eq_ignore_ascii_case(&raw.uuid)
+                || command.header.name != raw.name
+                || command.header.synonyms != raw.synonyms
+                || command.header.comment != raw.comment
+        })
+    {
+        return None;
+    }
+    Some(commands)
 }
 
 fn parse_settings_storage_collection(
@@ -14550,6 +14967,7 @@ fn owned_default_list_form_ref(
 fn metadata_source_folder_for_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "Document" => Some("Documents"),
+        "DocumentJournal" => Some("DocumentJournals"),
         "InformationRegister" => Some("InformationRegisters"),
         "AccumulationRegister" => Some("AccumulationRegisters"),
         "AccountingRegister" => Some("AccountingRegisters"),
@@ -20011,7 +20429,108 @@ fn format_document_journal_source_xml(
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
+    if let Some(index) = xml.find("\t\t</Properties>") {
+        let mut properties = String::new();
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "DefaultForm",
+            document_journal.default_form.as_deref(),
+        );
+        push_optional_text_element(
+            &mut properties,
+            "\t\t\t",
+            "AuxiliaryForm",
+            document_journal.auxiliary_form.as_deref(),
+        );
+        properties.push_str(&format!(
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
+            xml_bool(document_journal.use_standard_commands)
+        ));
+        if document_journal.registered_documents.is_empty() {
+            properties.push_str("\t\t\t<RegisteredDocuments/>\r\n");
+        } else {
+            properties.push_str("\t\t\t<RegisteredDocuments>\r\n");
+            for document in &document_journal.registered_documents {
+                properties.push_str(&format!(
+                    "\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                    escape_xml_element_text(document)
+                ));
+            }
+            properties.push_str("\t\t\t</RegisteredDocuments>\r\n");
+        }
+        properties.push_str(&format!(
+            "\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n",
+            xml_bool(document_journal.include_help_in_contents)
+        ));
+        push_register_standard_attributes_xml(
+            &mut properties,
+            &document_journal.standard_attributes,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ListPresentation",
+            &document_journal.list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedListPresentation",
+            &document_journal.extended_list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "Explanation",
+            &document_journal.explanation,
+        );
+        xml.insert_str(index, &properties);
+    }
+    if !document_journal.columns.is_empty() {
+        let mut columns = String::new();
+        for column in &document_journal.columns {
+            push_document_journal_column_xml(&mut columns, column);
+        }
+        insert_metadata_child_objects_xml(&mut xml, "DocumentJournal", &columns);
+    }
     xml
+}
+
+fn push_document_journal_column_xml(xml: &mut String, column: &DocumentJournalColumn) {
+    xml.push_str(&format!(
+        "\t\t\t<Column uuid=\"{}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>{}</Name>\r\n",
+        escape_xml_text(&column.header.uuid),
+        escape_xml_element_text(&column.header.name),
+    ));
+    push_header_synonym_xml(xml, "\t\t\t\t\t", &column.header.synonyms);
+    if column.header.comment.is_empty() {
+        xml.push_str("\t\t\t\t\t<Comment/>\r\n");
+    } else {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<Comment>{}</Comment>\r\n",
+            escape_xml_element_text(&column.header.comment)
+        ));
+    }
+    xml.push_str(&format!(
+        "\t\t\t\t\t<Indexing>{}</Indexing>\r\n",
+        column.indexing
+    ));
+    if column.references.is_empty() {
+        xml.push_str("\t\t\t\t\t<References/>\r\n");
+    } else {
+        xml.push_str("\t\t\t\t\t<References>\r\n");
+        for reference in &column.references {
+            xml.push_str(&format!(
+                "\t\t\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{}</xr:Item>\r\n",
+                escape_xml_element_text(reference)
+            ));
+        }
+        xml.push_str("\t\t\t\t\t</References>\r\n");
+    }
+    xml.push_str("\t\t\t\t</Properties>\r\n\t\t\t</Column>\r\n");
 }
 
 fn format_enum_source_xml(
