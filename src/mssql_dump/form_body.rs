@@ -5269,20 +5269,26 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|options| options.read_only)
         } else if tag == "Table" {
             table_schema.and_then(|schema| schema.read_only(&fields))
-        } else if matches!(
-            tag,
-            "InputField"
-                | "TextDocumentField"
-                | "LabelField"
-                | "GraphicalSchemaField"
-                | "HTMLDocumentField"
-        ) && form_input_field_layout_is_extended(&fields)
-        {
-            fields
-                .get(14 + input_field_top_level_offset)
-                .and_then(|field| parse_form_child_item_show_title(field))
         } else {
-            None
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, _)| schema.read_only(&fields))
+                .or_else(|| {
+                    (matches!(
+                        tag,
+                        "InputField"
+                            | "TextDocumentField"
+                            | "LabelField"
+                            | "GraphicalSchemaField"
+                            | "HTMLDocumentField"
+                    ) && form_input_field_layout_is_extended(&fields))
+                    .then(|| {
+                        fields
+                            .get(14 + input_field_top_level_offset)
+                            .and_then(|field| parse_form_child_item_show_title(field))
+                    })
+                    .flatten()
+                })
         },
         skip_on_input: if tag == "Table" {
             fields
@@ -11822,6 +11828,8 @@ pub(super) fn format_form_child_item_xml(
             item.tag,
             "InputField"
                 | "LabelField"
+                | "CheckBoxField"
+                | "PictureField"
                 | "TextDocumentField"
                 | "GraphicalSchemaField"
                 | "HTMLDocumentField"
