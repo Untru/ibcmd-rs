@@ -1744,6 +1744,7 @@ pub(crate) struct FormCheckBoxFieldSchema {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormFieldSchema {
     top_level_offset: usize,
+    input_field_options: bool,
     title_slot: usize,
     width_option_slot: Option<usize>,
     height_option_slot: Option<usize>,
@@ -1802,6 +1803,7 @@ impl FormFieldSchema {
         }
         Some(Self {
             top_level_offset,
+            input_field_options: item_tag == "InputField",
             title_slot: 9 + top_level_offset,
             width_option_slot: (item_tag == "PictureField").then_some(1),
             height_option_slot: (item_tag == "PictureField").then_some(2),
@@ -1926,6 +1928,26 @@ impl FormFieldSchema {
             "0" => None,
             _ => None,
         }
+    }
+
+    pub(crate) fn input_field_option<'a>(
+        self,
+        options: &'a [&'a str],
+        slot: FormInputFieldExtendedOptionSlot,
+    ) -> Option<&'a str> {
+        self.input_field_options
+            .then(|| options.get(slot.index()).copied())
+            .flatten()
+    }
+
+    pub(crate) fn choice_button_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
+        self.input_field_options.then_some(())?;
+        let picture = FormPictureValueSchema::from_raw_layout(value)?;
+        matches!(
+            picture.kind(),
+            FormPictureValueKind::Empty | FormPictureValueKind::Reference
+        )
+        .then_some(picture)
     }
 
     pub(crate) const fn text_color_option_slot(self) -> Option<usize> {
@@ -3357,6 +3379,7 @@ impl FormTableOrdinaryTailKey {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormInputFieldExtendedOptionSlot {
+    ChoiceList,
     Width,
     Height,
     HorizontalStretch,
@@ -3370,7 +3393,12 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     ClearButton,
     SpinButton,
     OpenButton,
+    MinValue,
+    MaxValue,
+    Mask,
     ListChoiceMode,
+    ChoiceButtonPicture,
+    DropListWidth,
     QuickChoice,
     AutoCellHeight,
     ChoiceFoldersAndItems,
@@ -3378,14 +3406,17 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     AutoChoiceIncomplete,
     AutoMarkIncomplete,
     ChooseType,
+    IncompleteChoiceMode,
     Format,
     EditFormat,
     Font,
     TextEdit,
     TypeLink,
+    EditTextUpdate,
     CreateButton,
     ChoiceButtonRepresentation,
     DropListButton,
+    ChoiceHistoryOnInput,
     AutoMaxWidth,
     MaxWidth,
     AutoMaxHeight,
@@ -3396,6 +3427,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
 impl FormInputFieldExtendedOptionSlot {
     pub(crate) const fn index(self) -> usize {
         match self {
+            Self::ChoiceList => 1,
             Self::Width => 2,
             Self::Height => 3,
             Self::HorizontalStretch => 4,
@@ -3409,7 +3441,12 @@ impl FormInputFieldExtendedOptionSlot {
             Self::ClearButton => 13,
             Self::SpinButton => 14,
             Self::OpenButton => 15,
+            Self::MinValue => 16,
+            Self::MaxValue => 17,
+            Self::Mask => 18,
             Self::ListChoiceMode => 19,
+            Self::ChoiceButtonPicture => 20,
+            Self::DropListWidth => 22,
             Self::QuickChoice => 23,
             Self::ChoiceFoldersAndItems => 24,
             Self::ChoiceParameterLinks => 26,
@@ -3419,12 +3456,15 @@ impl FormInputFieldExtendedOptionSlot {
             Self::EditFormat => 30,
             Self::AutoMarkIncomplete => 31,
             Self::ChooseType => 32,
+            Self::IncompleteChoiceMode => 33,
             Self::Font => 40,
             Self::TextEdit => 41,
             Self::TypeLink => 42,
+            Self::EditTextUpdate => 43,
             Self::CreateButton => 45,
             Self::ChoiceButtonRepresentation => 46,
             Self::DropListButton => 47,
+            Self::ChoiceHistoryOnInput => 48,
             Self::AutoMaxWidth => 49,
             Self::MaxWidth => 50,
             Self::AutoMaxHeight => 52,

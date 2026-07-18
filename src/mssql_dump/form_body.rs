@@ -37,6 +37,7 @@ use crate::form_schema::{
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
+use uuid::Uuid;
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
     ("Ссылка", "Ref"),
@@ -626,12 +627,16 @@ pub(super) struct FormChildItem {
     pub(super) horizontal_stretch: Option<bool>,
     pub(super) vertical_stretch: Option<bool>,
     pub(super) max_value: Option<String>,
+    pub(super) input_min_value: Option<String>,
+    pub(super) input_max_value: Option<String>,
     pub(super) show_percent: Option<bool>,
     pub(super) password_mode: Option<bool>,
     pub(super) multi_line: Option<bool>,
     pub(super) wrap: Option<bool>,
     pub(super) extended_edit: Option<bool>,
+    pub(super) mask: Option<String>,
     pub(super) text_edit: Option<bool>,
+    pub(super) edit_text_update: Option<&'static str>,
     pub(super) auto_cell_height: Option<bool>,
     pub(super) drop_list_button: Option<bool>,
     pub(super) clear_button: Option<bool>,
@@ -646,7 +651,12 @@ pub(super) struct FormChildItem {
     pub(super) choose_type: Option<bool>,
     pub(super) auto_choice_incomplete: Option<bool>,
     pub(super) auto_mark_incomplete: Option<bool>,
+    pub(super) incomplete_choice_mode: Option<&'static str>,
     pub(super) choice_button_representation: Option<&'static str>,
+    pub(super) choice_button_picture_ref: Option<String>,
+    pub(super) choice_button_picture_load_transparent: bool,
+    pub(super) drop_list_width: Option<String>,
+    pub(super) choice_history_on_input: Option<&'static str>,
     pub(super) item_type: Option<&'static str>,
     pub(super) addition_source_item: Option<String>,
     pub(super) picture_ref: Option<String>,
@@ -681,7 +691,9 @@ pub(super) struct FormChoiceListItem {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum FormChoiceListValue {
+    Boolean(bool),
     Decimal(String),
+    Nil,
     String(String),
     DesignTimeRef(String),
 }
@@ -4573,7 +4585,12 @@ fn parse_form_child_item_with_metadata_owners(
         .map(|field| field.trim());
     let field_schema_and_options = fields
         .get(FormFieldSchema::OPTIONS_BASE_SLOT + input_field_top_level_offset)
-        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        .and_then(|field| {
+            let options_text = field.trim();
+            (scan_1c_braced_value(options_text, 0) == Some(options_text.len()))
+                .then(|| split_1c_braced_fields(options_text, 0))
+                .flatten()
+        })
         .and_then(|options| {
             FormFieldSchema::from_raw_layout(
                 wrapper,
@@ -4884,6 +4901,11 @@ fn parse_form_child_item_with_metadata_owners(
         input_field_top_level_offset,
         object_refs,
     );
+    let choice_button_picture = field_schema_and_options
+        .as_ref()
+        .and_then(|(schema, options)| {
+            parse_form_input_field_choice_button_picture(*schema, options, object_refs)
+        });
     let page_picture = page_schema.and_then(|schema| {
         show_title_options
             .as_deref()
@@ -5906,6 +5928,16 @@ fn parse_form_child_item_with_metadata_owners(
         max_value: special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.max_value(options)),
+        input_min_value: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| {
+                parse_form_input_field_decimal_option(*schema, options, InputFieldSlot::MinValue)
+            }),
+        input_max_value: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| {
+                parse_form_input_field_decimal_option(*schema, options, InputFieldSlot::MaxValue)
+            }),
         show_percent: special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.show_percent(options)),
@@ -5929,11 +5961,19 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        mask: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| parse_form_input_field_mask(*schema, options)),
         text_edit: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_text_edit(input_field_extended_options.as_deref())
         } else {
             None
         },
+        edit_text_update: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| {
+                parse_form_input_field_edit_text_update(*schema, options)
+            }),
         auto_cell_height: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.auto_cell_height(&fields))
@@ -6008,6 +6048,11 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        incomplete_choice_mode: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| {
+                parse_form_input_field_incomplete_choice_mode(*schema, options)
+            }),
         choice_button_representation: if tag == "InputField"
             && form_input_field_layout_is_extended(&fields)
         {
@@ -6017,6 +6062,20 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        choice_button_picture_ref: choice_button_picture
+            .as_ref()
+            .and_then(|picture| picture.reference.clone()),
+        choice_button_picture_load_transparent: choice_button_picture
+            .as_ref()
+            .is_some_and(|picture| picture.load_transparent),
+        drop_list_width: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| parse_form_input_field_drop_list_width(*schema, options)),
+        choice_history_on_input: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, options)| {
+                parse_form_input_field_choice_history_on_input(*schema, options)
+            }),
         item_type: if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(4 + button_top_level_offset)
@@ -6120,7 +6179,12 @@ fn parse_form_child_item_with_metadata_owners(
         choice_list: if tag == "RadioButtonField" {
             parse_form_radio_button_choice_list(radio_button_options.as_deref(), object_refs)
         } else if tag == "InputField" {
-            parse_form_input_field_choice_list(input_field_extended_options.as_deref(), object_refs)
+            field_schema_and_options
+                .as_ref()
+                .map(|(schema, options)| {
+                    parse_form_input_field_choice_list(*schema, options, object_refs)
+                })
+                .unwrap_or_default()
         } else {
             Vec::new()
         },
@@ -7420,6 +7484,116 @@ pub(super) fn parse_form_input_field_skip_on_input(field: &str) -> Option<bool> 
     }
 }
 
+fn parse_form_input_field_decimal_option(
+    schema: FormFieldSchema,
+    options: &[&str],
+    slot: InputFieldSlot,
+) -> Option<String> {
+    let raw = schema.input_field_option(options, slot)?.trim();
+    if scan_1c_braced_value(raw, 0) != Some(raw.len()) {
+        return None;
+    }
+    let value = split_1c_braced_fields(raw, 0)?;
+    match value.as_slice() {
+        [kind, decimal]
+            if kind.trim() == r#""N""# && information_register_decimal_is_valid(decimal.trim()) =>
+        {
+            Some(decimal.trim().to_string())
+        }
+        [kind] if kind.trim() == r#""U""# => None,
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_mask(schema: FormFieldSchema, options: &[&str]) -> Option<String> {
+    let mask = parse_exact_1c_quoted_string(
+        schema
+            .input_field_option(options, InputFieldSlot::Mask)?
+            .trim(),
+    )?;
+    (!mask.is_empty()).then_some(mask)
+}
+
+fn parse_form_input_field_choice_button_picture(
+    schema: FormFieldSchema,
+    options: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormOwnedPicture> {
+    let raw = schema
+        .input_field_option(options, InputFieldSlot::ChoiceButtonPicture)?
+        .trim();
+    if scan_1c_braced_value(raw, 0) != Some(raw.len()) {
+        return None;
+    }
+    let value = split_1c_braced_fields(raw, 0)?;
+    let picture = schema.choice_button_picture(&value)?;
+    parse_form_owned_picture(
+        raw,
+        &value,
+        picture.kind(),
+        picture.load_transparent(),
+        "ChoiceButtonPicture",
+        object_refs,
+    )
+}
+
+fn parse_form_input_field_drop_list_width(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<String> {
+    let value = schema
+        .input_field_option(options, InputFieldSlot::DropListWidth)?
+        .trim();
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value != 0)
+        .map(|value| value.to_string())
+}
+
+fn parse_form_input_field_incomplete_choice_mode(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<&'static str> {
+    match schema
+        .input_field_option(options, InputFieldSlot::IncompleteChoiceMode)?
+        .trim()
+    {
+        "0" => None,
+        "1" => Some("OnActivate"),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_edit_text_update(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<&'static str> {
+    match schema
+        .input_field_option(options, InputFieldSlot::EditTextUpdate)?
+        .trim()
+    {
+        "0" => None,
+        "1" => Some("DontUse"),
+        "2" => Some("OnValueChange"),
+        _ => None,
+    }
+}
+
+fn parse_form_input_field_choice_history_on_input(
+    schema: FormFieldSchema,
+    options: &[&str],
+) -> Option<&'static str> {
+    match schema
+        .input_field_option(options, InputFieldSlot::ChoiceHistoryOnInput)?
+        .trim()
+    {
+        "0" => None,
+        "1" => Some("DontUse"),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_form_button_auto_max_width(field: Option<&str>) -> Option<bool> {
     match field.map(|value| value.trim()) {
         Some("0") => Some(false),
@@ -7830,13 +8004,18 @@ pub(super) fn parse_form_radio_button_choice_list(
 }
 
 pub(super) fn parse_form_input_field_choice_list(
-    extended_options: Option<&[&str]>,
+    schema: FormFieldSchema,
+    options: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<FormChoiceListItem> {
-    let Some(field) = extended_options.and_then(|options| options.get(1)) else {
+    let Some(field) = schema.input_field_option(options, InputFieldSlot::ChoiceList) else {
         return Vec::new();
     };
-    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+    let field = field.trim();
+    if scan_1c_braced_value(field, 0) != Some(field.len()) {
+        return Vec::new();
+    }
+    let Some(fields) = split_1c_braced_fields(field, 0) else {
         return Vec::new();
     };
     let Some(item_count) = fields
@@ -7861,7 +8040,7 @@ pub(super) fn parse_form_input_field_choice_list_item(
         return None;
     }
     let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    let value = parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?;
+    let value = parse_form_input_field_choice_list_value(&payload_fields, object_refs)?;
     let presentation = payload_fields
         .get(5)
         .map(|field| parse_form_localized_strings(field))
@@ -7870,6 +8049,43 @@ pub(super) fn parse_form_input_field_choice_list_item(
         presentation,
         value,
     })
+}
+
+fn parse_form_input_field_choice_list_value(
+    payload_fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChoiceListValue> {
+    let raw_value = payload_fields.get(2)?.trim();
+    if scan_1c_braced_value(raw_value, 0) != Some(raw_value.len()) {
+        return None;
+    }
+    let value_fields = split_1c_braced_fields(raw_value, 0)?;
+    match value_fields.as_slice() {
+        [kind, value]
+            if kind.trim() == r#""N""# && information_register_decimal_is_valid(value.trim()) =>
+        {
+            Some(FormChoiceListValue::Decimal(value.trim().to_string()))
+        }
+        [kind, value] if kind.trim() == r#""S""# => {
+            parse_exact_1c_quoted_string(value.trim()).map(FormChoiceListValue::String)
+        }
+        [kind, value] if kind.trim() == r#""B""# => match value.trim() {
+            "0" => Some(FormChoiceListValue::Boolean(false)),
+            "1" => Some(FormChoiceListValue::Boolean(true)),
+            _ => None,
+        },
+        [kind] if kind.trim() == r#""U""# => {
+            let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok()?;
+            let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok()?;
+            if type_id.is_nil() && value_id.is_nil() {
+                Some(FormChoiceListValue::Nil)
+            } else {
+                parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
+                    .map(FormChoiceListValue::DesignTimeRef)
+            }
+        }
+        _ => None,
+    }
 }
 
 pub(super) fn parse_form_radio_button_choice_list_item(
@@ -11304,7 +11520,11 @@ fn format_form_input_field_button_option_xml(
     }
 }
 
-fn format_form_input_field_tail_xml(item: &FormChildItem, indent: usize) -> String {
+fn format_form_input_field_tail_xml(
+    item: &FormChildItem,
+    indent: usize,
+    include_auto_mark_incomplete: bool,
+) -> String {
     if item.tag != "InputField" {
         return String::new();
     }
@@ -11325,7 +11545,8 @@ fn format_form_input_field_tail_xml(item: &FormChildItem, indent: usize) -> Stri
                 ));
             }
             FormInputFieldTailXmlProperty::AutoMarkIncomplete
-                if item.extended_edit_multiple_values == Some(true)
+                if include_auto_mark_incomplete
+                    && item.extended_edit_multiple_values == Some(true)
                     && item.auto_mark_incomplete.is_some() =>
             {
                 let value = item.auto_mark_incomplete == Some(true);
@@ -11338,6 +11559,34 @@ fn format_form_input_field_tail_xml(item: &FormChildItem, indent: usize) -> Stri
         }
     }
     xml
+}
+
+fn format_form_auto_choice_incomplete_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.auto_choice_incomplete != Some(true) {
+        return String::new();
+    }
+    let tab = "\t".repeat(indent);
+    format!("{tab}<AutoChoiceIncomplete>true</AutoChoiceIncomplete>\r\n")
+}
+
+fn format_form_direct_auto_mark_incomplete_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag == "Table"
+        || (item.tag == "InputField" && item.extended_edit_multiple_values == Some(true))
+    {
+        return String::new();
+    }
+    format_form_auto_mark_incomplete_xml(item, indent)
+}
+
+fn format_form_auto_mark_incomplete_xml(item: &FormChildItem, indent: usize) -> String {
+    let Some(value) = item.auto_mark_incomplete else {
+        return String::new();
+    };
+    let tab = "\t".repeat(indent);
+    format!(
+        "{tab}<AutoMarkIncomplete>{}</AutoMarkIncomplete>\r\n",
+        xml_bool(value)
+    )
 }
 
 fn format_form_table_properties_xml(item: &FormChildItem, indent: usize) -> String {
@@ -12246,7 +12495,7 @@ pub(super) fn format_form_child_item_xml(
             if horizontal_stretch { "true" } else { "false" }
         ));
     }
-    if item.tag != "Table"
+    if !matches!(item.tag, "Table" | "InputField")
         && let Some(choice_folders_and_items) = item.choice_folders_and_items
     {
         xml.push_str(&format!(
@@ -12317,31 +12566,28 @@ pub(super) fn format_form_child_item_xml(
             if extended_edit { "true" } else { "false" }
         ));
     }
-    if item.auto_choice_incomplete == Some(true) {
-        xml.push_str(&format!(
-            "{tab}\t<AutoChoiceIncomplete>true</AutoChoiceIncomplete>\r\n"
-        ));
-    }
-    if item.tag != "Table"
-        && !(item.tag == "InputField" && item.extended_edit_multiple_values == Some(true))
-        && let Some(auto_mark_incomplete) = item.auto_mark_incomplete
-    {
-        xml.push_str(&format!(
-            "{tab}\t<AutoMarkIncomplete>{}</AutoMarkIncomplete>\r\n",
-            if auto_mark_incomplete {
-                "true"
-            } else {
-                "false"
-            }
-        ));
+    if item.mask.is_none() {
+        xml.push_str(&format_form_auto_choice_incomplete_xml(item, indent + 1));
+        if item.tag != "InputField" {
+            xml.push_str(&format_form_direct_auto_mark_incomplete_xml(
+                item,
+                indent + 1,
+            ));
+        }
     }
     xml.push_str(&format_form_input_field_button_options_xml(
         item,
         indent + 1,
     ));
-    xml.push_str(&format_form_input_field_tail_xml(item, indent + 1));
-    if !item.choice_list.is_empty() {
-        xml.push_str(&format_form_choice_list_xml(&item.choice_list, indent + 1));
+    if let Some(mask) = &item.mask {
+        xml.push_str(&format!(
+            "{tab}\t<Mask>{}</Mask>\r\n",
+            escape_xml_text(mask)
+        ));
+        xml.push_str(&format_form_input_field_tail_xml(item, indent + 1, false));
+        xml.push_str(&format_form_auto_choice_incomplete_xml(item, indent + 1));
+    } else {
+        xml.push_str(&format_form_input_field_tail_xml(item, indent + 1, false));
     }
     if let Some(quick_choice) = item.quick_choice {
         xml.push_str(&format!(
@@ -12349,11 +12595,77 @@ pub(super) fn format_form_child_item_xml(
             if quick_choice { "true" } else { "false" }
         ));
     }
+    if item.tag == "InputField" {
+        if let Some(choice_folders_and_items) = item.choice_folders_and_items {
+            xml.push_str(&format!(
+                "{tab}\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n",
+                escape_xml_text(choice_folders_and_items)
+            ));
+        }
+        xml.push_str(&format_form_auto_mark_incomplete_xml(item, indent + 1));
+        if !item.format.is_empty() {
+            xml.push_str(&format_form_localized_section(
+                "Format",
+                &item.format,
+                indent + 1,
+            ));
+        }
+        if !item.edit_format.is_empty() {
+            xml.push_str(&format_form_localized_section(
+                "EditFormat",
+                &item.edit_format,
+                indent + 1,
+            ));
+        }
+    }
     if item.choose_type == Some(false) {
         xml.push_str(&format!("{tab}\t<ChooseType>false</ChooseType>\r\n"));
     }
+    if let Some(incomplete_choice_mode) = item.incomplete_choice_mode {
+        xml.push_str(&format!(
+            "{tab}\t<IncompleteChoiceMode>{}</IncompleteChoiceMode>\r\n",
+            escape_xml_text(incomplete_choice_mode)
+        ));
+    }
     if item.text_edit == Some(false) {
         xml.push_str(&format!("{tab}\t<TextEdit>false</TextEdit>\r\n"));
+    }
+    if let Some(edit_text_update) = item.edit_text_update {
+        xml.push_str(&format!(
+            "{tab}\t<EditTextUpdate>{}</EditTextUpdate>\r\n",
+            escape_xml_text(edit_text_update)
+        ));
+    }
+    if let Some(reference) = &item.choice_button_picture_ref {
+        xml.push_str(&format!(
+            "{tab}\t<ChoiceButtonPicture>\r\n\
+{tab}\t\t<xr:Ref>{}</xr:Ref>\r\n\
+{tab}\t\t<xr:LoadTransparent>{}</xr:LoadTransparent>\r\n\
+{tab}\t</ChoiceButtonPicture>\r\n",
+            escape_xml_text(reference),
+            xml_bool(item.choice_button_picture_load_transparent)
+        ));
+    }
+    if let Some(value) = &item.input_min_value {
+        xml.push_str(&format!(
+            "{tab}\t<MinValue xsi:type=\"xs:decimal\">{}</MinValue>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = &item.input_max_value {
+        xml.push_str(&format!(
+            "{tab}\t<MaxValue xsi:type=\"xs:decimal\">{}</MaxValue>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if !item.choice_list.is_empty() {
+        xml.push_str(&format_form_choice_list_xml(&item.choice_list, indent + 1));
+    }
+    if let Some(drop_list_width) = &item.drop_list_width {
+        xml.push_str(&format!(
+            "{tab}\t<DropListWidth>{}</DropListWidth>\r\n",
+            escape_xml_text(drop_list_width)
+        ));
     }
     if item.tag == "InputField" && !item.choice_parameter_links.is_empty() {
         xml.push_str(&format_form_choice_parameter_links_xml(
@@ -12468,14 +12780,14 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "ColumnGroup" && item.show_in_header == Some(true) {
         xml.push_str(&format!("{tab}\t<ShowInHeader>true</ShowInHeader>\r\n"));
     }
-    if item.tag != "UsualGroup" && !item.format.is_empty() {
+    if !matches!(item.tag, "UsualGroup" | "InputField") && !item.format.is_empty() {
         xml.push_str(&format_form_localized_section(
             "Format",
             &item.format,
             indent + 1,
         ));
     }
-    if !item.edit_format.is_empty() {
+    if item.tag != "InputField" && !item.edit_format.is_empty() {
         xml.push_str(&format_form_localized_section(
             "EditFormat",
             &item.edit_format,
@@ -12699,6 +13011,12 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(border_color)
             ));
         }
+    }
+    if let Some(choice_history_on_input) = item.choice_history_on_input {
+        xml.push_str(&format!(
+            "{tab}\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n",
+            escape_xml_text(choice_history_on_input)
+        ));
     }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
@@ -13604,10 +13922,17 @@ pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: 
             ));
         }
         match &item.value {
+            FormChoiceListValue::Boolean(value) => xml.push_str(&format!(
+                "{tab}\t\t\t<Value xsi:type=\"xs:boolean\">{}</Value>\r\n",
+                xml_bool(*value)
+            )),
             FormChoiceListValue::Decimal(value) => xml.push_str(&format!(
                 "{tab}\t\t\t<Value xsi:type=\"xs:decimal\">{}</Value>\r\n",
                 escape_xml_text(value)
             )),
+            FormChoiceListValue::Nil => {
+                xml.push_str(&format!("{tab}\t\t\t<Value xsi:nil=\"true\"/>\r\n"))
+            }
             FormChoiceListValue::String(value) => xml.push_str(&format!(
                 "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",
                 escape_xml_text(value)
