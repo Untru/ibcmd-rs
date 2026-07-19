@@ -18,8 +18,9 @@ use crate::form_schema::{
     FormConditionalTableSchema, FormContainerReadOnlySchema, FormDecorationHeaderSchema,
     FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
     FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
-    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -4766,6 +4767,13 @@ fn parse_form_child_item_with_metadata_owners(
     let direct_discriminator = fields
         .get(5 + input_field_top_level_offset)
         .map(|field| field.trim());
+    let title_location_schema = FormFieldTitleLocationSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        tag,
+        input_field_top_level_offset,
+        direct_discriminator,
+    );
     let shared_container_content_change_schema =
         FormSharedContainerContentChangeSchema::from_raw_layout(
             wrapper,
@@ -5639,29 +5647,9 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         strict_table_schema: table_schema.is_some(),
-        title_location: if matches!(
-            tag,
-            "InputField"
-                | "LabelField"
-                | "CheckBoxField"
-                | "PictureField"
-                | "RadioButtonField"
-                | "TextDocumentField"
-                | "CalendarField"
-                | "GraphicalSchemaField"
-                | "SpreadSheetDocumentField"
-                | "HTMLDocumentField"
-                | "ProgressBarField"
-                | "TrackBarField"
-                | "ChartField"
-        ) && form_input_field_layout_is_extended(&fields)
-        {
-            fields
-                .get(7)
-                .and_then(|field| parse_form_input_field_title_location(field))
-        } else {
-            None
-        },
+        title_location: title_location_schema
+            .and_then(|schema| schema.title_location(&fields))
+            .or_else(|| table_schema.and_then(|schema| schema.title_location(&fields))),
         title_height: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.title_height(&fields))
@@ -6544,14 +6532,8 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
         item.choice_parameter_links.clear();
         item.type_link = None;
         item.title_data_path = None;
-        match item.tag {
-            "LabelField" => {
-                item.width = None;
-            }
-            "InputField" => {
-                item.title_location = None;
-            }
-            _ => {}
+        if item.tag == "LabelField" {
+            item.width = None;
         }
         sanitize_form_conditional_group_descendants(&mut item.child_items);
     }
@@ -7633,16 +7615,6 @@ pub(super) fn parse_form_button_location_in_command_bar(field: &str) -> Option<&
         "1" => Some("InAdditionalSubmenu"),
         "2" => Some("InCommandBar"),
         "3" => Some("InCommandBarAndInAdditionalSubmenu"),
-        _ => None,
-    }
-}
-
-pub(super) fn parse_form_input_field_title_location(field: &str) -> Option<&'static str> {
-    match field.trim() {
-        "0" => Some("None"),
-        "2" => Some("Left"),
-        "3" => Some("Top"),
-        "4" => Some("Right"),
         _ => None,
     }
 }
@@ -12439,6 +12411,15 @@ fn format_form_table_property_xml(
                 )
             })
             .unwrap_or_default(),
+        FormTableXmlProperty::TitleLocation => item
+            .title_location
+            .map(|value| {
+                format!(
+                    "{tab}<TitleLocation>{}</TitleLocation>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::UserVisible => match item.user_visible_common {
             Some(false) => format!(
                 "{tab}<UserVisible>\r\n{tab}\t<xr:Common>false</xr:Common>\r\n{tab}</UserVisible>\r\n"
@@ -12850,8 +12831,11 @@ pub(super) fn format_form_child_item_xml(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            | "FormattedDocumentField"
             | "ColumnGroup"
     );
+    let title_location_follows_title =
+        FormFieldTitleLocationSchema::follows_title_in_xml(item.tag, !item.title.is_empty());
     let usual_group_title_first = matches!(item.tag, "UsualGroup" | "ButtonGroup");
     let mut direct_context_menu_xml = String::new();
     let mut direct_regular_children = Vec::new();
@@ -13019,6 +13003,12 @@ pub(super) fn format_form_child_item_xml(
             indent + 1,
         ));
         xml.push_str(&format_form_title_section(item, indent + 1));
+        if title_location_follows_title && let Some(title_location) = item.title_location {
+            xml.push_str(&format!(
+                "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
+                escape_xml_text(title_location)
+            ));
+        }
     }
     if item.tag != "UsualGroup"
         && let Some(title_font_xml) = &item.title_font_xml
@@ -13054,7 +13044,10 @@ pub(super) fn format_form_child_item_xml(
     if item.tag == "Button" && item.default_item == Some(true) {
         xml.push_str(&format!("{tab}\t<DefaultItem>true</DefaultItem>\r\n"));
     }
-    if let Some(title_location) = item.title_location {
+    if item.tag != "Table"
+        && !title_location_follows_title
+        && let Some(title_location) = item.title_location
+    {
         xml.push_str(&format!(
             "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
             escape_xml_text(title_location)
@@ -13692,6 +13685,12 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format_form_decoration_header_xml(item, indent + 1));
         } else {
             xml.push_str(&format_form_title_section(item, indent + 1));
+            if title_location_follows_title && let Some(title_location) = item.title_location {
+                xml.push_str(&format!(
+                    "{tab}\t<TitleLocation>{}</TitleLocation>\r\n",
+                    escape_xml_text(title_location)
+                ));
+            }
         }
         if item.tag == "LabelDecoration" && item.hiperlink == Some(true) {
             xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));

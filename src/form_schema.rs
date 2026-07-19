@@ -1742,6 +1742,63 @@ pub(crate) struct FormCheckBoxFieldSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormFieldTitleLocationSchema {
+    slot: usize,
+}
+
+impl FormFieldTitleLocationSchema {
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        direct_discriminator: Option<&str>,
+    ) -> Option<Self> {
+        let discriminator = match item_tag {
+            "LabelField" => "1",
+            "InputField" => "2",
+            "CheckBoxField" => "3",
+            "PictureField" => "4",
+            "RadioButtonField" => "5",
+            "SpreadSheetDocumentField" => "6",
+            "TextDocumentField" => "7",
+            "CalendarField" => "8",
+            "ProgressBarField" => "9",
+            "TrackBarField" => "10",
+            "ChartField" => "11",
+            "GraphicalSchemaField" => "14",
+            "HTMLDocumentField" => "15",
+            "FormattedDocumentField" => "17",
+            _ => return None,
+        };
+        if !matches!(wrapper, "37" | "48")
+            || field_count <= 20
+            || top_level_offset > 1
+            || direct_discriminator != Some(discriminator)
+        {
+            return None;
+        }
+        Some(Self {
+            slot: 7 + top_level_offset,
+        })
+    }
+
+    pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(self.slot)?.trim() {
+            "0" => Some("None"),
+            "2" => Some("Left"),
+            "3" => Some("Top"),
+            "4" => Some("Right"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn follows_title_in_xml(item_tag: &str, has_title: bool) -> bool {
+        item_tag == "FormattedDocumentField" && has_title
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormFieldSchema {
     top_level_offset: usize,
     input_field_options: bool,
@@ -3100,6 +3157,7 @@ pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlPropert
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTableXmlProperty {
     Representation,
+    TitleLocation,
     UserVisible,
     Visible,
     CommandBarLocation,
@@ -3155,6 +3213,7 @@ pub(crate) enum FormTableXmlProperty {
 
 pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Representation,
+    FormTableXmlProperty::TitleLocation,
     FormTableXmlProperty::UserVisible,
     FormTableXmlProperty::Visible,
     FormTableXmlProperty::CommandBarLocation,
@@ -3437,6 +3496,14 @@ impl FormTableSchema {
 
     pub(crate) const fn tooltip_slot(self) -> usize {
         10
+    }
+
+    pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(6)?.trim() {
+            "1" => Some("Auto"),
+            "3" => Some("Top"),
+            _ => None,
+        }
     }
 
     pub(crate) const fn data_path_slot(self) -> usize {
