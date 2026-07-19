@@ -5535,6 +5535,8 @@ fn parse_form_child_item_with_metadata_owners(
         },
         group_horizontal_align: if let Some(schema) = command_bar_schema {
             schema.group_horizontal_align(&fields)
+        } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
+            schema.group_horizontal_align(&fields)
         } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
@@ -5728,6 +5730,8 @@ fn parse_form_child_item_with_metadata_owners(
             }),
         group_vertical_align: if let Some(schema) = command_bar_schema {
             schema.group_vertical_align(&fields)
+        } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
+            schema.group_vertical_align(&fields)
         } else if let Some(schema) = button_common_schema {
             schema.group_vertical_align(&fields)
         } else if tag == "PictureDecoration" {
@@ -5756,7 +5760,9 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         cell_hyperlink: None,
-        show_in_footer: None,
+        show_in_footer: check_box_field_layout
+            .as_ref()
+            .and_then(|(schema, _)| schema.show_in_footer(&fields)),
         footer_horizontal_align: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.footer_horizontal_align(&fields)),
@@ -13253,6 +13259,14 @@ pub(super) fn format_form_child_item_xml(
         FormTooltipRepresentationXmlOrder::FieldProperties,
         indent + 1,
     ));
+    if item.tag == "CheckBoxField"
+        && let Some(group_horizontal_align) = item.group_horizontal_align
+    {
+        xml.push_str(&format!(
+            "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+            escape_xml_text(group_horizontal_align)
+        ));
+    }
     if item.tag != "Button"
         && item.tag != "PictureDecoration"
         && item.tag != "CommandBar"

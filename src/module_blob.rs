@@ -1802,7 +1802,7 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
         fields.push(format_spreadsheet_area_bounds_for_moxel(print_area));
     }
     if let Some(print_settings) = &spreadsheet.print_settings {
-        fields.push(format_spreadsheet_print_settings_for_moxel(print_settings));
+        fields.push(format_spreadsheet_print_settings_for_moxel(print_settings)?);
     }
     fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
     fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
@@ -1945,6 +1945,8 @@ struct SpreadsheetDocumentXmlPrintSettings {
     paper_source: Option<usize>,
     page_width: Option<usize>,
     page_height: Option<usize>,
+    duplex_type: Option<String>,
+    page_placement_alternation: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -2498,6 +2500,8 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "paperSource"
             | "pageWidth"
             | "pageHeight"
+            | "duplexType"
+            | "pagePlacementAlternation"
             | "defaultFormatIndex"
             | "vgLevels"
             | "font"
@@ -2856,6 +2860,22 @@ fn apply_spreadsheet_text_value(
             set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
                 settings.page_height = Some(parsed)
             });
+        }
+        "duplexType" if path_ends_with(path, &["printSettings", "duplexType"]) => {
+            if let Some(print_settings) = print_settings
+                && !value.is_empty()
+            {
+                print_settings.duplex_type = Some(text.to_string());
+            }
+        }
+        "pagePlacementAlternation"
+            if path_ends_with(path, &["printSettings", "pagePlacementAlternation"]) =>
+        {
+            if let Some(print_settings) = print_settings
+                && !value.is_empty()
+            {
+                print_settings.page_placement_alternation = Some(text.to_string());
+            }
         }
         "defaultFormatIndex" if path_ends_with(path, &["defaultFormatIndex"]) => {
             if let Ok(parsed) = value.parse::<usize>() {
@@ -3545,8 +3565,8 @@ fn spreadsheet_area_type_code(area_type: &str) -> &'static str {
 
 fn format_spreadsheet_print_settings_for_moxel(
     settings: &SpreadsheetDocumentXmlPrintSettings,
-) -> String {
-    let pairs = [
+) -> Result<String> {
+    let mut pairs = vec![
         (
             0,
             format_spreadsheet_print_number(settings.paper.unwrap_or(0)),
@@ -3628,6 +3648,29 @@ fn format_spreadsheet_print_settings_for_moxel(
             format_spreadsheet_print_number(settings.page_height.unwrap_or(0)),
         ),
     ];
+    match (
+        settings.duplex_type.as_deref(),
+        settings.page_placement_alternation.as_deref(),
+    ) {
+        (None, None) => {}
+        (Some(duplex_type), Some(page_placement_alternation)) => {
+            let duplex_type = spreadsheet_duplex_type_code(duplex_type)
+                .ok_or_else(|| anyhow!("unsupported printSettings duplexType"))?;
+            let page_placement_alternation =
+                spreadsheet_page_placement_alternation_code(page_placement_alternation)
+                    .ok_or_else(|| anyhow!("unsupported printSettings pagePlacementAlternation"))?;
+            pairs.push((19, format_spreadsheet_print_number(duplex_type)));
+            pairs.push((
+                20,
+                format_spreadsheet_print_number(page_placement_alternation),
+            ));
+        }
+        _ => {
+            return Err(anyhow!(
+                "printSettings duplexType and pagePlacementAlternation must be specified together"
+            ));
+        }
+    }
     let mut fields = Vec::with_capacity(pairs.len() * 2 + 2);
     fields.push("0".to_string());
     fields.push(pairs.len().to_string());
@@ -3635,7 +3678,7 @@ fn format_spreadsheet_print_settings_for_moxel(
         fields.push(key.to_string());
         fields.push(value);
     }
-    format!("{{{{{}}}}}", fields.join(","))
+    Ok(format!("{{{{{}}}}}", fields.join(",")))
 }
 
 fn format_spreadsheet_print_number(value: usize) -> String {
@@ -3651,6 +3694,18 @@ fn spreadsheet_page_orientation_code(value: &str) -> usize {
         "Landscape" => 2,
         _ => 1,
     }
+}
+
+fn spreadsheet_duplex_type_code(value: &str) -> Option<usize> {
+    match value {
+        "None" => Some(1),
+        "UsePrinterSettings" => Some(4),
+        _ => None,
+    }
+}
+
+fn spreadsheet_page_placement_alternation_code(value: &str) -> Option<usize> {
+    (value == "Auto").then_some(0)
 }
 
 fn bool_to_usize(value: bool) -> usize {

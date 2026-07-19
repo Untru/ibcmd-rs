@@ -379,6 +379,8 @@ pub(super) struct MoxelPrintSettings {
     pub(super) paper_source: Option<usize>,
     pub(super) page_width: Option<usize>,
     pub(super) page_height: Option<usize>,
+    pub(super) duplex_type: Option<&'static str>,
+    pub(super) page_placement_alternation: Option<&'static str>,
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -2554,14 +2556,14 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if count == 0 || count > 18 || fields.len() != count * 2 + 2 {
+    if count == 0 || count > 20 || fields.len() != count * 2 + 2 {
         return None;
     }
     let mut settings = MoxelPrintSettings::default();
     let mut seen_keys = BTreeSet::new();
     for pair in fields[2..].chunks_exact(2) {
         let key = pair.first()?.trim().parse::<usize>().ok()?;
-        if key > 17 || !seen_keys.insert(key) {
+        if !matches!(key, 0..=17 | 19 | 20) || !seen_keys.insert(key) {
             return None;
         }
         let value = parse_moxel_print_settings_value(pair.get(1)?)?;
@@ -2584,8 +2586,24 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
             15 => settings.paper_source = value.as_usize(),
             16 => settings.page_width = value.as_usize(),
             17 => settings.page_height = value.as_usize(),
+            19 => {
+                settings.duplex_type = Some(moxel_duplex_type(value.as_usize()?)?);
+            }
+            20 => {
+                settings.page_placement_alternation =
+                    Some(moxel_page_placement_alternation(value.as_usize()?)?);
+            }
             _ => return None,
         }
+    }
+    let has_extended_keys = seen_keys.contains(&19) || seen_keys.contains(&20);
+    if has_extended_keys
+        && (count != 20
+            || !seen_keys.contains(&19)
+            || !seen_keys.contains(&20)
+            || !(0..=17).all(|key| seen_keys.contains(&key)))
+    {
+        return None;
     }
     Some(settings)
 }
@@ -4154,6 +4172,18 @@ pub(super) fn moxel_page_orientation(value: usize) -> Option<&'static str> {
     }
 }
 
+pub(super) fn moxel_duplex_type(value: usize) -> Option<&'static str> {
+    match value {
+        1 => Some("None"),
+        4 => Some("UsePrinterSettings"),
+        _ => None,
+    }
+}
+
+pub(super) fn moxel_page_placement_alternation(value: usize) -> Option<&'static str> {
+    (value == 0).then_some("Auto")
+}
+
 pub(super) fn moxel_fill_type(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Text"),
@@ -5458,6 +5488,12 @@ pub(super) fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPr
     push_moxel_format_usize(xml, "paperSource", settings.paper_source);
     push_moxel_format_usize(xml, "pageWidth", settings.page_width);
     push_moxel_format_usize(xml, "pageHeight", settings.page_height);
+    push_moxel_format_text(xml, "duplexType", settings.duplex_type);
+    push_moxel_format_text(
+        xml,
+        "pagePlacementAlternation",
+        settings.page_placement_alternation,
+    );
     xml.push_str("\t</printSettings>\r\n");
 }
 
@@ -5481,6 +5517,8 @@ impl MoxelPrintSettings {
             && self.paper_source.is_none()
             && self.page_width.is_none()
             && self.page_height.is_none()
+            && self.duplex_type.is_none()
+            && self.page_placement_alternation.is_none()
     }
 }
 

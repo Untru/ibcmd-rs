@@ -2315,6 +2315,10 @@ impl FormButtonShapeRepresentationSchema {
 }
 
 impl FormCheckBoxFieldSchema {
+    const SHOW_IN_FOOTER_SLOT: usize = 21;
+    const GROUP_HORIZONTAL_ALIGN_SLOT: usize = 53;
+    const GROUP_VERTICAL_ALIGN_SLOT: usize = 54;
+
     pub(crate) fn top_level_offset_for_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -2356,6 +2360,41 @@ impl FormCheckBoxFieldSchema {
             .map(|field| field.trim())?
         {
             "0" => Some("Left"),
+            "1" => Some("Center"),
+            "3" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) fn show_in_footer(self, fields: &[&str]) -> Option<bool> {
+        match fields
+            .get(Self::SHOW_IN_FOOTER_SLOT + self.top_level_offset)?
+            .trim()
+        {
+            "0" => Some(false),
+            "1" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+        match fields
+            .get(Self::GROUP_HORIZONTAL_ALIGN_SLOT + self.top_level_offset)?
+            .trim()
+        {
+            "0" => Some("Left"),
+            "2" => Some("Right"),
+            "3" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+        match fields
+            .get(Self::GROUP_VERTICAL_ALIGN_SLOT + self.top_level_offset)?
+            .trim()
+        {
+            "0" => Some("Top"),
             "1" => Some("Center"),
             "3" => None,
             _ => None,
