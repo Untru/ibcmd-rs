@@ -299,6 +299,7 @@ pub(super) struct FormAttribute {
     pub(super) name: String,
     pub(super) title: Vec<(String, String)>,
     pub(super) value_types: Vec<ConstantValueType>,
+    pub(super) exact_single_type_uuid: Option<String>,
     pub(super) explicit_empty_type: bool,
     pub(super) columns: Vec<FormAttributeColumn>,
     pub(super) additional_columns: Vec<FormAttributeAdditionalColumns>,
@@ -2007,6 +2008,9 @@ pub(super) fn parse_form_attribute(
     let parsed_value_types = fields
         .get(5)
         .and_then(|field| parse_form_type_pattern(field, type_index));
+    let exact_single_type_uuid = fields
+        .get(5)
+        .and_then(|field| parse_form_exact_single_type_uuid(field));
     let explicit_empty_type = parsed_value_types
         .as_ref()
         .is_some_and(|value_types| value_types.is_empty());
@@ -2054,6 +2058,7 @@ pub(super) fn parse_form_attribute(
         name,
         title,
         value_types,
+        exact_single_type_uuid,
         explicit_empty_type,
         columns,
         additional_columns: Vec::new(),
@@ -2067,6 +2072,18 @@ pub(super) fn parse_form_attribute(
         spreadsheet_document_settings,
         type_description_settings,
     })
+}
+
+fn parse_form_exact_single_type_uuid(field: &str) -> Option<String> {
+    let pattern = split_1c_braced_fields(field.trim(), 0)?;
+    if pattern.len() != 2 || pattern.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    let value_type = split_1c_braced_fields(pattern.get(1)?.trim(), 0)?;
+    if value_type.len() != 2 || value_type.first()?.trim() != r##""#""## {
+        return None;
+    }
+    parse_non_zero_uuid(value_type.get(1)?.trim())
 }
 
 pub(super) fn parse_form_type_description_settings(
@@ -3783,15 +3800,45 @@ struct FormAttributePlatformColumn {
 }
 
 // Platform-owned columns of built-in value types, independent of infobase metadata.
+const FORM_DYNAMIC_LIST_TYPE_UUID: &str = "65abad24-838b-4987-8b35-ed9e2bd4d9c8";
+const FORM_VALUE_LIST_TYPE_UUID: &str = "4772b3b4-f4a3-49c0-a1a5-8cb5961511a3";
+const FORM_VALUE_LIST_PRESENTATION_COLUMN: FormAttributePlatformColumn =
+    FormAttributePlatformColumn {
+        id: "1",
+        name: "Presentation",
+    };
+const FORM_VALUE_LIST_CHECK_COLUMN: FormAttributePlatformColumn = FormAttributePlatformColumn {
+    id: "2",
+    name: "Check",
+};
 const FORM_VALUE_LIST_PICTURE_COLUMN: FormAttributePlatformColumn = FormAttributePlatformColumn {
     id: "3",
     name: "Picture",
 };
+const FORM_DYNAMIC_LIST_DEFAULT_PICTURE_COLUMN: FormAttributePlatformColumn =
+    FormAttributePlatformColumn {
+        id: "10000000",
+        name: "DefaultPicture",
+    };
+const FORM_SETTINGS_COMPOSER_USER_SETTINGS_COLUMN: FormAttributePlatformColumn =
+    FormAttributePlatformColumn {
+        id: "1",
+        name: "UserSettings",
+    };
 const FORM_SETTINGS_COMPOSER_FIELD_PICTURE_COLUMN: FormAttributePlatformColumn =
     FormAttributePlatformColumn {
         id: "10001",
         name: "FieldPicture",
     };
+
+const FORM_VALUE_LIST_DATA_PATH_COLUMNS: &[FormAttributePlatformColumn] = &[
+    FORM_VALUE_LIST_PRESENTATION_COLUMN,
+    FORM_VALUE_LIST_CHECK_COLUMN,
+];
+const FORM_DYNAMIC_LIST_DATA_PATH_COLUMNS: &[FormAttributePlatformColumn] =
+    &[FORM_DYNAMIC_LIST_DEFAULT_PICTURE_COLUMN];
+const FORM_SETTINGS_COMPOSER_DATA_PATH_COLUMNS: &[FormAttributePlatformColumn] =
+    &[FORM_SETTINGS_COMPOSER_USER_SETTINGS_COLUMN];
 
 pub(super) fn extend_form_attribute_special_columns(
     table_column_names_by_id: &mut BTreeMap<String, BTreeMap<String, String>>,
@@ -3848,6 +3895,31 @@ fn form_attribute_is_settings_composer(attribute: &FormAttribute) -> bool {
     })
 }
 
+fn form_attribute_has_exact_single_reference_type(
+    attribute: &FormAttribute,
+    expected_uuid: &str,
+) -> bool {
+    attribute
+        .exact_single_type_uuid
+        .as_deref()
+        .is_some_and(|uuid| uuid.eq_ignore_ascii_case(expected_uuid))
+}
+
+fn form_attribute_is_exact_dynamic_list(attribute: &FormAttribute) -> bool {
+    form_attribute_has_exact_single_reference_type(attribute, FORM_DYNAMIC_LIST_TYPE_UUID)
+}
+
+fn form_attribute_is_exact_value_list(attribute: &FormAttribute) -> bool {
+    form_attribute_has_exact_single_reference_type(attribute, FORM_VALUE_LIST_TYPE_UUID)
+}
+
+fn form_attribute_is_exact_settings_composer(attribute: &FormAttribute) -> bool {
+    form_attribute_has_exact_single_reference_type(
+        attribute,
+        DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID,
+    )
+}
+
 fn parse_exact_form_attribute_binding_id(field: &str) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.len() != 2 || fields.first().map(|field| field.trim()) != Some("1") {
@@ -3892,10 +3964,58 @@ struct FormBoundColumnKey {
     column_key: String,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct FormAttributeColumnKey {
+    attribute_id: String,
+    column_id: String,
+}
+
 #[derive(Default)]
 pub(super) struct FormOwnerScopedBindingIndexes {
+    attribute_columns: BTreeMap<FormAttributeColumnKey, Option<String>>,
     table_paths: BTreeMap<FormBoundTableKey, Option<String>>,
     column_names: BTreeMap<FormBoundColumnKey, Option<String>>,
+}
+
+fn collect_form_attribute_data_path_columns(
+    index: &mut BTreeMap<FormAttributeColumnKey, Option<String>>,
+    attribute: &FormAttribute,
+) {
+    let mut insert = |column_id: &str, column_name: &str| {
+        insert_unambiguous_form_binding(
+            index,
+            FormAttributeColumnKey {
+                attribute_id: attribute.id.clone(),
+                column_id: column_id.to_string(),
+            },
+            column_name.to_string(),
+        );
+    };
+    for column in &attribute.columns {
+        insert(&column.id, &column.name);
+    }
+    let is_dynamic_list = form_attribute_is_exact_dynamic_list(attribute);
+    if is_dynamic_list {
+        if let Some(settings) = &attribute.settings {
+            for field in &settings.fields {
+                if let Some(item_id) = &field.item_id {
+                    insert(item_id, &field.field);
+                }
+            }
+        }
+    }
+    let platform_columns = if is_dynamic_list {
+        FORM_DYNAMIC_LIST_DATA_PATH_COLUMNS
+    } else if form_attribute_is_exact_value_list(attribute) {
+        FORM_VALUE_LIST_DATA_PATH_COLUMNS
+    } else if form_attribute_is_exact_settings_composer(attribute) {
+        FORM_SETTINGS_COMPOSER_DATA_PATH_COLUMNS
+    } else {
+        &[]
+    };
+    for column in platform_columns {
+        insert(column.id, column.name);
+    }
 }
 
 fn insert_unambiguous_form_binding<K: Ord>(
@@ -3979,6 +4099,10 @@ fn collect_form_child_item_indexes_with_object_refs(
             .or_insert(data_path);
     }
     for attribute in attributes {
+        collect_form_attribute_data_path_columns(
+            &mut indexes.owner_scoped_bindings.attribute_columns,
+            attribute,
+        );
         if !attribute.columns.is_empty() {
             indexes
                 .table_column_names_by_id
@@ -10122,6 +10246,14 @@ fn resolve_form_owner_scoped_bound_data_path(
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> FormOwnerScopedDataPath {
+    let attribute_column = resolve_form_attribute_column_data_path(
+        field,
+        attribute_metadata_owners_by_id,
+        owner_scoped_bindings,
+    );
+    if !matches!(attribute_column, FormOwnerScopedDataPath::Unknown) {
+        return attribute_column;
+    }
     if let Some(data_path) = resolve_form_owner_scoped_metadata_data_path(
         field,
         attribute_metadata_owners_by_id,
@@ -10183,6 +10315,53 @@ fn resolve_form_owner_scoped_bound_data_path(
         Some(None) => FormOwnerScopedDataPath::Ambiguous,
         None => FormOwnerScopedDataPath::Unknown,
     }
+}
+
+fn resolve_form_attribute_column_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+) -> FormOwnerScopedDataPath {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let [kind, owner, column] = fields.as_slice() else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    if kind.trim() != "2" {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let Some(owner) = split_1c_braced_fields(owner.trim(), 0) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let Some(column) = split_1c_braced_fields(column.trim(), 0) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    if owner.len() != 1 || column.len() != 1 {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let attribute_id = owner[0].trim();
+    let column_id = column[0].trim();
+    let Ok(column_number) = column_id.parse::<u64>() else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    if column_number == 0 || column_number.to_string() != column_id {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let key = FormAttributeColumnKey {
+        attribute_id: attribute_id.to_string(),
+        column_id: column_id.to_string(),
+    };
+    let Some(column_name) = owner_scoped_bindings.attribute_columns.get(&key) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let Some(column_name) = column_name else {
+        return FormOwnerScopedDataPath::Ambiguous;
+    };
+    let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    FormOwnerScopedDataPath::Resolved(format!("{}.{}", attribute.name, column_name))
 }
 
 fn parse_form_bound_data_path_with_metadata_owner(

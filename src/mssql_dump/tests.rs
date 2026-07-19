@@ -3555,6 +3555,7 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
             value_types: vec![ConstantValueType::Reference {
                 reference: "cfg:DynamicList".to_string(),
             }],
+            exact_single_type_uuid: None,
             explicit_empty_type: false,
             columns: Vec::new(),
             additional_columns: Vec::new(),
@@ -3785,6 +3786,7 @@ fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
         value_types: vec![ConstantValueType::Reference {
             reference: "cfg:DynamicList".to_string(),
         }],
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -3889,6 +3891,7 @@ fn formats_explicit_false_dynamic_data_read() {
         value_types: vec![ConstantValueType::Reference {
             reference: "cfg:DynamicList".to_string(),
         }],
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -4048,6 +4051,7 @@ fn resolves_form_attribute_save_field_bindings_for_main_attribute() {
         name: "Объект".to_string(),
         title: Vec::new(),
         value_types: Vec::new(),
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -4608,6 +4612,7 @@ fn extracts_form_child_items_from_layout_pairs() {
         name: "Список".to_string(),
         title: Vec::new(),
         value_types: Vec::new(),
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -5839,6 +5844,7 @@ fn extracts_wrapper55_table_user_settings_group() {
         name: "Rows".to_string(),
         title: Vec::new(),
         value_types: Vec::new(),
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -6926,6 +6932,7 @@ fn extracts_standard_period_child_data_paths_from_attribute_indexes() {
         value_types: vec![ConstantValueType::Reference {
             reference: "v8:StandardPeriod".to_string(),
         }],
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -7084,6 +7091,7 @@ fn extracts_nested_table_additional_columns_group() {
         name: "Объект".to_string(),
         title: Vec::new(),
         value_types: Vec::new(),
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -7125,6 +7133,7 @@ fn prefers_child_binding_path_for_additional_columns_group() {
         name: "Объект".to_string(),
         title: Vec::new(),
         value_types: Vec::new(),
+        exact_single_type_uuid: None,
         explicit_empty_type: false,
         columns: vec![FormAttributeColumn {
             id: "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
