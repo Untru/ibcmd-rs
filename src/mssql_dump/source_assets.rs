@@ -1374,13 +1374,18 @@ pub(super) fn write_source_asset(
             )?;
         }
         SourceAssetKind::BusinessProcessFlowchart => {
-            let flowchart = parse_business_process_flowchart_blob(bytes, context.object_refs)
-                .with_context(|| {
-                    format!(
-                        "failed to extract business process flowchart from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+            let flowchart = parse_business_process_flowchart_blob(
+                bytes,
+                context.object_refs,
+                context.type_index,
+                context.type_index_collisions,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract business process flowchart from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)

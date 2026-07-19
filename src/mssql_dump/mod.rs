@@ -2327,9 +2327,20 @@ struct FlowchartItemProperties {
     horizontal_align: &'static str,
     explanation: Option<String>,
     task_description: Option<String>,
+    addressing_attributes: Vec<FlowchartAddressingAttribute>,
     subprocess: Option<String>,
     true_port_index: Option<String>,
     false_port_index: Option<String>,
+}
+
+struct FlowchartAddressingAttribute {
+    reference: String,
+    value: FlowchartAddressingAttributeValue,
+}
+
+enum FlowchartAddressingAttributeValue {
+    Nil,
+    DesignTimeRef(String),
 }
 
 struct FlowchartLocation {
@@ -2443,15 +2454,37 @@ fn parse_exchange_plan_content_blob(
 fn parse_business_process_flowchart_blob(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
 ) -> Option<BusinessProcessFlowchart> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
-    parse_business_process_flowchart_text(text.trim_start_matches('\u{feff}'), object_refs)
+    parse_business_process_flowchart_text_with_types(
+        text.trim_start_matches('\u{feff}'),
+        object_refs,
+        type_index,
+        type_index_collisions,
+    )
 }
 
+#[cfg(test)]
 fn parse_business_process_flowchart_text(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+) -> Option<BusinessProcessFlowchart> {
+    parse_business_process_flowchart_text_with_types(
+        text,
+        object_refs,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    )
+}
+
+fn parse_business_process_flowchart_text_with_types(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
 ) -> Option<BusinessProcessFlowchart> {
     let fields = split_1c_braced_fields(text, 0)?;
     if fields.first()?.trim() != "5" {
@@ -2477,6 +2510,8 @@ fn parse_business_process_flowchart_text(
             &body,
             &names,
             object_refs,
+            type_index,
+            type_index_collisions,
             z_order.to_string(),
         )?);
     }
@@ -2489,6 +2524,8 @@ fn parse_flowchart_item(
     body: &str,
     names: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     z_order: String,
 ) -> Option<FlowchartItem> {
     let fields = split_1c_braced_fields(body, 0)?;
@@ -2507,6 +2544,7 @@ fn parse_flowchart_item(
         horizontal_align: "Center",
         explanation: None,
         task_description: None,
+        addressing_attributes: Vec::new(),
         subprocess: None,
         true_port_index: None,
         false_port_index: None,
@@ -2577,6 +2615,13 @@ fn parse_flowchart_item(
             parse_flowchart_shape_graphics(fields.get(2)?, &mut properties)?;
             properties.explanation = fields.get(3).and_then(|value| parse_1c_string(value));
             properties.task_description = fields.get(7).and_then(|value| parse_1c_string(value));
+            properties.addressing_attributes = parse_flowchart_activity_addressing_attributes(
+                &fields,
+                object_refs,
+                type_index,
+                type_index_collisions,
+            )
+            .unwrap_or_default();
             events = parse_flowchart_activity_events(fields.get(5)?)?;
             "Activity"
         }
@@ -2861,6 +2906,85 @@ fn parse_flowchart_activity_events(text: &str) -> Option<Vec<FlowchartEvent>> {
     ])
 }
 
+fn parse_flowchart_activity_addressing_attributes(
+    activity_fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+) -> Option<Vec<FlowchartAddressingAttribute>> {
+    if activity_fields.len() != 8 {
+        return None;
+    }
+    let collection = split_1c_braced_fields(activity_fields.get(6)?, 0)?;
+    if collection.len() != 5 || collection.first()?.trim() != "4" {
+        return None;
+    }
+
+    let mut owner = None::<String>;
+    let mut references = BTreeSet::new();
+    let mut attributes = Vec::with_capacity(4);
+    for raw_member in &collection[1..] {
+        let member = split_1c_braced_fields(raw_member, 0)?;
+        if member.len() != 2 {
+            return None;
+        }
+        let reference_uuid = parse_uuid_field(member.first()?.trim())?;
+        let reference = object_refs.get(&reference_uuid)?.clone();
+        let reference_owner = flowchart_task_addressing_attribute_owner(&reference)?;
+        if owner
+            .as_ref()
+            .is_some_and(|expected| expected != reference_owner)
+        {
+            return None;
+        }
+        owner.get_or_insert_with(|| reference_owner.to_string());
+        if !references.insert(reference.clone()) {
+            return None;
+        }
+        attributes.push(FlowchartAddressingAttribute {
+            reference,
+            value: parse_flowchart_addressing_attribute_value(
+                member.get(1)?,
+                type_index,
+                type_index_collisions,
+            )?,
+        });
+    }
+    if attributes.len() != 4 || references.len() != 4 {
+        return None;
+    }
+    attributes.sort_by(|left, right| left.reference.cmp(&right.reference));
+    Some(attributes)
+}
+
+fn flowchart_task_addressing_attribute_owner(reference: &str) -> Option<&str> {
+    let parts = reference.split('.').collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["Task", owner, "AddressingAttribute", child] if !owner.is_empty() && !child.is_empty() => {
+            Some(owner)
+        }
+        _ => None,
+    }
+}
+
+fn parse_flowchart_addressing_attribute_value(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+) -> Option<FlowchartAddressingAttributeValue> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.len() == 1 && fields.first()?.trim() == r#""U""# {
+        return Some(FlowchartAddressingAttributeValue::Nil);
+    }
+    let owner_type_id = parse_data_processor_empty_ref_fill_owner(value)?;
+    let type_reference =
+        unique_metadata_type_reference(type_index, type_index_collisions, &owner_type_id)?;
+    let owner_reference = metadata_reference_type_owner_reference(type_reference)?;
+    Some(FlowchartAddressingAttributeValue::DesignTimeRef(format!(
+        "{owner_reference}.EmptyRef"
+    )))
+}
+
 fn parse_flowchart_named_events(text: &str, names: &[&'static str]) -> Option<Vec<FlowchartEvent>> {
     let handlers = parse_flowchart_event_handlers(text)?;
     Some(
@@ -3125,6 +3249,7 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
             escape_xml_text(item.properties.explanation.as_deref().unwrap_or(""))
         ));
         xml.push_str("\t\t\t\t<Group>false</Group>\r\n");
+        push_flowchart_addressing_attributes_xml(xml, &item.properties.addressing_attributes);
     }
     if item.tag == "SubBusinessProcess" {
         if let Some(subprocess) = &item.properties.subprocess {
@@ -3153,6 +3278,35 @@ fn push_flowchart_shape_properties_xml(xml: &mut String, item: &FlowchartItem) {
         xml.push_str("\t\t\t\t<FlipMode>0</FlipMode>\r\n");
         xml.push_str("\t\t\t\t<Angle xsi:type=\"xs:decimal\">0</Angle>\r\n");
     }
+}
+
+fn push_flowchart_addressing_attributes_xml(
+    xml: &mut String,
+    attributes: &[FlowchartAddressingAttribute],
+) {
+    if attributes.is_empty() {
+        return;
+    }
+    xml.push_str("\t\t\t\t<AddressingAttributes>\r\n");
+    for attribute in attributes {
+        xml.push_str(&format!(
+            "\t\t\t\t\t<AddressingAttribute ref=\"{}\">\r\n",
+            escape_xml_text(&attribute.reference)
+        ));
+        match &attribute.value {
+            FlowchartAddressingAttributeValue::Nil => {
+                xml.push_str("\t\t\t\t\t\t<Value xsi:nil=\"true\"/>\r\n");
+            }
+            FlowchartAddressingAttributeValue::DesignTimeRef(reference) => {
+                xml.push_str(&format!(
+                    "\t\t\t\t\t\t<Value xmlns:d7p1=\"http://v8.1c.ru/8.3/xcf/readable\" xsi:type=\"d7p1:DesignTimeRef\">{}</Value>\r\n",
+                    escape_xml_text(reference)
+                ));
+            }
+        }
+        xml.push_str("\t\t\t\t\t</AddressingAttribute>\r\n");
+    }
+    xml.push_str("\t\t\t\t</AddressingAttributes>\r\n");
 }
 
 fn push_flowchart_line_properties_xml(xml: &mut String, properties: &FlowchartItemProperties) {
@@ -20763,6 +20917,20 @@ fn parse_common_attribute_properties_from_text(
     let auto_use = use_fields
         .as_deref()
         .and_then(parse_common_attribute_auto_use)
+        .or_else(|| {
+            if fields.len() != 15
+                || use_fields
+                    .as_deref()
+                    .and_then(|content_fields| content_fields.first())
+                    .map(|field| field.trim())
+                    != Some("3")
+            {
+                return None;
+            }
+            fields
+                .get(11)
+                .and_then(|field| common_attribute_auto_use_xml(field.trim()))
+        })
         .unwrap_or("DontUse");
     let content = use_fields
         .as_deref()
@@ -20906,17 +21074,22 @@ fn parse_common_attribute_separation_properties(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<CommonAttributeSeparationProperties> {
+    if fields.len() != 15 || fields.first().map(|field| field.trim()) != Some("5") {
+        return None;
+    }
     Some(CommonAttributeSeparationProperties {
-        data_separation: common_attribute_use_xml(fields.get(3)?.trim())?,
-        separated_data_use: common_attribute_separated_data_use_xml(fields.get(4)?.trim())?,
-        users_separation: common_attribute_reversed_use_xml(fields.get(5)?.trim())?,
-        authentication_separation: common_attribute_reversed_use_xml(fields.get(6)?.trim())?,
+        data_separation: common_attribute_reversed_separation_xml(fields.get(5)?.trim())?,
+        separated_data_use: common_attribute_separated_data_use_xml(fields.get(12)?.trim())?,
+        users_separation: common_attribute_separation_xml(fields.get(13)?.trim())?,
+        authentication_separation: common_attribute_reversed_separation_xml(fields.get(6)?.trim())?,
         data_separation_value: parse_common_attribute_optional_ref(fields.get(7)?, object_refs),
         data_separation_use: parse_common_attribute_optional_ref(fields.get(8)?, object_refs),
         conditional_separation: parse_common_attribute_optional_ref(fields.get(9)?, object_refs),
-        configuration_extensions_separation: common_attribute_use_xml(fields.get(10)?.trim())?,
-        indexing: common_attribute_indexing_xml(fields.get(11)?.trim())?,
-        full_text_search: common_attribute_full_text_search_xml(fields.get(12)?.trim())?,
+        configuration_extensions_separation: common_attribute_separation_xml(
+            fields.get(10)?.trim(),
+        )?,
+        indexing: common_attribute_indexing_xml(fields.get(3)?.trim())?,
+        full_text_search: common_attribute_use_xml(fields.get(4)?.trim())?,
         data_history: common_attribute_use_xml(fields.get(14)?.trim())?,
     })
 }
@@ -20955,9 +21128,17 @@ fn common_attribute_use_xml(value: &str) -> Option<&'static str> {
     }
 }
 
-fn common_attribute_reversed_use_xml(value: &str) -> Option<&'static str> {
+fn common_attribute_separation_xml(value: &str) -> Option<&'static str> {
     match value {
-        "0" => Some("Use"),
+        "0" => Some("DontUse"),
+        "1" => Some("Separate"),
+        _ => None,
+    }
+}
+
+fn common_attribute_reversed_separation_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Separate"),
         "1" => Some("DontUse"),
         _ => None,
     }
@@ -20965,7 +21146,8 @@ fn common_attribute_reversed_use_xml(value: &str) -> Option<&'static str> {
 
 fn common_attribute_separated_data_use_xml(value: &str) -> Option<&'static str> {
     match value {
-        "1" => Some("Independently"),
+        "0" => Some("Independently"),
+        "1" => Some("IndependentlyAndSimultaneously"),
         _ => None,
     }
 }
@@ -20973,14 +21155,6 @@ fn common_attribute_separated_data_use_xml(value: &str) -> Option<&'static str> 
 fn common_attribute_indexing_xml(value: &str) -> Option<&'static str> {
     match value {
         "0" => Some("DontIndex"),
-        _ => None,
-    }
-}
-
-fn common_attribute_full_text_search_xml(value: &str) -> Option<&'static str> {
-    match value {
-        "0" => Some("Use"),
-        "1" => Some("DontUse"),
         _ => None,
     }
 }
