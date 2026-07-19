@@ -3389,34 +3389,26 @@ impl FormTableSchema {
         {
             return None;
         }
-
-        let pair_count = fields
-            .get(Self::COMMAND_SET_PAIR_COUNT_SLOT)?
-            .trim()
-            .parse::<usize>()
-            .ok()?;
-        let expected_field_count = pair_count
-            .checked_mul(2)?
-            .checked_add(Self::BASE_FIELD_COUNT)?;
-        if fields.len() != expected_field_count
-            || !FormTableSlot::ALL.iter().all(|slot| {
-                fields
-                    .get(slot.index())
-                    .is_some_and(|field| slot.accepts(field))
-            })
-            || FormTableFileDragMode::from_raw(Self::reverse_field(
-                fields,
-                Self::FILE_DRAG_MODE_REVERSE_OFFSET,
-            )?)
-            .is_none()
-            || FormTableSkipOnInput::from_raw(Self::reverse_field(
-                fields,
-                Self::SKIP_ON_INPUT_REVERSE_OFFSET,
-            )?)
-            .is_none()
-        {
+        // The suffix combines several paired sections; slot 54 counts only one of them.
+        if (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0 {
             return None;
         }
+
+        if !FormTableSlot::ALL.iter().all(|slot| {
+            fields
+                .get(slot.index())
+                .is_some_and(|field| slot.accepts(field))
+        }) {
+            return None;
+        }
+        FormTableFileDragMode::from_raw(Self::reverse_field(
+            fields,
+            Self::FILE_DRAG_MODE_REVERSE_OFFSET,
+        )?)?;
+        FormTableSkipOnInput::from_raw(Self::reverse_field(
+            fields,
+            Self::SKIP_ON_INPUT_REVERSE_OFFSET,
+        )?)?;
         Some(Self)
     }
 
