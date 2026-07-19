@@ -513,6 +513,12 @@ impl FormExtendedTooltip {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum FormChildItemDataPathProvenance {
+    DirectRawSlot,
+    InferredFallback,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) struct FormChildItem {
     pub(super) tag: &'static str,
@@ -681,6 +687,7 @@ pub(super) struct FormChildItem {
     pub(super) extended_tooltip: Option<FormExtendedTooltip>,
     pub(super) events: Vec<FormBodyEvent>,
     pub(super) data_path: Option<String>,
+    pub(super) data_path_provenance: Option<FormChildItemDataPathProvenance>,
     pub(super) title_data_path: Option<String>,
     pub(super) command_name: Option<String>,
     pub(super) command_source: Option<String>,
@@ -4807,7 +4814,7 @@ fn parse_form_child_item_with_metadata_owners(
     let strict_field_data_path = field_schema_and_options.is_some();
     let owner_scoped_data_path =
         strict_field_data_path || table_schema.is_some() || button_data_path_slot.is_some();
-    let data_path = parse_form_child_item_data_path(
+    let data_path_resolution = parse_form_child_item_data_path(
         tag,
         &fields,
         &name,
@@ -4828,7 +4835,13 @@ fn parse_form_child_item_with_metadata_owners(
         owner_scoped_bindings,
         object_refs,
     );
-    let child_parent_data_path = data_path.as_deref().or(parent_data_path);
+    let data_path_provenance = data_path_resolution
+        .as_ref()
+        .map(|resolved| resolved.provenance);
+    let child_parent_data_path = data_path_resolution
+        .as_ref()
+        .map(|resolved| resolved.data_path.as_str())
+        .or(parent_data_path);
     let user_visible_schema = if tag == "Button" {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,
@@ -5424,7 +5437,9 @@ fn parse_form_child_item_with_metadata_owners(
                         parse_form_table_row_picture_data_path(
                             schema,
                             &fields,
-                            data_path.as_deref(),
+                            data_path_resolution
+                                .as_ref()
+                                .map(|resolved| resolved.data_path.as_str()),
                             table_column_names_by_id,
                             attribute_metadata_owners_by_id,
                             object_refs,
@@ -6488,7 +6503,8 @@ fn parse_form_child_item_with_metadata_owners(
             }
             events
         },
-        data_path,
+        data_path: data_path_resolution.map(|resolved| resolved.data_path),
+        data_path_provenance,
         title_data_path: parse_form_title_data_path(
             tag,
             wrapper,
@@ -6521,7 +6537,10 @@ fn parse_form_child_item_with_metadata_owners(
 
 fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
     for item in items {
-        item.data_path = None;
+        if item.data_path_provenance != Some(FormChildItemDataPathProvenance::DirectRawSlot) {
+            item.data_path = None;
+            item.data_path_provenance = None;
+        }
         item.choice_parameter_links.clear();
         item.type_link = None;
         item.title_data_path = None;
@@ -10059,7 +10078,7 @@ pub(super) fn parse_form_child_item_data_path(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
+) -> Option<ResolvedFormChildItemDataPath> {
     let owner_scoped_metadata = !matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField");
     let parse_direct_bound = |field: &&str| {
         let scoped = if strict_field_data_path {
@@ -10083,51 +10102,57 @@ pub(super) fn parse_form_child_item_data_path(
                 FormOwnerScopedDataPath::Unknown
             }
         });
-        scoped.or_else(|| {
-            let data_path = if owner_scoped_metadata {
-                parse_form_bound_data_path_with_metadata_owner(
-                    field,
-                    name,
-                    attribute_names_by_id,
-                    attribute_metadata_owners_by_id,
-                    table_name_by_id,
-                    table_column_names_by_id,
-                    bound_table_path_by_binding_key,
-                    table_column_names_by_binding_key,
-                    object_refs,
-                )
-            } else {
-                parse_form_bound_data_path(
-                    field,
-                    name,
-                    attribute_names_by_id,
-                    table_name_by_id,
-                    table_column_names_by_id,
-                    bound_table_path_by_binding_key,
-                    table_column_names_by_binding_key,
-                )
-            };
-            FormOwnerScopedDataPath::from_option(data_path)
-        })
+        scoped
+            .or_else(|| {
+                let data_path = if owner_scoped_metadata {
+                    parse_form_bound_data_path_with_metadata_owner(
+                        field,
+                        name,
+                        attribute_names_by_id,
+                        attribute_metadata_owners_by_id,
+                        table_name_by_id,
+                        table_column_names_by_id,
+                        bound_table_path_by_binding_key,
+                        table_column_names_by_binding_key,
+                        object_refs,
+                    )
+                } else {
+                    parse_form_bound_data_path(
+                        field,
+                        name,
+                        attribute_names_by_id,
+                        table_name_by_id,
+                        table_column_names_by_id,
+                        bound_table_path_by_binding_key,
+                        table_column_names_by_binding_key,
+                    )
+                };
+                FormOwnerScopedDataPath::from_option(data_path)
+            })
+            .with_provenance(FormChildItemDataPathProvenance::DirectRawSlot)
     };
     let parse_bound = |field: &&str| {
         parse_direct_bound(field).or_else(|| {
             let data_path = parse_form_bound_data_binding_key(field)
                 .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned());
-            FormOwnerScopedDataPath::from_option(data_path)
+            FormChildItemDataPathResolution::from_option(
+                data_path,
+                FormChildItemDataPathProvenance::InferredFallback,
+            )
         })
     };
-    let resolve_slots = |slots: &[usize], resolver: &dyn Fn(&&str) -> FormOwnerScopedDataPath| {
-        for slot in slots {
-            if let Some(field) = fields.get(*slot) {
-                match resolver(field) {
-                    FormOwnerScopedDataPath::Unknown => {}
-                    resolved => return resolved,
+    let resolve_slots =
+        |slots: &[usize], resolver: &dyn Fn(&&str) -> FormChildItemDataPathResolution| {
+            for slot in slots {
+                if let Some(field) = fields.get(*slot) {
+                    match resolver(field) {
+                        FormChildItemDataPathResolution::Unknown => {}
+                        resolved => return resolved,
+                    }
                 }
             }
-        }
-        FormOwnerScopedDataPath::Unknown
-    };
+            FormChildItemDataPathResolution::Unknown
+        };
     let input_field_offset = matches!(
         tag,
         "InputField"
@@ -10156,9 +10181,12 @@ pub(super) fn parse_form_child_item_data_path(
         "Table" => fields
             .get(11)
             .map(parse_bound)
-            .unwrap_or(FormOwnerScopedDataPath::Unknown)
+            .unwrap_or(FormChildItemDataPathResolution::Unknown)
             .or_else(|| {
-                FormOwnerScopedDataPath::from_option(main_data_path.map(ToOwned::to_owned))
+                FormChildItemDataPathResolution::from_option(
+                    main_data_path.map(ToOwned::to_owned),
+                    FormChildItemDataPathProvenance::InferredFallback,
+                )
             }),
         "InputField"
         | "CheckBoxField"
@@ -10168,10 +10196,13 @@ pub(super) fn parse_form_child_item_data_path(
         | "ProgressBarField"
         | "TrackBarField"
         | "ChartField" => resolve_slots(&input_slots, &parse_bound).or_else(|| {
-            FormOwnerScopedDataPath::from_option(parent_data_path.map(|parent| {
-                let name = normalize_form_data_path_child_name(parent, name);
-                format!("{parent}.{name}")
-            }))
+            FormChildItemDataPathResolution::from_option(
+                parent_data_path.map(|parent| {
+                    let name = normalize_form_data_path_child_name(parent, name);
+                    format!("{parent}.{name}")
+                }),
+                FormChildItemDataPathProvenance::InferredFallback,
+            )
         }),
         "CalendarField"
         | "GraphicalSchemaField"
@@ -10189,11 +10220,53 @@ pub(super) fn parse_form_child_item_data_path(
                     table_column_names_by_id,
                     type_link_data_path_by_table_column,
                 )
+                .with_provenance(FormChildItemDataPathProvenance::DirectRawSlot)
             })
-            .unwrap_or(FormOwnerScopedDataPath::Unknown),
-        _ => FormOwnerScopedDataPath::from_option(table_name_by_id.get(id).cloned()),
+            .unwrap_or(FormChildItemDataPathResolution::Unknown),
+        _ => FormChildItemDataPathResolution::from_option(
+            table_name_by_id.get(id).cloned(),
+            FormChildItemDataPathProvenance::InferredFallback,
+        ),
     };
     data_path.into_option()
+}
+
+pub(super) struct ResolvedFormChildItemDataPath {
+    data_path: String,
+    provenance: FormChildItemDataPathProvenance,
+}
+
+enum FormChildItemDataPathResolution {
+    Unknown,
+    Ambiguous,
+    Resolved(ResolvedFormChildItemDataPath),
+}
+
+impl FormChildItemDataPathResolution {
+    fn from_option(data_path: Option<String>, provenance: FormChildItemDataPathProvenance) -> Self {
+        data_path
+            .map(|data_path| {
+                Self::Resolved(ResolvedFormChildItemDataPath {
+                    data_path,
+                    provenance,
+                })
+            })
+            .unwrap_or(Self::Unknown)
+    }
+
+    fn or_else(self, fallback: impl FnOnce() -> Self) -> Self {
+        match self {
+            Self::Unknown => fallback(),
+            resolved => resolved,
+        }
+    }
+
+    fn into_option(self) -> Option<ResolvedFormChildItemDataPath> {
+        match self {
+            Self::Resolved(resolved) => Some(resolved),
+            Self::Unknown | Self::Ambiguous => None,
+        }
+    }
 }
 
 enum FormOwnerScopedDataPath {
@@ -10214,10 +10287,19 @@ impl FormOwnerScopedDataPath {
         }
     }
 
-    fn into_option(self) -> Option<String> {
+    fn with_provenance(
+        self,
+        provenance: FormChildItemDataPathProvenance,
+    ) -> FormChildItemDataPathResolution {
         match self {
-            Self::Resolved(data_path) => Some(data_path),
-            Self::Unknown | Self::Ambiguous => None,
+            Self::Unknown => FormChildItemDataPathResolution::Unknown,
+            Self::Ambiguous => FormChildItemDataPathResolution::Ambiguous,
+            Self::Resolved(data_path) => {
+                FormChildItemDataPathResolution::Resolved(ResolvedFormChildItemDataPath {
+                    data_path,
+                    provenance,
+                })
+            }
         }
     }
 }
