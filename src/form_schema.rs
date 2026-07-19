@@ -2613,6 +2613,159 @@ impl FormChildItemVisibleSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormCommandBarSchema;
+
+impl FormCommandBarSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 20;
+    const CHILD_COUNT_SLOT: usize = 21;
+    const ENABLED_SLOT: usize = 10;
+    const WIDTH_SLOT: usize = 12;
+    const HEIGHT_SLOT: usize = 13;
+    const HORIZONTAL_STRETCH_SLOT: usize = 14;
+    const GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET: usize = 3;
+    const GROUP_VERTICAL_ALIGN_REVERSE_OFFSET: usize = 2;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        fields: &[&str],
+        options: &[&str],
+        source: &[&str],
+    ) -> Option<Self> {
+        if wrapper != "22"
+            || item_tag != "CommandBar"
+            || direct_discriminator != Some("0")
+            || options.len() != 3
+            || options.first().map(|field| field.trim()) != Some("1")
+            || !matches!(
+                options.get(1).map(|field| field.trim()),
+                Some("0" | "1" | "2" | "3")
+            )
+        {
+            return None;
+        }
+
+        let child_count = fields
+            .get(Self::CHILD_COUNT_SLOT)?
+            .trim()
+            .parse::<usize>()
+            .ok()?;
+        let expected_field_count = child_count.checked_mul(2)?.checked_add(30)?;
+        if fields.len() != expected_field_count
+            || !matches!(
+                fields.get(Self::ENABLED_SLOT).map(|field| field.trim()),
+                Some("0" | "1")
+            )
+            || fields.get(Self::WIDTH_SLOT)?.trim().parse::<u32>().is_err()
+            || fields
+                .get(Self::HEIGHT_SLOT)?
+                .trim()
+                .parse::<u32>()
+                .is_err()
+            || !matches!(
+                fields
+                    .get(Self::HORIZONTAL_STRETCH_SLOT)
+                    .map(|field| field.trim()),
+                Some("0" | "1" | "2")
+            )
+            || !matches!(
+                fields
+                    .get(
+                        fields
+                            .len()
+                            .checked_sub(Self::GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET)?
+                    )
+                    .map(|field| field.trim()),
+                Some("2" | "3")
+            )
+            || !matches!(
+                fields
+                    .get(
+                        fields
+                            .len()
+                            .checked_sub(Self::GROUP_VERTICAL_ALIGN_REVERSE_OFFSET)?
+                    )
+                    .map(|field| field.trim()),
+                Some("1" | "2" | "3")
+            )
+        {
+            return None;
+        }
+
+        let source_is_valid = match source {
+            [source_id] => source_id.trim().parse::<i64>().is_ok(),
+            [source_id, source_type] => {
+                source_id.trim().parse::<i64>().is_ok()
+                    && uuid::Uuid::parse_str(source_type.trim())
+                        .ok()
+                        .is_some_and(|value| !value.is_nil())
+            }
+            _ => false,
+        };
+        source_is_valid.then_some(Self)
+    }
+
+    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(Self::ENABLED_SLOT)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn width(self, fields: &[&str]) -> Option<String> {
+        Self::dimension(fields, Self::WIDTH_SLOT)
+    }
+
+    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+        Self::dimension(fields, Self::HEIGHT_SLOT)
+    }
+
+    pub(crate) fn horizontal_stretch(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(Self::HORIZONTAL_STRETCH_SLOT)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+        match fields
+            .get(
+                fields
+                    .len()
+                    .checked_sub(Self::GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET)?,
+            )?
+            .trim()
+        {
+            "2" => Some("Right"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+        match fields
+            .get(
+                fields
+                    .len()
+                    .checked_sub(Self::GROUP_VERTICAL_ALIGN_REVERSE_OFFSET)?,
+            )?
+            .trim()
+        {
+            "1" => Some("Center"),
+            "2" => Some("Bottom"),
+            _ => None,
+        }
+    }
+
+    fn dimension(fields: &[&str], slot: usize) -> Option<String> {
+        let value = fields.get(slot)?.trim();
+        value
+            .parse::<u32>()
+            .ok()
+            .filter(|value| *value != 0)
+            .map(|_| value.to_owned())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormChildItemShowTitleSchema {
     option_slot: usize,
     back_color_option_slot: Option<usize>,

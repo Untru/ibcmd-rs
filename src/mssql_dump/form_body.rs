@@ -12,7 +12,7 @@ use crate::form_schema::{
     FormButtonShapeRepresentationSchema, FormCheckBoxFieldSchema, FormChildItemAlignment,
     FormChildItemDisplayImportanceSchema, FormChildItemEventCollectionSchema,
     FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema, FormChildItemVisibleSchema,
-    FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
+    FormCommandBarSchema, FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
     FormConditionalTableSchema, FormContainerReadOnlySchema, FormDecorationHeaderSchema,
@@ -4769,6 +4769,29 @@ fn parse_form_child_item_with_metadata_owners(
     let direct_discriminator = fields
         .get(5 + input_field_top_level_offset)
         .map(|field| field.trim());
+    let command_bar_schema = fields
+        .get(FormCommandBarSchema::OPTIONS_SLOT)
+        .and_then(|field| {
+            let options_text = field.trim();
+            (scan_1c_braced_value(options_text, 0) == Some(options_text.len()))
+                .then(|| split_1c_braced_fields(options_text, 0))
+                .flatten()
+        })
+        .and_then(|options| {
+            let source_text = options.get(2)?.trim();
+            if scan_1c_braced_value(source_text, 0) != Some(source_text.len()) {
+                return None;
+            }
+            let source = split_1c_braced_fields(source_text, 0)?;
+            FormCommandBarSchema::from_raw_layout(
+                wrapper,
+                tag,
+                direct_discriminator,
+                &fields,
+                &options,
+                &source,
+            )
+        });
     let title_location_schema = FormFieldTitleLocationSchema::from_raw_layout(
         wrapper,
         fields.len(),
@@ -5510,7 +5533,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        group_horizontal_align: if tag == "UsualGroup" {
+        group_horizontal_align: if let Some(schema) = command_bar_schema {
+            schema.group_horizontal_align(&fields)
+        } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.group_horizontal_align)
@@ -5598,7 +5623,8 @@ fn parse_form_child_item_with_metadata_owners(
         enabled: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.enabled(&fields))
-            .or_else(|| button_common_schema.and_then(|schema| schema.enabled(&fields))),
+            .or_else(|| button_common_schema.and_then(|schema| schema.enabled(&fields)))
+            .or_else(|| command_bar_schema.and_then(|schema| schema.enabled(&fields))),
         read_only: if let Some(schema) = container_read_only_schema {
             schema.read_only(&fields)
         } else if tag == "UsualGroup" {
@@ -5700,7 +5726,9 @@ fn parse_form_child_item_with_metadata_owners(
                     None
                 }
             }),
-        group_vertical_align: if let Some(schema) = button_common_schema {
+        group_vertical_align: if let Some(schema) = command_bar_schema {
+            schema.group_vertical_align(&fields)
+        } else if let Some(schema) = button_common_schema {
             schema.group_vertical_align(&fields)
         } else if tag == "PictureDecoration" {
             picture_decoration_properties
@@ -5914,7 +5942,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        width: if tag == "Table" {
+        width: if let Some(schema) = command_bar_schema {
+            schema.width(&fields)
+        } else if tag == "Table" {
             table_schema.and_then(|schema| schema.width(&fields))
         } else if let Some(properties) = spreadsheet_document_properties.as_ref() {
             properties.width.clone()
@@ -5960,7 +5990,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        height: if tag == "UsualGroup" {
+        height: if let Some(schema) = command_bar_schema {
+            schema.height(&fields)
+        } else if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.height.clone())
@@ -6140,7 +6172,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        horizontal_stretch: if let Some(schema) = button_common_schema {
+        horizontal_stretch: if let Some(schema) = command_bar_schema {
+            schema.horizontal_stretch(&fields)
+        } else if let Some(schema) = button_common_schema {
             schema.horizontal_stretch(&fields)
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_horizontal_stretch(input_field_extended_options.as_deref())
@@ -12875,6 +12909,46 @@ fn format_form_control_colors_xml(item: &FormChildItem, indent: usize) -> String
     xml
 }
 
+fn format_form_command_bar_properties_xml(item: &FormChildItem, indent: usize) -> String {
+    if item.tag != "CommandBar" {
+        return String::new();
+    }
+
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    if let Some(width) = &item.width {
+        xml.push_str(&format!(
+            "{tab}<Width>{}</Width>\r\n",
+            escape_xml_text(width)
+        ));
+    }
+    if let Some(height) = &item.height {
+        xml.push_str(&format!(
+            "{tab}<Height>{}</Height>\r\n",
+            escape_xml_text(height)
+        ));
+    }
+    if let Some(horizontal_stretch) = item.horizontal_stretch {
+        xml.push_str(&format!(
+            "{tab}<HorizontalStretch>{}</HorizontalStretch>\r\n",
+            xml_bool(horizontal_stretch)
+        ));
+    }
+    if let Some(group_horizontal_align) = item.group_horizontal_align {
+        xml.push_str(&format!(
+            "{tab}<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+            escape_xml_text(group_horizontal_align)
+        ));
+    }
+    if let Some(group_vertical_align) = item.group_vertical_align {
+        xml.push_str(&format!(
+            "{tab}<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+            escape_xml_text(group_vertical_align)
+        ));
+    }
+    xml
+}
+
 pub(super) fn format_form_child_item_xml(
     item: &FormChildItem,
     indent: usize,
@@ -13042,7 +13116,7 @@ pub(super) fn format_form_child_item_xml(
     }
     if matches!(
         item.tag,
-        "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "CommandBar"
     ) && item.enabled == Some(false)
     {
         xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
@@ -13181,6 +13255,7 @@ pub(super) fn format_form_child_item_xml(
     ));
     if item.tag != "Button"
         && item.tag != "PictureDecoration"
+        && item.tag != "CommandBar"
         && let Some(group_vertical_align) = item.group_vertical_align
     {
         xml.push_str(&format!(
@@ -13259,6 +13334,7 @@ pub(super) fn format_form_child_item_xml(
         && item.tag != "Button"
         && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
+        && item.tag != "CommandBar"
         && let Some(width) = &item.width
     {
         xml.push_str(&format!(
@@ -13277,6 +13353,7 @@ pub(super) fn format_form_child_item_xml(
         && item.tag != "Button"
         && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
+        && item.tag != "CommandBar"
         && let Some(height) = &item.height
     {
         xml.push_str(&format!(
@@ -13422,6 +13499,7 @@ pub(super) fn format_form_child_item_xml(
         && item.tag != "LabelDecoration"
         && item.tag != "PictureDecoration"
         && item.tag != "Page"
+        && item.tag != "CommandBar"
         && let Some(horizontal_stretch) = item.horizontal_stretch
         && !usual_group_title_first
     {
@@ -13825,6 +13903,14 @@ pub(super) fn format_form_child_item_xml(
             }
         }
     }
+    if item.tag == "CommandBar" {
+        xml.push_str(&format_form_localized_section(
+            "ToolTip",
+            &item.tooltip,
+            indent + 1,
+        ));
+    }
+    xml.push_str(&format_form_command_bar_properties_xml(item, indent + 1));
     if item.tag == "Popup" {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
@@ -13923,6 +14009,7 @@ pub(super) fn format_form_child_item_xml(
             | "ButtonGroup"
             | "Popup"
             | "Page"
+            | "CommandBar"
     ) {
         xml.push_str(&format_form_localized_section(
             "ToolTip",

@@ -408,17 +408,25 @@ pub(super) struct MoxelFormat {
     pub(super) drawing_border: Option<usize>,
     pub(super) by_selected_columns: Option<bool>,
     pub(super) details_use: Option<&'static str>,
+    pub(super) mark_negatives: Option<bool>,
     pub(super) hyper_link: Option<bool>,
+    pub(super) auto_mark_incomplete: Option<bool>,
+    pub(super) mark_incomplete: Option<bool>,
     pub(super) protection: Option<bool>,
     pub(super) hidden: Option<bool>,
     pub(super) indent: Option<usize>,
     pub(super) auto_indent: Option<usize>,
+    pub(super) column_size_change: Option<&'static str>,
     pub(super) mask: Option<&'static str>,
     pub(super) pic_index: Option<usize>,
     pub(super) picture_size_mode: Option<&'static str>,
     pub(super) pic_horizontal_alignment: Option<&'static str>,
     pub(super) pic_vertical_alignment: Option<&'static str>,
     pub(super) text_position: Option<&'static str>,
+    pub(super) left_margin: Option<usize>,
+    pub(super) top_margin: Option<usize>,
+    pub(super) right_margin: Option<usize>,
+    pub(super) bottom_margin: Option<usize>,
 }
 
 impl MoxelFormat {
@@ -448,17 +456,25 @@ impl MoxelFormat {
             && self.drawing_border.is_none()
             && self.by_selected_columns.is_none()
             && self.details_use.is_none()
+            && self.mark_negatives.is_none()
             && self.hyper_link.is_none()
+            && self.auto_mark_incomplete.is_none()
+            && self.mark_incomplete.is_none()
             && self.protection.is_none()
             && self.hidden.is_none()
             && self.indent.is_none()
             && self.auto_indent.is_none()
+            && self.column_size_change.is_none()
             && self.mask.is_none()
             && self.pic_index.is_none()
             && self.picture_size_mode.is_none()
             && self.pic_horizontal_alignment.is_none()
             && self.pic_vertical_alignment.is_none()
             && self.text_position.is_none()
+            && self.left_margin.is_none()
+            && self.top_margin.is_none()
+            && self.right_margin.is_none()
+            && self.bottom_margin.is_none()
     }
 }
 
@@ -1227,6 +1243,14 @@ pub(super) fn is_sparse_moxel_column_set_default_format(format: &MoxelFormat) ->
         && format.text_placement.is_none()
         && format.text_orientation.is_none()
         && format.fill_type.is_none()
+        && format.mark_negatives.is_none()
+        && format.auto_mark_incomplete.is_none()
+        && format.mark_incomplete.is_none()
+        && format.column_size_change.is_none()
+        && format.left_margin.is_none()
+        && format.top_margin.is_none()
+        && format.right_margin.is_none()
+        && format.bottom_margin.is_none()
 }
 
 pub(super) fn resolve_sparse_moxel_column_set_default_format_index(
@@ -3026,6 +3050,14 @@ pub(super) fn is_moxel_width_only_format(format: &MoxelFormat) -> bool {
         && format.text_position.is_none()
         && format.details_use.is_none()
         && format.by_selected_columns.is_none()
+        && format.mark_negatives.is_none()
+        && format.auto_mark_incomplete.is_none()
+        && format.mark_incomplete.is_none()
+        && format.column_size_change.is_none()
+        && format.left_margin.is_none()
+        && format.top_margin.is_none()
+        && format.right_margin.is_none()
+        && format.bottom_margin.is_none()
 }
 
 pub(super) fn split_moxel_formats_for_output(
@@ -3446,6 +3478,7 @@ pub(super) fn parse_moxel_format(
     let fields = split_1c_braced_fields(text, 0)?;
     let flags = fields.first()?.trim().parse::<u64>().ok()?;
     let values = moxel_format_values(flags, &fields)?;
+    let explicit_pattern = values[12].is_some();
     let left_border = parse_moxel_format_usize(&values, 1);
     let top_border = parse_moxel_format_usize(&values, 2);
     let right_border = parse_moxel_format_usize(&values, 3);
@@ -3480,7 +3513,8 @@ pub(super) fn parse_moxel_format(
         pattern: parse_moxel_format_usize(&values, 12).and_then(moxel_format_pattern),
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
-        text_orientation: parse_moxel_format_usize(&values, 13),
+        text_orientation: parse_moxel_format_usize(&values, 13)
+            .or_else(|| parse_moxel_format_usize(&values, 18).and_then(moxel_explicit_zero)),
         fill_type: parse_moxel_format_usize(&values, 15).and_then(moxel_fill_type),
         number_format_present: values[24].is_some(),
         number_format: parse_moxel_format_usize(&values, 24)
@@ -3496,11 +3530,16 @@ pub(super) fn parse_moxel_format(
         by_selected_columns: parse_moxel_format_usize(&values, 20)
             .and_then(moxel_by_selected_columns),
         details_use: parse_moxel_format_usize(&values, 19).and_then(moxel_details_use),
+        mark_negatives: parse_moxel_format_usize(&values, 21).and_then(moxel_false_only),
         hyper_link: parse_moxel_format_usize(&values, 26).and_then(moxel_hyper_link),
+        auto_mark_incomplete: parse_moxel_format_usize(&values, 28).and_then(moxel_bool_value),
+        mark_incomplete: parse_moxel_format_usize(&values, 29).and_then(moxel_false_only),
         protection: parse_moxel_format_usize(&values, 16).and_then(moxel_protection),
         hidden: parse_moxel_format_usize(&values, 17).and_then(moxel_hidden),
         indent: parse_moxel_format_usize(&values, 30),
         auto_indent: parse_moxel_format_usize(&values, 31),
+        column_size_change: parse_moxel_format_usize(&values, 33)
+            .and_then(moxel_column_size_change),
         mask: parse_moxel_format_usize(&values, 34).and_then(moxel_mask),
         pic_index: parse_moxel_format_usize(&values, 35),
         pic_horizontal_alignment: parse_moxel_format_usize(&values, 36)
@@ -3509,8 +3548,13 @@ pub(super) fn parse_moxel_format(
             .and_then(moxel_picture_vertical_alignment),
         picture_size_mode: parse_moxel_format_usize(&values, 38).and_then(moxel_picture_size_mode),
         text_position: parse_moxel_format_usize(&values, 39).and_then(moxel_text_position),
+        left_margin: parse_moxel_format_usize(&values, 42).and_then(moxel_explicit_zero),
+        top_margin: parse_moxel_format_usize(&values, 43).and_then(moxel_explicit_zero),
+        right_margin: parse_moxel_format_usize(&values, 44).and_then(moxel_explicit_zero),
+        bottom_margin: parse_moxel_format_usize(&values, 45).and_then(moxel_explicit_zero),
     };
-    if format.pattern.is_none()
+    if !explicit_pattern
+        && format.pattern.is_none()
         && format.back_color.is_some()
         && format.border_color.is_some()
         && matches!(format.text_placement, Some("Auto"))
@@ -3556,18 +3600,24 @@ pub(super) fn moxel_format_bit_is_supported(bit: usize) -> bool {
             | 9
             | 10
             | 11
+            | 12
             | 13
             | 14
             | 15
             | 16
             | 17
+            | 18
             | 19
             | 20
+            | 21
             | 24
             | 26
+            | 28
+            | 29
             | 30
             | 31
             | 32
+            | 33
             | 34
             | 35
             | 36
@@ -3575,6 +3625,10 @@ pub(super) fn moxel_format_bit_is_supported(bit: usize) -> bool {
             | 38
             | 39
             | 41
+            | 42
+            | 43
+            | 44
+            | 45
     )
 }
 
@@ -4063,8 +4117,31 @@ pub(super) fn moxel_text_placement(value: usize) -> Option<&'static str> {
 
 pub(super) fn moxel_format_pattern(value: usize) -> Option<&'static str> {
     match value {
-        0 => Some("WithoutPattern"),
-        1 => Some("Solid"),
+        255 => Some("WithoutPattern"),
+        _ => None,
+    }
+}
+
+pub(super) fn moxel_explicit_zero(value: usize) -> Option<usize> {
+    (value == 0).then_some(0)
+}
+
+pub(super) fn moxel_false_only(value: usize) -> Option<bool> {
+    (value == 0).then_some(false)
+}
+
+pub(super) fn moxel_bool_value(value: usize) -> Option<bool> {
+    match value {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
+
+pub(super) fn moxel_column_size_change(value: usize) -> Option<&'static str> {
+    match value {
+        0 => Some("Normal"),
+        1 => Some("QuickChange"),
         _ => None,
     }
 }
@@ -5437,37 +5514,53 @@ pub(super) fn push_moxel_format_xml(
     push_moxel_format_text(xml, "backColor", format.back_color.as_deref());
     push_moxel_format_text(xml, "pattern", format.pattern);
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
-    push_moxel_format_usize(xml, "textOrientation", format.text_orientation);
     push_moxel_format_text(xml, "fillType", format.fill_type);
-    push_moxel_localized_values_xml(
-        xml,
-        "format",
-        &format.number_format,
-        format.number_format_present,
-    );
-    push_moxel_localized_values_xml(
-        xml,
-        "editFormat",
-        &format.edit_format,
-        format.edit_format_present,
-    );
-    if let Some(by_selected_columns) = format.by_selected_columns {
-        xml.push_str(&format!(
-            "\t\t<bySelectedColumns>{by_selected_columns}</bySelectedColumns>\r\n"
-        ));
-    }
-    push_moxel_format_text(xml, "detailsUse", format.details_use);
-    if let Some(hyper_link) = format.hyper_link {
-        xml.push_str(&format!("\t\t<hyperLink>{hyper_link}</hyperLink>\r\n"));
-    }
     if let Some(protection) = format.protection {
         xml.push_str(&format!("\t\t<protection>{protection}</protection>\r\n"));
     }
     if let Some(hidden) = format.hidden {
         xml.push_str(&format!("\t\t<hidden>{hidden}</hidden>\r\n"));
     }
+    push_moxel_format_usize(xml, "textOrientation", format.text_orientation);
+    push_moxel_format_text(xml, "detailsUse", format.details_use);
+    if let Some(by_selected_columns) = format.by_selected_columns {
+        xml.push_str(&format!(
+            "\t\t<bySelectedColumns>{by_selected_columns}</bySelectedColumns>\r\n"
+        ));
+    }
+    if let Some(mark_negatives) = format.mark_negatives {
+        xml.push_str(&format!(
+            "\t\t<markNegatives>{mark_negatives}</markNegatives>\r\n"
+        ));
+    }
+    push_moxel_localized_values_xml(
+        xml,
+        "format",
+        &format.number_format,
+        format.number_format_present,
+    );
+    if let Some(hyper_link) = format.hyper_link {
+        xml.push_str(&format!("\t\t<hyperLink>{hyper_link}</hyperLink>\r\n"));
+    }
+    if let Some(auto_mark_incomplete) = format.auto_mark_incomplete {
+        xml.push_str(&format!(
+            "\t\t<autoMarkIncomplete>{auto_mark_incomplete}</autoMarkIncomplete>\r\n"
+        ));
+    }
+    if let Some(mark_incomplete) = format.mark_incomplete {
+        xml.push_str(&format!(
+            "\t\t<markIncomplete>{mark_incomplete}</markIncomplete>\r\n"
+        ));
+    }
     push_moxel_format_usize(xml, "indent", format.indent);
     push_moxel_format_usize(xml, "autoIndent", format.auto_indent);
+    push_moxel_localized_values_xml(
+        xml,
+        "editFormat",
+        &format.edit_format,
+        format.edit_format_present,
+    );
+    push_moxel_format_text(xml, "columnSizeChange", format.column_size_change);
     if let Some(mask) = format.mask {
         if mask.is_empty() {
             xml.push_str("\t\t<mask/>\r\n");
@@ -5487,6 +5580,10 @@ pub(super) fn push_moxel_format_xml(
     );
     push_moxel_format_text(xml, "picVerticalAlignment", format.pic_vertical_alignment);
     push_moxel_format_text(xml, "textPosition", format.text_position);
+    push_moxel_format_usize(xml, "leftMargin", format.left_margin);
+    push_moxel_format_usize(xml, "topMargin", format.top_margin);
+    push_moxel_format_usize(xml, "rightMargin", format.right_margin);
+    push_moxel_format_usize(xml, "bottomMargin", format.bottom_margin);
     xml.push_str("\t</format>\r\n");
 }
 
