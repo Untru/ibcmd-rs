@@ -5544,14 +5544,14 @@ pub(super) fn push_moxel_format_xml(
         push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
     }
     push_moxel_format_i32(xml, "height", format.height);
-    push_moxel_format_text(xml, "borderColor", format.border_color.as_deref());
+    push_moxel_format_color(xml, "borderColor", format.border_color.as_deref());
     push_moxel_format_usize(xml, "width", format.width);
     push_moxel_format_usize(xml, "widthWeightFactor", format.width_weight_factor);
     push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     push_moxel_format_text(xml, "horizontalAlignment", format.horizontal_alignment);
     push_moxel_format_text(xml, "verticalAlignment", format.vertical_alignment);
-    push_moxel_format_text(xml, "textColor", format.text_color.as_deref());
-    push_moxel_format_text(xml, "backColor", format.back_color.as_deref());
+    push_moxel_format_color(xml, "textColor", format.text_color.as_deref());
+    push_moxel_format_color(xml, "backColor", format.back_color.as_deref());
     push_moxel_format_text(xml, "pattern", format.pattern);
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_text(xml, "fillType", format.fill_type);
@@ -5734,6 +5734,17 @@ pub(super) fn push_moxel_format_text(xml: &mut String, tag: &str, value: Option<
             "\t\t<{tag}>{}</{tag}>\r\n",
             escape_xml_element_text(value)
         ));
+    }
+}
+
+pub(super) fn push_moxel_format_color(xml: &mut String, tag: &str, value: Option<&str>) {
+    if let Some(value) = value.filter(|value| value.starts_with("d3p1:")) {
+        xml.push_str(&format!(
+            "\t\t<{tag} xmlns:d3p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\">{}</{tag}>\r\n",
+            escape_xml_element_text(value)
+        ));
+    } else {
+        push_moxel_format_text(xml, tag, value);
     }
 }
 
