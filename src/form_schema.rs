@@ -1223,6 +1223,134 @@ pub(crate) const FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER:
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormControlBorderStyle {
+    WithoutBorder,
+    Single,
+    Underline,
+    Overline,
+}
+
+impl FormControlBorderStyle {
+    pub(crate) fn from_raw_code(value: &str) -> Option<Self> {
+        match value.trim() {
+            "0" => Some(Self::WithoutBorder),
+            "1" => Some(Self::Single),
+            "4" => Some(Self::Underline),
+            "7" => Some(Self::Overline),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::WithoutBorder => "0",
+            Self::Single => "1",
+            Self::Underline => "4",
+            Self::Overline => "7",
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "WithoutBorder" => Some(Self::WithoutBorder),
+            "Single" => Some(Self::Single),
+            "Underline" => Some(Self::Underline),
+            "Overline" => Some(Self::Overline),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::WithoutBorder => "WithoutBorder",
+            Self::Single => "Single",
+            Self::Underline => "Underline",
+            Self::Overline => "Overline",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormControlBorderSchema {
+    border_option_slot: usize,
+    default_style: FormControlBorderStyle,
+}
+
+impl FormControlBorderSchema {
+    pub(crate) fn options_slot(item_tag: &str, top_level_offset: usize) -> Option<usize> {
+        match item_tag {
+            "LabelField" | "PictureField" if top_level_offset <= 1 => {
+                Some(FormFieldSchema::OPTIONS_BASE_SLOT + top_level_offset)
+            }
+            "LabelDecoration" | "PictureDecoration" if top_level_offset == 0 => Some(18),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        top_level_offset: usize,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        let (border_option_slot, default_style) = match (
+            wrapper,
+            field_count,
+            item_tag,
+            top_level_offset,
+            direct_discriminator,
+            options.len(),
+            options.first().map(|field| field.trim()),
+        ) {
+            ("37", 59, "LabelField", 0, Some("1"), 20, Some("11"))
+            | ("37", 60, "LabelField", 1, Some("1"), 20, Some("11")) => {
+                (14, FormControlBorderStyle::WithoutBorder)
+            }
+            ("37", 59, "PictureField", 0, Some("4"), 24, Some("10"))
+            | ("37", 60, "PictureField", 1, Some("4"), 24, Some("10")) => {
+                (13, FormControlBorderStyle::Single)
+            }
+            ("12", 36, "LabelDecoration", 0, Some("0"), 9, Some("5")) => {
+                (8, FormControlBorderStyle::WithoutBorder)
+            }
+            ("12", 36, "PictureDecoration", 0, Some("1"), 13, Some("4")) => {
+                (7, FormControlBorderStyle::WithoutBorder)
+            }
+            _ => return None,
+        };
+        Some(Self {
+            border_option_slot,
+            default_style,
+        })
+    }
+
+    pub(crate) const fn border_option_slot(self) -> usize {
+        self.border_option_slot
+    }
+
+    pub(crate) fn tuple_style(self, tuple: &[&str]) -> Option<FormControlBorderStyle> {
+        if tuple.len() != 7
+            || tuple.first().map(|field| field.trim()) != Some("3")
+            || tuple.get(1).map(|field| field.trim()) != Some("0")
+            || tuple.get(2).map(|field| field.trim()) != Some("{0}")
+            || tuple.get(4).map(|field| field.trim()) != Some("1")
+            || tuple.get(5).map(|field| field.trim()) != Some("0")
+            || uuid::Uuid::parse_str(tuple.get(6)?.trim()).is_err()
+        {
+            return None;
+        }
+        FormControlBorderStyle::from_raw_code(tuple.get(3)?)
+    }
+
+    pub(crate) fn non_default_tuple_style(self, tuple: &[&str]) -> Option<FormControlBorderStyle> {
+        self.tuple_style(tuple)
+            .filter(|style| *style != self.default_style)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormPictureDecorationSchema;
 
 #[derive(Debug, Clone, Eq, PartialEq)]

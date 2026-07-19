@@ -3681,11 +3681,15 @@ pub(super) fn remap_moxel_format_style_ref_index(
     style_refs: &[Option<String>],
     raw_index: usize,
 ) -> usize {
-    if raw_index > 0
-        && style_refs.len() >= 5
-        && style_refs[0].as_deref() == Some("moxel:f527:1:1")
+    if raw_index == 0 || style_refs.len() < 5 {
+        return raw_index;
+    }
+    let has_embedded_prefix = (style_refs[0].as_deref() == Some("moxel:f527:1:1")
         && style_refs[1].as_deref() == Some("moxel:f527:1:2")
-        && style_refs[2].as_deref() == Some("moxel:f527:1:3")
+        && style_refs[2].as_deref() == Some("moxel:f527:1:3"))
+        || (style_refs[0].as_deref() == Some("moxel:f527:1:1")
+            && style_refs[1].as_deref() == Some("moxel:f527:0:1"));
+    if has_embedded_prefix
         && style_refs[3].as_deref() == Some("style:FormBackColor")
         && style_refs[4].as_deref() == Some("style:FormTextColor")
     {
@@ -4081,6 +4085,7 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         134 => "SteelBlue",
         140 => "Violet",
         141 => "VioletRed",
+        143 => "White",
         144 => "WhiteSmoke",
         145 => "Yellow",
         _ => return None,

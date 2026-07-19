@@ -15,12 +15,12 @@ use crate::form_schema::{
     FormCommandBarSchema, FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
     FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
     FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
-    FormConditionalTableSchema, FormContainerReadOnlySchema, FormDecorationHeaderSchema,
-    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
-    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
-    FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
-    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormConditionalTableSchema, FormContainerReadOnlySchema, FormControlBorderSchema,
+    FormControlBorderStyle, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
+    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
+    FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTitleLocationSchema,
+    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -618,6 +618,7 @@ pub(super) struct FormChildItem {
     pub(super) text_color: Option<String>,
     pub(super) back_color: Option<String>,
     pub(super) border_color: Option<String>,
+    pub(super) control_border: Option<FormControlBorderStyle>,
     pub(super) title_text_color: Option<String>,
     pub(super) mark_required_complete: Option<bool>,
     pub(super) auto_edit_mode: Option<bool>,
@@ -4670,6 +4671,35 @@ pub(super) fn parse_form_child_item_with_context(
     )
 }
 
+fn parse_form_control_border(
+    wrapper: &str,
+    fields: &[&str],
+    item_tag: &str,
+    top_level_offset: usize,
+    direct_discriminator: Option<&str>,
+) -> Option<FormControlBorderStyle> {
+    let options_slot = FormControlBorderSchema::options_slot(item_tag, top_level_offset)?;
+    let options_text = fields.get(options_slot)?.trim();
+    if scan_1c_braced_value(options_text, 0) != Some(options_text.len()) {
+        return None;
+    }
+    let options = split_1c_braced_fields(options_text, 0)?;
+    let schema = FormControlBorderSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        item_tag,
+        top_level_offset,
+        direct_discriminator,
+        &options,
+    )?;
+    let tuple_text = options.get(schema.border_option_slot())?.trim();
+    if scan_1c_braced_value(tuple_text, 0) != Some(tuple_text.len()) {
+        return None;
+    }
+    let tuple = split_1c_braced_fields(tuple_text, 0)?;
+    schema.non_default_tuple_style(&tuple)
+}
+
 fn parse_form_child_item_with_metadata_owners(
     field: &str,
     main_data_path: Option<&str>,
@@ -4769,6 +4799,13 @@ fn parse_form_child_item_with_metadata_owners(
     let direct_discriminator = fields
         .get(5 + input_field_top_level_offset)
         .map(|field| field.trim());
+    let control_border = parse_form_control_border(
+        wrapper,
+        fields,
+        tag,
+        input_field_top_level_offset,
+        direct_discriminator,
+    );
     let command_bar_schema = fields
         .get(FormCommandBarSchema::OPTIONS_SLOT)
         .and_then(|field| {
@@ -5871,6 +5908,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        control_border,
         title_text_color: (tag == "UsualGroup")
             .then(|| parse_form_usual_group_title_text_color(&fields, object_refs))
             .flatten(),
@@ -12915,6 +12953,19 @@ fn format_form_control_colors_xml(item: &FormChildItem, indent: usize) -> String
     xml
 }
 
+fn format_form_control_border_xml(item: &FormChildItem, indent: usize) -> String {
+    let Some(style) = item.control_border else {
+        return String::new();
+    };
+    let tab = "\t".repeat(indent);
+    format!(
+        "{tab}<Border width=\"1\">\r\n\
+{tab}\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{}</v8ui:style>\r\n\
+{tab}</Border>\r\n",
+        style.xml_value()
+    )
+}
+
 fn format_form_command_bar_properties_xml(item: &FormChildItem, indent: usize) -> String {
     if item.tag != "CommandBar" {
         return String::new();
@@ -13576,6 +13627,7 @@ pub(super) fn format_form_child_item_xml(
                 xml_bool(item.picture_load_transparent)
             ));
         }
+        xml.push_str(&format_form_control_border_xml(item, indent + 1));
     }
     if let Some(password_mode) = item.password_mode {
         xml.push_str(&format!(
@@ -13909,6 +13961,7 @@ pub(super) fn format_form_child_item_xml(
                     escape_xml_text(file_name)
                 ));
             }
+            xml.push_str(&format_form_control_border_xml(item, indent + 1));
             if let Some(file_drag_mode) = item.file_drag_mode {
                 xml.push_str(&format!(
                     "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
@@ -14049,6 +14102,9 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<FileDragMode>{}</FileDragMode>\r\n",
             escape_xml_text(file_drag_mode)
         ));
+    }
+    if matches!(item.tag, "LabelField" | "LabelDecoration") {
+        xml.push_str(&format_form_control_border_xml(item, indent + 1));
     }
     if matches!(
         item.tag,

@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
+    FormControlBorderSchema, FormControlBorderStyle,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormTablePropertyBagKey as TableBagKey,
 };
 use crate::v8_container::{
@@ -293,6 +294,8 @@ struct FormXmlChildItem {
     max_height: Option<String>,
     horizontal_stretch: Option<bool>,
     vertical_stretch: Option<bool>,
+    control_border_seen: bool,
+    control_border: Option<FormXmlControlBorder>,
     password_mode: Option<bool>,
     multi_line: Option<bool>,
     wrap: Option<bool>,
@@ -322,6 +325,13 @@ struct FormXmlChildItem {
     data_path: Option<String>,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlControlBorder {
+    style: Option<FormControlBorderStyle>,
+    style_seen: bool,
+    valid: bool,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -4152,6 +4162,7 @@ fn spreadsheet_web_color_code(value: &str) -> Option<u32> {
         "d3p1:LightYellow" => Some(79),
         "d3p1:PaleGoldenrod" => Some(108),
         "d3p1:RoyalBlue" => Some(121),
+        "d3p1:White" => Some(143),
         _ => None,
     }
 }
@@ -5122,6 +5133,32 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                } else if local == "Border"
+                    && path_ends_with_for_current_border_owner(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    if item.control_border_seen {
+                        item.control_border = None;
+                    } else {
+                        item.control_border_seen = true;
+                        item.control_border = Some(parse_form_xml_control_border(&event)?);
+                    }
+                } else if path_ends_with_for_child_control_border(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(border) = item.control_border.as_mut()
+                {
+                    if local == "style" && !border.style_seen {
+                        border.style_seen = true;
+                        border.valid &= form_xml_control_border_style_attrs_are_valid(&event)?;
+                        text_value.clear();
+                    } else {
+                        border.valid = false;
+                    }
+                } else if path_ends_with_for_child_control_border_style(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(border) = item.control_border.as_mut()
+                {
+                    border.valid = false;
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
@@ -5198,6 +5235,22 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                } else if local == "Border"
+                    && path_ends_with_for_current_border_owner(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.control_border_seen = true;
+                    item.control_border = None;
+                } else if path_ends_with_for_child_control_border(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(border) = item.control_border.as_mut()
+                {
+                    border.valid = false;
+                } else if path_ends_with_for_child_control_border_style(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(border) = item.control_border.as_mut()
+                {
+                    border.valid = false;
                 } else if local == "RowFilter"
                     && path_ends_with_for_child_row_filter(&path, &current_child_items)
                     && xml_event_is_nil(&event)?
@@ -5235,6 +5288,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
             }
             Ok(Event::Text(text)) => {
+                if path_ends_with_for_child_control_border(&path, &current_child_items)
+                    && !text.xml_content()?.trim().is_empty()
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(border) = item.control_border.as_mut()
+                {
+                    border.valid = false;
+                }
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
                     || path_ends_with(&path, &["Form", "SaveWindowSettings"])
@@ -5516,6 +5576,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_control_border_style(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_child_behavior(&path, &current_child_items)
@@ -5728,6 +5789,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
             }
             Ok(Event::CData(text)) => {
+                if path_ends_with_for_child_control_border(&path, &current_child_items)
+                    && !text.xml_content()?.trim().is_empty()
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(border) = item.control_border.as_mut()
+                {
+                    border.valid = false;
+                }
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
                     || path_ends_with(&path, &["Form", "SaveWindowSettings"])
@@ -6007,6 +6075,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
                     || path_ends_with_for_child_event(&path, &current_child_items)
+                    || path_ends_with_for_child_control_border_style(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
                     || path_ends_with_for_child_group(&path, &current_child_items)
                     || path_ends_with_for_usual_group_title_text_color(&path, &current_child_items)
@@ -8005,6 +8074,31 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             item.data_path = Some(text_value.trim().to_string());
                         }
                     }
+                    "style"
+                        if path_ends_with_for_child_control_border_style(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut()
+                            && let Some(border) = item.control_border.as_mut()
+                        {
+                            border.style =
+                                FormControlBorderStyle::from_xml_value(text_value.trim());
+                            border.valid &= border.style.is_some();
+                        }
+                    }
+                    "Border"
+                        if path_ends_with_for_child_control_border(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut()
+                            && !item.control_border.as_ref().is_some_and(|border| {
+                                border.valid && border.style_seen && border.style.is_some()
+                            })
+                        {
+                            item.control_border = None;
+                        }
+                    }
                     _ if current_child_items
                         .last()
                         .is_some_and(|item| local == item.tag)
@@ -8109,6 +8203,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Behavior"
                         | "Representation"
                         | "TitleTextColor"
+                        | "style"
                         | "lang"
                         | "content"
                 ) {
@@ -8285,6 +8380,8 @@ fn parse_form_child_item_xml(
         max_height: None,
         horizontal_stretch: None,
         vertical_stretch: None,
+        control_border_seen: false,
+        control_border: None,
         password_mode: None,
         multi_line: None,
         wrap: None,
@@ -8315,6 +8412,42 @@ fn parse_form_child_item_xml(
         child_items_present: false,
         child_items: Vec::new(),
     }))
+}
+
+fn parse_form_xml_control_border(event: &BytesStart<'_>) -> Result<FormXmlControlBorder> {
+    let mut width = None::<String>;
+    let mut gap = None::<String>;
+    let mut valid = true;
+    for attr in event.attributes() {
+        let attr = attr?;
+        let value = attr.unescape_value()?.into_owned();
+        match attr.key.as_ref() {
+            b"width" if width.is_none() => width = Some(value),
+            b"gap" if gap.is_none() => gap = Some(value),
+            _ => valid = false,
+        }
+    }
+    valid &= width.as_deref() == Some("1") && gap.as_deref().is_none_or(|value| value == "false");
+    Ok(FormXmlControlBorder {
+        style: None,
+        style_seen: false,
+        valid,
+    })
+}
+
+fn form_xml_control_border_style_attrs_are_valid(event: &BytesStart<'_>) -> Result<bool> {
+    let mut style_type_seen = false;
+    let mut valid = true;
+    for attr in event.attributes() {
+        let attr = attr?;
+        if attr.key.as_ref() == b"xsi:type" && !style_type_seen {
+            style_type_seen = true;
+            valid &= attr.unescape_value()?.as_ref() == "v8ui:ControlBorderType";
+        } else {
+            valid = false;
+        }
+    }
+    Ok(valid && style_type_seen)
 }
 
 fn parse_form_extended_tooltip_xml(
@@ -8413,8 +8546,10 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
             | "Table"
             | "InputField"
             | "LabelField"
+            | "PictureField"
             | "CheckBoxField"
             | "TextDocumentField"
+            | "LabelDecoration"
             | "PictureDecoration"
             | "SearchStringAddition"
             | "ViewStatusAddition"
@@ -8478,6 +8613,39 @@ fn path_ends_with_for_current_child_item(path: &[String], items: &[FormXmlChildI
         return false;
     };
     path.last().map(String::as_str) == Some(item.tag.as_str())
+}
+
+fn form_child_item_supports_control_border(tag: &str) -> bool {
+    matches!(
+        tag,
+        "LabelField" | "PictureField" | "LabelDecoration" | "PictureDecoration"
+    )
+}
+
+fn path_ends_with_for_current_border_owner(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    items.last().is_some_and(|item| {
+        form_child_item_supports_control_border(&item.tag)
+            && path.last().map(String::as_str) == Some(item.tag.as_str())
+    })
+}
+
+fn path_ends_with_for_child_control_border(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    form_child_item_supports_control_border(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "Border"])
+}
+
+fn path_ends_with_for_child_control_border_style(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    form_child_item_supports_control_border(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "Border", "style"])
 }
 
 fn path_ends_with_root_auto_command_bar_child_items(path: &[String]) -> bool {
@@ -12215,6 +12383,52 @@ fn form_layout_child_item_matches(
         || existing_name.as_deref() == Some(item.name.as_str())
 }
 
+fn form_layout_control_border_style_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let top_level_offset = match (wrapper, fields.len(), item_tag) {
+        ("37", 59, "LabelField" | "PictureField") => 0,
+        ("37", 60, "LabelField" | "PictureField") => 1,
+        ("12", 36, "LabelDecoration" | "PictureDecoration") => 0,
+        _ => return None,
+    };
+    let direct_discriminator = fields
+        .get(5 + top_level_offset)
+        .map(|range| text[range.clone()].trim());
+    let options_slot = FormControlBorderSchema::options_slot(item_tag, top_level_offset)?;
+    let options_range = fields.get(options_slot)?.clone();
+    if scan_1c_braced_value_range(text, options_range.start) != Some(options_range.clone()) {
+        return None;
+    }
+    let option_ranges = scan_braced_fields(text, options_range.start).ok()?;
+    let options = option_ranges
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let schema = FormControlBorderSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        item_tag,
+        top_level_offset,
+        direct_discriminator,
+        &options,
+    )?;
+    let tuple_range = option_ranges.get(schema.border_option_slot())?.clone();
+    if scan_1c_braced_value_range(text, tuple_range.start) != Some(tuple_range.clone()) {
+        return None;
+    }
+    let tuple_ranges = scan_braced_fields(text, tuple_range.start).ok()?;
+    let tuple = tuple_ranges
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    schema.tuple_style(&tuple)?;
+    tuple_ranges.get(3).cloned()
+}
+
 fn patch_form_layout_child_item_entry(
     text: &mut String,
     fields: &[Range<usize>],
@@ -12248,6 +12462,11 @@ fn patch_form_layout_child_item_entry(
             form_localized_replacement(&text[tooltip_range.clone()], &item.tooltip)
     {
         replacements.push((tooltip_range, replacement));
+    }
+    if let Some(style) = item.control_border.as_ref().and_then(|border| border.style)
+        && let Some(style_range) = form_layout_control_border_style_range(text, fields, &item.tag)
+    {
+        replacements.push((style_range, style.raw_code().to_string()));
     }
     if let Some(extended_tooltip) = &item.extended_tooltip
         && let Some(tooltip_range) = form_layout_child_item_extended_tooltip_range(text, fields)?
@@ -14168,10 +14387,22 @@ fn form_layout_child_item_tag<'a>(
             _ => None,
         },
         "12" => match fields.get(5).map(|range| text[range.clone()].trim())? {
+            "0" if fields.len() == 36 => Some("LabelDecoration"),
             "1" => Some("PictureDecoration"),
             _ => None,
         },
         "34" => Some("Button"),
+        "37" if matches!(fields.len(), 59 | 60) => {
+            let top_level_offset = fields.len() - 59;
+            match fields
+                .get(5 + top_level_offset)
+                .map(|range| text[range.clone()].trim())?
+            {
+                "1" => Some("LabelField"),
+                "4" => Some("PictureField"),
+                _ => None,
+            }
+        }
         "48" => match fields
             .get(5 + form_layout_input_field_top_level_offset(text, fields))
             .map(|range| text[range.clone()].trim())?
@@ -14210,7 +14441,7 @@ fn form_layout_child_item_name_range(
 ) -> Option<Range<usize>> {
     let indexes: &[usize] = match wrapper {
         "73" | "55" | "34" => &[5],
-        "48" => &[6, 7],
+        "37" | "48" => &[6, 7],
         _ => &[6],
     };
     indexes.iter().find_map(|index| {
@@ -14230,7 +14461,7 @@ fn form_layout_child_item_title_range(
     let indexes: &[usize] = match wrapper {
         "73" | "55" => &[9],
         "34" => &[6],
-        "48" => &[9, 10],
+        "37" | "48" => &[9, 10],
         _ => &[7],
     };
     indexes
