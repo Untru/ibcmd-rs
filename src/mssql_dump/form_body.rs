@@ -30,9 +30,9 @@ use crate::form_schema::{
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
-    FormTableRowPictureDataPath, FormTableSchema, FormTableSearchControlLocation,
-    FormTableSearchStringLocation, FormTableViewStatusLocation, FormTableXmlProperty,
-    FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
+    FormTableRootPropertyBagKey as TableRootBagKey, FormTableRowPictureDataPath, FormTableSchema,
+    FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
@@ -591,7 +591,7 @@ pub(super) struct FormChildItem {
     pub(super) enabled: Option<bool>,
     pub(super) read_only: Option<bool>,
     pub(super) skip_on_input: Option<bool>,
-    pub(super) table_skip_on_input_from_schema: bool,
+    pub(super) strict_table_schema: bool,
     pub(super) title_location: Option<&'static str>,
     pub(super) title_height: Option<String>,
     pub(super) tooltip_representation: Option<&'static str>,
@@ -4676,6 +4676,9 @@ fn parse_form_child_item_with_metadata_owners(
         button_top_level_offset,
     );
     let table_schema = FormTableSchema::from_raw_layout(wrapper, tag, &fields);
+    let strict_table_root_properties = table_schema
+        .and_then(|schema| parse_form_table_root_properties(schema, &fields))
+        .unwrap_or_default();
     let button_data_path_slot = button_common_schema.and_then(|schema| schema.data_path_slot());
     let strict_field_data_path = field_schema_and_options.is_some();
     let owner_scoped_data_path =
@@ -5245,7 +5248,9 @@ fn parse_form_child_item_with_metadata_owners(
         table_header: table_schema.and_then(|schema| schema.header(&fields)),
         table_horizontal_lines: table_schema.and_then(|schema| schema.horizontal_lines(&fields)),
         table_vertical_lines: table_schema.and_then(|schema| schema.vertical_lines(&fields)),
-        show_root: if tag == "Table" && !ordinary_table_layout {
+        show_root: if table_schema.is_some() {
+            strict_table_root_properties.show_root
+        } else if tag == "Table" && !ordinary_table_layout {
             fields
                 .get(36)
                 .and_then(|field| parse_form_child_item_show_title(field))
@@ -5253,7 +5258,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        allow_root_choice: if tag == "Table" && !ordinary_table_layout {
+        allow_root_choice: if table_schema.is_some() {
+            strict_table_root_properties.allow_root_choice
+        } else if tag == "Table" && !ordinary_table_layout {
             fields
                 .get(37)
                 .and_then(|field| parse_form_child_item_show_title(field))
@@ -5267,7 +5274,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        restore_current_row: if tag == "Table" {
+        restore_current_row: if table_schema.is_some() {
+            strict_table_root_properties.restore_current_row
+        } else if tag == "Table" {
             parse_form_table_property_bag_bool(&fields, TableBagKey::RestoreCurrentRow)
         } else {
             None
@@ -5310,7 +5319,9 @@ fn parse_form_child_item_with_metadata_owners(
         rows_picture_load_transparent: rows_picture
             .as_ref()
             .is_some_and(|picture| picture.load_transparent),
-        top_level_parent_nil: if tag == "Table" && !ordinary_table_layout {
+        top_level_parent_nil: if table_schema.is_some() {
+            strict_table_root_properties.top_level_parent_nil
+        } else if tag == "Table" && !ordinary_table_layout {
             parse_form_table_property_bag_undefined(&fields, TableBagKey::TopLevelParent)
                 .or_else(|| parse_form_table_default_top_level_parent_nil(wrapper, &fields))
         } else {
@@ -5488,7 +5499,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        table_skip_on_input_from_schema: table_schema_skip_on_input.is_some(),
+        strict_table_schema: table_schema.is_some(),
         title_location: if matches!(
             tag,
             "InputField"
@@ -8588,6 +8599,69 @@ pub(super) fn form_command_source_name(
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+struct FormTableRootProperties {
+    restore_current_row: Option<bool>,
+    top_level_parent_nil: Option<bool>,
+    show_root: Option<bool>,
+    allow_root_choice: Option<bool>,
+}
+
+fn parse_form_table_root_properties(
+    schema: FormTableSchema,
+    fields: &[&str],
+) -> Option<FormTableRootProperties> {
+    let (start, end) = schema.counted_property_bag_bounds(fields)?;
+    let mut seen_keys = BTreeSet::new();
+    let mut properties = FormTableRootProperties::default();
+
+    for pair in fields.get(start..end)?.chunks_exact(2) {
+        let raw_key = *pair.first()?;
+        let key = raw_key.parse::<usize>().ok()?;
+        if key.to_string() != raw_key {
+            return None;
+        }
+        if !seen_keys.insert(key) {
+            return None;
+        }
+
+        let value = pair.get(1)?.trim();
+        if scan_1c_braced_value(value, 0) != Some(value.len()) {
+            return None;
+        }
+
+        if key == TableRootBagKey::RestoreCurrentRow.key() {
+            properties.restore_current_row = Some(parse_form_table_root_property_bool(value)?);
+        } else if key == TableRootBagKey::TopLevelParent.key() {
+            properties.top_level_parent_nil =
+                Some(parse_form_table_root_property_undefined(value)?);
+        } else if key == TableRootBagKey::ShowRoot.key() {
+            properties.show_root = Some(parse_form_table_root_property_bool(value)?);
+        } else if key == TableRootBagKey::AllowRootChoice.key() {
+            properties.allow_root_choice = Some(parse_form_table_root_property_bool(value)?);
+        }
+    }
+
+    Some(properties)
+}
+
+fn parse_form_table_root_property_bool(value: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    match fields.as_slice() {
+        [marker, value] if marker.trim() == "\"B\"" => match value.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn parse_form_table_root_property_undefined(value: &str) -> Option<bool> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    matches!(fields.as_slice(), [marker] if marker.trim() == "\"U\"").then_some(true)
+}
+
 pub(super) fn parse_form_table_property_bag_bool(
     fields: &[&str],
     key: TableBagKey,
@@ -8792,7 +8866,7 @@ fn parse_form_table_command_set_excluded_commands_for_table(
     schema: FormTableSchema,
     fields: &[&str],
 ) -> Vec<&'static str> {
-    let pair_count_slot = schema.command_set_pair_count_slot();
+    let pair_count_slot = schema.counted_property_bag_pair_count_slot();
     let Some(pair_count) = fields
         .get(pair_count_slot)
         .and_then(|field| field.trim().parse::<usize>().ok())
@@ -12416,14 +12490,21 @@ fn format_form_table_property_xml(
             Some(true) => format!("{tab}<TopLevelParent xsi:nil=\"true\"/>\r\n"),
             _ => String::new(),
         },
-        FormTableXmlProperty::ShowRoot => match item.show_root {
-            Some(true) => format!("{tab}<ShowRoot>true</ShowRoot>\r\n"),
-            _ => String::new(),
-        },
-        FormTableXmlProperty::AllowRootChoice => match item.allow_root_choice {
-            Some(false) => format!("{tab}<AllowRootChoice>false</AllowRootChoice>\r\n"),
-            _ => String::new(),
-        },
+        FormTableXmlProperty::ShowRoot => item
+            .show_root
+            .filter(|value| item.strict_table_schema || *value)
+            .map(|value| format!("{tab}<ShowRoot>{}</ShowRoot>\r\n", xml_bool(value)))
+            .unwrap_or_default(),
+        FormTableXmlProperty::AllowRootChoice => item
+            .allow_root_choice
+            .filter(|value| item.strict_table_schema || !*value)
+            .map(|value| {
+                format!(
+                    "{tab}<AllowRootChoice>{}</AllowRootChoice>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::UpdateOnDataChange => item
             .update_on_data_change
             .map(|value| {
@@ -14530,7 +14611,7 @@ fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String 
 pub(super) fn should_emit_explicit_table_skip_on_input(item: &FormChildItem) -> bool {
     item.tag == "Table"
         && item.skip_on_input == Some(false)
-        && (item.table_skip_on_input_from_schema
+        && (item.strict_table_schema
             || (!form_table_has_hierarchical_navigation(item)
                 && (item.row_picture_data_path.is_some() || item.rows_picture_ref.is_some())))
 }

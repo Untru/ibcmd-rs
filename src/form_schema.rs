@@ -3376,7 +3376,7 @@ pub(crate) struct FormTableSchema;
 
 impl FormTableSchema {
     const BASE_FIELD_COUNT: usize = 99;
-    const COMMAND_SET_PAIR_COUNT_SLOT: usize = 54;
+    const COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT: usize = 54;
     const DATA_PATH_SLOT: usize = 11;
     const ROW_PICTURE_DATA_PATH_SLOT: usize = 43;
     const ROWS_PICTURE_SLOT: usize = 44;
@@ -3397,7 +3397,7 @@ impl FormTableSchema {
         {
             return None;
         }
-        // The suffix combines several paired sections; slot 54 counts only one of them.
+        // The suffix combines several paired sections; the bag at slot 54 is only one of them.
         if (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0 {
             return None;
         }
@@ -3420,8 +3420,19 @@ impl FormTableSchema {
         Some(Self)
     }
 
-    pub(crate) const fn command_set_pair_count_slot(self) -> usize {
-        Self::COMMAND_SET_PAIR_COUNT_SLOT
+    pub(crate) const fn counted_property_bag_pair_count_slot(self) -> usize {
+        Self::COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT
+    }
+
+    pub(crate) fn counted_property_bag_bounds(self, fields: &[&str]) -> Option<(usize, usize)> {
+        let pair_count = fields
+            .get(Self::COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT)?
+            .trim()
+            .parse::<usize>()
+            .ok()?;
+        let start = Self::COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT.checked_add(1)?;
+        let end = pair_count.checked_mul(2)?.checked_add(start)?;
+        (end <= fields.len()).then_some((start, end))
     }
 
     pub(crate) const fn tooltip_slot(self) -> usize {
@@ -3625,6 +3636,25 @@ impl FormTableSchema {
     fn non_zero_u32(self, fields: &[&str], slot: FormTableSlot) -> Option<String> {
         let value = fields.get(slot.index())?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableRootPropertyBagKey {
+    RestoreCurrentRow,
+    TopLevelParent,
+    ShowRoot,
+    AllowRootChoice,
+}
+
+impl FormTableRootPropertyBagKey {
+    pub(crate) const fn key(self) -> usize {
+        match self {
+            Self::RestoreCurrentRow => 9,
+            Self::TopLevelParent => 10,
+            Self::ShowRoot => 11,
+            Self::AllowRootChoice => 12,
+        }
     }
 }
 
