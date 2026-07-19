@@ -1434,6 +1434,7 @@ pub(super) fn parse_form_auto_command_bar_fields(
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &FormOwnerScopedBindingIndexes::default(),
             commands,
             object_refs,
         )
@@ -3726,6 +3727,7 @@ pub(super) fn extract_form_child_items(
         &indexes.data_path_by_binding_key,
         &indexes.bound_table_path_by_binding_key,
         &indexes.table_column_names_by_binding_key,
+        &indexes.owner_scoped_bindings,
         commands,
         object_refs,
     )
@@ -3859,6 +3861,7 @@ pub(super) struct FormChildItemIndexes {
     pub(super) table_column_names_by_id: BTreeMap<String, BTreeMap<String, String>>,
     pub(super) bound_table_path_by_binding_key: BTreeMap<String, String>,
     pub(super) table_column_names_by_binding_key: BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: FormOwnerScopedBindingIndexes,
     pub(super) data_path_by_binding_key: BTreeMap<String, String>,
     pub(super) attribute_name_by_binding_key: BTreeMap<String, String>,
     pub(super) binding_names_by_key: BTreeMap<String, BTreeSet<String>>,
@@ -3868,6 +3871,42 @@ pub(super) struct FormChildItemIndexes {
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
     bound_attribute_id_by_table_id: BTreeMap<String, String>,
     pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct FormBoundTableKey {
+    attribute_id: String,
+    table_key: String,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct FormBoundColumnKey {
+    attribute_id: String,
+    table_key: String,
+    column_key: String,
+}
+
+#[derive(Default)]
+pub(super) struct FormOwnerScopedBindingIndexes {
+    table_paths: BTreeMap<FormBoundTableKey, Option<String>>,
+    column_names: BTreeMap<FormBoundColumnKey, Option<String>>,
+}
+
+fn insert_unambiguous_form_binding<K: Ord>(
+    index: &mut BTreeMap<K, Option<String>>,
+    key: K,
+    value: String,
+) {
+    match index.entry(key) {
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            entry.insert(Some(value));
+        }
+        std::collections::btree_map::Entry::Occupied(mut entry) => {
+            if entry.get().as_ref() != Some(&value) {
+                entry.insert(None);
+            }
+        }
+    }
 }
 
 pub(super) struct FormStandardCommandOwner {
@@ -4117,10 +4156,18 @@ pub(super) fn collect_form_child_item_indexes_from_field(
                 .and_then(|field| parse_form_table_binding(field))
                 && let Some(attribute_name) = attribute_names_by_id.get(&attribute_id)
             {
-                indexes.bound_table_path_by_binding_key.insert(
-                    table_key,
-                    format!("{attribute_name}.{}", indexes.table_name_by_id[id]),
+                let table_path = format!("{attribute_name}.{}", indexes.table_name_by_id[id]);
+                insert_unambiguous_form_binding(
+                    &mut indexes.owner_scoped_bindings.table_paths,
+                    FormBoundTableKey {
+                        attribute_id,
+                        table_key: table_key.clone(),
+                    },
+                    table_path.clone(),
                 );
+                indexes
+                    .bound_table_path_by_binding_key
+                    .insert(table_key, table_path);
             }
             let mut columns = BTreeMap::new();
             collect_form_table_column_names_for_table(&fields, &mut columns);
@@ -4192,7 +4239,7 @@ pub(super) fn collect_form_child_item_indexes_from_field(
                             .or_insert_with(|| attribute_name.clone());
                     }
                 }
-                if let Some((_, table_key, column_key)) =
+                if let Some((attribute_id, table_key, column_key)) =
                     parse_form_nested_table_column_binding(binding)
                 {
                     let column_name = if column_key == "-2" {
@@ -4200,6 +4247,15 @@ pub(super) fn collect_form_child_item_indexes_from_field(
                     } else {
                         name.clone()
                     };
+                    insert_unambiguous_form_binding(
+                        &mut indexes.owner_scoped_bindings.column_names,
+                        FormBoundColumnKey {
+                            attribute_id,
+                            table_key: table_key.clone(),
+                            column_key: column_key.clone(),
+                        },
+                        column_name.clone(),
+                    );
                     indexes
                         .table_column_names_by_binding_key
                         .entry(table_key)
@@ -4266,6 +4322,7 @@ pub(super) fn parse_form_child_item_pairs(
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChildItem>> {
@@ -4305,6 +4362,7 @@ pub(super) fn parse_form_child_item_pairs(
                 data_path_by_binding_key,
                 bound_table_path_by_binding_key,
                 table_column_names_by_binding_key,
+                owner_scoped_bindings,
                 commands,
                 object_refs,
             ) {
@@ -4428,6 +4486,7 @@ pub(super) fn parse_form_child_item_with_attrs(
         &BTreeMap::new(),
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
+        &FormOwnerScopedBindingIndexes::default(),
         commands,
         object_refs,
     )
@@ -4465,6 +4524,7 @@ pub(super) fn parse_form_child_item_with_context(
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
+        &FormOwnerScopedBindingIndexes::default(),
         commands,
         object_refs,
     )
@@ -4485,6 +4545,7 @@ fn parse_form_child_item_with_metadata_owners(
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
@@ -4531,6 +4592,7 @@ fn parse_form_child_item_with_metadata_owners(
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
+        owner_scoped_bindings,
         object_refs,
     );
     let child_parent_data_path = data_path.as_deref().or(parent_data_path);
@@ -4741,6 +4803,7 @@ fn parse_form_child_item_with_metadata_owners(
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
+        owner_scoped_bindings,
         commands,
         object_refs,
     )
@@ -4762,6 +4825,7 @@ fn parse_form_child_item_with_metadata_owners(
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
+            owner_scoped_bindings,
             commands,
             object_refs,
         );
@@ -4783,6 +4847,7 @@ fn parse_form_child_item_with_metadata_owners(
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
+            owner_scoped_bindings,
             commands,
             object_refs,
         );
@@ -4804,6 +4869,7 @@ fn parse_form_child_item_with_metadata_owners(
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
+            owner_scoped_bindings,
             commands,
             object_refs,
         );
@@ -4825,6 +4891,7 @@ fn parse_form_child_item_with_metadata_owners(
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
+            owner_scoped_bindings,
             commands,
             object_refs,
         )
@@ -6364,6 +6431,7 @@ pub(super) fn append_form_table_service_child_items(
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) {
@@ -6390,6 +6458,7 @@ pub(super) fn append_form_table_service_child_items(
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
+        owner_scoped_bindings,
         commands,
         object_refs,
     );
@@ -6412,6 +6481,7 @@ pub(super) fn append_form_child_items_by_tag(
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) {
@@ -6431,6 +6501,7 @@ pub(super) fn append_form_child_items_by_tag(
             data_path_by_binding_key,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
+            owner_scoped_bindings,
             commands,
             object_refs,
         ) else {
@@ -6474,6 +6545,7 @@ pub(super) fn parse_form_text_document_context_menu(
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
@@ -6495,6 +6567,7 @@ pub(super) fn parse_form_text_document_context_menu(
         data_path_by_binding_key,
         bound_table_path_by_binding_key,
         table_column_names_by_binding_key,
+        owner_scoped_bindings,
         commands,
         object_refs,
     )
@@ -9770,68 +9843,59 @@ pub(super) fn parse_form_child_item_data_path(
     data_path_by_binding_key: &BTreeMap<String, String>,
     bound_table_path_by_binding_key: &BTreeMap<String, String>,
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let owner_scoped_metadata = !matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField");
     let parse_bound = |field: &&str| {
-        owner_scoped_metadata
-            .then(|| {
-                parse_form_bound_data_path_with_metadata_owner(
-                    field,
-                    name,
-                    attribute_names_by_id,
-                    attribute_metadata_owners_by_id,
-                    table_name_by_id,
-                    table_column_names_by_id,
-                    bound_table_path_by_binding_key,
-                    table_column_names_by_binding_key,
-                    object_refs,
-                )
-            })
-            .flatten()
-            .or_else(|| {
-                parse_form_bound_data_path(
-                    field,
-                    name,
-                    attribute_names_by_id,
-                    table_name_by_id,
-                    table_column_names_by_id,
-                    bound_table_path_by_binding_key,
-                    table_column_names_by_binding_key,
-                )
-            })
+        let scoped = owner_scoped_metadata.then(|| {
+            resolve_form_owner_scoped_bound_data_path(
+                field,
+                attribute_metadata_owners_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            )
+        });
+        match scoped {
+            Some(FormOwnerScopedDataPath::Resolved(data_path)) => Some(data_path),
+            Some(FormOwnerScopedDataPath::Ambiguous) => None,
+            Some(FormOwnerScopedDataPath::Unknown) | None => parse_form_bound_data_path(
+                field,
+                name,
+                attribute_names_by_id,
+                table_name_by_id,
+                table_column_names_by_id,
+                bound_table_path_by_binding_key,
+                table_column_names_by_binding_key,
+            )
             .or_else(|| {
                 parse_form_bound_data_binding_key(field)
                     .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned())
-            })
+            }),
+        }
     };
     let parse_direct_bound = |field: &&str| {
-        owner_scoped_metadata
-            .then(|| {
-                parse_form_bound_data_path_with_metadata_owner(
-                    field,
-                    name,
-                    attribute_names_by_id,
-                    attribute_metadata_owners_by_id,
-                    table_name_by_id,
-                    table_column_names_by_id,
-                    bound_table_path_by_binding_key,
-                    table_column_names_by_binding_key,
-                    object_refs,
-                )
-            })
-            .flatten()
-            .or_else(|| {
-                parse_form_bound_data_path(
-                    field,
-                    name,
-                    attribute_names_by_id,
-                    table_name_by_id,
-                    table_column_names_by_id,
-                    bound_table_path_by_binding_key,
-                    table_column_names_by_binding_key,
-                )
-            })
+        let scoped = owner_scoped_metadata.then(|| {
+            resolve_form_owner_scoped_bound_data_path(
+                field,
+                attribute_metadata_owners_by_id,
+                owner_scoped_bindings,
+                object_refs,
+            )
+        });
+        match scoped {
+            Some(FormOwnerScopedDataPath::Resolved(data_path)) => Some(data_path),
+            Some(FormOwnerScopedDataPath::Ambiguous) => None,
+            Some(FormOwnerScopedDataPath::Unknown) | None => parse_form_bound_data_path(
+                field,
+                name,
+                attribute_names_by_id,
+                table_name_by_id,
+                table_column_names_by_id,
+                bound_table_path_by_binding_key,
+                table_column_names_by_binding_key,
+            ),
+        }
     };
     let input_field_offset = matches!(
         tag,
@@ -9911,6 +9975,81 @@ pub(super) fn parse_form_child_item_data_path(
         }
         "Button" => None,
         _ => table_name_by_id.get(id).cloned(),
+    }
+}
+
+enum FormOwnerScopedDataPath {
+    Unknown,
+    Ambiguous,
+    Resolved(String),
+}
+
+fn resolve_form_owner_scoped_bound_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+) -> FormOwnerScopedDataPath {
+    if let Some(data_path) = resolve_form_owner_scoped_metadata_data_path(
+        field,
+        attribute_metadata_owners_by_id,
+        object_refs,
+    ) {
+        return FormOwnerScopedDataPath::Resolved(data_path);
+    }
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let Some(owner) = fields
+        .get(1)
+        .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+    else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    if owner.len() != 1 {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let attribute_id = owner[0].trim().to_string();
+    let Some(table_key) = fields
+        .get(2)
+        .and_then(|field| parse_form_binding_key(field.trim()))
+    else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let table_lookup = FormBoundTableKey {
+        attribute_id: attribute_id.clone(),
+        table_key: table_key.clone(),
+    };
+    let Some(table_path) = owner_scoped_bindings.table_paths.get(&table_lookup) else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let Some(table_path) = table_path.as_ref() else {
+        return FormOwnerScopedDataPath::Ambiguous;
+    };
+    if fields.first().map(|field| field.trim()) == Some("2") {
+        return FormOwnerScopedDataPath::Resolved(table_path.clone());
+    }
+    if fields.first().map(|field| field.trim()) != Some("3") {
+        return FormOwnerScopedDataPath::Unknown;
+    }
+    let Some(column_key) = fields
+        .get(3)
+        .and_then(|field| parse_form_binding_key(field.trim()))
+    else {
+        return FormOwnerScopedDataPath::Unknown;
+    };
+    let column_lookup = FormBoundColumnKey {
+        attribute_id,
+        table_key,
+        column_key,
+    };
+    match owner_scoped_bindings.column_names.get(&column_lookup) {
+        Some(Some(column_name)) => {
+            let column_name = normalize_form_table_column_name(table_path, column_name);
+            FormOwnerScopedDataPath::Resolved(format!("{table_path}.{column_name}"))
+        }
+        Some(None) => FormOwnerScopedDataPath::Ambiguous,
+        None => FormOwnerScopedDataPath::Unknown,
     }
 }
 
