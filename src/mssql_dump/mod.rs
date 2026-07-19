@@ -122,6 +122,11 @@ const CCT_ATTRIBUTE_COLLECTION_UUID: &str = "31182525-9346-4595-81f8-6f91a72ebe0
 const CCT_TABULAR_SECTION_COLLECTION_UUID: &str = "54e36536-7863-42fd-bea3-c5edd3122fdc";
 const CCT_COMMAND_COLLECTION_UUID: &str = "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73";
 const CCT_FORM_COLLECTION_UUID: &str = "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94";
+const BUSINESS_PROCESS_FORM_COLLECTION_UUID: &str = "3f7a8120-b71a-4265-98bf-4d9bc09b7719";
+const BUSINESS_PROCESS_COMMAND_COLLECTION_UUID: &str = "7a3e533c-f232-40d5-a932-6a311d2480bf";
+const BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID: &str = "87c988de-ecbf-413b-87b0-b9516df05e28";
+const BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID: &str =
+    "a3fe6537-d787-40f7-8a06-419d2f0c1cfd";
 const TYPE_DESCRIPTION_TYPE_UUID: &str = "f5c65050-3bbb-11d5-b988-0050bae0a95d";
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
@@ -4472,7 +4477,45 @@ struct DocumentCharacteristic {
 struct BusinessProcessProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
+    edit_type: &'static str,
+    input_by_string: Vec<String>,
+    create_on_input: &'static str,
+    search_string_mode_on_input_by_string: &'static str,
+    choice_data_get_mode_on_input_by_string: &'static str,
+    full_text_search_on_input_by_string: &'static str,
+    default_object_form: Option<String>,
     default_list_form: Option<String>,
+    default_choice_form: Option<String>,
+    auxiliary_object_form: Option<String>,
+    auxiliary_list_form: Option<String>,
+    auxiliary_choice_form: Option<String>,
+    choice_history_on_input: &'static str,
+    number_type: &'static str,
+    number_length: u32,
+    number_allowed_length: &'static str,
+    check_unique: bool,
+    standard_attributes: Vec<MetadataStandardAttribute>,
+    autonumbering: bool,
+    based_on: Vec<String>,
+    number_periodicity: &'static str,
+    task: String,
+    create_task_in_privileged_mode: bool,
+    data_lock_fields: Vec<String>,
+    data_lock_control_mode: &'static str,
+    include_help_in_contents: bool,
+    full_text_search: &'static str,
+    object_presentation: Vec<(String, String)>,
+    extended_object_presentation: Vec<(String, String)>,
+    list_presentation: Vec<(String, String)>,
+    extended_list_presentation: Vec<(String, String)>,
+    explanation: Vec<(String, String)>,
+    data_history: &'static str,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
+    child_attributes: Vec<MetadataChildObject>,
+    child_tabular_sections: Vec<MetadataChildObject>,
+    child_forms: Vec<String>,
+    child_commands: Vec<MetadataChildCommand>,
 }
 
 struct TaskProperties {
@@ -6143,6 +6186,7 @@ fn extract_metadata_source_xml_from_text_row(
                 | "InformationRegister"
                 | "Task"
                 | "ChartOfCharacteristicTypes"
+                | "BusinessProcess"
         ) {
         nested_command_headers_for_owner_from_text(kind, text, uuid)
     } else {
@@ -6226,7 +6270,14 @@ fn extract_metadata_source_xml_from_text_row(
         document_journal_child_commands = document_journal.child_commands;
         formatted.into_bytes()
     } else if kind == "BusinessProcess" {
-        let business_process = parse_business_process_properties_from_text(text, uuid, form_refs)?;
+        let business_process = parse_business_process_properties_from_text(
+            text,
+            uuid,
+            type_index,
+            object_refs,
+            metadata_object_refs,
+            form_refs,
+        )?;
         format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
     } else if kind == "Task" {
         let task = parse_task_properties_from_text(
@@ -6335,30 +6386,11 @@ fn extract_metadata_source_xml_from_text_row(
     } else {
         format_metadata_source_xml(kind, &header, source_version).into_bytes()
     };
-    let additional_tabular_section_child_objects = if kind == "BusinessProcess" {
-        let mut child_objects = String::new();
-        for child in parse_attribute_tabular_section_child_objects(
-            kind,
-            &header.name,
-            text,
-            uuid,
-            None,
-            type_index,
-            object_refs,
-            metadata_object_refs,
-            form_refs,
-        )
-        .into_iter()
-        .filter(|child| child.tag == "TabularSection" && !child.generated_types.is_empty())
-        {
-            push_metadata_child_object_xml(&mut child_objects, &child);
-        }
-        child_objects
-    } else {
-        String::new()
-    };
-    let owned_form_template_child_objects = if matches!(kind, "Task" | "ChartOfCharacteristicTypes")
-    {
+    let additional_tabular_section_child_objects = String::new();
+    let owned_form_template_child_objects = if matches!(
+        kind,
+        "Task" | "ChartOfCharacteristicTypes" | "BusinessProcess"
+    ) {
         String::new()
     } else {
         simple_metadata_form_template_child_objects_xml(
@@ -9897,6 +9929,9 @@ fn parse_attribute_tabular_section_child_objects(
                     other => other,
                 })
                 .collect();
+        } else if owner_kind == "BusinessProcess" {
+            value_types =
+                stable_partition_metadata_types(classify_metadata_reference_type_sets(value_types));
         }
         let properties = if tag == "Attribute" && owner_kind == "Catalog" {
             let expected_wrapper_code = if parent_tabular_section.is_some() {
@@ -9935,6 +9970,15 @@ fn parse_attribute_tabular_section_child_objects(
                     proof,
                 )
             })
+        } else if tag == "Attribute" && owner_kind == "BusinessProcess" {
+            parse_business_process_child_properties(
+                text,
+                marker_start,
+                &header.uuid,
+                parent_tabular_section.is_some(),
+                type_index,
+                metadata_object_refs,
+            )
         } else if tag == "Attribute" {
             parse_metadata_child_properties(
                 owner_kind,
@@ -12445,7 +12489,7 @@ fn parse_document_attribute_wrapper_fields<'a>(
 ) -> Option<(Vec<&'a str>, Vec<&'a str>, u32, String)> {
     let wrapper_code = fields.first()?.trim().parse::<u32>().ok()?;
     let expected_len = match wrapper_code {
-        5 | 8 => 5,
+        2 | 5 | 8 => 5,
         6 => 7,
         _ => return None,
     };
@@ -13654,6 +13698,12 @@ fn attribute_tabular_section_child_object_tag(
     {
         return Some(("Attribute", None));
     }
+    if owner_kind == "BusinessProcess"
+        && is_offset_inside_metadata_object_code(text, marker_start, 2)
+        && !is_offset_inside_metadata_object_code(text, marker_start, 8)
+    {
+        return Some(("Attribute", None));
+    }
     if is_offset_inside_metadata_object_code(text, marker_start, 5) {
         return Some(("Attribute", None));
     }
@@ -14215,6 +14265,7 @@ fn parse_cct_attribute(
         &payload,
         &wrapper,
         nested,
+        true,
         owner_name,
         &value_types,
         type_index,
@@ -14238,6 +14289,7 @@ fn parse_cct_attribute_properties(
     payload: &[&str],
     wrapper: &[&str],
     nested: bool,
+    direct_use_mode: bool,
     _owner_name: &str,
     _value_types: &[ConstantValueType],
     type_index: &BTreeMap<String, String>,
@@ -14277,13 +14329,13 @@ fn parse_cct_attribute_properties(
         return None;
     }
 
-    let use_mode = if nested {
+    let use_mode = if nested || !direct_use_mode {
         None
     } else {
         Some(catalog_attribute_use_mode_xml(wrapper.get(3)?.trim())?)
     };
-    let full_text_search_index = if nested { 3 } else { 4 };
-    let data_history_index = if nested { 4 } else { 5 };
+    let full_text_search_index = if nested || !direct_use_mode { 3 } else { 4 };
+    let data_history_index = if nested || !direct_use_mode { 4 } else { 5 };
     Some(MetadataChildProperties {
         password_mode: information_register_bool(payload.get(2)?)?,
         format: parse_metadata_child_localized_value(payload.get(3)?)?,
@@ -14336,6 +14388,37 @@ fn parse_cct_attribute_properties(
         update_data_history_immediately_after_write: None,
         execute_after_write_data_history_version_processing: None,
     })
+}
+
+fn parse_business_process_child_properties(
+    text: &str,
+    marker_start: usize,
+    child_uuid: &str,
+    expected_nested: bool,
+    type_index: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+) -> Option<MetadataChildProperties> {
+    let mut layouts =
+        metadata_object_field_candidates_around_header(text, marker_start, child_uuid)
+            .into_iter()
+            .filter_map(|fields| parse_document_attribute_wrapper_fields(&fields, Some(child_uuid)))
+            .filter(|(_, _, wrapper_code, _)| *wrapper_code == if expected_nested { 8 } else { 2 })
+            .collect::<Vec<_>>();
+    if layouts.len() != 1 {
+        return None;
+    }
+    let (payload, wrapper, _, _) = layouts.pop()?;
+    parse_cct_attribute_properties(
+        &payload,
+        &wrapper,
+        expected_nested,
+        false,
+        "",
+        &[],
+        type_index,
+        &BTreeMap::new(),
+        metadata_object_refs,
+    )
 }
 
 fn parse_cct_tabular_sections(
@@ -15539,77 +15622,531 @@ fn parse_document_characteristic_field(
 fn parse_business_process_properties_from_text(
     text: &str,
     uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
 ) -> Option<BusinessProcessProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("30") {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
         return None;
     }
-    let header_index = metadata_header_field_index(&fields, uuid)?;
+    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    let parsed_header = parse_information_register_owner_header(fields.get(1)?)?;
+    if fields.len() != 49
+        || fields.first()?.trim() != "30"
+        || metadata_header_field_index(&fields, uuid) != Some(1)
+        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
+        || parsed_header.name != header.name
+        || parsed_header.synonyms != header.synonyms
+        || parsed_header.comment != header.comment
+    {
+        return None;
+    }
 
-    let mut generated_types = Vec::new();
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        3,
-        4,
-        &format!("BusinessProcessObject.{}", header.name),
-        "Object",
+    let collections = root[3..]
+        .iter()
+        .map(|value| parse_task_root_collection(value))
+        .collect::<Option<Vec<_>>>()?;
+    let expected_markers = [
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        BUSINESS_PROCESS_FORM_COLLECTION_UUID,
+        BUSINESS_PROCESS_COMMAND_COLLECTION_UUID,
+        BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID,
+        BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID,
+    ];
+    if collections.len() != expected_markers.len()
+        || collections
+            .iter()
+            .zip(expected_markers)
+            .any(|(collection, expected)| !collection.marker.eq_ignore_ascii_case(expected))
+        || !collections.first()?.items.is_empty()
+    {
+        return None;
+    }
+
+    let generated_types = parse_business_process_generated_types(&fields, &header.name)?;
+    let form_uuids = parse_task_form_uuids(&collections.get(1)?.items)?;
+    let child_forms = parse_business_process_child_forms(&form_uuids, &header.name, form_refs)?;
+    if child_forms
+        != owned_metadata_form_names_in_text_order(
+            text,
+            "BusinessProcesses",
+            &header.name,
+            form_refs,
+        )
+    {
+        return None;
+    }
+    let direct_attribute_uuids =
+        parse_document_attribute_collection(&collections.get(3)?.items, 2)?;
+    let tabular_sections = parse_business_process_tabular_sections(
+        &collections.get(4)?.items,
+        &header.name,
+        object_refs,
+    )?;
+    let child_metadata_objects = parse_attribute_tabular_section_child_objects(
+        "BusinessProcess",
+        &header.name,
+        text,
+        uuid,
+        None,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        form_refs,
     );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        5,
-        6,
-        &format!("BusinessProcessRef.{}", header.name),
-        "Ref",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        7,
-        8,
-        &format!("BusinessProcessSelection.{}", header.name),
-        "Selection",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        9,
-        10,
-        &format!("BusinessProcessList.{}", header.name),
-        "List",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        11,
-        12,
-        &format!("BusinessProcessManager.{}", header.name),
-        "Manager",
-    );
-    push_generated_type_entry(
-        &mut generated_types,
-        &fields,
-        13,
-        14,
-        &format!("BusinessProcessRoutePointRef.{}", header.name),
-        "RoutePointRef",
-    );
+    if !validate_document_child_objects(
+        &child_metadata_objects,
+        &direct_attribute_uuids,
+        &tabular_sections,
+    ) {
+        return None;
+    }
+    let mut child_attributes = Vec::new();
+    let mut child_tabular_sections = Vec::new();
+    for child in child_metadata_objects {
+        match child.tag {
+            "Attribute" => child_attributes.push(child),
+            "TabularSection" => child_tabular_sections.push(child),
+            _ => return None,
+        }
+    }
+    let child_commands = parse_task_commands(
+        &collections.get(2)?.items,
+        text,
+        uuid,
+        type_index,
+        object_refs,
+    )?;
+
+    let attribute_references = child_attributes
+        .iter()
+        .map(|attribute| {
+            format!(
+                "BusinessProcess.{}.Attribute.{}",
+                header.name, attribute.header.name
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let input_by_string = parse_business_process_field_references(
+        fields.get(27)?,
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-2", "Number")],
+    )?;
+    let data_lock_fields = parse_business_process_field_references(
+        fields.get(43)?,
+        &header.name,
+        object_refs,
+        &attribute_references,
+        &[("-8", "HeadTask")],
+    )?;
+    let (
+        search_string_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+    ) = parse_task_input_modes(fields.get(44)?)?;
+
+    if !task_characteristics_is_empty(fields.get(41)?) {
+        return None;
+    }
+    let mut child_uuids = BTreeSet::new();
+    if generated_types
+        .iter()
+        .flat_map(|generated| [&generated.type_id, &generated.value_id])
+        .chain(&form_uuids)
+        .chain(&direct_attribute_uuids)
+        .chain(child_tabular_sections.iter().flat_map(|section| {
+            std::iter::once(&section.header.uuid)
+                .chain(
+                    section
+                        .generated_types
+                        .iter()
+                        .flat_map(|generated| [&generated.type_id, &generated.value_id]),
+                )
+                .chain(section.child_objects.iter().map(|child| &child.header.uuid))
+        }))
+        .chain(child_commands.iter().map(|command| &command.header.uuid))
+        .any(|child_uuid| !child_uuids.insert(child_uuid.to_ascii_lowercase()))
+    {
+        return None;
+    }
 
     Some(BusinessProcessProperties {
         generated_types,
-        use_standard_commands: parse_1c_bool_field(fields.get(header_index + 1).copied())
-            .unwrap_or(true),
-        default_list_form: parse_default_list_form_ref(
-            &fields,
-            &[header_index + 9],
-            form_refs,
-            "BusinessProcesses",
+        use_standard_commands: information_register_bool(fields.get(2)?)?,
+        edit_type: match fields.get(16)?.trim() {
+            "1" => "InDialog",
+            _ => return None,
+        },
+        input_by_string,
+        create_on_input: metadata_create_on_input_xml(fields.get(19)?.trim())?,
+        search_string_mode_on_input_by_string,
+        choice_data_get_mode_on_input_by_string,
+        full_text_search_on_input_by_string,
+        default_object_form: parse_business_process_form_ref(
+            fields.get(22)?,
+            &form_uuids,
             &header.name,
-        ),
+            form_refs,
+        )?,
+        default_list_form: parse_business_process_form_ref(
+            fields.get(23)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        default_choice_form: parse_business_process_form_ref(
+            fields.get(24)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_object_form: parse_business_process_form_ref(
+            fields.get(32)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_list_form: parse_business_process_form_ref(
+            fields.get(33)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        auxiliary_choice_form: parse_business_process_form_ref(
+            fields.get(34)?,
+            &form_uuids,
+            &header.name,
+            form_refs,
+        )?,
+        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(45)?.trim())?,
+        number_type: match fields.get(17)?.trim() {
+            "0" => "String",
+            _ => return None,
+        },
+        number_length: parse_exchange_plan_u32(fields.get(18)?)?,
+        number_allowed_length: match fields.get(28)?.trim() {
+            "0" => "Fixed",
+            "1" => "Variable",
+            _ => return None,
+        },
+        check_unique: information_register_bool(fields.get(20)?)?,
+        standard_attributes: parse_business_process_standard_attributes(
+            fields.get(30)?,
+            type_index,
+            metadata_object_refs,
+        )?,
+        autonumbering: information_register_bool(fields.get(21)?)?,
+        based_on: parse_business_process_based_on(fields.get(15)?, object_refs)?,
+        number_periodicity: match fields.get(31)?.trim() {
+            "1" => "Nonperiodical",
+            _ => return None,
+        },
+        task: parse_task_optional_reference(fields.get(25)?, object_refs, "Task.")??,
+        create_task_in_privileged_mode: information_register_bool(fields.get(29)?)?,
+        data_lock_fields,
+        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(40)?)?,
+        include_help_in_contents: information_register_bool(fields.get(26)?)?,
+        full_text_search: register_child_full_text_search_xml(fields.get(42)?.trim())?,
+        object_presentation: parse_information_register_owner_localized_value(fields.get(35)?)?,
+        extended_object_presentation: parse_information_register_owner_localized_value(
+            fields.get(36)?,
+        )?,
+        list_presentation: parse_information_register_owner_localized_value(fields.get(37)?)?,
+        extended_list_presentation: parse_information_register_owner_localized_value(
+            fields.get(38)?,
+        )?,
+        explanation: parse_information_register_owner_localized_value(fields.get(39)?)?,
+        data_history: metadata_data_history_xml(fields.get(46)?.trim())?,
+        update_data_history_immediately_after_write: information_register_bool(fields.get(47)?)?,
+        execute_after_write_data_history_version_processing: information_register_bool(
+            fields.get(48)?,
+        )?,
+        child_attributes,
+        child_tabular_sections,
+        child_forms,
+        child_commands,
     })
+}
+
+fn parse_business_process_generated_types(
+    fields: &[&str],
+    owner_name: &str,
+) -> Option<Vec<GeneratedTypeEntry>> {
+    let definitions = [
+        (3, 4, "BusinessProcessObject", "Object"),
+        (5, 6, "BusinessProcessRef", "Ref"),
+        (7, 8, "BusinessProcessSelection", "Selection"),
+        (9, 10, "BusinessProcessList", "List"),
+        (11, 12, "BusinessProcessManager", "Manager"),
+        (13, 14, "BusinessProcessRoutePointRef", "RoutePointRef"),
+    ];
+    let mut seen = BTreeSet::new();
+    definitions
+        .into_iter()
+        .map(|(type_slot, value_slot, prefix, category)| {
+            let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
+            let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
+            if !seen.insert(type_id.to_ascii_lowercase())
+                || !seen.insert(value_id.to_ascii_lowercase())
+            {
+                return None;
+            }
+            Some(GeneratedTypeEntry {
+                name: format!("{prefix}.{owner_name}"),
+                category,
+                type_id,
+                value_id,
+            })
+        })
+        .collect()
+}
+
+fn parse_business_process_child_forms(
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<String>> {
+    let prefix = format!("BusinessProcess.{owner_name}.Form.");
+    let mut seen = BTreeSet::new();
+    form_uuids
+        .iter()
+        .map(|uuid| {
+            let reference = parse_exact_register_owned_form_ref(
+                uuid,
+                "BusinessProcess",
+                owner_name,
+                form_refs,
+            )??;
+            let name = reference.strip_prefix(&prefix)?;
+            (!name.is_empty() && !name.contains('.') && seen.insert(name.to_lowercase()))
+                .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn parse_business_process_form_ref(
+    value: &str,
+    form_uuids: &[String],
+    owner_name: &str,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Option<String>> {
+    let uuid = parse_information_register_uuid(value)?.to_ascii_lowercase();
+    if !information_register_uuid_is_zero(&uuid)
+        && !form_uuids
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&uuid))
+    {
+        return None;
+    }
+    parse_exact_register_owned_form_ref(value, "BusinessProcess", owner_name, form_refs)
+}
+
+fn parse_business_process_based_on(
+    value: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    let mut seen = BTreeSet::new();
+    fields[2..]
+        .iter()
+        .map(|value| {
+            let typed = split_information_register_braced_fields(value)?;
+            if typed.len() != 3
+                || typed.first()?.trim() != r##""#""##
+                || !information_register_uuid_matches(typed.get(1)?, METADATA_OBJECT_REF_TYPE_UUID)
+            {
+                return None;
+            }
+            let payload = split_information_register_braced_fields(typed.get(2)?)?;
+            if payload.len() != 2 || payload.first()?.trim() != "1" {
+                return None;
+            }
+            let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
+            let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+            let mut parts = reference.split('.');
+            let kind = parts.next()?;
+            let name = parts.next()?;
+            if kind.is_empty() || name.is_empty() || parts.next().is_some() {
+                return None;
+            }
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
+        })
+        .collect()
+}
+
+fn parse_business_process_field_references(
+    value: &str,
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+    attribute_references: &BTreeSet<String>,
+    standard_attributes: &[(&str, &str)],
+) -> Option<Vec<String>> {
+    let mut seen = BTreeSet::new();
+    parse_exchange_plan_field_ref_collection(value)?
+        .into_iter()
+        .map(|value| {
+            let payload = parse_exchange_plan_field_ref_payload(value)?;
+            let reference = match payload.as_slice() {
+                [marker] => {
+                    let (_, name) = standard_attributes
+                        .iter()
+                        .find(|(candidate, _)| marker.trim() == *candidate)?;
+                    format!("BusinessProcess.{owner_name}.StandardAttribute.{name}")
+                }
+                [kind, uuid] if kind.trim() == "0" => {
+                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
+                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
+                    attribute_references
+                        .contains(&reference)
+                        .then_some(reference)?
+                }
+                _ => return None,
+            };
+            seen.insert(reference.to_ascii_lowercase())
+                .then_some(reference)
+        })
+        .collect()
+}
+
+const BUSINESS_PROCESS_STANDARD_ATTRIBUTES: [(&str, &str); 7] = [
+    ("-9", "Started"),
+    ("-8", "HeadTask"),
+    ("-7", "Completed"),
+    ("-5", "Ref"),
+    ("-4", "DeletionMark"),
+    ("-3", "Date"),
+    ("-2", "Number"),
+];
+
+fn parse_business_process_standard_attributes(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<MetadataStandardAttribute>> {
+    let outer = split_information_register_braced_fields(value)?;
+    if outer.len() != 2 || outer.first()?.trim() != "1" {
+        return None;
+    }
+    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    if payload.first()?.trim() != "1"
+        || parse_information_register_usize(payload.get(1)?)?
+            != BUSINESS_PROCESS_STANDARD_ATTRIBUTES.len()
+        || payload.len()
+            != BUSINESS_PROCESS_STANDARD_ATTRIBUTES
+                .len()
+                .checked_mul(3)?
+                .checked_add(2)?
+    {
+        return None;
+    }
+    let mut bag_shape = None;
+    BUSINESS_PROCESS_STANDARD_ATTRIBUTES
+        .iter()
+        .copied()
+        .zip(payload[2..].chunks_exact(3))
+        .map(|((expected_marker, name), triplet)| {
+            let marker = split_information_register_braced_fields(triplet[0])?;
+            if marker.len() != 1
+                || marker.first()?.trim() != expected_marker
+                || !information_register_uuid_matches(
+                    triplet[1],
+                    INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID,
+                )
+            {
+                return None;
+            }
+            let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
+            if bag_shape.is_some_and(|shape| shape != bag.has_type_reduction_mode) {
+                return None;
+            }
+            bag_shape = Some(bag.has_type_reduction_mode);
+            let fill_value =
+                bag.get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)?;
+            let fill_value =
+                parse_information_register_fill_value(fill_value, type_index, object_refs)?;
+            let (attribute, comment) =
+                parse_register_standard_attribute_with_comment(name, &bag, fill_value)?;
+            Some(MetadataStandardAttribute { attribute, comment })
+        })
+        .collect()
+}
+
+fn parse_business_process_tabular_sections(
+    items: &[&str],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<DocumentTabularSectionLayout>> {
+    let mut seen_uuids = BTreeSet::new();
+    let mut seen_names = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let item = split_information_register_braced_fields(item)?;
+            if item.len() != 3 || item.get(1)?.trim() != "1" {
+                return None;
+            }
+            let wrapper = split_information_register_braced_fields(item.first()?)?;
+            if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
+                return None;
+            }
+            let fields = split_information_register_braced_fields(wrapper.get(1)?)?;
+            if fields.len() != 9 || fields.first()?.trim() != "11" {
+                return None;
+            }
+            let header = parse_wrapped_register_owner_header(fields.get(5)?)?;
+            let expected_reference = format!(
+                "BusinessProcess.{owner_name}.TabularSection.{}",
+                header.name
+            );
+            if header.name.is_empty()
+                || header.name.contains('.')
+                || resolve_exchange_plan_index_reference(&header.uuid, object_refs)?
+                    != expected_reference
+                || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+                || !seen_names.insert(header.name.to_lowercase())
+                || fields[1..5]
+                    .iter()
+                    .map(|value| parse_information_register_non_zero_uuid(value))
+                    .collect::<Option<Vec<_>>>()?
+                    .into_iter()
+                    .any(|uuid| !seen_uuids.insert(uuid.to_ascii_lowercase()))
+                || !matches!(fields.get(6)?.trim(), "0" | "1")
+                || parse_exact_tabular_section_standard_attributes_presence(
+                    "BusinessProcess",
+                    fields.get(7)?,
+                )
+                .is_none()
+                || parse_information_register_owner_localized_value(fields.get(8)?).is_none()
+            {
+                return None;
+            }
+            let collection = parse_task_root_collection(item.get(2)?)?;
+            if !collection
+                .marker
+                .eq_ignore_ascii_case(CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID)
+            {
+                return None;
+            }
+            let attribute_uuids = parse_document_attribute_collection(&collection.items, 8)?;
+            Some(DocumentTabularSectionLayout {
+                uuid: header.uuid,
+                attribute_uuids,
+            })
+        })
+        .collect()
 }
 
 fn parse_task_properties_from_text(
@@ -22864,16 +23401,162 @@ fn format_business_process_source_xml(
     }
     if let Some(index) = xml.find("\t\t</Properties>") {
         let mut properties = format!(
-            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
-            xml_bool(business_process.use_standard_commands)
+            "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n\
+\t\t\t<EditType>{}</EditType>\r\n",
+            xml_bool(business_process.use_standard_commands),
+            business_process.edit_type,
         );
-        push_optional_text_element(
+        push_catalog_input_by_string_xml(&mut properties, &business_process.input_by_string);
+        properties.push_str(&format!(
+            "\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
+\t\t\t<SearchStringModeOnInputByString>{}</SearchStringModeOnInputByString>\r\n\
+\t\t\t<ChoiceDataGetModeOnInputByString>{}</ChoiceDataGetModeOnInputByString>\r\n\
+\t\t\t<FullTextSearchOnInputByString>{}</FullTextSearchOnInputByString>\r\n",
+            business_process.create_on_input,
+            business_process.search_string_mode_on_input_by_string,
+            business_process.choice_data_get_mode_on_input_by_string,
+            business_process.full_text_search_on_input_by_string,
+        ));
+        push_exchange_plan_form_xml(
             &mut properties,
-            "\t\t\t",
+            "DefaultObjectForm",
+            business_process.default_object_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
             "DefaultListForm",
             business_process.default_list_form.as_deref(),
         );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "DefaultChoiceForm",
+            business_process.default_choice_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryObjectForm",
+            business_process.auxiliary_object_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryListForm",
+            business_process.auxiliary_list_form.as_deref(),
+        );
+        push_exchange_plan_form_xml(
+            &mut properties,
+            "AuxiliaryChoiceForm",
+            business_process.auxiliary_choice_form.as_deref(),
+        );
+        properties.push_str(&format!(
+            "\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
+\t\t\t<NumberType>{}</NumberType>\r\n\
+\t\t\t<NumberLength>{}</NumberLength>\r\n\
+\t\t\t<NumberAllowedLength>{}</NumberAllowedLength>\r\n\
+\t\t\t<CheckUnique>{}</CheckUnique>\r\n",
+            business_process.choice_history_on_input,
+            business_process.number_type,
+            business_process.number_length,
+            business_process.number_allowed_length,
+            xml_bool(business_process.check_unique),
+        ));
+        push_metadata_standard_attributes_xml(
+            &mut properties,
+            &business_process.standard_attributes,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<Characteristics/>\r\n\
+\t\t\t<Autonumbering>{}</Autonumbering>\r\n",
+            xml_bool(business_process.autonumbering),
+        ));
+        push_task_based_on_xml(&mut properties, &business_process.based_on);
+        properties.push_str(&format!(
+            "\t\t\t<NumberPeriodicity>{}</NumberPeriodicity>\r\n\
+\t\t\t<Task>{}</Task>\r\n\
+\t\t\t<CreateTaskInPrivilegedMode>{}</CreateTaskInPrivilegedMode>\r\n",
+            business_process.number_periodicity,
+            escape_xml_element_text(&business_process.task),
+            xml_bool(business_process.create_task_in_privileged_mode),
+        ));
+        push_exchange_plan_field_collection_xml(
+            &mut properties,
+            "DataLockFields",
+            &business_process.data_lock_fields,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
+\t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
+\t\t\t<FullTextSearch>{}</FullTextSearch>\r\n",
+            business_process.data_lock_control_mode,
+            xml_bool(business_process.include_help_in_contents),
+            business_process.full_text_search,
+        ));
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ObjectPresentation",
+            &business_process.object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedObjectPresentation",
+            &business_process.extended_object_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ListPresentation",
+            &business_process.list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "ExtendedListPresentation",
+            &business_process.extended_list_presentation,
+        );
+        push_localized_property(
+            &mut properties,
+            "\t\t\t",
+            "Explanation",
+            &business_process.explanation,
+        );
+        properties.push_str(&format!(
+            "\t\t\t<DataHistory>{}</DataHistory>\r\n\
+\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>{}</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
+\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>{}</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
+            business_process.data_history,
+            xml_bool(business_process.update_data_history_immediately_after_write),
+            xml_bool(business_process.execute_after_write_data_history_version_processing),
+        ));
         xml.insert_str(index, &properties);
+    }
+    if let Some(index) = xml.find("\t</BusinessProcess>") {
+        if business_process.child_attributes.is_empty()
+            && business_process.child_tabular_sections.is_empty()
+            && business_process.child_forms.is_empty()
+            && business_process.child_commands.is_empty()
+        {
+            xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
+        } else {
+            let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
+            for child in &business_process.child_attributes {
+                push_metadata_child_object_xml(&mut child_objects, child);
+            }
+            for child in &business_process.child_tabular_sections {
+                push_metadata_child_object_xml(&mut child_objects, child);
+            }
+            for form in &business_process.child_forms {
+                child_objects.push_str(&format!(
+                    "\t\t\t<Form>{}</Form>\r\n",
+                    escape_xml_element_text(form)
+                ));
+            }
+            for command in &business_process.child_commands {
+                push_metadata_child_command_xml(&mut child_objects, command);
+            }
+            child_objects.push_str("\t\t</ChildObjects>\r\n");
+            xml.insert_str(index, &child_objects);
+        }
     }
     xml
 }
