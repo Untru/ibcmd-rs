@@ -4577,25 +4577,6 @@ fn parse_form_child_item_with_metadata_owners(
     let button_top_level_offset = (tag == "Button")
         .then(|| form_button_top_level_offset(&fields))
         .unwrap_or(0);
-    let data_path = parse_form_child_item_data_path(
-        tag,
-        &fields,
-        &name,
-        id,
-        main_data_path,
-        parent_data_path,
-        attribute_names_by_id,
-        attribute_metadata_owners_by_id,
-        table_name_by_id,
-        table_column_names_by_id,
-        type_link_data_path_by_table_column,
-        data_path_by_binding_key,
-        bound_table_path_by_binding_key,
-        table_column_names_by_binding_key,
-        owner_scoped_bindings,
-        object_refs,
-    );
-    let child_parent_data_path = data_path.as_deref().or(parent_data_path);
     let input_field_extended_options = (matches!(tag, "InputField" | "TextDocumentField")
         && form_input_field_layout_is_extended(&fields))
     .then(|| form_input_field_extended_options(&fields))
@@ -4688,6 +4669,32 @@ fn parse_form_child_item_with_metadata_owners(
         tag,
         button_top_level_offset,
     );
+    let table_schema = FormTableSchema::from_raw_layout(wrapper, tag, &fields);
+    let button_data_path_slot = button_common_schema.and_then(|schema| schema.data_path_slot());
+    let owner_scoped_data_path = field_schema_and_options.is_some()
+        || table_schema.is_some()
+        || button_data_path_slot.is_some();
+    let data_path = parse_form_child_item_data_path(
+        tag,
+        &fields,
+        &name,
+        id,
+        main_data_path,
+        parent_data_path,
+        owner_scoped_data_path,
+        button_data_path_slot,
+        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
+        owner_scoped_bindings,
+        object_refs,
+    );
+    let child_parent_data_path = data_path.as_deref().or(parent_data_path);
     let user_visible_schema = if tag == "Button" {
         FormChildItemUserVisibleSchema::from_raw_layout(
             wrapper,
@@ -4929,7 +4936,6 @@ fn parse_form_child_item_with_metadata_owners(
             .filter(|options| options.first().map(|field| field.trim()) == Some(options_kind))
     });
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
-    let table_schema = FormTableSchema::from_raw_layout(wrapper, tag, &fields);
     let table_schema_skip_on_input = table_schema.and_then(|schema| schema.skip_on_input(&fields));
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
@@ -9835,6 +9841,8 @@ pub(super) fn parse_form_child_item_data_path(
     id: &str,
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    owner_scoped_data_path: bool,
+    button_data_path_slot: Option<usize>,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
@@ -9847,55 +9855,61 @@ pub(super) fn parse_form_child_item_data_path(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let owner_scoped_metadata = !matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField");
-    let parse_bound = |field: &&str| {
-        let scoped = owner_scoped_metadata.then(|| {
-            resolve_form_owner_scoped_bound_data_path(
-                field,
-                attribute_metadata_owners_by_id,
-                owner_scoped_bindings,
-                object_refs,
-            )
-        });
-        match scoped {
-            Some(FormOwnerScopedDataPath::Resolved(data_path)) => Some(data_path),
-            Some(FormOwnerScopedDataPath::Ambiguous) => None,
-            Some(FormOwnerScopedDataPath::Unknown) | None => parse_form_bound_data_path(
-                field,
-                name,
-                attribute_names_by_id,
-                table_name_by_id,
-                table_column_names_by_id,
-                bound_table_path_by_binding_key,
-                table_column_names_by_binding_key,
-            )
-            .or_else(|| {
-                parse_form_bound_data_binding_key(field)
-                    .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned())
-            }),
-        }
-    };
     let parse_direct_bound = |field: &&str| {
-        let scoped = owner_scoped_metadata.then(|| {
+        let scoped = if owner_scoped_data_path {
             resolve_form_owner_scoped_bound_data_path(
                 field,
                 attribute_metadata_owners_by_id,
                 owner_scoped_bindings,
                 object_refs,
             )
-        });
-        match scoped {
-            Some(FormOwnerScopedDataPath::Resolved(data_path)) => Some(data_path),
-            Some(FormOwnerScopedDataPath::Ambiguous) => None,
-            Some(FormOwnerScopedDataPath::Unknown) | None => parse_form_bound_data_path(
-                field,
-                name,
-                attribute_names_by_id,
-                table_name_by_id,
-                table_column_names_by_id,
-                bound_table_path_by_binding_key,
-                table_column_names_by_binding_key,
-            ),
+        } else {
+            FormOwnerScopedDataPath::Unknown
+        };
+        scoped.or_else(|| {
+            let data_path = if owner_scoped_metadata {
+                parse_form_bound_data_path_with_metadata_owner(
+                    field,
+                    name,
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    bound_table_path_by_binding_key,
+                    table_column_names_by_binding_key,
+                    object_refs,
+                )
+            } else {
+                parse_form_bound_data_path(
+                    field,
+                    name,
+                    attribute_names_by_id,
+                    table_name_by_id,
+                    table_column_names_by_id,
+                    bound_table_path_by_binding_key,
+                    table_column_names_by_binding_key,
+                )
+            };
+            FormOwnerScopedDataPath::from_option(data_path)
+        })
+    };
+    let parse_bound = |field: &&str| {
+        parse_direct_bound(field).or_else(|| {
+            let data_path = parse_form_bound_data_binding_key(field)
+                .and_then(|binding_key| data_path_by_binding_key.get(&binding_key).cloned());
+            FormOwnerScopedDataPath::from_option(data_path)
+        })
+    };
+    let resolve_slots = |slots: &[usize], resolver: &dyn Fn(&&str) -> FormOwnerScopedDataPath| {
+        for slot in slots {
+            if let Some(field) = fields.get(*slot) {
+                match resolver(field) {
+                    FormOwnerScopedDataPath::Unknown => {}
+                    resolved => return resolved,
+                }
+            }
         }
+        FormOwnerScopedDataPath::Unknown
     };
     let input_field_offset = matches!(
         tag,
@@ -9920,11 +9934,15 @@ pub(super) fn parse_form_child_item_data_path(
     })
     .flatten()
     .unwrap_or(0);
-    match tag {
+    let input_slots = [11 + input_field_offset, 12 + input_field_offset];
+    let data_path = match tag {
         "Table" => fields
             .get(11)
-            .and_then(parse_bound)
-            .or_else(|| main_data_path.map(ToOwned::to_owned)),
+            .map(parse_bound)
+            .unwrap_or(FormOwnerScopedDataPath::Unknown)
+            .or_else(|| {
+                FormOwnerScopedDataPath::from_option(main_data_path.map(ToOwned::to_owned))
+            }),
         "InputField"
         | "CheckBoxField"
         | "PictureField"
@@ -9932,56 +9950,77 @@ pub(super) fn parse_form_child_item_data_path(
         | "FormattedDocumentField"
         | "ProgressBarField"
         | "TrackBarField"
-        | "ChartField" => [11usize, 12]
-            .iter()
-            .filter_map(|index| fields.get(*index + input_field_offset))
-            .find_map(parse_bound)
-            .or_else(|| {
-                parent_data_path.map(|parent| {
-                    let name = normalize_form_data_path_child_name(parent, name);
-                    format!("{parent}.{name}")
-                })
-            }),
+        | "ChartField" => resolve_slots(&input_slots, &parse_bound).or_else(|| {
+            FormOwnerScopedDataPath::from_option(parent_data_path.map(|parent| {
+                let name = normalize_form_data_path_child_name(parent, name);
+                format!("{parent}.{name}")
+            }))
+        }),
         "CalendarField"
         | "GraphicalSchemaField"
         | "SpreadSheetDocumentField"
-        | "HTMLDocumentField" => [11usize, 12]
-            .iter()
-            .filter_map(|index| fields.get(*index + input_field_offset))
-            .find_map(parse_bound),
-        "LabelField" => [11usize, 12]
-            .iter()
-            .filter_map(|index| fields.get(*index + input_field_offset))
-            .find_map(parse_direct_bound),
-        "TextDocumentField" => [11usize, 12]
-            .iter()
-            .filter_map(|index| fields.get(*index + input_field_offset))
-            .find_map(parse_bound),
-        "Button"
-            if fields.first().map(|field| field.trim()) == Some("31")
-                && fields.len() == 52
-                && form_button_top_level_offset(fields) == 0 =>
-        {
-            fields.get(9).and_then(|field| {
-                parse_form_button_data_path(
+        | "HTMLDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        "LabelField" => resolve_slots(&input_slots, &parse_direct_bound),
+        "TextDocumentField" => resolve_slots(&input_slots, &parse_bound),
+        "Button" => button_data_path_slot
+            .and_then(|slot| fields.get(slot))
+            .map(|field| {
+                resolve_form_owner_scoped_button_data_path(
                     field,
                     attribute_names_by_id,
                     table_name_by_id,
                     table_column_names_by_id,
                     type_link_data_path_by_table_column,
-                    data_path_by_binding_key,
                 )
             })
-        }
-        "Button" => None,
-        _ => table_name_by_id.get(id).cloned(),
-    }
+            .unwrap_or(FormOwnerScopedDataPath::Unknown),
+        _ => FormOwnerScopedDataPath::from_option(table_name_by_id.get(id).cloned()),
+    };
+    data_path.into_option()
 }
 
 enum FormOwnerScopedDataPath {
     Unknown,
     Ambiguous,
     Resolved(String),
+}
+
+impl FormOwnerScopedDataPath {
+    fn from_option(data_path: Option<String>) -> Self {
+        data_path.map(Self::Resolved).unwrap_or(Self::Unknown)
+    }
+
+    fn or_else(self, fallback: impl FnOnce() -> Self) -> Self {
+        match self {
+            Self::Unknown => fallback(),
+            resolved => resolved,
+        }
+    }
+
+    fn into_option(self) -> Option<String> {
+        match self {
+            Self::Resolved(data_path) => Some(data_path),
+            Self::Unknown | Self::Ambiguous => None,
+        }
+    }
+}
+
+fn resolve_form_owner_scoped_button_data_path(
+    field: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+) -> FormOwnerScopedDataPath {
+    let no_global_binding_paths = BTreeMap::new();
+    FormOwnerScopedDataPath::from_option(parse_form_button_data_path(
+        field,
+        attribute_names_by_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        &no_global_binding_paths,
+    ))
 }
 
 fn resolve_form_owner_scoped_bound_data_path(

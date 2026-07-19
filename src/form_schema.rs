@@ -2128,6 +2128,14 @@ impl FormButtonCommonSchema {
         (fields.get(7 + self.top_level_offset)?.trim() == "0").then_some(false)
     }
 
+    pub(crate) const fn data_path_slot(self) -> Option<usize> {
+        if self.top_level_offset == 0 {
+            Some(9)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
         self.non_zero_dimension(fields, 17)
     }
