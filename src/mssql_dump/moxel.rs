@@ -112,6 +112,93 @@ impl MoxelSourceFormatMap {
     }
 }
 
+struct MoxelSourceFontMap {
+    source_to_output: Vec<usize>,
+    output_to_source: Vec<usize>,
+}
+
+impl MoxelSourceFontMap {
+    fn try_new(spreadsheet: &MoxelSpreadsheet) -> Option<Self> {
+        let font_count = spreadsheet.fonts.len();
+        if font_count < 2
+            || !spreadsheet.fonts.iter().all(|font| {
+                font.kind == "Absolute"
+                    && font.ref_name.is_none()
+                    && font.face_name.is_some()
+                    && font.height.is_some()
+                    && font.scale.is_some()
+            })
+        {
+            return None;
+        }
+
+        let mut seen = vec![false; font_count];
+        let mut output_to_source = Vec::with_capacity(font_count);
+        for source_font_index in moxel_output_format_indices(spreadsheet)
+            .into_iter()
+            .filter_map(|format_index| moxel_format_for_index(spreadsheet, format_index).font)
+        {
+            let source_slot = seen.get_mut(source_font_index)?;
+            if !*source_slot {
+                *source_slot = true;
+                output_to_source.push(source_font_index);
+            }
+        }
+        if output_to_source.len() != font_count
+            || output_to_source.iter().copied().eq(0..font_count)
+        {
+            return None;
+        }
+
+        let mut source_to_output = vec![usize::MAX; font_count];
+        for (output_font_index, source_font_index) in output_to_source.iter().copied().enumerate() {
+            let output_slot = source_to_output.get_mut(source_font_index)?;
+            if *output_slot != usize::MAX {
+                return None;
+            }
+            *output_slot = output_font_index;
+        }
+        if source_to_output
+            .iter()
+            .enumerate()
+            .any(|(source_font_index, output_font_index)| {
+                output_to_source.get(*output_font_index).copied() != Some(source_font_index)
+            })
+        {
+            return None;
+        }
+
+        Some(Self {
+            source_to_output,
+            output_to_source,
+        })
+    }
+
+    fn output_for_source(&self, source_font_index: usize) -> Option<usize> {
+        let output_font_index = self.source_to_output.get(source_font_index).copied()?;
+        (self.output_to_source.get(output_font_index).copied() == Some(source_font_index))
+            .then_some(output_font_index)
+    }
+
+    fn output_fonts(&self, fonts: &[MoxelFont]) -> Option<Vec<MoxelFont>> {
+        if fonts.len() != self.source_to_output.len() || fonts.len() != self.output_to_source.len()
+        {
+            return None;
+        }
+        self.output_to_source
+            .iter()
+            .map(|source_font_index| fonts.get(*source_font_index).cloned())
+            .collect()
+    }
+
+    fn output_format_font(&self, format: &MoxelFormat) -> Option<Option<usize>> {
+        match format.font {
+            Some(source_font_index) => Some(Some(self.output_for_source(source_font_index)?)),
+            None => Some(None),
+        }
+    }
+}
+
 fn complete_moxel_source_format_order(
     format_count: usize,
     leading_sources: &[usize],
@@ -213,6 +300,7 @@ pub(super) struct MoxelMerge {
     pub(super) columns_id: Option<String>,
 }
 
+#[derive(Clone)]
 pub(super) struct MoxelFont {
     pub(super) ref_name: Option<String>,
     pub(super) face_name: Option<String>,
@@ -751,7 +839,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
     {
         default_set.default_format_index = Some(shared_format_index);
     }
-    Some(MoxelSpreadsheet {
+    let mut spreadsheet = MoxelSpreadsheet {
         column_count,
         column_sets,
         column_formats,
@@ -777,7 +865,13 @@ pub(super) fn parse_moxel_spreadsheet_text(
         default_format_index,
         source_format_map,
         height,
-    })
+    };
+    if sparse_source_format_refs
+        && let Some(source_font_map) = MoxelSourceFontMap::try_new(&spreadsheet)
+    {
+        remap_moxel_source_fonts(&source_font_map, &mut spreadsheet);
+    }
+    Some(spreadsheet)
 }
 
 pub(super) fn normalize_moxel_fonts(fonts: &mut Vec<MoxelFont>, formats: &[MoxelFormat]) {
@@ -2413,6 +2507,63 @@ pub(super) fn unquote_moxel_string(value: &str) -> Option<String> {
     let value = value.trim();
     let inner = value.strip_prefix('"')?.strip_suffix('"')?;
     Some(inner.replace("\"\"", "\""))
+}
+
+fn remap_moxel_source_fonts(
+    source_font_map: &MoxelSourceFontMap,
+    spreadsheet: &mut MoxelSpreadsheet,
+) {
+    let Some(output_fonts) = source_font_map.output_fonts(&spreadsheet.fonts) else {
+        return;
+    };
+    let Some(output_default_font) = source_font_map.output_format_font(&spreadsheet.default_format)
+    else {
+        return;
+    };
+    let Some(output_column_fonts) = spreadsheet
+        .column_formats
+        .iter()
+        .map(|format| source_font_map.output_format_font(format))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return;
+    };
+    let Some(output_format_fonts) = spreadsheet
+        .formats
+        .iter()
+        .map(|format| source_font_map.output_format_font(format))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return;
+    };
+    let Some(output_extra_format_fonts) = spreadsheet
+        .extra_formats
+        .values()
+        .map(|format| source_font_map.output_format_font(format))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return;
+    };
+
+    spreadsheet.fonts = output_fonts;
+    spreadsheet.default_format.font = output_default_font;
+    for (format, output_font) in spreadsheet
+        .column_formats
+        .iter_mut()
+        .zip(output_column_fonts)
+    {
+        format.font = output_font;
+    }
+    for (format, output_font) in spreadsheet.formats.iter_mut().zip(output_format_fonts) {
+        format.font = output_font;
+    }
+    for (format, output_font) in spreadsheet
+        .extra_formats
+        .values_mut()
+        .zip(output_extra_format_fonts)
+    {
+        format.font = output_font;
+    }
 }
 
 fn parse_moxel_formats_with_source_map(
