@@ -4847,7 +4847,9 @@ fn remap_moxel_row_and_cell_source_format_indices(
     for row in rows {
         if let Some(source_format_index) = row.source_format_index {
             if source_format_index <= 1 {
-                row.format_index = source_format_index;
+                // Raw row slot zero means that no row format was specified. Keep
+                // that sentinel outside the typed source/internal slot map.
+                row.format_index = 0;
             } else if let Some(format_index) =
                 source_format_map.internal_for_source(source_format_index - 1)
             {
