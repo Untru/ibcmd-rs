@@ -569,6 +569,7 @@ pub(super) struct FormChildItem {
     pub(super) initial_tree_view: Option<&'static str>,
     pub(super) row_input_mode: Option<&'static str>,
     pub(super) table_choice_mode: Option<bool>,
+    pub(super) table_multiple_choice: Option<bool>,
     pub(super) table_selection_mode: Option<&'static str>,
     pub(super) table_header: Option<bool>,
     pub(super) table_horizontal_scroll_bar: Option<FormTableHorizontalScrollBar>,
@@ -5467,6 +5468,7 @@ fn parse_form_child_item_with_metadata_owners(
         },
         row_input_mode: table_schema.and_then(|schema| schema.row_input_mode(&fields)),
         table_choice_mode: table_schema.and_then(|schema| schema.choice_mode(&fields)),
+        table_multiple_choice: table_schema.and_then(|schema| schema.multiple_choice(&fields)),
         table_selection_mode: table_schema.and_then(|schema| schema.selection_mode(&fields)),
         table_header: table_schema.and_then(|schema| schema.header(&fields)),
         table_horizontal_scroll_bar: table_schema
@@ -12700,6 +12702,10 @@ fn format_form_table_property_xml(
         },
         FormTableXmlProperty::ChoiceMode => match item.table_choice_mode {
             Some(true) => format!("{tab}<ChoiceMode>true</ChoiceMode>\r\n"),
+            _ => String::new(),
+        },
+        FormTableXmlProperty::MultipleChoice => match item.table_multiple_choice {
+            Some(true) => format!("{tab}<MultipleChoice>true</MultipleChoice>\r\n"),
             _ => String::new(),
         },
         FormTableXmlProperty::RowInputMode => item

@@ -258,6 +258,7 @@ struct FormXmlChildItem {
     table_command_bar_location: Option<String>,
     table_current_row_use: Option<FormTableCurrentRowUse>,
     table_horizontal_scroll_bar: Option<FormTableHorizontalScrollBar>,
+    table_multiple_choice: Option<bool>,
     height_in_table_rows: Option<String>,
     row_selection_mode: Option<String>,
     enable_start_drag: Option<bool>,
@@ -4905,6 +4906,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ModifiesSavedData"
                         | "CurrentRowUse"
                         | "HorizontalScrollBar"
+                        | "MultipleChoice"
                         | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
@@ -5350,6 +5352,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &current_child_items,
                     )
+                    || path_ends_with_for_child_table_multiple_choice(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -5859,6 +5862,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &current_child_items,
                     )
+                    || path_ends_with_for_child_table_multiple_choice(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -6560,6 +6564,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                         )
                                     })?,
                             );
+                        }
+                    }
+                    "MultipleChoice"
+                        if path_ends_with_for_child_table_multiple_choice(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_multiple_choice = Some(parse_form_xml_bool(
+                                "Table/MultipleChoice",
+                                text_value.trim(),
+                            )?);
                         }
                     }
                     "CurrentRowUse"
@@ -8225,6 +8242,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ModifiesSavedData"
                         | "CurrentRowUse"
                         | "HorizontalScrollBar"
+                        | "MultipleChoice"
                         | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
@@ -8437,6 +8455,7 @@ fn parse_form_child_item_xml(
         table_command_bar_location: None,
         table_current_row_use: None,
         table_horizontal_scroll_bar: None,
+        table_multiple_choice: None,
         height_in_table_rows: None,
         row_selection_mode: None,
         enable_start_drag: None,
@@ -9379,6 +9398,16 @@ fn path_ends_with_for_child_table_horizontal_scroll_bar(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "HorizontalScrollBar"])
+}
+
+fn path_ends_with_for_child_table_multiple_choice(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "MultipleChoice"])
 }
 
 fn path_ends_with_for_child_row_filter(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -12683,6 +12712,21 @@ fn form_layout_table_horizontal_scroll_bar_range(
     fields.get(schema.horizontal_scroll_bar_slot()).cloned()
 }
 
+fn form_layout_table_multiple_choice_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let raw_fields = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let schema = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields)?;
+    fields
+        .get(schema.multiple_choice_slot(&raw_fields)?)
+        .cloned()
+}
+
 fn form_layout_table_file_drag_mode_replacement(
     text: &str,
     fields: &[Range<usize>],
@@ -12799,6 +12843,15 @@ fn patch_form_layout_child_item_entry(
             replacements.push((
                 horizontal_scroll_bar_range,
                 horizontal_scroll_bar.raw_code().to_string(),
+            ));
+        }
+        if let Some(multiple_choice) = item.table_multiple_choice
+            && let Some(multiple_choice_range) =
+                form_layout_table_multiple_choice_range(text, fields)
+        {
+            replacements.push((
+                multiple_choice_range,
+                if multiple_choice { "1" } else { "0" }.to_string(),
             ));
         }
         if let Some(data_path) = &item.data_path

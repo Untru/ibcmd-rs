@@ -3570,6 +3570,7 @@ pub(crate) enum FormTableXmlProperty {
     AutoMaxHeight,
     HeightInTableRows,
     ChoiceMode,
+    MultipleChoice,
     RowInputMode,
     SelectionMode,
     RowSelectionMode,
@@ -3628,6 +3629,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::AutoMaxHeight,
     FormTableXmlProperty::HeightInTableRows,
     FormTableXmlProperty::ChoiceMode,
+    FormTableXmlProperty::MultipleChoice,
     FormTableXmlProperty::RowInputMode,
     FormTableXmlProperty::SelectionMode,
     FormTableXmlProperty::RowSelectionMode,
@@ -3912,6 +3914,7 @@ impl FormTableSchema {
     const TEXT_COLOR_SLOT: usize = 46;
     const BORDER_COLOR_SLOT: usize = 47;
     const FILE_DRAG_MODE_REVERSE_OFFSET: usize = 2;
+    const MULTIPLE_CHOICE_REVERSE_OFFSET: usize = 34;
     const SKIP_ON_INPUT_REVERSE_OFFSET: usize = 30;
     const SEARCH_STRING_LOCATION_REVERSE_OFFSET: usize = 25;
     const VIEW_STATUS_LOCATION_REVERSE_OFFSET: usize = 24;
@@ -3942,6 +3945,12 @@ impl FormTableSchema {
             fields,
             Self::FILE_DRAG_MODE_REVERSE_OFFSET,
         )?)?;
+        if !matches!(
+            Self::reverse_field(fields, Self::MULTIPLE_CHOICE_REVERSE_OFFSET)?.trim(),
+            "0" | "1"
+        ) {
+            return None;
+        }
         FormTableSkipOnInput::from_raw(Self::reverse_field(
             fields,
             Self::SKIP_ON_INPUT_REVERSE_OFFSET,
@@ -4112,6 +4121,17 @@ impl FormTableSchema {
 
     pub(crate) fn choice_mode(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::ChoiceMode)
+    }
+
+    pub(crate) fn multiple_choice_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::MULTIPLE_CHOICE_REVERSE_OFFSET)?;
+        matches!(fields.get(slot)?.trim(), "0" | "1").then_some(slot)
+    }
+
+    pub(crate) fn multiple_choice(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(self.multiple_choice_slot(fields)?)?.trim() == "1").then_some(true)
     }
 
     pub(crate) fn row_input_mode(self, fields: &[&str]) -> Option<&'static str> {
