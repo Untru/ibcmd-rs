@@ -1369,6 +1369,8 @@ pub(crate) struct FormPictureDecorationProperties {
 }
 
 impl FormPictureDecorationSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 18;
+
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -1380,6 +1382,18 @@ impl FormPictureDecorationSchema {
             ("12", 36, "PictureDecoration", Some("1"))
         )
         .then_some(Self)
+    }
+
+    pub(crate) fn hyperlink(self, options: &[&str]) -> Option<bool> {
+        self.hyperlink_option_slot(options)?;
+        (options[2].trim() == "1").then_some(true)
+    }
+
+    pub(crate) fn hyperlink_option_slot(self, options: &[&str]) -> Option<usize> {
+        (options.len() == 13
+            && options.first().map(|field| field.trim()) == Some("4")
+            && matches!(options.get(2).map(|field| field.trim()), Some("0" | "1")))
+        .then_some(2)
     }
 
     pub(crate) fn properties(self, fields: &[&str]) -> FormPictureDecorationProperties {
@@ -1938,6 +1952,8 @@ pub(crate) struct FormFieldSchema {
     vertical_stretch_option_slot: Option<usize>,
     show_in_header_slot: Option<usize>,
     auto_cell_height_slot: Option<usize>,
+    cell_hyperlink_slot: Option<usize>,
+    show_in_footer_slot: Option<usize>,
     read_only_slot: Option<usize>,
     title_height_slot: Option<usize>,
     horizontal_align_slot: Option<usize>,
@@ -2160,6 +2176,9 @@ impl FormFieldSchema {
             .then_some(20 + top_level_offset),
             auto_cell_height_slot: matches!(item_tag, "InputField" | "LabelField" | "PictureField")
                 .then_some(28 + top_level_offset),
+            cell_hyperlink_slot: matches!(item_tag, "InputField" | "LabelField")
+                .then_some(22 + top_level_offset),
+            show_in_footer_slot: (item_tag == "PictureField").then_some(21 + top_level_offset),
             read_only_slot: matches!(
                 item_tag,
                 "InputField"
@@ -2223,6 +2242,30 @@ impl FormFieldSchema {
 
     pub(crate) fn auto_cell_height(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.auto_cell_height_slot?)?.trim() == "1").then_some(true)
+    }
+
+    pub(crate) fn cell_hyperlink(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(self.cell_hyperlink_slot?)?.trim() {
+            "1" => Some(true),
+            "0" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn cell_hyperlink_slot(self) -> Option<usize> {
+        self.cell_hyperlink_slot
+    }
+
+    pub(crate) fn show_in_footer(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(self.show_in_footer_slot?)?.trim() {
+            "0" => Some(false),
+            "1" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn show_in_footer_slot(self) -> Option<usize> {
+        self.show_in_footer_slot
     }
 
     pub(crate) fn read_only(self, fields: &[&str]) -> Option<bool> {

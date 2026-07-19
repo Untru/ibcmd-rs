@@ -3684,6 +3684,16 @@ pub(super) fn remap_moxel_format_style_ref_index(
     if raw_index == 0 || style_refs.len() < 5 {
         return raw_index;
     }
+    let has_gray_embedded_prefix = raw_index == 2
+        && style_refs.first().and_then(|slot| slot.as_deref()) == Some("moxel:f527:0:1")
+        && style_refs.get(1).and_then(|slot| slot.as_deref()) == Some("moxel:f527:6:1")
+        && style_refs.get(2).is_some_and(Option::is_none)
+        && style_refs.get(3).and_then(|slot| slot.as_deref()) == Some("style:FormBackColor")
+        && style_refs.get(4).and_then(|slot| slot.as_deref()) == Some("style:FormTextColor")
+        && style_refs.get(5).and_then(|slot| slot.as_deref()) == Some("d3p1:Gray");
+    if has_gray_embedded_prefix {
+        return raw_index + 3;
+    }
     let has_embedded_prefix = (style_refs[0].as_deref() == Some("moxel:f527:1:1")
         && style_refs[1].as_deref() == Some("moxel:f527:1:2")
         && style_refs[2].as_deref() == Some("moxel:f527:1:3"))

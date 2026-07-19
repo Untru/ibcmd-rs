@@ -17,8 +17,9 @@ use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
-    FormControlBorderSchema, FormControlBorderStyle,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormTablePropertyBagKey as TableBagKey,
+    FormControlBorderSchema, FormControlBorderStyle, FormFieldSchema,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
+    FormTablePropertyBagKey as TableBagKey,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -280,6 +281,7 @@ struct FormXmlChildItem {
     scroll_on_compress: Option<bool>,
     show_title: Option<bool>,
     show_in_header: Option<bool>,
+    show_in_footer: Option<bool>,
     read_only: Option<bool>,
     skip_on_input: Option<bool>,
     title_location: Option<FormXmlTitleLocation>,
@@ -301,6 +303,8 @@ struct FormXmlChildItem {
     wrap: Option<bool>,
     text_edit: Option<bool>,
     auto_cell_height: Option<bool>,
+    cell_hyperlink: Option<bool>,
+    hyperlink: Option<bool>,
     drop_list_button: Option<bool>,
     clear_button: Option<bool>,
     open_button: Option<bool>,
@@ -4158,6 +4162,7 @@ fn spreadsheet_web_color_code(value: &str) -> Option<u32> {
     match value {
         "d3p1:Crimson" => Some(21),
         "d3p1:Gainsboro" => Some(48),
+        "d3p1:Gray" => Some(52),
         "d3p1:LemonChiffon" => Some(64),
         "d3p1:LightYellow" => Some(79),
         "d3p1:PaleGoldenrod" => Some(108),
@@ -4957,6 +4962,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Wrap"
                         | "TextEdit"
                         | "AutoCellHeight"
+                        | "CellHyperlink"
+                        | "ShowInFooter"
+                        | "Hyperlink"
                         | "DropListButton"
                         | "ClearButton"
                         | "OpenButton"
@@ -5640,6 +5648,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_wrap(&path, &current_child_items)
                     || path_ends_with_for_child_text_edit(&path, &current_child_items)
                     || path_ends_with_for_child_auto_cell_height(&path, &current_child_items)
+                    || path_ends_with_for_child_cell_hyperlink(&path, &current_child_items)
+                    || path_ends_with_for_child_show_in_footer(&path, &current_child_items)
+                    || path_ends_with_for_child_hyperlink(&path, &current_child_items)
                     || path_ends_with_for_child_drop_list_button(&path, &current_child_items)
                     || path_ends_with_for_child_clear_button(&path, &current_child_items)
                     || path_ends_with_for_child_open_button(&path, &current_child_items)
@@ -7893,6 +7904,36 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "CellHyperlink"
+                        if path_ends_with_for_child_cell_hyperlink(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.cell_hyperlink = Some(parse_form_xml_bool(
+                                "ChildItem/CellHyperlink",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ShowInFooter"
+                        if path_ends_with_for_child_show_in_footer(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.show_in_footer = Some(parse_form_xml_bool(
+                                "ChildItem/ShowInFooter",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Hyperlink"
+                        if path_ends_with_for_child_hyperlink(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.hyperlink = Some(parse_form_xml_bool(
+                                "ChildItem/Hyperlink",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "DropListButton"
                         if path_ends_with_for_child_drop_list_button(
                             &path,
@@ -8188,6 +8229,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Wrap"
                         | "TextEdit"
                         | "AutoCellHeight"
+                        | "CellHyperlink"
+                        | "ShowInFooter"
+                        | "Hyperlink"
                         | "DropListButton"
                         | "ClearButton"
                         | "OpenButton"
@@ -8366,6 +8410,7 @@ fn parse_form_child_item_xml(
         scroll_on_compress: None,
         show_title: None,
         show_in_header: None,
+        show_in_footer: None,
         read_only: None,
         skip_on_input: None,
         title_location: None,
@@ -8387,6 +8432,8 @@ fn parse_form_child_item_xml(
         wrap: None,
         text_edit: None,
         auto_cell_height: None,
+        cell_hyperlink: None,
+        hyperlink: None,
         drop_list_button: None,
         clear_button: None,
         open_button: None,
@@ -8959,6 +9006,28 @@ fn path_ends_with_for_child_auto_cell_height(path: &[String], items: &[FormXmlCh
         return false;
     };
     item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoCellHeight"])
+}
+
+fn path_ends_with_for_child_cell_hyperlink(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(item.tag.as_str(), "InputField" | "LabelField")
+        && path_ends_with(path, &[item.tag.as_str(), "CellHyperlink"])
+}
+
+fn path_ends_with_for_child_show_in_footer(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "PictureField" && path_ends_with(path, &[item.tag.as_str(), "ShowInFooter"])
+}
+
+fn path_ends_with_for_child_hyperlink(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "PictureDecoration" && path_ends_with(path, &[item.tag.as_str(), "Hyperlink"])
 }
 
 fn path_ends_with_for_child_drop_list_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -12429,6 +12498,90 @@ fn form_layout_control_border_style_range(
     tuple_ranges.get(3).cloned()
 }
 
+fn form_layout_field_schema(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<FormFieldSchema> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let top_level_offset = match (wrapper, fields.len()) {
+        ("37", 59) => 0,
+        ("37", 60) => 1,
+        _ => return None,
+    };
+    let direct_discriminator = fields
+        .get(5 + top_level_offset)
+        .map(|range| text[range.clone()].trim());
+    let options_range = fields
+        .get(FormFieldSchema::OPTIONS_BASE_SLOT + top_level_offset)?
+        .clone();
+    if scan_1c_braced_value_range(text, options_range.start) != Some(options_range.clone()) {
+        return None;
+    }
+    let option_ranges = scan_braced_fields(text, options_range.start).ok()?;
+    let options = option_ranges
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    FormFieldSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        item_tag,
+        top_level_offset,
+        direct_discriminator,
+        &options,
+    )
+}
+
+fn form_layout_field_cell_hyperlink_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields.get(schema.cell_hyperlink_slot()?)?.clone();
+    matches!(text[range.clone()].trim(), "0" | "1").then_some(range)
+}
+
+fn form_layout_field_show_in_footer_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields.get(schema.show_in_footer_slot()?)?.clone();
+    matches!(text[range.clone()].trim(), "0" | "1").then_some(range)
+}
+
+fn form_layout_picture_decoration_hyperlink_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let direct_discriminator = fields.get(5).map(|range| text[range.clone()].trim());
+    let options_range = fields
+        .get(FormPictureDecorationSchema::OPTIONS_SLOT)?
+        .clone();
+    if scan_1c_braced_value_range(text, options_range.start) != Some(options_range.clone()) {
+        return None;
+    }
+    let option_ranges = scan_braced_fields(text, options_range.start).ok()?;
+    let options = option_ranges
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let schema = FormPictureDecorationSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        item_tag,
+        direct_discriminator,
+    )?;
+    option_ranges
+        .get(schema.hyperlink_option_slot(&options)?)
+        .cloned()
+}
+
 fn patch_form_layout_child_item_entry(
     text: &mut String,
     fields: &[Range<usize>],
@@ -12467,6 +12620,22 @@ fn patch_form_layout_child_item_entry(
         && let Some(style_range) = form_layout_control_border_style_range(text, fields, &item.tag)
     {
         replacements.push((style_range, style.raw_code().to_string()));
+    }
+    if let Some(cell_hyperlink) = item.cell_hyperlink
+        && let Some(range) = form_layout_field_cell_hyperlink_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, if cell_hyperlink { "1" } else { "0" }.to_string()));
+    }
+    if let Some(show_in_footer) = item.show_in_footer
+        && let Some(range) = form_layout_field_show_in_footer_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, if show_in_footer { "1" } else { "0" }.to_string()));
+    }
+    if let Some(hyperlink) = item.hyperlink
+        && let Some(range) =
+            form_layout_picture_decoration_hyperlink_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, if hyperlink { "1" } else { "0" }.to_string()));
     }
     if let Some(extended_tooltip) = &item.extended_tooltip
         && let Some(tooltip_range) = form_layout_child_item_extended_tooltip_range(text, fields)?

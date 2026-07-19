@@ -5134,13 +5134,21 @@ fn parse_form_child_item_with_metadata_owners(
     let label_decoration_options = (tag == "LabelDecoration")
         .then(|| parse_form_label_decoration_options(tag, &fields, object_refs))
         .flatten();
-    let picture_decoration_properties = FormPictureDecorationSchema::from_raw_layout(
+    let picture_decoration_options = (tag == "PictureDecoration")
+        .then(|| {
+            fields
+                .get(FormPictureDecorationSchema::OPTIONS_SLOT)
+                .and_then(|field| split_1c_braced_fields(field.trim(), 0))
+        })
+        .flatten();
+    let picture_decoration_schema = FormPictureDecorationSchema::from_raw_layout(
         wrapper,
         fields.len(),
         tag,
         direct_discriminator,
-    )
-    .map(|schema| schema.properties(&fields));
+    );
+    let picture_decoration_properties =
+        picture_decoration_schema.map(|schema| schema.properties(&fields));
     let label_field_options = (tag == "LabelField")
         .then(|| parse_form_label_field_options(&fields, object_refs))
         .flatten();
@@ -5796,10 +5804,17 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        cell_hyperlink: None,
+        cell_hyperlink: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.cell_hyperlink(&fields)),
         show_in_footer: check_box_field_layout
             .as_ref()
-            .and_then(|(schema, _)| schema.show_in_footer(&fields)),
+            .and_then(|(schema, _)| schema.show_in_footer(&fields))
+            .or_else(|| {
+                field_schema_and_options
+                    .as_ref()
+                    .and_then(|(schema, _)| schema.show_in_footer(&fields))
+            }),
         footer_horizontal_align: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.footer_horizontal_align(&fields)),
@@ -5811,6 +5826,11 @@ fn parse_form_child_item_with_metadata_owners(
                 && label_decoration_options
                     .as_ref()
                     .is_some_and(|options| options.hyperlink))
+            || (tag == "PictureDecoration"
+                && picture_decoration_schema
+                    .zip(picture_decoration_options.as_deref())
+                    .and_then(|(schema, options)| schema.hyperlink(options))
+                    == Some(true))
         {
             Some(true)
         } else {
@@ -13532,7 +13552,8 @@ pub(super) fn format_form_child_item_xml(
             xml_bool(item.picture_load_transparent)
         ));
     }
-    if item.tag != "LabelDecoration" && item.hiperlink == Some(true) {
+    if !matches!(item.tag, "LabelDecoration" | "PictureDecoration") && item.hiperlink == Some(true)
+    {
         xml.push_str(&format!("{tab}\t<Hiperlink>true</Hiperlink>\r\n"));
     }
     if item.tag != "PictureDecoration"
@@ -13919,7 +13940,9 @@ pub(super) fn format_form_child_item_xml(
                 ));
             }
         }
-        if item.tag == "LabelDecoration" && item.hiperlink == Some(true) {
+        if matches!(item.tag, "LabelDecoration" | "PictureDecoration")
+            && item.hiperlink == Some(true)
+        {
             xml.push_str(&format!("{tab}\t<Hyperlink>true</Hyperlink>\r\n"));
         }
         if item.tag == "LabelDecoration" {
