@@ -14344,7 +14344,7 @@ fn parse_chart_of_accounts_properties(
     if metadata_header_field_index(fields, &header.uuid) != Some(15)
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
-        || !exchange_plan_characteristics_is_empty(fields.get(18)?)
+        || !cct_pair_is(fields.get(18)?, "0", "0")
         || !cct_based_on_is_empty(fields.get(48)?)
         || !cct_data_lock_fields_are_empty(fields.get(50)?)
     {
@@ -14643,7 +14643,7 @@ fn parse_chart_of_calculation_types_properties(
     if metadata_header_field_index(fields, &header.uuid) != Some(1)
         || header_occurrences != 1
         || !strict_metadata_headers_match(&parsed_header, header)
-        || !exchange_plan_characteristics_is_empty(fields.get(36)?)
+        || !cct_pair_is(fields.get(36)?, "0", "0")
         || !cct_based_on_is_empty(fields.get(54)?)
         || !cct_data_lock_fields_are_empty(fields.get(56)?)
     {
@@ -14735,14 +14735,14 @@ fn parse_chart_of_calculation_types_properties(
         create_on_input: (fields.get(39)?.trim() == "0").then_some("DontUse")?,
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(59)?.trim())?,
         default_object_form: parse_strict_chart_owned_form_ref(
-            fields.get(33)?,
+            fields.get(32)?,
             "ChartOfCalculationTypes",
             &form_uuids,
             &header.name,
             form_refs,
         )?,
         default_list_form: parse_strict_chart_owned_form_ref(
-            fields.get(32)?,
+            fields.get(33)?,
             "ChartOfCalculationTypes",
             &form_uuids,
             &header.name,
