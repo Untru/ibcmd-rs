@@ -4160,6 +4160,8 @@ fn spreadsheet_horizontal_alignment_code(value: &str) -> Option<usize> {
     match value {
         "Left" => Some(0),
         "Right" => Some(2),
+        "Justify" => Some(4),
+        "Auto" => Some(5),
         "Center" => Some(6),
         _ => None,
     }

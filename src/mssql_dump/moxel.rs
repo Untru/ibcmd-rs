@@ -4108,6 +4108,8 @@ pub(super) fn moxel_horizontal_alignment(value: usize) -> Option<&'static str> {
     match value {
         0 => Some("Left"),
         2 => Some("Right"),
+        4 => Some("Justify"),
+        5 => Some("Auto"),
         6 => Some("Center"),
         7 => Some("Right"),
         _ => None,
