@@ -3330,6 +3330,40 @@ impl FormTableSearchControlLocation {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormTableFileDragMode {
+    AsFile,
+    Omit,
+}
+
+impl FormTableFileDragMode {
+    fn from_raw(value: &str) -> Option<Self> {
+        match value.trim() {
+            "0" => Some(Self::AsFile),
+            "1" => Some(Self::Omit),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormTableSkipOnInput {
+    False,
+    True,
+    Omit,
+}
+
+impl FormTableSkipOnInput {
+    fn from_raw(value: &str) -> Option<Self> {
+        match value.trim() {
+            "0" => Some(Self::False),
+            "1" => Some(Self::True),
+            "2" => Some(Self::Omit),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormTableSchema;
 
 impl FormTableSchema {
@@ -3341,6 +3375,8 @@ impl FormTableSchema {
     const BACK_COLOR_SLOT: usize = 45;
     const TEXT_COLOR_SLOT: usize = 46;
     const BORDER_COLOR_SLOT: usize = 47;
+    const FILE_DRAG_MODE_REVERSE_OFFSET: usize = 2;
+    const SKIP_ON_INPUT_REVERSE_OFFSET: usize = 30;
     const SEARCH_STRING_LOCATION_REVERSE_OFFSET: usize = 25;
     const VIEW_STATUS_LOCATION_REVERSE_OFFSET: usize = 24;
     const SEARCH_CONTROL_LOCATION_REVERSE_OFFSET: usize = 23;
@@ -3350,12 +3386,34 @@ impl FormTableSchema {
             || item_tag != "Table"
             || fields.first().map(|field| field.trim()) != Some("55")
             || fields.len() < Self::BASE_FIELD_COUNT
-            || (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0
+        {
+            return None;
+        }
+
+        let pair_count = fields
+            .get(Self::COMMAND_SET_PAIR_COUNT_SLOT)?
+            .trim()
+            .parse::<usize>()
+            .ok()?;
+        let expected_field_count = pair_count
+            .checked_mul(2)?
+            .checked_add(Self::BASE_FIELD_COUNT)?;
+        if fields.len() != expected_field_count
             || !FormTableSlot::ALL.iter().all(|slot| {
                 fields
                     .get(slot.index())
                     .is_some_and(|field| slot.accepts(field))
             })
+            || FormTableFileDragMode::from_raw(Self::reverse_field(
+                fields,
+                Self::FILE_DRAG_MODE_REVERSE_OFFSET,
+            )?)
+            .is_none()
+            || FormTableSkipOnInput::from_raw(Self::reverse_field(
+                fields,
+                Self::SKIP_ON_INPUT_REVERSE_OFFSET,
+            )?)
+            .is_none()
         {
             return None;
         }
@@ -3525,6 +3583,35 @@ impl FormTableSchema {
 
     pub(crate) fn enable_drag(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::EnableDrag)
+    }
+
+    pub(crate) fn file_drag_mode(self, fields: &[&str]) -> Option<&'static str> {
+        match FormTableFileDragMode::from_raw(Self::reverse_field(
+            fields,
+            Self::FILE_DRAG_MODE_REVERSE_OFFSET,
+        )?)? {
+            FormTableFileDragMode::AsFile => Some("AsFile"),
+            FormTableFileDragMode::Omit => None,
+        }
+    }
+
+    pub(crate) fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
+        match FormTableSkipOnInput::from_raw(Self::reverse_field(
+            fields,
+            Self::SKIP_ON_INPUT_REVERSE_OFFSET,
+        )?)? {
+            FormTableSkipOnInput::False => Some(false),
+            FormTableSkipOnInput::True => Some(true),
+            FormTableSkipOnInput::Omit => None,
+        }
+    }
+
+    fn reverse_field<'a>(fields: &[&'a str], reverse_offset: usize) -> Option<&'a str> {
+        fields
+            .len()
+            .checked_sub(reverse_offset)
+            .and_then(|slot| fields.get(slot))
+            .copied()
     }
 
     fn explicit_true(self, fields: &[&str], slot: FormTableSlot) -> Option<bool> {

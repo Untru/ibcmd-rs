@@ -590,6 +590,7 @@ pub(super) struct FormChildItem {
     pub(super) enabled: Option<bool>,
     pub(super) read_only: Option<bool>,
     pub(super) skip_on_input: Option<bool>,
+    pub(super) table_skip_on_input_from_schema: bool,
     pub(super) title_location: Option<&'static str>,
     pub(super) title_height: Option<String>,
     pub(super) tooltip_representation: Option<&'static str>,
@@ -4862,6 +4863,7 @@ fn parse_form_child_item_with_metadata_owners(
     });
     let ordinary_table_layout = tag == "Table" && form_table_ordinary_layout_variant(&fields);
     let table_schema = FormTableSchema::from_raw_layout(wrapper, tag, &fields);
+    let table_schema_skip_on_input = table_schema.and_then(|schema| schema.skip_on_input(&fields));
     let command_name = if tag == "Button" {
         fields.get(8 + button_top_level_offset).and_then(|field| {
             parse_form_button_command_name(
@@ -5087,7 +5089,11 @@ fn parse_form_child_item_with_metadata_owners(
         enable_start_drag: table_schema.and_then(|schema| schema.enable_start_drag(&fields)),
         enable_drag: table_schema.and_then(|schema| schema.enable_drag(&fields)),
         file_drag_mode: if tag == "Table" {
-            parse_form_table_file_drag_mode_from_fields(wrapper, &fields)
+            if let Some(schema) = table_schema {
+                schema.file_drag_mode(&fields)
+            } else {
+                parse_form_table_file_drag_mode_from_fields(wrapper, &fields)
+            }
         } else if tag == "PictureDecoration" {
             parse_form_picture_decoration_file_drag_mode(&fields)
         } else if tag == "PictureField" {
@@ -5378,9 +5384,13 @@ fn parse_form_child_item_with_metadata_owners(
                 })
         },
         skip_on_input: if tag == "Table" {
-            fields
-                .get(12)
-                .and_then(|field| parse_form_input_field_skip_on_input(field))
+            if table_schema.is_some() {
+                table_schema_skip_on_input
+            } else {
+                fields
+                    .get(12)
+                    .and_then(|field| parse_form_input_field_skip_on_input(field))
+            }
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(29 + button_top_level_offset)
@@ -5398,6 +5408,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        table_skip_on_input_from_schema: table_schema_skip_on_input.is_some(),
         title_location: if matches!(
             tag,
             "InputField"
@@ -14255,9 +14266,10 @@ fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String 
 
 pub(super) fn should_emit_explicit_table_skip_on_input(item: &FormChildItem) -> bool {
     item.tag == "Table"
-        && !form_table_has_hierarchical_navigation(item)
         && item.skip_on_input == Some(false)
-        && (item.row_picture_data_path.is_some() || item.rows_picture_ref.is_some())
+        && (item.table_skip_on_input_from_schema
+            || (!form_table_has_hierarchical_navigation(item)
+                && (item.row_picture_data_path.is_some() || item.rows_picture_ref.is_some())))
 }
 
 pub(super) fn format_form_context_menu_xml(item: &FormChildItem, indent: usize) -> String {
