@@ -25,7 +25,119 @@ pub(super) struct MoxelSpreadsheet {
     pub(super) empty_headers_footers: bool,
     pub(super) header_footer_format_index: Option<usize>,
     pub(super) default_format_index: Option<usize>,
+    pub(super) source_format_map: Option<MoxelSourceFormatMap>,
     pub(super) height: usize,
+}
+
+pub(super) struct MoxelSourceFormatMap {
+    source_to_internal: Vec<usize>,
+    internal_to_source: Vec<usize>,
+    output_source_order: Vec<usize>,
+}
+
+impl MoxelSourceFormatMap {
+    fn try_new(
+        format_count: usize,
+        internal_column_sources: &[usize],
+        output_column_sources: &[usize],
+    ) -> Option<Self> {
+        // A non-identity per-set order is the typed admission for this path.
+        if format_count == 0
+            || internal_column_sources.is_empty()
+            || output_column_sources.is_empty()
+            || internal_column_sources == output_column_sources
+        {
+            return None;
+        }
+
+        let internal_to_source =
+            complete_moxel_source_format_order(format_count, internal_column_sources, false)?;
+        let output_source_order =
+            complete_moxel_source_format_order(format_count, output_column_sources, true)?;
+        let mut source_to_internal = vec![0; format_count];
+        for (internal_offset, source_format_index) in internal_to_source.iter().copied().enumerate()
+        {
+            let slot = source_to_internal.get_mut(source_format_index.checked_sub(1)?)?;
+            if *slot != 0 {
+                return None;
+            }
+            *slot = internal_offset + 1;
+        }
+        if source_to_internal
+            .iter()
+            .any(|format_index| *format_index == 0)
+        {
+            return None;
+        }
+
+        Some(Self {
+            source_to_internal,
+            internal_to_source,
+            output_source_order,
+        })
+    }
+
+    fn len(&self) -> usize {
+        self.internal_to_source.len()
+    }
+
+    fn internal_for_source(&self, source_format_index: usize) -> Option<usize> {
+        source_format_index
+            .checked_sub(1)
+            .and_then(|index| self.source_to_internal.get(index))
+            .copied()
+            .filter(|format_index| *format_index > 0)
+    }
+
+    fn output_internal_indices(&self, format_count: usize) -> Option<Vec<usize>> {
+        if format_count != self.len() || self.output_source_order.len() != format_count {
+            return None;
+        }
+        let mut seen = BTreeSet::new();
+        let mut output = Vec::with_capacity(format_count);
+        for source_format_index in &self.output_source_order {
+            let internal_format_index = self.internal_for_source(*source_format_index)?;
+            if self
+                .internal_to_source
+                .get(internal_format_index - 1)
+                .copied()
+                != Some(*source_format_index)
+                || !seen.insert(internal_format_index)
+            {
+                return None;
+            }
+            output.push(internal_format_index);
+        }
+        (output.len() == format_count).then_some(output)
+    }
+}
+
+fn complete_moxel_source_format_order(
+    format_count: usize,
+    leading_sources: &[usize],
+    default_source_last: bool,
+) -> Option<Vec<usize>> {
+    let mut seen = BTreeSet::new();
+    let mut ordered = Vec::with_capacity(format_count);
+    for source_format_index in leading_sources {
+        if *source_format_index == 0 || *source_format_index > format_count {
+            return None;
+        }
+        if seen.insert(*source_format_index) {
+            ordered.push(*source_format_index);
+        }
+    }
+    // Source slot 1 is the implicit default and trails unselected table slots.
+    let remaining_start = if default_source_last { 2 } else { 1 };
+    for source_format_index in remaining_start..=format_count {
+        if seen.insert(source_format_index) {
+            ordered.push(source_format_index);
+        }
+    }
+    if default_source_last && seen.insert(1) {
+        ordered.push(1);
+    }
+    (ordered.len() == format_count).then_some(ordered)
 }
 
 #[derive(Clone)]
@@ -350,7 +462,8 @@ pub(super) fn parse_moxel_spreadsheet_text(
         &vertical_unmerges,
     );
     compact_moxel_empty_row_ranges(&mut rows);
-    let (column_sets, row_column_ids, declared_sheet_height) = parse_moxel_column_sets(&fields);
+    let (column_sets, row_column_ids, declared_sheet_height, source_column_format_order) =
+        parse_moxel_column_sets_with_source_format_order(&fields);
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields, object_refs);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
@@ -455,33 +568,48 @@ pub(super) fn parse_moxel_spreadsheet_text(
             default_format = leading_default_format;
         }
     }
-    let (column_formats, formats) = parse_moxel_formats(
+    let (column_formats, formats, source_format_map) = parse_moxel_formats_with_source_map(
         &fields,
         column_format_slots,
         sparse_source_format_refs,
         &source_column_format_refs,
+        &source_column_format_order,
         &style_refs,
         &drawing_format_indices,
         &number_format_refs,
     );
     let (column_formats, mut formats) = (column_formats, formats);
+    let source_format_map = source_format_map.filter(|source_format_map| {
+        moxel_source_format_refs_are_complete(
+            source_format_map,
+            &column_sets,
+            &rows,
+            &drawings,
+            header_footer_format_ref,
+        )
+    });
     if source_column_format_offset == 0 && column_formats.is_empty() && formats.is_empty() {
         restore_moxel_source_format_refs_without_format_table(&mut rows);
     }
     if source_column_format_offset > 0 {
         if sparse_source_format_refs {
-            remap_moxel_column_set_sparse_internal_format_indices(
-                &mut column_sets,
-                &source_column_format_refs,
-                column_formats.len(),
-                formats.len(),
-            );
-            remap_moxel_row_and_cell_sparse_internal_format_indices(
-                &mut rows,
-                &source_column_format_refs,
-                column_formats.len(),
-                formats.len(),
-            );
+            if let Some(source_format_map) = &source_format_map {
+                remap_moxel_column_set_source_format_indices(&mut column_sets, source_format_map);
+                remap_moxel_row_and_cell_source_format_indices(&mut rows, source_format_map);
+            } else {
+                remap_moxel_column_set_sparse_internal_format_indices(
+                    &mut column_sets,
+                    &source_column_format_refs,
+                    column_formats.len(),
+                    formats.len(),
+                );
+                remap_moxel_row_and_cell_sparse_internal_format_indices(
+                    &mut rows,
+                    &source_column_format_refs,
+                    column_formats.len(),
+                    formats.len(),
+                );
+            }
         } else if column_formats.len() > source_column_format_refs.len()
             || needs_sparse_column_set_default_format
         {
@@ -647,6 +775,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
         empty_headers_footers,
         header_footer_format_index,
         default_format_index,
+        source_format_map,
         height,
     })
 }
@@ -705,8 +834,26 @@ pub(super) fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnS
 pub(super) fn parse_moxel_column_sets(
     fields: &[&str],
 ) -> (Vec<MoxelColumnSet>, BTreeMap<usize, String>, Option<usize>) {
+    let (column_sets, row_column_ids, declared_sheet_height, _) =
+        parse_moxel_column_sets_with_source_format_order(fields);
+    (column_sets, row_column_ids, declared_sheet_height)
+}
+
+fn parse_moxel_column_sets_with_source_format_order(
+    fields: &[&str],
+) -> (
+    Vec<MoxelColumnSet>,
+    BTreeMap<usize, String>,
+    Option<usize>,
+    Vec<usize>,
+) {
     for index in 0..fields.len() {
         let Some(default_set) = parse_moxel_column_set(fields[index]) else {
+            continue;
+        };
+        let Some(default_source_format_index) =
+            parse_moxel_column_set_raw_default_format_index(fields[index])
+        else {
             continue;
         };
         if default_set.id.is_some() || index + 2 >= fields.len() {
@@ -729,9 +876,16 @@ pub(super) fn parse_moxel_column_sets(
         }
 
         let mut column_sets = vec![default_set];
+        let mut raw_default_format_indices = vec![default_source_format_index];
         let mut cursor = index + 3;
         for _ in 0..additional_count {
             let Some(column_set) = parse_moxel_column_set(fields[cursor]) else {
+                column_sets.clear();
+                break;
+            };
+            let Some(raw_default_format_index) =
+                parse_moxel_column_set_raw_default_format_index(fields[cursor])
+            else {
                 column_sets.clear();
                 break;
             };
@@ -740,17 +894,57 @@ pub(super) fn parse_moxel_column_sets(
                 break;
             }
             column_sets.push(column_set);
+            raw_default_format_indices.push(raw_default_format_index);
             cursor += 1;
         }
-        if column_sets.is_empty() {
+        if column_sets.is_empty() || column_sets.len() != raw_default_format_indices.len() {
             continue;
         }
         normalize_moxel_column_set_format_indices(&mut column_sets);
         let row_column_ids =
             parse_moxel_row_column_set_ids(fields, cursor, &column_sets[1..]).unwrap_or_default();
-        return (column_sets, row_column_ids, Some(declared_sheet_height));
+        let source_format_order =
+            moxel_source_column_format_refs_in_set_order(&column_sets, &raw_default_format_indices);
+        return (
+            column_sets,
+            row_column_ids,
+            Some(declared_sheet_height),
+            source_format_order,
+        );
     }
-    (Vec::new(), BTreeMap::new(), None)
+    (Vec::new(), BTreeMap::new(), None, Vec::new())
+}
+
+fn parse_moxel_column_set_raw_default_format_index(text: &str) -> Option<usize> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    fields.get(1)?.trim().parse::<usize>().ok()
+}
+
+fn moxel_source_column_format_refs_in_set_order(
+    column_sets: &[MoxelColumnSet],
+    raw_default_format_indices: &[usize],
+) -> Vec<usize> {
+    if column_sets.len() != raw_default_format_indices.len() {
+        return Vec::new();
+    }
+    let mut seen = BTreeSet::new();
+    let mut ordered = Vec::new();
+    for (column_set, raw_default_format_index) in column_sets.iter().zip(raw_default_format_indices)
+    {
+        if *raw_default_format_index > 0 && seen.insert(*raw_default_format_index) {
+            ordered.push(*raw_default_format_index);
+        }
+        for source_format_index in column_set
+            .columns
+            .iter()
+            .filter_map(|column| column.source_format_index)
+        {
+            if source_format_index > 0 && seen.insert(source_format_index) {
+                ordered.push(source_format_index);
+            }
+        }
+    }
+    ordered
 }
 
 pub(super) fn parse_moxel_vertical_groups(fields: &[&str]) -> Vec<MoxelVerticalGroup> {
@@ -2219,6 +2413,53 @@ pub(super) fn unquote_moxel_string(value: &str) -> Option<String> {
     let value = value.trim();
     let inner = value.strip_prefix('"')?.strip_suffix('"')?;
     Some(inner.replace("\"\"", "\""))
+}
+
+fn parse_moxel_formats_with_source_map(
+    fields: &[&str],
+    column_count: usize,
+    sparse_source_format_refs: bool,
+    source_column_format_refs: &[usize],
+    source_column_format_order: &[usize],
+    style_refs: &[Option<String>],
+    drawing_format_indices: &BTreeSet<usize>,
+    number_format_refs: &[Vec<MoxelLocalizedValue>],
+) -> (
+    Vec<MoxelFormat>,
+    Vec<MoxelFormat>,
+    Option<MoxelSourceFormatMap>,
+) {
+    if sparse_source_format_refs
+        && !source_column_format_refs.is_empty()
+        && !source_column_format_order.is_empty()
+        && let Some(formats) = parse_moxel_format_table(
+            fields,
+            column_count,
+            style_refs,
+            drawing_format_indices,
+            number_format_refs,
+        )
+    {
+        let source_format_map = MoxelSourceFormatMap::try_new(
+            formats.len(),
+            source_column_format_refs,
+            source_column_format_order,
+        );
+        let (column_formats, formats) =
+            split_moxel_formats_by_source_refs(formats, source_column_format_refs);
+        return (column_formats, formats, source_format_map);
+    }
+
+    let (column_formats, formats) = parse_moxel_formats(
+        fields,
+        column_count,
+        sparse_source_format_refs,
+        source_column_format_refs,
+        style_refs,
+        drawing_format_indices,
+        number_format_refs,
+    );
+    (column_formats, formats, None)
 }
 
 pub(super) fn parse_moxel_formats(
@@ -4134,6 +4375,13 @@ pub(super) fn moxel_sparse_source_output_order(
 
 pub(super) fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec<usize> {
     let format_count = moxel_output_format_count(spreadsheet);
+    if let Some(ordered) = spreadsheet
+        .source_format_map
+        .as_ref()
+        .and_then(|source_format_map| source_format_map.output_internal_indices(format_count))
+    {
+        return ordered;
+    }
     if let Some(ordered) = moxel_sparse_source_output_order(spreadsheet) {
         return ordered;
     }
@@ -4515,6 +4763,108 @@ pub(super) fn remap_moxel_column_set_sparse_internal_format_indices(
             format_len,
         ) {
             column.format_index = format_index;
+        }
+    }
+}
+
+fn moxel_source_format_refs_are_complete(
+    source_format_map: &MoxelSourceFormatMap,
+    column_sets: &[MoxelColumnSet],
+    rows: &[MoxelRow],
+    drawings: &[MoxelDrawing],
+    header_footer_format_ref: Option<usize>,
+) -> bool {
+    let direct_ref_is_valid = |source_format_index: usize| {
+        source_format_index == 0
+            || source_format_map
+                .internal_for_source(source_format_index)
+                .is_some()
+    };
+    let row_ref_is_valid = |source_format_index: usize| {
+        source_format_index <= 1
+            || source_format_map
+                .internal_for_source(source_format_index - 1)
+                .is_some()
+    };
+    let cell_ref_is_valid = |source_format_index: usize| {
+        source_format_index == 0
+            || (source_format_index > 1
+                && source_format_map
+                    .internal_for_source(source_format_index - 1)
+                    .is_some())
+    };
+
+    column_sets.iter().all(|column_set| {
+        column_set
+            .source_default_format_index
+            .is_none_or(direct_ref_is_valid)
+            && column_set
+                .columns
+                .iter()
+                .all(|column| column.source_format_index.is_none_or(direct_ref_is_valid))
+    }) && rows.iter().all(|row| {
+        row.source_format_index.is_none_or(row_ref_is_valid)
+            && row
+                .cells
+                .iter()
+                .all(|cell| cell.source_format_index.is_none_or(cell_ref_is_valid))
+    }) && drawings.iter().all(|drawing| {
+        drawing.format_index == 0
+            || source_format_map.internal_for_source(drawing.format_index)
+                == Some(drawing.format_index)
+    }) && header_footer_format_ref.is_none()
+}
+
+fn remap_moxel_column_set_source_format_indices(
+    column_sets: &mut [MoxelColumnSet],
+    source_format_map: &MoxelSourceFormatMap,
+) {
+    for column_set in column_sets {
+        if let Some(source_format_index) = column_set.source_default_format_index
+            && let Some(format_index) = source_format_map.internal_for_source(source_format_index)
+        {
+            column_set.default_format_index = Some(format_index);
+        }
+        for column in &mut column_set.columns {
+            let Some(source_format_index) = column.source_format_index else {
+                continue;
+            };
+            if source_format_index == 0 {
+                column.format_index = 0;
+            } else if let Some(format_index) =
+                source_format_map.internal_for_source(source_format_index)
+            {
+                column.format_index = format_index;
+            }
+        }
+    }
+}
+
+fn remap_moxel_row_and_cell_source_format_indices(
+    rows: &mut [MoxelRow],
+    source_format_map: &MoxelSourceFormatMap,
+) {
+    for row in rows {
+        if let Some(source_format_index) = row.source_format_index {
+            if source_format_index <= 1 {
+                row.format_index = source_format_index;
+            } else if let Some(format_index) =
+                source_format_map.internal_for_source(source_format_index - 1)
+            {
+                row.format_index = format_index;
+            }
+        }
+        for cell in &mut row.cells {
+            let Some(source_format_index) = cell.source_format_index else {
+                continue;
+            };
+            if source_format_index == 0 {
+                cell.format_index = 0;
+            } else if let Some(format_index) =
+                source_format_map.internal_for_source(source_format_index - 1)
+            {
+                cell.format_index = format_index;
+            }
         }
     }
 }

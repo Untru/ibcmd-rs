@@ -15446,6 +15446,7 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: Some(1),
+        source_format_map: None,
         height: 15,
     };
 
@@ -15817,6 +15818,7 @@ fn spreadsheet_extract_omits_default_print_settings() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: Some(1),
+        source_format_map: None,
         height: 0,
     };
 
@@ -16246,6 +16248,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: Some(7),
+        source_format_map: None,
         height: 1,
     };
 
@@ -16306,6 +16309,7 @@ fn formats_moxel_output_count_includes_sparse_referenced_indices() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
 
@@ -16600,6 +16604,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 6,
     };
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
@@ -17228,6 +17233,7 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     });
 
@@ -17842,6 +17848,7 @@ fn formats_moxel_embedded_f527_colors_resolve_by_property() {
             empty_headers_footers: false,
             header_footer_format_index: None,
             default_format_index: None,
+            source_format_map: None,
             height: 0,
         };
         let mut xml = String::new();
@@ -17968,6 +17975,7 @@ fn formats_moxel_field_selection_back_color_style() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
     let mut xml = String::new();
@@ -18005,6 +18013,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
     let mut xml = String::new();
@@ -18042,6 +18051,7 @@ fn formats_moxel_field_text_color_style() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
     let mut xml = String::new();
@@ -18079,6 +18089,7 @@ fn formats_moxel_button_text_color_style() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
     let mut xml = String::new();
@@ -18147,6 +18158,7 @@ fn formats_moxel_report_back_color_styles() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
     let mut xml = String::new();
@@ -18203,6 +18215,7 @@ fn formats_moxel_preserve_hidden_false_and_legacy_bottom_alignment() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
     let mut xml = String::new();
@@ -18240,6 +18253,7 @@ fn formats_moxel_preserve_explicit_empty_number_and_edit_formats() {
         empty_headers_footers: false,
         header_footer_format_index: None,
         default_format_index: None,
+        source_format_map: None,
         height: 0,
     };
     let mut xml = String::new();
@@ -19105,6 +19119,7 @@ fn formats_moxel_sparse_source_output_order_skips_when_explicit_default_format_e
         empty_headers_footers: false,
         header_footer_format_index: Some(5),
         default_format_index: Some(5),
+        source_format_map: None,
         height: 1,
     };
 
@@ -19184,6 +19199,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
         empty_headers_footers: false,
         header_footer_format_index: Some(4),
         default_format_index: Some(5),
+        source_format_map: None,
         height: 1,
     };
 
