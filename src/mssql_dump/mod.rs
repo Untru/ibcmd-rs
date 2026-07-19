@@ -130,6 +130,11 @@ const BUSINESS_PROCESS_COMMAND_COLLECTION_UUID: &str = "7a3e533c-f232-40d5-a932-
 const BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID: &str = "87c988de-ecbf-413b-87b0-b9516df05e28";
 const BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID: &str =
     "a3fe6537-d787-40f7-8a06-419d2f0c1cfd";
+const REPORT_ATTRIBUTE_COLLECTION_UUID: &str = "7e7123e0-29e2-11d6-a3c7-0050bae0a776";
+const REPORT_FORM_COLLECTION_UUID: &str = "a3b368c0-29e2-11d6-a3c7-0050bae0a776";
+const REPORT_TABULAR_SECTION_COLLECTION_UUID: &str = "b077d780-29e2-11d6-a3c7-0050bae0a776";
+const REPORT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "c339c860-29e2-11d6-a3c7-0050bae0a776";
+const REPORT_COMMAND_COLLECTION_UUID: &str = "e7ff38c0-ec3c-47a0-ae90-20c73ca72246";
 const TYPE_DESCRIPTION_TYPE_UUID: &str = "f5c65050-3bbb-11d5-b988-0050bae0a95d";
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
@@ -4038,6 +4043,7 @@ struct ExchangePlanProperties {
     update_data_history_immediately_after_write: bool,
     execute_after_write_data_history_version_processing: bool,
     child_objects: Vec<MetadataChildObject>,
+    emit_empty_child_objects: bool,
 }
 
 struct ExchangePlanOwnerFields<'a> {
@@ -7016,6 +7022,15 @@ fn parse_exchange_plan_properties_from_text(
         return None;
     }
 
+    let (child_objects, emit_empty_child_objects) = parse_exchange_plan_child_objects(
+        text,
+        uuid,
+        &header.name,
+        type_index,
+        object_refs,
+        form_refs,
+    )?;
+
     Some(ExchangePlanProperties {
         this_node: parse_information_register_non_zero_uuid(fields.get(11)?)?,
         generated_types: parse_exchange_plan_generated_types(&fields, &header.name)?,
@@ -7103,14 +7118,8 @@ fn parse_exchange_plan_properties_from_text(
         data_history: "DontUse",
         update_data_history_immediately_after_write: false,
         execute_after_write_data_history_version_processing: false,
-        child_objects: parse_exchange_plan_child_objects(
-            text,
-            uuid,
-            &header.name,
-            type_index,
-            object_refs,
-            form_refs,
-        ),
+        child_objects,
+        emit_empty_child_objects,
     })
 }
 
@@ -7121,60 +7130,297 @@ fn parse_exchange_plan_child_objects(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
-) -> Vec<MetadataChildObject> {
-    let mut child_objects = nested_headers_with_offsets_from_text(text, uuid, |_| true)
-        .into_iter()
-        .filter_map(|(header, marker_start)| {
-            let tag = exchange_plan_child_object_tag(text, marker_start)?;
-            let value_types =
-                parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
-            let properties = parse_metadata_child_properties(
-                "ExchangePlan",
-                text,
-                marker_start,
-                &header.uuid,
-                &value_types,
-                &BTreeMap::new(),
-            );
-            Some(MetadataChildObject {
-                tag,
-                header,
-                generated_types: Vec::new(),
-                value_types,
-                emit_empty_type: tag == "Attribute",
-                properties,
-                register_properties: None,
-                tabular_section_properties: None,
-                child_objects: Vec::new(),
-            })
+) -> Option<(Vec<MetadataChildObject>, bool)> {
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
+        return None;
+    }
+    let owner = split_information_register_braced_fields(root.get(1)?)?;
+    let modern_layout = match (owner.first().map(|field| field.trim()), owner.len()) {
+        (Some("36"), 50) => false,
+        (Some("37"), 51) if owner.get(50)?.trim() == "1" => true,
+        _ => return None,
+    };
+    let collections = root[3..]
+        .iter()
+        .zip(EXCHANGE_PLAN_ROOT_COLLECTION_TYPE_UUIDS)
+        .map(|(value, expected_uuid)| parse_strict_metadata_collection(value, expected_uuid))
+        .collect::<Option<Vec<_>>>()?;
+    let emit_empty_child_objects = collections.iter().all(Vec::is_empty);
+
+    let mut child_uuids = BTreeSet::new();
+    let mut root_names = BTreeSet::new();
+    let mut child_objects = collections[0]
+        .iter()
+        .map(|value| {
+            let child = parse_exchange_plan_attribute(
+                value,
+                owner_name,
+                modern_layout,
+                false,
+                type_index,
+                object_refs,
+                form_refs,
+            )?;
+            strict_metadata_child_identity_is_unique(&child, &mut child_uuids, &mut root_names)
+                .then_some(child)
         })
-        .collect::<Vec<_>>();
-    child_objects.extend(
-        parse_attribute_tabular_section_child_objects(
-            "ExchangePlan",
-            owner_name,
-            text,
-            uuid,
-            None,
-            type_index,
-            object_refs,
-            &BTreeMap::new(),
-            form_refs,
-        )
-        .into_iter()
-        .filter(|child| child.tag == "TabularSection" && !child.generated_types.is_empty()),
-    );
-    child_objects
+        .collect::<Option<Vec<_>>>()?;
+
+    let generic_sections = parse_attribute_tabular_section_child_objects(
+        "ExchangePlan",
+        owner_name,
+        text,
+        uuid,
+        None,
+        type_index,
+        object_refs,
+        &BTreeMap::new(),
+        form_refs,
+    )
+    .into_iter()
+    .filter(|child| child.tag == "TabularSection")
+    .collect::<Vec<_>>();
+    let sections = parse_strict_tabular_sections(
+        &collections[2],
+        modern_layout,
+        "ExchangePlan",
+        owner_name,
+        CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
+        generic_sections,
+        type_index,
+        object_refs,
+        form_refs,
+        &mut child_uuids,
+        &mut root_names,
+    )?;
+    child_objects.extend(sections);
+    Some((child_objects, emit_empty_child_objects))
 }
 
-fn exchange_plan_child_object_tag(text: &str, marker_start: usize) -> Option<&'static str> {
-    if is_offset_inside_metadata_object_code(text, marker_start, 4)
-        && is_offset_inside_metadata_object_code(text, marker_start, 27)
-    {
-        Some("Attribute")
-    } else {
-        None
+fn parse_strict_metadata_collection<'a>(
+    value: &'a str,
+    expected_uuid: &str,
+) -> Option<Vec<&'a str>> {
+    let fields = split_information_register_braced_fields(value)?;
+    if fields.len() < 2 || !information_register_uuid_matches(fields.first()?, expected_uuid) {
+        return None;
     }
+    let count = parse_information_register_usize(fields.get(1)?)?;
+    (count.checked_add(2) == Some(fields.len())).then(|| fields.into_iter().skip(2).collect())
+}
+
+fn parse_exchange_plan_attribute(
+    value: &str,
+    owner_name: &str,
+    modern_layout: bool,
+    nested: bool,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChildObject> {
+    let item = split_information_register_braced_fields(value)?;
+    if item.len() != 2 || item.get(1)?.trim() != "0" {
+        return None;
+    }
+    let wrapper = split_information_register_braced_fields(item.first()?)?;
+    if nested {
+        if wrapper.len() != 5 || wrapper.first()?.trim() != "8" {
+            return None;
+        }
+    } else if modern_layout {
+        if wrapper.len() != 7
+            || wrapper.first()?.trim() != "4"
+            || wrapper.get(5)?.trim() != "0"
+            || !metadata_reserved_wrapper_tail(wrapper.get(6)?)
+        {
+            return None;
+        }
+    } else if wrapper.len() != 5 || wrapper.first()?.trim() != "3" {
+        return None;
+    }
+
+    let common = split_information_register_braced_fields(wrapper.get(1)?)?;
+    let mut child = parse_strict_common_metadata_attribute(
+        common,
+        "ExchangePlan",
+        owner_name,
+        type_index,
+        object_refs,
+        form_refs,
+        !nested,
+    )?;
+    let properties = child.properties.as_mut()?;
+    properties.indexing = Some(metadata_attribute_indexing_xml(wrapper.get(2)?.trim())?);
+    properties.full_text_search =
+        Some(register_child_full_text_search_xml(wrapper.get(3)?.trim())?);
+    properties.data_history = Some(metadata_data_history_xml(wrapper.get(4)?.trim())?);
+    Some(child)
+}
+
+fn parse_strict_common_metadata_attribute(
+    common: Vec<&str>,
+    owner_kind: &str,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    emit_fill_values: bool,
+) -> Option<MetadataChildObject> {
+    let (common, child_uuid) = parse_metadata_code27_payload_fields(common)?;
+    let header = parse_metadata_header_from_text(common.get(1)?, &child_uuid)?;
+    if !register_common_child_header_matches(&common, &header) {
+        return None;
+    }
+    let value_types = stable_partition_metadata_types(classify_metadata_reference_type_sets(
+        parse_register_common_child_value_types(&common, &header, type_index)?,
+    ));
+    let mut properties = parse_information_register_common_child_properties(
+        &common,
+        owner_kind,
+        owner_name,
+        type_index,
+        object_refs,
+        form_refs,
+        false,
+    )?;
+    properties.emit_fill_from_filling_value = emit_fill_values;
+    properties.emit_fill_value = emit_fill_values;
+    Some(MetadataChildObject {
+        tag: "Attribute",
+        header,
+        generated_types: Vec::new(),
+        value_types,
+        emit_empty_type: true,
+        properties: Some(properties),
+        register_properties: None,
+        tabular_section_properties: None,
+        child_objects: Vec::new(),
+    })
+}
+
+fn strict_metadata_child_identity_is_unique(
+    child: &MetadataChildObject,
+    uuids: &mut BTreeSet<String>,
+    names: &mut BTreeSet<String>,
+) -> bool {
+    uuids.insert(child.header.uuid.to_ascii_lowercase())
+        && names.insert(child.header.name.to_lowercase())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_strict_tabular_sections(
+    values: &[&str],
+    exchange_plan_modern_layout: bool,
+    owner_kind: &str,
+    owner_name: &str,
+    nested_collection_uuid: &str,
+    generic_sections: Vec<MetadataChildObject>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    child_uuids: &mut BTreeSet<String>,
+    root_names: &mut BTreeSet<String>,
+) -> Option<Vec<MetadataChildObject>> {
+    let mut sections_by_uuid = BTreeMap::new();
+    for section in generic_sections {
+        if section.tag != "TabularSection"
+            || section.generated_types.len() != 2
+            || section.tabular_section_properties.is_none()
+            || sections_by_uuid
+                .insert(section.header.uuid.to_ascii_lowercase(), section)
+                .is_some()
+        {
+            return None;
+        }
+    }
+    if sections_by_uuid.len() != values.len() {
+        return None;
+    }
+
+    let mut sections = Vec::with_capacity(values.len());
+    for value in values {
+        let item = split_information_register_braced_fields(value)?;
+        if item.len() != 3 || item.get(1)?.trim() != "1" {
+            return None;
+        }
+        let wrapper = split_information_register_braced_fields(item.first()?)?;
+        match owner_kind {
+            "ExchangePlan" if exchange_plan_modern_layout => {
+                if wrapper.len() != 3
+                    || wrapper.first()?.trim() != "1"
+                    || wrapper.get(2)?.trim() != "5"
+                {
+                    return None;
+                }
+            }
+            "ExchangePlan" | "Report" => {
+                if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+        let section_fields = split_information_register_braced_fields(wrapper.get(1)?)?;
+        let raw_header = parse_strict_code11_tabular_section_header(&section_fields)?;
+        let key = raw_header.uuid.to_ascii_lowercase();
+        let mut section = sections_by_uuid.remove(&key)?;
+        if !strict_metadata_headers_match(&section.header, &raw_header)
+            || !strict_metadata_child_identity_is_unique(&section, child_uuids, root_names)
+        {
+            return None;
+        }
+
+        let nested_values = parse_strict_metadata_collection(item.get(2)?, nested_collection_uuid)?;
+        let mut nested_names = BTreeSet::new();
+        section.child_objects = nested_values
+            .iter()
+            .map(|value| {
+                let child = match owner_kind {
+                    "ExchangePlan" => parse_exchange_plan_attribute(
+                        value,
+                        owner_name,
+                        exchange_plan_modern_layout,
+                        true,
+                        type_index,
+                        object_refs,
+                        form_refs,
+                    ),
+                    "Report" => parse_report_attribute(
+                        value,
+                        owner_name,
+                        true,
+                        type_index,
+                        object_refs,
+                        form_refs,
+                    ),
+                    _ => None,
+                }?;
+                strict_metadata_child_identity_is_unique(&child, child_uuids, &mut nested_names)
+                    .then_some(child)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        sections.push(section);
+    }
+    sections_by_uuid.is_empty().then_some(sections)
+}
+
+fn parse_strict_code11_tabular_section_header(fields: &[&str]) -> Option<MetadataHeader> {
+    if fields.len() != 9 || fields.first()?.trim() != "11" {
+        return None;
+    }
+    let header = parse_wrapped_register_owner_header(fields.get(5)?)?;
+    let mut header_indexes = fields.iter().enumerate().filter_map(|(index, field)| {
+        (metadata_header_field_index(&[*field], &header.uuid) == Some(0)).then_some(index)
+    });
+    (header_indexes.next() == Some(5) && header_indexes.next().is_none()).then_some(header)
+}
+
+fn strict_metadata_headers_match(left: &MetadataHeader, right: &MetadataHeader) -> bool {
+    left.uuid.eq_ignore_ascii_case(&right.uuid)
+        && left.name == right.name
+        && left.synonyms == right.synonyms
+        && left.comment == right.comment
 }
 
 fn parse_recalculation_properties_from_text(
@@ -15555,10 +15801,26 @@ fn parse_report_properties_from_text(
         "Manager",
     );
 
-    let child_templates = if fields.first()?.trim() == "19" {
-        parse_report_child_templates_from_text(text, &header, template_refs).unwrap_or_default()
+    let strict_layout = fields.first()?.trim() == "19";
+    let child_templates = if strict_layout {
+        parse_report_child_templates_from_text(text, &header, template_refs)?
     } else {
         parse_legacy_report_child_templates_from_text(text, template_refs)
+    };
+    let child_metadata_objects = if strict_layout {
+        parse_strict_report_child_objects(text, uuid, &header, type_index, object_refs, form_refs)?
+    } else {
+        parse_attribute_tabular_section_child_objects(
+            "Report",
+            &header.name,
+            text,
+            uuid,
+            None,
+            type_index,
+            object_refs,
+            &BTreeMap::new(),
+            form_refs,
+        )
     };
 
     Some(ReportProperties {
@@ -15576,21 +15838,101 @@ fn parse_report_properties_from_text(
         include_help_in_contents: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
         extended_presentation: parse_1c_synonyms(fields.get(15).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
-        child_metadata_objects: parse_attribute_tabular_section_child_objects(
-            "Report",
-            &header.name,
-            text,
-            uuid,
-            None,
-            type_index,
-            object_refs,
-            &BTreeMap::new(),
-            form_refs,
-        ),
+        child_metadata_objects,
         child_forms: owned_report_form_names_in_text_order(text, &header.name, form_refs),
         child_templates,
         child_commands: nested_child_commands_from_text(text, uuid, type_index, object_refs),
     })
+}
+
+fn parse_strict_report_child_objects(
+    text: &str,
+    uuid: &str,
+    header: &MetadataHeader,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<Vec<MetadataChildObject>> {
+    let root = parse_strict_report_root_fields(text, header)?;
+    let direct_values =
+        parse_strict_metadata_collection(root.get(4)?, REPORT_ATTRIBUTE_COLLECTION_UUID)?;
+    let section_values =
+        parse_strict_metadata_collection(root.get(6)?, REPORT_TABULAR_SECTION_COLLECTION_UUID)?;
+
+    let mut child_uuids = BTreeSet::new();
+    let mut root_names = BTreeSet::new();
+    let mut children = direct_values
+        .iter()
+        .map(|value| {
+            let child = parse_report_attribute(
+                value,
+                &header.name,
+                false,
+                type_index,
+                object_refs,
+                form_refs,
+            )?;
+            strict_metadata_child_identity_is_unique(&child, &mut child_uuids, &mut root_names)
+                .then_some(child)
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    let generic_sections = parse_attribute_tabular_section_child_objects(
+        "Report",
+        &header.name,
+        text,
+        uuid,
+        None,
+        type_index,
+        object_refs,
+        &BTreeMap::new(),
+        form_refs,
+    )
+    .into_iter()
+    .filter(|child| child.tag == "TabularSection")
+    .collect::<Vec<_>>();
+    children.extend(parse_strict_tabular_sections(
+        &section_values,
+        false,
+        "Report",
+        &header.name,
+        REPORT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        generic_sections,
+        type_index,
+        object_refs,
+        form_refs,
+        &mut child_uuids,
+        &mut root_names,
+    )?);
+    Some(children)
+}
+
+fn parse_report_attribute(
+    value: &str,
+    owner_name: &str,
+    nested: bool,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> Option<MetadataChildObject> {
+    let item = split_information_register_braced_fields(value)?;
+    if item.len() != 2 || item.get(1)?.trim() != "0" {
+        return None;
+    }
+    let wrapper = split_information_register_braced_fields(item.first()?)?;
+    if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
+        return None;
+    }
+    let common = split_information_register_braced_fields(wrapper.get(1)?)?;
+    parse_strict_common_metadata_attribute(
+        common,
+        "Report",
+        owner_name,
+        type_index,
+        object_refs,
+        form_refs,
+        nested,
+    )
 }
 
 fn parse_document_properties_from_text(
@@ -18653,31 +18995,7 @@ fn parse_report_child_templates_from_text(
     expected_header: &MetadataHeader,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
 ) -> Option<Vec<String>> {
-    let root_fields = split_information_register_braced_fields(text)?;
-    if root_fields.len() != 8
-        || root_fields.first()?.trim() != "1"
-        || parse_information_register_usize(root_fields.get(2)?)? != 5
-    {
-        return None;
-    }
-
-    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
-    let header_wrapper = split_information_register_braced_fields(owner_fields.get(3)?)?;
-    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
-    if owner_fields.len() != 18
-        || owner_fields.first()?.trim() != "19"
-        || metadata_header_field_index(&owner_fields, &expected_header.uuid) != Some(3)
-        || header_wrapper.len() != 2
-        || header_wrapper.first()?.trim() != "0"
-        || !parsed_header
-            .uuid
-            .eq_ignore_ascii_case(&expected_header.uuid)
-        || parsed_header.name != expected_header.name
-        || parsed_header.synonyms != expected_header.synonyms
-        || parsed_header.comment != expected_header.comment
-    {
-        return None;
-    }
+    let root_fields = parse_strict_report_root_fields(text, expected_header)?;
 
     let (template_collection_uuid, template_uuids) =
         parse_report_child_collection(root_fields.get(3)?)?;
@@ -18702,6 +19020,45 @@ fn parse_report_child_templates_from_text(
         templates.push(name);
     }
     Some(templates)
+}
+
+fn parse_strict_report_root_fields<'a>(
+    text: &'a str,
+    expected_header: &MetadataHeader,
+) -> Option<Vec<&'a str>> {
+    let root_fields =
+        split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
+    if root_fields.len() != 8
+        || root_fields.first()?.trim() != "1"
+        || parse_information_register_usize(root_fields.get(2)?)? != 5
+    {
+        return None;
+    }
+
+    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+    let header_wrapper = split_information_register_braced_fields(owner_fields.get(3)?)?;
+    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    if owner_fields.len() != 18
+        || owner_fields.first()?.trim() != "19"
+        || metadata_header_field_index(&owner_fields, &expected_header.uuid) != Some(3)
+        || header_wrapper.len() != 2
+        || header_wrapper.first()?.trim() != "0"
+        || !strict_metadata_headers_match(&parsed_header, expected_header)
+    {
+        return None;
+    }
+
+    let expected_collection_uuids = [
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        REPORT_ATTRIBUTE_COLLECTION_UUID,
+        REPORT_FORM_COLLECTION_UUID,
+        REPORT_TABULAR_SECTION_COLLECTION_UUID,
+        REPORT_COMMAND_COLLECTION_UUID,
+    ];
+    for (value, expected_uuid) in root_fields[3..].iter().zip(expected_collection_uuids) {
+        parse_strict_metadata_collection(value, expected_uuid)?;
+    }
+    Some(root_fields)
 }
 
 fn parse_report_child_collection(value: &str) -> Option<(String, Vec<String>)> {
@@ -22719,6 +23076,10 @@ fn format_exchange_plan_source_xml(
             push_metadata_child_object_xml(&mut child_objects, child);
         }
         insert_metadata_child_objects_xml(&mut xml, "ExchangePlan", &child_objects);
+    } else if exchange_plan.emit_empty_child_objects
+        && let Some(index) = xml.find("\t</ExchangePlan>")
+    {
+        xml.insert_str(index, "\t\t<ChildObjects/>\r\n");
     }
     xml
 }
