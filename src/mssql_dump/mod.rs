@@ -81,13 +81,16 @@ const STD_PICTURE_CUSTOMIZE_LIST_UUID: &str = "f04794cb-c198-4172-86c3-649386013
 const DESIGN_TIME_REF_TYPE_UUID: &str = "5c14e26f-099b-4d37-84a6-b433d87400da";
 const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
 const METADATA_OBJECT_REF_TYPE_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
+const CONSTANTS_SET_TYPE_UUID: &str = "dcfc3784-a14f-4786-ac7b-c82db5ba275f";
+const CHART_TYPE_UUID: &str = "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5";
+const REPORT_BUILDER_TYPE_UUID: &str = "0dda99d9-ae9f-43d2-b7ac-44f3fb0d4059";
 const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID: &str = "cab0d12b-3c88-4993-8edc-8c3827cadc7d";
 const DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME: &str = "dcsset:SettingsComposer";
 const DATA_COMPOSITION_SETTINGS_NAMESPACE_ATTRIBUTE: &str =
     r#" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings""#;
 // Platform type IDs used by serialized Form type patterns.
 const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
-    ("dcfc3784-a14f-4786-ac7b-c82db5ba275f", "cfg:ConstantsSet"),
+    (CONSTANTS_SET_TYPE_UUID, "cfg:ConstantsSet"),
     (
         DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_UUID,
         DATA_PROCESSOR_SETTINGS_COMPOSER_TYPE_NAME,
@@ -101,11 +104,19 @@ const FORM_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     ("e6f51714-91cb-4dce-94fe-90ae3e3e1ad1", "v8ui:Picture"),
     ("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb", "cfg:ReportObject"),
     ("52616226-8ccf-4d1d-a3da-827eeb4f9cf9", "v8ui:VerticalAlign"),
-    ("3543ef08-3316-4f7e-9447-0cd0a1cbf1d5", "d5p1:Chart"),
+    (CHART_TYPE_UUID, "d5p1:Chart"),
     (
         "4af83795-fc2a-48cd-9bea-ce665789a62c",
         "d5p1:FlowchartContextType",
     ),
+];
+// Platform types serialized in DataProcessor Attribute patterns. SettingsComposer
+// stays on its stricter owner-wide admission path below.
+const DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
+    (CONSTANTS_SET_TYPE_UUID, "cfg:ConstantsSet"),
+    (TYPE_DESCRIPTION_TYPE_UUID, "v8:TypeDescription"),
+    (CHART_TYPE_UUID, "d7p1:Chart"),
+    (REPORT_BUILDER_TYPE_UUID, "cfg:ReportBuilder"),
 ];
 const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
@@ -5130,6 +5141,10 @@ const DCS_BUILTIN_REFERENCE_TYPE_SETS: &[(&str, &str)] = &[
     (
         "0a52f9de-73ea-4507-81e8-66217bead73a",
         "cfg:ExchangePlanRef",
+    ),
+    (
+        "11e5f865-1501-40c6-b4d4-022095a296a5",
+        "cfg:BusinessProcessRoutePointRef",
     ),
     (
         "214fa4d8-6ba4-4748-a5e1-6332b5887780",
@@ -10384,6 +10399,14 @@ fn parse_attribute_tabular_section_child_objects(
                 type_index,
                 platform_reference_family_type_reference,
             )
+        } else if tag == "Attribute" && owner_kind == "DataProcessor" {
+            parse_metadata_child_value_types_with_builtin(
+                text,
+                marker_start,
+                &header.uuid,
+                type_index,
+                data_processor_builtin_type_reference,
+            )
         } else if tag == "Attribute" {
             parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index)
         } else {
@@ -10401,7 +10424,7 @@ fn parse_attribute_tabular_section_child_objects(
                     other => other,
                 })
                 .collect();
-        } else if matches!(owner_kind, "BusinessProcess" | "Catalog") {
+        } else if matches!(owner_kind, "BusinessProcess" | "Catalog" | "DataProcessor") {
             value_types =
                 stable_partition_metadata_types(classify_metadata_reference_type_sets(value_types));
         }
@@ -23378,6 +23401,17 @@ fn form_builtin_type_reference(type_id: &str) -> Option<&'static str> {
         .or_else(|| platform_reference_family_type_reference(type_id))
 }
 
+fn data_processor_builtin_type_reference(type_id: &str) -> Option<&'static str> {
+    DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES
+        .iter()
+        .find_map(|(candidate, reference)| {
+            candidate
+                .eq_ignore_ascii_case(type_id)
+                .then_some(*reference)
+        })
+        .or_else(|| platform_reference_family_type_reference(type_id))
+}
+
 fn platform_reference_family_type_reference(type_id: &str) -> Option<&'static str> {
     DCS_BUILTIN_REFERENCE_TYPE_SETS
         .iter()
@@ -29647,6 +29681,12 @@ fn metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'static 
             if reference.starts_with("mxl:") =>
         {
             r#" xmlns:mxl="http://v8.1c.ru/8.2/data/spreadsheet""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference }
+            if reference == "d7p1:Chart" =>
+        {
+            r#" xmlns:d7p1="http://v8.1c.ru/8.2/data/chart""#
         }
         _ => "",
     }
