@@ -14277,19 +14277,16 @@ fn parse_chart_of_accounts_properties_from_text(
     if root.get(2).map(|field| field.trim()) != Some("7") {
         return StrictMetadataRoot::Unsupported;
     }
-    if root.len() != 10 {
-        return StrictMetadataRoot::Invalid;
-    }
     let Some(fields) = root
         .get(1)
         .and_then(|field| split_information_register_braced_fields(field))
     else {
-        return StrictMetadataRoot::Invalid;
+        return StrictMetadataRoot::Unsupported;
     };
     if fields.first().map(|field| field.trim()) != Some("32") {
         return StrictMetadataRoot::Unsupported;
     }
-    if fields.len() != 57 {
+    if root.len() != 10 || fields.len() != 57 {
         return StrictMetadataRoot::Invalid;
     }
 
@@ -14581,19 +14578,16 @@ fn parse_chart_of_calculation_types_properties_from_text(
     if root.get(2).map(|field| field.trim()) != Some("5") {
         return StrictMetadataRoot::Unsupported;
     }
-    if root.len() != 8 {
-        return StrictMetadataRoot::Invalid;
-    }
     let Some(fields) = root
         .get(1)
         .and_then(|field| split_information_register_braced_fields(field))
     else {
-        return StrictMetadataRoot::Invalid;
+        return StrictMetadataRoot::Unsupported;
     };
     if fields.first().map(|field| field.trim()) != Some("35") {
         return StrictMetadataRoot::Unsupported;
     }
-    if fields.len() != 63 {
+    if root.len() != 8 || fields.len() != 63 {
         return StrictMetadataRoot::Invalid;
     }
 
