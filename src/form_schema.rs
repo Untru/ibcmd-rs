@@ -1802,6 +1802,7 @@ impl FormFieldTitleLocationSchema {
 pub(crate) struct FormFieldSchema {
     top_level_offset: usize,
     input_field_options: bool,
+    spreadsheet_document_options: bool,
     title_slot: usize,
     width_option_slot: Option<usize>,
     height_option_slot: Option<usize>,
@@ -1817,6 +1818,28 @@ pub(crate) struct FormFieldSchema {
     back_color_option_slot: Option<usize>,
     border_color_option_slot: Option<usize>,
     extended_edit_multiple_values_option_slot: Option<usize>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct FormSpreadsheetDocumentFieldProperties {
+    pub(crate) default_item: Option<bool>,
+    pub(crate) width: Option<String>,
+    pub(crate) height: Option<String>,
+    pub(crate) auto_max_width: Option<bool>,
+    pub(crate) auto_max_height: Option<bool>,
+    pub(crate) vertical_stretch: Option<bool>,
+    pub(crate) show_grid: Option<bool>,
+    pub(crate) show_headers: Option<bool>,
+    pub(crate) show_cell_names: Option<bool>,
+    pub(crate) show_row_and_column_names: Option<bool>,
+    pub(crate) vertical_scroll_bar: Option<bool>,
+    pub(crate) horizontal_scroll_bar: Option<bool>,
+    pub(crate) edit: Option<bool>,
+    pub(crate) selection_show_mode: Option<&'static str>,
+    pub(crate) output: Option<&'static str>,
+    pub(crate) protection: Option<bool>,
+    pub(crate) enable_start_drag: Option<bool>,
+    pub(crate) enable_drag: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -1996,6 +2019,7 @@ impl FormFieldSchema {
         Some(Self {
             top_level_offset,
             input_field_options: item_tag == "InputField",
+            spreadsheet_document_options: item_tag == "SpreadSheetDocumentField",
             title_slot: 9 + top_level_offset,
             width_option_slot: (item_tag == "PictureField").then_some(1),
             height_option_slot: (item_tag == "PictureField").then_some(2),
@@ -2120,6 +2144,16 @@ impl FormFieldSchema {
             "0" => None,
             _ => None,
         }
+    }
+
+    pub(crate) fn spreadsheet_document_properties(
+        self,
+        fields: &[&str],
+        options: &[&str],
+    ) -> Option<FormSpreadsheetDocumentFieldProperties> {
+        self.spreadsheet_document_options
+            .then(|| FormSpreadsheetDocumentFieldProperties::from_raw_layout(fields, options))
+            .flatten()
     }
 
     pub(crate) fn input_field_option<'a>(
@@ -3703,6 +3737,58 @@ impl FormTableSchema {
     fn non_zero_u32(self, fields: &[&str], slot: FormTableSlot) -> Option<String> {
         let value = fields.get(slot.index())?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+    }
+}
+
+impl FormSpreadsheetDocumentFieldProperties {
+    fn from_raw_layout(fields: &[&str], options: &[&str]) -> Option<Self> {
+        if fields.len() != 59
+            || fields.get(5).map(|field| field.trim()) != Some("6")
+            || options.len() != 32
+            || options.first().map(|field| field.trim()) != Some("13")
+        {
+            return None;
+        }
+
+        let option = |slot: usize| options.get(slot).map(|field| field.trim());
+        let dimension = |slot: usize, default: &str| {
+            option(slot)
+                .filter(|value| *value != "0" && *value != default)
+                .filter(|value| value.parse::<u32>().is_ok())
+                .map(str::to_owned)
+        };
+        let explicit_true = |slot: usize| (option(slot) == Some("1")).then_some(true);
+        let explicit_false = |slot: usize| (option(slot) == Some("0")).then_some(false);
+        let scroll_bar = |slot: usize| match option(slot) {
+            Some("0") => Some(false),
+            Some("1") => Some(true),
+            _ => None,
+        };
+
+        Some(Self {
+            default_item: (fields.get(16)?.trim() == "1").then_some(true),
+            width: dimension(1, "50"),
+            height: dimension(2, "10"),
+            auto_max_width: explicit_false(20),
+            auto_max_height: explicit_false(23),
+            vertical_stretch: explicit_false(4),
+            show_grid: explicit_true(5),
+            show_headers: explicit_true(6),
+            show_cell_names: explicit_true(25),
+            show_row_and_column_names: explicit_true(26),
+            vertical_scroll_bar: scroll_bar(28),
+            horizontal_scroll_bar: scroll_bar(29),
+            edit: explicit_true(13),
+            selection_show_mode: match option(30) {
+                Some("0") => Some("WhenActive"),
+                Some("3") => Some("WhenMultipleCellsSelected"),
+                _ => None,
+            },
+            output: (option(12) == Some("1")).then_some("Enable"),
+            protection: explicit_true(10),
+            enable_start_drag: explicit_false(16),
+            enable_drag: explicit_false(17),
+        })
     }
 }
 

@@ -30,10 +30,11 @@ use crate::form_schema::{
     FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
-    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
-    FormTableRootPropertyBagKey as TableRootBagKey, FormTableRowPictureDataPath, FormTableSchema,
-    FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
+    FormSpreadsheetDocumentFieldProperties, FormTableOrdinaryTailKey as TableTailKey,
+    FormTablePropertyBagKey as TableBagKey, FormTableRootPropertyBagKey as TableRootBagKey,
+    FormTableRowPictureDataPath, FormTableSchema, FormTableSearchControlLocation,
+    FormTableSearchStringLocation, FormTableViewStatusLocation, FormTableXmlProperty,
+    FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
@@ -637,6 +638,7 @@ pub(super) struct FormChildItem {
     pub(super) max_height: Option<String>,
     pub(super) horizontal_stretch: Option<bool>,
     pub(super) vertical_stretch: Option<bool>,
+    pub(super) spreadsheet_document_properties: Option<FormSpreadsheetDocumentFieldProperties>,
     pub(super) max_value: Option<String>,
     pub(super) input_min_value: Option<String>,
     pub(super) input_max_value: Option<String>,
@@ -4801,6 +4803,9 @@ fn parse_form_child_item_with_metadata_owners(
             )
             .map(|schema| (schema, options))
         });
+    let spreadsheet_document_properties = field_schema_and_options
+        .as_ref()
+        .and_then(|(schema, options)| schema.spreadsheet_document_properties(&fields, options));
     let button_color_schema = FormButtonColorSchema::from_raw_layout(wrapper, fields.len(), tag);
     let button_shape_representation_schema = FormButtonShapeRepresentationSchema::from_raw_layout(
         wrapper,
@@ -5357,6 +5362,8 @@ fn parse_form_child_item_with_metadata_owners(
             .and_then(|schema| schema.use_alternation_row_color(&fields)),
         default_item: if tag == "Table" {
             table_schema.and_then(|schema| schema.default_item(&fields))
+        } else if let Some(properties) = spreadsheet_document_properties.as_ref() {
+            properties.default_item
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
             fields
                 .get(13 + button_top_level_offset)
@@ -5909,6 +5916,8 @@ fn parse_form_child_item_with_metadata_owners(
         },
         width: if tag == "Table" {
             table_schema.and_then(|schema| schema.width(&fields))
+        } else if let Some(properties) = spreadsheet_document_properties.as_ref() {
+            properties.width.clone()
         } else if tag == "CalendarField" {
             document_field_options
                 .as_deref()
@@ -5955,6 +5964,8 @@ fn parse_form_child_item_with_metadata_owners(
             extended_group_options
                 .as_ref()
                 .and_then(|options| options.height.clone())
+        } else if let Some(properties) = spreadsheet_document_properties.as_ref() {
+            properties.height.clone()
         } else if tag == "PictureField" {
             field_schema_and_options
                 .as_ref()
@@ -6043,7 +6054,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        auto_max_width: if matches!(tag, "InputField" | "TextDocumentField")
+        auto_max_width: if let Some(properties) = spreadsheet_document_properties.as_ref() {
+            properties.auto_max_width
+        } else if matches!(tag, "InputField" | "TextDocumentField")
             && form_input_field_layout_is_extended(&fields)
         {
             parse_form_input_field_auto_max_width(input_field_extended_options.as_deref())
@@ -6090,7 +6103,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        auto_max_height: if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
+        auto_max_height: if let Some(properties) = spreadsheet_document_properties.as_ref() {
+            properties.auto_max_height
+        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_auto_max_height(input_field_extended_options.as_deref())
         } else if tag == "LabelField" {
             label_field_options
@@ -6158,6 +6173,8 @@ fn parse_form_child_item_with_metadata_owners(
         },
         vertical_stretch: if let Some(schema) = button_common_schema {
             schema.vertical_stretch(&fields)
+        } else if let Some(properties) = spreadsheet_document_properties.as_ref() {
+            properties.vertical_stretch
         } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
             parse_form_input_field_vertical_stretch(input_field_extended_options.as_deref())
         } else if tag == "LabelDecoration" {
@@ -6179,6 +6196,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        spreadsheet_document_properties,
         max_value: special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.max_value(options)),
@@ -12383,6 +12401,67 @@ fn format_form_auto_mark_incomplete_xml(item: &FormChildItem, indent: usize) -> 
     )
 }
 
+fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent: usize) -> String {
+    let Some(properties) = item.spreadsheet_document_properties.as_ref() else {
+        return String::new();
+    };
+    let tab = "\t".repeat(indent);
+    let mut xml = String::new();
+    if properties.show_grid == Some(true) {
+        xml.push_str(&format!("{tab}<ShowGrid>true</ShowGrid>\r\n"));
+    }
+    if properties.show_headers == Some(true) {
+        xml.push_str(&format!("{tab}<ShowHeaders>true</ShowHeaders>\r\n"));
+    }
+    if properties.show_cell_names == Some(true) {
+        xml.push_str(&format!("{tab}<ShowCellNames>true</ShowCellNames>\r\n"));
+    }
+    if properties.show_row_and_column_names == Some(true) {
+        xml.push_str(&format!(
+            "{tab}<ShowRowAndColumnNames>true</ShowRowAndColumnNames>\r\n"
+        ));
+    }
+    if let Some(value) = properties.vertical_scroll_bar {
+        xml.push_str(&format!(
+            "{tab}<VerticalScrollBar>{}</VerticalScrollBar>\r\n",
+            xml_bool(value)
+        ));
+    }
+    if let Some(value) = properties.horizontal_scroll_bar {
+        xml.push_str(&format!(
+            "{tab}<HorizontalScrollBar>{}</HorizontalScrollBar>\r\n",
+            xml_bool(value)
+        ));
+    }
+    if properties.edit == Some(true) {
+        xml.push_str(&format!("{tab}<Edit>true</Edit>\r\n"));
+    }
+    if let Some(value) = properties.selection_show_mode {
+        xml.push_str(&format!(
+            "{tab}<SelectionShowMode>{}</SelectionShowMode>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if let Some(value) = properties.output {
+        xml.push_str(&format!(
+            "{tab}<Output>{}</Output>\r\n",
+            escape_xml_text(value)
+        ));
+    }
+    if properties.protection == Some(true) {
+        xml.push_str(&format!("{tab}<Protection>true</Protection>\r\n"));
+    }
+    if properties.enable_start_drag == Some(false) {
+        xml.push_str(&format!(
+            "{tab}<EnableStartDrag>false</EnableStartDrag>\r\n"
+        ));
+    }
+    if properties.enable_drag == Some(false) {
+        xml.push_str(&format!("{tab}<EnableDrag>false</EnableDrag>\r\n"));
+    }
+    xml
+}
+
 fn format_form_table_properties_xml(item: &FormChildItem, indent: usize) -> String {
     if item.tag != "Table" {
         return String::new();
@@ -13371,6 +13450,10 @@ pub(super) fn format_form_child_item_xml(
             if vertical_stretch { "true" } else { "false" }
         ));
     }
+    xml.push_str(&format_form_spreadsheet_document_properties_xml(
+        item,
+        indent + 1,
+    ));
     if let Some(max_value) = &item.max_value {
         xml.push_str(&format!(
             "{tab}\t<MaxValue>{}</MaxValue>\r\n",

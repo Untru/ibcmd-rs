@@ -10301,6 +10301,7 @@ fn formats_table_search_additions_as_direct_sections() {
         max_height: None,
         horizontal_stretch: None,
         vertical_stretch: None,
+        spreadsheet_document_properties: None,
         max_value: None,
         input_min_value: None,
         input_max_value: None,
@@ -10473,6 +10474,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 max_height: None,
                 horizontal_stretch: None,
                 vertical_stretch: None,
+                spreadsheet_document_properties: None,
                 max_value: None,
                 input_min_value: None,
                 input_max_value: None,
@@ -10646,6 +10648,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 max_height: None,
                 horizontal_stretch: None,
                 vertical_stretch: None,
+                spreadsheet_document_properties: None,
                 max_value: None,
                 input_min_value: None,
                 input_max_value: None,
@@ -16215,6 +16218,7 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
                 text: Some("Cell".to_string()),
                 parameter: None,
                 detail_parameter: None,
+                note: None,
                 empty_text: false,
             }],
         }],
@@ -16572,6 +16576,7 @@ fn parses_and_formats_moxel_vertical_groups() {
                 text: Some("Cell".to_string()),
                 parameter: None,
                 detail_parameter: None,
+                note: None,
                 empty_text: false,
             }],
         }],
@@ -17119,6 +17124,7 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     text: None,
                     parameter: None,
                     detail_parameter: None,
+                    note: None,
                     empty_text: false,
                 },
                 MoxelCell {
@@ -17128,6 +17134,7 @@ fn formats_moxel_zero_column_slots_normalize_row_and_cell_refs() {
                     text: None,
                     parameter: None,
                     detail_parameter: None,
+                    note: None,
                     empty_text: false,
                 },
             ],
@@ -17170,6 +17177,7 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 text: None,
                 parameter: None,
                 detail_parameter: None,
+                note: None,
                 empty_text: false,
             },
             MoxelCell {
@@ -17179,6 +17187,7 @@ fn formats_moxel_without_format_table_restore_source_refs() {
                 text: None,
                 parameter: None,
                 detail_parameter: None,
+                note: None,
                 empty_text: false,
             },
         ],
@@ -17260,6 +17269,7 @@ fn formats_moxel_non_zero_column_slots_suppress_row_output_index_one() {
                 text: None,
                 parameter: None,
                 detail_parameter: None,
+                note: None,
                 empty_text: false,
             }],
         },
@@ -17289,6 +17299,7 @@ fn formats_moxel_leading_shared_default_suppresses_shifted_row_output_index_two(
                 text: None,
                 parameter: None,
                 detail_parameter: None,
+                note: None,
                 empty_text: false,
             }],
         },
@@ -37200,7 +37211,7 @@ fn derives_empty_ref_for_saved_data_processor_tabular_attribute() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     let type_index = BTreeMap::from([(
@@ -37236,7 +37247,7 @@ fn keeps_direct_data_processor_empty_ref_shapes_as_noncandidates() {
         EmptyRefDataProcessorLayout::DirectModern,
         EmptyRefDataProcessorLayout::DirectLegacy,
     ] {
-        let fixture = empty_ref_data_processor_fixture(layout, "", "", ",0", "0");
+        let fixture = empty_ref_data_processor_fixture(layout, "", "", "", "0");
         let type_index = BTreeMap::from([(
             fixture.owner_type_id.clone(),
             "cfg:CatalogRef.Currencies".to_string(),
@@ -37261,7 +37272,7 @@ fn rejects_empty_ref_type_index_and_object_id_collisions_atomically() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     let type_index = BTreeMap::from([(
@@ -37307,12 +37318,12 @@ fn rejects_empty_ref_type_index_and_object_id_collisions_atomically() {
 #[test]
 fn rejects_malformed_empty_ref_wrappers_and_shifted_slot_atomically() {
     let cases = [
-        ("missing inner tail", "", "", "", "0"),
-        ("extra inner tail", "", "", ",0,0", "0"),
-        ("missing outer tail", "", "", ",0", ""),
-        ("extra outer tail", "", "", ",0", "0,0"),
-        ("extra field before fill", "0,", "", ",0", "0"),
-        ("extra field after fill", "", ",0", ",0", "0"),
+        ("extra inner tail", "", "", ",0", "0"),
+        ("two extra inner tails", "", "", ",0,0", "0"),
+        ("missing outer tail", "", "", "", ""),
+        ("extra outer tail", "", "", "", "0,0"),
+        ("extra field before fill", "0,", "", "", "0"),
+        ("extra field after fill", "", ",0", "", "0"),
     ];
     for (case, payload_prefix, payload_suffix, inner_wrapper_suffix, outer_suffix) in cases {
         let fixture = empty_ref_data_processor_fixture(
@@ -37345,7 +37356,7 @@ fn rejects_missing_ambiguous_and_malformed_empty_ref_owners_atomically() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     assert!(
@@ -37412,7 +37423,7 @@ fn rejects_malformed_empty_ref_protocol_fields_atomically() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     let zero = "00000000-0000-0000-0000-000000000000";
@@ -37495,7 +37506,7 @@ fn treats_wrong_empty_ref_descriptor_tag_and_uuid_as_noncandidates() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     let zero = "00000000-0000-0000-0000-000000000000";
@@ -37547,7 +37558,7 @@ fn rejects_duplicate_empty_ref_attribute_candidate_atomically() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     let marker = "{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,";
@@ -37574,7 +37585,7 @@ fn derives_empty_ref_for_any_valid_generated_ref_kind() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     let type_index = BTreeMap::from([(
@@ -37598,7 +37609,7 @@ fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
         EmptyRefDataProcessorLayout::SavedTabular,
         "",
         "",
-        ",0",
+        "",
         "0",
     );
     let type_index = BTreeMap::from([(

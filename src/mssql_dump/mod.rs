@@ -10918,10 +10918,7 @@ fn has_exact_data_processor_tabular_attribute_wrappers(
         else {
             continue;
         };
-        if inner.len() != 3
-            || inner.first().map(|field| field.trim()) != Some("0")
-            || inner.get(2).map(|field| field.trim()) != Some("0")
-        {
+        if inner.len() != 2 || inner.first().map(|field| field.trim()) != Some("0") {
             continue;
         }
         let Some(payload) = inner

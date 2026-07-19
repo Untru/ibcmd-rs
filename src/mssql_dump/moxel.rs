@@ -259,7 +259,24 @@ pub(super) struct MoxelCell {
     pub(super) text: Option<String>,
     pub(super) parameter: Option<String>,
     pub(super) detail_parameter: Option<String>,
+    pub(super) note: Option<MoxelNote>,
     pub(super) empty_text: bool,
+}
+
+#[derive(Clone)]
+pub(super) struct MoxelNote {
+    pub(super) format_index: usize,
+    pub(super) source_format_index: usize,
+    pub(super) text: MoxelLocalizedValue,
+    pub(super) begin_row: i32,
+    pub(super) begin_row_offset: i32,
+    pub(super) end_row: i32,
+    pub(super) end_row_offset: i32,
+    pub(super) begin_column: i32,
+    pub(super) begin_column_offset: i32,
+    pub(super) end_column: i32,
+    pub(super) end_column_offset: i32,
+    pub(super) auto_size: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -626,6 +643,11 @@ pub(super) fn parse_moxel_spreadsheet_text(
                 if cell.format_index > 0 {
                     cell.format_index += format_offset;
                 }
+                if let Some(note) = &mut cell.note
+                    && note.format_index > 0
+                {
+                    note.format_index += format_offset;
+                }
             }
         }
     }
@@ -765,7 +787,12 @@ pub(super) fn parse_moxel_spreadsheet_text(
         moxel_column_format_slots(&column_sets, column_count).max(1),
         |max_index, row| {
             let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
-                cell_max.max(cell.format_index)
+                cell_max.max(cell.format_index).max(
+                    cell.note
+                        .as_ref()
+                        .map(|note| note.format_index)
+                        .unwrap_or(0),
+                )
             });
             max_index.max(row_max)
         },
@@ -1700,6 +1727,7 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
         .as_ref()
         .filter(|value| value.lang.is_empty())
         .map(|value| value.content.clone());
+    let note = parse_moxel_cell_note(&fields, cell_kind);
     Some(MoxelCell {
         column_index,
         format_index,
@@ -1711,7 +1739,86 @@ pub(super) fn parse_moxel_cell(text: &str, column_index: usize) -> Option<MoxelC
         text,
         parameter,
         detail_parameter,
+        note,
         empty_text,
+    })
+}
+
+fn parse_moxel_cell_note(fields: &[&str], cell_kind: &str) -> Option<MoxelNote> {
+    let note_text_index = match cell_kind {
+        "48" if fields.len() == 7 => 3,
+        "56" if fields.len() == 8 => 4,
+        _ => return None,
+    };
+    if fields.get(note_text_index + 1)?.trim() != "1"
+        || fields.get(note_text_index + 3)?.trim() != "0"
+    {
+        return None;
+    }
+
+    let note_text_field = fields.get(note_text_index)?.trim();
+    let text = parse_moxel_single_localized_value(note_text_field)?;
+    let note_fields = split_1c_braced_fields(fields.get(note_text_index + 2)?.trim(), 0)?;
+    if note_fields.len() != 12
+        || note_fields.get(1)?.trim() != "6"
+        || note_fields.get(10)?.trim() != "0"
+    {
+        return None;
+    }
+
+    let format_fields = split_1c_braced_fields(note_fields.first()?.trim(), 0)?;
+    if format_fields.len() != 4
+        || format_fields.first()?.trim() != "16"
+        || format_fields.get(2)?.trim() != note_text_field
+        || format_fields.get(3)?.trim() != "0"
+        || parse_moxel_single_localized_value(format_fields.get(2)?.trim())? != text
+    {
+        return None;
+    }
+    let source_format_index = format_fields
+        .get(1)?
+        .trim()
+        .parse::<usize>()
+        .ok()?
+        .checked_add(1)?;
+    if source_format_index == 1 {
+        return None;
+    }
+    let coordinate = |index: usize| note_fields.get(index)?.trim().parse::<i32>().ok();
+    let auto_size = match note_fields.get(11)?.trim() {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+
+    Some(MoxelNote {
+        format_index: source_format_index,
+        source_format_index,
+        text,
+        begin_row: coordinate(3)?,
+        begin_row_offset: coordinate(5)?,
+        end_row: coordinate(7)?,
+        end_row_offset: coordinate(9)?,
+        begin_column: coordinate(2)?,
+        begin_column_offset: coordinate(4)?,
+        end_column: coordinate(6)?,
+        end_column_offset: coordinate(8)?,
+        auto_size,
+    })
+}
+
+fn parse_moxel_single_localized_value(text: &str) -> Option<MoxelLocalizedValue> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 3 || fields.first()?.trim() != "1" || fields.get(1)?.trim() != "1" {
+        return None;
+    }
+    let pair = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
+    if pair.len() != 2 {
+        return None;
+    }
+    Some(MoxelLocalizedValue {
+        lang: parse_1c_string(pair.first()?)?,
+        content: parse_1c_string(pair.get(1)?)?,
     })
 }
 
@@ -4390,7 +4497,12 @@ pub(super) fn moxel_output_format_count(spreadsheet: &MoxelSpreadsheet) -> usize
         .unwrap_or(0);
     let max_row_or_cell_format_index = spreadsheet.rows.iter().fold(0usize, |max_index, row| {
         let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
-            cell_max.max(cell.format_index)
+            cell_max.max(cell.format_index).max(
+                cell.note
+                    .as_ref()
+                    .map(|note| note.format_index)
+                    .unwrap_or(0),
+            )
         });
         max_index.max(row_max)
     });
@@ -4600,6 +4712,9 @@ pub(super) fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec
         push(row.format_index);
         for cell in &row.cells {
             push(cell.format_index);
+            if let Some(note) = &cell.note {
+                push(note.format_index);
+            }
         }
     }
     for drawing in &spreadsheet.drawings {
@@ -4955,10 +5070,13 @@ fn moxel_source_format_refs_are_complete(
                 .all(|column| column.source_format_index.is_none_or(direct_ref_is_valid))
     }) && rows.iter().all(|row| {
         row.source_format_index.is_none_or(row_ref_is_valid)
-            && row
-                .cells
-                .iter()
-                .all(|cell| cell.source_format_index.is_none_or(cell_ref_is_valid))
+            && row.cells.iter().all(|cell| {
+                cell.source_format_index.is_none_or(cell_ref_is_valid)
+                    && cell
+                        .note
+                        .as_ref()
+                        .is_none_or(|note| cell_ref_is_valid(note.source_format_index))
+            })
     }) && drawings.iter().all(|drawing| {
         drawing.format_index == 0
             || source_format_map.internal_for_source(drawing.format_index)
@@ -5008,15 +5126,23 @@ fn remap_moxel_row_and_cell_source_format_indices(
             }
         }
         for cell in &mut row.cells {
-            let Some(source_format_index) = cell.source_format_index else {
-                continue;
-            };
-            if source_format_index == 0 {
-                cell.format_index = 0;
-            } else if let Some(format_index) =
-                source_format_map.internal_for_source(source_format_index - 1)
-            {
-                cell.format_index = format_index;
+            if let Some(source_format_index) = cell.source_format_index {
+                if source_format_index == 0 {
+                    cell.format_index = 0;
+                } else if let Some(format_index) =
+                    source_format_map.internal_for_source(source_format_index - 1)
+                {
+                    cell.format_index = format_index;
+                }
+            }
+            if let Some(note) = &mut cell.note {
+                if note.source_format_index == 0 {
+                    note.format_index = 0;
+                } else if let Some(format_index) =
+                    source_format_map.internal_for_source(note.source_format_index - 1)
+                {
+                    note.format_index = format_index;
+                }
             }
         }
     }
@@ -5044,16 +5170,25 @@ pub(super) fn remap_moxel_row_and_cell_sparse_source_format_indices(
             }
         }
         for cell in &mut row.cells {
-            let Some(source_format_index) = cell.source_format_index else {
-                continue;
-            };
-            let output_index = remap_moxel_row_or_cell_source_format_index(
-                source_format_index,
-                source_column_format_refs,
-                false,
-            );
-            if let Some(format_index) = output_to_internal.get(&output_index).copied() {
-                cell.format_index = format_index;
+            if let Some(source_format_index) = cell.source_format_index {
+                let output_index = remap_moxel_row_or_cell_source_format_index(
+                    source_format_index,
+                    source_column_format_refs,
+                    false,
+                );
+                if let Some(format_index) = output_to_internal.get(&output_index).copied() {
+                    cell.format_index = format_index;
+                }
+            }
+            if let Some(note) = &mut cell.note {
+                let output_index = remap_moxel_row_or_cell_source_format_index(
+                    note.source_format_index,
+                    source_column_format_refs,
+                    false,
+                );
+                if let Some(format_index) = output_to_internal.get(&output_index).copied() {
+                    note.format_index = format_index;
+                }
             }
         }
     }
@@ -5079,18 +5214,33 @@ pub(super) fn remap_moxel_row_and_cell_sparse_internal_format_indices(
             }
         }
         for cell in &mut row.cells {
-            let Some(source_format_index) = cell.source_format_index else {
-                continue;
-            };
-            if source_format_index == 0 {
-                cell.format_index = 0;
-            } else if let Some(format_index) = moxel_internal_format_index_for_sparse_source_index(
-                source_format_index - 1,
-                source_column_format_refs,
-                column_format_len,
-                format_len,
-            ) {
-                cell.format_index = format_index;
+            if let Some(source_format_index) = cell.source_format_index {
+                if source_format_index == 0 {
+                    cell.format_index = 0;
+                } else if let Some(format_index) =
+                    moxel_internal_format_index_for_sparse_source_index(
+                        source_format_index - 1,
+                        source_column_format_refs,
+                        column_format_len,
+                        format_len,
+                    )
+                {
+                    cell.format_index = format_index;
+                }
+            }
+            if let Some(note) = &mut cell.note {
+                if note.source_format_index == 0 {
+                    note.format_index = 0;
+                } else if let Some(format_index) =
+                    moxel_internal_format_index_for_sparse_source_index(
+                        note.source_format_index - 1,
+                        source_column_format_refs,
+                        column_format_len,
+                        format_len,
+                    )
+                {
+                    note.format_index = format_index;
+                }
             }
         }
     }
@@ -5109,14 +5259,20 @@ pub(super) fn remap_moxel_row_and_cell_output_format_indices(
             );
         }
         for cell in &mut row.cells {
-            let Some(source_format_index) = cell.source_format_index else {
-                continue;
-            };
-            cell.format_index = remap_moxel_row_or_cell_source_format_index(
-                source_format_index,
-                source_column_format_refs,
-                false,
-            );
+            if let Some(source_format_index) = cell.source_format_index {
+                cell.format_index = remap_moxel_row_or_cell_source_format_index(
+                    source_format_index,
+                    source_column_format_refs,
+                    false,
+                );
+            }
+            if let Some(note) = &mut cell.note {
+                note.format_index = remap_moxel_row_or_cell_source_format_index(
+                    note.source_format_index,
+                    source_column_format_refs,
+                    false,
+                );
+            }
         }
     }
 }
@@ -5136,6 +5292,10 @@ pub(super) fn normalize_moxel_zero_column_format_refs(rows: &mut [MoxelRow]) {
             } else {
                 Some(cell.format_index)
             };
+            if let Some(note) = &mut cell.note {
+                note.format_index = note.format_index.saturating_sub(1);
+                note.source_format_index = note.format_index;
+            }
         }
     }
 }
@@ -5148,6 +5308,9 @@ pub(super) fn restore_moxel_source_format_refs_without_format_table(rows: &mut [
         for cell in &mut row.cells {
             if let Some(source_format_index) = cell.source_format_index {
                 cell.format_index = source_format_index;
+            }
+            if let Some(note) = &mut cell.note {
+                note.format_index = note.source_format_index;
             }
         }
     }
@@ -5770,9 +5933,79 @@ pub(super) fn push_moxel_row_xml(
                 escape_xml_element_text(detail_parameter)
             ));
         }
+        if let Some(note) = &cell.note {
+            push_moxel_note_xml(xml, note, output_format_index_map);
+        }
         xml.push_str("\t\t\t\t</c>\r\n");
         xml.push_str("\t\t\t</c>\r\n");
         expected_column = cell.column_index + 1;
     }
     xml.push_str("\t\t</row>\r\n\t</rowsItem>\r\n");
+}
+
+fn push_moxel_note_xml(
+    xml: &mut String,
+    note: &MoxelNote,
+    output_format_index_map: &BTreeMap<usize, usize>,
+) {
+    let format_index = output_format_index_map
+        .get(&note.format_index)
+        .copied()
+        .unwrap_or(note.format_index);
+    xml.push_str("\t\t\t\t\t<note>\r\n");
+    xml.push_str("\t\t\t\t\t\t<drawingType>Comment</drawingType>\r\n");
+    xml.push_str("\t\t\t\t\t\t<id>0</id>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<formatIndex>{format_index}</formatIndex>\r\n"
+    ));
+    xml.push_str("\t\t\t\t\t\t<text>\r\n");
+    xml.push_str("\t\t\t\t\t\t\t<v8:item>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t\t\t<v8:lang>{}</v8:lang>\r\n",
+        escape_xml_element_text(&note.text.lang)
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t\t\t<v8:content>{}</v8:content>\r\n",
+        escape_xml_element_text(&note.text.content)
+    ));
+    xml.push_str("\t\t\t\t\t\t\t</v8:item>\r\n");
+    xml.push_str("\t\t\t\t\t\t</text>\r\n");
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<beginRow>{}</beginRow>\r\n",
+        note.begin_row
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<beginRowOffset>{}</beginRowOffset>\r\n",
+        note.begin_row_offset
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<endRow>{}</endRow>\r\n",
+        note.end_row
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<endRowOffset>{}</endRowOffset>\r\n",
+        note.end_row_offset
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<beginColumn>{}</beginColumn>\r\n",
+        note.begin_column
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<beginColumnOffset>{}</beginColumnOffset>\r\n",
+        note.begin_column_offset
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<endColumn>{}</endColumn>\r\n",
+        note.end_column
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<endColumnOffset>{}</endColumnOffset>\r\n",
+        note.end_column_offset
+    ));
+    xml.push_str(&format!(
+        "\t\t\t\t\t\t<autoSize>{}</autoSize>\r\n",
+        xml_bool(note.auto_size)
+    ));
+    xml.push_str("\t\t\t\t\t\t<pictureSize>Stretch</pictureSize>\r\n");
+    xml.push_str("\t\t\t\t\t</note>\r\n");
 }
