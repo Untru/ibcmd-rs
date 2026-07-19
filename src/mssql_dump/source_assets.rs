@@ -2800,7 +2800,7 @@ pub(super) fn format_predefined_data_xml(
             1,
         )?;
     }
-    xml.push_str("</PredefinedData>\r\n");
+    xml.push_str("</PredefinedData>");
     Ok(xml)
 }
 
