@@ -12498,7 +12498,7 @@ fn parse_metadata_code27_payload_fields(payload: Vec<&str>) -> Option<(Vec<&str>
         return None;
     }
     let pattern = split_1c_braced_fields(detail.get(2)?.trim(), 0)?;
-    if pattern.len() < 2 || pattern.first()?.trim() != r#""Pattern""# {
+    if pattern.first()?.trim() != r#""Pattern""# {
         return None;
     }
     Some((payload, child_uuid))
