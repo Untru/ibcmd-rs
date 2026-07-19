@@ -19,7 +19,8 @@ use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
     FormControlBorderSchema, FormControlBorderStyle, FormFieldSchema,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
-    FormTableCurrentRowUse, FormTablePropertyBagKey as TableBagKey, FormTableSchema,
+    FormTableCurrentRowUse, FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey,
+    FormTableSchema,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -256,6 +257,7 @@ struct FormXmlChildItem {
     table_representation: Option<String>,
     table_command_bar_location: Option<String>,
     table_current_row_use: Option<FormTableCurrentRowUse>,
+    table_horizontal_scroll_bar: Option<FormTableHorizontalScrollBar>,
     height_in_table_rows: Option<String>,
     row_selection_mode: Option<String>,
     enable_start_drag: Option<bool>,
@@ -4902,6 +4904,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Action"
                         | "ModifiesSavedData"
                         | "CurrentRowUse"
+                        | "HorizontalScrollBar"
                         | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
@@ -5343,6 +5346,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
                     || path_ends_with_for_child_table_current_row_use(&path, &current_child_items)
+                    || path_ends_with_for_child_table_horizontal_scroll_bar(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -5848,6 +5855,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
                     || path_ends_with_for_child_table_current_row_use(&path, &current_child_items)
+                    || path_ends_with_for_child_table_horizontal_scroll_bar(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -6527,6 +6538,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                     .ok_or_else(|| {
                                         anyhow!(
                                             "unsupported Form Table CurrentRowUse: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
+                        }
+                    }
+                    "HorizontalScrollBar"
+                        if path_ends_with_for_child_table_horizontal_scroll_bar(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_horizontal_scroll_bar = Some(
+                                FormTableHorizontalScrollBar::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form Table HorizontalScrollBar: {}",
                                             text_value.trim()
                                         )
                                     })?,
@@ -8195,6 +8224,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "Action"
                         | "ModifiesSavedData"
                         | "CurrentRowUse"
+                        | "HorizontalScrollBar"
                         | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
@@ -8406,6 +8436,7 @@ fn parse_form_child_item_xml(
         table_representation: None,
         table_command_bar_location: None,
         table_current_row_use: None,
+        table_horizontal_scroll_bar: None,
         height_in_table_rows: None,
         row_selection_mode: None,
         enable_start_drag: None,
@@ -9338,6 +9369,16 @@ fn path_ends_with_for_child_table_current_row_use(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "CurrentRowUse"])
+}
+
+fn path_ends_with_for_child_table_horizontal_scroll_bar(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "HorizontalScrollBar"])
 }
 
 fn path_ends_with_for_child_row_filter(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -12629,6 +12670,41 @@ fn form_layout_table_current_row_use_range(
         .cloned()
 }
 
+fn form_layout_table_horizontal_scroll_bar_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let raw_fields = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let schema = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields)?;
+    fields.get(schema.horizontal_scroll_bar_slot()).cloned()
+}
+
+fn form_layout_table_file_drag_mode_replacement(
+    text: &str,
+    fields: &[Range<usize>],
+    value: &str,
+) -> Option<(Range<usize>, String)> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let raw_fields = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    if let Some(schema) = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields) {
+        let range = fields
+            .get(schema.file_drag_mode_slot(&raw_fields)?)?
+            .clone();
+        let code = schema.file_drag_mode_raw_code(value)?;
+        return Some((range, code.to_string()));
+    }
+    let range = fields.get(30)?.clone();
+    let code = form_table_file_drag_mode_code(value)?;
+    Some((range, code.to_string()))
+}
+
 fn patch_form_layout_child_item_entry(
     text: &mut String,
     fields: &[Range<usize>],
@@ -12716,6 +12792,15 @@ fn patch_form_layout_child_item_entry(
                 current_row_use.raw_code().to_string(),
             ));
         }
+        if let Some(horizontal_scroll_bar) = item.table_horizontal_scroll_bar
+            && let Some(horizontal_scroll_bar_range) =
+                form_layout_table_horizontal_scroll_bar_range(text, fields)
+        {
+            replacements.push((
+                horizontal_scroll_bar_range,
+                horizontal_scroll_bar.raw_code().to_string(),
+            ));
+        }
         if let Some(data_path) = &item.data_path
             && let Some(data_path_range) = fields.get(11)
             && text[data_path_range.clone()].trim_start().starts_with('{')
@@ -12756,10 +12841,10 @@ fn patch_form_layout_child_item_entry(
             ));
         }
         if let Some(file_drag_mode) = &item.file_drag_mode
-            && let Some(code) = form_table_file_drag_mode_code(file_drag_mode)
-            && let Some(file_drag_range) = fields.get(30)
+            && let Some(replacement) =
+                form_layout_table_file_drag_mode_replacement(text, fields, file_drag_mode)
         {
-            replacements.push((file_drag_range.clone(), code.to_string()));
+            replacements.push(replacement);
         }
         if let Some(skip_on_input) = item.skip_on_input
             && let Some(skip_range) = fields.get(12)

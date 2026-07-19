@@ -3574,6 +3574,7 @@ pub(crate) enum FormTableXmlProperty {
     SelectionMode,
     RowSelectionMode,
     Header,
+    HorizontalScrollBar,
     HorizontalLines,
     VerticalLines,
     UseAlternationRowColor,
@@ -3631,6 +3632,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::SelectionMode,
     FormTableXmlProperty::RowSelectionMode,
     FormTableXmlProperty::Header,
+    FormTableXmlProperty::HorizontalScrollBar,
     FormTableXmlProperty::HorizontalLines,
     FormTableXmlProperty::VerticalLines,
     FormTableXmlProperty::UseAlternationRowColor,
@@ -3680,6 +3682,7 @@ enum FormTableSlot {
     SelectionMode,
     RowSelectionMode,
     Header,
+    HorizontalScrollBar,
     HorizontalLines,
     VerticalLines,
     UseAlternationRowColor,
@@ -3689,7 +3692,7 @@ enum FormTableSlot {
 }
 
 impl FormTableSlot {
-    const ALL: [Self; 18] = [
+    const ALL: [Self; 19] = [
         Self::Autofill,
         Self::ReadOnly,
         Self::DefaultItem,
@@ -3702,6 +3705,7 @@ impl FormTableSlot {
         Self::SelectionMode,
         Self::RowSelectionMode,
         Self::Header,
+        Self::HorizontalScrollBar,
         Self::HorizontalLines,
         Self::VerticalLines,
         Self::UseAlternationRowColor,
@@ -3724,6 +3728,7 @@ impl FormTableSlot {
             Self::SelectionMode => 24,
             Self::RowSelectionMode => 25,
             Self::Header => 26,
+            Self::HorizontalScrollBar => 30,
             Self::HorizontalLines => 32,
             Self::VerticalLines => 33,
             Self::UseAlternationRowColor => 36,
@@ -3736,8 +3741,39 @@ impl FormTableSlot {
     fn accepts(self, field: &str) -> bool {
         match self {
             Self::RowInputMode => matches!(field.trim(), "0" | "2"),
+            Self::HorizontalScrollBar => matches!(field.trim(), "0" | "1" | "2"),
             Self::Width | Self::Height => field.trim().parse::<u32>().is_ok(),
             _ => matches!(field.trim(), "0" | "1"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableHorizontalScrollBar {
+    DontUse,
+    UseAlways,
+}
+
+impl FormTableHorizontalScrollBar {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::DontUse => "DontUse",
+            Self::UseAlways => "UseAlways",
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value {
+            "DontUse" => Some(Self::DontUse),
+            "UseAlways" => Some(Self::UseAlways),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::DontUse => "0",
+            Self::UseAlways => "1",
         }
     }
 }
@@ -4095,6 +4131,21 @@ impl FormTableSchema {
         self.explicit_false(fields, FormTableSlot::Header)
     }
 
+    pub(crate) const fn horizontal_scroll_bar_slot(self) -> usize {
+        FormTableSlot::HorizontalScrollBar.index()
+    }
+
+    pub(crate) fn horizontal_scroll_bar(
+        self,
+        fields: &[&str],
+    ) -> Option<FormTableHorizontalScrollBar> {
+        match fields.get(self.horizontal_scroll_bar_slot())?.trim() {
+            "0" => Some(FormTableHorizontalScrollBar::DontUse),
+            "1" => Some(FormTableHorizontalScrollBar::UseAlways),
+            _ => None,
+        }
+    }
+
     pub(crate) fn horizontal_lines(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::HorizontalLines)
     }
@@ -4119,11 +4170,23 @@ impl FormTableSchema {
         self.explicit_true(fields, FormTableSlot::EnableDrag)
     }
 
+    pub(crate) fn file_drag_mode_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::FILE_DRAG_MODE_REVERSE_OFFSET)?;
+        FormTableFileDragMode::from_raw(fields.get(slot)?)?;
+        Some(slot)
+    }
+
+    pub(crate) fn file_drag_mode_raw_code(self, value: &str) -> Option<&'static str> {
+        match value {
+            "AsFile" => Some("0"),
+            _ => None,
+        }
+    }
+
     pub(crate) fn file_drag_mode(self, fields: &[&str]) -> Option<&'static str> {
-        match FormTableFileDragMode::from_raw(Self::reverse_field(
-            fields,
-            Self::FILE_DRAG_MODE_REVERSE_OFFSET,
-        )?)? {
+        match FormTableFileDragMode::from_raw(fields.get(self.file_drag_mode_slot(fields)?)?)? {
             FormTableFileDragMode::AsFile => Some("AsFile"),
             FormTableFileDragMode::Omit => None,
         }

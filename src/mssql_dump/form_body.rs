@@ -30,7 +30,7 @@ use crate::form_schema::{
     FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
-    FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse,
+    FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
     FormTableRootPropertyBagKey as TableRootBagKey, FormTableRowPictureDataPath, FormTableSchema,
     FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
@@ -571,6 +571,7 @@ pub(super) struct FormChildItem {
     pub(super) table_choice_mode: Option<bool>,
     pub(super) table_selection_mode: Option<&'static str>,
     pub(super) table_header: Option<bool>,
+    pub(super) table_horizontal_scroll_bar: Option<FormTableHorizontalScrollBar>,
     pub(super) table_horizontal_lines: Option<bool>,
     pub(super) table_vertical_lines: Option<bool>,
     pub(super) show_root: Option<bool>,
@@ -5468,6 +5469,8 @@ fn parse_form_child_item_with_metadata_owners(
         table_choice_mode: table_schema.and_then(|schema| schema.choice_mode(&fields)),
         table_selection_mode: table_schema.and_then(|schema| schema.selection_mode(&fields)),
         table_header: table_schema.and_then(|schema| schema.header(&fields)),
+        table_horizontal_scroll_bar: table_schema
+            .and_then(|schema| schema.horizontal_scroll_bar(&fields)),
         table_horizontal_lines: table_schema.and_then(|schema| schema.horizontal_lines(&fields)),
         table_vertical_lines: table_schema.and_then(|schema| schema.vertical_lines(&fields)),
         show_root: if table_schema.is_some() {
@@ -12725,6 +12728,15 @@ fn format_form_table_property_xml(
             Some(false) => format!("{tab}<Header>false</Header>\r\n"),
             _ => String::new(),
         },
+        FormTableXmlProperty::HorizontalScrollBar => item
+            .table_horizontal_scroll_bar
+            .map(|value| {
+                format!(
+                    "{tab}<HorizontalScrollBar>{}</HorizontalScrollBar>\r\n",
+                    value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::HorizontalLines => match item.table_horizontal_lines {
             Some(false) => format!("{tab}<HorizontalLines>false</HorizontalLines>\r\n"),
             _ => String::new(),
