@@ -317,6 +317,7 @@ pub(super) struct FormAttribute {
 pub(super) struct FormAttributeMetadataOwner {
     name: String,
     type_references: Vec<String>,
+    exact_single_type_reference: Option<String>,
     has_dynamic_list_settings: bool,
     main_table: Option<String>,
 }
@@ -3751,6 +3752,10 @@ fn form_attribute_metadata_owners_by_id(
 }
 
 fn form_attribute_metadata_owner(attribute: &FormAttribute) -> FormAttributeMetadataOwner {
+    let exact_single_type_reference = match attribute.value_types.as_slice() {
+        [ConstantValueType::Reference { reference }] => Some(reference.clone()),
+        _ => None,
+    };
     let type_references = attribute
         .value_types
         .iter()
@@ -3766,6 +3771,7 @@ fn form_attribute_metadata_owner(attribute: &FormAttribute) -> FormAttributeMeta
     FormAttributeMetadataOwner {
         name: attribute.name.clone(),
         type_references,
+        exact_single_type_reference,
         has_dynamic_list_settings: attribute.settings.is_some(),
         main_table,
     }
@@ -4671,9 +4677,9 @@ fn parse_form_child_item_with_metadata_owners(
     );
     let table_schema = FormTableSchema::from_raw_layout(wrapper, tag, &fields);
     let button_data_path_slot = button_common_schema.and_then(|schema| schema.data_path_slot());
-    let owner_scoped_data_path = field_schema_and_options.is_some()
-        || table_schema.is_some()
-        || button_data_path_slot.is_some();
+    let strict_field_data_path = field_schema_and_options.is_some();
+    let owner_scoped_data_path =
+        strict_field_data_path || table_schema.is_some() || button_data_path_slot.is_some();
     let data_path = parse_form_child_item_data_path(
         tag,
         &fields,
@@ -4681,6 +4687,7 @@ fn parse_form_child_item_with_metadata_owners(
         id,
         main_data_path,
         parent_data_path,
+        strict_field_data_path,
         owner_scoped_data_path,
         button_data_path_slot,
         attribute_names_by_id,
@@ -9841,6 +9848,7 @@ pub(super) fn parse_form_child_item_data_path(
     id: &str,
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
+    strict_field_data_path: bool,
     owner_scoped_data_path: bool,
     button_data_path_slot: Option<usize>,
     attribute_names_by_id: &BTreeMap<String, String>,
@@ -9856,16 +9864,27 @@ pub(super) fn parse_form_child_item_data_path(
 ) -> Option<String> {
     let owner_scoped_metadata = !matches!(tag, "ProgressBarField" | "TrackBarField" | "ChartField");
     let parse_direct_bound = |field: &&str| {
-        let scoped = if owner_scoped_data_path {
-            resolve_form_owner_scoped_bound_data_path(
+        let scoped = if strict_field_data_path {
+            FormOwnerScopedDataPath::from_option(resolve_form_strict_field_model_data_path(
                 field,
                 attribute_metadata_owners_by_id,
-                owner_scoped_bindings,
                 object_refs,
-            )
+            ))
         } else {
             FormOwnerScopedDataPath::Unknown
-        };
+        }
+        .or_else(|| {
+            if owner_scoped_data_path {
+                resolve_form_owner_scoped_bound_data_path(
+                    field,
+                    attribute_metadata_owners_by_id,
+                    owner_scoped_bindings,
+                    object_refs,
+                )
+            } else {
+                FormOwnerScopedDataPath::Unknown
+            }
+        });
         scoped.or_else(|| {
             let data_path = if owner_scoped_metadata {
                 parse_form_bound_data_path_with_metadata_owner(
@@ -10155,6 +10174,67 @@ fn resolve_form_owner_scoped_metadata_data_path(
     Some(format!("{}.{}", attribute.name, relative_path))
 }
 
+fn resolve_form_strict_field_model_data_path(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let [kind, owner, terminal] = fields.as_slice() else {
+        return None;
+    };
+    if kind.trim() != "2" {
+        return None;
+    }
+    let owner = split_1c_braced_fields(owner.trim(), 0)?;
+    if owner.len() != 1 {
+        return None;
+    }
+    let attribute = attribute_metadata_owners_by_id.get(owner.first()?.trim())?;
+    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+    match terminal.as_slice() {
+        [marker] => {
+            let marker = marker.trim();
+            marker.parse::<i64>().ok()?;
+            resolve_form_owner_scoped_standard_attribute_data_path(attribute, marker)
+        }
+        [marker, uuid] => {
+            marker.trim().parse::<i64>().ok()?;
+            let uuid = parse_non_zero_uuid(uuid.trim())?;
+            let reference = object_refs.get(&uuid)?;
+            resolve_form_constants_set_data_path(attribute, reference)
+        }
+        _ => None,
+    }
+}
+
+fn resolve_form_owner_scoped_standard_attribute_data_path(
+    attribute: &FormAttributeMetadataOwner,
+    marker: &str,
+) -> Option<String> {
+    let reference = attribute.exact_single_type_reference.as_deref()?;
+    let (generated_type, _) = form_generated_owner_type_from_type_reference(reference)?;
+    let attribute_name = match generated_type {
+        "ChartOfAccountsObject" => chart_of_accounts_standard_attribute_name(marker),
+        _ => None,
+    }?;
+    Some(format!("{}.{}", attribute.name, attribute_name))
+}
+
+fn resolve_form_constants_set_data_path(
+    attribute: &FormAttributeMetadataOwner,
+    reference: &str,
+) -> Option<String> {
+    if attribute.exact_single_type_reference.as_deref() != Some("cfg:ConstantsSet") {
+        return None;
+    }
+    let (kind, constant_name) = reference.split_once('.')?;
+    if kind != "Constant" || constant_name.is_empty() || constant_name.contains('.') {
+        return None;
+    }
+    Some(format!("{}.{}", attribute.name, constant_name))
+}
+
 fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
     let mut parts = reference.split('.');
     let owner_kind = parts.next()?;
@@ -10295,11 +10375,7 @@ fn resolve_form_title_rows_count_path(
 }
 
 fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
-    let reference = reference.strip_prefix("cfg:")?;
-    let (generated_type, owner_name) = reference.split_once('.')?;
-    if owner_name.is_empty() || owner_name.contains('.') {
-        return None;
-    }
+    let (generated_type, owner_name) = form_generated_owner_type_from_type_reference(reference)?;
     let owner_kind = [
         "RecordManager",
         "RecordSet",
@@ -10312,6 +10388,15 @@ fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<Strin
     .find_map(|role| generated_type.strip_suffix(role))
     .filter(|owner_kind| !owner_kind.is_empty())?;
     Some(format!("{owner_kind}.{owner_name}"))
+}
+
+fn form_generated_owner_type_from_type_reference(reference: &str) -> Option<(&str, &str)> {
+    let reference = reference.strip_prefix("cfg:")?;
+    let (generated_type, owner_name) = reference.split_once('.')?;
+    if owner_name.is_empty() || owner_name.contains('.') {
+        return None;
+    }
+    Some((generated_type, owner_name))
 }
 
 pub(super) fn parse_form_bound_data_path(

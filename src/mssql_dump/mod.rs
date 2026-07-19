@@ -133,6 +133,18 @@ const CHART_OF_ACCOUNTS_ACCOUNTING_FLAG_COLLECTION_UUID: &str =
     "78bd1243-c4df-46c3-8138-e147465cb9a4";
 const CHART_OF_ACCOUNTS_EXT_DIMENSION_FLAG_COLLECTION_UUID: &str =
     "c70ca527-5042-4cad-a315-dcb4007e32a3";
+const CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS: &[(&str, &str)] = &[
+    ("-28", "PredefinedDataName"),
+    ("-17", "Order"),
+    ("-11", "OffBalance"),
+    ("-10", "Type"),
+    ("-8", "Description"),
+    ("-7", "Code"),
+    ("-6", "Parent"),
+    ("-5", "Predefined"),
+    ("-4", "DeletionMark"),
+    ("-2", "Ref"),
+];
 const CHART_OF_CALCULATION_TYPES_RESERVED_COLLECTION_UUIDS: [&str; 3] = [
     "054aa8cf-faa6-4634-aef4-1087ca0d88fc",
     "0dc22ad2-476a-4794-afae-cfa7ed251752",
@@ -14451,18 +14463,7 @@ fn parse_chart_of_accounts_properties(
         },
         standard_attributes: parse_chart_standard_attributes(
             fields.get(38)?,
-            &[
-                ("-28", "PredefinedDataName"),
-                ("-17", "Order"),
-                ("-11", "OffBalance"),
-                ("-10", "Type"),
-                ("-8", "Description"),
-                ("-7", "Code"),
-                ("-6", "Parent"),
-                ("-5", "Predefined"),
-                ("-4", "DeletionMark"),
-                ("-2", "Ref"),
-            ],
+            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
             Some(("-6", "ChartOfAccounts")),
             &header.name,
             type_index,
@@ -15121,6 +15122,12 @@ fn parse_chart_standard_attributes(
             parse_register_standard_attribute(name, &bag, fill_value)
         })
         .collect()
+}
+
+fn chart_of_accounts_standard_attribute_name(marker: &str) -> Option<&'static str> {
+    CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS
+        .iter()
+        .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
 }
 
 type ChartStandardTabularSectionDefinition = (
