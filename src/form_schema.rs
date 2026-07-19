@@ -3591,6 +3591,7 @@ pub(crate) enum FormTableXmlProperty {
     BorderColor,
     Title,
     CommandSet,
+    CurrentRowUse,
     ToolTip,
     SearchStringLocation,
     ViewStatusLocation,
@@ -3651,6 +3652,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::SearchStringLocation,
     FormTableXmlProperty::ViewStatusLocation,
     FormTableXmlProperty::SearchControlLocation,
+    FormTableXmlProperty::CurrentRowUse,
     FormTableXmlProperty::AutoRefresh,
     FormTableXmlProperty::AutoRefreshPeriod,
     FormTableXmlProperty::Period,
@@ -3744,6 +3746,40 @@ impl FormTableSlot {
 pub(crate) enum FormTableRowPictureDataPath<'a> {
     Empty,
     Payload(&'a str),
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableCurrentRowUse {
+    Choice,
+    SelectionPresentation,
+    SelectionPresentationAndChoice,
+}
+
+impl FormTableCurrentRowUse {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Choice => "Choice",
+            Self::SelectionPresentation => "SelectionPresentation",
+            Self::SelectionPresentationAndChoice => "SelectionPresentationAndChoice",
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value {
+            "Choice" => Some(Self::Choice),
+            "SelectionPresentation" => Some(Self::SelectionPresentation),
+            "SelectionPresentationAndChoice" => Some(Self::SelectionPresentationAndChoice),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::Choice => "1",
+            Self::SelectionPresentation => "2",
+            Self::SelectionPresentationAndChoice => "3",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -3844,6 +3880,7 @@ impl FormTableSchema {
     const SEARCH_STRING_LOCATION_REVERSE_OFFSET: usize = 25;
     const VIEW_STATUS_LOCATION_REVERSE_OFFSET: usize = 24;
     const SEARCH_CONTROL_LOCATION_REVERSE_OFFSET: usize = 23;
+    const CURRENT_ROW_USE_REVERSE_OFFSET: usize = 5;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -3873,6 +3910,12 @@ impl FormTableSchema {
             fields,
             Self::SKIP_ON_INPUT_REVERSE_OFFSET,
         )?)?;
+        if !matches!(
+            Self::reverse_field(fields, Self::CURRENT_ROW_USE_REVERSE_OFFSET)?.trim(),
+            "0" | "1" | "2" | "3"
+        ) {
+            return None;
+        }
         Some(Self)
     }
 
@@ -3979,6 +4022,22 @@ impl FormTableSchema {
         match fields.get(slot)?.trim() {
             "1" => Some(FormTableSearchControlLocation::None),
             "2" => Some(FormTableSearchControlLocation::CommandBar),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn current_row_use_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::CURRENT_ROW_USE_REVERSE_OFFSET)?;
+        matches!(fields.get(slot)?.trim(), "0" | "1" | "2" | "3").then_some(slot)
+    }
+
+    pub(crate) fn current_row_use(self, fields: &[&str]) -> Option<FormTableCurrentRowUse> {
+        match fields.get(self.current_row_use_slot(fields)?)?.trim() {
+            "1" => Some(FormTableCurrentRowUse::Choice),
+            "2" => Some(FormTableCurrentRowUse::SelectionPresentation),
+            "3" => Some(FormTableCurrentRowUse::SelectionPresentationAndChoice),
             _ => None,
         }
     }

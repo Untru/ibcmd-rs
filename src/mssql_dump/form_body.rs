@@ -30,11 +30,11 @@ use crate::form_schema::{
     FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
-    FormSpreadsheetDocumentFieldProperties, FormTableOrdinaryTailKey as TableTailKey,
-    FormTablePropertyBagKey as TableBagKey, FormTableRootPropertyBagKey as TableRootBagKey,
-    FormTableRowPictureDataPath, FormTableSchema, FormTableSearchControlLocation,
-    FormTableSearchStringLocation, FormTableViewStatusLocation, FormTableXmlProperty,
-    FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
+    FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse,
+    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
+    FormTableRootPropertyBagKey as TableRootBagKey, FormTableRowPictureDataPath, FormTableSchema,
+    FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
@@ -563,6 +563,7 @@ pub(super) struct FormChildItem {
     pub(super) change_row_set: Option<bool>,
     pub(super) change_row_order: Option<bool>,
     pub(super) command_set_excluded_commands: Vec<&'static str>,
+    pub(super) table_current_row_use: Option<FormTableCurrentRowUse>,
     pub(super) use_alternation_row_color: Option<bool>,
     pub(super) default_item: Option<bool>,
     pub(super) initial_tree_view: Option<&'static str>,
@@ -5426,6 +5427,7 @@ fn parse_form_child_item_with_metadata_owners(
             .unwrap_or_else(|| {
                 parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
             }),
+        table_current_row_use: table_schema.and_then(|schema| schema.current_row_use(&fields)),
         use_alternation_row_color: table_schema
             .and_then(|schema| schema.use_alternation_row_color(&fields)),
         default_item: if tag == "Table" {
@@ -12827,6 +12829,15 @@ fn format_form_table_property_xml(
                 xml
             }
         }
+        FormTableXmlProperty::CurrentRowUse => item
+            .table_current_row_use
+            .map(|value| {
+                format!(
+                    "{tab}<CurrentRowUse>{}</CurrentRowUse>\r\n",
+                    value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::ToolTip => {
             format_form_localized_section("ToolTip", &item.tooltip, indent)
         }

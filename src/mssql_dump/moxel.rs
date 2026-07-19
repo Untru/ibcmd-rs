@@ -3751,7 +3751,7 @@ pub(super) fn parse_moxel_style_refs(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<Option<String>> {
-    let mut style_refs = Vec::new();
+    let mut style_refs: Vec<Option<String>> = Vec::new();
     let mut index = 0usize;
     let normalize = |value: &str| {
         value
@@ -3760,6 +3760,21 @@ pub(super) fn parse_moxel_style_refs(
             .collect::<String>()
     };
     while index < fields.len() {
+        let has_style_prefix = style_refs.len() >= 2
+            && style_refs[style_refs.len() - 2].as_deref() == Some("style:FormBackColor")
+            && style_refs[style_refs.len() - 1].as_deref() == Some("style:FormTextColor");
+        if has_style_prefix
+            && let Some(end) = index.checked_add(3)
+            && let Some(slots) = fields.get(index..end)
+            && is_moxel_direct_report_palette(slots)
+            && let Some(white_ref) = parse_moxel_style_ref_slot(slots[2], object_refs)
+        {
+            style_refs.push(Some("#CCC085".to_string()));
+            style_refs.push(Some("#F4ECC5".to_string()));
+            style_refs.push(white_ref);
+            index = end;
+            continue;
+        }
         if normalize(fields[index]) == "{1,3,{3,3,{-28}}}" {
             index += 1;
             continue;
@@ -3798,6 +3813,27 @@ pub(super) fn parse_moxel_style_refs(
         style_refs[1] = Some("style:FormTextColor".to_string());
     }
     style_refs
+}
+
+fn is_moxel_direct_report_palette(slots: &[&str]) -> bool {
+    slots.len() == 3
+        && parse_moxel_raw_color_slot(slots[0]) == Some((0, 8765644))
+        && parse_moxel_raw_color_slot(slots[1]) == Some((0, 12971252))
+        && parse_moxel_raw_color_slot(slots[2]) == Some((2, 143))
+}
+
+fn parse_moxel_raw_color_slot(text: &str) -> Option<(u32, u32)> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 3 || fields.first()?.trim() != "3" {
+        return None;
+    }
+    let mode = fields.get(1)?.trim().parse::<u32>().ok()?;
+    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
+    if payload.len() != 1 {
+        return None;
+    }
+    let value = payload.first()?.trim().parse::<u32>().ok()?;
+    Some((mode, value))
 }
 
 pub(super) fn parse_moxel_indexed_style_ref_overrides(

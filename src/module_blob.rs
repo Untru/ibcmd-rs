@@ -19,7 +19,7 @@ use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
     FormControlBorderSchema, FormControlBorderStyle, FormFieldSchema,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
-    FormTablePropertyBagKey as TableBagKey,
+    FormTableCurrentRowUse, FormTablePropertyBagKey as TableBagKey, FormTableSchema,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -255,6 +255,7 @@ struct FormXmlChildItem {
     representation: Option<FormXmlGroupRepresentation>,
     table_representation: Option<String>,
     table_command_bar_location: Option<String>,
+    table_current_row_use: Option<FormTableCurrentRowUse>,
     height_in_table_rows: Option<String>,
     row_selection_mode: Option<String>,
     enable_start_drag: Option<bool>,
@@ -5341,6 +5342,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with_for_child_table_current_row_use(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -5845,6 +5847,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
+                    || path_ends_with_for_child_table_current_row_use(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -6510,6 +6513,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Form Command ModifiesSavedData",
                                 text_value.trim(),
                             )?);
+                        }
+                    }
+                    "CurrentRowUse"
+                        if path_ends_with_for_child_table_current_row_use(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_current_row_use = Some(
+                                FormTableCurrentRowUse::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form Table CurrentRowUse: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
                         }
                     }
                     "CurrentRowUse"
@@ -8384,6 +8405,7 @@ fn parse_form_child_item_xml(
         representation: None,
         table_representation: None,
         table_command_bar_location: None,
+        table_current_row_use: None,
         height_in_table_rows: None,
         row_selection_mode: None,
         enable_start_drag: None,
@@ -9306,6 +9328,16 @@ fn path_ends_with_for_child_restore_current_row(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RestoreCurrentRow"])
+}
+
+fn path_ends_with_for_child_table_current_row_use(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "CurrentRowUse"])
 }
 
 fn path_ends_with_for_child_row_filter(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -12582,6 +12614,21 @@ fn form_layout_picture_decoration_hyperlink_range(
         .cloned()
 }
 
+fn form_layout_table_current_row_use_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let raw_fields = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let schema = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields)?;
+    fields
+        .get(schema.current_row_use_slot(&raw_fields)?)
+        .cloned()
+}
+
 fn patch_form_layout_child_item_entry(
     text: &mut String,
     fields: &[Range<usize>],
@@ -12659,6 +12706,15 @@ fn patch_form_layout_child_item_entry(
                 form_layout_table_command_bar_location_range(text, fields)
         {
             replacements.push((command_bar_range.clone(), code.to_string()));
+        }
+        if let Some(current_row_use) = item.table_current_row_use
+            && let Some(current_row_use_range) =
+                form_layout_table_current_row_use_range(text, fields)
+        {
+            replacements.push((
+                current_row_use_range,
+                current_row_use.raw_code().to_string(),
+            ));
         }
         if let Some(data_path) = &item.data_path
             && let Some(data_path_range) = fields.get(11)
