@@ -6181,6 +6181,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_group_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_three_state(&path, &current_child_items)
+                    || path_ends_with_for_child_show_in_footer(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
@@ -9390,7 +9391,10 @@ fn path_ends_with_for_child_show_in_footer(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "PictureField" && path_ends_with(path, &[item.tag.as_str(), "ShowInFooter"])
+    matches!(
+        item.tag.as_str(),
+        "InputField" | "LabelField" | "PictureField"
+    ) && path_ends_with(path, &[item.tag.as_str(), "ShowInFooter"])
 }
 
 fn path_ends_with_for_child_hyperlink(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -11587,6 +11591,8 @@ fn form_child_item_strict_properties_require_existing_layout(item: &FormXmlChild
         && (item.group_horizontal_align.is_some()
             || item.vertical_align.is_some()
             || item.group_vertical_align.is_some()
+            || (matches!(item.tag.as_str(), "InputField" | "LabelField")
+                && item.show_in_footer.is_some())
             || (item.tag == "CheckBoxField" && item.three_state.is_some())))
         || (item.tag == "Table"
             && (item.table_search_on_input.is_some()

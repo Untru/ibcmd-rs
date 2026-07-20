@@ -2328,7 +2328,8 @@ impl FormFieldSchema {
                 .then_some(28 + top_level_offset),
             cell_hyperlink_slot: matches!(item_tag, "InputField" | "LabelField")
                 .then_some(22 + top_level_offset),
-            show_in_footer_slot: (item_tag == "PictureField").then_some(21 + top_level_offset),
+            show_in_footer_slot: matches!(item_tag, "InputField" | "LabelField" | "PictureField")
+                .then_some(21 + top_level_offset),
             read_only_slot: matches!(
                 item_tag,
                 "InputField"
