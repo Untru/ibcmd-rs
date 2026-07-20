@@ -17,12 +17,13 @@ use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
-    FormControlBorderSchema, FormControlBorderStyle, FormFieldGroupHorizontalAlign,
-    FormFieldSchema, FormFieldVerticalAlign, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormPictureDecorationSchema, FormRootVerticalAlign, FormRootVerticalAlignSchema,
-    FormTableCurrentRowUse, FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey,
-    FormTableSchema, FormTooltipRepresentation, FormWarningOnEditRepresentation,
-    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
+    FormCheckBoxFieldSchema, FormControlBorderSchema, FormControlBorderStyle,
+    FormFieldGroupHorizontalAlign, FormFieldSchema, FormFieldVerticalAlign,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
+    FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
+    FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey, FormTableSchema,
+    FormTooltipRepresentation, FormWarningOnEditRepresentation, form_tooltip_representation_schema,
+    form_tooltip_representation_supports_xml_tag,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -284,6 +285,7 @@ struct FormXmlChildItem {
     group_horizontal_align: Option<FormFieldGroupHorizontalAlign>,
     vertical_align: Option<FormFieldVerticalAlign>,
     group_vertical_align: Option<FormFieldVerticalAlign>,
+    three_state: Option<bool>,
     autofill: Option<bool>,
     button_representation: Option<FormXmlButtonRepresentation>,
     location_in_command_bar: Option<FormXmlButtonLocationInCommandBar>,
@@ -4904,6 +4906,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "VerticalAlign"
                         | "GroupHorizontalAlign"
                         | "GroupVerticalAlign"
+                        | "ThreeState"
                         | "CommandBarLocation"
                         | "VerticalScroll"
                         | "ConversationsRepresentation"
@@ -5665,6 +5668,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_group_vertical_align(&path, &current_child_items)
+                    || path_ends_with_for_child_three_state(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
@@ -6167,6 +6171,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_group_vertical_align(&path, &current_child_items)
+                    || path_ends_with_for_child_three_state(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
@@ -7849,6 +7854,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             );
                         }
                     }
+                    "ThreeState"
+                        if path_ends_with_for_child_three_state(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.three_state = Some(parse_form_xml_bool(
+                                "CheckBoxField/ThreeState",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "Autofill"
                         if path_ends_with_for_child_autofill(&path, &current_child_items) =>
                     {
@@ -8392,6 +8407,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "GroupHorizontalAlign"
                         | "VerticalAlign"
                         | "GroupVerticalAlign"
+                        | "ThreeState"
                         | "Event"
                         | "Action"
                         | "ModifiesSavedData"
@@ -8635,6 +8651,7 @@ fn parse_form_child_item_xml(
         group_horizontal_align: None,
         vertical_align: None,
         group_vertical_align: None,
+        three_state: None,
         autofill: None,
         button_representation: None,
         location_in_command_bar: None,
@@ -9723,6 +9740,13 @@ fn path_ends_with_for_child_group_vertical_align(
     };
     FormFieldSchema::supports_item_tag(&item.tag)
         && path_ends_with(path, &[item.tag.as_str(), "GroupVerticalAlign"])
+}
+
+fn path_ends_with_for_child_three_state(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "CheckBoxField" && path_ends_with(path, &[item.tag.as_str(), "ThreeState"])
 }
 
 fn path_ends_with_for_child_autofill(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -10970,7 +10994,7 @@ fn patch_form_layout_auto_command_bar(
         }
         for child in &command_bar.child_items {
             if !is_form_layout_creatable_nested_item(child)
-                && !form_field_alignment_requires_existing_layout(child)
+                && !form_field_strict_properties_require_existing_layout(child)
             {
                 continue;
             }
@@ -11419,9 +11443,9 @@ fn append_form_layout_top_level_child_item(
     if item.depth != 0 {
         return Ok(false);
     }
-    if form_field_alignment_requires_existing_layout(item) {
+    if form_field_strict_properties_require_existing_layout(item) {
         return Err(anyhow!(
-            "cannot create Form field {} with alignment properties without an existing strict layout",
+            "cannot create Form field {} with strict-schema properties without an existing strict layout",
             item.name
         ));
     }
@@ -11491,11 +11515,12 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
     )
 }
 
-fn form_field_alignment_requires_existing_layout(item: &FormXmlChildItem) -> bool {
+fn form_field_strict_properties_require_existing_layout(item: &FormXmlChildItem) -> bool {
     FormFieldSchema::supports_item_tag(&item.tag)
         && (item.group_horizontal_align.is_some()
             || item.vertical_align.is_some()
-            || item.group_vertical_align.is_some())
+            || item.group_vertical_align.is_some()
+            || (item.tag == "CheckBoxField" && item.three_state.is_some()))
 }
 
 fn format_form_layout_new_top_level_item(
@@ -11571,9 +11596,9 @@ fn format_form_layout_new_child_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    if form_field_alignment_requires_existing_layout(item) {
+    if form_field_strict_properties_require_existing_layout(item) {
         return Err(anyhow!(
-            "cannot create Form field {} with alignment properties without an existing strict layout",
+            "cannot create Form field {} with strict-schema properties without an existing strict layout",
             item.name
         ));
     }
@@ -12209,7 +12234,7 @@ fn format_form_layout_new_table_item(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_alignment_requires_existing_layout(child)
+                || form_field_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let mut text = format!(
@@ -12367,7 +12392,7 @@ fn format_form_layout_new_group_item(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_alignment_requires_existing_layout(child)
+                || form_field_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let mut text = format!(
@@ -12442,7 +12467,7 @@ fn format_form_layout_new_extended_page_item(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_alignment_requires_existing_layout(child)
+                || form_field_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let scroll_on_compress = if item.scroll_on_compress.unwrap_or(true) {
@@ -12511,7 +12536,7 @@ fn format_form_layout_new_extended_group_with_child_span(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_alignment_requires_existing_layout(child)
+                || form_field_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let mut text = format!(
@@ -12955,6 +12980,45 @@ fn form_layout_field_schema(
     )
 }
 
+fn form_layout_checkbox_field_three_state_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    if item_tag != "CheckBoxField" {
+        return None;
+    }
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let top_level_offset =
+        FormCheckBoxFieldSchema::top_level_offset_for_raw_layout(wrapper, fields.len())?;
+    let provisional_options_range = fields
+        .get(FormFieldSchema::OPTIONS_BASE_SLOT + top_level_offset)?
+        .clone();
+    if scan_1c_braced_value_range(text, provisional_options_range.start)
+        != Some(provisional_options_range.clone())
+    {
+        return None;
+    }
+    let option_ranges = scan_braced_fields(text, provisional_options_range.start).ok()?;
+    let options = option_ranges
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let schema = FormCheckBoxFieldSchema::from_raw_layout(
+        wrapper,
+        fields.len(),
+        fields
+            .get(5 + top_level_offset)
+            .map(|range| text[range.clone()].trim()),
+        &options,
+    )?;
+    if fields.get(schema.options_slot())? != &provisional_options_range {
+        return None;
+    }
+    let range = option_ranges.get(schema.three_state_option_slot())?.clone();
+    matches!(text[range.clone()].trim(), "0" | "1").then_some(range)
+}
+
 fn form_layout_field_vertical_align_range(
     text: &str,
     fields: &[Range<usize>],
@@ -13206,6 +13270,12 @@ fn patch_form_layout_child_item_entry(
             form_layout_field_group_vertical_align_range(text, fields, item.tag.as_str())
     {
         replacements.push((range, group_vertical_align.raw_code().to_string()));
+    }
+    if let Some(three_state) = item.three_state
+        && let Some(range) =
+            form_layout_checkbox_field_three_state_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, if three_state { "1" } else { "0" }.to_string()));
     }
     if let Some(representation) = item.warning_on_edit_representation
         && let Some(range) =
@@ -14456,7 +14526,7 @@ fn patch_form_layout_direct_child_items(
     }
     for child in &item.child_items {
         if !is_form_layout_creatable_nested_item(child)
-            && !form_field_alignment_requires_existing_layout(child)
+            && !form_field_strict_properties_require_existing_layout(child)
         {
             continue;
         }

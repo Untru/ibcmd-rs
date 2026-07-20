@@ -618,6 +618,7 @@ pub(super) struct FormChildItem {
     pub(super) group_vertical_align: Option<&'static str>,
     pub(super) label_decoration_visual_tail: Option<FormLabelDecorationVisualTail>,
     pub(super) check_box_type: Option<&'static str>,
+    pub(super) three_state: Option<bool>,
     pub(super) radio_button_type: Option<&'static str>,
     pub(super) columns_count: Option<u32>,
     pub(super) cell_hyperlink: Option<bool>,
@@ -5871,6 +5872,9 @@ fn parse_form_child_item_with_metadata_owners(
         check_box_type: check_box_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.check_box_type(options)),
+        three_state: check_box_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.three_state(options)),
         radio_button_type: if tag == "RadioButtonField" {
             parse_form_radio_button_type(radio_button_options.as_deref())
         } else {
@@ -13546,6 +13550,9 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<CheckBoxType>{}</CheckBoxType>\r\n",
             escape_xml_text(check_box_type)
         ));
+    }
+    if item.three_state == Some(true) {
+        xml.push_str(&format!("{tab}\t<ThreeState>true</ThreeState>\r\n"));
     }
     if let Some(radio_button_type) = item.radio_button_type {
         xml.push_str(&format!(

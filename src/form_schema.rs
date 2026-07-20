@@ -2690,6 +2690,7 @@ impl FormCheckBoxFieldSchema {
     const SHOW_IN_FOOTER_SLOT: usize = 21;
     const GROUP_HORIZONTAL_ALIGN_SLOT: usize = 53;
     const GROUP_VERTICAL_ALIGN_SLOT: usize = 54;
+    const THREE_STATE_OPTION_SLOT: usize = 1;
 
     pub(crate) fn top_level_offset_for_raw_layout(
         wrapper: &str,
@@ -2785,6 +2786,21 @@ impl FormCheckBoxFieldSchema {
             (Some("0"), Some("3")) => Some("Switcher"),
             _ => None,
         }
+    }
+
+    pub(crate) fn three_state(self, options: &[&str]) -> Option<bool> {
+        match options
+            .get(Self::THREE_STATE_OPTION_SLOT)
+            .map(|field| field.trim())?
+        {
+            "1" => Some(true),
+            "0" => None,
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn three_state_option_slot(self) -> usize {
+        Self::THREE_STATE_OPTION_SLOT
     }
 }
 
