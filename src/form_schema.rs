@@ -2980,6 +2980,14 @@ impl FormConditionalTableSchema {
     pub(crate) const fn prefix_slot(self) -> usize {
         self.prefix_slot
     }
+
+    pub(crate) const fn raw_slot_for_normalized(self, normalized_slot: usize) -> usize {
+        if normalized_slot < self.prefix_slot {
+            normalized_slot
+        } else {
+            normalized_slot + 1
+        }
+    }
 }
 
 impl FormChildItemVisibleSchema {
@@ -3934,6 +3942,7 @@ pub(crate) enum FormTableXmlProperty {
     UseAlternationRowColor,
     AutoInsertNewRow,
     AutoMarkIncomplete,
+    SearchOnInput,
     InitialTreeView,
     EnableStartDrag,
     EnableDrag,
@@ -3994,6 +4003,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::UseAlternationRowColor,
     FormTableXmlProperty::AutoInsertNewRow,
     FormTableXmlProperty::AutoMarkIncomplete,
+    FormTableXmlProperty::SearchOnInput,
     FormTableXmlProperty::InitialTreeView,
     FormTableXmlProperty::EnableStartDrag,
     FormTableXmlProperty::EnableDrag,
@@ -4176,6 +4186,36 @@ impl FormTableCurrentRowUse {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableSearchOnInput {
+    Use,
+    DontUse,
+}
+
+impl FormTableSearchOnInput {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Use => "Use",
+            Self::DontUse => "DontUse",
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value {
+            "Use" => Some(Self::Use),
+            "DontUse" => Some(Self::DontUse),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::Use => "0",
+            Self::DontUse => "1",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormTableSearchStringLocation {
     None,
     CommandBar,
@@ -4271,6 +4311,7 @@ impl FormTableSchema {
     const FILE_DRAG_MODE_REVERSE_OFFSET: usize = 2;
     const MULTIPLE_CHOICE_REVERSE_OFFSET: usize = 34;
     const SKIP_ON_INPUT_REVERSE_OFFSET: usize = 30;
+    const SEARCH_ON_INPUT_REVERSE_OFFSET: usize = 29;
     const SEARCH_STRING_LOCATION_REVERSE_OFFSET: usize = 25;
     const VIEW_STATUS_LOCATION_REVERSE_OFFSET: usize = 24;
     const SEARCH_CONTROL_LOCATION_REVERSE_OFFSET: usize = 23;
@@ -4311,6 +4352,12 @@ impl FormTableSchema {
             fields,
             Self::SKIP_ON_INPUT_REVERSE_OFFSET,
         )?)?;
+        if !matches!(
+            Self::reverse_field(fields, Self::SEARCH_ON_INPUT_REVERSE_OFFSET)?.trim(),
+            "0" | "1" | "2"
+        ) {
+            return None;
+        }
         if !matches!(
             Self::reverse_field(fields, Self::CURRENT_ROW_USE_REVERSE_OFFSET)?.trim(),
             "0" | "1" | "2" | "3"
@@ -4584,6 +4631,21 @@ impl FormTableSchema {
             FormTableSkipOnInput::False => Some(false),
             FormTableSkipOnInput::True => Some(true),
             FormTableSkipOnInput::Omit => None,
+        }
+    }
+
+    pub(crate) fn search_on_input_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::SEARCH_ON_INPUT_REVERSE_OFFSET)?;
+        matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
+    }
+
+    pub(crate) fn search_on_input(self, fields: &[&str]) -> Option<FormTableSearchOnInput> {
+        match fields.get(self.search_on_input_slot(fields)?)?.trim() {
+            "0" => Some(FormTableSearchOnInput::Use),
+            "1" => Some(FormTableSearchOnInput::DontUse),
+            _ => None,
         }
     }
 

@@ -17,13 +17,13 @@ use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
-    FormCheckBoxFieldSchema, FormControlBorderSchema, FormControlBorderStyle,
-    FormFieldGroupHorizontalAlign, FormFieldSchema, FormFieldVerticalAlign,
+    FormCheckBoxFieldSchema, FormConditionalTableSchema, FormControlBorderSchema,
+    FormControlBorderStyle, FormFieldGroupHorizontalAlign, FormFieldSchema, FormFieldVerticalAlign,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
     FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
     FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey, FormTableSchema,
-    FormTooltipRepresentation, FormWarningOnEditRepresentation, form_tooltip_representation_schema,
-    form_tooltip_representation_supports_xml_tag,
+    FormTableSearchOnInput, FormTooltipRepresentation, FormWarningOnEditRepresentation,
+    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -261,6 +261,7 @@ struct FormXmlChildItem {
     table_representation: Option<String>,
     table_command_bar_location: Option<String>,
     table_current_row_use: Option<FormTableCurrentRowUse>,
+    table_search_on_input: Option<FormTableSearchOnInput>,
     table_horizontal_scroll_bar: Option<FormTableHorizontalScrollBar>,
     table_multiple_choice: Option<bool>,
     height_in_table_rows: Option<String>,
@@ -4925,6 +4926,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CurrentRowUse"
                         | "HorizontalScrollBar"
                         | "MultipleChoice"
+                        | "SearchOnInput"
                         | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
@@ -5375,6 +5377,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_table_multiple_choice(&path, &current_child_items)
+                    || path_ends_with_for_child_table_search_on_input(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -5897,6 +5900,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_table_multiple_choice(&path, &current_child_items)
+                    || path_ends_with_for_child_table_search_on_input(&path, &current_child_items)
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
@@ -6634,6 +6638,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Table/MultipleChoice",
                                 text_value.trim(),
                             )?);
+                        }
+                    }
+                    "SearchOnInput"
+                        if path_ends_with_for_child_table_search_on_input(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_search_on_input = Some(
+                                FormTableSearchOnInput::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form Table SearchOnInput: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
                         }
                     }
                     "CurrentRowUse"
@@ -8414,6 +8436,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "CurrentRowUse"
                         | "HorizontalScrollBar"
                         | "MultipleChoice"
+                        | "SearchOnInput"
                         | "Item"
                         | "MainAttribute"
                         | "ManualQuery"
@@ -8627,6 +8650,7 @@ fn parse_form_child_item_xml(
         table_representation: None,
         table_command_bar_location: None,
         table_current_row_use: None,
+        table_search_on_input: None,
         table_horizontal_scroll_bar: None,
         table_multiple_choice: None,
         height_in_table_rows: None,
@@ -9656,6 +9680,16 @@ fn path_ends_with_for_child_table_multiple_choice(
         return false;
     };
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "MultipleChoice"])
+}
+
+fn path_ends_with_for_child_table_search_on_input(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "SearchOnInput"])
 }
 
 fn path_ends_with_for_child_row_filter(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -10994,7 +11028,7 @@ fn patch_form_layout_auto_command_bar(
         }
         for child in &command_bar.child_items {
             if !is_form_layout_creatable_nested_item(child)
-                && !form_field_strict_properties_require_existing_layout(child)
+                && !form_child_item_strict_properties_require_existing_layout(child)
             {
                 continue;
             }
@@ -11443,9 +11477,9 @@ fn append_form_layout_top_level_child_item(
     if item.depth != 0 {
         return Ok(false);
     }
-    if form_field_strict_properties_require_existing_layout(item) {
+    if form_child_item_strict_properties_require_existing_layout(item) {
         return Err(anyhow!(
-            "cannot create Form field {} with strict-schema properties without an existing strict layout",
+            "cannot create Form child item {} with strict-schema properties without an existing strict layout",
             item.name
         ));
     }
@@ -11515,12 +11549,13 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
     )
 }
 
-fn form_field_strict_properties_require_existing_layout(item: &FormXmlChildItem) -> bool {
-    FormFieldSchema::supports_item_tag(&item.tag)
+fn form_child_item_strict_properties_require_existing_layout(item: &FormXmlChildItem) -> bool {
+    (FormFieldSchema::supports_item_tag(&item.tag)
         && (item.group_horizontal_align.is_some()
             || item.vertical_align.is_some()
             || item.group_vertical_align.is_some()
-            || (item.tag == "CheckBoxField" && item.three_state.is_some()))
+            || (item.tag == "CheckBoxField" && item.three_state.is_some())))
+        || (item.tag == "Table" && item.table_search_on_input.is_some())
 }
 
 fn format_form_layout_new_top_level_item(
@@ -11596,9 +11631,9 @@ fn format_form_layout_new_child_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    if form_field_strict_properties_require_existing_layout(item) {
+    if form_child_item_strict_properties_require_existing_layout(item) {
         return Err(anyhow!(
-            "cannot create Form field {} with strict-schema properties without an existing strict layout",
+            "cannot create Form child item {} with strict-schema properties without an existing strict layout",
             item.name
         ));
     }
@@ -12234,7 +12269,7 @@ fn format_form_layout_new_table_item(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_strict_properties_require_existing_layout(child)
+                || form_child_item_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let mut text = format!(
@@ -12392,7 +12427,7 @@ fn format_form_layout_new_group_item(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_strict_properties_require_existing_layout(child)
+                || form_child_item_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let mut text = format!(
@@ -12467,7 +12502,7 @@ fn format_form_layout_new_extended_page_item(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_strict_properties_require_existing_layout(child)
+                || form_child_item_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let scroll_on_compress = if item.scroll_on_compress.unwrap_or(true) {
@@ -12536,7 +12571,7 @@ fn format_form_layout_new_extended_group_with_child_span(
         .iter()
         .filter(|child| {
             is_form_layout_creatable_nested_item(child)
-                || form_field_strict_properties_require_existing_layout(child)
+                || form_child_item_strict_properties_require_existing_layout(child)
         })
         .collect::<Vec<_>>();
     let mut text = format!(
@@ -13081,6 +13116,74 @@ fn form_layout_field_warning_on_edit_representation_range(
     matches!(text[range.clone()].trim(), "0" | "1" | "2").then_some(range)
 }
 
+fn parse_form_layout_conditional_user_visible_common(value: &str) -> Option<bool> {
+    let value = value.trim();
+    let outer = scan_braced_fields(value, 0).ok()?;
+    if outer.len() != 2 || value[outer[0].clone()].trim() != "0" {
+        return None;
+    }
+    let condition_text = value[outer[1].clone()].trim();
+    let condition = scan_braced_fields(condition_text, 0).ok()?;
+    if condition.len() != 3
+        || condition_text[condition[0].clone()].trim() != "0"
+        || condition_text[condition[2].clone()].trim() != "0"
+    {
+        return None;
+    }
+    let typed_value_text = condition_text[condition[1].clone()].trim();
+    let typed_value = scan_braced_fields(typed_value_text, 0).ok()?;
+    if typed_value.len() != 2
+        || parse_1c_quoted_string(&typed_value_text[typed_value[0].clone()]).ok()? != "B"
+    {
+        return None;
+    }
+    match typed_value_text[typed_value[1].clone()].trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn form_layout_table_raw_slot(
+    text: &str,
+    fields: &[Range<usize>],
+    resolve_slot: impl FnOnce(FormTableSchema, &[&str]) -> Option<usize>,
+) -> Option<usize> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let raw_fields = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let conditional_schema =
+        if FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields).is_some() {
+            None
+        } else {
+            Some(FormConditionalTableSchema::from_raw_layout(
+                wrapper,
+                raw_fields.len(),
+                raw_fields
+                    .get(5)
+                    .and_then(|field| parse_form_layout_conditional_user_visible_common(field)),
+                raw_fields.get(4).map(|field| field.trim()),
+            )?)
+        };
+    let normalized_fields = conditional_schema
+        .map(|conditional| {
+            raw_fields
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, field)| (slot != conditional.prefix_slot()).then_some(*field))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| raw_fields.clone());
+    let schema = FormTableSchema::from_raw_layout(wrapper, "Table", &normalized_fields)?;
+    let normalized_slot = resolve_slot(schema, &normalized_fields)?;
+    let raw_slot = conditional_schema
+        .map(|conditional| conditional.raw_slot_for_normalized(normalized_slot))
+        .unwrap_or(normalized_slot);
+    (raw_slot < fields.len()).then_some(raw_slot)
+}
+
 fn form_layout_child_item_tooltip_representation_range(
     text: &str,
     fields: &[Range<usize>],
@@ -13088,12 +13191,9 @@ fn form_layout_child_item_tooltip_representation_range(
 ) -> Option<Range<usize>> {
     let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
     let slot = if item_tag == "Table" {
-        let raw_fields = fields
-            .iter()
-            .map(|range| &text[range.clone()])
-            .collect::<Vec<_>>();
-        FormTableSchema::from_raw_layout(wrapper, item_tag, &raw_fields)?
-            .tooltip_representation_slot(&raw_fields)?
+        form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+            schema.tooltip_representation_slot(normalized_fields)
+        })?
     } else {
         form_tooltip_representation_schema(
             wrapper,
@@ -13153,43 +13253,40 @@ fn form_layout_table_current_row_use_range(
     text: &str,
     fields: &[Range<usize>],
 ) -> Option<Range<usize>> {
-    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    let raw_fields = fields
-        .iter()
-        .map(|range| &text[range.clone()])
-        .collect::<Vec<_>>();
-    let schema = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields)?;
-    fields
-        .get(schema.current_row_use_slot(&raw_fields)?)
-        .cloned()
+    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+        schema.current_row_use_slot(normalized_fields)
+    })?;
+    fields.get(slot).cloned()
 }
 
 fn form_layout_table_horizontal_scroll_bar_range(
     text: &str,
     fields: &[Range<usize>],
 ) -> Option<Range<usize>> {
-    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    let raw_fields = fields
-        .iter()
-        .map(|range| &text[range.clone()])
-        .collect::<Vec<_>>();
-    let schema = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields)?;
-    fields.get(schema.horizontal_scroll_bar_slot()).cloned()
+    let slot = form_layout_table_raw_slot(text, fields, |schema, _| {
+        Some(schema.horizontal_scroll_bar_slot())
+    })?;
+    fields.get(slot).cloned()
 }
 
 fn form_layout_table_multiple_choice_range(
     text: &str,
     fields: &[Range<usize>],
 ) -> Option<Range<usize>> {
-    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    let raw_fields = fields
-        .iter()
-        .map(|range| &text[range.clone()])
-        .collect::<Vec<_>>();
-    let schema = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields)?;
-    fields
-        .get(schema.multiple_choice_slot(&raw_fields)?)
-        .cloned()
+    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+        schema.multiple_choice_slot(normalized_fields)
+    })?;
+    fields.get(slot).cloned()
+}
+
+fn form_layout_table_search_on_input_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+        schema.search_on_input_slot(normalized_fields)
+    })?;
+    fields.get(slot).cloned()
 }
 
 fn form_layout_table_file_drag_mode_replacement(
@@ -13197,16 +13294,11 @@ fn form_layout_table_file_drag_mode_replacement(
     fields: &[Range<usize>],
     value: &str,
 ) -> Option<(Range<usize>, String)> {
-    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    let raw_fields = fields
-        .iter()
-        .map(|range| &text[range.clone()])
-        .collect::<Vec<_>>();
-    if let Some(schema) = FormTableSchema::from_raw_layout(wrapper, "Table", &raw_fields) {
-        let range = fields
-            .get(schema.file_drag_mode_slot(&raw_fields)?)?
-            .clone();
-        let code = schema.file_drag_mode_raw_code(value)?;
+    if let Some(slot) = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+        schema.file_drag_mode_slot(normalized_fields)
+    }) {
+        let range = fields.get(slot)?.clone();
+        let code = FormTableSchema.file_drag_mode_raw_code(value)?;
         return Some((range, code.to_string()));
     }
     let range = fields.get(30)?.clone();
@@ -13360,6 +13452,15 @@ fn patch_form_layout_child_item_entry(
             replacements.push((
                 multiple_choice_range,
                 if multiple_choice { "1" } else { "0" }.to_string(),
+            ));
+        }
+        if let Some(search_on_input) = item.table_search_on_input
+            && let Some(search_on_input_range) =
+                form_layout_table_search_on_input_range(text, fields)
+        {
+            replacements.push((
+                search_on_input_range,
+                search_on_input.raw_code().to_string(),
             ));
         }
         if let Some(data_path) = &item.data_path
@@ -14526,7 +14627,7 @@ fn patch_form_layout_direct_child_items(
     }
     for child in &item.child_items {
         if !is_form_layout_creatable_nested_item(child)
-            && !form_field_strict_properties_require_existing_layout(child)
+            && !form_child_item_strict_properties_require_existing_layout(child)
         {
             continue;
         }

@@ -35,12 +35,13 @@ use crate::form_schema::{
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
     FormTableRootPropertyBagKey as TableRootBagKey, FormTableRowPictureDataPath, FormTableSchema,
-    FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
-    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
-    FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
-    FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
-    form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    FormTableSearchControlLocation, FormTableSearchOnInput, FormTableSearchStringLocation,
+    FormTableViewStatusLocation, FormTableXmlProperty, FormTooltipRepresentationXmlOrder,
+    FormUsualGroupGroupVerticalAlign, FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema,
+    FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty, FormWarningOnEditRepresentation,
+    decode_form_tooltip_representation, form_attribute_column_builtin_type_reference,
+    form_child_item_representation_is_default, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 use uuid::Uuid;
 
@@ -552,6 +553,7 @@ pub(super) struct FormChildItem {
     pub(super) usual_group_show_left_margin: Option<bool>,
     pub(super) table_representation: Option<&'static str>,
     pub(super) table_command_bar_location: Option<&'static str>,
+    pub(super) table_search_on_input: Option<FormTableSearchOnInput>,
     pub(super) table_search_string_location: Option<FormTableSearchStringLocation>,
     pub(super) table_view_status_location: Option<FormTableViewStatusLocation>,
     pub(super) table_search_control_location: Option<FormTableSearchControlLocation>,
@@ -5488,6 +5490,7 @@ fn parse_form_child_item_with_metadata_owners(
                 parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
             }),
         table_current_row_use: table_schema.and_then(|schema| schema.current_row_use(&fields)),
+        table_search_on_input: table_schema.and_then(|schema| schema.search_on_input(&fields)),
         use_alternation_row_color: table_schema
             .and_then(|schema| schema.use_alternation_row_color(&fields)),
         default_item: if tag == "Table" {
@@ -12739,6 +12742,15 @@ fn format_form_table_property_xml(
             Some(true) => format!("{tab}<AutoMarkIncomplete>true</AutoMarkIncomplete>\r\n"),
             _ => String::new(),
         },
+        FormTableXmlProperty::SearchOnInput => item
+            .table_search_on_input
+            .map(|value| {
+                format!(
+                    "{tab}<SearchOnInput>{}</SearchOnInput>\r\n",
+                    value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::SkipOnInput => item
             .skip_on_input
             .filter(|value| *value || should_emit_explicit_table_skip_on_input(item))
