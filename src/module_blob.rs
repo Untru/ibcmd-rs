@@ -20,7 +20,7 @@ use crate::form_schema::{
     FormControlBorderSchema, FormControlBorderStyle, FormFieldSchema,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
     FormTableCurrentRowUse, FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey,
-    FormTableSchema,
+    FormTableSchema, FormWarningOnEditRepresentation,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -288,6 +288,8 @@ struct FormXmlChildItem {
     show_in_footer: Option<bool>,
     read_only: Option<bool>,
     skip_on_input: Option<bool>,
+    warning_on_edit_representation: Option<FormWarningOnEditRepresentation>,
+    warning_on_edit: Vec<LocalizedString>,
     title_location: Option<FormXmlTitleLocation>,
     edit_mode: Option<FormXmlEditMode>,
     mark_required_complete: Option<bool>,
@@ -4954,6 +4956,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SkipOnInput"
                         | "LocationInCommandBar"
                         | "TitleLocation"
+                        | "WarningOnEditRepresentation"
                         | "EditMode"
                         | "MarkRequiredComplete"
                         | "AutoEditMode"
@@ -5125,12 +5128,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                 } else if local == "item"
                     && (path_ends_with_for_child_title(&path, &current_child_items)
-                        || path_ends_with_for_child_tooltip(&path, &current_child_items))
+                        || path_ends_with_for_child_tooltip(&path, &current_child_items)
+                        || path_ends_with_for_child_warning_on_edit(&path, &current_child_items))
                 {
-                    current_child_localized_section = path
-                        .last()
-                        .map(|value| value.to_string())
-                        .filter(|value| matches!(value.as_str(), "Title" | "ToolTip"));
+                    current_child_localized_section =
+                        path.last().map(|value| value.to_string()).filter(|value| {
+                            matches!(value.as_str(), "Title" | "ToolTip" | "WarningOnEdit")
+                        });
                     current_child_title_lang = None;
                     current_child_title_content = None;
                 } else if local == "Event"
@@ -5595,6 +5599,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
+                    || path_ends_with_for_child_warning_on_edit_representation(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_control_border_style(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
@@ -6103,6 +6113,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
+                    || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
+                    || path_ends_with_for_child_warning_on_edit_representation(
+                        &path,
+                        &current_child_items,
+                    )
                     || path_ends_with_for_child_event(&path, &current_child_items)
                     || path_ends_with_for_child_control_border_style(&path, &current_child_items)
                     || path_ends_with_for_child_type(&path, &current_child_items)
@@ -7386,6 +7402,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_tooltip_lang(
                                 &path,
                                 &current_child_items,
+                            )
+                            || path_ends_with_for_child_warning_on_edit_lang(
+                                &path,
+                                &current_child_items,
                             ) =>
                     {
                         current_child_title_lang = Some(text_value.trim().to_string());
@@ -7393,6 +7413,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "content"
                         if path_ends_with_for_child_title_content(&path, &current_child_items)
                             || path_ends_with_for_child_tooltip_content(
+                                &path,
+                                &current_child_items,
+                            )
+                            || path_ends_with_for_child_warning_on_edit_content(
                                 &path,
                                 &current_child_items,
                             ) =>
@@ -7404,6 +7428,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_tooltip_item(
                                 &path,
                                 &current_child_items,
+                            )
+                            || path_ends_with_for_child_warning_on_edit_item(
+                                &path,
+                                &current_child_items,
                             ) =>
                     {
                         if let (Some(item), Some(lang), Some(content)) = (
@@ -7412,10 +7440,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             current_child_title_content.take(),
                         ) {
                             let value = LocalizedString { lang, content };
-                            if current_child_localized_section.as_deref() == Some("ToolTip") {
-                                item.tooltip.push(value);
-                            } else {
-                                item.title.push(value);
+                            match current_child_localized_section.as_deref() {
+                                Some("ToolTip") => item.tooltip.push(value),
+                                Some("WarningOnEdit") => item.warning_on_edit.push(value),
+                                _ => item.title.push(value),
                             }
                         }
                         current_child_localized_section = None;
@@ -7805,6 +7833,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         if let Some(item) = current_child_items.last_mut() {
                             item.title_location =
                                 Some(parse_form_title_location_xml(text_value.trim())?);
+                        }
+                    }
+                    "WarningOnEditRepresentation"
+                        if path_ends_with_for_child_warning_on_edit_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.warning_on_edit_representation = Some(
+                                FormWarningOnEditRepresentation::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form WarningOnEditRepresentation: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
                         }
                     }
                     "EditMode"
@@ -8284,6 +8330,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SkipOnInput"
                         | "LocationInCommandBar"
                         | "TitleLocation"
+                        | "WarningOnEditRepresentation"
                         | "EditMode"
                         | "MarkRequiredComplete"
                         | "AutoEditMode"
@@ -8485,6 +8532,8 @@ fn parse_form_child_item_xml(
         show_in_footer: None,
         read_only: None,
         skip_on_input: None,
+        warning_on_edit_representation: None,
+        warning_on_edit: Vec::new(),
         title_location: None,
         edit_mode: None,
         mark_required_complete: None,
@@ -8650,30 +8699,26 @@ fn parse_nested_command_uuid_from_xml(xml: &[u8], command_name: &str) -> Result<
 }
 
 fn is_form_child_item_xml_tag(tag: &str) -> bool {
-    matches!(
-        tag,
-        "UsualGroup"
-            | "CommandBar"
-            | "AutoCommandBar"
-            | "ColumnGroup"
-            | "Popup"
-            | "Pages"
-            | "Page"
-            | "ButtonGroup"
-            | "ContextMenu"
-            | "Button"
-            | "Table"
-            | "InputField"
-            | "LabelField"
-            | "PictureField"
-            | "CheckBoxField"
-            | "TextDocumentField"
-            | "LabelDecoration"
-            | "PictureDecoration"
-            | "SearchStringAddition"
-            | "ViewStatusAddition"
-            | "SearchControlAddition"
-    )
+    FormFieldSchema::supports_item_tag(tag)
+        || matches!(
+            tag,
+            "UsualGroup"
+                | "CommandBar"
+                | "AutoCommandBar"
+                | "ColumnGroup"
+                | "Popup"
+                | "Pages"
+                | "Page"
+                | "ButtonGroup"
+                | "ContextMenu"
+                | "Button"
+                | "Table"
+                | "LabelDecoration"
+                | "PictureDecoration"
+                | "SearchStringAddition"
+                | "ViewStatusAddition"
+                | "SearchControlAddition"
+        )
 }
 
 fn finalize_form_xml_child_item(mut item: FormXmlChildItem) -> FormXmlChildItem {
@@ -8709,6 +8754,18 @@ fn path_ends_with_for_child_tooltip(path: &[String], items: &[FormXmlChildItem])
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "ToolTip"])
+}
+
+fn form_child_item_supports_warning_on_edit(tag: &str) -> bool {
+    tag == "Column" || FormFieldSchema::supports_item_tag(tag)
+}
+
+fn path_ends_with_for_child_warning_on_edit(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    form_child_item_supports_warning_on_edit(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "WarningOnEdit"])
 }
 
 fn path_ends_with_for_usual_group_title_text_color(
@@ -8809,6 +8866,17 @@ fn path_ends_with_for_child_tooltip_item(path: &[String], items: &[FormXmlChildI
     path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item"])
 }
 
+fn path_ends_with_for_child_warning_on_edit_item(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    form_child_item_supports_warning_on_edit(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "WarningOnEdit", "item"])
+}
+
 fn path_ends_with_for_child_title_lang(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -8837,6 +8905,31 @@ fn path_ends_with_for_child_tooltip_content(path: &[String], items: &[FormXmlChi
     path_ends_with(path, &[item.tag.as_str(), "ToolTip", "item", "content"])
 }
 
+fn path_ends_with_for_child_warning_on_edit_lang(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    form_child_item_supports_warning_on_edit(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "WarningOnEdit", "item", "lang"])
+}
+
+fn path_ends_with_for_child_warning_on_edit_content(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    form_child_item_supports_warning_on_edit(&item.tag)
+        && path_ends_with(
+            path,
+            &[item.tag.as_str(), "WarningOnEdit", "item", "content"],
+        )
+}
+
 fn form_localized_text_path_allows_entity_ref(
     path: &[String],
     child_items: &[FormXmlChildItem],
@@ -8863,6 +8956,8 @@ fn form_localized_text_path_allows_entity_ref(
         || path_ends_with_for_child_title_content(path, child_items)
         || path_ends_with_for_child_tooltip_lang(path, child_items)
         || path_ends_with_for_child_tooltip_content(path, child_items)
+        || path_ends_with_for_child_warning_on_edit_lang(path, child_items)
+        || path_ends_with_for_child_warning_on_edit_content(path, child_items)
 }
 
 fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -8956,6 +9051,17 @@ fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChil
     };
     matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
         && path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
+}
+
+fn path_ends_with_for_child_warning_on_edit_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    form_child_item_supports_warning_on_edit(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "WarningOnEditRepresentation"])
 }
 
 fn path_ends_with_for_child_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -12655,6 +12761,30 @@ fn form_layout_field_show_in_footer_range(
     matches!(text[range.clone()].trim(), "0" | "1").then_some(range)
 }
 
+fn form_layout_field_warning_on_edit_representation_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields
+        .get(schema.warning_on_edit_representation_slot())?
+        .clone();
+    matches!(text[range.clone()].trim(), "0" | "1" | "2").then_some(range)
+}
+
+fn form_layout_field_warning_on_edit_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields.get(schema.warning_on_edit_slot())?.clone();
+    parse_form_warning_on_edit_value(text[range.clone()].trim())
+        .is_ok()
+        .then_some(range)
+}
+
 fn form_layout_picture_decoration_hyperlink_range(
     text: &str,
     fields: &[Range<usize>],
@@ -12782,6 +12912,20 @@ fn patch_form_layout_child_item_entry(
             form_localized_replacement(&text[tooltip_range.clone()], &item.tooltip)
     {
         replacements.push((tooltip_range, replacement));
+    }
+    if let Some(representation) = item.warning_on_edit_representation
+        && let Some(range) =
+            form_layout_field_warning_on_edit_representation_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, representation.raw_code().to_string()));
+    }
+    if !item.warning_on_edit.is_empty()
+        && let Some(range) =
+            form_layout_field_warning_on_edit_range(text, fields, item.tag.as_str())
+        && let Some(replacement) =
+            form_warning_on_edit_replacement(&text[range.clone()], &item.warning_on_edit)
+    {
+        replacements.push((range, replacement));
     }
     if let Some(style) = item.control_border.as_ref().and_then(|border| border.style)
         && let Some(style_range) = form_layout_control_border_style_range(text, fields, &item.tag)
@@ -14757,14 +14901,11 @@ fn form_layout_child_item_tag<'a>(
         "34" => Some("Button"),
         "37" if matches!(fields.len(), 59 | 60) => {
             let top_level_offset = fields.len() - 59;
-            match fields
+            let discriminator = fields
                 .get(5 + top_level_offset)
-                .map(|range| text[range.clone()].trim())?
-            {
-                "1" => Some("LabelField"),
-                "4" => Some("PictureField"),
-                _ => None,
-            }
+                .map(|range| text[range.clone()].trim())?;
+            let item_tag = FormFieldSchema::item_tag_from_discriminator(discriminator)?;
+            form_layout_field_schema(text, fields, item_tag).map(|_| item_tag)
         }
         "48" => match fields
             .get(5 + form_layout_input_field_top_level_offset(text, fields))
@@ -16839,6 +16980,52 @@ fn form_localized_replacement(existing: &str, values: &[LocalizedString]) -> Opt
     } else {
         format_1c_synonyms(values)
     })
+}
+
+fn form_warning_on_edit_replacement(existing: &str, values: &[LocalizedString]) -> Option<String> {
+    if parse_form_warning_on_edit_value(existing).ok().as_deref() == Some(values) {
+        return None;
+    }
+    Some(format_form_title_value(values))
+}
+
+fn parse_form_warning_on_edit_value(value: &str) -> Result<Vec<LocalizedString>> {
+    let value = value.trim();
+    if scan_balanced_braces(value, 0)? != value.len() {
+        return Err(anyhow!("trailing data after Form WarningOnEdit value"));
+    }
+    let fields = scan_braced_fields(value, 0)?;
+    if fields
+        .first()
+        .is_none_or(|range| value[range.clone()].trim() != "1")
+    {
+        return Err(anyhow!("unsupported Form WarningOnEdit marker"));
+    }
+    let count = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("Form WarningOnEdit count is missing"))
+        .and_then(|range| Ok(value[range.clone()].trim().parse::<usize>()?))?;
+    if fields.len() != 2 + count {
+        return Err(anyhow!("Form WarningOnEdit field count mismatch"));
+    }
+
+    let mut output = Vec::with_capacity(count);
+    for range in fields.iter().skip(2) {
+        if scan_balanced_braces(value, range.start)? != range.end {
+            return Err(anyhow!("invalid Form WarningOnEdit localized pair"));
+        }
+        let pair = scan_braced_fields(value, range.start)?;
+        if pair.len() != 2 {
+            return Err(anyhow!(
+                "Form WarningOnEdit localized pair field count mismatch"
+            ));
+        }
+        output.push(LocalizedString {
+            lang: parse_1c_quoted_string(&value[pair[0].clone()])?,
+            content: parse_1c_quoted_string(&value[pair[1].clone()])?,
+        });
+    }
+    Ok(output)
 }
 
 fn form_localized_uses_nested_pairs(value: &str) -> bool {

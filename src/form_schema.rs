@@ -1888,6 +1888,36 @@ pub(crate) struct FormFieldTitleLocationSchema {
     slot: usize,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormWarningOnEditRepresentation {
+    Show,
+    DontShow,
+}
+
+impl FormWarningOnEditRepresentation {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Show => "Show",
+            Self::DontShow => "DontShow",
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value {
+            "Show" => Some(Self::Show),
+            "DontShow" => Some(Self::DontShow),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::Show => "0",
+            Self::DontShow => "1",
+        }
+    }
+}
+
 impl FormFieldTitleLocationSchema {
     pub(crate) fn from_raw_layout(
         wrapper: &str,
@@ -2124,6 +2154,40 @@ impl FormChildItemEventCollectionSchema {
 impl FormFieldSchema {
     pub(crate) const OPTIONS_BASE_SLOT: usize = 39;
 
+    pub(crate) fn item_tag_from_discriminator(discriminator: &str) -> Option<&'static str> {
+        match discriminator {
+            "1" => Some("LabelField"),
+            "2" => Some("InputField"),
+            "3" => Some("CheckBoxField"),
+            "4" => Some("PictureField"),
+            "5" => Some("RadioButtonField"),
+            "6" => Some("SpreadSheetDocumentField"),
+            "7" => Some("TextDocumentField"),
+            "8" => Some("CalendarField"),
+            "14" => Some("GraphicalSchemaField"),
+            "15" => Some("HTMLDocumentField"),
+            "17" => Some("FormattedDocumentField"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn supports_item_tag(item_tag: &str) -> bool {
+        matches!(
+            item_tag,
+            "LabelField"
+                | "InputField"
+                | "CheckBoxField"
+                | "PictureField"
+                | "RadioButtonField"
+                | "SpreadSheetDocumentField"
+                | "TextDocumentField"
+                | "CalendarField"
+                | "GraphicalSchemaField"
+                | "HTMLDocumentField"
+                | "FormattedDocumentField"
+        )
+    }
+
     pub(crate) fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
@@ -2288,6 +2352,28 @@ impl FormFieldSchema {
 
     pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.enabled_slot?)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) const fn warning_on_edit_representation_slot(self) -> usize {
+        17 + self.top_level_offset
+    }
+
+    pub(crate) fn warning_on_edit_representation(
+        self,
+        fields: &[&str],
+    ) -> Option<FormWarningOnEditRepresentation> {
+        match fields
+            .get(self.warning_on_edit_representation_slot())?
+            .trim()
+        {
+            "0" => Some(FormWarningOnEditRepresentation::Show),
+            "1" => Some(FormWarningOnEditRepresentation::DontShow),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn warning_on_edit_slot(self) -> usize {
+        18 + self.top_level_offset
     }
 
     pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {

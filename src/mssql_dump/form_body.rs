@@ -36,7 +36,7 @@ use crate::form_schema::{
     FormTableSearchControlLocation, FormTableSearchStringLocation, FormTableViewStatusLocation,
     FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
-    FormUsualGroupXmlProperty, decode_form_tooltip_representation,
+    FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
@@ -607,6 +607,8 @@ pub(super) struct FormChildItem {
     pub(super) title_location: Option<&'static str>,
     pub(super) title_height: Option<String>,
     pub(super) tooltip_representation: Option<&'static str>,
+    pub(super) warning_on_edit_representation: Option<FormWarningOnEditRepresentation>,
+    pub(super) warning_on_edit: Vec<(String, String)>,
     pub(super) edit_mode: Option<&'static str>,
     pub(super) horizontal_align: Option<FormChildItemAlignment>,
     pub(super) group_vertical_align: Option<&'static str>,
@@ -3674,6 +3676,37 @@ pub(super) fn parse_form_localized_strings(field: &str) -> Vec<(String, String)>
     parse_1c_synonyms(field)
 }
 
+fn parse_form_warning_on_edit_localized_strings(field: &str) -> Option<Vec<(String, String)>> {
+    let field = field.trim();
+    (scan_1c_braced_value(field, 0)? == field.len()).then_some(())?;
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first().copied() != Some("1") {
+        return None;
+    }
+    let count = fields.get(1)?.parse::<usize>().ok()?;
+    if fields.len() != 2 + count {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(2)
+        .map(|pair| {
+            let pair = pair.trim();
+            (scan_1c_braced_value(pair, 0)? == pair.len()).then_some(())?;
+            let pair_fields = split_1c_braced_fields(pair, 0)?;
+            if pair_fields.len() != 2 {
+                return None;
+            }
+            let lang_field = pair_fields[0].trim();
+            let content_field = pair_fields[1].trim();
+            let (lang, lang_len) = parse_1c_quoted_string_with_len(lang_field)?;
+            let (content, content_len) = parse_1c_quoted_string_with_len(content_field)?;
+            (lang_len == lang_field.len() && content_len == content_field.len())
+                .then_some((lang, content))
+        })
+        .collect()
+}
+
 pub(super) fn parse_form_reference_list(
     field: &str,
     object_refs: &BTreeMap<String, String>,
@@ -5210,6 +5243,14 @@ fn parse_form_child_item_with_metadata_owners(
         table_schema,
     );
     let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
+    let warning_on_edit_representation = field_schema_and_options
+        .as_ref()
+        .and_then(|(schema, _)| schema.warning_on_edit_representation(&fields));
+    let warning_on_edit = field_schema_and_options
+        .as_ref()
+        .and_then(|(schema, _)| fields.get(schema.warning_on_edit_slot()))
+        .and_then(|field| parse_form_warning_on_edit_localized_strings(field))
+        .unwrap_or_default();
     let header_picture = parse_form_field_header_picture(
         wrapper,
         tag,
@@ -5742,6 +5783,8 @@ fn parse_form_child_item_with_metadata_owners(
             .and_then(|(schema, _)| schema.title_height(&fields))
             .or_else(|| button_common_schema.and_then(|schema| schema.title_height(&fields))),
         tooltip_representation,
+        warning_on_edit_representation,
+        warning_on_edit,
         edit_mode: if matches!(
             tag,
             "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
@@ -13357,6 +13400,17 @@ pub(super) fn format_form_child_item_xml(
     xml.push_str(&format_form_tooltip_representation_xml(
         item,
         FormTooltipRepresentationXmlOrder::FieldProperties,
+        indent + 1,
+    ));
+    if let Some(representation) = item.warning_on_edit_representation {
+        xml.push_str(&format!(
+            "{tab}\t<WarningOnEditRepresentation>{}</WarningOnEditRepresentation>\r\n",
+            representation.xml_value()
+        ));
+    }
+    xml.push_str(&format_form_localized_section(
+        "WarningOnEdit",
+        &item.warning_on_edit,
         indent + 1,
     ));
     if item.tag == "CheckBoxField"
