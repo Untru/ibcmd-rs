@@ -33,15 +33,15 @@ use crate::form_schema::{
     FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
-    FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
-    FormTableRootPropertyBagKey as TableRootBagKey, FormTableRowPictureDataPath, FormTableSchema,
-    FormTableSearchControlLocation, FormTableSearchOnInput, FormTableSearchStringLocation,
-    FormTableViewStatusLocation, FormTableXmlProperty, FormTooltipRepresentationXmlOrder,
-    FormUsualGroupGroupVerticalAlign, FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema,
-    FormUsualGroupXmlAnchor, FormUsualGroupXmlProperty, FormWarningOnEditRepresentation,
-    decode_form_tooltip_representation, form_attribute_column_builtin_type_reference,
-    form_child_item_representation_is_default, form_tooltip_representation_schema,
-    form_tooltip_representation_xml_order,
+    FormTableInitialListView, FormTableOrdinaryTailKey as TableTailKey,
+    FormTablePropertyBagKey as TableBagKey, FormTableRootPropertyBagKey as TableRootBagKey,
+    FormTableRowPictureDataPath, FormTableSchema, FormTableSearchControlLocation,
+    FormTableSearchOnInput, FormTableSearchStringLocation, FormTableViewStatusLocation,
+    FormTableXmlProperty, FormTooltipRepresentationXmlOrder, FormUsualGroupGroupVerticalAlign,
+    FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
+    FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
+    form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
+    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 use uuid::Uuid;
 
@@ -554,6 +554,7 @@ pub(super) struct FormChildItem {
     pub(super) table_representation: Option<&'static str>,
     pub(super) table_command_bar_location: Option<&'static str>,
     pub(super) table_search_on_input: Option<FormTableSearchOnInput>,
+    pub(super) table_initial_list_view: Option<FormTableInitialListView>,
     pub(super) table_search_string_location: Option<FormTableSearchStringLocation>,
     pub(super) table_view_status_location: Option<FormTableViewStatusLocation>,
     pub(super) table_search_control_location: Option<FormTableSearchControlLocation>,
@@ -5491,6 +5492,7 @@ fn parse_form_child_item_with_metadata_owners(
             }),
         table_current_row_use: table_schema.and_then(|schema| schema.current_row_use(&fields)),
         table_search_on_input: table_schema.and_then(|schema| schema.search_on_input(&fields)),
+        table_initial_list_view: table_schema.and_then(|schema| schema.initial_list_view(&fields)),
         use_alternation_row_color: table_schema
             .and_then(|schema| schema.use_alternation_row_color(&fields)),
         default_item: if tag == "Table" {
@@ -5522,11 +5524,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        initial_tree_view: if tag == "Table" {
-            parse_form_table_initial_tree_view(wrapper, &fields)
-        } else {
-            None
-        },
+        initial_tree_view: table_schema.and_then(|schema| schema.initial_tree_view(&fields)),
         row_input_mode: table_schema.and_then(|schema| schema.row_input_mode(&fields)),
         table_choice_mode: table_schema.and_then(|schema| schema.choice_mode(&fields)),
         table_multiple_choice: table_schema.and_then(|schema| schema.multiple_choice(&fields)),
@@ -8733,20 +8731,6 @@ pub(super) fn parse_form_table_command_bar_location(
 
 pub(super) fn form_table_wrapper55_uses_split_head_slots(fields: &[&str]) -> bool {
     fields.get(8).map(|field| field.trim()) == Some("2")
-}
-
-pub(super) fn parse_form_table_initial_tree_view(
-    wrapper: &str,
-    fields: &[&str],
-) -> Option<&'static str> {
-    match wrapper {
-        "55" => fields.get(39).and_then(|field| match field.trim() {
-            "1" => Some("ExpandTopLevel"),
-            "2" => Some("ExpandAllLevels"),
-            _ => None,
-        }),
-        _ => None,
-    }
 }
 
 pub(super) fn parse_form_table_default_top_level_parent_nil(
@@ -12747,6 +12731,15 @@ fn format_form_table_property_xml(
             .map(|value| {
                 format!(
                     "{tab}<SearchOnInput>{}</SearchOnInput>\r\n",
+                    value.xml_value()
+                )
+            })
+            .unwrap_or_default(),
+        FormTableXmlProperty::InitialListView => item
+            .table_initial_list_view
+            .map(|value| {
+                format!(
+                    "{tab}<InitialListView>{}</InitialListView>\r\n",
                     value.xml_value()
                 )
             })

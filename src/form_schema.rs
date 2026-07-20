@@ -3943,6 +3943,7 @@ pub(crate) enum FormTableXmlProperty {
     AutoInsertNewRow,
     AutoMarkIncomplete,
     SearchOnInput,
+    InitialListView,
     InitialTreeView,
     EnableStartDrag,
     EnableDrag,
@@ -4004,6 +4005,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::AutoInsertNewRow,
     FormTableXmlProperty::AutoMarkIncomplete,
     FormTableXmlProperty::SearchOnInput,
+    FormTableXmlProperty::InitialListView,
     FormTableXmlProperty::InitialTreeView,
     FormTableXmlProperty::EnableStartDrag,
     FormTableXmlProperty::EnableDrag,
@@ -4054,12 +4056,14 @@ enum FormTableSlot {
     VerticalLines,
     UseAlternationRowColor,
     AutoInsertNewRow,
+    InitialListView,
+    InitialTreeView,
     EnableStartDrag,
     EnableDrag,
 }
 
 impl FormTableSlot {
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 21] = [
         Self::Autofill,
         Self::ReadOnly,
         Self::DefaultItem,
@@ -4077,6 +4081,8 @@ impl FormTableSlot {
         Self::VerticalLines,
         Self::UseAlternationRowColor,
         Self::AutoInsertNewRow,
+        Self::InitialListView,
+        Self::InitialTreeView,
         Self::EnableStartDrag,
         Self::EnableDrag,
     ];
@@ -4100,6 +4106,8 @@ impl FormTableSlot {
             Self::VerticalLines => 33,
             Self::UseAlternationRowColor => 36,
             Self::AutoInsertNewRow => 37,
+            Self::InitialListView => 38,
+            Self::InitialTreeView => 39,
             Self::EnableStartDrag => 52,
             Self::EnableDrag => 53,
         }
@@ -4109,6 +4117,9 @@ impl FormTableSlot {
         match self {
             Self::RowInputMode => matches!(field.trim(), "0" | "2"),
             Self::HorizontalScrollBar => matches!(field.trim(), "0" | "1" | "2"),
+            Self::InitialListView | Self::InitialTreeView => {
+                matches!(field.trim(), "0" | "1" | "2")
+            }
             Self::Width | Self::Height => field.trim().parse::<u32>().is_ok(),
             _ => matches!(field.trim(), "0" | "1"),
         }
@@ -4211,6 +4222,36 @@ impl FormTableSearchOnInput {
         match self {
             Self::Use => "0",
             Self::DontUse => "1",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormTableInitialListView {
+    Beginning,
+    End,
+}
+
+impl FormTableInitialListView {
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Beginning => "Beginning",
+            Self::End => "End",
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value {
+            "Beginning" => Some(Self::Beginning),
+            "End" => Some(Self::End),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::Beginning => "0",
+            Self::End => "1",
         }
     }
 }
@@ -4645,6 +4686,32 @@ impl FormTableSchema {
         match fields.get(self.search_on_input_slot(fields)?)?.trim() {
             "0" => Some(FormTableSearchOnInput::Use),
             "1" => Some(FormTableSearchOnInput::DontUse),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn initial_list_view_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = FormTableSlot::InitialListView.index();
+        matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
+    }
+
+    pub(crate) fn initial_list_view(self, fields: &[&str]) -> Option<FormTableInitialListView> {
+        match fields.get(self.initial_list_view_slot(fields)?)?.trim() {
+            "0" => Some(FormTableInitialListView::Beginning),
+            "1" => Some(FormTableInitialListView::End),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn initial_tree_view_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = FormTableSlot::InitialTreeView.index();
+        matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
+    }
+
+    pub(crate) fn initial_tree_view(self, fields: &[&str]) -> Option<&'static str> {
+        match fields.get(self.initial_tree_view_slot(fields)?)?.trim() {
+            "1" => Some("ExpandTopLevel"),
+            "2" => Some("ExpandAllLevels"),
             _ => None,
         }
     }

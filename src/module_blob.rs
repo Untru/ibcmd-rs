@@ -21,9 +21,10 @@ use crate::form_schema::{
     FormControlBorderStyle, FormFieldGroupHorizontalAlign, FormFieldSchema, FormFieldVerticalAlign,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
     FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
-    FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey, FormTableSchema,
-    FormTableSearchOnInput, FormTooltipRepresentation, FormWarningOnEditRepresentation,
-    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
+    FormTableHorizontalScrollBar, FormTableInitialListView, FormTablePropertyBagKey as TableBagKey,
+    FormTableSchema, FormTableSearchOnInput, FormTooltipRepresentation,
+    FormWarningOnEditRepresentation, form_tooltip_representation_schema,
+    form_tooltip_representation_supports_xml_tag,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -262,6 +263,7 @@ struct FormXmlChildItem {
     table_command_bar_location: Option<String>,
     table_current_row_use: Option<FormTableCurrentRowUse>,
     table_search_on_input: Option<FormTableSearchOnInput>,
+    table_initial_list_view: Option<FormTableInitialListView>,
     table_horizontal_scroll_bar: Option<FormTableHorizontalScrollBar>,
     table_multiple_choice: Option<bool>,
     height_in_table_rows: Option<String>,
@@ -4959,6 +4961,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "endDate"
                         | "UseAlternationRowColor"
                         | "DefaultItem"
+                        | "InitialListView"
                         | "InitialTreeView"
                         | "ChoiceFoldersAndItems"
                         | "RestoreCurrentRow"
@@ -5654,6 +5657,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_default_item(&path, &current_child_items)
+                    || path_ends_with_for_child_initial_list_view(&path, &current_child_items)
                     || path_ends_with_for_child_initial_tree_view(&path, &current_child_items)
                     || path_ends_with_for_child_choice_folders_and_items(
                         &path,
@@ -6165,6 +6169,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_enable_drag(&path, &current_child_items)
                     || path_ends_with_for_child_file_drag_mode(&path, &current_child_items)
                     || path_ends_with_for_child_default_item(&path, &current_child_items)
+                    || path_ends_with_for_child_initial_list_view(&path, &current_child_items)
                     || path_ends_with_for_child_initial_tree_view(&path, &current_child_items)
                     || path_ends_with_for_child_choice_folders_and_items(
                         &path,
@@ -7735,6 +7740,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "InitialListView"
+                        if path_ends_with_for_child_initial_list_view(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.table_initial_list_view = Some(
+                                FormTableInitialListView::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form Table InitialListView: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
+                        }
+                    }
                     "InitialTreeView"
                         if path_ends_with_for_child_initial_tree_view(
                             &path,
@@ -8464,6 +8487,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "endDate"
                         | "UseAlternationRowColor"
                         | "DefaultItem"
+                        | "InitialListView"
+                        | "InitialTreeView"
                         | "ChoiceFoldersAndItems"
                         | "RestoreCurrentRow"
                         | "RowPictureDataPath"
@@ -8651,6 +8676,7 @@ fn parse_form_child_item_xml(
         table_command_bar_location: None,
         table_current_row_use: None,
         table_search_on_input: None,
+        table_initial_list_view: None,
         table_horizontal_scroll_bar: None,
         table_multiple_choice: None,
         height_in_table_rows: None,
@@ -9632,6 +9658,13 @@ fn path_ends_with_for_child_initial_tree_view(path: &[String], items: &[FormXmlC
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "InitialTreeView"])
 }
 
+fn path_ends_with_for_child_initial_list_view(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "InitialListView"])
+}
+
 fn path_ends_with_for_child_choice_folders_and_items(
     path: &[String],
     items: &[FormXmlChildItem],
@@ -9980,7 +10013,7 @@ fn parse_form_table_command_bar_location_xml(value: &str) -> Result<String> {
 
 fn parse_form_table_initial_tree_view_xml(value: &str) -> Result<String> {
     match value {
-        "ExpandTopLevel" => Ok(value.to_string()),
+        "ExpandTopLevel" | "ExpandAllLevels" => Ok(value.to_string()),
         other => Err(anyhow!("unsupported Form Table InitialTreeView: {other}")),
     }
 }
@@ -11555,7 +11588,10 @@ fn form_child_item_strict_properties_require_existing_layout(item: &FormXmlChild
             || item.vertical_align.is_some()
             || item.group_vertical_align.is_some()
             || (item.tag == "CheckBoxField" && item.three_state.is_some())))
-        || (item.tag == "Table" && item.table_search_on_input.is_some())
+        || (item.tag == "Table"
+            && (item.table_search_on_input.is_some()
+                || item.table_initial_list_view.is_some()
+                || item.initial_tree_view.is_some()))
 }
 
 fn format_form_layout_new_top_level_item(
@@ -13289,6 +13325,16 @@ fn form_layout_table_search_on_input_range(
     fields.get(slot).cloned()
 }
 
+fn form_layout_table_initial_list_view_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+        schema.initial_list_view_slot(normalized_fields)
+    })?;
+    fields.get(slot).cloned()
+}
+
 fn form_layout_table_file_drag_mode_replacement(
     text: &str,
     fields: &[Range<usize>],
@@ -13461,6 +13507,15 @@ fn patch_form_layout_child_item_entry(
             replacements.push((
                 search_on_input_range,
                 search_on_input.raw_code().to_string(),
+            ));
+        }
+        if let Some(initial_list_view) = item.table_initial_list_view
+            && let Some(initial_list_view_range) =
+                form_layout_table_initial_list_view_range(text, fields)
+        {
+            replacements.push((
+                initial_list_view_range,
+                initial_list_view.raw_code().to_string(),
             ));
         }
         if let Some(data_path) = &item.data_path
@@ -15006,6 +15061,7 @@ fn form_table_command_bar_location_code(value: &str) -> Option<&'static str> {
 fn form_table_initial_tree_view_code(value: &str) -> Option<&'static str> {
     match value {
         "ExpandTopLevel" => Some("1"),
+        "ExpandAllLevels" => Some("2"),
         _ => None,
     }
 }
@@ -15265,8 +15321,10 @@ fn form_layout_table_initial_tree_view_range(
     text: &str,
     fields: &[Range<usize>],
 ) -> Option<Range<usize>> {
-    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    (wrapper == "55").then(|| fields.get(22).cloned()).flatten()
+    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+        schema.initial_tree_view_slot(normalized_fields)
+    })?;
+    fields.get(slot).cloned()
 }
 
 fn form_layout_table_property_bag_value_range(
@@ -33594,7 +33652,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 		<Table name="Rows" id="1">
 			<Representation>List</Representation>
 			<CommandBarLocation>Top</CommandBarLocation>
-			<InitialTreeView>ExpandTopLevel</InitialTreeView>
 		</Table>
 	</ChildItems>
 </Form>
@@ -33611,11 +33668,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .as_deref(),
             Some("Top")
         );
-        assert_eq!(
-            properties.child_items[0].initial_tree_view.as_deref(),
-            Some("ExpandTopLevel")
-        );
-
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
@@ -33624,7 +33676,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[table_fields[8].clone()], "0");
         assert_eq!(&parsed.layout[table_fields[13].clone()], "1");
         assert_eq!(&parsed.layout[table_fields[18].clone()], "1");
-        assert_eq!(&parsed.layout[table_fields[22].clone()], "1");
         Ok(())
     }
 
