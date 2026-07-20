@@ -3432,6 +3432,12 @@ impl FormSpecialFieldSchema {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormTooltipRepresentationItemKind {
     UsualGroup,
+    Popup,
+    ColumnGroup,
+    Pages,
+    Page,
+    ButtonGroup,
+    Table,
     LabelDecoration,
     PictureDecoration,
     LabelField,
@@ -3451,6 +3457,12 @@ impl FormTooltipRepresentationItemKind {
     fn from_xml_tag(tag: &str) -> Self {
         match tag {
             "UsualGroup" => Self::UsualGroup,
+            "Popup" => Self::Popup,
+            "ColumnGroup" => Self::ColumnGroup,
+            "Pages" => Self::Pages,
+            "Page" => Self::Page,
+            "ButtonGroup" => Self::ButtonGroup,
+            "Table" => Self::Table,
             "LabelDecoration" => Self::LabelDecoration,
             "PictureDecoration" => Self::PictureDecoration,
             "LabelField" => Self::LabelField,
@@ -3473,6 +3485,7 @@ pub(crate) enum FormTooltipRepresentationXmlOrder {
     UsualGroupHeader,
     DecorationHeader,
     FieldProperties,
+    ButtonGroupHeader,
     AfterTitle,
 }
 
@@ -3504,6 +3517,21 @@ pub(crate) fn form_tooltip_representation_schema(
         });
     }
     let item_kind = FormTooltipRepresentationItemKind::from_xml_tag(item_tag);
+    if wrapper == "22" && field_count >= 30 && (field_count - 30) % 2 == 0 {
+        let admitted = matches!(
+            (item_kind, direct_discriminator),
+            (FormTooltipRepresentationItemKind::Popup, Some("1"))
+                | (FormTooltipRepresentationItemKind::ColumnGroup, Some("2"))
+                | (FormTooltipRepresentationItemKind::Pages, Some("3"))
+                | (FormTooltipRepresentationItemKind::Page, Some("4"))
+                | (FormTooltipRepresentationItemKind::ButtonGroup, Some("6"))
+        );
+        if admitted {
+            return Some(FormTooltipRepresentationSchema {
+                slot: field_count.checked_sub(7)?,
+            });
+        }
+    }
     let slot = match (wrapper, field_count, item_kind, direct_discriminator) {
         ("22", 30, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 23,
         ("22", 32, FormTooltipRepresentationItemKind::UsualGroup, Some("5")) => 25,
@@ -3531,6 +3559,16 @@ pub(crate) fn form_tooltip_representation_xml_order(
         FormTooltipRepresentationItemKind::UsualGroup => {
             Some(FormTooltipRepresentationXmlOrder::UsualGroupHeader)
         }
+        FormTooltipRepresentationItemKind::Popup | FormTooltipRepresentationItemKind::Pages => {
+            Some(FormTooltipRepresentationXmlOrder::AfterTitle)
+        }
+        FormTooltipRepresentationItemKind::ButtonGroup => {
+            Some(FormTooltipRepresentationXmlOrder::ButtonGroupHeader)
+        }
+        FormTooltipRepresentationItemKind::ColumnGroup => {
+            Some(FormTooltipRepresentationXmlOrder::FieldProperties)
+        }
+        FormTooltipRepresentationItemKind::Page | FormTooltipRepresentationItemKind::Table => None,
         FormTooltipRepresentationItemKind::LabelDecoration
         | FormTooltipRepresentationItemKind::PictureDecoration => {
             Some(FormTooltipRepresentationXmlOrder::DecorationHeader)
@@ -3553,8 +3591,15 @@ pub(crate) fn form_tooltip_representation_xml_order(
     }
 }
 
+pub(crate) fn form_tooltip_representation_supports_xml_tag(item_tag: &str) -> bool {
+    !matches!(
+        FormTooltipRepresentationItemKind::from_xml_tag(item_tag),
+        FormTooltipRepresentationItemKind::Other
+    )
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum FormTooltipRepresentation {
+pub(crate) enum FormTooltipRepresentation {
     Omit,
     None,
     Balloon,
@@ -3567,7 +3612,7 @@ enum FormTooltipRepresentation {
 }
 
 impl FormTooltipRepresentation {
-    fn from_raw_scalar(value: &str) -> Option<Self> {
+    pub(crate) fn from_raw_scalar(value: &str) -> Option<Self> {
         match value {
             "0" => Some(Self::Omit),
             "1" => Some(Self::None),
@@ -3579,6 +3624,34 @@ impl FormTooltipRepresentation {
             "7" => Some(Self::ShowBottom),
             "8" => Some(Self::ShowRight),
             _ => None,
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value {
+            "None" => Some(Self::None),
+            "Balloon" => Some(Self::Balloon),
+            "Button" => Some(Self::Button),
+            "ShowAuto" => Some(Self::ShowAuto),
+            "ShowTop" => Some(Self::ShowTop),
+            "ShowLeft" => Some(Self::ShowLeft),
+            "ShowBottom" => Some(Self::ShowBottom),
+            "ShowRight" => Some(Self::ShowRight),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::Omit => "0",
+            Self::None => "1",
+            Self::Balloon => "2",
+            Self::Button => "3",
+            Self::ShowAuto => "4",
+            Self::ShowTop => "5",
+            Self::ShowLeft => "6",
+            Self::ShowBottom => "7",
+            Self::ShowRight => "8",
         }
     }
 
@@ -3681,6 +3754,7 @@ pub(crate) enum FormTableXmlProperty {
     CommandSet,
     CurrentRowUse,
     ToolTip,
+    ToolTipRepresentation,
     SearchStringLocation,
     ViewStatusLocation,
     SearchControlLocation,
@@ -3739,6 +3813,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Title,
     FormTableXmlProperty::CommandSet,
     FormTableXmlProperty::ToolTip,
+    FormTableXmlProperty::ToolTipRepresentation,
     FormTableXmlProperty::SearchStringLocation,
     FormTableXmlProperty::ViewStatusLocation,
     FormTableXmlProperty::SearchControlLocation,
@@ -4005,6 +4080,7 @@ impl FormTableSchema {
     const SEARCH_STRING_LOCATION_REVERSE_OFFSET: usize = 25;
     const VIEW_STATUS_LOCATION_REVERSE_OFFSET: usize = 24;
     const SEARCH_CONTROL_LOCATION_REVERSE_OFFSET: usize = 23;
+    const TOOLTIP_REPRESENTATION_REVERSE_OFFSET: usize = 28;
     const CURRENT_ROW_USE_REVERSE_OFFSET: usize = 5;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
@@ -4067,6 +4143,14 @@ impl FormTableSchema {
 
     pub(crate) const fn tooltip_slot(self) -> usize {
         10
+    }
+
+    pub(crate) fn tooltip_representation_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::TOOLTIP_REPRESENTATION_REVERSE_OFFSET)?;
+        FormTooltipRepresentation::from_raw_scalar(fields.get(slot)?.trim())?;
+        Some(slot)
     }
 
     pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {

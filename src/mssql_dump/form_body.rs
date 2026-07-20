@@ -5242,7 +5242,8 @@ fn parse_form_child_item_with_metadata_owners(
         check_box_field_layout.as_ref().map(|(schema, _)| *schema),
         table_schema,
     );
-    let tooltip_representation = parse_form_field_tooltip_representation(wrapper, tag, &fields);
+    let tooltip_representation =
+        parse_form_field_tooltip_representation(wrapper, tag, &fields, table_schema);
     let warning_on_edit_representation = field_schema_and_options
         .as_ref()
         .and_then(|(schema, _)| schema.warning_on_edit_representation(&fields));
@@ -9532,15 +9533,21 @@ pub(super) fn parse_form_field_tooltip_representation(
     wrapper: &str,
     tag: &str,
     fields: &[&str],
+    table_schema: Option<FormTableSchema>,
 ) -> Option<&'static str> {
-    let schema = form_tooltip_representation_schema(
-        wrapper,
-        fields.len(),
-        tag,
-        fields.get(5).map(|field| field.trim()),
-    )?;
+    let slot = if let Some(schema) = table_schema {
+        schema.tooltip_representation_slot(fields)?
+    } else {
+        form_tooltip_representation_schema(
+            wrapper,
+            fields.len(),
+            tag,
+            fields.get(5).map(|field| field.trim()),
+        )?
+        .slot()
+    };
     fields
-        .get(schema.slot())
+        .get(slot)
         .and_then(|field| decode_form_tooltip_representation(field.trim()))
 }
 
@@ -12902,6 +12909,15 @@ fn format_form_table_property_xml(
         FormTableXmlProperty::ToolTip => {
             format_form_localized_section("ToolTip", &item.tooltip, indent)
         }
+        FormTableXmlProperty::ToolTipRepresentation => item
+            .tooltip_representation
+            .map(|value| {
+                format!(
+                    "{tab}<ToolTipRepresentation>{}</ToolTipRepresentation>\r\n",
+                    escape_xml_text(value)
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::SearchStringLocation => item
             .table_search_string_location
             .map(|value| {
@@ -13889,6 +13905,11 @@ pub(super) fn format_form_child_item_xml(
                 &item.tooltip,
                 indent + 1,
             ));
+            xml.push_str(&format_form_tooltip_representation_xml(
+                item,
+                FormTooltipRepresentationXmlOrder::ButtonGroupHeader,
+                indent + 1,
+            ));
         }
         if item.tag == "UsualGroup" {
             if let Some(horizontal_stretch) = item.horizontal_stretch {
@@ -14084,7 +14105,7 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     xml.push_str(&format_form_command_bar_properties_xml(item, indent + 1));
-    if item.tag == "Popup" {
+    if matches!(item.tag, "Popup" | "Pages") {
         xml.push_str(&format_form_localized_section(
             "ToolTip",
             &item.tooltip,
@@ -14181,6 +14202,7 @@ pub(super) fn format_form_child_item_xml(
             | "UsualGroup"
             | "ButtonGroup"
             | "Popup"
+            | "Pages"
             | "Page"
             | "CommandBar"
     ) {

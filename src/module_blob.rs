@@ -20,7 +20,8 @@ use crate::form_schema::{
     FormControlBorderSchema, FormControlBorderStyle, FormFieldSchema,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
     FormTableCurrentRowUse, FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey,
-    FormTableSchema, FormWarningOnEditRepresentation,
+    FormTableSchema, FormTooltipRepresentation, FormWarningOnEditRepresentation,
+    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -288,6 +289,7 @@ struct FormXmlChildItem {
     show_in_footer: Option<bool>,
     read_only: Option<bool>,
     skip_on_input: Option<bool>,
+    tooltip_representation: Option<FormTooltipRepresentation>,
     warning_on_edit_representation: Option<FormWarningOnEditRepresentation>,
     warning_on_edit: Vec<LocalizedString>,
     title_location: Option<FormXmlTitleLocation>,
@@ -4956,6 +4958,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SkipOnInput"
                         | "LocationInCommandBar"
                         | "TitleLocation"
+                        | "ToolTipRepresentation"
                         | "WarningOnEditRepresentation"
                         | "EditMode"
                         | "MarkRequiredComplete"
@@ -5599,6 +5602,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_representation(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_representation(
@@ -6113,6 +6117,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || path_ends_with_for_child_tooltip_representation(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_representation(
@@ -7835,6 +7840,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some(parse_form_title_location_xml(text_value.trim())?);
                         }
                     }
+                    "ToolTipRepresentation"
+                        if path_ends_with_for_child_tooltip_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.tooltip_representation = Some(
+                                FormTooltipRepresentation::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form ToolTipRepresentation: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
+                        }
+                    }
                     "WarningOnEditRepresentation"
                         if path_ends_with_for_child_warning_on_edit_representation(
                             &path,
@@ -8330,6 +8353,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "SkipOnInput"
                         | "LocationInCommandBar"
                         | "TitleLocation"
+                        | "ToolTipRepresentation"
                         | "WarningOnEditRepresentation"
                         | "EditMode"
                         | "MarkRequiredComplete"
@@ -8532,6 +8556,7 @@ fn parse_form_child_item_xml(
         show_in_footer: None,
         read_only: None,
         skip_on_input: None,
+        tooltip_representation: None,
         warning_on_edit_representation: None,
         warning_on_edit: Vec::new(),
         title_location: None,
@@ -8754,6 +8779,17 @@ fn path_ends_with_for_child_tooltip(path: &[String], items: &[FormXmlChildItem])
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "ToolTip"])
+}
+
+fn path_ends_with_for_child_tooltip_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    (item.tag == "Column" || form_tooltip_representation_supports_xml_tag(&item.tag))
+        && path_ends_with(path, &[item.tag.as_str(), "ToolTipRepresentation"])
 }
 
 fn form_child_item_supports_warning_on_edit(tag: &str) -> bool {
@@ -12773,6 +12809,33 @@ fn form_layout_field_warning_on_edit_representation_range(
     matches!(text[range.clone()].trim(), "0" | "1" | "2").then_some(range)
 }
 
+fn form_layout_child_item_tooltip_representation_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
+    let slot = if item_tag == "Table" {
+        let raw_fields = fields
+            .iter()
+            .map(|range| &text[range.clone()])
+            .collect::<Vec<_>>();
+        FormTableSchema::from_raw_layout(wrapper, item_tag, &raw_fields)?
+            .tooltip_representation_slot(&raw_fields)?
+    } else {
+        form_tooltip_representation_schema(
+            wrapper,
+            fields.len(),
+            item_tag,
+            fields.get(5).map(|range| text[range.clone()].trim()),
+        )?
+        .slot()
+    };
+    let range = fields.get(slot)?.clone();
+    FormTooltipRepresentation::from_raw_scalar(text[range.clone()].trim())?;
+    Some(range)
+}
+
 fn form_layout_field_warning_on_edit_range(
     text: &str,
     fields: &[Range<usize>],
@@ -12912,6 +12975,12 @@ fn patch_form_layout_child_item_entry(
             form_localized_replacement(&text[tooltip_range.clone()], &item.tooltip)
     {
         replacements.push((tooltip_range, replacement));
+    }
+    if let Some(representation) = item.tooltip_representation
+        && let Some(range) =
+            form_layout_child_item_tooltip_representation_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, representation.raw_code().to_string()));
     }
     if let Some(representation) = item.warning_on_edit_representation
         && let Some(range) =
