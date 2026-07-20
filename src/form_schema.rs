@@ -3226,6 +3226,69 @@ impl FormRootVerticalScrollSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormRootVerticalAlign {
+    Bottom,
+}
+
+impl FormRootVerticalAlign {
+    pub(crate) fn from_raw_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "2" => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value {
+            "Bottom" => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_value(self) -> &'static str {
+        match self {
+            Self::Bottom => "2",
+        }
+    }
+
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Bottom => "Bottom",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootVerticalAlignSchema {
+    trailer_slot: usize,
+}
+
+impl FormRootVerticalAlignSchema {
+    const TRAILER_SLOT: usize = 12;
+
+    pub(crate) fn from_raw_layout(
+        root_discriminator: Option<&str>,
+        trailer_field_count: usize,
+    ) -> Option<Self> {
+        matches!((root_discriminator, trailer_field_count), (Some("50"), 24)).then_some(Self {
+            trailer_slot: Self::TRAILER_SLOT,
+        })
+    }
+
+    pub(crate) fn vertical_align(self, trailer: &[&str]) -> Option<FormRootVerticalAlign> {
+        FormRootVerticalAlign::from_raw_value(trailer.get(self.trailer_slot)?.trim())
+    }
+
+    pub(crate) const fn trailer_slot(self) -> usize {
+        self.trailer_slot
+    }
+
+    pub(crate) fn accepts_raw_value(self, value: &str) -> bool {
+        matches!(value.trim(), "2" | "3")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormRootAutoUrlSchema {
     auto_url: Option<bool>,
 }

@@ -28,7 +28,8 @@ use crate::form_schema::{
     FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
     FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
-    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalScrollSchema,
+    FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalAlign,
+    FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
     FormSpreadsheetDocumentFieldProperties, FormTableCurrentRowUse, FormTableHorizontalScrollBar,
     FormTableOrdinaryTailKey as TableTailKey, FormTablePropertyBagKey as TableBagKey,
@@ -247,6 +248,7 @@ pub(super) struct FormBodyProperties {
     pub(super) command_set_excluded_commands: Vec<&'static str>,
     pub(super) use_for_folders_and_items: Option<&'static str>,
     pub(super) customizable: Option<bool>,
+    pub(super) vertical_align: Option<FormRootVerticalAlign>,
     pub(super) command_bar_location: Option<&'static str>,
     pub(super) vertical_scroll: Option<&'static str>,
     pub(super) horizontal_align: Option<&'static str>,
@@ -770,6 +772,7 @@ pub(super) fn extract_form_body_properties(
         ),
         use_for_folders_and_items: extract_form_use_for_folders_and_items(fields),
         customizable: extract_form_customizable(fields),
+        vertical_align: extract_form_vertical_align(fields),
         command_bar_location: extract_form_command_bar_location(fields),
         vertical_scroll: extract_form_vertical_scroll(fields),
         horizontal_align: extract_form_horizontal_align(fields),
@@ -1103,6 +1106,16 @@ pub(super) fn extract_form_command_bar_location(fields: &[&str]) -> Option<&'sta
         "3" => Some("Bottom"),
         _ => None,
     }
+}
+
+pub(super) fn extract_form_vertical_align(fields: &[&str]) -> Option<FormRootVerticalAlign> {
+    let tail_start = form_root_child_items_tail_start(fields)?;
+    let trailer = fields.get(tail_start..)?;
+    FormRootVerticalAlignSchema::from_raw_layout(
+        fields.first().map(|field| field.trim()),
+        trailer.len(),
+    )?
+    .vertical_align(trailer)
 }
 
 pub(super) fn extract_form_vertical_scroll(fields: &[&str]) -> Option<&'static str> {
@@ -12179,6 +12192,12 @@ pub(super) fn format_form_body_xml(
     }
     if properties.customizable == Some(false) {
         xml.push_str("\t<Customizable>false</Customizable>\r\n");
+    }
+    if let Some(vertical_align) = properties.vertical_align {
+        xml.push_str(&format!(
+            "\t<VerticalAlign>{}</VerticalAlign>\r\n",
+            vertical_align.xml_value()
+        ));
     }
     if let Some(command_bar_location) = properties.command_bar_location {
         xml.push_str(&format!(

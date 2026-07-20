@@ -19,9 +19,10 @@ use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
     FormControlBorderSchema, FormControlBorderStyle, FormFieldSchema,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
-    FormTableCurrentRowUse, FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey,
-    FormTableSchema, FormTooltipRepresentation, FormWarningOnEditRepresentation,
-    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
+    FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
+    FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey, FormTableSchema,
+    FormTooltipRepresentation, FormWarningOnEditRepresentation, form_tooltip_representation_schema,
+    form_tooltip_representation_supports_xml_tag,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -106,6 +107,7 @@ struct FormXmlBodyProperties {
     command_set_excluded_commands: Vec<FormXmlExcludedCommand>,
     use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
     customizable: Option<bool>,
+    vertical_align: Option<FormRootVerticalAlign>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
     vertical_scroll: Option<FormXmlVerticalScroll>,
     horizontal_align: Option<FormXmlHorizontalAlign>,
@@ -4457,6 +4459,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
             || !properties.command_set_excluded_commands.is_empty()
             || properties.use_for_folders_and_items.is_some()
             || properties.customizable.is_some()
+            || properties.vertical_align.is_some()
             || properties.command_bar_location.is_some()
             || properties.vertical_scroll.is_some()
             || properties.horizontal_align.is_some()
@@ -4662,6 +4665,7 @@ fn form_xml_root_layout_signal_count(properties: &FormXmlBodyProperties) -> usiz
         + properties.command_set_excluded_commands.len()
         + usize::from(properties.use_for_folders_and_items.is_some())
         + usize::from(properties.customizable.is_some())
+        + usize::from(properties.vertical_align.is_some())
         + usize::from(properties.command_bar_location.is_some())
         + usize::from(properties.vertical_scroll.is_some())
         + usize::from(properties.horizontal_align.is_some())
@@ -4701,6 +4705,7 @@ fn form_xml_requires_existing_layout(properties: &FormXmlBodyProperties) -> bool
         || !properties.command_set_excluded_commands.is_empty()
         || properties.use_for_folders_and_items.is_some()
         || properties.customizable.is_some()
+        || properties.vertical_align.is_some()
         || properties.command_bar_location.is_some()
         || properties.vertical_scroll.is_some()
         || properties.horizontal_align.is_some()
@@ -4893,6 +4898,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "ExcludedCommand"
                         | "UseForFoldersAndItems"
                         | "Customizable"
+                        | "VerticalAlign"
                         | "CommandBarLocation"
                         | "VerticalScroll"
                         | "ConversationsRepresentation"
@@ -5334,6 +5340,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
+                    || path_ends_with(&path, &["Form", "VerticalAlign"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "HorizontalAlign"])
@@ -5851,6 +5858,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
+                    || path_ends_with(&path, &["Form", "VerticalAlign"])
                     || path_ends_with(&path, &["Form", "CommandBarLocation"])
                     || path_ends_with(&path, &["Form", "VerticalScroll"])
                     || path_ends_with(&path, &["Form", "HorizontalAlign"])
@@ -6368,6 +6376,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "Customizable" if path_ends_with(&path, &["Form", "Customizable"]) => {
                         properties.customizable =
                             Some(parse_form_xml_bool("Customizable", text_value.trim())?);
+                    }
+                    "VerticalAlign" if path_ends_with(&path, &["Form", "VerticalAlign"]) => {
+                        properties.vertical_align = Some(
+                            FormRootVerticalAlign::from_xml_value(text_value.trim()).ok_or_else(
+                                || {
+                                    anyhow!(
+                                        "unsupported root Form VerticalAlign: {}",
+                                        text_value.trim()
+                                    )
+                                },
+                            )?,
+                        );
                     }
                     "CommandBarLocation"
                         if path_ends_with(&path, &["Form", "CommandBarLocation"]) =>
@@ -10015,6 +10035,9 @@ fn patch_form_layout_properties(
     if let Some(customizable) = properties.customizable {
         replace_form_customizable(layout, customizable)?;
     }
+    if let Some(vertical_align) = properties.vertical_align {
+        replace_form_vertical_align(layout, vertical_align)?;
+    }
     if let Some(command_bar_location) = properties.command_bar_location {
         replace_braced_field(
             layout,
@@ -10375,6 +10398,26 @@ fn replace_form_horizontal_align(layout: &mut String, value: FormXmlHorizontalAl
     };
     if matches!(layout[range.clone()].trim(), "0" | "1" | "2" | "3") {
         layout.replace_range(range.clone(), form_horizontal_align_code(value));
+    }
+    Ok(())
+}
+
+fn replace_form_vertical_align(layout: &mut String, value: FormRootVerticalAlign) -> Result<()> {
+    let fields = scan_braced_fields(layout, 0)?;
+    let Some(tail_start) = form_layout_child_items_tail_start(layout, &fields) else {
+        return Ok(());
+    };
+    let Some(schema) = FormRootVerticalAlignSchema::from_raw_layout(
+        fields.first().map(|range| layout[range.clone()].trim()),
+        fields.len().saturating_sub(tail_start),
+    ) else {
+        return Ok(());
+    };
+    let Some(range) = fields.get(tail_start + schema.trailer_slot()) else {
+        return Ok(());
+    };
+    if schema.accepts_raw_value(&layout[range.clone()]) {
+        layout.replace_range(range.clone(), value.raw_value());
     }
     Ok(())
 }
