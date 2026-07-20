@@ -435,6 +435,7 @@ enum FormXmlExcludedCommand {
 enum FormXmlUseForFoldersAndItems {
     Items,
     Folders,
+    FoldersAndItems,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -9676,7 +9677,8 @@ fn path_ends_with_for_child_choice_folders_and_items(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "ChoiceFoldersAndItems"])
+    matches!(item.tag.as_str(), "Table" | "InputField")
+        && path_ends_with(path, &[item.tag.as_str(), "ChoiceFoldersAndItems"])
 }
 
 fn path_ends_with_for_child_restore_current_row(
@@ -9948,6 +9950,7 @@ fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseFor
     match value {
         "Items" => Ok(FormXmlUseForFoldersAndItems::Items),
         "Folders" => Ok(FormXmlUseForFoldersAndItems::Folders),
+        "FoldersAndItems" => Ok(FormXmlUseForFoldersAndItems::FoldersAndItems),
         other => Err(anyhow!("unsupported Form UseForFoldersAndItems: {other}")),
     }
 }
@@ -10477,13 +10480,17 @@ fn replace_form_use_for_folders_and_items(
 ) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
     if !form_layout_uses_property_bag(layout, &fields) {
-        return Ok(());
+        return Err(anyhow!(
+            "cannot patch Form UseForFoldersAndItems without an existing property bag"
+        ));
     }
-    let Some(range) = form_root_property_bag_value_range(layout, &fields, "0") else {
-        return Ok(());
-    };
+    let range = form_root_property_bag_value_range(layout, &fields, "0").ok_or_else(|| {
+        anyhow!("cannot patch Form UseForFoldersAndItems without an existing property-bag value")
+    })?;
     if !is_form_use_for_folders_and_items_value(&layout[range.clone()]) {
-        return Ok(());
+        return Err(anyhow!(
+            "cannot patch Form UseForFoldersAndItems over an incompatible property-bag value"
+        ));
     }
     layout.replace_range(
         range,
@@ -10797,7 +10804,23 @@ fn form_root_command_set_range(layout: &str, fields: &[Range<usize>]) -> Option<
 }
 
 fn is_form_use_for_folders_and_items_value(value: &str) -> bool {
-    is_form_property_bag_enum_value(value, FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID)
+    let value = value.trim();
+    if scan_1c_braced_value_range(value, 0) != Some(0..value.len()) {
+        return false;
+    }
+    let Ok(fields) = scan_braced_fields(value, 0) else {
+        return false;
+    };
+    fields.len() == 3
+        && fields.first().is_some_and(|range| {
+            parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "#")
+        })
+        && fields
+            .get(1)
+            .is_some_and(|range| value[range.clone()].trim() == FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID)
+        && fields
+            .get(2)
+            .is_some_and(|range| matches!(value[range.clone()].trim(), "0" | "1" | "2"))
 }
 
 fn is_form_conversations_representation_value(value: &str) -> bool {
@@ -10922,6 +10945,7 @@ fn form_use_for_folders_and_items_code(value: FormXmlUseForFoldersAndItems) -> &
     match value {
         FormXmlUseForFoldersAndItems::Items => "0",
         FormXmlUseForFoldersAndItems::Folders => "1",
+        FormXmlUseForFoldersAndItems::FoldersAndItems => "2",
     }
 }
 
@@ -11593,11 +11617,13 @@ fn form_child_item_strict_properties_require_existing_layout(item: &FormXmlChild
             || item.group_vertical_align.is_some()
             || (matches!(item.tag.as_str(), "InputField" | "LabelField")
                 && item.show_in_footer.is_some())
+            || (item.tag == "InputField" && item.choice_folders_and_items.is_some())
             || (item.tag == "CheckBoxField" && item.three_state.is_some())))
         || (item.tag == "Table"
             && (item.table_search_on_input.is_some()
                 || item.table_initial_list_view.is_some()
-                || item.initial_tree_view.is_some()))
+                || item.initial_tree_view.is_some()
+                || item.choice_folders_and_items.is_some()))
 }
 
 fn format_form_layout_new_top_level_item(
@@ -13057,6 +13083,19 @@ fn form_layout_field_schema(
     )
 }
 
+fn form_layout_input_field_choice_folders_and_items_range(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, "InputField")?;
+    let options_range = fields.get(schema.options_slot())?.clone();
+    let option_ranges = scan_braced_fields(text, options_range.start).ok()?;
+    let range = option_ranges
+        .get(InputFieldSlot::ChoiceFoldersAndItems.index())?
+        .clone();
+    matches!(text[range.clone()].trim(), "0" | "1" | "2").then_some(range)
+}
+
 fn form_layout_checkbox_field_three_state_range(
     text: &str,
     fields: &[Range<usize>],
@@ -13653,16 +13692,21 @@ fn patch_form_layout_child_item_entry(
         {
             replacements.push((initial_tree_view_range.clone(), code.to_string()));
         }
-        if let Some(choice_folders_and_items) = item.choice_folders_and_items
-            && let Some(choice_range) = form_layout_table_property_bag_value_range(
+        if let Some(choice_folders_and_items) = item.choice_folders_and_items {
+            let choice_range = form_layout_table_counted_property_bag_value_range(
                 text,
                 fields,
                 TableBagKey::ChoiceFoldersAndItems,
             )
-            && is_form_use_for_folders_and_items_value(&text[choice_range.clone()])
-        {
+            .filter(|range| is_form_use_for_folders_and_items_value(&text[range.clone()]))
+            .ok_or_else(|| {
+                anyhow!(
+                    "cannot patch Form Table {} ChoiceFoldersAndItems without an existing strict property-bag value",
+                    item.name
+                )
+            })?;
             replacements.push((
-                choice_range.clone(),
+                choice_range,
                 format!(
                     r##"{{"#",{FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID},{}}}"##,
                     form_use_for_folders_and_items_code(choice_folders_and_items)
@@ -13876,6 +13920,21 @@ fn patch_form_layout_child_item_entry(
                 if show_in_header { "1" } else { "0" }.to_string(),
             ));
         }
+    }
+    if item.tag == "InputField"
+        && let Some(choice_folders_and_items) = item.choice_folders_and_items
+    {
+        let choice_range = form_layout_input_field_choice_folders_and_items_range(text, fields)
+            .ok_or_else(|| {
+                anyhow!(
+                    "cannot patch Form InputField {} ChoiceFoldersAndItems without an existing strict FormField layout",
+                    item.name
+                )
+            })?;
+        replacements.push((
+            choice_range,
+            form_use_for_folders_and_items_code(choice_folders_and_items).to_string(),
+        ));
     }
     if item.tag == "InputField"
         && form_layout_input_field_is_extended(fields)
@@ -15346,6 +15405,18 @@ fn form_layout_table_property_bag_value_range(
             && text[value_range.clone()].trim_start().starts_with('{'))
         .then(|| value_range.clone())
     })
+}
+
+fn form_layout_table_counted_property_bag_value_range(
+    text: &str,
+    fields: &[Range<usize>],
+    key: TableBagKey,
+) -> Option<Range<usize>> {
+    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
+        schema.counted_property_bag_value_slot(normalized_fields, key)
+    })?;
+    let range = fields.get(slot)?.clone();
+    (scan_1c_braced_value_range(text, range.start) == Some(range.clone())).then_some(range)
 }
 
 fn is_form_property_bag_number_value(value: &str) -> bool {

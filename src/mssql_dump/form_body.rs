@@ -1083,14 +1083,22 @@ pub(super) fn extract_form_report_attribute_ref(
 
 pub(super) fn extract_form_use_for_folders_and_items(fields: &[&str]) -> Option<&'static str> {
     let value = form_root_property_bag_value(fields, "0")?;
-    let value_fields = split_1c_braced_fields(value, 0)?;
-    match (
-        value_fields.first().map(|field| field.trim()),
-        value_fields.get(1).map(|field| field.trim()),
-        value_fields.get(2).map(|field| field.trim()),
-    ) {
-        (Some(r##""#""##), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("0")) => Some("Items"),
-        (Some(r##""#""##), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("1")) => Some("Folders"),
+    parse_form_choice_folders_and_items_value(value)
+}
+
+fn parse_form_choice_folders_and_items_value(value: &str) -> Option<&'static str> {
+    let value = value.trim();
+    if scan_1c_braced_value(value, 0) != Some(value.len()) {
+        return None;
+    }
+    let tuple = split_1c_braced_fields(value, 0)?;
+    match tuple.as_slice() {
+        [marker, uuid, code]
+            if marker.trim() == r##""#""##
+                && uuid.trim() == FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID =>
+        {
+            metadata_choice_folders_and_items_xml(code.trim())
+        }
         _ => None,
     }
 }
@@ -5553,10 +5561,14 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        choice_folders_and_items: if tag == "Table" {
-            parse_form_table_choice_folders_and_items(&fields)
-        } else if tag == "InputField" && form_input_field_layout_is_extended(&fields) {
-            parse_form_input_field_choice_folders_and_items(input_field_extended_options.as_deref())
+        choice_folders_and_items: if let Some(schema) = table_schema {
+            parse_form_table_choice_folders_and_items(schema, &fields)
+        } else if tag == "InputField" {
+            field_schema_and_options
+                .as_ref()
+                .and_then(|(schema, options)| {
+                    parse_form_input_field_choice_folders_and_items(*schema, options)
+                })
         } else {
             None
         },
@@ -8433,11 +8445,12 @@ pub(super) fn parse_form_input_field_choice_button_representation(
 }
 
 pub(super) fn parse_form_input_field_choice_folders_and_items(
-    extended_options: Option<&[&str]>,
+    schema: FormFieldSchema,
+    options: &[&str],
 ) -> Option<&'static str> {
     metadata_choice_folders_and_items_xml(
-        extended_options?
-            .get(InputFieldSlot::ChoiceFoldersAndItems.index())?
+        schema
+            .input_field_option(options, InputFieldSlot::ChoiceFoldersAndItems)?
             .trim(),
     )
 }
@@ -9071,22 +9084,13 @@ pub(super) fn parse_form_table_update_on_data_change(fields: &[&str]) -> Option<
     }
 }
 
-pub(super) fn parse_form_table_choice_folders_and_items(fields: &[&str]) -> Option<&'static str> {
-    let value = form_table_property_bag_value(fields, TableBagKey::ChoiceFoldersAndItems)?;
-    let fields = split_1c_braced_fields(value.trim(), 0)?;
-    match (
-        fields.first().and_then(|field| parse_1c_string(field)),
-        fields.get(1).map(|field| field.trim()),
-        fields.get(2).map(|field| field.trim()),
-    ) {
-        (Some(marker), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("0")) if marker == "#" => {
-            Some("Items")
-        }
-        (Some(marker), Some(FORM_USE_FOR_FOLDERS_AND_ITEMS_UUID), Some("1")) if marker == "#" => {
-            Some("Folders")
-        }
-        _ => None,
-    }
+pub(super) fn parse_form_table_choice_folders_and_items(
+    schema: FormTableSchema,
+    fields: &[&str],
+) -> Option<&'static str> {
+    let value_slot =
+        schema.counted_property_bag_value_slot(fields, TableBagKey::ChoiceFoldersAndItems)?;
+    parse_form_choice_folders_and_items_value(fields.get(value_slot)?)
 }
 
 pub(super) fn form_table_property_bag_value<'a>(

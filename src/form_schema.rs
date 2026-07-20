@@ -2240,6 +2240,10 @@ impl FormChildItemEventCollectionSchema {
 impl FormFieldSchema {
     pub(crate) const OPTIONS_BASE_SLOT: usize = 39;
 
+    pub(crate) const fn options_slot(self) -> usize {
+        Self::OPTIONS_BASE_SLOT + self.top_level_offset
+    }
+
     pub(crate) fn item_tag_from_discriminator(discriminator: &str) -> Option<&'static str> {
         match discriminator {
             "1" => Some("LabelField"),
@@ -4422,6 +4426,30 @@ impl FormTableSchema {
         let start = Self::COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT.checked_add(1)?;
         let end = pair_count.checked_mul(2)?.checked_add(start)?;
         (end <= fields.len()).then_some((start, end))
+    }
+
+    pub(crate) fn counted_property_bag_value_slot(
+        self,
+        fields: &[&str],
+        expected_key: FormTablePropertyBagKey,
+    ) -> Option<usize> {
+        let (start, end) = self.counted_property_bag_bounds(fields)?;
+        let mut result = None;
+        for key_slot in (start..end).step_by(2) {
+            let raw_key = fields.get(key_slot)?.trim();
+            let key = raw_key.parse::<usize>().ok()?;
+            if key.to_string() != raw_key
+                || (start..key_slot)
+                    .step_by(2)
+                    .any(|previous| fields[previous].trim() == raw_key)
+            {
+                return None;
+            }
+            if raw_key == expected_key.key() {
+                result = Some(key_slot + 1);
+            }
+        }
+        result
     }
 
     pub(crate) const fn tooltip_slot(self) -> usize {
