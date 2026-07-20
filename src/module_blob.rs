@@ -17,12 +17,12 @@ use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
-    FormControlBorderSchema, FormControlBorderStyle, FormFieldSchema,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
-    FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
-    FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey, FormTableSchema,
-    FormTooltipRepresentation, FormWarningOnEditRepresentation, form_tooltip_representation_schema,
-    form_tooltip_representation_supports_xml_tag,
+    FormControlBorderSchema, FormControlBorderStyle, FormFieldGroupHorizontalAlign,
+    FormFieldSchema, FormFieldVerticalAlign, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormPictureDecorationSchema, FormRootVerticalAlign, FormRootVerticalAlignSchema,
+    FormTableCurrentRowUse, FormTableHorizontalScrollBar, FormTablePropertyBagKey as TableBagKey,
+    FormTableSchema, FormTooltipRepresentation, FormWarningOnEditRepresentation,
+    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -281,6 +281,9 @@ struct FormXmlChildItem {
     user_settings_group: Option<String>,
     allow_getting_current_row_url: Option<bool>,
     horizontal_align: Option<FormXmlHorizontalAlign>,
+    group_horizontal_align: Option<FormFieldGroupHorizontalAlign>,
+    vertical_align: Option<FormFieldVerticalAlign>,
+    group_vertical_align: Option<FormFieldVerticalAlign>,
     autofill: Option<bool>,
     button_representation: Option<FormXmlButtonRepresentation>,
     location_in_command_bar: Option<FormXmlButtonLocationInCommandBar>,
@@ -4899,6 +4902,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "UseForFoldersAndItems"
                         | "Customizable"
                         | "VerticalAlign"
+                        | "GroupHorizontalAlign"
+                        | "GroupVerticalAlign"
                         | "CommandBarLocation"
                         | "VerticalScroll"
                         | "ConversationsRepresentation"
@@ -5657,6 +5662,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &current_child_items,
                     )
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
+                    || path_ends_with_for_child_group_horizontal_align(&path, &current_child_items)
+                    || path_ends_with_for_child_vertical_align(&path, &current_child_items)
+                    || path_ends_with_for_child_group_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
                     || path_ends_with_for_child_default_button(&path, &current_child_items)
@@ -6156,6 +6164,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_child_restore_current_row(&path, &current_child_items)
                     || path_ends_with_for_child_horizontal_align(&path, &current_child_items)
+                    || path_ends_with_for_child_group_horizontal_align(&path, &current_child_items)
+                    || path_ends_with_for_child_vertical_align(&path, &current_child_items)
+                    || path_ends_with_for_child_group_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_show_title(&path, &current_child_items)
                     || path_ends_with_for_child_addition_source_item(&path, &current_child_items)
@@ -7787,6 +7798,57 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some(parse_form_horizontal_align_xml(text_value.trim())?);
                         }
                     }
+                    "GroupHorizontalAlign"
+                        if path_ends_with_for_child_group_horizontal_align(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.group_horizontal_align = Some(
+                                FormFieldGroupHorizontalAlign::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form field GroupHorizontalAlign: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
+                        }
+                    }
+                    "VerticalAlign"
+                        if path_ends_with_for_child_vertical_align(&path, &current_child_items) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.vertical_align = Some(
+                                FormFieldVerticalAlign::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form field VerticalAlign: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
+                        }
+                    }
+                    "GroupVerticalAlign"
+                        if path_ends_with_for_child_group_vertical_align(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.group_vertical_align = Some(
+                                FormFieldVerticalAlign::from_xml_value(text_value.trim())
+                                    .ok_or_else(|| {
+                                        anyhow!(
+                                            "unsupported Form field GroupVerticalAlign: {}",
+                                            text_value.trim()
+                                        )
+                                    })?,
+                            );
+                        }
+                    }
                     "Autofill"
                         if path_ends_with_for_child_autofill(&path, &current_child_items) =>
                     {
@@ -8326,6 +8388,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "WindowOpeningMode"
                         | "AutoFillCheck"
                         | "Group"
+                        | "HorizontalAlign"
+                        | "GroupHorizontalAlign"
+                        | "VerticalAlign"
+                        | "GroupVerticalAlign"
                         | "Event"
                         | "Action"
                         | "ModifiesSavedData"
@@ -8566,6 +8632,9 @@ fn parse_form_child_item_xml(
         user_settings_group: None,
         allow_getting_current_row_url: None,
         horizontal_align: None,
+        group_horizontal_align: None,
+        vertical_align: None,
+        group_vertical_align: None,
         autofill: None,
         button_representation: None,
         location_in_command_bar: None,
@@ -9624,6 +9693,36 @@ fn path_ends_with_for_child_horizontal_align(path: &[String], items: &[FormXmlCh
         return false;
     };
     item.tag == "AutoCommandBar" && path_ends_with(path, &[item.tag.as_str(), "HorizontalAlign"])
+}
+
+fn path_ends_with_for_child_group_horizontal_align(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    FormFieldSchema::supports_item_tag(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "GroupHorizontalAlign"])
+}
+
+fn path_ends_with_for_child_vertical_align(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    FormFieldSchema::supports_item_tag(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "VerticalAlign"])
+}
+
+fn path_ends_with_for_child_group_vertical_align(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    FormFieldSchema::supports_item_tag(&item.tag)
+        && path_ends_with(path, &[item.tag.as_str(), "GroupVerticalAlign"])
 }
 
 fn path_ends_with_for_child_autofill(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -10870,7 +10969,9 @@ fn patch_form_layout_auto_command_bar(
             retain_form_layout_direct_child_items(text, &command_bar.child_items)?;
         }
         for child in &command_bar.child_items {
-            if !is_form_layout_creatable_nested_item(child) {
+            if !is_form_layout_creatable_nested_item(child)
+                && !form_field_alignment_requires_existing_layout(child)
+            {
                 continue;
             }
             let _ = patch_or_append_form_layout_direct_child_item(
@@ -11315,7 +11416,16 @@ fn append_form_layout_top_level_child_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
-    if item.depth != 0 || !is_form_layout_creatable_top_level_item(item) {
+    if item.depth != 0 {
+        return Ok(false);
+    }
+    if form_field_alignment_requires_existing_layout(item) {
+        return Err(anyhow!(
+            "cannot create Form field {} with alignment properties without an existing strict layout",
+            item.name
+        ));
+    }
+    if !is_form_layout_creatable_top_level_item(item) {
         return Ok(false);
     }
     let fields = scan_braced_fields(text, 0)?;
@@ -11379,6 +11489,13 @@ fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
             | "ViewStatusAddition"
             | "SearchControlAddition"
     )
+}
+
+fn form_field_alignment_requires_existing_layout(item: &FormXmlChildItem) -> bool {
+    FormFieldSchema::supports_item_tag(&item.tag)
+        && (item.group_horizontal_align.is_some()
+            || item.vertical_align.is_some()
+            || item.group_vertical_align.is_some())
 }
 
 fn format_form_layout_new_top_level_item(
@@ -11454,6 +11571,12 @@ fn format_form_layout_new_child_item(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    if form_field_alignment_requires_existing_layout(item) {
+        return Err(anyhow!(
+            "cannot create Form field {} with alignment properties without an existing strict layout",
+            item.name
+        ));
+    }
     match item.tag.as_str() {
         "Button" => format_form_layout_new_button_item(
             item,
@@ -12084,7 +12207,10 @@ fn format_form_layout_new_table_item(
     let creatable_children = item
         .child_items
         .iter()
-        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .filter(|child| {
+            is_form_layout_creatable_nested_item(child)
+                || form_field_alignment_requires_existing_layout(child)
+        })
         .collect::<Vec<_>>();
     let mut text = format!(
         "{{73,{{{},{}}},0,1,0,{},0,0,0,{},{}",
@@ -12239,7 +12365,10 @@ fn format_form_layout_new_group_item(
     let creatable_children = item
         .child_items
         .iter()
-        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .filter(|child| {
+            is_form_layout_creatable_nested_item(child)
+                || form_field_alignment_requires_existing_layout(child)
+        })
         .collect::<Vec<_>>();
     let mut text = format!(
         "{{22,{{{},{}}},0,0,0,{},{},{},{},{},{}",
@@ -12311,7 +12440,10 @@ fn format_form_layout_new_extended_page_item(
     let creatable_children = item
         .child_items
         .iter()
-        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .filter(|child| {
+            is_form_layout_creatable_nested_item(child)
+                || form_field_alignment_requires_existing_layout(child)
+        })
         .collect::<Vec<_>>();
     let scroll_on_compress = if item.scroll_on_compress.unwrap_or(true) {
         "1"
@@ -12377,7 +12509,10 @@ fn format_form_layout_new_extended_group_with_child_span(
     let creatable_children = item
         .child_items
         .iter()
-        .filter(|child| is_form_layout_creatable_nested_item(child))
+        .filter(|child| {
+            is_form_layout_creatable_nested_item(child)
+                || form_field_alignment_requires_existing_layout(child)
+        })
         .collect::<Vec<_>>();
     let mut text = format!(
         "{{22,{{{},{}}},0,0,0,{},{},{},{},{},{},{},0,{},2,2,{},{},{{0,0,0}},1,{},{}",
@@ -12820,6 +12955,36 @@ fn form_layout_field_schema(
     )
 }
 
+fn form_layout_field_vertical_align_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields.get(schema.vertical_align_slot())?.clone();
+    matches!(text[range.clone()].trim(), "0" | "1" | "2" | "3").then_some(range)
+}
+
+fn form_layout_field_group_horizontal_align_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields.get(schema.group_horizontal_align_slot())?.clone();
+    matches!(text[range.clone()].trim(), "0" | "1" | "2" | "3").then_some(range)
+}
+
+fn form_layout_field_group_vertical_align_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields.get(schema.group_vertical_align_slot())?.clone();
+    matches!(text[range.clone()].trim(), "0" | "1" | "2" | "3").then_some(range)
+}
+
 fn form_layout_field_cell_hyperlink_range(
     text: &str,
     fields: &[Range<usize>],
@@ -13024,6 +13189,23 @@ fn patch_form_layout_child_item_entry(
             form_layout_child_item_tooltip_representation_range(text, fields, item.tag.as_str())
     {
         replacements.push((range, representation.raw_code().to_string()));
+    }
+    if let Some(vertical_align) = item.vertical_align
+        && let Some(range) = form_layout_field_vertical_align_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, vertical_align.raw_code().to_string()));
+    }
+    if let Some(group_horizontal_align) = item.group_horizontal_align
+        && let Some(range) =
+            form_layout_field_group_horizontal_align_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, group_horizontal_align.raw_code().to_string()));
+    }
+    if let Some(group_vertical_align) = item.group_vertical_align
+        && let Some(range) =
+            form_layout_field_group_vertical_align_range(text, fields, item.tag.as_str())
+    {
+        replacements.push((range, group_vertical_align.raw_code().to_string()));
     }
     if let Some(representation) = item.warning_on_edit_representation
         && let Some(range) =
@@ -14273,7 +14455,9 @@ fn patch_form_layout_direct_child_items(
         retain_form_layout_direct_child_items(text, &item.child_items)?;
     }
     for child in &item.child_items {
-        if !is_form_layout_creatable_nested_item(child) {
+        if !is_form_layout_creatable_nested_item(child)
+            && !form_field_alignment_requires_existing_layout(child)
+        {
             continue;
         }
         let _ = patch_or_append_form_layout_direct_child_item(

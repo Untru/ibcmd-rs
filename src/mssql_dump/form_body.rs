@@ -17,10 +17,11 @@ use crate::form_schema::{
     FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
     FormConditionalTableSchema, FormContainerReadOnlySchema, FormControlBorderSchema,
     FormControlBorderStyle, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldHeaderPictureSchema,
-    FormFieldHeaderPictureXmlProperty, FormFieldSchema, FormFieldTitleLocationSchema,
-    FormFieldTopLevelSlot as FieldSlot, FormInputFieldExtendedOptionSlot as InputFieldSlot,
-    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldGroupHorizontalAlign,
+    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
+    FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot, FormFieldVerticalAlign,
+    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
+    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -613,6 +614,7 @@ pub(super) struct FormChildItem {
     pub(super) warning_on_edit: Vec<(String, String)>,
     pub(super) edit_mode: Option<&'static str>,
     pub(super) horizontal_align: Option<FormChildItemAlignment>,
+    pub(super) vertical_align: Option<FormFieldVerticalAlign>,
     pub(super) group_vertical_align: Option<&'static str>,
     pub(super) label_decoration_visual_tail: Option<FormLabelDecorationVisualTail>,
     pub(super) check_box_type: Option<&'static str>,
@@ -5640,7 +5642,11 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        group_horizontal_align: if let Some(schema) = command_bar_schema {
+        group_horizontal_align: if let Some((schema, _)) = field_schema_and_options.as_ref() {
+            schema
+                .group_horizontal_align(&fields)
+                .map(FormFieldGroupHorizontalAlign::xml_value)
+        } else if let Some(schema) = command_bar_schema {
             schema.group_horizontal_align(&fields)
         } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
             schema.group_horizontal_align(&fields)
@@ -5837,7 +5843,14 @@ fn parse_form_child_item_with_metadata_owners(
                     None
                 }
             }),
-        group_vertical_align: if let Some(schema) = command_bar_schema {
+        vertical_align: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.vertical_align(&fields)),
+        group_vertical_align: if let Some((schema, _)) = field_schema_and_options.as_ref() {
+            schema
+                .group_vertical_align(&fields)
+                .map(FormFieldVerticalAlign::xml_value)
+        } else if let Some(schema) = command_bar_schema {
             schema.group_vertical_align(&fields)
         } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
             schema.group_vertical_align(&fields)
@@ -13448,33 +13461,56 @@ pub(super) fn format_form_child_item_xml(
         &item.warning_on_edit,
         indent + 1,
     ));
-    if item.tag == "CheckBoxField"
-        && let Some(group_horizontal_align) = item.group_horizontal_align
-    {
-        xml.push_str(&format!(
-            "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
-            escape_xml_text(group_horizontal_align)
-        ));
-    }
-    if item.tag != "Button"
-        && item.tag != "PictureDecoration"
-        && item.tag != "CommandBar"
-        && let Some(group_vertical_align) = item.group_vertical_align
-    {
-        xml.push_str(&format!(
-            "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
-            escape_xml_text(group_vertical_align)
-        ));
-    }
-    if !matches!(item.tag, "LabelDecoration" | "AutoCommandBar")
-        && let Some(horizontal_align) = item
+    if FormFieldSchema::supports_item_tag(&item.tag) {
+        if let Some(horizontal_align) = item
             .horizontal_align
             .and_then(FormChildItemAlignment::horizontal_align)
-    {
-        xml.push_str(&format!(
-            "{tab}\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
-            escape_xml_text(horizontal_align)
-        ));
+        {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+                escape_xml_text(horizontal_align)
+            ));
+        }
+        if let Some(group_horizontal_align) = item.group_horizontal_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupHorizontalAlign>{}</GroupHorizontalAlign>\r\n",
+                escape_xml_text(group_horizontal_align)
+            ));
+        }
+        if let Some(vertical_align) = item.vertical_align {
+            xml.push_str(&format!(
+                "{tab}\t<VerticalAlign>{}</VerticalAlign>\r\n",
+                vertical_align.xml_value()
+            ));
+        }
+        if let Some(group_vertical_align) = item.group_vertical_align {
+            xml.push_str(&format!(
+                "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                escape_xml_text(group_vertical_align)
+            ));
+        }
+    } else {
+        if item.tag != "Button"
+            && item.tag != "PictureDecoration"
+            && item.tag != "CommandBar"
+            && let Some(group_vertical_align) = item.group_vertical_align
+        {
+            xml.push_str(&format!(
+                "{tab}\t<GroupVerticalAlign>{}</GroupVerticalAlign>\r\n",
+                escape_xml_text(group_vertical_align)
+            ));
+        }
+        if item.tag != "LabelDecoration"
+            && item.tag != "AutoCommandBar"
+            && let Some(horizontal_align) = item
+                .horizontal_align
+                .and_then(FormChildItemAlignment::horizontal_align)
+        {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalAlign>{}</HorizontalAlign>\r\n",
+                escape_xml_text(horizontal_align)
+            ));
+        }
     }
     if let Some(edit_mode) = item.edit_mode {
         xml.push_str(&format!(

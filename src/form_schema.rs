@@ -1971,6 +1971,92 @@ impl FormFieldTitleLocationSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormFieldGroupHorizontalAlign {
+    Left,
+    Center,
+    Right,
+}
+
+impl FormFieldGroupHorizontalAlign {
+    pub(crate) fn from_raw_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "0" => Some(Self::Left),
+            "1" => Some(Self::Center),
+            "2" => Some(Self::Right),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "Left" => Some(Self::Left),
+            "Center" => Some(Self::Center),
+            "Right" => Some(Self::Right),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::Left => "0",
+            Self::Center => "1",
+            Self::Right => "2",
+        }
+    }
+
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Left => "Left",
+            Self::Center => "Center",
+            Self::Right => "Right",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormFieldVerticalAlign {
+    Top,
+    Center,
+    Bottom,
+}
+
+impl FormFieldVerticalAlign {
+    pub(crate) fn from_raw_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "0" => Some(Self::Top),
+            "1" => Some(Self::Center),
+            "2" => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "Top" => Some(Self::Top),
+            "Center" => Some(Self::Center),
+            "Bottom" => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn raw_code(self) -> &'static str {
+        match self {
+            Self::Top => "0",
+            Self::Center => "1",
+            Self::Bottom => "2",
+        }
+    }
+
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Top => "Top",
+            Self::Center => "Center",
+            Self::Bottom => "Bottom",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormFieldSchema {
     top_level_offset: usize,
     input_field_options: bool,
@@ -2348,6 +2434,35 @@ impl FormFieldSchema {
             "3" => None,
             _ => None,
         }
+    }
+
+    pub(crate) const fn vertical_align_slot(self) -> usize {
+        27 + self.top_level_offset
+    }
+
+    pub(crate) fn vertical_align(self, fields: &[&str]) -> Option<FormFieldVerticalAlign> {
+        FormFieldVerticalAlign::from_raw_value(fields.get(self.vertical_align_slot())?)
+    }
+
+    pub(crate) const fn group_horizontal_align_slot(self) -> usize {
+        53 + self.top_level_offset
+    }
+
+    pub(crate) fn group_horizontal_align(
+        self,
+        fields: &[&str],
+    ) -> Option<FormFieldGroupHorizontalAlign> {
+        FormFieldGroupHorizontalAlign::from_raw_value(
+            fields.get(self.group_horizontal_align_slot())?,
+        )
+    }
+
+    pub(crate) const fn group_vertical_align_slot(self) -> usize {
+        54 + self.top_level_offset
+    }
+
+    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<FormFieldVerticalAlign> {
+        FormFieldVerticalAlign::from_raw_value(fields.get(self.group_vertical_align_slot())?)
     }
 
     pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
