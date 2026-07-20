@@ -17,8 +17,9 @@ use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
 use crate::form_schema::{
-    FormCheckBoxFieldSchema, FormConditionalTableSchema, FormControlBorderSchema,
-    FormControlBorderStyle, FormFieldGroupHorizontalAlign, FormFieldSchema, FormFieldVerticalAlign,
+    FormCheckBoxFieldSchema, FormColumnGroupSchema, FormConditionalTableSchema,
+    FormControlBorderSchema, FormControlBorderStyle, FormFieldGroupHorizontalAlign,
+    FormFieldSchema, FormFieldVerticalAlign, FormFixingInTable,
     FormInputFieldExtendedOptionSlot as InputFieldSlot, FormPictureDecorationSchema,
     FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
     FormTableHorizontalScrollBar, FormTableInitialListView, FormTablePropertyBagKey as TableBagKey,
@@ -288,6 +289,7 @@ struct FormXmlChildItem {
     group_horizontal_align: Option<FormFieldGroupHorizontalAlign>,
     vertical_align: Option<FormFieldVerticalAlign>,
     group_vertical_align: Option<FormFieldVerticalAlign>,
+    fixing_in_table: Option<FormFixingInTable>,
     three_state: Option<bool>,
     autofill: Option<bool>,
     button_representation: Option<FormXmlButtonRepresentation>,
@@ -5676,6 +5678,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_group_vertical_align(&path, &current_child_items)
+                    || path_ends_with_for_child_fixing_in_table(&path, &current_child_items)
                     || path_ends_with_for_child_three_state(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
                     || path_ends_with_for_child_button_representation(&path, &current_child_items)
@@ -6181,6 +6184,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_group_horizontal_align(&path, &current_child_items)
                     || path_ends_with_for_child_vertical_align(&path, &current_child_items)
                     || path_ends_with_for_child_group_vertical_align(&path, &current_child_items)
+                    || path_ends_with_for_child_fixing_in_table(&path, &current_child_items)
                     || path_ends_with_for_child_three_state(&path, &current_child_items)
                     || path_ends_with_for_child_show_in_footer(&path, &current_child_items)
                     || path_ends_with_for_child_autofill(&path, &current_child_items)
@@ -7901,6 +7905,33 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             );
                         }
                     }
+                    "FixingInTable"
+                        if path_ends_with_for_child_fixing_in_table(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            let fixing_in_table = FormFixingInTable::from_xml_value(
+                                text_value.trim(),
+                            )
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "unsupported Form field FixingInTable: {}",
+                                    text_value.trim()
+                                )
+                            })?;
+                            if item.tag == "ColumnGroup"
+                                && fixing_in_table != FormFixingInTable::Left
+                            {
+                                return Err(anyhow!(
+                                    "unsupported Form ColumnGroup FixingInTable: {}",
+                                    text_value.trim()
+                                ));
+                            }
+                            item.fixing_in_table = Some(fixing_in_table);
+                        }
+                    }
                     "ThreeState"
                         if path_ends_with_for_child_three_state(&path, &current_child_items) =>
                     {
@@ -8703,6 +8734,7 @@ fn parse_form_child_item_xml(
         group_horizontal_align: None,
         vertical_align: None,
         group_vertical_align: None,
+        fixing_in_table: None,
         three_state: None,
         autofill: None,
         button_representation: None,
@@ -9813,6 +9845,16 @@ fn path_ends_with_for_child_group_vertical_align(
     };
     FormFieldSchema::supports_item_tag(&item.tag)
         && path_ends_with(path, &[item.tag.as_str(), "GroupVerticalAlign"])
+}
+
+fn path_ends_with_for_child_fixing_in_table(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(
+        item.tag.as_str(),
+        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "ColumnGroup"
+    ) && path_ends_with(path, &[item.tag.as_str(), "FixingInTable"])
 }
 
 fn path_ends_with_for_child_three_state(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -11615,6 +11657,7 @@ fn form_child_item_strict_properties_require_existing_layout(item: &FormXmlChild
         && (item.group_horizontal_align.is_some()
             || item.vertical_align.is_some()
             || item.group_vertical_align.is_some()
+            || item.fixing_in_table.is_some()
             || (matches!(item.tag.as_str(), "InputField" | "LabelField")
                 && item.show_in_footer.is_some())
             || (item.tag == "InputField" && item.choice_folders_and_items.is_some())
@@ -11624,6 +11667,7 @@ fn form_child_item_strict_properties_require_existing_layout(item: &FormXmlChild
                 || item.table_initial_list_view.is_some()
                 || item.initial_tree_view.is_some()
                 || item.choice_folders_and_items.is_some()))
+        || (item.tag == "ColumnGroup" && item.fixing_in_table.is_some())
 }
 
 fn format_form_layout_new_top_level_item(
@@ -13165,6 +13209,16 @@ fn form_layout_field_group_vertical_align_range(
     matches!(text[range.clone()].trim(), "0" | "1" | "2" | "3").then_some(range)
 }
 
+fn form_layout_field_fixing_in_table_range(
+    text: &str,
+    fields: &[Range<usize>],
+    item_tag: &str,
+) -> Option<Range<usize>> {
+    let schema = form_layout_field_schema(text, fields, item_tag)?;
+    let range = fields.get(schema.fixing_in_table_slot()?)?.clone();
+    matches!(text[range.clone()].trim(), "0" | "1" | "2").then_some(range)
+}
+
 fn form_layout_field_cell_hyperlink_range(
     text: &str,
     fields: &[Range<usize>],
@@ -13453,6 +13507,18 @@ fn patch_form_layout_child_item_entry(
             form_layout_field_group_vertical_align_range(text, fields, item.tag.as_str())
     {
         replacements.push((range, group_vertical_align.raw_code().to_string()));
+    }
+    if item.tag != "ColumnGroup"
+        && let Some(fixing_in_table) = item.fixing_in_table
+    {
+        let range = form_layout_field_fixing_in_table_range(text, fields, item.tag.as_str())
+            .ok_or_else(|| {
+                anyhow!(
+                    "Form field FixingInTable requires a supported strict layout for {}",
+                    item.name
+                )
+            })?;
+        replacements.push((range, fixing_in_table.field_raw_code().to_string()));
     }
     if let Some(three_state) = item.three_state
         && let Some(range) =
@@ -14131,18 +14197,32 @@ fn patch_form_layout_child_item_entry(
         ));
     }
     if item.tag == "ColumnGroup"
-        && (item.group.is_some() || item.show_in_header.is_some())
-        && let Some(options_range) = form_layout_column_group_options_range(text, fields)
-        && let Some(options) =
-            patch_form_layout_column_group_options(&text[options_range.clone()], item)
-                .with_context(|| {
-                    format!(
-                        "failed to patch Form layout column group options for {}",
-                        item.name
-                    )
-                })?
+        && (item.group.is_some() || item.show_in_header.is_some() || item.fixing_in_table.is_some())
     {
-        replacements.push((options_range, options));
+        let options_range = form_layout_column_group_options_range(text, fields);
+        if options_range.is_none() && item.fixing_in_table.is_some() {
+            return Err(anyhow!(
+                "Form ColumnGroup FixingInTable requires a supported strict layout for {}",
+                item.name
+            ));
+        }
+        if let Some(options_range) = options_range
+            && let Some(options) = patch_form_layout_column_group_options(
+                &text[options_range.clone()],
+                item,
+                wrapper,
+                fields.len(),
+                fields.get(5).map(|range| text[range.clone()].trim()),
+            )
+            .with_context(|| {
+                format!(
+                    "failed to patch Form layout column group options for {}",
+                    item.name
+                )
+            })?
+        {
+            replacements.push((options_range, options));
+        }
     }
 
     replacements.sort_by_key(|(range, _)| range.start);
@@ -14293,30 +14373,70 @@ fn form_layout_column_group_options_range(
     if wrapper != "22" || fields.get(5).map(|range| text[range.clone()].trim()) != Some("2") {
         return None;
     }
-    let range = fields.get(20)?.clone();
-    text[range.clone()]
-        .trim_start()
-        .starts_with("{5")
-        .then_some(range)
+    let range = fields.get(FormColumnGroupSchema::OPTIONS_SLOT)?.clone();
+    if scan_1c_braced_value_range(text, range.start) != Some(range.clone()) {
+        return None;
+    }
+    let options = scan_braced_fields(text, range.start).ok()?;
+    matches!(
+        options.first().map(|field| text[field.clone()].trim()),
+        Some("2" | "5")
+    )
+    .then_some(range)
 }
 
 fn patch_form_layout_column_group_options(
     existing: &str,
     item: &FormXmlChildItem,
+    wrapper: &str,
+    field_count: usize,
+    direct_discriminator: Option<&str>,
 ) -> Result<Option<String>> {
     let mut text = existing.trim().to_string();
     let fields = scan_braced_fields(&text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) != Some("5") {
+    let option_values = fields
+        .iter()
+        .map(|range| &text[range.clone()])
+        .collect::<Vec<_>>();
+    let options_kind = option_values.first().map(|value| value.trim());
+    if !matches!(options_kind, Some("2" | "5")) {
         return Ok(None);
     }
+    let strict_schema = FormColumnGroupSchema::from_raw_layout(
+        wrapper,
+        field_count,
+        item.tag.as_str(),
+        direct_discriminator,
+        &option_values,
+    );
     let mut replacements = Vec::<(usize, &'static str)>::new();
-    if let Some(group) = item.group
+    if options_kind == Some("5")
+        && let Some(group) = item.group
         && let Some(code) = form_column_group_group_code(group)
     {
         replacements.push((1, code));
     }
-    if let Some(show_in_header) = item.show_in_header {
+    if options_kind == Some("5")
+        && let Some(show_in_header) = item.show_in_header
+    {
         replacements.push((3, if show_in_header { "1" } else { "0" }));
+    }
+    if let Some(fixing_in_table) = item.fixing_in_table {
+        let schema = strict_schema.ok_or_else(|| {
+            anyhow!(
+                "Form ColumnGroup FixingInTable requires a supported strict options tuple for {}",
+                item.name
+            )
+        })?;
+        let raw_code = schema
+            .fixing_in_table_raw_code(fixing_in_table)
+            .ok_or_else(|| {
+                anyhow!(
+                    "unsupported Form ColumnGroup FixingInTable value for {}",
+                    item.name
+                )
+            })?;
+        replacements.push((FormColumnGroupSchema::FIXING_IN_TABLE_OPTION_SLOT, raw_code));
     }
     if replacements.is_empty() {
         return Ok(None);

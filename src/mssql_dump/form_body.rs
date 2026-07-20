@@ -12,16 +12,16 @@ use crate::form_schema::{
     FormButtonShapeRepresentationSchema, FormCheckBoxFieldSchema, FormChildItemAlignment,
     FormChildItemDisplayImportanceSchema, FormChildItemEventCollectionSchema,
     FormChildItemShowTitleSchema, FormChildItemUserVisibleSchema, FormChildItemVisibleSchema,
-    FormCommandBarSchema, FormCommandCurrentRowUse, FormCommandInterfaceContainerOwner,
-    FormCommandInterfaceContainerSchema, FormCommandInterfaceItemSchema,
-    FormCommandInterfaceVisibilitySchema, FormCommandSchema, FormConditionalGroupSchema,
-    FormConditionalTableSchema, FormContainerReadOnlySchema, FormControlBorderSchema,
-    FormControlBorderStyle, FormDecorationHeaderSchema, FormDecorationHeaderXmlProperty,
-    FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty, FormFieldGroupHorizontalAlign,
-    FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty, FormFieldSchema,
-    FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot, FormFieldVerticalAlign,
-    FormInputFieldExtendedOptionSlot as InputFieldSlot, FormInputFieldTailXmlProperty,
-    FormInputFieldXmlProperty, FormLabelDecorationAlignment,
+    FormColumnGroupSchema, FormCommandBarSchema, FormCommandCurrentRowUse,
+    FormCommandInterfaceContainerOwner, FormCommandInterfaceContainerSchema,
+    FormCommandInterfaceItemSchema, FormCommandInterfaceVisibilitySchema, FormCommandSchema,
+    FormConditionalGroupSchema, FormConditionalTableSchema, FormContainerReadOnlySchema,
+    FormControlBorderSchema, FormControlBorderStyle, FormDecorationHeaderSchema,
+    FormDecorationHeaderXmlProperty, FormExtendedTooltipSchema, FormExtendedTooltipXmlProperty,
+    FormFieldGroupHorizontalAlign, FormFieldHeaderPictureSchema, FormFieldHeaderPictureXmlProperty,
+    FormFieldSchema, FormFieldTitleLocationSchema, FormFieldTopLevelSlot as FieldSlot,
+    FormFieldVerticalAlign, FormFixingInTable, FormInputFieldExtendedOptionSlot as InputFieldSlot,
+    FormInputFieldTailXmlProperty, FormInputFieldXmlProperty, FormLabelDecorationAlignment,
     FormLabelDecorationAlignmentTailXmlProperty, FormLabelDecorationGeometry,
     FormLabelDecorationGeometryXmlProperty, FormLabelDecorationSchema,
     FormLabelDecorationVisualTail, FormLabelDecorationVisualTailXmlProperty,
@@ -616,6 +616,7 @@ pub(super) struct FormChildItem {
     pub(super) warning_on_edit_representation: Option<FormWarningOnEditRepresentation>,
     pub(super) warning_on_edit: Vec<(String, String)>,
     pub(super) edit_mode: Option<&'static str>,
+    pub(super) fixing_in_table: Option<FormFixingInTable>,
     pub(super) horizontal_align: Option<FormChildItemAlignment>,
     pub(super) vertical_align: Option<FormFieldVerticalAlign>,
     pub(super) group_vertical_align: Option<&'static str>,
@@ -5830,6 +5831,14 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        fixing_in_table: field_schema_and_options
+            .as_ref()
+            .and_then(|(schema, _)| schema.fixing_in_table(&fields))
+            .or_else(|| {
+                column_group_options
+                    .as_ref()
+                    .and_then(|options| options.fixing_in_table)
+            }),
         horizontal_align: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.horizontal_align(&fields))
@@ -6962,6 +6971,7 @@ pub(super) struct FormUsualGroupExtendedOptions {
 pub(super) struct FormColumnGroupOptions {
     pub(super) group: Option<&'static str>,
     pub(super) show_in_header: Option<bool>,
+    pub(super) fixing_in_table: Option<FormFixingInTable>,
 }
 
 pub(super) struct FormLabelFieldOptions {
@@ -6990,10 +7000,21 @@ pub(super) struct FormLabelDecorationOptions {
 }
 
 pub(super) fn parse_form_column_group_options(fields: &[&str]) -> Option<FormColumnGroupOptions> {
-    let options = split_1c_braced_fields(fields.get(20)?.trim(), 0)?;
+    let options_text = fields.get(FormColumnGroupSchema::OPTIONS_SLOT)?.trim();
+    if scan_1c_braced_value(options_text, 0) != Some(options_text.len()) {
+        return None;
+    }
+    let options = split_1c_braced_fields(options_text, 0)?;
     if !matches!(options.first()?.trim(), "2" | "5") {
         return None;
     }
+    let strict_schema = FormColumnGroupSchema::from_raw_layout(
+        fields.first()?.trim(),
+        fields.len(),
+        "ColumnGroup",
+        fields.get(5).map(|field| field.trim()),
+        &options,
+    );
     Some(FormColumnGroupOptions {
         group: options
             .get(1)
@@ -7001,6 +7022,7 @@ pub(super) fn parse_form_column_group_options(fields: &[&str]) -> Option<FormCol
         show_in_header: options
             .get(3)
             .and_then(|field| parse_form_child_item_show_title(field)),
+        fixing_in_table: strict_schema.and_then(|schema| schema.fixing_in_table(&options)),
     })
 }
 
@@ -13372,6 +13394,14 @@ pub(super) fn format_form_child_item_xml(
                 escape_xml_text(title_location)
             ));
         }
+        if item.tag == "ColumnGroup"
+            && let Some(fixing_in_table) = item.fixing_in_table
+        {
+            xml.push_str(&format!(
+                "{tab}\t<FixingInTable>{}</FixingInTable>\r\n",
+                fixing_in_table.xml_value()
+            ));
+        }
     }
     if item.tag != "UsualGroup"
         && let Some(title_font_xml) = &item.title_font_xml
@@ -13529,6 +13559,14 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!(
             "{tab}\t<EditMode>{}</EditMode>\r\n",
             escape_xml_text(edit_mode)
+        ));
+    }
+    if item.tag != "ColumnGroup"
+        && let Some(fixing_in_table) = item.fixing_in_table
+    {
+        xml.push_str(&format!(
+            "{tab}\t<FixingInTable>{}</FixingInTable>\r\n",
+            fixing_in_table.xml_value()
         ));
     }
     if item.cell_hyperlink == Some(true) {

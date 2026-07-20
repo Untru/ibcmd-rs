@@ -2014,6 +2014,90 @@ impl FormFieldGroupHorizontalAlign {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum FormFixingInTable {
+    Left,
+    Right,
+}
+
+impl FormFixingInTable {
+    pub(crate) fn from_field_raw_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "1" => Some(Self::Left),
+            "2" => Some(Self::Right),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+        match value.trim() {
+            "Left" => Some(Self::Left),
+            "Right" => Some(Self::Right),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn field_raw_code(self) -> &'static str {
+        match self {
+            Self::Left => "1",
+            Self::Right => "2",
+        }
+    }
+
+    pub(crate) const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Left => "Left",
+            Self::Right => "Right",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormColumnGroupSchema;
+
+impl FormColumnGroupSchema {
+    pub(crate) const OPTIONS_SLOT: usize = 20;
+    pub(crate) const FIXING_IN_TABLE_OPTION_SLOT: usize = 11;
+
+    pub(crate) fn from_raw_layout(
+        wrapper: &str,
+        field_count: usize,
+        item_tag: &str,
+        direct_discriminator: Option<&str>,
+        options: &[&str],
+    ) -> Option<Self> {
+        (wrapper == "22"
+            && field_count >= 30
+            && (field_count - 30) % 2 == 0
+            && item_tag == "ColumnGroup"
+            && direct_discriminator == Some("2")
+            && options.len() == 12
+            && options.first().map(|field| field.trim()) == Some("2")
+            && matches!(
+                options
+                    .get(Self::FIXING_IN_TABLE_OPTION_SLOT)
+                    .map(|field| field.trim()),
+                Some("0" | "1")
+            ))
+        .then_some(Self)
+    }
+
+    pub(crate) fn fixing_in_table(self, options: &[&str]) -> Option<FormFixingInTable> {
+        (options.get(Self::FIXING_IN_TABLE_OPTION_SLOT)?.trim() == "1")
+            .then_some(FormFixingInTable::Left)
+    }
+
+    pub(crate) const fn fixing_in_table_raw_code(
+        self,
+        value: FormFixingInTable,
+    ) -> Option<&'static str> {
+        match value {
+            FormFixingInTable::Left => Some("1"),
+            FormFixingInTable::Right => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormFieldVerticalAlign {
     Top,
     Center,
@@ -2073,6 +2157,7 @@ pub(crate) struct FormFieldSchema {
     read_only_slot: Option<usize>,
     title_height_slot: Option<usize>,
     horizontal_align_slot: Option<usize>,
+    fixing_in_table_slot: Option<usize>,
     enabled_slot: Option<usize>,
     text_color_option_slot: Option<usize>,
     back_color_option_slot: Option<usize>,
@@ -2354,6 +2439,11 @@ impl FormFieldSchema {
                 "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
             )
             .then_some(23 + top_level_offset),
+            fixing_in_table_slot: matches!(
+                item_tag,
+                "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
+            )
+            .then_some(49 + top_level_offset),
             enabled_slot: matches!(
                 item_tag,
                 "InputField" | "LabelField" | "CheckBoxField" | "PictureField"
@@ -2439,6 +2529,14 @@ impl FormFieldSchema {
             "3" => None,
             _ => None,
         }
+    }
+
+    pub(crate) const fn fixing_in_table_slot(self) -> Option<usize> {
+        self.fixing_in_table_slot
+    }
+
+    pub(crate) fn fixing_in_table(self, fields: &[&str]) -> Option<FormFixingInTable> {
+        FormFixingInTable::from_field_raw_value(fields.get(self.fixing_in_table_slot?)?)
     }
 
     pub(crate) const fn vertical_align_slot(self) -> usize {
