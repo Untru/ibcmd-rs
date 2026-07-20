@@ -13858,6 +13858,9 @@ pub(super) fn format_form_child_item_xml(
         }
         xml.push_str(&format_form_control_border_xml(item, indent + 1));
     }
+    if item.wrap == Some(false) {
+        xml.push_str(&format!("{tab}\t<Wrap>false</Wrap>\r\n"));
+    }
     if let Some(password_mode) = item.password_mode {
         xml.push_str(&format!(
             "{tab}\t<PasswordMode>{}</PasswordMode>\r\n",
@@ -13870,23 +13873,18 @@ pub(super) fn format_form_child_item_xml(
             if multi_line { "true" } else { "false" }
         ));
     }
-    if item.wrap == Some(false) {
-        xml.push_str(&format!("{tab}\t<Wrap>false</Wrap>\r\n"));
-    }
     if let Some(extended_edit) = item.extended_edit {
         xml.push_str(&format!(
             "{tab}\t<ExtendedEdit>{}</ExtendedEdit>\r\n",
             if extended_edit { "true" } else { "false" }
         ));
     }
-    if item.mask.is_none() {
+    if item.mask.is_none() && item.tag != "InputField" {
         xml.push_str(&format_form_auto_choice_incomplete_xml(item, indent + 1));
-        if item.tag != "InputField" {
-            xml.push_str(&format_form_direct_auto_mark_incomplete_xml(
-                item,
-                indent + 1,
-            ));
-        }
+        xml.push_str(&format_form_direct_auto_mark_incomplete_xml(
+            item,
+            indent + 1,
+        ));
     }
     xml.push_str(&format_form_input_field_button_options_xml(
         item,
@@ -13901,6 +13899,9 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format_form_auto_choice_incomplete_xml(item, indent + 1));
     } else {
         xml.push_str(&format_form_input_field_tail_xml(item, indent + 1, false));
+        if item.tag == "InputField" {
+            xml.push_str(&format_form_auto_choice_incomplete_xml(item, indent + 1));
+        }
     }
     if let Some(quick_choice) = item.quick_choice {
         xml.push_str(&format!(
@@ -13973,6 +13974,13 @@ pub(super) fn format_form_child_item_xml(
     }
     if !item.choice_list.is_empty() {
         xml.push_str(&format_form_choice_list_xml(&item.choice_list, indent + 1));
+    }
+    if item.tag == "InputField" {
+        xml.push_str(&format_form_input_field_button_option_xml(
+            item,
+            FormInputFieldXmlProperty::ChoiceListButton,
+            indent + 1,
+        ));
     }
     if let Some(drop_list_width) = &item.drop_list_width {
         xml.push_str(&format!(

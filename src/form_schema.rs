@@ -3999,7 +3999,6 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
     FormInputFieldXmlProperty::SpinButton,
     FormInputFieldXmlProperty::OpenButton,
     FormInputFieldXmlProperty::CreateButton,
-    FormInputFieldXmlProperty::ChoiceListButton,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
