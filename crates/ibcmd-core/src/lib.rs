@@ -8,6 +8,7 @@
 
 pub mod artifact;
 pub mod detection;
+pub mod diagnostic;
 pub mod profile;
 pub mod version;
 
