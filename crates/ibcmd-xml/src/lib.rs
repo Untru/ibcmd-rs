@@ -2,11 +2,19 @@
 
 #![forbid(unsafe_code)]
 
+mod dialect;
 mod node;
 mod reader;
 pub mod source_tree;
 mod writer;
 
+pub use dialect::{
+    BomRule, DetectionCandidate, DialectDescriptor, DialectDetection, DialectError,
+    DialectEvidence, DialectFeature, DialectLexicalPolicy, DialectRegistry, DialectRule,
+    ElementMatcher, FeatureAvailability, LexicalRules, LineEndingRule, NamespaceEvidence,
+    NamespaceMatcher, ParseDialectIdError, PropertyOrderRule, RootSignature, RuleProvenance,
+    XmlEncoding, bundled_dialect_registry,
+};
 pub use node::{
     Attribute, AttributeKind, QName, XmlCData, XmlComment, XmlDocument, XmlElement, XmlNode,
     XmlRawNode, XmlText,

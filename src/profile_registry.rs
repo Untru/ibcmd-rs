@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_seed_profiles_resolve_as_six_independent_coordinates() {
+    fn bundled_seed_profiles_keep_version_axes_independent() {
         let registry = load_bundled_profile_registry().unwrap();
         assert_eq!(BUNDLED_PROFILES.len(), 6);
         assert_eq!(registry.profiles().len(), 6);
@@ -262,12 +262,18 @@ mod tests {
             assert!(profile.storage_profile.is_none());
             assert!(profile.container_revision.is_none());
             assert!(profile.dbms.is_none());
-            assert_eq!(profile.fingerprints.len(), 1);
+            assert_eq!(
+                profile.fingerprints.len(),
+                if version == "2.21" { 3 } else { 1 }
+            );
             assert_eq!(profile.fingerprints["xcf.version"].value, version);
-            assert!(profile.constants.is_empty());
+            assert_eq!(
+                profile.constants.len(),
+                if version == "2.21" { 3 } else { 1 }
+            );
             assert!(profile.capabilities.is_empty());
-            assert_eq!(profile.inheritance_chain, [id]);
-            assert_eq!(profile.source_chain.len(), 1);
+            assert_eq!(profile.inheritance_chain.last(), Some(&id));
+            assert_eq!(profile.source_chain.len(), profile.inheritance_chain.len());
             assert_eq!(
                 profile
                     .evidence
@@ -275,8 +281,13 @@ mod tests {
                     .map(|value| value.value.as_str())
                     .collect::<Vec<_>>(),
                 match version {
-                    "2.17" | "2.21" => vec!["src/module_blob.rs", "src/mssql.rs"],
-                    "2.20" => vec!["src/source.rs", "tests/portable_root_smoke.rs"],
+                    "2.17" => vec!["src/module_blob.rs", "src/mssql.rs"],
+                    "2.20" | "2.21" => vec![
+                        "src/module_blob.rs",
+                        "src/mssql.rs",
+                        "src/source.rs",
+                        "tests/portable_root_smoke.rs"
+                    ],
                     _ => unreachable!(),
                 }
             );

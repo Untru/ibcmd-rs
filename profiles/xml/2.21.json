@@ -1,10 +1,17 @@
 {
   "schema_version": 1,
   "id": "xml-2.21",
+  "extends": "xml-2.20",
   "status": "experimental",
   "xml_dialect": "2.21",
   "fingerprints": {
-    "xcf.version": "2.21"
+    "xcf.version": "2.21",
+    "xcf.namespace.palette_namespace": "http://v8.1c.ru/8.1/data/ui/colors/palette",
+    "xcf.element.use_in_interface_compatibility_mode": "UseInInterfaceCompatibilityMode|http://v8.1c.ru/8.3/MDClasses"
+  },
+  "constants": {
+    "xcf.feature.palette_namespace": "supported",
+    "xcf.feature.use_in_interface_compatibility_mode": "supported"
   },
   "evidence": [
     "src/module_blob.rs",

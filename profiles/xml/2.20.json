@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "id": "xml-2.20",
+  "extends": "xml-2.17",
   "status": "experimental",
   "xml_dialect": "2.20",
   "fingerprints": {

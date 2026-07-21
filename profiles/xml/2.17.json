@@ -6,6 +6,9 @@
   "fingerprints": {
     "xcf.version": "2.17"
   },
+  "constants": {
+    "xcf.order.root_children": "source"
+  },
   "evidence": [
     "src/module_blob.rs",
     "src/mssql.rs"
