@@ -10,6 +10,7 @@ pub mod artifact;
 pub mod detection;
 pub mod diagnostic;
 pub mod profile;
+pub mod storage;
 pub mod version;
 
 #[cfg(test)]
