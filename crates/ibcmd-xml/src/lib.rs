@@ -4,6 +4,7 @@
 
 mod node;
 mod reader;
+pub mod source_tree;
 mod writer;
 
 pub use node::{
