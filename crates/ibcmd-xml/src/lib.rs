@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod dialect;
+pub mod metadata;
 mod node;
 mod reader;
 pub mod source_tree;
@@ -14,6 +15,11 @@ pub use dialect::{
     ElementMatcher, FeatureAvailability, LexicalRules, LineEndingRule, NamespaceEvidence,
     NamespaceMatcher, ParseDialectIdError, PropertyOrderRule, RootSignature, RuleProvenance,
     XmlEncoding, bundled_dialect_registry,
+};
+pub use metadata::{
+    MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
+    MetadataRegistry, MetadataRegistryError, decode_metadata_envelope,
+    decode_metadata_envelope_with_dialect,
 };
 pub use node::{
     Attribute, AttributeKind, QName, XmlCData, XmlComment, XmlDocument, XmlElement, XmlNode,
@@ -247,6 +253,14 @@ mod tests {
     #[test]
     fn writer_rejects_duplicate_serialized_attributes_and_bad_prefixes() {
         let cases = [
+            vec![Attribute::ordinary(
+                QName::new("xmlns").unwrap(),
+                "urn:evil",
+            )],
+            vec![Attribute::ordinary(
+                QName::new("xmlns:p").unwrap(),
+                "urn:evil",
+            )],
             vec![
                 Attribute::ordinary(QName::new("a").unwrap(), "1"),
                 Attribute::ordinary(QName::new("a").unwrap(), "2"),
@@ -270,6 +284,40 @@ mod tests {
             assert!(XmlWriter::to_vec(&document, LexicalPolicy::Preserve).is_err());
             assert!(XmlWriter::to_vec(&document, LexicalPolicy::Normalized).is_err());
         }
+    }
+
+    #[test]
+    fn writer_checks_thousands_of_attribute_names_with_one_set_pass() {
+        const ATTRIBUTE_COUNT: usize = 10_000;
+        let attributes: Vec<_> = (0..ATTRIBUTE_COUNT)
+            .map(|index| {
+                Attribute::ordinary(QName::new(format!("a{index}")).unwrap(), index.to_string())
+            })
+            .collect();
+        let unique = XmlDocument::new(XmlElement::with_parts(
+            QName::new("r").unwrap(),
+            attributes.clone(),
+            Vec::new(),
+        ));
+        assert!(crate::writer::validate_document(&unique).is_ok());
+        assert!(XmlWriter::to_vec(&unique, LexicalPolicy::Normalized).is_ok());
+
+        let mut duplicate_attributes = attributes;
+        duplicate_attributes.push(Attribute::ordinary(
+            QName::new("a5000").unwrap(),
+            "duplicate",
+        ));
+        let duplicate = XmlDocument::new(XmlElement::with_parts(
+            QName::new("r").unwrap(),
+            duplicate_attributes,
+            Vec::new(),
+        ));
+        assert_eq!(
+            crate::writer::validate_document(&duplicate)
+                .unwrap_err()
+                .to_string(),
+            "duplicate serialized attribute"
+        );
     }
 
     #[test]
