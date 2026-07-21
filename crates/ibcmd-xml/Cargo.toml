@@ -1,0 +1,8 @@
+[package]
+name = "ibcmd-xml"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ibcmd-core = { path = "../ibcmd-core" }

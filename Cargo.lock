@@ -262,6 +262,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "ibcmd-cf"
+version = "0.1.0"
+dependencies = [
+ "ibcmd-core",
+ "ibcmd-v8",
+]
+
+[[package]]
+name = "ibcmd-core"
+version = "0.1.0"
+
+[[package]]
 name = "ibcmd-rs"
 version = "0.1.1"
 dependencies = [
@@ -275,6 +287,20 @@ dependencies = [
  "sha2",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "ibcmd-v8"
+version = "0.1.0"
+dependencies = [
+ "ibcmd-core",
+]
+
+[[package]]
+name = "ibcmd-xml"
+version = "0.1.0"
+dependencies = [
+ "ibcmd-core",
 ]
 
 [[package]]
