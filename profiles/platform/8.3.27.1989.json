@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "id": "platform-8.3.27.1989",
+  "status": "experimental",
+  "platform_build": "8.3.27.1989",
+  "evidence": [
+    "docs/ssl-lab-2026-06-25.md"
+  ]
+}

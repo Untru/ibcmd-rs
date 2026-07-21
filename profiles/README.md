@@ -14,8 +14,29 @@ future names do not require a code change. Dotted versions contain two to eight
 canonical decimal `u32` components (`0` through `4294967295`) without leading
 zeroes.
 
-This directory intentionally contains no seed profile documents. Seed profiles
-and their evidence are delivered separately.
+The repository embeds six minimal experimental seed profiles: three XML
+dialects (`2.17`, `2.20`, and `2.21`) and three exact platform builds
+(`8.3.24.1819`, `8.3.27.1989`, and `8.5.1.1150`). Each seed declares exactly
+one version axis. There is no inheritance or mapping between a platform build
+and an XML dialect, and no compatibility, storage, container, or DBMS value is
+inferred. XML fingerprints record only an observed `xcf.version`; platform
+seeds deliberately contain no invented fingerprints or capabilities. Empty
+evidence on the 8.3.24 and 8.5.1 seeds is honest: the coordinate is requested
+for future research, not verified support.
+
+`profile_registry::BUNDLED_PROFILES` embeds these files at compile time and
+`load_bundled_profile_registry` resolves them without filesystem or platform
+access.
+
+## Exact detection
+
+The core detector accepts bounded, independent observations for an exact
+platform build, exact XML dialect, and open fingerprints. It matches a profile
+only when every supplied observation is explicitly present and equal. Empty,
+contradictory, or unmatched input is `Unknown`; multiple exact matches are
+`Ambiguous`. It never chooses a nearest version or maps one version axis to
+another. Writers must call `require_exact_target` before selecting an encode
+profile.
 
 ## Inheritance and merge rules
 

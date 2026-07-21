@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "xml-2.21",
+  "status": "experimental",
+  "xml_dialect": "2.21",
+  "fingerprints": {
+    "xcf.version": "2.21"
+  },
+  "evidence": [
+    "src/module_blob.rs",
+    "src/mssql.rs"
+  ]
+}

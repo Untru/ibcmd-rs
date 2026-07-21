@@ -46,6 +46,39 @@ pub struct BundledProfile<'a> {
     pub json: &'a str,
 }
 
+/// Deterministically ordered standalone seed profiles embedded in the binary.
+pub const BUNDLED_PROFILES: &[BundledProfile<'static>] = &[
+    BundledProfile {
+        name: "profiles/platform/8.3.24.1819.json",
+        json: include_str!("../profiles/platform/8.3.24.1819.json"),
+    },
+    BundledProfile {
+        name: "profiles/platform/8.3.27.1989.json",
+        json: include_str!("../profiles/platform/8.3.27.1989.json"),
+    },
+    BundledProfile {
+        name: "profiles/platform/8.5.1.1150.json",
+        json: include_str!("../profiles/platform/8.5.1.1150.json"),
+    },
+    BundledProfile {
+        name: "profiles/xml/2.17.json",
+        json: include_str!("../profiles/xml/2.17.json"),
+    },
+    BundledProfile {
+        name: "profiles/xml/2.20.json",
+        json: include_str!("../profiles/xml/2.20.json"),
+    },
+    BundledProfile {
+        name: "profiles/xml/2.21.json",
+        json: include_str!("../profiles/xml/2.21.json"),
+    },
+];
+
+/// Resolves the six project-owned seed profiles without filesystem access.
+pub fn load_bundled_profile_registry() -> Result<ProfileRegistry> {
+    load_profile_registry(BUNDLED_PROFILES, None, ProfileRegistryLimits::default())
+}
+
 /// Loads trusted bundled inputs and, optionally, an external profile directory.
 ///
 /// External profiles are read in filename order. Only regular files whose
@@ -172,6 +205,8 @@ mod tests {
 
     use super::*;
     use ibcmd_core::artifact::ProfileId;
+    use ibcmd_core::detection::{DetectionObservations, detect_profiles, require_exact_target};
+    use ibcmd_core::profile::ProfileStatus;
 
     struct TempDirectory(PathBuf);
 
@@ -206,6 +241,125 @@ mod tests {
 
     fn experimental(id: &str) -> String {
         format!(r#"{{"schema_version":1,"id":"{id}","status":"experimental"}}"#)
+    }
+
+    #[test]
+    fn bundled_seed_profiles_resolve_as_six_independent_coordinates() {
+        let registry = load_bundled_profile_registry().unwrap();
+        assert_eq!(BUNDLED_PROFILES.len(), 6);
+        assert_eq!(registry.profiles().len(), 6);
+
+        for version in ["2.17", "2.20", "2.21"] {
+            let id = ProfileId::parse(&format!("xml-{version}")).unwrap();
+            let profile = registry.get(&id).unwrap();
+            assert_eq!(profile.status.value, ProfileStatus::Experimental);
+            assert_eq!(
+                profile.xml_dialect.as_ref().unwrap().value.to_string(),
+                version
+            );
+            assert!(profile.platform_build.is_none());
+            assert!(profile.compatibility_mode.is_none());
+            assert!(profile.storage_profile.is_none());
+            assert!(profile.container_revision.is_none());
+            assert!(profile.dbms.is_none());
+            assert_eq!(profile.fingerprints.len(), 1);
+            assert_eq!(profile.fingerprints["xcf.version"].value, version);
+            assert!(profile.constants.is_empty());
+            assert!(profile.capabilities.is_empty());
+            assert_eq!(profile.inheritance_chain, [id]);
+            assert_eq!(profile.source_chain.len(), 1);
+            assert_eq!(
+                profile
+                    .evidence
+                    .iter()
+                    .map(|value| value.value.as_str())
+                    .collect::<Vec<_>>(),
+                match version {
+                    "2.17" | "2.21" => vec!["src/module_blob.rs", "src/mssql.rs"],
+                    "2.20" => vec!["src/source.rs", "tests/portable_root_smoke.rs"],
+                    _ => unreachable!(),
+                }
+            );
+        }
+
+        for version in ["8.3.24.1819", "8.3.27.1989", "8.5.1.1150"] {
+            let id = ProfileId::parse(&format!("platform-{version}")).unwrap();
+            let profile = registry.get(&id).unwrap();
+            assert_eq!(profile.status.value, ProfileStatus::Experimental);
+            assert_eq!(
+                profile.platform_build.as_ref().unwrap().value.to_string(),
+                version
+            );
+            assert!(profile.xml_dialect.is_none());
+            assert!(profile.compatibility_mode.is_none());
+            assert!(profile.storage_profile.is_none());
+            assert!(profile.container_revision.is_none());
+            assert!(profile.dbms.is_none());
+            assert!(profile.fingerprints.is_empty());
+            assert!(profile.constants.is_empty());
+            assert!(profile.capabilities.is_empty());
+            assert_eq!(profile.inheritance_chain, [id]);
+            assert_eq!(profile.source_chain.len(), 1);
+        }
+
+        assert!(
+            registry
+                .get(&ProfileId::parse("platform-8.3.24.1819").unwrap())
+                .unwrap()
+                .evidence
+                .is_empty()
+        );
+        assert_eq!(
+            registry
+                .get(&ProfileId::parse("platform-8.3.27.1989").unwrap())
+                .unwrap()
+                .evidence[0]
+                .value,
+            "docs/ssl-lab-2026-06-25.md"
+        );
+        assert!(
+            registry
+                .get(&ProfileId::parse("platform-8.5.1.1150").unwrap())
+                .unwrap()
+                .evidence
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn bundled_detection_keeps_xml_and_platform_axes_independent() {
+        let registry = load_bundled_profile_registry().unwrap();
+        let xml_observations =
+            DetectionObservations::try_new(None, None, [("xcf.version", "2.20")]).unwrap();
+        let xml_result = detect_profiles(&registry, &xml_observations);
+        let xml = require_exact_target(&xml_result).unwrap();
+        assert_eq!(xml.id().as_str(), "xml-2.20");
+        assert_eq!(
+            xml.profile.xml_dialect.as_ref().unwrap().value.to_string(),
+            "2.20"
+        );
+        assert!(xml.profile.platform_build.is_none());
+
+        let platform_observations = DetectionObservations::try_new(
+            Some("8.3.27.1989".parse().unwrap()),
+            None,
+            std::iter::empty::<(&str, &str)>(),
+        )
+        .unwrap();
+        let platform_result = detect_profiles(&registry, &platform_observations);
+        let platform = require_exact_target(&platform_result).unwrap();
+        assert_eq!(platform.id().as_str(), "platform-8.3.27.1989");
+        assert_eq!(
+            platform
+                .profile
+                .platform_build
+                .as_ref()
+                .unwrap()
+                .value
+                .to_string(),
+            "8.3.27.1989"
+        );
+        assert!(platform.profile.xml_dialect.is_none());
     }
 
     #[test]

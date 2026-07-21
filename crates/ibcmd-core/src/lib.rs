@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod artifact;
+pub mod detection;
 pub mod profile;
 pub mod version;
 

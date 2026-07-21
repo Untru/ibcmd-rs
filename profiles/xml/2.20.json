@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "xml-2.20",
+  "status": "experimental",
+  "xml_dialect": "2.20",
+  "fingerprints": {
+    "xcf.version": "2.20"
+  },
+  "evidence": [
+    "src/source.rs",
+    "tests/portable_root_smoke.rs"
+  ]
+}
