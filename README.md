@@ -25,23 +25,23 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=12 total=56 updated=2026-07-21 -->
+<!-- offline-converter-progress: completed=13 total=56 updated=2026-07-21 -->
 
-As of 2026-07-21, 12 of 56 accepted leaf issues in the
+As of 2026-07-21, 13 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (21.4%). This is issue-count roadmap progress, not codec or
+are complete (23.2%). This is issue-count roadmap progress, not codec or
 compatibility coverage, and it is separate from the export parity metrics below.
 
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
-| Phase 1 version profiles/core models | 8/10 | 80% |
+| Phase 1 version profiles/core models | 9/10 | 90% |
 | Phase 2 XCF | 0/6 | 0% |
 | Phase 3 CF | 0/15 | 0% |
 | Phase 4 bootstrap | 0/13 | 0% |
 | Phase 5a migrations | 0/4 | 0% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **12/56** | **21.4%** |
+| **Overall** | **13/56** | **23.2%** |
 
 ## Export Compatibility Status
 
