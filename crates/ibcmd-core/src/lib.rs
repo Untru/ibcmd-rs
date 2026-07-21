@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod artifact;
 pub mod version;
 
 #[cfg(test)]
