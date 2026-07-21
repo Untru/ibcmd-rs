@@ -10,10 +10,15 @@ pub mod artifact;
 pub mod asset;
 pub mod detection;
 pub mod diagnostic;
+pub mod graph;
+pub mod identity;
+pub mod model;
 pub mod opaque;
 pub mod profile;
 pub mod provenance;
+pub mod semantic;
 pub mod storage;
+pub mod validate;
 pub mod value;
 pub mod version;
 
