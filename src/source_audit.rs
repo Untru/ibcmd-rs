@@ -1137,7 +1137,7 @@ fn roundtrip_difference_message(first: &str, second: &str) -> String {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "research-corpus-tests"))]
 fn spreadsheet_top_level_format_summaries(xml: &str) -> Result<Vec<String>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1191,7 +1191,7 @@ fn spreadsheet_top_level_format_summaries(xml: &str) -> Result<Vec<String>> {
     Ok(summaries)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "research-corpus-tests"))]
 fn spreadsheet_column_format_indexes(xml: &str) -> Result<Vec<usize>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1237,7 +1237,7 @@ fn spreadsheet_column_format_indexes(xml: &str) -> Result<Vec<usize>> {
     Ok(indexes)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "research-corpus-tests"))]
 fn spreadsheet_format_layout_stats(xml: &str) -> Result<(usize, Option<usize>, usize, usize)> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -1499,7 +1499,9 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn live_roundtrip_repro_reports_first_diverging_avansovy_template_format_slot()
     -> anyhow::Result<()> {
         let root = PathBuf::from(

@@ -57,10 +57,9 @@ pub(crate) fn resolve_form_item_picture_owner(
 }
 
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
-#[cfg(test)]
+#[cfg(all(test, feature = "mssql-live-tests"))]
 pub(crate) use moxel::{
-    DebugMoxelNumberFormatUsage, DebugMoxelSpreadsheetSummary, debug_moxel_number_format_usage,
-    debug_moxel_spreadsheet_summary_from_blob,
+    debug_moxel_number_format_usage, debug_moxel_spreadsheet_summary_from_blob,
 };
 pub(crate) use moxel::{extract_moxel_spreadsheet_xml, spreadsheet_number_format_hint_from_blob};
 

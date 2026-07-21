@@ -3318,7 +3318,7 @@ pub(crate) fn spreadsheet_number_format_hint_from_blob(
     spreadsheet_number_format_hint_from_text(&raw_text)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mssql-live-tests"))]
 #[derive(Debug, Clone)]
 pub(crate) struct DebugMoxelSpreadsheetSummary {
     pub column_count: usize,
@@ -3332,7 +3332,7 @@ pub(crate) struct DebugMoxelSpreadsheetSummary {
     pub first_columns: Vec<String>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mssql-live-tests"))]
 pub(crate) fn debug_moxel_spreadsheet_summary_from_blob(
     blob: &[u8],
 ) -> Option<DebugMoxelSpreadsheetSummary> {
@@ -3406,14 +3406,14 @@ pub(crate) fn debug_moxel_spreadsheet_summary_from_blob(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mssql-live-tests"))]
 #[derive(Debug, Clone)]
 pub(crate) struct DebugMoxelNumberFormatUsage {
     pub slots: Vec<String>,
     pub format_slot_indices: Vec<Option<usize>>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mssql-live-tests"))]
 pub(crate) fn debug_moxel_number_format_usage(
     raw_text: &str,
 ) -> Option<DebugMoxelNumberFormatUsage> {

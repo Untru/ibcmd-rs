@@ -11,7 +11,7 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,8 +27,43 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-  test:
-    name: Build And Test
+  portable:
+    name: Portable (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check standalone workspace layers
+        run: cargo check --locked --workspace --exclude ibcmd-rs --all-targets
+
+      - name: Clippy standalone workspace layers
+        run: cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings
+
+      - name: Test standalone workspace layers
+        run: cargo test --locked --workspace --exclude ibcmd-rs
+
+      - name: Test portable root smoke
+        run: cargo test --locked -p ibcmd-rs --test portable_root_smoke
+
+  legacy-windows:
+    name: Legacy Root (Windows)
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -40,15 +75,8 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Cargo check
-        run: cargo check --locked --all-targets
+      - name: Check legacy root targets
+        run: cargo check --locked -p ibcmd-rs --all-targets
 
-      - name: Cargo test (CI-safe suite)
-        run: >
-          cargo test --locked --lib --quiet --
-          --skip scans_real_
-          --skip extracts_real_sfc_page_scroll_on_compress
-          --skip round_trips_common_form_and_template_from_lab_sources
-          --skip patches_command_group_metadata_blob_from_lab_xml
-          --skip patches_common_command_metadata_blob_from_lab_xml
-          --skip resolves_metadata_references_from_lab_sources
+      - name: Compile legacy root test harness
+        run: cargo test --locked -p ibcmd-rs --no-run

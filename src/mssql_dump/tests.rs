@@ -7172,7 +7172,9 @@ fn prefers_child_binding_path_for_additional_columns_group() {
     assert_eq!(group.table, "Объект.ТаблицаПравилВыгрузки");
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn extracts_real_sfc_page_scroll_on_compress() {
     let form_body = fs::read(
             r"lab\sfc\verify\event_aliases_after_patch_20260628\Config\f1335af3-b387-4b08-b9f0-d742466fb011.0__part0.bin",
@@ -16491,7 +16493,9 @@ fn normalize_moxel_drawing_format_promotes_back_color_from_border_color_slot() {
     assert_eq!(format.left_border, None);
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn live_pack_extract_repro_preserves_avansovy_report_template_shape() -> anyhow::Result<()> {
     let template_path = std::path::PathBuf::from(
         r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
@@ -19257,6 +19261,7 @@ fn formats_moxel_sparse_source_output_order_leads_with_external_shared_default()
     );
 }
 
+#[cfg(feature = "research-corpus-tests")]
 fn assert_moxel_template_matches_lab_baseline(
     raw: &str,
     baseline_relative_path: &[&str],
@@ -19331,7 +19336,9 @@ fn assert_moxel_template_matches_lab_baseline(
     }
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn formats_moxel_invoice_1096_matches_lab_baseline_template_xml() {
     let raw = include_str!("../../tests/fixtures/moxel_invoice_1096_raw.txt");
     assert_moxel_template_matches_lab_baseline(
@@ -19348,7 +19355,9 @@ fn formats_moxel_invoice_1096_matches_lab_baseline_template_xml() {
     );
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn formats_moxel_ukd_info_buyer_2020_matches_lab_baseline_template_xml() {
     let raw = include_str!("../../tests/fixtures/moxel_ukd_info_buyer_2020_raw.txt");
     assert_moxel_template_matches_lab_baseline(
@@ -19365,7 +19374,9 @@ fn formats_moxel_ukd_info_buyer_2020_matches_lab_baseline_template_xml() {
     );
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn formats_moxel_contract_parameter_map_matches_lab_baseline_template_xml() {
     let raw = include_str!("../../tests/fixtures/moxel_contract_parameter_map_raw.txt");
     assert_moxel_template_matches_lab_baseline(
@@ -19382,7 +19393,9 @@ fn formats_moxel_contract_parameter_map_matches_lab_baseline_template_xml() {
     );
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn formats_moxel_contract_typical_names_matches_lab_baseline_template_xml() {
     let raw = include_str!("../../tests/fixtures/moxel_contract_typical_names_raw.txt");
     assert_moxel_template_matches_lab_baseline(
@@ -19399,7 +19412,9 @@ fn formats_moxel_contract_typical_names_matches_lab_baseline_template_xml() {
     );
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn formats_moxel_eis_appendix_matches_lab_baseline_template_xml() {
     let raw = include_str!("../../tests/fixtures/moxel_eis_appendix_raw.txt");
     assert_moxel_template_matches_lab_baseline(
@@ -19416,7 +19431,9 @@ fn formats_moxel_eis_appendix_matches_lab_baseline_template_xml() {
     );
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn debug_moxel_card_matches_lab_baseline() {
     let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
     let out_dir = out_dir.trim();
@@ -19438,7 +19455,9 @@ fn debug_moxel_card_matches_lab_baseline() {
     );
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn debug_moxel_card_output_order() {
     let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
     let out_dir = out_dir.trim();
@@ -19541,7 +19560,9 @@ fn debug_moxel_card_output_order() {
     }
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn debug_moxel_bank_transfer_style_slots() {
     let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
     let out_dir = out_dir.trim();
@@ -19651,7 +19672,9 @@ fn debug_moxel_bank_transfer_style_slots() {
     }
 }
 
+#[cfg(feature = "research-corpus-tests")]
 #[test]
+#[ignore = "requires external research corpus"]
 fn debug_moxel_bank_purchase_style_slots() {
     let out_dir = std::fs::read_to_string(".tmp_selected_dp_outdir.txt").unwrap();
     let out_dir = out_dir.trim();

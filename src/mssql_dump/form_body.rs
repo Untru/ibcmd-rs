@@ -8849,11 +8849,6 @@ pub(super) fn parse_form_button_group_command_source_with_items(
     }
 }
 
-#[cfg(test)]
-pub(super) fn parse_form_command_bar_source(fields: &[&str]) -> Option<String> {
-    parse_form_command_bar_source_with_items(fields, &BTreeMap::new())
-}
-
 pub(super) fn parse_form_command_bar_source_with_items(
     fields: &[&str],
     item_name_by_id: &BTreeMap<String, String>,

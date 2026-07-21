@@ -6778,20 +6778,25 @@ mod tests {
         validate_storage_manifest,
     };
     use crate::cli::InfobaseConfigSourceVersion;
+    #[cfg(feature = "mssql-live-tests")]
+    use crate::module_blob::parse_simple_metadata_xml_properties;
     use crate::module_blob::{
         CommonModuleXmlProperties, MetadataSourceContext, ReturnValuesReuse,
         SimpleMetadataXmlProperties, hex_sha256, module_blob_text_sha256,
         pack_help_blob_from_parts, pack_moxel_spreadsheet_blob_from_xml_with_source,
         pack_raw_deflated_blob_from_bytes, pack_style_body_blob_from_xml,
-        parse_simple_metadata_xml_properties, raw_deflated_first_base64_payload_sha256,
-        raw_deflated_plain_sha256,
+        raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
     };
+    #[cfg(feature = "mssql-live-tests")]
     use crate::mssql_dump::extract_moxel_spreadsheet_xml;
     use crate::source::{SourceFile, SourceKind, SourceManifest};
     use crate::v8_container::{V8Element, build_v8_container, make_v8_element_header};
+    #[cfg(feature = "mssql-live-tests")]
     use anyhow::Context;
+    #[cfg(feature = "mssql-live-tests")]
     use flate2::read::DeflateDecoder;
     use std::fs;
+    #[cfg(feature = "mssql-live-tests")]
     use std::io::Read;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -6827,6 +6832,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn inflate_raw_deflate_for_test(input: &[u8]) -> anyhow::Result<Vec<u8>> {
         let mut decoder = DeflateDecoder::new(input);
         let mut output = Vec::new();
@@ -6834,6 +6840,7 @@ mod tests {
         Ok(output)
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn first_diff_offset(left: &str, right: &str) -> Option<usize> {
         let mut offset = 0usize;
         let mut left_chars = left.chars();
@@ -6850,6 +6857,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn excerpt_around_offset(text: &str, offset: usize, radius: usize) -> String {
         let mut start = offset.saturating_sub(radius).min(text.len());
         while start > 0 && !text.is_char_boundary(start) {
@@ -6862,6 +6870,7 @@ mod tests {
         text[start..end].replace('\r', "\\r").replace('\n', "\\n")
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn print_raw_token_diagnostics(label: &str, text: &str, token: &str) {
         let count = text.matches(token).count();
         println!("{label}_count[{token}]={count}");
@@ -6873,6 +6882,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn print_number_format_slot_diagnostics(label: &str, text: &str) {
         let Some(debug) = crate::mssql_dump::debug_moxel_number_format_usage(text) else {
             println!("{label}_number_format_slots=unavailable");
@@ -6896,6 +6906,7 @@ mod tests {
         println!("{label}_number_format_usages={usage_summaries}");
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn print_moxel_spreadsheet_summary(label: &str, blob: &[u8]) {
         let Some(summary) = crate::mssql_dump::debug_moxel_spreadsheet_summary_from_blob(blob)
         else {
@@ -6924,6 +6935,7 @@ mod tests {
         println!("{label}_first_rows={}", summary.first_rows.join(", "));
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn spreadsheet_format_blocks(xml: &str) -> Vec<String> {
         let mut blocks = Vec::new();
         let mut cursor = 0usize;
@@ -6939,6 +6951,7 @@ mod tests {
         blocks
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn find_format_index_with_fragments(xml: &str, fragments: &[&str]) -> Option<usize> {
         spreadsheet_format_blocks(xml)
             .iter()
@@ -6946,6 +6959,7 @@ mod tests {
             .map(|index| index + 1)
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     fn live_compare_native_and_packed_spreadsheet_template(
         source_root: &Path,
         owner_xml: &Path,
@@ -10658,8 +10672,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     #[test]
-    #[ignore]
+    #[ignore = "requires local SQL Server databases and research corpus"]
     fn live_compares_native_and_packed_avansovy_spreadsheet_template_blobs() -> anyhow::Result<()> {
         let source_root =
             PathBuf::from(r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline");
@@ -10696,8 +10711,9 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "mssql-live-tests")]
     #[test]
-    #[ignore]
+    #[ignore = "requires local SQL Server databases and research corpus"]
     fn live_compares_native_and_packed_dossier_financial_analysis_spreadsheet_template_blobs()
     -> anyhow::Result<()> {
         let source_root = PathBuf::from(

@@ -1681,7 +1681,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_common_form_template_and_package_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -1832,7 +1834,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_chart_of_characteristic_types_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2148,7 +2152,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_document_journal_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2306,7 +2312,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_subsystem_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2388,7 +2396,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_task_form_and_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2486,7 +2496,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_data_processor_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2710,7 +2722,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_report_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2812,7 +2826,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_exchange_plan_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2884,7 +2900,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_enum_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -2935,7 +2953,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_catalog_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3099,7 +3119,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_information_register_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3289,7 +3311,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_common_attribute_and_session_parameter_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3341,7 +3365,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_common_command_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3437,7 +3463,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_business_process_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3562,7 +3590,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_xdto_package_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3613,7 +3643,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_xdto_package_variant_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3667,7 +3699,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_role_and_scheduled_job_ext_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3739,7 +3773,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_language_and_settings_storage_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3823,7 +3859,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_functional_options_parameters_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -3874,7 +3912,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_service_and_subscription_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -4251,7 +4291,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_new_sfc_families() {
         let sfc_root = std::path::PathBuf::from(r"D:\УХА\sfc");
         if !sfc_root.is_dir() {
@@ -4409,7 +4451,9 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_event_subscription_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -4460,7 +4504,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_filter_criteria_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -4501,7 +4547,9 @@ mod tests {
         )));
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn scans_real_common_picture_asset_layouts() {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")

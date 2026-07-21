@@ -24744,7 +24744,9 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn round_trips_real_new_sfc_simple_metadata_families() -> anyhow::Result<()> {
         let sfc_root = std::path::PathBuf::from(r"D:\УХА\sfc");
         if !sfc_root.is_dir() {
@@ -24800,7 +24802,9 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn round_trips_common_form_and_template_from_lab_sources() -> anyhow::Result<()> {
         let lab_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -25741,7 +25745,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         }
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn patches_command_group_metadata_blob_from_lab_xml() -> anyhow::Result<()> {
         let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -26531,8 +26537,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
-    #[ignore]
+    #[ignore = "requires external research corpus"]
     fn debug_packs_spreadsheet_basic_formats_text() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
@@ -26567,8 +26574,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
-    #[ignore]
+    #[ignore = "requires external research corpus"]
     fn debug_packs_spreadsheet_sparse_format_text() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
@@ -26631,8 +26639,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
-    #[ignore]
+    #[ignore = "requires external research corpus"]
     fn debug_live_avansovy_hybrid_format_metadata() -> anyhow::Result<()> {
         let template_path = std::path::PathBuf::from(
             r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
@@ -27051,7 +27060,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn live_parse_repro_counts_avansovy_report_template_sections() -> anyhow::Result<()> {
         let template_path = std::path::PathBuf::from(
             r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
@@ -27460,8 +27471,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
-    #[ignore]
+    #[ignore = "requires external research corpus"]
     fn debug_packs_spreadsheet_standard_picture_refs_text() -> anyhow::Result<()> {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
@@ -35735,7 +35747,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn patches_common_command_metadata_blob_from_lab_xml() -> anyhow::Result<()> {
         let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
@@ -36288,7 +36302,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
     }
 
+    #[cfg(feature = "research-corpus-tests")]
     #[test]
+    #[ignore = "requires external research corpus"]
     fn resolves_metadata_references_from_lab_sources() {
         let source_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("lab")
