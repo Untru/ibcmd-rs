@@ -15,6 +15,14 @@ The first milestone started read-only for the target infobase:
 Guarded direct database writers are now available for researched storage rows.
 They are still intended only for throwaway test databases.
 
+## Standalone Conversion Direction
+
+The planned XML/CF converter is a standalone Rust path with no production
+runtime dependency on `ibcmd`, `1cv8`/Designer, EDT, or a JVM. Its independent
+version axes, capability levels, opaque-data rules, and fail-closed loss policy
+are defined in the
+[standalone conversion contract](docs/architecture/standalone-core.md).
+
 ## Export Compatibility Status
 
 Current parity tracking is maintained in
