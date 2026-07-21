@@ -7,10 +7,14 @@
 #![forbid(unsafe_code)]
 
 pub mod artifact;
+pub mod asset;
 pub mod detection;
 pub mod diagnostic;
+pub mod opaque;
 pub mod profile;
+pub mod provenance;
 pub mod storage;
+pub mod value;
 pub mod version;
 
 #[cfg(test)]
