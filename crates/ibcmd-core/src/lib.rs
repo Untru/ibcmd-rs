@@ -6,6 +6,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod version;
+
 #[cfg(test)]
 mod tests {
     #[test]
