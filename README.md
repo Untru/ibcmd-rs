@@ -23,6 +23,26 @@ version axes, capability levels, opaque-data rules, and fail-closed loss policy
 are defined in the
 [standalone conversion contract](docs/architecture/standalone-core.md).
 
+### Standalone Converter Roadmap Progress
+
+<!-- offline-converter-progress: completed=8 total=56 updated=2026-07-21 -->
+
+As of 2026-07-21, 8 of 56 accepted leaf issues in the
+[standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
+are complete (14.3%). This is issue-count roadmap progress, not codec or
+compatibility coverage, and it is separate from the export parity metrics below.
+
+| Phase | Completed | Progress |
+|---|---:|---:|
+| Phase 0 baseline/boundaries | 4/4 | 100% |
+| Phase 1 version profiles/core models | 4/10 | 40% |
+| Phase 2 XCF | 0/6 | 0% |
+| Phase 3 CF | 0/15 | 0% |
+| Phase 4 bootstrap | 0/13 | 0% |
+| Phase 5a migrations | 0/4 | 0% |
+| Phase 5b app/release | 0/4 | 0% |
+| **Overall** | **8/56** | **14.3%** |
+
 ## Export Compatibility Status
 
 Current parity tracking is maintained in
