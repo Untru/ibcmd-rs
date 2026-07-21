@@ -284,6 +284,7 @@ dependencies = [
  "anyhow",
  "clap",
  "flate2",
+ "ibcmd-core",
  "quick-xml",
  "rayon",
  "serde",

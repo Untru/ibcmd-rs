@@ -11,6 +11,7 @@ pub mod parallel;
 pub mod plan;
 pub mod probe;
 pub mod profile;
+pub mod profile_registry;
 pub mod source;
 pub mod source_audit;
 pub mod storage_map;
