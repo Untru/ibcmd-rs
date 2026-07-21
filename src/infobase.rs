@@ -5,17 +5,20 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
+use ibcmd_core::version::{PlatformBuild, XmlDialect};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use serde::Serialize;
 use serde_json::Value;
 use walkdir::WalkDir;
 
+use crate::adapters::mssql_legacy::MssqlLegacyAdapter;
 use crate::cli::{
     InfobaseConfigExportArgs, InfobaseConfigFormat, InfobaseConfigImportArgs,
     InfobaseConfigRoundtripArgs, InfobaseConfigSourceVersion, InfobaseConfigSweepArgs,
     MssqlCloneArgs, MssqlDumpConfigArgs, MssqlStageSourceObjectsArgs,
 };
+use crate::legacy_version::LegacyVersionAxes;
 use crate::module_blob::{
     parse_common_module_xml_properties, parse_simple_metadata_xml_properties,
 };
@@ -153,7 +156,18 @@ struct ConnectionConfig {
     db_pwd: Option<String>,
     password_source: Option<String>,
     format: InfobaseConfigFormat,
-    source_version: InfobaseConfigSourceVersion,
+    legacy_adapter: MssqlLegacyAdapter,
+}
+
+impl ConnectionConfig {
+    fn legacy_source_version(&self) -> Result<InfobaseConfigSourceVersion> {
+        self.legacy_adapter.legacy_selector().ok_or_else(|| {
+            anyhow!(
+                "legacy MSSQL adapter does not support XML dialect {}",
+                self.legacy_adapter.xml_dialect()
+            )
+        })
+    }
 }
 
 pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigExportReport> {
@@ -187,6 +201,7 @@ fn export_config_report(
     overwrite: bool,
     file_names: Vec<String>,
 ) -> Result<InfobaseConfigExportReport> {
+    let source_version = config.legacy_source_version()?;
     let output_dir = absolute_path(output_dir_arg)?;
     prepare_output_dir(&output_dir, overwrite)?;
     let dump_args = MssqlDumpConfigArgs {
@@ -207,7 +222,7 @@ fn export_config_report(
         no_binary_rows: true,
         write_binary_rows: false,
         write_manifest: false,
-        source_version: config.source_version,
+        source_version,
     };
     let dump = crate::mssql_dump::dump_config(&dump_args)?;
 
@@ -217,7 +232,7 @@ fn export_config_report(
         operation: "infobase config export",
         backend: "mssql-config-direct",
         format: format_name(config.format),
-        source_version: config.source_version.as_str(),
+        source_version: source_version.as_str(),
         dbms: config.dbms.clone(),
         db_server: config.db_server.clone(),
         db_name: config.db_name.clone(),
@@ -250,12 +265,13 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
 
     let stage_args = build_import_stage_args(&config, args)?;
     let report = crate::mssql::stage_source_objects(&stage_args)?;
+    let source_version = config.legacy_source_version()?;
 
     Ok(InfobaseConfigImportReport {
         operation: "infobase config import",
         backend: "mssql-configsave-stage",
         format: format_name(config.format),
-        source_version: config.source_version.as_str(),
+        source_version: source_version.as_str(),
         dbms: config.dbms,
         db_server: config.db_server,
         db_name: config.db_name,
@@ -431,7 +447,7 @@ pub fn roundtrip_config(
             db_pwd: config.db_pwd.clone(),
             password_source: config.password_source.clone(),
             format: config.format,
-            source_version: config.source_version,
+            legacy_adapter: config.legacy_adapter.clone(),
         },
         &args.sqlcmd,
         &args.db_pwd_env,
@@ -819,7 +835,7 @@ fn build_import_stage_args(
         replace_config_save: args.replace_config_save,
         allow_non_lab: args.allow_non_lab,
         batch_size: args.batch_size,
-        source_version: Some(config.source_version),
+        source_version: Some(config.legacy_source_version()?),
         path_prefix: args.path_prefix.clone(),
         script_output: args.script_output.clone(),
     })
@@ -1278,9 +1294,7 @@ fn resolve_connection(
     let format = cli_format
         .or_else(|| settings_format(&settings))
         .unwrap_or(InfobaseConfigFormat::Xml);
-    let source_version = cli_source_version
-        .or_else(|| settings_source_version(&settings))
-        .unwrap_or(InfobaseConfigSourceVersion::V2_20);
+    let legacy_adapter = resolve_legacy_adapter(&settings, cli_source_version)?;
     let dbms = first_value(cli_dbms, settings_value(&settings, "dbms-type"))
         .unwrap_or_else(|| "MSSQLServer".to_string());
     let db_server = first_value(cli_db_server, settings_value(&settings, "dbms-server"))
@@ -1301,7 +1315,7 @@ fn resolve_connection(
         db_pwd,
         password_source,
         format,
-        source_version,
+        legacy_adapter,
     })
 }
 
@@ -1329,20 +1343,65 @@ fn settings_format(settings: &Option<Value>) -> Option<InfobaseConfigFormat> {
     parse_format(&value)
 }
 
-fn settings_source_version(settings: &Option<Value>) -> Option<InfobaseConfigSourceVersion> {
+fn resolve_legacy_adapter(
+    settings: &Option<Value>,
+    cli_source_version: Option<InfobaseConfigSourceVersion>,
+) -> Result<MssqlLegacyAdapter> {
+    let xml_dialect = match cli_source_version {
+        Some(selector) => selector.version_axes().xml_dialect().clone(),
+        None => settings_xml_dialect(settings)?.unwrap_or_else(|| {
+            XmlDialect::parse(InfobaseConfigSourceVersion::V2_20.as_str())
+                .expect("default legacy XML dialect is valid")
+        }),
+    };
+    let version_axes = LegacyVersionAxes::new(
+        xml_dialect,
+        settings_platform_build(settings)?,
+        None,
+        None,
+        None,
+    );
+    let legacy_adapter = MssqlLegacyAdapter::new(version_axes)?;
+    if legacy_adapter.legacy_selector().is_none() {
+        bail!(
+            "legacy MSSQL adapter does not support XML dialect {}",
+            legacy_adapter.xml_dialect()
+        );
+    }
+    Ok(legacy_adapter)
+}
+
+fn settings_xml_dialect(settings: &Option<Value>) -> Result<Option<XmlDialect>> {
     let value = settings_string_at(settings, &["ibcmd-rs", "source-version"])
         .or_else(|| settings_string_at(settings, &["ibcmd-rs", "xml-version"]))
         .or_else(|| settings_string_at(settings, &["ibcmd-rs", "xcf-version"]))
-        .or_else(|| settings_string_at(settings, &["ibcmd-rs", "platform-version"]))
         .or_else(|| settings_string_at(settings, &["source-version"]))
         .or_else(|| settings_string_at(settings, &["xml-version"]))
         .or_else(|| settings_string_at(settings, &["xcf-version"]))
-        .or_else(|| settings_string_at(settings, &["platform-version"]))
         .or_else(|| settings_value(settings, "source-version"))
         .or_else(|| settings_value(settings, "xml-version"))
-        .or_else(|| settings_value(settings, "xcf-version"))
-        .or_else(|| settings_value(settings, "platform-version"))?;
-    parse_source_version(&value)
+        .or_else(|| settings_value(settings, "xcf-version"));
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Some(selector) = parse_legacy_source_selector(&value) {
+        return Ok(Some(selector.version_axes().xml_dialect().clone()));
+    }
+    XmlDialect::parse(value.trim())
+        .map(Some)
+        .map_err(|error| anyhow!("invalid XML dialect `{value}` in settings: {error}"))
+}
+
+fn settings_platform_build(settings: &Option<Value>) -> Result<Option<PlatformBuild>> {
+    let value = settings_string_at(settings, &["ibcmd-rs", "platform-version"])
+        .or_else(|| settings_string_at(settings, &["platform-version"]))
+        .or_else(|| settings_value(settings, "platform-version"));
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    PlatformBuild::parse(value.trim())
+        .map(Some)
+        .map_err(|error| anyhow!("invalid platform build `{value}` in settings: {error}"))
 }
 
 fn settings_string_at(settings: &Option<Value>, path: &[&str]) -> Option<String> {
@@ -1363,7 +1422,7 @@ fn parse_format(value: &str) -> Option<InfobaseConfigFormat> {
     }
 }
 
-fn parse_source_version(value: &str) -> Option<InfobaseConfigSourceVersion> {
+fn parse_legacy_source_selector(value: &str) -> Option<InfobaseConfigSourceVersion> {
     let normalized = value.trim().to_ascii_lowercase();
     match normalized.as_str() {
         "2.20" | "20" | "8.3" | "8.3.27" => Some(InfobaseConfigSourceVersion::V2_20),
@@ -1529,12 +1588,68 @@ mod tests {
 
         assert_eq!(settings_format(&settings), Some(InfobaseConfigFormat::Xml));
         assert_eq!(
-            settings_source_version(&settings),
-            Some(InfobaseConfigSourceVersion::V2_21)
+            settings_xml_dialect(&settings)
+                .unwrap()
+                .map(|dialect| dialect.to_string()),
+            Some("2.21".to_string())
         );
+        assert_eq!(settings_platform_build(&settings).unwrap(), None);
         assert_eq!(
             settings_value(&settings, "dbms-base"),
             Some("servicedesk".to_string())
+        );
+    }
+
+    #[test]
+    fn settings_version_axes_are_separate_and_fail_closed() {
+        let default = resolve_legacy_adapter(&None, None).unwrap();
+        assert_eq!(default.xml_dialect().to_string(), "2.20");
+        assert_eq!(default.version_axes().platform_build(), None);
+
+        let platform_only = Some(serde_json::json!({
+            "ibcmd-rs": { "platform-version": "8.5.1.1150" }
+        }));
+        let resolved = resolve_legacy_adapter(&platform_only, None).unwrap();
+        assert_eq!(resolved.xml_dialect().to_string(), "2.20");
+        assert_eq!(
+            resolved
+                .version_axes()
+                .platform_build()
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("8.5.1.1150")
+        );
+
+        for dialect in ["2.17", "2.99"] {
+            let settings = Some(serde_json::json!({
+                "ibcmd-rs": { "xml-version": dialect }
+            }));
+            let error = resolve_legacy_adapter(&settings, None).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("legacy MSSQL adapter does not support XML dialect")
+            );
+        }
+
+        let malformed_xml = Some(serde_json::json!({
+            "ibcmd-rs": { "xml-version": "not-a-version" }
+        }));
+        assert!(
+            resolve_legacy_adapter(&malformed_xml, None)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid XML dialect")
+        );
+
+        let malformed_platform = Some(serde_json::json!({
+            "ibcmd-rs": { "platform-version": "8.5.invalid" }
+        }));
+        assert!(
+            resolve_legacy_adapter(&malformed_platform, None)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid platform build")
         );
     }
 
@@ -1560,7 +1675,9 @@ mod tests {
             db_pwd: Some("secret".to_string()),
             password_source: Some("--db-pwd".to_string()),
             format: InfobaseConfigFormat::Xml,
-            source_version: InfobaseConfigSourceVersion::V2_21,
+            legacy_adapter: MssqlLegacyAdapter::from_legacy_selector(
+                InfobaseConfigSourceVersion::V2_21,
+            ),
         };
         let args = InfobaseConfigImportArgs {
             settings: None,

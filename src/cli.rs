@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+pub use crate::legacy_version::InfobaseConfigSourceVersion;
+
 #[derive(Debug, Parser)]
 #[command(name = "ibcmd-rs")]
 #[command(about = "Research-first replacement path for loading 1C configuration sources")]
@@ -216,25 +218,6 @@ pub enum InfobaseConfigFormat {
     /// Hierarchical 1C XML source tree compatible with ibcmd config export/import.
     #[value(name = "xml", alias = "ibcmd-xml", alias = "source-tree")]
     Xml,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum InfobaseConfigSourceVersion {
-    /// Source XML version used by 1C 8.3.27.
-    #[value(name = "2.20", alias = "20", alias = "8.3", alias = "8.3.27")]
-    V2_20,
-    /// Source XML version used by 1C 8.5.1.
-    #[value(name = "2.21", alias = "21", alias = "8.5", alias = "8.5.1")]
-    V2_21,
-}
-
-impl InfobaseConfigSourceVersion {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::V2_20 => "2.20",
-            Self::V2_21 => "2.21",
-        }
-    }
 }
 
 #[derive(Debug, Args)]

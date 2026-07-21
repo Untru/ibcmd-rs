@@ -952,8 +952,35 @@ pub(super) fn write_source_xml_file(
     xml: impl AsRef<[u8]>,
     source_version: InfobaseConfigSourceVersion,
 ) -> Result<()> {
-    let normalized = normalize_source_xml_version_bytes(xml.as_ref(), source_version);
+    let adapter = MssqlLegacyAdapter::from_legacy_selector(source_version);
+    let normalized =
+        normalize_legacy_source_asset_xml_version_bytes(xml.as_ref(), adapter.xml_dialect());
     fs::write(path, normalized).with_context(|| format!("failed to write {}", path.display()))
+}
+
+/// Preserves historical MSSQL source-asset output behavior only.
+///
+/// Replacing a root `version` attribute is not a dialect migration. Keeping
+/// this helper inside the legacy source-assets module prevents the future XCF
+/// adapter from treating the compatibility rewrite as a general conversion.
+pub(super) fn normalize_legacy_source_asset_xml_version_bytes(
+    bytes: &[u8],
+    xml_dialect: &ibcmd_core::version::XmlDialect,
+) -> Vec<u8> {
+    let from = match xml_dialect.to_string().as_str() {
+        "2.20" => "version=\"2.21\"",
+        "2.21" => "version=\"2.20\"",
+        _ => return bytes.to_vec(),
+    };
+    let to = format!("version=\"{xml_dialect}\"");
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
+    if text.contains(from) {
+        text.replace(from, &to).into_bytes()
+    } else {
+        bytes.to_vec()
+    }
 }
 
 pub(super) fn is_xml_path(path: &Path) -> bool {

@@ -1,9 +1,11 @@
+pub mod adapters;
 pub mod cli;
 pub mod compatibility;
 pub mod dump_sources;
 pub mod form_matrix;
 pub(crate) mod form_schema;
 pub mod infobase;
+pub mod legacy_version;
 pub mod module_blob;
 pub mod mssql;
 pub mod mssql_dump;

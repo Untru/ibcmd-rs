@@ -13,6 +13,7 @@ use quick_xml::{NsReader, Reader};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::adapters::mssql_legacy::MssqlLegacyAdapter;
 use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
 use crate::module_blob::{
     LocalizedString, ParsedFormBodyBlob, SpreadsheetNumberFormatHint, parse_form_body_blob,
@@ -241,6 +242,13 @@ struct MssqlDumpRowManifest {
 }
 
 pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
+    let legacy_adapter = MssqlLegacyAdapter::from_legacy_selector(args.source_version);
+    let source_version = legacy_adapter.legacy_selector().ok_or_else(|| {
+        anyhow!(
+            "legacy MSSQL dump does not support XML dialect {}",
+            legacy_adapter.xml_dialect()
+        )
+    })?;
     prepare_output_dir(&args.output_dir, args.overwrite)?;
 
     let mut table_names = vec!["Config"];
@@ -274,7 +282,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             args.inflate,
             args.extract_module_text,
             args.extract_metadata_xml,
-            args.source_version,
+            source_version,
         )?;
         reports.push(MssqlDumpedTableReport {
             table: table.to_string(),
@@ -321,25 +329,6 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
         timings: total_timings,
         tables: reports,
     })
-}
-
-fn normalize_source_xml_version_bytes(
-    bytes: &[u8],
-    source_version: InfobaseConfigSourceVersion,
-) -> Vec<u8> {
-    let from = match source_version {
-        InfobaseConfigSourceVersion::V2_20 => "version=\"2.21\"",
-        InfobaseConfigSourceVersion::V2_21 => "version=\"2.20\"",
-    };
-    let to = format!("version=\"{}\"", source_version.as_str());
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return bytes.to_vec();
-    };
-    if text.contains(from) {
-        text.replace(from, &to).into_bytes()
-    } else {
-        bytes.to_vec()
-    }
 }
 
 #[allow(dead_code)]

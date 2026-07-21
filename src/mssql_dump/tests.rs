@@ -27258,20 +27258,26 @@ fn extracts_common_module_xml_from_metadata_blob() {
 }
 
 #[test]
-fn normalizes_source_version_in_xml_bytes() {
+fn legacy_source_asset_bridge_normalizes_root_version_without_claiming_migration() {
+    let v21 = MssqlLegacyAdapter::from_legacy_selector(InfobaseConfigSourceVersion::V2_21);
     assert_eq!(
-        String::from_utf8(normalize_source_xml_version_bytes(
-            br#"<Object version="2.20"/>"#,
-            InfobaseConfigSourceVersion::V2_21
-        ))
+        String::from_utf8(
+            source_assets::normalize_legacy_source_asset_xml_version_bytes(
+                br#"<Object version="2.20"/>"#,
+                v21.xml_dialect(),
+            )
+        )
         .unwrap(),
         r#"<Object version="2.21"/>"#
     );
+    let v20 = MssqlLegacyAdapter::from_legacy_selector(InfobaseConfigSourceVersion::V2_20);
     assert_eq!(
-        String::from_utf8(normalize_source_xml_version_bytes(
-            br#"<Object version="2.21"/>"#,
-            InfobaseConfigSourceVersion::V2_20
-        ))
+        String::from_utf8(
+            source_assets::normalize_legacy_source_asset_xml_version_bytes(
+                br#"<Object version="2.21"/>"#,
+                v20.xml_dialect(),
+            )
+        )
         .unwrap(),
         r#"<Object version="2.20"/>"#
     );
