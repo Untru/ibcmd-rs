@@ -307,6 +307,7 @@ name = "ibcmd-xml"
 version = "0.1.0"
 dependencies = [
  "ibcmd-core",
+ "quick-xml",
 ]
 
 [[package]]
