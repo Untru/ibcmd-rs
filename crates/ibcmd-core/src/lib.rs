@@ -6,10 +6,13 @@
 
 #![forbid(unsafe_code)]
 
+pub mod adapter;
 pub mod artifact;
 pub mod asset;
+pub mod capability;
 pub mod detection;
 pub mod diagnostic;
+pub mod family;
 pub mod graph;
 pub mod identity;
 pub mod model;
