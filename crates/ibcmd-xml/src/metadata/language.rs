@@ -70,7 +70,7 @@ struct LanguageProjection {
     language_code: String,
 }
 
-fn profile_version(profile: &ProfileId) -> Option<&'static str> {
+pub(super) fn profile_version(profile: &ProfileId) -> Option<&'static str> {
     match profile.as_str() {
         PROFILE_220 => Some("2.20"),
         PROFILE_221 => Some("2.21"),
@@ -78,7 +78,7 @@ fn profile_version(profile: &ProfileId) -> Option<&'static str> {
     }
 }
 
-fn root_version(root: &XmlElement) -> Result<&str, MetadataDecodeError> {
+pub(super) fn root_version(root: &XmlElement) -> Result<&str, MetadataDecodeError> {
     let mut value = None;
     for attribute in root.attributes() {
         if let AttributeKind::Ordinary(name) = attribute.kind()
@@ -94,7 +94,7 @@ fn root_version(root: &XmlElement) -> Result<&str, MetadataDecodeError> {
     value.ok_or(MetadataDecodeError::Missing("root version"))
 }
 
-fn validate_decode_profile(
+pub(super) fn validate_decode_profile(
     document: &XmlDocument,
     profile: &ProfileId,
     path: &ObjectPath,
@@ -272,7 +272,7 @@ fn reject_unknown_attributes_recursive(element: &XmlElement) -> Result<(), Metad
     Ok(())
 }
 
-fn required_child<'a>(
+pub(super) fn required_child<'a>(
     parent: &'a XmlElement,
     local: &'static str,
     namespace: Option<&str>,
@@ -304,7 +304,7 @@ fn required_text_child(
     ))
 }
 
-fn copy_object_parts(object: &CanonicalObject) -> CanonicalObjectParts {
+pub(super) fn copy_object_parts(object: &CanonicalObject) -> CanonicalObjectParts {
     let mut parts = CanonicalObjectParts::new(
         object.identity().clone(),
         object.kind().clone(),
@@ -319,11 +319,11 @@ fn copy_object_parts(object: &CanonicalObject) -> CanonicalObjectParts {
     parts
 }
 
-fn canonical_text(value: &str) -> Result<CanonicalText, MetadataDecodeError> {
+pub(super) fn canonical_text(value: &str) -> Result<CanonicalText, MetadataDecodeError> {
     CanonicalText::new(value).map_err(|error| MetadataDecodeError::Core(error.to_string()))
 }
 
-fn canonical_field(
+pub(super) fn canonical_field(
     name: &str,
     value: CanonicalValue,
 ) -> Result<CanonicalField, MetadataDecodeError> {
@@ -364,7 +364,7 @@ fn encode_language(
         .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
 }
 
-fn decode_to_encode(error: MetadataDecodeError) -> MetadataEncodeError {
+pub(super) fn decode_to_encode(error: MetadataDecodeError) -> MetadataEncodeError {
     match error {
         MetadataDecodeError::UnsupportedProfile {
             object_path,
@@ -380,7 +380,7 @@ fn decode_to_encode(error: MetadataDecodeError) -> MetadataEncodeError {
     }
 }
 
-fn invalid_model(path: &ObjectPath, field: &'static str) -> MetadataEncodeError {
+pub(super) fn invalid_model(path: &ObjectPath, field: &'static str) -> MetadataEncodeError {
     MetadataEncodeError::InvalidModel {
         object_path: path.clone(),
         field,
@@ -720,7 +720,7 @@ fn namespace_prefix<'a>(root: &'a XmlElement, uri: &str) -> Option<&'a str> {
     })
 }
 
-fn set_unprefixed_attribute(
+pub(super) fn set_unprefixed_attribute(
     element: &XmlElement,
     local: &'static str,
     value: &str,

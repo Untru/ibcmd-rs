@@ -1,10 +1,11 @@
 //! Base-free native codecs for compact metadata families.
 //!
-//! The first implemented vertical slice is `Language`.  Other BOOT-003
-//! families remain explicit profile-selection failures until their complete
-//! native layouts and required UUID/reference inputs are represented.
+//! Implemented vertical slices are `Language` and
+//! `FunctionalOptionsParameter`. Other BOOT-003 families remain explicit
+//! profile-selection failures until their complete native layouts and
+//! required UUID/reference inputs are represented.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter, Write as _};
 use std::io::{self, Read, Write};
@@ -32,11 +33,15 @@ use super::super::graph::BootstrapGraph;
 
 const LANGUAGE_LAYOUT_KEY: &str = "bootstrap.metadata.language.layout";
 const LANGUAGE_LAYOUT: &str = "language-v1-crlf-no-bom";
+const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY: &str =
+    "bootstrap.metadata.functional_options_parameter.layout";
+const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT: &str = "functional-options-parameter-v1-crlf-no-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
+const DESIGN_TIME_REFERENCE_CLASS_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 
 const MAX_LANGUAGE_CODE_BYTES: usize = 256;
-const MAX_LANGUAGE_PLAIN_BYTES: usize = MAX_CANONICAL_RETAINED_BYTES + 4 * 1_048_576;
+const MAX_SIMPLE_METADATA_PLAIN_BYTES: usize = MAX_CANONICAL_RETAINED_BYTES + 4 * 1_048_576;
 const MAX_NATIVE_DEPTH: usize = 8;
 const MAX_NATIVE_NODES: usize = 100_000;
 
@@ -81,6 +86,7 @@ impl SimpleFamily {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SimpleLayout {
     LanguageV1,
+    FunctionalOptionsParameterV1,
 }
 
 /// Exact independent target coordinates and one family-specific layout.
@@ -129,6 +135,11 @@ impl SimpleMetadataProfile {
                 LANGUAGE_LAYOUT,
                 SimpleLayout::LanguageV1,
             ),
+            SimpleFamily::FunctionalOptionsParameter => (
+                FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY,
+                FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT,
+                SimpleLayout::FunctionalOptionsParameterV1,
+            ),
             _ => {
                 return Err(SimpleMetadataProfileError::FamilyNotImplemented {
                     profile: profile.id.clone(),
@@ -175,6 +186,17 @@ impl SimpleMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: SimpleFamily::Language,
             layout: SimpleLayout::LanguageV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn functional_options_parameter_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: SimpleFamily::FunctionalOptionsParameter,
+            layout: SimpleLayout::FunctionalOptionsParameterV1,
         }
     }
 }
@@ -269,6 +291,62 @@ pub struct LanguageNativeIr {
     pub language_code: String,
 }
 
+/// Complete base-free native IR for a `FunctionalOptionsParameter` row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FunctionalOptionsParameterNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<NativeLocalizedString>,
+    pub comment: String,
+    pub uses: Vec<ObjectUuid>,
+}
+
+impl FunctionalOptionsParameterNativeIr {
+    /// Renders XCF using caller-supplied readable names for every native UUID.
+    pub fn to_xml(
+        &self,
+        profile: &ProfileId,
+        references: &BTreeMap<ObjectUuid, String>,
+    ) -> Result<Vec<u8>, SimpleMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| SimpleMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        let mut resolved = Vec::with_capacity(self.uses.len());
+        for uuid in &self.uses {
+            resolved.push(
+                references
+                    .get(uuid)
+                    .cloned()
+                    .ok_or(SimpleMetadataBuildError::MissingReadableReference(*uuid))?,
+            );
+        }
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{version}\">\r\n\t<FunctionalOptionsParameter uuid=\"{}\">\r\n\t\t<Properties>\r\n",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonym_xml(&mut xml, &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        if resolved.is_empty() {
+            xml.push_str("\t\t\t<Use/>\r\n");
+        } else {
+            xml.push_str("\t\t\t<Use>\r\n");
+            for reference in resolved {
+                xml.push_str("\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">");
+                push_xml_text(&mut xml, &reference);
+                xml.push_str("</xr:Item>\r\n");
+            }
+            xml.push_str("\t\t\t</Use>\r\n");
+        }
+        xml.push_str("\t\t</Properties>\r\n\t</FunctionalOptionsParameter>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
+}
+
 impl LanguageNativeIr {
     /// Renders a minimal standalone XCF document for a caller-selected dialect.
     pub fn to_xml(&self, profile: &ProfileId) -> Result<Vec<u8>, SimpleMetadataBuildError> {
@@ -324,6 +402,7 @@ pub enum SimpleMetadataBuildError {
         reason: &'static str,
     },
     InvalidXmlProfile(ProfileId),
+    MissingReadableReference(ObjectUuid),
     Native(String),
     PlainPayloadTooLarge {
         maximum: usize,
@@ -370,23 +449,47 @@ impl Display for SimpleMetadataBuildError {
             Self::InvalidModel { object, reason } => {
                 write!(
                     formatter,
-                    "object {object} is not a compilable Language: {reason}"
+                    "object {object} is not compilable simple metadata: {reason}"
                 )
             }
             Self::InvalidXmlProfile(profile) => {
-                write!(formatter, "unsupported Language XML profile `{profile}`")
+                write!(
+                    formatter,
+                    "unsupported simple metadata XML profile `{profile}`"
+                )
             }
-            Self::Native(reason) => write!(formatter, "invalid native Language row: {reason}"),
+            Self::MissingReadableReference(uuid) => write!(
+                formatter,
+                "no readable XCF reference was supplied for native object UUID {uuid}"
+            ),
+            Self::Native(reason) => {
+                write!(formatter, "invalid native simple metadata row: {reason}")
+            }
             Self::PlainPayloadTooLarge { maximum, actual } => write!(
                 formatter,
-                "native Language plaintext has {actual} bytes, exceeding the {maximum}-byte bound"
+                "native simple metadata plaintext has {actual} bytes, exceeding the {maximum}-byte bound"
             ),
             Self::Deflate(source) => {
-                write!(formatter, "failed to raw-deflate Language row: {source}")
+                write!(
+                    formatter,
+                    "failed to raw-deflate simple metadata row: {source}"
+                )
             }
-            Self::Inflate(source) => write!(formatter, "failed to inflate Language row: {source}"),
-            Self::Storage(source) => write!(formatter, "invalid Language storage target: {source}"),
-            Self::Patch(source) => write!(formatter, "invalid Language storage payload: {source}"),
+            Self::Inflate(source) => {
+                write!(formatter, "failed to inflate simple metadata row: {source}")
+            }
+            Self::Storage(source) => {
+                write!(
+                    formatter,
+                    "invalid simple metadata storage target: {source}"
+                )
+            }
+            Self::Patch(source) => {
+                write!(
+                    formatter,
+                    "invalid simple metadata storage payload: {source}"
+                )
+            }
         }
     }
 }
@@ -465,6 +568,10 @@ pub fn compile_simple_metadata(
             let projection = project_language(validated, object)?;
             serialize_language(&projection)
         }
+        (SimpleFamily::FunctionalOptionsParameter, SimpleLayout::FunctionalOptionsParameterV1) => {
+            let projection = project_functional_options_parameter(validated, object)?;
+            serialize_functional_options_parameter(&projection)
+        }
         (family, _) => return Err(SimpleMetadataBuildError::UnsupportedFamily(family)),
     };
     let bytes = raw_deflate(&plaintext)?;
@@ -489,6 +596,20 @@ pub fn decode_language_blob(
     }
     let plain = inflate_bounded(blob)?;
     parse_language(&plain)
+}
+
+/// Strictly decodes a raw-DEFLATE `FunctionalOptionsParameter` primary row.
+pub fn decode_functional_options_parameter_blob(
+    blob: &[u8],
+    profile: &SimpleMetadataProfile,
+) -> Result<FunctionalOptionsParameterNativeIr, SimpleMetadataBuildError> {
+    if profile.family != SimpleFamily::FunctionalOptionsParameter
+        || profile.layout != SimpleLayout::FunctionalOptionsParameterV1
+    {
+        return Err(SimpleMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    let plain = inflate_bounded(blob)?;
+    parse_functional_options_parameter(&plain)
 }
 
 fn validate_coordinates(
@@ -607,6 +728,153 @@ fn project_language(
     })
 }
 
+fn project_functional_options_parameter(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<FunctionalOptionsParameterNativeIr, SimpleMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    match object.provenance().source_profile().as_str() {
+        "xml-2.20" | "xml-2.21" => {}
+        _ => {
+            return invalid_model(uuid, "source profile is not xml-2.20 or xml-2.21");
+        }
+    }
+    if object.owner().is_some() {
+        return invalid_model(uuid, "FunctionalOptionsParameter must be top-level");
+    }
+    if !object.references().is_empty()
+        || !object.generated_types().is_empty()
+        || !object.assets().is_empty()
+    {
+        return invalid_model(
+            uuid,
+            "FunctionalOptionsParameter cannot own canonical references, generated types, or assets",
+        );
+    }
+    if validated
+        .configuration()
+        .objects()
+        .iter()
+        .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(uuid, "FunctionalOptionsParameter cannot own child objects");
+    }
+    let expected = ["Name", "Synonym", "Comment", "Use"];
+    if object.properties().len() != expected.len()
+        || object
+            .properties()
+            .iter()
+            .zip(expected)
+            .any(|(field, expected)| field.name().as_str() != expected)
+    {
+        return invalid_model(uuid, "typed property schema is not exact");
+    }
+    let name = text_property(object, "Name")?.to_owned();
+    if name.is_empty() {
+        return invalid_model(uuid, "Name must not be empty");
+    }
+    let comment = text_property(object, "Comment")?.to_owned();
+    let synonyms = synonym_property(object, "Synonym")?;
+    let use_values =
+        property(object, "Use")?
+            .as_sequence()
+            .ok_or(SimpleMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "Use is not a sequence",
+            })?;
+    let references = readable_reference_index(validated, uuid)?;
+    let mut seen_names = BTreeSet::new();
+    let mut seen_uuids = BTreeSet::new();
+    let mut uses = Vec::with_capacity(use_values.len());
+    for value in use_values {
+        let readable = canonical_text(value, uuid)?;
+        if readable.is_empty() || !seen_names.insert(readable) {
+            return invalid_model(uuid, "Use contains an empty or duplicate reference");
+        }
+        let target =
+            references
+                .get(readable)
+                .copied()
+                .ok_or(SimpleMetadataBuildError::InvalidModel {
+                    object: uuid,
+                    reason: "Use contains an unresolved readable reference",
+                })?;
+        if !seen_uuids.insert(target) {
+            return invalid_model(uuid, "Use resolves more than once to the same object");
+        }
+        uses.push(target);
+    }
+    Ok(FunctionalOptionsParameterNativeIr {
+        uuid,
+        name,
+        synonyms,
+        comment,
+        uses,
+    })
+}
+
+fn readable_reference_index(
+    validated: &ValidatedConfiguration<'_>,
+    compiling: ObjectUuid,
+) -> Result<BTreeMap<String, ObjectUuid>, SimpleMetadataBuildError> {
+    let mut cache = BTreeMap::<usize, Option<String>>::new();
+    let mut visiting = BTreeSet::new();
+    let mut references = BTreeMap::new();
+    for index in 0..validated.configuration().objects().len() {
+        let Some(reference) =
+            readable_reference_for_object(validated, index, &mut cache, &mut visiting)
+        else {
+            continue;
+        };
+        let uuid = validated.configuration().objects()[index].identity().uuid();
+        if references.insert(reference, uuid).is_some() {
+            return invalid_model(compiling, "readable metadata reference is ambiguous");
+        }
+    }
+    Ok(references)
+}
+
+fn readable_reference_for_object(
+    validated: &ValidatedConfiguration<'_>,
+    index: usize,
+    cache: &mut BTreeMap<usize, Option<String>>,
+    visiting: &mut BTreeSet<usize>,
+) -> Option<String> {
+    if let Some(cached) = cache.get(&index) {
+        return cached.clone();
+    }
+    if !visiting.insert(index) {
+        return None;
+    }
+    let object = validated.configuration().objects().get(index)?;
+    let name = object
+        .properties()
+        .iter()
+        .find(|field| field.name().as_str() == "Name")
+        .and_then(|field| match field.value().kind() {
+            CanonicalValueKind::Text(value)
+                if !value.as_str().is_empty() && !value.as_str().contains('.') =>
+            {
+                Some(value.as_str())
+            }
+            _ => None,
+        });
+    let reference = name.and_then(|name| {
+        let own = format!("{}.{}", object.kind().as_str(), name);
+        match object.owner() {
+            None => Some(own),
+            Some(owner) => {
+                let owner_index = validated.graph().object_index_by_uuid(owner)?;
+                readable_reference_for_object(validated, owner_index, cache, visiting)
+                    .map(|parent| format!("{parent}.{own}"))
+            }
+        }
+    });
+    visiting.remove(&index);
+    cache.insert(index, reference.clone());
+    reference
+}
+
 fn invalid_model<T>(
     object: ObjectUuid,
     reason: &'static str,
@@ -693,26 +961,72 @@ fn canonical_text(
 
 fn serialize_language(value: &LanguageNativeIr) -> Vec<u8> {
     let mut plaintext = String::new();
-    plaintext.push_str("{1,\r\n{0,\r\n{3,\r\n{1,0,");
-    plaintext.push_str(&value.uuid.to_string());
-    plaintext.push_str("},");
-    push_1c_string(&mut plaintext, &value.name);
+    plaintext.push_str("{1,\r\n{0,\r\n");
+    push_native_header(
+        &mut plaintext,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
     plaintext.push(',');
-    write!(&mut plaintext, "{{{}", value.synonyms.len()).expect("writing to String cannot fail");
-    for synonym in &value.synonyms {
-        plaintext.push(',');
-        push_1c_string(&mut plaintext, &synonym.language);
-        plaintext.push(',');
-        push_1c_string(&mut plaintext, &synonym.content);
-    }
-    plaintext.push_str("},");
-    push_1c_string(&mut plaintext, &value.comment);
-    plaintext.push_str(",0,0,");
-    plaintext.push_str(NIL_UUID);
-    plaintext.push_str(",0},");
     push_1c_string(&mut plaintext, &value.language_code);
     plaintext.push_str("},0}");
     plaintext.into_bytes()
+}
+
+fn serialize_functional_options_parameter(value: &FunctionalOptionsParameterNativeIr) -> Vec<u8> {
+    let mut plaintext = String::new();
+    plaintext.push_str("{1,\r\n{0,\r\n");
+    push_native_header(
+        &mut plaintext,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plaintext.push_str(",\r\n");
+    if value.uses.is_empty() {
+        plaintext.push_str("{0}");
+    } else {
+        write!(&mut plaintext, "{{0,{}", value.uses.len()).expect("writing to String cannot fail");
+        for uuid in &value.uses {
+            plaintext.push_str(",\r\n{\"#\",");
+            plaintext.push_str(DESIGN_TIME_REFERENCE_CLASS_UUID);
+            plaintext.push_str(",\r\n{1,");
+            plaintext.push_str(&uuid.to_string());
+            plaintext.push_str("}\r\n}");
+        }
+        plaintext.push_str("\r\n}");
+    }
+    plaintext.push_str("\r\n},0}");
+    plaintext.into_bytes()
+}
+
+fn push_native_header(
+    output: &mut String,
+    uuid: ObjectUuid,
+    name: &str,
+    synonyms: &[NativeLocalizedString],
+    comment: &str,
+) {
+    output.push_str("{3,\r\n{1,0,");
+    output.push_str(&uuid.to_string());
+    output.push_str("},");
+    push_1c_string(output, name);
+    output.push(',');
+    write!(output, "{{{}", synonyms.len()).expect("writing to String cannot fail");
+    for synonym in synonyms {
+        output.push(',');
+        push_1c_string(output, &synonym.language);
+        output.push(',');
+        push_1c_string(output, &synonym.content);
+    }
+    output.push_str("},");
+    push_1c_string(output, comment);
+    output.push_str(",0,0,");
+    output.push_str(NIL_UUID);
+    output.push_str(",0}");
 }
 
 fn push_1c_string(output: &mut String, value: &str) {
@@ -727,9 +1041,9 @@ fn push_1c_string(output: &mut String, value: &str) {
 }
 
 fn raw_deflate(plaintext: &[u8]) -> Result<Vec<u8>, SimpleMetadataBuildError> {
-    if plaintext.len() > MAX_LANGUAGE_PLAIN_BYTES {
+    if plaintext.len() > MAX_SIMPLE_METADATA_PLAIN_BYTES {
         return Err(SimpleMetadataBuildError::PlainPayloadTooLarge {
-            maximum: MAX_LANGUAGE_PLAIN_BYTES,
+            maximum: MAX_SIMPLE_METADATA_PLAIN_BYTES,
             actual: plaintext.len(),
         });
     }
@@ -741,17 +1055,17 @@ fn raw_deflate(plaintext: &[u8]) -> Result<Vec<u8>, SimpleMetadataBuildError> {
 }
 
 fn inflate_bounded(blob: &[u8]) -> Result<Vec<u8>, SimpleMetadataBuildError> {
-    let limit = MAX_LANGUAGE_PLAIN_BYTES
+    let limit = MAX_SIMPLE_METADATA_PLAIN_BYTES
         .checked_add(1)
-        .expect("Language plaintext bound is below usize::MAX");
+        .expect("simple metadata plaintext bound is below usize::MAX");
     let mut decoder = DeflateDecoder::new(blob).take(limit as u64);
     let mut plain = Vec::new();
     decoder
         .read_to_end(&mut plain)
         .map_err(SimpleMetadataBuildError::Inflate)?;
-    if plain.len() > MAX_LANGUAGE_PLAIN_BYTES {
+    if plain.len() > MAX_SIMPLE_METADATA_PLAIN_BYTES {
         return Err(SimpleMetadataBuildError::PlainPayloadTooLarge {
-            maximum: MAX_LANGUAGE_PLAIN_BYTES,
+            maximum: MAX_SIMPLE_METADATA_PLAIN_BYTES,
             actual: plain.len(),
         });
     }
@@ -897,16 +1211,55 @@ fn parse_language(plain: &[u8]) -> Result<LanguageNativeIr, SimpleMetadataBuildE
     exact_token(&root[2], "0", "root tail")?;
     let object = exact_list(&root[1], 3, "Language object")?;
     exact_token(&object[0], "0", "Language discriminator")?;
-    let header = exact_list(&object[1], 9, "metadata header")?;
+    let header = parse_native_header(&object[1])?;
+    let language_code = text(&object[2], "LanguageCode")?.to_owned();
+    validate_native_text(&language_code, "LanguageCode")?;
+    if language_code.is_empty() || language_code.len() > MAX_LANGUAGE_CODE_BYTES {
+        return Err(native("LanguageCode is empty or exceeds its bound"));
+    }
+    Ok(LanguageNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        language_code,
+    })
+}
+
+fn parse_functional_options_parameter(
+    plain: &[u8],
+) -> Result<FunctionalOptionsParameterNativeIr, SimpleMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 3, "root")?;
+    exact_token(&root[0], "1", "root discriminator")?;
+    exact_token(&root[2], "0", "root tail")?;
+    let object = exact_list(&root[1], 3, "FunctionalOptionsParameter object")?;
+    exact_token(&object[0], "0", "FunctionalOptionsParameter discriminator")?;
+    let header = parse_native_header(&object[1])?;
+    let uses = parse_native_use_references(&object[2])?;
+    Ok(FunctionalOptionsParameterNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        uses,
+    })
+}
+
+struct NativeHeaderIr {
+    uuid: ObjectUuid,
+    name: String,
+    synonyms: Vec<NativeLocalizedString>,
+    comment: String,
+}
+
+fn parse_native_header(value: &NativeValue) -> Result<NativeHeaderIr, SimpleMetadataBuildError> {
+    let header = exact_list(value, 9, "metadata header")?;
     exact_token(&header[0], "3", "metadata header discriminator")?;
     let identity = exact_list(&header[1], 3, "metadata identity")?;
     exact_token(&identity[0], "1", "identity discriminator")?;
     exact_token(&identity[1], "0", "identity tail")?;
-    let uuid_text = token(&identity[2], "object UUID")?;
-    let uuid = ObjectUuid::parse(uuid_text).map_err(|_| native("invalid object UUID"))?;
-    if uuid.to_string() != uuid_text {
-        return Err(native("object UUID is not canonical lowercase text"));
-    }
+    let uuid = canonical_uuid_token(&identity[2], "object UUID")?;
     let name = text(&header[2], "Name")?.to_owned();
     let synonyms = parse_synonyms(&header[3])?;
     let comment = text(&header[4], "Comment")?.to_owned();
@@ -914,23 +1267,72 @@ fn parse_language(plain: &[u8]) -> Result<LanguageNativeIr, SimpleMetadataBuildE
     exact_token(&header[6], "0", "header flag 2")?;
     exact_token(&header[7], NIL_UUID, "header nil UUID")?;
     exact_token(&header[8], "0", "header tail")?;
-    let language_code = text(&object[2], "LanguageCode")?.to_owned();
     validate_native_text(&name, "Name")?;
     validate_native_text(&comment, "Comment")?;
-    validate_native_text(&language_code, "LanguageCode")?;
     if name.is_empty() {
         return Err(native("Name must not be empty"));
     }
-    if language_code.is_empty() || language_code.len() > MAX_LANGUAGE_CODE_BYTES {
-        return Err(native("LanguageCode is empty or exceeds its bound"));
-    }
-    Ok(LanguageNativeIr {
+    Ok(NativeHeaderIr {
         uuid,
         name,
         synonyms,
         comment,
-        language_code,
     })
+}
+
+fn parse_native_use_references(
+    value: &NativeValue,
+) -> Result<Vec<ObjectUuid>, SimpleMetadataBuildError> {
+    let fields = list(value, "Use")?;
+    if fields.len() == 1 {
+        exact_token(&fields[0], "0", "empty Use discriminator")?;
+        return Ok(Vec::new());
+    }
+    exact_token(&fields[0], "0", "Use discriminator")?;
+    let count_text = token(&fields[1], "Use count")?;
+    let count = count_text
+        .parse::<usize>()
+        .ok()
+        .filter(|count| count.to_string() == count_text)
+        .ok_or_else(|| native("Use count is not canonical decimal"))?;
+    if count > MAX_CANONICAL_COLLECTION_ITEMS || fields.len() != count + 2 {
+        return Err(native(
+            "Use count is out of bounds or does not match fields",
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    let mut uses = Vec::with_capacity(count);
+    for value in &fields[2..] {
+        let reference = exact_list(value, 3, "Use reference")?;
+        if text(&reference[0], "Use reference marker")? != "#" {
+            return Err(native("Use reference marker is not #"));
+        }
+        exact_token(
+            &reference[1],
+            DESIGN_TIME_REFERENCE_CLASS_UUID,
+            "Use reference class",
+        )?;
+        let target = exact_list(&reference[2], 2, "Use reference target")?;
+        exact_token(&target[0], "1", "Use reference target discriminator")?;
+        let uuid = canonical_uuid_token(&target[1], "Use target UUID")?;
+        if uuid.to_string() == NIL_UUID || !unique.insert(uuid) {
+            return Err(native("Use target UUID is nil or duplicated"));
+        }
+        uses.push(uuid);
+    }
+    Ok(uses)
+}
+
+fn canonical_uuid_token(
+    value: &NativeValue,
+    field: &'static str,
+) -> Result<ObjectUuid, SimpleMetadataBuildError> {
+    let value = token(value, field)?;
+    let uuid = ObjectUuid::parse(value).map_err(|_| native(&format!("invalid {field}")))?;
+    if uuid.to_string() != value {
+        return Err(native(&format!("{field} is not canonical lowercase text")));
+    }
+    Ok(uuid)
 }
 
 fn parse_synonyms(
@@ -1064,6 +1466,21 @@ fn write_xml_text_element(output: &mut String, indent: &str, name: &str, value: 
     output.push_str(">\r\n");
 }
 
+fn write_synonym_xml(output: &mut String, synonyms: &[NativeLocalizedString]) {
+    if synonyms.is_empty() {
+        output.push_str("\t\t\t<Synonym/>\r\n");
+        return;
+    }
+    output.push_str("\t\t\t<Synonym>\r\n");
+    for synonym in synonyms {
+        output.push_str("\t\t\t\t<v8:item>\r\n");
+        write_xml_text_element(output, "\t\t\t\t\t", "v8:lang", &synonym.language);
+        write_xml_text_element(output, "\t\t\t\t\t", "v8:content", &synonym.content);
+        output.push_str("\t\t\t\t</v8:item>\r\n");
+    }
+    output.push_str("\t\t\t</Synonym>\r\n");
+}
+
 fn push_xml_text(output: &mut String, value: &str) {
     for character in value.chars() {
         match character {
@@ -1088,6 +1505,7 @@ mod tests {
     use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
     use ibcmd_core::storage::StoragePatchOutcome;
     use ibcmd_core::validate::validate_configuration;
+    use ibcmd_core::value::{CanonicalField, CanonicalText, CanonicalValue};
     use ibcmd_core::version::XmlDialect;
     use ibcmd_xml::{XmlReader, bundled_metadata_registry};
 
@@ -1098,6 +1516,8 @@ mod tests {
 
     const UUID: &str = "11111111-1111-4111-8111-111111111111";
     const CONFIGURATION_UUID: &str = "22222222-2222-4222-8222-222222222222";
+    const FUNCTIONAL_OPTIONS_PARAMETER_UUID: &str = "33333333-3333-4333-8333-333333333333";
+    const CATALOG_UUID: &str = "44444444-4444-4444-8444-444444444444";
 
     fn xml(version: &str) -> Vec<u8> {
         format!(
@@ -1171,6 +1591,105 @@ mod tests {
         )
     }
 
+    fn functional_options_parameter_xml(version: &str, reference: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{version}\">\r\n\
+\t<FunctionalOptionsParameter uuid=\"{FUNCTIONAL_OPTIONS_PARAMETER_UUID}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>UseFeatureFor</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>en</v8:lang><v8:content>Use feature for</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Use><xr:Item xsi:type=\"xr:MDObjectRef\">{reference}</xr:Item></Use>\r\n\
+\t\t</Properties>\r\n\
+\t</FunctionalOptionsParameter>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn simple_object(version: &str, uuid: &str, kind: &str, name: &str) -> CanonicalObject {
+        let path = ObjectPath::new(vec![
+            PathSegment::name(&format!(
+                "{}-{}",
+                kind.to_ascii_lowercase(),
+                name.to_ascii_lowercase()
+            ))
+            .unwrap(),
+        ])
+        .unwrap();
+        let provenance = SourceProvenance::new(
+            ProfileId::parse(&format!("xml-{version}")).unwrap(),
+            CanonicalAnchor::new(path.clone(), PropertyPath::root()),
+        );
+        let mut parts = CanonicalObjectParts::new(
+            LogicalIdentity::new(ObjectUuid::parse(uuid).unwrap(), path),
+            MetadataKind::new(kind).unwrap(),
+            provenance,
+        );
+        parts.properties.push(
+            CanonicalField::named(
+                "Name",
+                CanonicalValue::text(CanonicalText::new(name).unwrap()),
+            )
+            .unwrap(),
+        );
+        CanonicalObject::new(parts).unwrap()
+    }
+
+    fn functional_options_parameter_configuration(version: &str) -> CanonicalConfiguration {
+        functional_options_parameter_configuration_with_reference(version, "Catalog.Products")
+    }
+
+    fn functional_options_parameter_configuration_with_reference(
+        version: &str,
+        reference: &str,
+    ) -> CanonicalConfiguration {
+        let document =
+            XmlReader::from_slice(&functional_options_parameter_xml(version, reference)).unwrap();
+        let parameter = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("FunctionalOptionsParameter").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        CanonicalConfiguration::new(vec![
+            simple_object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            simple_object(version, CATALOG_UUID, "Catalog", "Products"),
+            parameter,
+        ])
+        .unwrap()
+    }
+
+    fn functional_options_parameter_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, SimpleMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [
+                CONFIGURATION_UUID,
+                CATALOG_UUID,
+                FUNCTIONAL_OPTIONS_PARAMETER_UUID,
+            ]
+            .into_iter()
+            .map(|uuid| {
+                ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+            })
+            .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            SimpleMetadataProfile::functional_options_parameter_fixture("platform-test"),
+        )
+    }
+
     #[test]
     fn language_xml_to_blob_to_ir_to_xml_is_base_free_for_both_dialects() {
         for version in ["2.20", "2.21"] {
@@ -1238,7 +1757,10 @@ mod tests {
                 "status": "experimental",
                 "platform_build": "8.3.27.1989",
                 "storage_profile": "{SUPPORTED_STORAGE_PROFILE}",
-                "constants": {{"{LANGUAGE_LAYOUT_KEY}": "{LANGUAGE_LAYOUT}"}}
+                "constants": {{
+                    "{LANGUAGE_LAYOUT_KEY}": "{LANGUAGE_LAYOUT}",
+                    "{FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY}": "{FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT}"
+                }}
             }}"#
         );
         let source =
@@ -1257,6 +1779,97 @@ mod tests {
             SimpleMetadataProfile::from_effective_for_family(effective, SimpleFamily::Constant),
             Err(SimpleMetadataProfileError::FamilyNotImplemented {
                 family: SimpleFamily::Constant,
+                ..
+            })
+        ));
+        assert_eq!(
+            SimpleMetadataProfile::from_effective_for_family(
+                effective,
+                SimpleFamily::FunctionalOptionsParameter
+            )
+            .unwrap()
+            .family(),
+            SimpleFamily::FunctionalOptionsParameter
+        );
+    }
+
+    #[test]
+    fn functional_options_parameter_roundtrips_references_without_a_base() {
+        for version in ["2.20", "2.21"] {
+            let configuration = functional_options_parameter_configuration(version);
+            let validated = validate_configuration(&configuration).unwrap();
+            let (graph, profile) = functional_options_parameter_graph(&validated);
+            let uuid = ObjectUuid::parse(FUNCTIONAL_OPTIONS_PARAMETER_UUID).unwrap();
+            let entry = compile_simple_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                .unwrap();
+            assert_eq!(
+                entry.target().key().as_str(),
+                FUNCTIONAL_OPTIONS_PARAMETER_UUID
+            );
+            let payload = entry.outcome().compiled_payload().unwrap();
+            let ir = decode_functional_options_parameter_blob(payload.bytes(), &profile).unwrap();
+            assert_eq!(ir.uses, [ObjectUuid::parse(CATALOG_UUID).unwrap()]);
+            let references = BTreeMap::from([(
+                ObjectUuid::parse(CATALOG_UUID).unwrap(),
+                "Catalog.Products".to_owned(),
+            )]);
+            let xml = ir
+                .to_xml(
+                    &ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    &references,
+                )
+                .unwrap();
+            let document = XmlReader::from_slice(&xml).unwrap();
+            bundled_metadata_registry()
+                .decode(
+                    &FamilyId::parse("FunctionalOptionsParameter").unwrap(),
+                    &document,
+                    ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn functional_options_parameter_plaintext_matches_evidenced_golden() {
+        let configuration = functional_options_parameter_configuration("2.20");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = functional_options_parameter_graph(&validated);
+        let entry = compile_simple_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(FUNCTIONAL_OPTIONS_PARAMETER_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert_eq!(
+            plain,
+            format!(
+                "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{FUNCTIONAL_OPTIONS_PARAMETER_UUID}}},\"UseFeatureFor\",{{1,\"en\",\"Use feature for\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{0,1,\r\n{{\"#\",{DESIGN_TIME_REFERENCE_CLASS_UUID},\r\n{{1,{CATALOG_UUID}}}\r\n}}\r\n}}\r\n}},0}}"
+            )
+            .as_bytes()
+        );
+    }
+
+    #[test]
+    fn functional_options_parameter_does_not_guess_unresolved_references() {
+        let configuration =
+            functional_options_parameter_configuration_with_reference("2.20", "Catalog.Missing");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = functional_options_parameter_graph(&validated);
+        assert!(matches!(
+            compile_simple_metadata(
+                &validated,
+                &graph,
+                ObjectUuid::parse(FUNCTIONAL_OPTIONS_PARAMETER_UUID).unwrap(),
+                &axes("2.20"),
+                &profile,
+            ),
+            Err(SimpleMetadataBuildError::InvalidModel {
+                reason: "Use contains an unresolved readable reference",
                 ..
             })
         ));
@@ -1292,6 +1905,31 @@ mod tests {
         .unwrap();
         assert!(matches!(
             decode_language_blob(&malformed, &profile),
+            Err(SimpleMetadataBuildError::Native(_))
+        ));
+    }
+
+    #[test]
+    fn functional_options_parameter_rejects_an_unknown_native_reference_class() {
+        let configuration = functional_options_parameter_configuration("2.20");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = functional_options_parameter_graph(&validated);
+        let entry = compile_simple_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(FUNCTIONAL_OPTIONS_PARAMETER_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        let malformed = String::from_utf8(plain).unwrap().replace(
+            DESIGN_TIME_REFERENCE_CLASS_UUID,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        );
+        let malformed = raw_deflate(malformed.as_bytes()).unwrap();
+        assert!(matches!(
+            decode_functional_options_parameter_blob(&malformed, &profile),
             Err(SimpleMetadataBuildError::Native(_))
         ));
     }

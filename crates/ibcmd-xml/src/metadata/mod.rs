@@ -3,6 +3,7 @@
 mod common;
 mod constant;
 mod fallback;
+mod functional_options_parameter;
 mod language;
 mod registry;
 
@@ -11,6 +12,7 @@ pub use common::{
     decode_metadata_envelope_with_dialect,
 };
 pub use constant::{bundled_metadata_registry, register_constant_codec};
+pub use functional_options_parameter::register_functional_options_parameter_codec;
 pub use language::register_language_codec;
 pub use registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
