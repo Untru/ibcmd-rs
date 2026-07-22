@@ -412,7 +412,7 @@
 
 ### MIG-001 — Определить migration steps и compatibility analyzer
 
-- **Статус:** `[ ]`; **зависимости:** CORE-005, CORE-008
+- **Статус:** `[x]`; **зависимости:** CORE-005, CORE-008
 - **Файлы:** создать `crates/ibcmd-core/src/migration/step.rs`, `compatibility.rs`
 - **Действия:** source/target constraints, analyze/apply split, touched capabilities, possible losses.
 - **Проверка:** каждый incompatible path получает stable diagnostic; analyze не мутирует модель.
