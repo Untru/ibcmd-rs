@@ -1,6 +1,6 @@
 # HTTPService native layout evidence for 8.3.27.1989
 
-Status: implemented as the `http-service-v1-crlf-no-bom` experimental
+Status: implemented as the `http-service-v1-crlf-utf8-bom` experimental
 platform layout. The metadata codec is standalone and does not require an
 installed 1C platform, EDT, JVM, or database access.
 
@@ -22,6 +22,9 @@ installed 1C platform, EDT, JVM, or database access.
 The implementation reads these retained artifacts only as evidence. It does
 not start 1C or modify Config/ConfigSave.
 
+The inflated native plaintext begins with the required UTF-8 BOM and then uses
+CRLF line endings.
+
 ## Exact native grammar
 
 The primary metadata row has exactly four fields:
@@ -38,15 +41,16 @@ reversible session mapping is `DontUse -> 0`, `Use -> 1`, and `AutoUse -> 2`.
 `ec6896c2-9b28-42d8-9140-48491146b8ea`, an exact count, and a list. Each entry
 contains a three-field URLTemplate object, marker `1`, and its method
 collection. The URLTemplate object is discriminator `0`, Template text, and a
-common metadata header.
+common metadata header. Entries follow `UUID,count` directly; there is no
+additional collection wrapper.
 
 Each method collection has fixed UUID
 `21c96ea8-c8fc-424a-a0b4-e1ffb2fa1a73`, an exact count, and a list. A method
 entry contains an exact four-field object plus tail marker `0`: discriminator
 `0`, Handler text, method code, and common metadata header. Retained reversible
 method mappings are `DELETE -> 2`, `GET -> 3`, `POST -> 11`, and `PUT -> 14`.
-Unknown codes, UUIDs, counts, markers, reordered fields, and extra fields fail
-closed.
+Method entries likewise follow `UUID,count` directly. Unknown codes, UUIDs,
+counts, markers, reordered fields, extra wrappers, and extra fields fail closed.
 
 ## Version boundary
 

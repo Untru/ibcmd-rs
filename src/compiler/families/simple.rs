@@ -31,19 +31,20 @@ use super::super::CompileAxes;
 use super::super::graph::BootstrapGraph;
 
 const LANGUAGE_LAYOUT_KEY: &str = "bootstrap.metadata.language.layout";
-const LANGUAGE_LAYOUT: &str = "language-v1-crlf-no-bom";
+const LANGUAGE_LAYOUT: &str = "language-v1-crlf-utf8-bom";
 const FUNCTIONAL_OPTION_LAYOUT_KEY: &str = "bootstrap.metadata.functional_option.layout";
-const FUNCTIONAL_OPTION_LAYOUT: &str = "functional-option-v1-crlf-no-bom";
+const FUNCTIONAL_OPTION_LAYOUT: &str = "functional-option-v1-crlf-utf8-bom";
 const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY: &str =
     "bootstrap.metadata.functional_options_parameter.layout";
-const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT: &str = "functional-options-parameter-v1-crlf-no-bom";
+const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT: &str = "functional-options-parameter-v1-crlf-utf8-bom";
 const SESSION_PARAMETER_LAYOUT_KEY: &str = "bootstrap.metadata.session_parameter.layout";
-const SESSION_PARAMETER_LAYOUT: &str = "session-parameter-v1-crlf-no-bom";
+const SESSION_PARAMETER_LAYOUT: &str = "session-parameter-v1-crlf-utf8-bom";
 const DEFINED_TYPE_LAYOUT_KEY: &str = "bootstrap.metadata.defined_type.layout";
-const DEFINED_TYPE_LAYOUT: &str = "defined-type-v1-crlf-no-bom";
+const DEFINED_TYPE_LAYOUT: &str = "defined-type-v1-crlf-utf8-bom";
 const CONSTANT_LAYOUT_KEY: &str = "bootstrap.metadata.constant.layout";
-const CONSTANT_LAYOUT: &str = "constant-v1-crlf-no-bom";
+const CONSTANT_LAYOUT: &str = "constant-v1-crlf-utf8-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
+const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const DESIGN_TIME_REFERENCE_CLASS_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 const FUNCTIONAL_OPTION_CONTENT_CLASS_UUID: &str = "3ea29ea5-66f6-4e3b-8595-d8940db766a2";
@@ -2144,7 +2145,7 @@ fn serialize_constant(value: &ConstantNativeIr) -> Vec<u8> {
     plaintext.push(',');
     plaintext.push_str(&value.value_key_value_id.to_string());
     plaintext.push_str(",0,0},0}");
-    plaintext.into_bytes()
+    native_plaintext(plaintext)
 }
 
 fn push_constant_type_pattern(output: &mut String, value: &ConstantTypeNativeIr) {
@@ -2190,7 +2191,7 @@ fn serialize_language(value: &LanguageNativeIr) -> Vec<u8> {
     plaintext.push(',');
     push_1c_string(&mut plaintext, &value.language_code);
     plaintext.push_str("},0}");
-    plaintext.into_bytes()
+    native_plaintext(plaintext)
 }
 
 fn serialize_session_parameter(value: &SessionParameterNativeIr) -> Vec<u8> {
@@ -2234,7 +2235,7 @@ fn serialize_session_parameter(value: &SessionParameterNativeIr) -> Vec<u8> {
         }
     }
     plaintext.push_str("\r\n}\r\n}\r\n},0}");
-    plaintext.into_bytes()
+    native_plaintext(plaintext)
 }
 
 fn serialize_defined_type(value: &DefinedTypeNativeIr) -> Vec<u8> {
@@ -2254,7 +2255,7 @@ fn serialize_defined_type(value: &DefinedTypeNativeIr) -> Vec<u8> {
     plaintext.push_str(",\r\n");
     push_native_type_pattern(&mut plaintext, &value.types);
     plaintext.push_str("\r\n},0}");
-    plaintext.into_bytes()
+    native_plaintext(plaintext)
 }
 
 fn push_native_type_pattern(output: &mut String, types: &[SessionParameterTypeNativeIr]) {
@@ -2325,7 +2326,7 @@ fn serialize_functional_option(value: &FunctionalOptionNativeIr) -> Vec<u8> {
     plaintext.push(',');
     plaintext.push(if value.privileged_get_mode { '1' } else { '0' });
     plaintext.push_str("},0}");
-    plaintext.into_bytes()
+    native_plaintext(plaintext)
 }
 
 fn serialize_functional_options_parameter(value: &FunctionalOptionsParameterNativeIr) -> Vec<u8> {
@@ -2350,7 +2351,14 @@ fn serialize_functional_options_parameter(value: &FunctionalOptionsParameterNati
         plaintext.push_str("\r\n}");
     }
     plaintext.push_str("\r\n},0}");
-    plaintext.into_bytes()
+    native_plaintext(plaintext)
+}
+
+fn native_plaintext(plaintext: String) -> Vec<u8> {
+    let mut output = Vec::with_capacity(UTF8_BOM.len() + plaintext.len());
+    output.extend_from_slice(UTF8_BOM);
+    output.extend_from_slice(plaintext.as_bytes());
+    output
 }
 
 fn push_design_time_reference(output: &mut String, uuid: ObjectUuid) {
@@ -2479,9 +2487,10 @@ impl<'a> NativeParser<'a> {
     }
 
     fn parse(mut self) -> Result<NativeValue, SimpleMetadataBuildError> {
-        if self.input.starts_with(b"\xef\xbb\xbf") {
-            return Err(native("unexpected BOM for simple metadata no-BOM layout"));
+        if !self.input.starts_with(UTF8_BOM) {
+            return Err(native("missing UTF-8 BOM for simple metadata layout"));
         }
+        self.offset = UTF8_BOM.len();
         let value = self.value(0)?;
         self.whitespace();
         if self.offset != self.input.len() {
@@ -4163,8 +4172,9 @@ mod tests {
         )
         .unwrap();
         let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
         assert_eq!(
-            plain,
+            &plain[UTF8_BOM.len()..],
             format!(
                 "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{UUID}}},\"English & More\",{{1,\"en\",\"English \"\"main\"\"\"}},\"Primary\",0,0,{NIL_UUID},0}},\"en\"}},0}}"
             )
@@ -4373,7 +4383,8 @@ mod tests {
         let expected = format!(
             "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{COMPILED_CONSTANT_UUID}}},\"АдресаСерверовМетокВремени\",\r\n{{1,\"ru\",\"Адреса серверов меток времени\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"S\"}}\r\n}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,{NIL_UUID},2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},{CONSTANT_MANAGER_TYPE_ID},{CONSTANT_MANAGER_VALUE_ID},{CONSTANT_VALUE_MANAGER_TYPE_ID},{CONSTANT_VALUE_MANAGER_VALUE_ID},1,1,\r\n{{0}},\r\n{{0}},{NIL_UUID},0,0,{CONSTANT_VALUE_KEY_TYPE_ID},{CONSTANT_VALUE_KEY_VALUE_ID},0,0}},0}}"
         );
-        assert_eq!(plain, expected.as_bytes());
+        assert!(plain.starts_with(UTF8_BOM));
+        assert_eq!(&plain[UTF8_BOM.len()..], expected.as_bytes());
         let ir = parse_constant(&plain).unwrap();
         assert_eq!(ir.value_type, ConstantTypeNativeIr::String { length: 0 });
     }
@@ -4441,8 +4452,9 @@ mod tests {
             assert_eq!(first, second);
             let plain =
                 inflate_bounded(first.outcome().compiled_payload().unwrap().bytes()).unwrap();
+            assert!(plain.starts_with(UTF8_BOM));
             assert_eq!(
-                plain,
+                &plain[UTF8_BOM.len()..],
                 format!(
                     "{{1,\r\n{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{SESSION_PARAMETER_UUID}}},\"AuthorizedUser\",{{1,\"en\",\"Authorized user\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"#\",{FIRST_CATALOG_REF_TYPE_ID}}},\r\n{{\"#\",{SECOND_CATALOG_REF_TYPE_ID}}}\r\n}}\r\n}}\r\n}},0}}"
                 )
@@ -4555,6 +4567,7 @@ mod tests {
         let observed = format!(
             "{{1,\r\n{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,5efc4bc4-b711-4620-8d2e-9d947c6cc141}},\"АвторизованныйПользователь\",\r\n{{1,\"ru\",\"Авторизованный пользователь\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"#\",{FIRST_CATALOG_REF_TYPE_ID}}},\r\n{{\"#\",{SECOND_CATALOG_REF_TYPE_ID}}}\r\n}}\r\n}}\r\n}},0}}"
         );
+        let observed = format!("\u{feff}{observed}");
         let ir = parse_session_parameter(observed.as_bytes()).unwrap();
         assert_eq!(ir.types.len(), 2);
         let unknown = observed.replace(
@@ -4588,8 +4601,9 @@ mod tests {
             assert_eq!(first, second);
             let plain =
                 inflate_bounded(first.outcome().compiled_payload().unwrap().bytes()).unwrap();
+            assert!(plain.starts_with(UTF8_BOM));
             assert_eq!(
-                plain,
+                &plain[UTF8_BOM.len()..],
                 format!(
                     "{{1,\r\n{{0,{DEFINED_TYPE_TYPE_ID},{DEFINED_TYPE_VALUE_ID},\r\n{{3,\r\n{{1,0,{DEFINED_TYPE_UUID}}},\"БезопасныйРежим\",{{1,\"ru\",\"Безопасный режим\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"B\"}},\r\n{{\"S\",120,1}}\r\n}}\r\n}},0}}"
                 )
@@ -4691,6 +4705,7 @@ mod tests {
         let observed = format!(
             "{{1,\r\n{{0,{DEFINED_TYPE_TYPE_ID},{DEFINED_TYPE_VALUE_ID},\r\n{{3,\r\n{{1,0,{DEFINED_TYPE_UUID}}},\"БезопасныйРежим\",\r\n{{1,\"ru\",\"Безопасный режим\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"B\"}},\r\n{{\"S\",120,1}}\r\n}}\r\n}},0}}"
         );
+        let observed = format!("\u{feff}{observed}");
         let ir = parse_defined_type(observed.as_bytes()).unwrap();
         assert_eq!(ir.types.len(), 2);
         let malformed = observed.replacen(",\r\n{\"Pattern\"", ",future,\r\n{\"Pattern\"", 1);
@@ -4768,8 +4783,9 @@ mod tests {
         )
         .unwrap();
         let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
         assert_eq!(
-            plain,
+            &plain[UTF8_BOM.len()..],
             format!(
                 "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{FUNCTIONAL_OPTION_UUID}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"\",0,0,{NIL_UUID},0}},{CONSTANT_UUID},\r\n{{0,1,\r\n{{\"#\",{FUNCTIONAL_OPTION_CONTENT_CLASS_UUID},\r\n{{0,\r\n{{\"#\",{DESIGN_TIME_REFERENCE_CLASS_UUID},\r\n{{1,{CATALOG_UUID}}}\r\n}}\r\n}}\r\n}}\r\n}},1}},0}}"
             )
@@ -4803,6 +4819,7 @@ mod tests {
         let plain = format!(
             "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,46e0522b-b88b-43b2-9067-a5359e90994b}},\"АктуальнаяДатаОбновленияПовторноИспользуемыхЗначенийМРО\",\r\n{{1,\"ru\",\"Актуальная дата обновления повторно используемых значений МРО\"}},\"\",0,0,{NIL_UUID},0}},94e08dcf-3885-4a73-82ab-cb291f1cf95f,\r\n{{0,0}},1}},0}}"
         );
+        let plain = format!("\u{feff}{plain}");
         let ir = parse_functional_option(plain.as_bytes()).unwrap();
         assert_eq!(
             ir.uuid,
@@ -4868,8 +4885,9 @@ mod tests {
         )
         .unwrap();
         let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
         assert_eq!(
-            plain,
+            &plain[UTF8_BOM.len()..],
             format!(
                 "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{FUNCTIONAL_OPTIONS_PARAMETER_UUID}}},\"UseFeatureFor\",{{1,\"en\",\"Use feature for\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{0,1,\r\n{{\"#\",{DESIGN_TIME_REFERENCE_CLASS_UUID},\r\n{{1,{CATALOG_UUID}}}\r\n}}\r\n}}\r\n}},0}}"
             )
@@ -4919,12 +4937,9 @@ mod tests {
     #[test]
     fn malformed_native_layout_is_rejected_instead_of_guessed() {
         let profile = SimpleMetadataProfile::language_fixture("platform-test");
-        let malformed = raw_deflate(
-            format!(
+        let malformed = raw_deflate(&native_plaintext(format!(
                 "{{1,{{0,{{3,{{1,0,{UUID}}},\"English\",{{0}},\"\",0,0,{NIL_UUID},0}},\"en\",\"future\"}},0}}"
-            )
-            .as_bytes(),
-        )
+            )))
         .unwrap();
         assert!(matches!(
             decode_language_blob(&malformed, &profile),

@@ -53,6 +53,9 @@ The core now also retains generated `ValueId` as a typed optional identity
 `Constant` codec preserves all three generated TypeId/ValueId pairs, its single
 type pattern and `UseStandardCommands`; unknown native shell fields and
 unevidenced qualifier mappings fail closed.
+All evidenced textual BOOT-003/BOOT-004 native rows include the required UTF-8
+BOM followed by deterministic CRLF text; serializers and strict decoders share
+that profile-level byte contract.
 
 BOOT-004 is in progress. Four of seven service-family slices, `ScheduledJob`,
 `EventSubscription`, `HTTPService`, and `XDTOPackage`, now support XML

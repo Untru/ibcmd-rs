@@ -9,7 +9,7 @@ written. The bounded `SessionParameter.АвторизованныйПользо�
 had these characteristics:
 
 - logical key: metadata object UUID, without a suffix;
-- storage encoding: raw DEFLATE over UTF-8 text, without a UTF-8 BOM;
+- storage encoding: raw DEFLATE over UTF-8 text with a required UTF-8 BOM;
 - compressed bytes: 217;
 - plaintext bytes: 349;
 - compressed SHA-256:
@@ -48,7 +48,7 @@ The following built-in XCF types were confirmed against existing rows:
 | `v8:UUID` | `fc01b5df-97fe-449b-83d4-218a090e681e` |
 | `v8:ValueStorage` | `e199ca70-93cf-46ce-a54b-6edc88c3a296` |
 
-The committed layout `session-parameter-v1-crlf-no-bom` resolves each
+The committed layout `session-parameter-v1-crlf-utf8-bom` resolves each
 readable `cfg:ObjectGeneratedType.Name` only from the validated canonical
 object's `GeneratedType/TypeId`; it never derives or guesses a UUID. Missing
 or ambiguous types, duplicate pattern items, unknown tags, non-canonical

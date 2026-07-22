@@ -1,6 +1,6 @@
 # ScheduledJob native layout evidence for 8.3.27.1989
 
-Status: implemented as the `scheduled-job-v1-crlf-no-bom` experimental
+Status: implemented as the `scheduled-job-v1-crlf-utf8-bom` experimental
 platform layout. The codec is standalone: it does not require an installed 1C
 platform, EDT, JVM, or database access.
 
@@ -15,6 +15,9 @@ platform, EDT, JVM, or database access.
 
 The implementation only reads retained artifacts used as test evidence. It
 does not start 1C or modify Config/ConfigSave.
+
+The inflated native plaintext begins with the required UTF-8 BOM and then uses
+CRLF line endings.
 
 ## Exact native grammar
 

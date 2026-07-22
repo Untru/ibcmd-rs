@@ -8,7 +8,7 @@ process was started and no database row was written. The selected primary row
 had these bounded characteristics:
 
 - logical key: metadata object UUID, without a suffix;
-- storage encoding: raw DEFLATE over UTF-8 text, without a UTF-8 BOM;
+- storage encoding: raw DEFLATE over UTF-8 text with a required UTF-8 BOM;
 - compressed bytes: 215;
 - plaintext bytes: 279;
 - compressed SHA-256:
@@ -27,7 +27,7 @@ fixture. The class UUID above is part of the observed design-time reference
 wrapper and is required exactly by the strict decoder.
 
 The committed layout
-`functional-options-parameter-v1-crlf-no-bom` resolves readable XCF `<Use>`
+`functional-options-parameter-v1-crlf-utf8-bom` resolves readable XCF `<Use>`
 references only through a validated canonical graph. Missing or ambiguous
 references, duplicate UUIDs, an unknown wrapper class, a mismatched count, or
 an extra native field fail closed. Fixtures cover XCF 2.20 and 2.21 through

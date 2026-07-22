@@ -11,7 +11,7 @@ generated `TypeId` and `ValueId`, followed by the common metadata header and a
 type pattern. One retained compressed row had these characteristics:
 
 - logical key: metadata object UUID, without a suffix;
-- storage encoding: raw DEFLATE over UTF-8 text, without a UTF-8 BOM;
+- storage encoding: raw DEFLATE over UTF-8 text with a required UTF-8 BOM;
 - compressed bytes: 238;
 - plaintext bytes: 351;
 - compressed SHA-256:
@@ -40,7 +40,7 @@ typed field on `GeneratedType`; legacy canonical JSON without it remains
 readable, while the semantic digest domain is explicitly advanced to v2 so a
 new ValueId changes semantic identity.
 
-The committed `defined-type-v1-crlf-no-bom` profile rejects missing, nil, or
+The committed `defined-type-v1-crlf-utf8-bom` profile rejects missing, nil, or
 equal TypeId/ValueId values, inconsistent generated names/categories,
 unresolved or ambiguous `cfg:*` types, duplicate pattern entries, unknown
 native tags and extra fields. Fixed strings and Date-only/Time-only qualifiers

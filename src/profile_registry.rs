@@ -306,15 +306,15 @@ mod tests {
             if version == "8.3.27.1989" {
                 assert_eq!(
                     profile.constants["bootstrap.metadata.constant.layout"].value,
-                    "constant-v1-crlf-no-bom"
+                    "constant-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.constants["bootstrap.metadata.defined_type.layout"].value,
-                    "defined-type-v1-crlf-no-bom"
+                    "defined-type-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.constants["bootstrap.metadata.event_subscription.layout"].value,
-                    "event-subscription-v1-crlf-no-bom"
+                    "event-subscription-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.storage_profile.as_ref().unwrap().value.as_str(),
@@ -329,27 +329,27 @@ mod tests {
             if version == "8.3.27.1989" {
                 assert_eq!(
                     profile.constants["bootstrap.metadata.functional_option.layout"].value,
-                    "functional-option-v1-crlf-no-bom"
+                    "functional-option-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.constants["bootstrap.metadata.http_service.layout"].value,
-                    "http-service-v1-crlf-no-bom"
+                    "http-service-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.constants["bootstrap.metadata.language.layout"].value,
-                    "language-v1-crlf-no-bom"
+                    "language-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.constants["bootstrap.metadata.scheduled_job.layout"].value,
-                    "scheduled-job-v1-crlf-no-bom"
+                    "scheduled-job-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.constants["bootstrap.metadata.session_parameter.layout"].value,
-                    "session-parameter-v1-crlf-no-bom"
+                    "session-parameter-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
                     profile.constants["bootstrap.metadata.xdto_package.layout"].value,
-                    "xdto-package-v1-crlf-no-bom"
+                    "xdto-package-v1-crlf-utf8-bom"
                 );
             } else {
                 assert!(profile.constants.is_empty());

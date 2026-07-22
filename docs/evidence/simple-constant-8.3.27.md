@@ -1,6 +1,6 @@
 # Constant native layout evidence for 8.3.27.1989
 
-Status: implemented as the `constant-v1-crlf-no-bom` experimental platform
+Status: implemented as the `constant-v1-crlf-utf8-bom` experimental platform
 layout. No installed 1C platform, EDT, JVM, or database access is required by
 the codec.
 

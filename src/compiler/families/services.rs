@@ -31,14 +31,15 @@ use super::super::CompileAxes;
 use super::super::graph::BootstrapGraph;
 
 const SCHEDULED_JOB_LAYOUT_KEY: &str = "bootstrap.metadata.scheduled_job.layout";
-const SCHEDULED_JOB_LAYOUT: &str = "scheduled-job-v1-crlf-no-bom";
+const SCHEDULED_JOB_LAYOUT: &str = "scheduled-job-v1-crlf-utf8-bom";
 const EVENT_SUBSCRIPTION_LAYOUT_KEY: &str = "bootstrap.metadata.event_subscription.layout";
-const EVENT_SUBSCRIPTION_LAYOUT: &str = "event-subscription-v1-crlf-no-bom";
+const EVENT_SUBSCRIPTION_LAYOUT: &str = "event-subscription-v1-crlf-utf8-bom";
 const XDTO_PACKAGE_LAYOUT_KEY: &str = "bootstrap.metadata.xdto_package.layout";
-const XDTO_PACKAGE_LAYOUT: &str = "xdto-package-v1-crlf-no-bom";
+const XDTO_PACKAGE_LAYOUT: &str = "xdto-package-v1-crlf-utf8-bom";
 const HTTP_SERVICE_LAYOUT_KEY: &str = "bootstrap.metadata.http_service.layout";
-const HTTP_SERVICE_LAYOUT: &str = "http-service-v1-crlf-no-bom";
+const HTTP_SERVICE_LAYOUT: &str = "http-service-v1-crlf-utf8-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
+const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const MAX_SERVICE_METADATA_PLAIN_BYTES: usize = MAX_CANONICAL_RETAINED_BYTES + 4 * 1_048_576;
 // HTTP/Web service trees nest collection, route, method, header, and identity
@@ -1737,7 +1738,7 @@ fn serialize_scheduled_job(value: &ScheduledJobNativeIr) -> Vec<u8> {
         value.restart_count_on_failure, value.restart_interval_on_failure
     )
     .expect("writing to String cannot fail");
-    plain.into_bytes()
+    native_plaintext(plain)
 }
 
 fn serialize_event_subscription(value: &EventSubscriptionNativeIr) -> Vec<u8> {
@@ -1767,7 +1768,7 @@ fn serialize_event_subscription(value: &EventSubscriptionNativeIr) -> Vec<u8> {
     plain.push(',');
     push_1c_string(&mut plain, &value.method_name);
     plain.push_str("},0}");
-    plain.into_bytes()
+    native_plaintext(plain)
 }
 
 fn serialize_xdto_package(value: &XdtoPackageNativeIr) -> Vec<u8> {
@@ -1783,7 +1784,7 @@ fn serialize_xdto_package(value: &XdtoPackageNativeIr) -> Vec<u8> {
     plain.push(',');
     push_1c_string(&mut plain, &value.namespace);
     plain.push_str("},0}");
-    plain.into_bytes()
+    native_plaintext(plain)
 }
 
 fn serialize_http_service(value: &HttpServiceNativeIr) -> Vec<u8> {
@@ -1807,30 +1808,24 @@ fn serialize_http_service(value: &HttpServiceNativeIr) -> Vec<u8> {
         .expect("writing to String cannot fail");
     write!(
         &mut plain,
-        "{{{HTTP_URL_COLLECTION_UUID},{},\r\n{{\r\n",
+        "{{{HTTP_URL_COLLECTION_UUID},{}",
         value.urls.len()
     )
     .expect("writing to String cannot fail");
-    for (url_index, url) in value.urls.iter().enumerate() {
-        if url_index != 0 {
-            plain.push_str(",\r\n");
-        }
-        plain.push_str("{\r\n{0,");
+    for url in &value.urls {
+        plain.push_str(",\r\n{\r\n{0,");
         push_1c_string(&mut plain, &url.template);
         plain.push_str(",\r\n");
         push_native_header(&mut plain, url.uuid, &url.name, &url.synonyms, &url.comment);
         plain.push_str("\r\n},1,\r\n");
         write!(
             &mut plain,
-            "{{{HTTP_METHOD_COLLECTION_UUID},{},\r\n{{\r\n",
+            "{{{HTTP_METHOD_COLLECTION_UUID},{}",
             url.methods.len()
         )
         .expect("writing to String cannot fail");
-        for (method_index, method) in url.methods.iter().enumerate() {
-            if method_index != 0 {
-                plain.push_str(",\r\n");
-            }
-            plain.push_str("{\r\n{0,");
+        for method in &url.methods {
+            plain.push_str(",\r\n{\r\n{0,");
             push_1c_string(&mut plain, &method.handler);
             plain.push(',');
             plain.push_str(
@@ -1847,10 +1842,17 @@ fn serialize_http_service(value: &HttpServiceNativeIr) -> Vec<u8> {
             );
             plain.push_str("\r\n},0}");
         }
-        plain.push_str("\r\n}\r\n}\r\n}");
+        plain.push_str("\r\n}\r\n}");
     }
-    plain.push_str("\r\n}\r\n}\r\n}");
-    plain.into_bytes()
+    plain.push_str("\r\n}\r\n}");
+    native_plaintext(plain)
+}
+
+fn native_plaintext(plain: String) -> Vec<u8> {
+    let mut output = Vec::with_capacity(UTF8_BOM.len() + plain.len());
+    output.extend_from_slice(UTF8_BOM);
+    output.extend_from_slice(plain.as_bytes());
+    output
 }
 
 fn push_native_header(
@@ -1945,9 +1947,10 @@ impl<'a> NativeParser<'a> {
     }
 
     fn parse(mut self) -> Result<NativeValue, ServiceMetadataBuildError> {
-        if self.input.starts_with(b"\xef\xbb\xbf") {
-            return Err(native("unexpected BOM for service metadata no-BOM layout"));
+        if !self.input.starts_with(UTF8_BOM) {
+            return Err(native("missing UTF-8 BOM for service metadata layout"));
         }
+        self.offset = UTF8_BOM.len();
         let value = self.value(0)?;
         self.whitespace();
         if self.offset != self.input.len() {
@@ -2197,7 +2200,10 @@ fn parse_http_service(plain: &[u8]) -> Result<HttpServiceNativeIr, ServiceMetada
         .to_owned();
     let session_max_age = canonical_u32_token(&service[4], "SessionMaxAge")?;
 
-    let url_collection = exact_list(&root[3], 3, "HTTPService URL collection")?;
+    let url_collection = list(&root[3], "HTTPService URL collection")?;
+    if url_collection.len() < 2 {
+        return Err(native("HTTPService URL collection is truncated"));
+    }
     exact_token(
         &url_collection[0],
         HTTP_URL_COLLECTION_UUID,
@@ -2207,12 +2213,11 @@ fn parse_http_service(plain: &[u8]) -> Result<HttpServiceNativeIr, ServiceMetada
     if url_count == 0 || url_count > MAX_CANONICAL_COLLECTION_ITEMS {
         return Err(native("HTTPService URLTemplate count is out of bounds"));
     }
-    let url_values = list(&url_collection[2], "HTTPService URL values")?;
-    if url_values.len() != url_count {
+    if url_collection.len() != url_count + 2 {
         return Err(native("HTTPService URLTemplate count is mismatched"));
     }
     let mut urls = Vec::with_capacity(url_count);
-    for url_value in url_values {
+    for url_value in &url_collection[2..] {
         let url_entry = exact_list(url_value, 3, "HTTPService URL entry")?;
         exact_token(&url_entry[1], "1", "HTTPService URL method marker")?;
         let url = exact_list(&url_entry[0], 3, "HTTPService URLTemplate")?;
@@ -2220,7 +2225,10 @@ fn parse_http_service(plain: &[u8]) -> Result<HttpServiceNativeIr, ServiceMetada
         let template = text(&url[1], "URLTemplate Template")?.to_owned();
         let url_header = parse_native_header(&url[2])?;
 
-        let method_collection = exact_list(&url_entry[2], 3, "HTTPService Method collection")?;
+        let method_collection = list(&url_entry[2], "HTTPService Method collection")?;
+        if method_collection.len() < 2 {
+            return Err(native("HTTPService Method collection is truncated"));
+        }
         exact_token(
             &method_collection[0],
             HTTP_METHOD_COLLECTION_UUID,
@@ -2230,12 +2238,11 @@ fn parse_http_service(plain: &[u8]) -> Result<HttpServiceNativeIr, ServiceMetada
         if method_count == 0 || method_count > MAX_CANONICAL_COLLECTION_ITEMS {
             return Err(native("HTTPService Method count is out of bounds"));
         }
-        let method_values = list(&method_collection[2], "HTTPService Method values")?;
-        if method_values.len() != method_count {
+        if method_collection.len() != method_count + 2 {
             return Err(native("HTTPService Method count is mismatched"));
         }
         let mut methods = Vec::with_capacity(method_count);
-        for method_value in method_values {
+        for method_value in &method_collection[2..] {
             let method_entry = exact_list(method_value, 2, "HTTPService Method entry")?;
             exact_token(&method_entry[1], "0", "HTTPService Method tail")?;
             let method = exact_list(&method_entry[0], 4, "HTTPService Method")?;
@@ -2963,8 +2970,9 @@ mod tests {
         )
         .unwrap();
         let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
         assert_eq!(
-            plain,
+            &plain[UTF8_BOM.len()..],
             format!(
                 "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{JOB_UUID}}},\"ЗагрузкаКурсовВалют\",\r\n{{1,\"ru\",\"Загрузка курсов валют\"}},\"\",0,0,{NIL_UUID},0}},\"\",\"\",0,1,{MODULE_UUID},\"ПриЗагрузкеАктуальныхКурсов\",10,600}},0}}"
             )
@@ -2994,6 +3002,7 @@ mod tests {
         let observed = format!(
             "{{1,{{2,{{3,{{1,0,{JOB_UUID}}},\"Job\",{{0}},\"\",0,0,{NIL_UUID},0}},\"\",\"\",0,1,{MODULE_UUID},\"Run\",10,600,future}},0}}"
         );
+        let observed = format!("\u{feff}{observed}");
         assert!(matches!(
             parse_scheduled_job(observed.as_bytes()),
             Err(ServiceMetadataBuildError::Native(_))
@@ -3086,8 +3095,9 @@ mod tests {
         )
         .unwrap();
         let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
         assert_eq!(
-            plain,
+            &plain[UTF8_BOM.len()..],
             format!(
                 "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{EVENT_UUID}}},\"ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных\",\r\n{{1,\"ru\",\"Варианты отчетов перед удалением идентификатора объекта метаданных\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"#\",{SOURCE_ONE_TYPE_ID}}},\r\n{{\"#\",{SOURCE_TWO_TYPE_ID}}}\r\n}},\"BeforeDelete_ПередУдалением\",{EVENT_MODULE_UUID},\"ПередУдалениемИдентификатораОбъектаМетаданных\"}},0}}"
             )
@@ -3116,6 +3126,7 @@ mod tests {
         let observed = format!(
             "{{1,{{1,{{3,{{1,0,{EVENT_UUID}}},\"Event\",{{0}},\"\",0,0,{NIL_UUID},0}},{{\"Pattern\",{{\"#\",{SOURCE_ONE_TYPE_ID}}}}},\"BeforeDelete_ПередУдалением\",{EVENT_MODULE_UUID},\"Run\",future}},0}}"
         );
+        let observed = format!("\u{feff}{observed}");
         assert!(matches!(
             parse_event_subscription(observed.as_bytes()),
             Err(ServiceMetadataBuildError::Native(_))
@@ -3173,8 +3184,9 @@ mod tests {
         )
         .unwrap();
         let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
         assert_eq!(
-            plain,
+            &plain[UTF8_BOM.len()..],
             format!(
                 "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{XDTO_UUID}}},\"АдминистрированиеОбменаДанными_2_4_5_1\",\r\n{{1,\"ru\",\"Администрирование обмена данными 2.4.5.1\"}},\"\",0,0,{NIL_UUID},0}},\"{namespace}\"}},0}}"
             )
@@ -3188,6 +3200,7 @@ mod tests {
         let observed = format!(
             "{{1,{{1,{{3,{{1,0,{XDTO_UUID}}},\"Package\",{{0}},\"\",0,0,{NIL_UUID},0}},\"{namespace}\",future}},0}}"
         );
+        let observed = format!("\u{feff}{observed}");
         assert!(matches!(
             parse_xdto_package(observed.as_bytes()),
             Err(ServiceMetadataBuildError::Native(_))
@@ -3258,10 +3271,11 @@ mod tests {
         )
         .unwrap();
         let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
         assert_eq!(
-            plain,
+            &plain[UTF8_BOM.len()..],
             format!(
-                "{{1,\r\n{{2,\"billing\",\r\n{{3,\r\n{{1,0,{HTTP_UUID}}},\"Биллинг\",\r\n{{1,\"ru\",\"Биллинг\"}},\"\",0,0,{NIL_UUID},0}},2,20}},1,\r\n{{{HTTP_URL_COLLECTION_UUID},1,\r\n{{\r\n{{\r\n{{0,\"/version\",\r\n{{3,\r\n{{1,0,{HTTP_URL_UUID}}},\"Версия\",\r\n{{0}},\"\",0,0,{NIL_UUID},0}}\r\n}},1,\r\n{{{HTTP_METHOD_COLLECTION_UUID},1,\r\n{{\r\n{{\r\n{{0,\"ВерсияПолучить\",3,\r\n{{3,\r\n{{1,0,{HTTP_METHOD_UUID}}},\"Получить\",\r\n{{0}},\"\",0,0,{NIL_UUID},0}}\r\n}},0}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}\r\n}}"
+                "{{1,\r\n{{2,\"billing\",\r\n{{3,\r\n{{1,0,{HTTP_UUID}}},\"Биллинг\",\r\n{{1,\"ru\",\"Биллинг\"}},\"\",0,0,{NIL_UUID},0}},2,20}},1,\r\n{{{HTTP_URL_COLLECTION_UUID},1,\r\n{{\r\n{{0,\"/version\",\r\n{{3,\r\n{{1,0,{HTTP_URL_UUID}}},\"Версия\",\r\n{{0}},\"\",0,0,{NIL_UUID},0}}\r\n}},1,\r\n{{{HTTP_METHOD_COLLECTION_UUID},1,\r\n{{\r\n{{0,\"ВерсияПолучить\",3,\r\n{{3,\r\n{{1,0,{HTTP_METHOD_UUID}}},\"Получить\",\r\n{{0}},\"\",0,0,{NIL_UUID},0}}\r\n}},0}}\r\n}}\r\n}}\r\n}}\r\n}}"
             )
             .as_bytes()
         );

@@ -9,7 +9,7 @@ No 1C process was started and no database row was written. The bounded
 primary row had these characteristics:
 
 - logical key: metadata object UUID, without a suffix;
-- storage encoding: raw DEFLATE over UTF-8 text, without a UTF-8 BOM;
+- storage encoding: raw DEFLATE over UTF-8 text with a required UTF-8 BOM;
 - compressed bytes: 241;
 - plaintext bytes: 401;
 - compressed SHA-256:
@@ -30,7 +30,7 @@ fixture. The empty observed `Content` list is `{0,0}`. A second observed row
 with non-empty content confirms both nested reference-class UUIDs, the count,
 and reference ordering.
 
-The committed layout `functional-option-v1-crlf-no-bom` resolves readable XCF
+The committed layout `functional-option-v1-crlf-utf8-bom` resolves readable XCF
 `Location` and `Content/xr:Object` values only through a validated canonical
 graph. Missing or ambiguous references, duplicate targets, unknown wrapper
 classes, mismatched counts, non-canonical booleans, and extra native fields

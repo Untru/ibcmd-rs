@@ -1,6 +1,6 @@
 # EventSubscription native layout evidence for 8.3.27.1989
 
-Status: implemented as the `event-subscription-v1-crlf-no-bom` experimental
+Status: implemented as the `event-subscription-v1-crlf-utf8-bom` experimental
 platform layout. The codec is standalone and does not require an installed 1C
 platform, EDT, JVM, or database access.
 
@@ -21,6 +21,9 @@ platform, EDT, JVM, or database access.
 
 The implementation reads these retained artifacts only as test evidence. It
 does not start 1C or modify Config/ConfigSave.
+
+The inflated native plaintext begins with the required UTF-8 BOM and then uses
+CRLF line endings.
 
 ## Exact native grammar
 

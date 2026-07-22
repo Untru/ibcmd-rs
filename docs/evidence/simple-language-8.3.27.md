@@ -8,7 +8,7 @@ process was started and no database row was written. The only observed
 `Language` primary row had these bounded characteristics:
 
 - logical key: the metadata object UUID, without a suffix;
-- storage encoding: raw DEFLATE over UTF-8 text, without a UTF-8 BOM;
+- storage encoding: raw DEFLATE over UTF-8 text with a required UTF-8 BOM;
 - compressed bytes: 105;
 - plaintext bytes: 144;
 - compressed SHA-256:
@@ -20,7 +20,7 @@ process was started and no database row was written. The only observed
 0,0,00000000-0000-0000-0000-000000000000,0},"<language-code>"},0}
 ```
 
-The committed compiler layout `language-v1-crlf-no-bom` emits the same value
+The committed compiler layout `language-v1-crlf-utf8-bom` emits the same value
 tree with deterministic CRLF formatting. Its strict decoder requires all
 discriminators, field counts, the nil UUID, canonical lowercase object UUID,
 and a synonym count that exactly matches its pairs. Unknown fields are an
