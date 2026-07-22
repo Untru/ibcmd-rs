@@ -10,7 +10,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use crate::adapter::AdapterOutcome;
 use crate::artifact::{ParseIdentifierError, ProfileId};
 use crate::diagnostic::{
-    CodecLossDeclaration, DiagnosticBuildError, DiagnosticCode, DiagnosticReport, LossPolicy,
+    CodecLossDeclaration, DiagnosticBuildError, DiagnosticCode, DiagnosticReport, LossDisposition,
+    LossPolicy,
 };
 use crate::model::CanonicalConfiguration;
 use crate::profile::{CapabilityId, CapabilityState, EffectiveProfile};
@@ -19,6 +20,8 @@ use crate::profile::{CapabilityId, CapabilityState, EffectiveProfile};
 pub const MAX_MIGRATION_CAPABILITIES: usize = 1_024;
 /// Maximum possible losses declared by one migration step.
 pub const MAX_MIGRATION_LOSSES: usize = 1_024;
+/// Maximum actual evaluated losses returned by one step application.
+pub const MAX_MIGRATION_APPLIED_LOSSES: usize = MAX_MIGRATION_LOSSES;
 
 /// Stable open identifier for one migration step.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -177,6 +180,13 @@ pub enum MigrationContractError {
         /// Duplicate stable diagnostic code.
         code: DiagnosticCode,
     },
+    /// Actual evaluated losses exceeded their explicit per-step bound.
+    TooManyAppliedLosses {
+        /// Maximum accepted evaluated losses.
+        maximum: usize,
+        /// Actual evaluated losses.
+        actual: usize,
+    },
 }
 
 impl Display for MigrationContractError {
@@ -200,6 +210,10 @@ impl Display for MigrationContractError {
             Self::DuplicateLoss { code } => {
                 write!(formatter, "duplicate possible migration loss `{code}`")
             }
+            Self::TooManyAppliedLosses { maximum, actual } => write!(
+                formatter,
+                "migration step output exceeds {maximum} applied losses (actual {actual})"
+            ),
         }
     }
 }
@@ -412,8 +426,49 @@ impl MigrationAnalysis {
     }
 }
 
+/// Owned model and the exact evaluated losses actually applied by one step.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MigrationStepOutput {
+    configuration: CanonicalConfiguration,
+    losses: Vec<LossDisposition>,
+}
+
+impl MigrationStepOutput {
+    /// Retains one independently owned model and a bounded actual-loss list.
+    pub fn new(
+        configuration: CanonicalConfiguration,
+        losses: Vec<LossDisposition>,
+    ) -> Result<Self, MigrationContractError> {
+        if losses.len() > MAX_MIGRATION_APPLIED_LOSSES {
+            return Err(MigrationContractError::TooManyAppliedLosses {
+                maximum: MAX_MIGRATION_APPLIED_LOSSES,
+                actual: losses.len(),
+            });
+        }
+        Ok(Self {
+            configuration,
+            losses,
+        })
+    }
+
+    /// Returns the independently owned candidate model.
+    pub const fn configuration(&self) -> &CanonicalConfiguration {
+        &self.configuration
+    }
+
+    /// Returns actual evaluated losses in step-defined path order.
+    pub fn losses(&self) -> &[LossDisposition] {
+        &self.losses
+    }
+
+    /// Separates the candidate model from its actual evaluated losses.
+    pub fn into_parts(self) -> (CanonicalConfiguration, Vec<LossDisposition>) {
+        (self.configuration, self.losses)
+    }
+}
+
 /// Guarded result of applying one migration step to a new model.
-pub type MigrationApplyOutcome = AdapterOutcome<CanonicalConfiguration>;
+pub type MigrationApplyOutcome = AdapterOutcome<MigrationStepOutput>;
 
 /// Object-safe contract for one explicit directed migration edge.
 ///
@@ -436,7 +491,10 @@ pub trait MigrationStep: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use crate::diagnostic::{CodecLossPermission, DiagnosticCode};
+    use crate::diagnostic::{
+        CodecLossPermission, Diagnostic, DiagnosticCode, ObjectPath, PropertyPath, Severity,
+        evaluate_loss,
+    };
     use crate::profile::{ProfileSourceKind, parse_profile_source, resolve_profiles};
 
     use super::*;
@@ -535,5 +593,39 @@ mod tests {
         let json = serde_json::to_string(&id).unwrap();
         assert_eq!(json, "\"migration:future-edge\"");
         assert_eq!(serde_json::from_str::<MigrationStepId>(&json).unwrap(), id);
+    }
+
+    #[test]
+    fn applied_loss_limit_plus_one_is_rejected_before_retention() {
+        let declaration = CodecLossDeclaration::new(
+            DiagnosticCode::parse("migration.test-applied-loss").unwrap(),
+            CodecLossPermission::WarnOnly,
+            "bounded applied loss",
+        )
+        .unwrap();
+        let disposition = evaluate_loss(
+            LossPolicy::Warn,
+            Diagnostic::new(
+                declaration.code().clone(),
+                Severity::Error,
+                ObjectPath::root(),
+                PropertyPath::root(),
+                "bounded applied loss",
+            )
+            .unwrap(),
+            Some(&declaration),
+        )
+        .unwrap();
+        let result = MigrationStepOutput::new(
+            CanonicalConfiguration::default(),
+            vec![disposition; MAX_MIGRATION_APPLIED_LOSSES + 1],
+        );
+        assert!(matches!(
+            result,
+            Err(MigrationContractError::TooManyAppliedLosses {
+                maximum: MAX_MIGRATION_APPLIED_LOSSES,
+                actual,
+            }) if actual == MAX_MIGRATION_APPLIED_LOSSES + 1
+        ));
     }
 }

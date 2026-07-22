@@ -489,7 +489,7 @@ mod tests {
 
     use super::super::step::{
         MigrationApplyOutcome, MigrationApplyRequest, MigrationStep, MigrationStepId,
-        ProfileConstraint,
+        MigrationStepOutput, ProfileConstraint,
     };
     use super::*;
 
@@ -580,7 +580,9 @@ mod tests {
         }
 
         fn apply(&self, request: MigrationApplyRequest<'_>) -> MigrationApplyOutcome {
-            AdapterOutcome::success(request.configuration().clone())
+            AdapterOutcome::success(
+                MigrationStepOutput::new(request.configuration().clone(), Vec::new()).unwrap(),
+            )
         }
     }
 
@@ -771,7 +773,10 @@ mod tests {
             &configuration,
             LossPolicy::Error,
         ));
-        assert_eq!(applied.value(), Some(&snapshot));
+        assert_eq!(
+            applied.value().map(MigrationStepOutput::configuration),
+            Some(&snapshot)
+        );
         assert_eq!(configuration, snapshot);
     }
 
