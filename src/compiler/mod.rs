@@ -1,8 +1,9 @@
 //! Pure source-to-storage-patch compilation.
 //!
-//! Callers supply already loaded source bytes, explicit version/profile axes,
-//! and optional base bytes. Native-storage adapters remain responsible for
-//! loading and writing data around this boundary.
+//! Callers supply already loaded source bytes and explicit version/profile
+//! axes. Native-storage adapters remain responsible for loading and writing
+//! data around this boundary. Bytes derived from a base artifact deliberately
+//! stay outside this base-free compiler contract.
 
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -10,28 +11,29 @@ use std::fmt::{self, Display, Formatter};
 use ibcmd_core::artifact::StorageProfileId;
 use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::{
-    MultipartIdentity, StorageKey, StoragePatchBuildError, StoragePatchEntry, StoragePatchOutcome,
-    StoragePatchTarget, StorageProvenance,
+    MAX_STORAGE_PAYLOAD_BYTES, MultipartIdentity, StorageBuildError, StorageKey,
+    StoragePatchBuildError, StoragePatchEntry, StoragePatchOutcome, StoragePatchTarget,
+    StorageProvenance,
 };
 use ibcmd_core::version::{CompatibilityMode, ContainerRevision, PlatformBuild, XmlDialect};
 
 use crate::module_blob::{
     command_interface_base_free_blockers, command_interface_xml_can_pack_without_base,
     common_module_metadata_base_free_blockers, metadata_xml_base_free_blockers,
-    pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
-    pack_module_blob_bytes, pack_module_blob_container_bytes, pack_raw_deflated_blob_from_bytes,
-    pack_simple_metadata_blob_from_xml,
+    pack_command_interface_blob_from_xml, pack_module_blob_bytes, pack_module_blob_container_bytes,
+    pack_raw_deflated_blob_from_bytes,
 };
 
 pub mod overlay;
 
 pub use overlay::compile_overlay;
 
+const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
+
 /// Independent coordinates used by one compiler invocation.
 ///
-/// No coordinate is inferred from another. The current legacy byte packers do
-/// not branch on every axis yet, but retaining them at this boundary makes that
-/// selection explicit and extensible.
+/// No coordinate is inferred from another. The legacy selector accepts only
+/// its exact verified coordinates and fails closed for every future value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompileAxes {
     xml_dialect: XmlDialect,
@@ -94,25 +96,52 @@ pub enum AdditionalIndexesMapping {
     Unmapped,
 }
 
-/// Adapter-prepared bytes crossing the transitional pure compiler seam.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum PrepackedDisposition<'a> {
+    BaseFree(&'a [u8]),
+    NeedsBase {
+        required: StorageKey,
+        reason: &'a str,
+    },
+}
+
+/// Adapter-prepared input crossing the transitional pure compiler seam.
 ///
-/// The family and provenance are mandatory so an adapter cannot submit an
-/// anonymous payload. The compiler verifies that provenance against the patch
-/// target before accepting the bytes.
+/// A base-free payload carries bytes. A base-dependent family carries only its
+/// dependency and reason, never bytes derived from the base. Family and
+/// provenance are mandatory in both cases.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrepackedSource<'a> {
     family: FamilyId,
     provenance: StorageProvenance,
-    bytes: &'a [u8],
+    disposition: PrepackedDisposition<'a>,
 }
 
 impl<'a> PrepackedSource<'a> {
-    /// Creates a named, attributable prepacked payload.
-    pub const fn new(family: FamilyId, provenance: StorageProvenance, bytes: &'a [u8]) -> Self {
+    /// Creates a named, attributable payload known to be base-free.
+    pub const fn base_free(
+        family: FamilyId,
+        provenance: StorageProvenance,
+        bytes: &'a [u8],
+    ) -> Self {
         Self {
             family,
             provenance,
-            bytes,
+            disposition: PrepackedDisposition::BaseFree(bytes),
+        }
+    }
+
+    /// Classifies an adapter-prepared family that still requires a base entry.
+    pub const fn needs_base(
+        family: FamilyId,
+        provenance: StorageProvenance,
+        required: StorageKey,
+        reason: &'a str,
+    ) -> Self {
+        Self {
+            family,
+            provenance,
+            disposition: PrepackedDisposition::NeedsBase { required, reason },
         }
     }
 
@@ -126,46 +155,39 @@ impl<'a> PrepackedSource<'a> {
         &self.provenance
     }
 
-    /// Returns the already packed native bytes.
-    pub const fn bytes(&self) -> &'a [u8] {
-        self.bytes
+    /// Returns native bytes only when they were prepared without a base.
+    pub const fn base_free_bytes(&self) -> Option<&'a [u8]> {
+        match &self.disposition {
+            PrepackedDisposition::BaseFree(bytes) => Some(*bytes),
+            PrepackedDisposition::NeedsBase { .. } => None,
+        }
     }
 }
 
 /// Byte-only source input for one target entry.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourcePayload<'a> {
-    /// BSL module text with optional explicit base and info element bytes.
+    /// BSL module text with optional explicitly source-supplied info bytes.
     ModuleText {
         text: &'a [u8],
-        base: Option<&'a [u8]>,
         info: Option<&'a [u8]>,
     },
     /// An exported V8 module container that only needs outer packing.
     ModuleContainer { container: &'a [u8] },
     /// Source bytes stored as a raw-deflate native body.
     RawDeflated { bytes: &'a [u8] },
-    /// Editable metadata XML, patched into an explicit native base when present.
-    MetadataXml {
-        xml: &'a [u8],
-        base: Option<&'a [u8]>,
-    },
-    /// Common-module metadata XML and its optional explicit native base.
-    CommonModuleMetadataXml {
-        xml: &'a [u8],
-        base: Option<&'a [u8]>,
-    },
-    /// CommandInterface XML, which is base-free only for raw command refs.
-    CommandInterfaceXml {
-        xml: &'a [u8],
-        base: Option<&'a [u8]>,
-    },
+    /// Editable metadata XML, which currently requires a native base entry.
+    MetadataXml { xml: &'a [u8] },
+    /// Common-module metadata XML, which currently requires a native base entry.
+    CommonModuleMetadataXml { xml: &'a [u8] },
+    /// CommandInterface XML, base-free only when all command refs are raw.
+    CommandInterfaceXml { xml: &'a [u8] },
     /// AdditionalIndexes source bytes with an explicit target-mapping decision.
     AdditionalIndexes {
         bytes: &'a [u8],
         mapping: AdditionalIndexesMapping,
     },
-    /// Bytes prepared by a legacy family packer outside this pure boundary.
+    /// Explicit base-free bytes or a base dependency prepared by an adapter.
     Prepacked(PrepackedSource<'a>),
     /// A source family known to require one exact base entry.
     NeedsBase {
@@ -287,72 +309,87 @@ pub type CompileResult<T> = std::result::Result<T, CompileError>;
 /// valid inputs whose implementation genuinely needs a base or is unavailable
 /// become non-compiled [`StoragePatchOutcome`] values.
 pub fn compile_source(
-    _axes: &CompileAxes,
+    axes: &CompileAxes,
     request: CompileRequest<'_>,
 ) -> CompileResult<StoragePatchEntry> {
+    compile_source_with_payload_limit(axes, request, MAX_STORAGE_PAYLOAD_BYTES)
+}
+
+fn compile_source_with_payload_limit(
+    axes: &CompileAxes,
+    request: CompileRequest<'_>,
+    maximum_payload_bytes: usize,
+) -> CompileResult<StoragePatchEntry> {
     let (target, source) = request.into_parts();
+    if let Some(reason) = unsupported_axes_reason(axes) {
+        return unsupported_entry(target, &reason);
+    }
+
     match source {
-        SourcePayload::ModuleText { text, base, info } => {
-            let packed = pack_module_blob_bytes(text, base, info)
+        SourcePayload::ModuleText { text, info } => {
+            let source_bytes = text
+                .len()
+                .checked_add(info.map_or(0, <[u8]>::len))
+                .ok_or_else(|| {
+                    CompileError::invalid_source(
+                        "module-text",
+                        anyhow::anyhow!("combined module text and info size overflow"),
+                    )
+                })?;
+            ensure_source_input_within_limit("module-text", source_bytes, maximum_payload_bytes)?;
+            let packed = pack_module_blob_bytes(text, None, info)
                 .map_err(|source| CompileError::invalid_source("module-text", source))?;
             compiled_entry(target, packed.blob)
         }
         SourcePayload::ModuleContainer { container } => {
+            ensure_source_input_within_limit(
+                "module-container",
+                container.len(),
+                maximum_payload_bytes,
+            )?;
             let packed = pack_module_blob_container_bytes(container)
                 .map_err(|source| CompileError::invalid_source("module-container", source))?;
             compiled_entry(target, packed.blob)
         }
         SourcePayload::RawDeflated { bytes } => {
+            ensure_source_input_within_limit("raw-deflated", bytes.len(), maximum_payload_bytes)?;
             let packed = pack_raw_deflated_blob_from_bytes(bytes)
                 .map_err(|source| CompileError::invalid_source("raw-deflated", source))?;
             compiled_entry(target, packed.blob)
         }
-        SourcePayload::MetadataXml { xml, base } => match base {
-            Some(base) => {
-                let packed = pack_simple_metadata_blob_from_xml(base, xml)
-                    .map_err(|source| CompileError::invalid_source("metadata", source))?;
-                compiled_entry(target, packed.blob)
-            }
-            None => {
-                let blockers = metadata_xml_base_free_blockers(xml)
-                    .map_err(|source| CompileError::invalid_source("metadata", source))?;
-                needs_target_base(target, "metadata XML requires a base entry", blockers)
-            }
-        },
-        SourcePayload::CommonModuleMetadataXml { xml, base } => match base {
-            Some(base) => {
-                let packed =
-                    pack_common_module_metadata_blob_from_xml(base, xml).map_err(|source| {
-                        CompileError::invalid_source("common-module-metadata", source)
-                    })?;
-                compiled_entry(target, packed.blob)
-            }
-            None => {
-                let blockers =
-                    common_module_metadata_base_free_blockers(xml).map_err(|source| {
-                        CompileError::invalid_source("common-module-metadata", source)
-                    })?;
-                needs_target_base(
-                    target,
-                    "CommonModule metadata XML requires a base entry",
-                    blockers,
-                )
-            }
-        },
-        SourcePayload::CommandInterfaceXml { xml, base } => match base {
-            Some(base) => {
-                let packed = pack_command_interface_blob_from_xml(base, xml)
-                    .map_err(|source| CompileError::invalid_source("command-interface", source))?;
-                compiled_entry(target, packed.blob)
-            }
-            None if command_interface_xml_can_pack_without_base(xml)
-                .map_err(|source| CompileError::invalid_source("command-interface", source))? =>
+        SourcePayload::MetadataXml { xml } => {
+            ensure_source_input_within_limit("metadata", xml.len(), maximum_payload_bytes)?;
+            let blockers = metadata_xml_base_free_blockers(xml)
+                .map_err(|source| CompileError::invalid_source("metadata", source))?;
+            needs_target_base(target, "metadata XML requires a base entry", blockers)
+        }
+        SourcePayload::CommonModuleMetadataXml { xml } => {
+            ensure_source_input_within_limit(
+                "common-module-metadata",
+                xml.len(),
+                maximum_payload_bytes,
+            )?;
+            let blockers = common_module_metadata_base_free_blockers(xml)
+                .map_err(|source| CompileError::invalid_source("common-module-metadata", source))?;
+            needs_target_base(
+                target,
+                "CommonModule metadata XML requires a base entry",
+                blockers,
+            )
+        }
+        SourcePayload::CommandInterfaceXml { xml } => {
+            ensure_source_input_within_limit(
+                "command-interface",
+                xml.len(),
+                maximum_payload_bytes,
+            )?;
+            if command_interface_xml_can_pack_without_base(xml)
+                .map_err(|source| CompileError::invalid_source("command-interface", source))?
             {
                 let packed = pack_command_interface_blob_from_xml(&[], xml)
                     .map_err(|source| CompileError::invalid_source("command-interface", source))?;
                 compiled_entry(target, packed.blob)
-            }
-            None => {
+            } else {
                 let blockers = command_interface_base_free_blockers(xml)
                     .map_err(|source| CompileError::invalid_source("command-interface", source))?;
                 needs_target_base(
@@ -361,11 +398,16 @@ pub fn compile_source(
                     blockers,
                 )
             }
-        },
+        }
         SourcePayload::AdditionalIndexes {
             bytes,
             mapping: AdditionalIndexesMapping::Confirmed,
         } => {
+            ensure_source_input_within_limit(
+                "additional-indexes",
+                bytes.len(),
+                maximum_payload_bytes,
+            )?;
             let packed = pack_raw_deflated_blob_from_bytes(bytes)
                 .map_err(|source| CompileError::invalid_source("additional-indexes", source))?;
             compiled_entry(target, packed.blob)
@@ -385,7 +427,24 @@ pub fn compile_source(
                     source: source.provenance().to_string(),
                 });
             }
-            compiled_entry(target, source.bytes().to_vec())
+            match source.disposition {
+                PrepackedDisposition::BaseFree(bytes) => {
+                    if bytes.len() > maximum_payload_bytes {
+                        return Err(CompileError::Patch(
+                            StorageBuildError::PayloadTooLarge {
+                                maximum: maximum_payload_bytes,
+                                actual: bytes.len(),
+                            }
+                            .into(),
+                        ));
+                    }
+                    compiled_entry(target, bytes.to_vec())
+                }
+                PrepackedDisposition::NeedsBase { required, reason } => {
+                    let outcome = StoragePatchOutcome::needs_base(required, reason)?;
+                    Ok(StoragePatchEntry::new(target, outcome))
+                }
+            }
         }
         SourcePayload::NeedsBase { required, reason } => {
             let outcome = StoragePatchOutcome::needs_base(required, reason)?;
@@ -402,7 +461,56 @@ pub fn compile_source(
     }
 }
 
-/// Accepts adapter-prepared bytes through the same classified patch contract.
+fn unsupported_axes_reason(axes: &CompileAxes) -> Option<String> {
+    let dialect = axes.xml_dialect().as_version().components();
+    if dialect != [2, 20] && dialect != [2, 21] {
+        return Some(format!(
+            "legacy source compiler does not support XML dialect {}",
+            axes.xml_dialect()
+        ));
+    }
+    if axes.storage_profile().as_str() != SUPPORTED_STORAGE_PROFILE {
+        return Some(format!(
+            "legacy source compiler does not support storage profile {}",
+            axes.storage_profile()
+        ));
+    }
+    if let Some(platform) = axes.platform_build() {
+        return Some(format!(
+            "legacy source compiler has no verified platform-build selector for {platform}"
+        ));
+    }
+    if let Some(compatibility) = axes.compatibility_mode() {
+        return Some(format!(
+            "legacy source compiler has no verified compatibility-mode selector for {compatibility}"
+        ));
+    }
+    if let Some(revision) = axes.container_revision() {
+        return Some(format!(
+            "legacy source compiler has no verified container-revision selector for {revision}"
+        ));
+    }
+    None
+}
+
+fn ensure_source_input_within_limit(
+    family: &str,
+    actual: usize,
+    maximum: usize,
+) -> CompileResult<()> {
+    if actual <= maximum {
+        Ok(())
+    } else {
+        Err(CompileError::invalid_source(
+            family,
+            anyhow::anyhow!(
+                "source input is {actual} bytes, exceeding the {maximum}-byte compiler bound"
+            ),
+        ))
+    }
+}
+
+/// Accepts adapter-prepared input through the same classified patch contract.
 pub fn compile_prepacked(
     axes: &CompileAxes,
     key: StorageKey,
@@ -439,21 +547,27 @@ fn unsupported_entry(target: StoragePatchTarget, reason: &str) -> CompileResult<
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
-    use flate2::Compression;
-    use flate2::write::DeflateEncoder;
     use ibcmd_core::storage::StoragePatchOutcome;
 
     use super::*;
 
-    fn axes() -> CompileAxes {
+    fn explicit_axes() -> CompileAxes {
         CompileAxes::new(
             XmlDialect::parse("2.20").unwrap(),
             Some(PlatformBuild::parse("8.3.27.1989").unwrap()),
             Some(CompatibilityMode::parse("Version8_3_24").unwrap()),
             StorageProfileId::parse("storage:mssql-test").unwrap(),
             Some(ContainerRevision::parse("revision-1").unwrap()),
+        )
+    }
+
+    fn supported_axes(dialect: &str) -> CompileAxes {
+        CompileAxes::new(
+            XmlDialect::parse(dialect).unwrap(),
+            None,
+            None,
+            StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            None,
         )
     }
 
@@ -465,12 +579,6 @@ mod tests {
         )
     }
 
-    fn deflate(bytes: &[u8]) -> Vec<u8> {
-        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(bytes).unwrap();
-        encoder.finish().unwrap()
-    }
-
     fn compiled_bytes(entry: &StoragePatchEntry) -> &[u8] {
         match entry.outcome() {
             StoragePatchOutcome::Compiled(payload) => payload.bytes(),
@@ -480,7 +588,7 @@ mod tests {
 
     #[test]
     fn explicit_axes_remain_independent() {
-        let axes = axes();
+        let axes = explicit_axes();
         assert_eq!(axes.xml_dialect().to_string(), "2.20");
         assert_eq!(
             axes.platform_build().map(ToString::to_string).as_deref(),
@@ -504,12 +612,11 @@ mod tests {
     #[test]
     fn module_and_raw_sources_compile_without_a_base() {
         let module = compile_source(
-            &axes(),
+            &supported_axes("2.20"),
             CompileRequest::new(
                 target("module.0", "CommonModules/Tools/Ext/Module.bsl"),
                 SourcePayload::ModuleText {
                     text: b"Procedure Run()\nEndProcedure",
-                    base: None,
                     info: None,
                 },
             ),
@@ -518,7 +625,7 @@ mod tests {
         assert!(!compiled_bytes(&module).is_empty());
 
         let raw = compile_source(
-            &axes(),
+            &supported_axes("2.21"),
             CompileRequest::new(
                 target("template.0", "Templates/Raw/Ext/Template.txt"),
                 SourcePayload::RawDeflated { bytes: b"raw body" },
@@ -529,8 +636,8 @@ mod tests {
     }
 
     #[test]
-    fn metadata_without_base_needs_it_and_with_base_compiles() {
-        let xml = br#"
+    fn metadata_and_common_module_metadata_remain_base_dependent() {
+        let metadata_xml = br#"
 <MetaDataObject xmlns:v8="urn:v8">
   <SessionParameter uuid="bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb">
     <Properties>
@@ -541,18 +648,18 @@ mod tests {
   </SessionParameter>
 </MetaDataObject>
 "#;
-        let no_base = compile_source(
-            &axes(),
+        let metadata = compile_source(
+            &supported_axes("2.20"),
             CompileRequest::new(
                 target(
                     "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
                     "SessionParameters/CurrentUser.xml",
                 ),
-                SourcePayload::MetadataXml { xml, base: None },
+                SourcePayload::MetadataXml { xml: metadata_xml },
             ),
         )
         .unwrap();
-        match no_base.outcome() {
+        match metadata.outcome() {
             StoragePatchOutcome::NeedsBase { required, reason } => {
                 assert_eq!(required.as_str(), "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb");
                 assert!(
@@ -564,26 +671,40 @@ mod tests {
             outcome => panic!("expected NeedsBase, got {outcome:?}"),
         }
 
-        let mut base_plain = b"\xEF\xBB\xBF".to_vec();
-        base_plain.extend_from_slice(
-            br#"{1,{3,{1,0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},"OldName",{1,"ru","Old"},"Old comment",0,0,00000000-0000-0000-0000-000000000000,0},0}"#,
-        );
-        let base = deflate(&base_plain);
-        let compiled = compile_source(
-            &axes(),
+        let common_module_xml = br#"
+<MetaDataObject xmlns:v8="urn:v8">
+  <CommonModule uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties>
+      <Name>Tools</Name>
+      <Global>false</Global>
+      <ClientManagedApplication>false</ClientManagedApplication>
+      <Server>true</Server>
+      <ExternalConnection>false</ExternalConnection>
+      <ClientOrdinaryApplication>false</ClientOrdinaryApplication>
+      <ServerCall>false</ServerCall>
+      <Privileged>false</Privileged>
+      <ReturnValuesReuse>DontUse</ReturnValuesReuse>
+    </Properties>
+  </CommonModule>
+</MetaDataObject>
+"#;
+        let common_module = compile_source(
+            &supported_axes("2.21"),
             CompileRequest::new(
                 target(
-                    "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
-                    "SessionParameters/CurrentUser.xml",
+                    "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                    "CommonModules/Tools.xml",
                 ),
-                SourcePayload::MetadataXml {
-                    xml,
-                    base: Some(&base),
+                SourcePayload::CommonModuleMetadataXml {
+                    xml: common_module_xml,
                 },
             ),
         )
         .unwrap();
-        assert!(!compiled_bytes(&compiled).is_empty());
+        assert!(matches!(
+            common_module.outcome(),
+            StoragePatchOutcome::NeedsBase { .. }
+        ));
     }
 
     #[test]
@@ -598,13 +719,10 @@ mod tests {
 </CommandInterface>
 "#;
         let raw = compile_source(
-            &axes(),
+            &supported_axes("2.20"),
             CompileRequest::new(
                 target("subsystem.0", "Subsystems/Sales/Ext/CommandInterface.xml"),
-                SourcePayload::CommandInterfaceXml {
-                    xml: raw_xml,
-                    base: None,
-                },
+                SourcePayload::CommandInterfaceXml { xml: raw_xml },
             ),
         )
         .unwrap();
@@ -620,13 +738,10 @@ mod tests {
 </CommandInterface>
 "#;
         let needs_base = compile_source(
-            &axes(),
+            &supported_axes("2.20"),
             CompileRequest::new(
                 target("subsystem.1", "Subsystems/Admin/Ext/CommandInterface.xml"),
-                SourcePayload::CommandInterfaceXml {
-                    xml: readable_xml,
-                    base: None,
-                },
+                SourcePayload::CommandInterfaceXml { xml: readable_xml },
             ),
         )
         .unwrap();
@@ -634,28 +749,12 @@ mod tests {
             needs_base.outcome(),
             StoragePatchOutcome::NeedsBase { .. }
         ));
-
-        let base = deflate(
-            b"{7,1,1,{0,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",0},0}},0,0,0,0,0}",
-        );
-        let compiled = compile_source(
-            &axes(),
-            CompileRequest::new(
-                target("subsystem.1", "Subsystems/Admin/Ext/CommandInterface.xml"),
-                SourcePayload::CommandInterfaceXml {
-                    xml: readable_xml,
-                    base: Some(&base),
-                },
-            ),
-        )
-        .unwrap();
-        assert!(!compiled_bytes(&compiled).is_empty());
     }
 
     #[test]
     fn unmapped_and_unknown_sources_are_unsupported() {
         let unmapped = compile_source(
-            &axes(),
+            &supported_axes("2.20"),
             CompileRequest::new(
                 target(
                     "indexes.unknown",
@@ -674,7 +773,7 @@ mod tests {
         ));
 
         let unknown = compile_source(
-            &axes(),
+            &supported_axes("2.20"),
             CompileRequest::new(
                 target("future.0", "FutureObjects/One.xml"),
                 SourcePayload::Unknown {
@@ -692,13 +791,10 @@ mod tests {
     #[test]
     fn malformed_xml_is_a_source_error() {
         let error = compile_source(
-            &axes(),
+            &supported_axes("2.20"),
             CompileRequest::new(
                 target("broken.0", "Broken.xml"),
-                SourcePayload::MetadataXml {
-                    xml: b"not XML",
-                    base: None,
-                },
+                SourcePayload::MetadataXml { xml: b"not XML" },
             ),
         )
         .unwrap_err();
@@ -706,8 +802,65 @@ mod tests {
     }
 
     #[test]
+    fn unknown_or_unverified_axes_fail_closed() {
+        let candidates = [
+            CompileAxes::new(
+                XmlDialect::parse("2.99").unwrap(),
+                None,
+                None,
+                StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+                None,
+            ),
+            CompileAxes::new(
+                XmlDialect::parse("2.20").unwrap(),
+                None,
+                None,
+                StorageProfileId::parse("storage:future").unwrap(),
+                None,
+            ),
+            CompileAxes::new(
+                XmlDialect::parse("2.20").unwrap(),
+                Some(PlatformBuild::parse("8.3.27.1989").unwrap()),
+                None,
+                StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+                None,
+            ),
+            CompileAxes::new(
+                XmlDialect::parse("2.20").unwrap(),
+                None,
+                Some(CompatibilityMode::parse("Version8_3_24").unwrap()),
+                StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+                None,
+            ),
+            CompileAxes::new(
+                XmlDialect::parse("2.20").unwrap(),
+                None,
+                None,
+                StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+                Some(ContainerRevision::parse("revision-1").unwrap()),
+            ),
+        ];
+
+        for (index, axes) in candidates.into_iter().enumerate() {
+            let key = format!("unsupported-axes.{index}");
+            let entry = compile_source(
+                &axes,
+                CompileRequest::new(
+                    target(&key, "source/axis-check"),
+                    SourcePayload::RawDeflated { bytes: b"body" },
+                ),
+            )
+            .unwrap();
+            assert!(matches!(
+                entry.outcome(),
+                StoragePatchOutcome::Unsupported { .. }
+            ));
+        }
+    }
+
+    #[test]
     fn prepacked_provenance_must_match_target() {
-        let source = PrepackedSource::new(
+        let source = PrepackedSource::base_free(
             FamilyId::parse("form-body").unwrap(),
             StorageProvenance::new("Forms/Main/Ext/Form.xml").unwrap(),
             b"packed",
@@ -716,11 +869,88 @@ mod tests {
             target("form.0", "Forms/Other/Ext/Form.xml"),
             SourcePayload::Prepacked(source),
         );
-        let error = compile_source(&axes(), request).unwrap_err();
+        let error = compile_source(&supported_axes("2.20"), request).unwrap_err();
         assert!(matches!(
             error,
             CompileError::PrepackedProvenanceMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn prepacked_input_makes_base_dependency_explicit() {
+        let compiled = compile_prepacked(
+            &supported_axes("2.20"),
+            StorageKey::new("raw.0").unwrap(),
+            MultipartIdentity::single(),
+            PrepackedSource::base_free(
+                FamilyId::parse("raw-template").unwrap(),
+                StorageProvenance::new("Templates/Raw/Ext/Template.txt").unwrap(),
+                b"packed",
+            ),
+        )
+        .unwrap();
+        assert_eq!(compiled_bytes(&compiled), b"packed");
+
+        let needs_base = compile_prepacked(
+            &supported_axes("2.20"),
+            StorageKey::new("form.0").unwrap(),
+            MultipartIdentity::single(),
+            PrepackedSource::needs_base(
+                FamilyId::parse("form-body").unwrap(),
+                StorageProvenance::new("Forms/Main/Ext/Form.xml").unwrap(),
+                StorageKey::new("form.0").unwrap(),
+                "form body must be resolved by a later overlay",
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            needs_base.outcome(),
+            StoragePatchOutcome::NeedsBase { required, .. } if required.as_str() == "form.0"
+        ));
+    }
+
+    #[test]
+    fn source_limits_are_checked_before_prepacked_clone_or_module_pack() {
+        let prepacked = CompileRequest::prepacked(
+            StorageKey::new("raw.0").unwrap(),
+            MultipartIdentity::single(),
+            PrepackedSource::base_free(
+                FamilyId::parse("raw-template").unwrap(),
+                StorageProvenance::new("Templates/Raw/Ext/Template.txt").unwrap(),
+                b"four",
+            ),
+        );
+        let error =
+            compile_source_with_payload_limit(&supported_axes("2.20"), prepacked, 3).unwrap_err();
+        assert!(matches!(
+            error,
+            CompileError::Patch(StoragePatchBuildError::Storage(
+                StorageBuildError::PayloadTooLarge {
+                    maximum: 3,
+                    actual: 4
+                }
+            ))
+        ));
+
+        let module = CompileRequest::new(
+            target("module.0", "CommonModules/Tools/Ext/Module.bsl"),
+            SourcePayload::ModuleText {
+                text: b"123",
+                info: Some(b"456"),
+            },
+        );
+        let error =
+            compile_source_with_payload_limit(&supported_axes("2.20"), module, 5).unwrap_err();
+        match error {
+            CompileError::Source { family, source } => {
+                assert_eq!(family, "module-text");
+                assert_eq!(
+                    source.to_string(),
+                    "source input is 6 bytes, exceeding the 5-byte compiler bound"
+                );
+            }
+            error => panic!("expected module-text Source error, got {error:?}"),
+        }
     }
 
     #[test]
@@ -743,6 +973,8 @@ mod tests {
             ["MetadataSource", "Context"].concat(),
             ["Path", "Buf"].concat(),
             ["sql", "cmd"].concat(),
+            ["pack_simple_metadata_blob", "_from_xml"].concat(),
+            ["pack_common_module_metadata_blob", "_from_xml"].concat(),
             ["dyn", " Fn"].concat(),
             ["impl", " Fn"].concat(),
         ];

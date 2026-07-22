@@ -1,8 +1,11 @@
 //! Ordered assembly of pure source outcomes into a neutral storage patch.
 
-use ibcmd_core::storage::StoragePatch;
+use ibcmd_core::storage::{
+    MAX_STORAGE_PATCH_ENTRIES, MAX_STORAGE_PATCH_RETAINED_BYTES, StoragePatch,
+    StoragePatchBuildError,
+};
 
-use super::{CompileAxes, CompileRequest, CompileResult, compile_source};
+use super::{CompileAxes, CompileError, CompileRequest, CompileResult, compile_source};
 
 /// Compiles requests in caller-supplied order and validates the resulting patch.
 ///
@@ -12,10 +15,52 @@ pub fn compile_overlay<'a, I>(axes: &CompileAxes, requests: I) -> CompileResult<
 where
     I: IntoIterator<Item = CompileRequest<'a>>,
 {
-    let entries = requests
-        .into_iter()
-        .map(|request| compile_source(axes, request))
-        .collect::<CompileResult<Vec<_>>>()?;
+    compile_overlay_with_limits(
+        axes,
+        requests,
+        MAX_STORAGE_PATCH_ENTRIES,
+        MAX_STORAGE_PATCH_RETAINED_BYTES,
+    )
+}
+
+fn compile_overlay_with_limits<'a, I>(
+    axes: &CompileAxes,
+    requests: I,
+    maximum_entries: usize,
+    maximum_retained_bytes: usize,
+) -> CompileResult<StoragePatch>
+where
+    I: IntoIterator<Item = CompileRequest<'a>>,
+{
+    let mut entries = Vec::new();
+    let mut retained_bytes = 0_usize;
+    for request in requests {
+        if entries.len() == maximum_entries {
+            return Err(CompileError::Patch(
+                StoragePatchBuildError::TooManyEntries {
+                    maximum: maximum_entries,
+                    actual: entries.len() + 1,
+                },
+            ));
+        }
+
+        let entry = compile_source(axes, request)?;
+        let actual = retained_bytes
+            .checked_add(entry.retained_byte_len()?)
+            .ok_or(CompileError::Patch(
+                StoragePatchBuildError::RetainedByteCountOverflow,
+            ))?;
+        if actual > maximum_retained_bytes {
+            return Err(CompileError::Patch(
+                StoragePatchBuildError::RetainedBytesExceeded {
+                    maximum: maximum_retained_bytes,
+                    actual,
+                },
+            ));
+        }
+        retained_bytes = actual;
+        entries.push(entry);
+    }
     StoragePatch::new(entries).map_err(Into::into)
 }
 
@@ -36,7 +81,7 @@ mod tests {
             XmlDialect::parse("2.20").unwrap(),
             None,
             None,
-            StorageProfileId::parse("storage:mssql-test").unwrap(),
+            StorageProfileId::parse("storage:mssql-config-configsave").unwrap(),
             None,
         )
     }
@@ -85,6 +130,48 @@ mod tests {
                 key,
                 part_index: 0
             }) if key == "duplicate"
+        ));
+    }
+
+    #[test]
+    fn overlay_rejects_count_before_compiling_the_next_request() {
+        let malformed = CompileRequest::new(
+            StoragePatchTarget::new(
+                StorageKey::new("second").unwrap(),
+                MultipartIdentity::single(),
+                StorageProvenance::new("source/second").unwrap(),
+            ),
+            SourcePayload::MetadataXml { xml: b"not XML" },
+        );
+        let error = compile_overlay_with_limits(
+            &axes(),
+            [request("first", b"1"), malformed],
+            1,
+            usize::MAX,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CompileError::Patch(StoragePatchBuildError::TooManyEntries {
+                maximum: 1,
+                actual: 2
+            })
+        ));
+    }
+
+    #[test]
+    fn overlay_rejects_retained_bytes_incrementally() {
+        let error =
+            compile_overlay_with_limits(&axes(), [request("first", b"payload")], usize::MAX, 1)
+                .unwrap_err();
+
+        assert!(matches!(
+            error,
+            CompileError::Patch(StoragePatchBuildError::RetainedBytesExceeded {
+                maximum: 1,
+                actual
+            }) if actual > 1
         ));
     }
 }
