@@ -38,6 +38,13 @@ CF fixture work is paused until project-owned, independently validated
 Format15/Format16 artifacts are available; platform-independent migration and
 compiler work continues on separate roadmap lanes.
 
+BOOT-002 is currently in progress. The compiler now has a bounded typed
+identity/inventory graph plus deterministic, profile-gated `root`, `version`,
+and `versions` codecs. The native `Configuration` body remains fail-closed:
+its seven-section envelope is documented, but the current XCF model and
+evidence do not yet prove every family/property slot needed for safe synthesis.
+This partial work does not increment the accepted-issue percentage above.
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |

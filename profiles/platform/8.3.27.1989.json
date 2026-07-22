@@ -3,7 +3,15 @@
   "id": "platform-8.3.27.1989",
   "status": "experimental",
   "platform_build": "8.3.27.1989",
+  "constants": {
+    "bootstrap.root.layout": "root-v2-empty-tail",
+    "bootstrap.version.layout": "version-v216",
+    "bootstrap.versions.layout": "versions-v1",
+    "bootstrap.version.compatibility": "80327"
+  },
   "evidence": [
-    "docs/ssl-lab-2026-06-25.md"
+    "docs/ssl-lab-2026-06-25.md",
+    "docs/evidence/bootstrap-special-8.3.27.md",
+    "docs/evidence/configuration-body-8.3.27-partial.md"
   ]
 }

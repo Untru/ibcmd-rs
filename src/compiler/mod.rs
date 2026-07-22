@@ -24,8 +24,13 @@ use crate::module_blob::{
     pack_module_blob_container_bytes, pack_raw_deflated_blob_from_bytes,
 };
 
+pub mod graph;
+pub mod identity;
 pub mod overlay;
 pub mod readiness;
+pub mod root;
+pub mod version;
+pub mod versions;
 
 pub use overlay::compile_overlay;
 
@@ -974,17 +979,24 @@ mod tests {
         }
 
         let source = format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
             production(include_str!("mod.rs")),
+            production(include_str!("identity.rs")),
+            production(include_str!("graph.rs")),
             production(include_str!("overlay.rs")),
-            production(include_str!("readiness.rs"))
+            production(include_str!("readiness.rs")),
+            production(include_str!("root.rs")),
+            production(include_str!("version.rs")),
+            production(include_str!("versions.rs"))
         );
         let forbidden = [
             ["std", "path"].join("::"),
             ["std", "fs"].join("::"),
             ["std", "process"].join("::"),
+            ["std", "net"].join("::"),
             ["crate", "cli"].join("::"),
             ["crate", "mssql"].join("::"),
+            ["rand", "::"].concat(),
             ["MetadataSource", "Context"].concat(),
             ["Path", "Buf"].concat(),
             ["sql", "cmd"].concat(),
