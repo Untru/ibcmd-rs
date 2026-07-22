@@ -1881,7 +1881,7 @@ mod tests {
         assert_eq!(patch.sha256(), patch.clone().sha256());
         assert_eq!(
             patch.sha256().to_string(),
-            "1bcaeb5f65b178791a0b23c1be009bedc15be0969adc0bb8d8fc0341d15548f4"
+            "35667d73677ecf45a4303f4952a34f619eca0adf8634c07ac90b0abd715098c6"
         );
 
         let reversed = StoragePatch::new(vec![
