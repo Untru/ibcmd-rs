@@ -8,6 +8,7 @@ mod functional_option;
 mod functional_options_parameter;
 mod language;
 mod registry;
+mod services;
 mod session_parameter;
 
 pub use common::{
@@ -22,4 +23,5 @@ pub use language::register_language_codec;
 pub use registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
+pub use services::register_scheduled_job_codec;
 pub use session_parameter::register_session_parameter_codec;

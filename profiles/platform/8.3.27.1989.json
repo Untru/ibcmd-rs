@@ -10,6 +10,7 @@
     "bootstrap.metadata.functional_option.layout": "functional-option-v1-crlf-no-bom",
     "bootstrap.metadata.functional_options_parameter.layout": "functional-options-parameter-v1-crlf-no-bom",
     "bootstrap.metadata.language.layout": "language-v1-crlf-no-bom",
+    "bootstrap.metadata.scheduled_job.layout": "scheduled-job-v1-crlf-no-bom",
     "bootstrap.metadata.session_parameter.layout": "session-parameter-v1-crlf-no-bom",
     "bootstrap.root.layout": "root-v2-empty-tail",
     "bootstrap.version.layout": "version-v216",
@@ -25,6 +26,7 @@
     "docs/evidence/simple-functional-option-8.3.27.md",
     "docs/evidence/simple-functional-options-parameter-8.3.27.md",
     "docs/evidence/simple-language-8.3.27.md",
+    "docs/evidence/service-scheduled-job-8.3.27.md",
     "docs/evidence/simple-session-parameter-8.3.27.md"
   ]
 }

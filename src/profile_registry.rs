@@ -332,6 +332,10 @@ mod tests {
                     "language-v1-crlf-no-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.scheduled_job.layout"].value,
+                    "scheduled-job-v1-crlf-no-bom"
+                );
+                assert_eq!(
                     profile.constants["bootstrap.metadata.session_parameter.layout"].value,
                     "session-parameter-v1-crlf-no-bom"
                 );

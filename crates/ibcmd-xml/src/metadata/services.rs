@@ -1,0 +1,495 @@
+//! Strict canonical codecs for service metadata families.
+//!
+//! BOOT-004 grows this module one independently evidenced family at a time.
+//! The first slice is `ScheduledJob`: every semantic property is typed and
+//! unknown properties fail closed, while document trivia remains available to
+//! the lossless XML writer.
+
+use std::collections::BTreeSet;
+
+use ibcmd_core::artifact::ProfileId;
+use ibcmd_core::diagnostic::ObjectPath;
+use ibcmd_core::family::FamilyId;
+use ibcmd_core::model::CanonicalObject;
+use ibcmd_core::value::{CanonicalInteger, CanonicalValue};
+
+use super::common::{
+    MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces, element_text,
+    resolve_namespaces, typed, uri_of,
+};
+use super::decode_metadata_envelope;
+use super::language::{
+    canonical_field, canonical_text, copy_object_parts, decode_to_encode, invalid_model,
+    profile_version, root_version, set_unprefixed_attribute, validate_decode_profile,
+};
+use super::registry::{
+    MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
+};
+use crate::{AttributeKind, LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlWriter};
+
+const SCHEDULED_JOB_FAMILY: &str = "ScheduledJob";
+
+/// Registers the strict `ScheduledJob` codec.
+pub fn register_scheduled_job_codec(
+    registry: &mut MetadataRegistry,
+) -> Result<(), MetadataRegistryError> {
+    registry.register(Box::new(ScheduledJobCodec {
+        family: FamilyId::parse(SCHEDULED_JOB_FAMILY).expect("family id is stable"),
+    }))
+}
+
+struct ScheduledJobCodec {
+    family: FamilyId,
+}
+
+impl MetadataFamilyCodec for ScheduledJobCodec {
+    fn family_id(&self) -> &FamilyId {
+        &self.family
+    }
+
+    fn decode(
+        &self,
+        document: &XmlDocument,
+        source: ProfileId,
+        path: ObjectPath,
+    ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        decode_scheduled_job(document, source, path)
+    }
+
+    fn encode(
+        &self,
+        envelope: &MetadataEnvelope,
+        target: &ProfileId,
+    ) -> Result<Vec<u8>, MetadataEncodeError> {
+        encode_scheduled_job(envelope, target)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ScheduledJobProjection {
+    comment: String,
+    method_name: String,
+    description: String,
+    key: String,
+    use_job: bool,
+    predefined: bool,
+    restart_count_on_failure: u32,
+    restart_interval_on_failure: u32,
+}
+
+fn decode_scheduled_job(
+    document: &XmlDocument,
+    source: ProfileId,
+    path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    validate_decode_profile(document, &source, &path)?;
+    let projection = project_scheduled_job(document)?;
+    let generic = decode_metadata_envelope(document, source, path)?;
+    if generic.root().kind().as_str() != SCHEDULED_JOB_FAMILY {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "ScheduledJob codec requires its exact family",
+        ));
+    }
+    if !generic.descendants().is_empty()
+        || !generic.root().generated_types().is_empty()
+        || !generic.root().references().is_empty()
+        || !generic.root().assets().is_empty()
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "ScheduledJob cannot contain children, generated types, references, or assets",
+        ));
+    }
+
+    let mut parts = copy_object_parts(generic.root());
+    for (name, value) in [
+        (
+            "Comment",
+            CanonicalValue::text(canonical_text(&projection.comment)?),
+        ),
+        (
+            "MethodName",
+            CanonicalValue::text(canonical_text(&projection.method_name)?),
+        ),
+        (
+            "Description",
+            CanonicalValue::text(canonical_text(&projection.description)?),
+        ),
+        (
+            "Key",
+            CanonicalValue::text(canonical_text(&projection.key)?),
+        ),
+        ("Use", CanonicalValue::boolean(projection.use_job)),
+        ("Predefined", CanonicalValue::boolean(projection.predefined)),
+        (
+            "RestartCountOnFailure",
+            integer_value(projection.restart_count_on_failure)?,
+        ),
+        (
+            "RestartIntervalOnFailure",
+            integer_value(projection.restart_interval_on_failure)?,
+        ),
+    ] {
+        parts.properties.push(canonical_field(name, value)?);
+    }
+    let root = CanonicalObject::new(parts)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
+    MetadataEnvelope::from_parts(root, Vec::new(), document.clone())
+}
+
+fn integer_value(value: u32) -> Result<CanonicalValue, MetadataDecodeError> {
+    CanonicalInteger::new(&value.to_string())
+        .map(CanonicalValue::integer)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))
+}
+
+fn project_scheduled_job(
+    document: &XmlDocument,
+) -> Result<ScheduledJobProjection, MetadataDecodeError> {
+    let uris = resolve_namespaces(document.root())?;
+    let expected = uri_of(document.root(), &uris);
+    if !matches!(expected, None | Some(MD_NAMESPACE)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "ScheduledJob root namespace",
+        ));
+    }
+    reject_attributes(document.root(), &["version"])?;
+    let object = required_child(document.root(), SCHEDULED_JOB_FAMILY, expected, &uris)?;
+    reject_attributes(object, &["uuid"])?;
+    let properties = exact_properties_child(object, expected, &uris)?;
+    reject_attributes(properties, &[])?;
+    reject_properties(properties, expected, &uris)?;
+
+    let method_name = required_text(properties, "MethodName", expected, &uris)?;
+    if method_name.is_empty() {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "ScheduledJob MethodName must not be empty",
+        ));
+    }
+    Ok(ScheduledJobProjection {
+        comment: required_text(properties, "Comment", expected, &uris)?,
+        method_name,
+        description: required_text(properties, "Description", expected, &uris)?,
+        key: required_text(properties, "Key", expected, &uris)?,
+        use_job: required_bool(properties, "Use", expected, &uris)?,
+        predefined: required_bool(properties, "Predefined", expected, &uris)?,
+        restart_count_on_failure: required_u32(
+            properties,
+            "RestartCountOnFailure",
+            expected,
+            &uris,
+        )?,
+        restart_interval_on_failure: required_u32(
+            properties,
+            "RestartIntervalOnFailure",
+            expected,
+            &uris,
+        )?,
+    })
+}
+
+fn exact_properties_child<'a>(
+    object: &'a XmlElement,
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<&'a XmlElement, MetadataDecodeError> {
+    let mut properties = None;
+    for node in object.children() {
+        let XmlNode::Element(child) = node else {
+            continue;
+        };
+        if !typed(child, "Properties", expected, uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "unknown ScheduledJob object child",
+            ));
+        }
+        if properties.replace(child).is_some() {
+            return Err(MetadataDecodeError::Duplicate("Properties"));
+        }
+    }
+    properties.ok_or(MetadataDecodeError::Missing("Properties"))
+}
+
+fn reject_properties(
+    properties: &XmlElement,
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<(), MetadataDecodeError> {
+    const REQUIRED: [&str; 10] = [
+        "Name",
+        "Synonym",
+        "Comment",
+        "MethodName",
+        "Description",
+        "Key",
+        "Use",
+        "Predefined",
+        "RestartCountOnFailure",
+        "RestartIntervalOnFailure",
+    ];
+    let mut seen = BTreeSet::new();
+    for node in properties.children() {
+        let XmlNode::Element(child) = node else {
+            continue;
+        };
+        let local = child.name().local();
+        if !REQUIRED.contains(&local) || !typed(child, local, expected, uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "unknown ScheduledJob property",
+            ));
+        }
+        reject_attributes_recursive(child)?;
+        if !seen.insert(local) {
+            return Err(MetadataDecodeError::Duplicate(match local {
+                "Name" => "Name",
+                "Synonym" => "Synonym",
+                "Comment" => "Comment",
+                "MethodName" => "MethodName",
+                "Description" => "Description",
+                "Key" => "Key",
+                "Use" => "Use",
+                "Predefined" => "Predefined",
+                "RestartCountOnFailure" => "RestartCountOnFailure",
+                "RestartIntervalOnFailure" => "RestartIntervalOnFailure",
+                _ => unreachable!("allowed property matched above"),
+            }));
+        }
+    }
+    for required in REQUIRED {
+        if !seen.contains(required) {
+            return Err(MetadataDecodeError::Missing(required));
+        }
+    }
+    Ok(())
+}
+
+fn reject_attributes(
+    element: &XmlElement,
+    allowed_unprefixed: &[&str],
+) -> Result<(), MetadataDecodeError> {
+    for attribute in element.attributes() {
+        match attribute.kind() {
+            AttributeKind::Namespace(_) => {}
+            AttributeKind::Ordinary(name)
+                if name.prefix().is_none() && allowed_unprefixed.contains(&name.local()) => {}
+            AttributeKind::Ordinary(_) => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "unknown ScheduledJob semantic attribute",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn reject_attributes_recursive(element: &XmlElement) -> Result<(), MetadataDecodeError> {
+    reject_attributes(element, &[])?;
+    for node in element.children() {
+        if let XmlNode::Element(child) = node {
+            reject_attributes_recursive(child)?;
+        }
+    }
+    Ok(())
+}
+
+fn required_child<'a>(
+    parent: &'a XmlElement,
+    local: &'static str,
+    namespace: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<&'a XmlElement, MetadataDecodeError> {
+    let mut found = None;
+    for node in parent.children() {
+        if let XmlNode::Element(child) = node
+            && typed(child, local, namespace, uris)
+        {
+            if found.is_some() {
+                return Err(MetadataDecodeError::Duplicate(local));
+            }
+            found = Some(child);
+        }
+    }
+    found.ok_or(MetadataDecodeError::Missing(local))
+}
+
+fn required_text(
+    parent: &XmlElement,
+    local: &'static str,
+    namespace: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<String, MetadataDecodeError> {
+    let child = required_child(parent, local, namespace, uris)?;
+    element_text(child)?.ok_or(MetadataDecodeError::InvalidEnvelope(
+        "ScheduledJob property must contain text only",
+    ))
+}
+
+fn required_bool(
+    parent: &XmlElement,
+    local: &'static str,
+    namespace: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<bool, MetadataDecodeError> {
+    match required_text(parent, local, namespace, uris)?.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(MetadataDecodeError::InvalidEnvelope(
+            "ScheduledJob boolean is not canonical",
+        )),
+    }
+}
+
+fn required_u32(
+    parent: &XmlElement,
+    local: &'static str,
+    namespace: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<u32, MetadataDecodeError> {
+    let value = required_text(parent, local, namespace, uris)?;
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|parsed| parsed.to_string() == value)
+        .ok_or(MetadataDecodeError::InvalidEnvelope(
+            "ScheduledJob integer is not canonical u32",
+        ))
+}
+
+fn encode_scheduled_job(
+    envelope: &MetadataEnvelope,
+    target: &ProfileId,
+) -> Result<Vec<u8>, MetadataEncodeError> {
+    let path = envelope.root().identity().path().clone();
+    let target_version =
+        profile_version(target).ok_or_else(|| MetadataEncodeError::UnsupportedProfile {
+            object_path: path.clone(),
+            profile: target.clone(),
+        })?;
+    if envelope.root().kind().as_str() != SCHEDULED_JOB_FAMILY {
+        return Err(invalid_model(&path, "kind"));
+    }
+    let source_profile = envelope.root().provenance().source_profile().clone();
+    validate_decode_profile(envelope.source_document(), &source_profile, &path)
+        .map_err(decode_to_encode)?;
+    let source = decode_scheduled_job(envelope.source_document(), source_profile, path.clone())
+        .map_err(decode_to_encode)?;
+    if source.root() != envelope.root() || source.descendants() != envelope.descendants() {
+        return Err(invalid_model(
+            &path,
+            "ScheduledJob semantic mutation is not implemented",
+        ));
+    }
+    let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
+        == target_version
+    {
+        envelope.source_document().root().clone()
+    } else {
+        set_unprefixed_attribute(
+            envelope.source_document().root(),
+            "version",
+            target_version,
+            &path,
+        )?
+    };
+    XmlWriter::to_vec(
+        &envelope.source_document().with_root(root),
+        LexicalPolicy::Preserve,
+    )
+    .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use ibcmd_core::value::CanonicalValueKind;
+
+    use super::*;
+    use crate::XmlReader;
+
+    const UUID: &str = "c7ffd8ab-15e9-4cf1-a7fd-d05534dff000";
+
+    fn profile(version: &str) -> ProfileId {
+        ProfileId::parse(&format!("xml-{version}")).unwrap()
+    }
+
+    fn fixture(version: &str, use_job: &str, count: &str, extra: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"{MD_NAMESPACE}\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"{version}\">\r\n\
+\t<ScheduledJob uuid=\"{UUID}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>ЗагрузкаКурсовВалют</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Загрузка курсов валют</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<MethodName>CommonModule.РаботаСКурсамиВалютЛокализация.ПриЗагрузкеАктуальныхКурсов</MethodName>\r\n\
+\t\t\t<Description/>\r\n\
+\t\t\t<Key/>\r\n\
+\t\t\t<Use>{use_job}</Use>\r\n\
+\t\t\t<Predefined>true</Predefined>\r\n\
+\t\t\t<RestartCountOnFailure>{count}</RestartCountOnFailure>\r\n\
+\t\t\t<RestartIntervalOnFailure>600</RestartIntervalOnFailure>{extra}\r\n\
+\t\t</Properties>\r\n\
+\t</ScheduledJob>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn scheduled_job_is_typed_and_cross_version_roundtrips() {
+        for version in ["2.20", "2.21"] {
+            let document = XmlReader::from_slice(&fixture(version, "false", "10", "")).unwrap();
+            let mut registry = MetadataRegistry::default();
+            register_scheduled_job_codec(&mut registry).unwrap();
+            let envelope = registry
+                .decode(
+                    &FamilyId::parse(SCHEDULED_JOB_FAMILY).unwrap(),
+                    &document,
+                    profile(version),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+            assert_eq!(envelope.root().properties().len(), 10);
+            assert!(matches!(
+                envelope.root().properties()[6].value().kind(),
+                CanonicalValueKind::Bool(false)
+            ));
+            assert!(matches!(
+                envelope.root().properties()[8].value().kind(),
+                CanonicalValueKind::Integer(_)
+            ));
+            let target = if version == "2.20" { "2.21" } else { "2.20" };
+            let output = registry.encode(&envelope, &profile(target)).unwrap();
+            let reparsed = XmlReader::from_slice(&output).unwrap();
+            registry
+                .decode(
+                    &FamilyId::parse(SCHEDULED_JOB_FAMILY).unwrap(),
+                    &reparsed,
+                    profile(target),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn scheduled_job_unknown_and_noncanonical_values_fail_closed() {
+        let mut registry = MetadataRegistry::default();
+        register_scheduled_job_codec(&mut registry).unwrap();
+        for input in [
+            fixture("2.20", "0", "10", ""),
+            fixture("2.20", "false", "010", ""),
+            fixture("2.20", "false", "10", "<Future/>"),
+        ] {
+            let document = XmlReader::from_slice(&input).unwrap();
+            assert!(
+                registry
+                    .decode(
+                        &FamilyId::parse(SCHEDULED_JOB_FAMILY).unwrap(),
+                        &document,
+                        profile("2.20"),
+                        ObjectPath::root(),
+                    )
+                    .is_err()
+            );
+        }
+    }
+}
