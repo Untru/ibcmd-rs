@@ -32,6 +32,9 @@ pub enum SourceAssetCodec {
     RawBinary,
     Picture,
     Help,
+    Rights,
+    Predefined,
+    OpaqueSupport,
     Deferred,
 }
 
@@ -42,7 +45,7 @@ impl SourceAssetCodec {
             Self::RawBinary => Some("bootstrap.asset.raw_binary.layout"),
             Self::Picture => Some("bootstrap.asset.picture.layout"),
             Self::Help => Some("bootstrap.asset.help.layout"),
-            Self::Deferred => None,
+            Self::Rights | Self::Predefined | Self::OpaqueSupport | Self::Deferred => None,
         }
     }
 
@@ -52,7 +55,7 @@ impl SourceAssetCodec {
             Self::RawBinary => Some("raw-deflate-v1"),
             Self::Picture => Some("ext-picture-v1"),
             Self::Help => Some("help-v1"),
-            Self::Deferred => None,
+            Self::Rights | Self::Predefined | Self::OpaqueSupport | Self::Deferred => None,
         }
     }
 }
@@ -82,6 +85,8 @@ pub enum SourceAssetRole {
     ClientApplicationInterface,
     MainSectionPicture,
     StandaloneContent,
+    Rights,
+    Predefined,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -427,6 +432,35 @@ const ROUTES: &[SourceAssetRoute] = &[
     ),
     route!("CommonPicture", Picture, ".0", "Ext/Picture.xml", Picture),
     route!("CommonCommand", Help, ".5", "Ext/Help.xml", Help),
+    route!("Role", Rights, ".0", "Ext/Rights.xml", Rights),
+    route!(
+        "Catalog",
+        Predefined,
+        ".1c",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
+    route!(
+        "ChartOfCharacteristicTypes",
+        Predefined,
+        ".7",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
+    route!(
+        "ChartOfAccounts",
+        Predefined,
+        ".9",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
+    route!(
+        "ChartOfCalculationTypes",
+        Predefined,
+        ".2",
+        "Ext/Predefined.xml",
+        Predefined
+    ),
     route!("XDTOPackage", Package, ".0", "Ext/Package.bin", RawBinary),
     route!("Configuration", Splash, ".2", "Ext/Splash.xml", Picture),
     route!("Configuration", Help, ".3", "Ext/Help.xml", Help),
@@ -435,7 +469,7 @@ const ROUTES: &[SourceAssetRoute] = &[
         ParentConfigurations,
         ".4",
         "Ext/ParentConfigurations.bin",
-        RawBinary
+        OpaqueSupport
     ),
     route!(
         "Configuration",
@@ -463,7 +497,7 @@ const ROUTES: &[SourceAssetRoute] = &[
         MobileClientSignature,
         ".10",
         "Ext/MobileClientSignature.bin",
-        RawBinary
+        OpaqueSupport
     ),
     route!(
         "Configuration",
@@ -484,7 +518,7 @@ const ROUTES: &[SourceAssetRoute] = &[
         StandaloneContent,
         ".f",
         "Ext/StandaloneConfigurationContent.bin",
-        Deferred
+        OpaqueSupport
     ),
 ];
 
@@ -807,7 +841,13 @@ pub fn compile_source_asset(
         }
         (SourceAssetCodec::Picture, SourceAssetPayload::Picture(asset)) => encode_picture(asset)?,
         (SourceAssetCodec::Help, SourceAssetPayload::Help(help)) => encode_help(help)?,
-        (SourceAssetCodec::Deferred, _) => return Err(AssetCodecError::DeferredRoute),
+        (
+            SourceAssetCodec::Rights
+            | SourceAssetCodec::Predefined
+            | SourceAssetCodec::OpaqueSupport
+            | SourceAssetCodec::Deferred,
+            _,
+        ) => return Err(AssetCodecError::DeferredRoute),
         _ => return Err(AssetCodecError::PayloadMismatch),
     };
     let suffix = StorageSuffix::new(route.suffix).map_err(|error| {
@@ -851,7 +891,10 @@ pub fn decode_source_asset(
             .map_err(native_error),
         SourceAssetCodec::Picture => decode_picture(blob).map(DecodedSourceAsset::Picture),
         SourceAssetCodec::Help => decode_help(blob).map(DecodedSourceAsset::Help),
-        SourceAssetCodec::Deferred => Err(AssetCodecError::DeferredRoute),
+        SourceAssetCodec::Rights
+        | SourceAssetCodec::Predefined
+        | SourceAssetCodec::OpaqueSupport
+        | SourceAssetCodec::Deferred => Err(AssetCodecError::DeferredRoute),
     }
 }
 
@@ -1302,6 +1345,33 @@ mod tests {
                 )
                 .unwrap(),
             PathBuf::from(r"CommonPictures\Logo\Ext\Picture.xml")
+        );
+        for (family, suffix) in [
+            ("Catalog", ".1c"),
+            ("ChartOfCharacteristicTypes", ".7"),
+            ("ChartOfAccounts", ".9"),
+            ("ChartOfCalculationTypes", ".2"),
+        ] {
+            let route = SourceAssetRegistry
+                .route(family, SourceAssetRole::Predefined)
+                .unwrap();
+            assert_eq!(route.suffix(), suffix);
+            assert_eq!(route.relative_path(), "Ext/Predefined.xml");
+            assert_eq!(route.codec(), SourceAssetCodec::Predefined);
+        }
+        assert_eq!(
+            SourceAssetRegistry
+                .route("Role", SourceAssetRole::Rights)
+                .unwrap()
+                .codec(),
+            SourceAssetCodec::Rights
+        );
+        assert_eq!(
+            SourceAssetRegistry
+                .route("Configuration", SourceAssetRole::MobileClientSignature)
+                .unwrap()
+                .codec(),
+            SourceAssetCodec::OpaqueSupport
         );
         assert_eq!(
             SourceAssetRegistry

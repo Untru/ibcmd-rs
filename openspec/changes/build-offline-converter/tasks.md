@@ -378,7 +378,7 @@
 
 ### BOOT-010 — Base-free codecs Rights/Predefined/support data
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002, CORE-005
+- **Статус:** `[x]`; **зависимости:** BOOT-002, CORE-005
 - **Файлы:** создать `src/compiler/bodies/rights.rs`, `predefined.rs`, `support.rs`; адаптировать `src/mssql_dump/role_rights.rs`
 - **Действия:** encode without base, preserve unsupported signature/support facets or report blocker.
 - **Проверка:** role and predefined fixtures roundtrip; signatures никогда не подделываются и не теряются молча.

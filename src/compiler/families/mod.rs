@@ -1,7 +1,7 @@
 //! Profile-gated native metadata-family compilers.
 
 mod business_object;
-mod native;
+pub(crate) mod native;
 mod utility;
 
 pub mod assets;

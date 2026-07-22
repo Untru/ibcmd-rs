@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=32 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=33 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 32 of 56 accepted leaf issues in the
+As of 2026-07-22, 33 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (57.1%). Live workflow statuses are tracked in
+are complete (58.9%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -136,16 +136,28 @@ compiler and the legacy MSSQL bridge. Unknown properties, unresolved graph
 references, unsafe asset names, malformed base64 and future layouts fail
 closed. See [module/command/asset native layout evidence](docs/evidence/modules-commands-assets-8.3.27.md).
 
+BOOT-010 is complete as a bounded, fail-closed body-codec slice. Role Rights
+now has a profile-selected base-free encoder plus a strict decoder shared with
+the MSSQL export bridge. Catalog Predefined data compiles from typed nested
+items without a base row; the three chart layouts are preserved only as exact
+same-profile opaque bytes until their family-specific schemas are evidenced.
+Parent-configuration, standalone-content and mobile-signature artifacts are
+classified as opaque support data: they require observed bytes, provenance and
+a matching SHA-256, never cross profiles implicitly, and can only be dropped
+through an explicit policy that emits a loss report. Source paths and native
+suffixes for Rights/Predefined/support data are centralized in the same asset
+registry. See [Rights/Predefined/support evidence](docs/evidence/rights-predefined-support-8.3.27.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 2/15 | 13.3% |
-| Phase 4 bootstrap | 8/13 | 61.5% |
+| Phase 4 bootstrap | 9/13 | 69.2% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **32/56** | **57.1%** |
+| **Overall** | **33/56** | **58.9%** |
 
 ## Export Compatibility Status
 

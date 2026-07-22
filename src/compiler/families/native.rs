@@ -13,32 +13,33 @@ const MAX_NATIVE_DEPTH: usize = 64;
 const MAX_NATIVE_NODES: usize = 500_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) enum NativeValue {
+pub(crate) enum NativeValue {
     Token(String),
     Text(String),
     List {
         values: Vec<NativeValue>,
+        leading_break: bool,
         line_breaks: Vec<usize>,
         trailing_break: bool,
     },
 }
 
 impl NativeValue {
-    pub(super) fn as_token(&self) -> Option<&str> {
+    pub(crate) fn as_token(&self) -> Option<&str> {
         match self {
             Self::Token(value) => Some(value),
             _ => None,
         }
     }
 
-    pub(super) fn as_text(&self) -> Option<&str> {
+    pub(crate) fn as_text(&self) -> Option<&str> {
         match self {
             Self::Text(value) => Some(value),
             _ => None,
         }
     }
 
-    pub(super) fn as_list(&self) -> Option<&[NativeValue]> {
+    pub(crate) fn as_list(&self) -> Option<&[NativeValue]> {
         match self {
             Self::List { values, .. } => Some(values),
             _ => None,
@@ -46,60 +47,78 @@ impl NativeValue {
     }
 }
 
-pub(super) fn token(value: impl Into<String>) -> NativeValue {
+pub(crate) fn token(value: impl Into<String>) -> NativeValue {
     NativeValue::Token(value.into())
 }
 
-pub(super) fn text(value: impl Into<String>) -> NativeValue {
+pub(crate) fn text(value: impl Into<String>) -> NativeValue {
     NativeValue::Text(value.into())
 }
 
 #[cfg(test)]
-pub(super) fn list(values: Vec<NativeValue>) -> NativeValue {
+pub(crate) fn list(values: Vec<NativeValue>) -> NativeValue {
     let line_breaks = (1..values.len()).collect();
     NativeValue::List {
         values,
+        leading_break: false,
         line_breaks,
         trailing_break: false,
     }
 }
 
-pub(super) fn inline_list(values: Vec<NativeValue>) -> NativeValue {
+pub(crate) fn inline_list(values: Vec<NativeValue>) -> NativeValue {
     NativeValue::List {
         values,
+        leading_break: false,
         line_breaks: Vec::new(),
         trailing_break: false,
     }
 }
 
-pub(super) fn styled_list(values: Vec<NativeValue>, line_breaks: Vec<usize>) -> NativeValue {
+pub(crate) fn styled_list(values: Vec<NativeValue>, line_breaks: Vec<usize>) -> NativeValue {
     NativeValue::List {
         values,
+        leading_break: false,
         line_breaks,
         trailing_break: false,
     }
 }
 
-pub(super) fn styled_list_with_tail(
+pub(crate) fn styled_list_with_tail(
     values: Vec<NativeValue>,
     line_breaks: Vec<usize>,
 ) -> NativeValue {
     NativeValue::List {
         values,
+        leading_break: false,
         line_breaks,
         trailing_break: true,
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct NativeMetadataHeader {
-    pub(super) uuid: ObjectUuid,
-    pub(super) name: String,
-    pub(super) synonyms: Vec<(String, String)>,
-    pub(super) comment: String,
+pub(crate) fn formatted_list(
+    values: Vec<NativeValue>,
+    leading_break: bool,
+    line_breaks: Vec<usize>,
+    trailing_break: bool,
+) -> NativeValue {
+    NativeValue::List {
+        values,
+        leading_break,
+        line_breaks,
+        trailing_break,
+    }
 }
 
-pub(super) fn metadata_header(value: &NativeMetadataHeader) -> NativeValue {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct NativeMetadataHeader {
+    pub(crate) uuid: ObjectUuid,
+    pub(crate) name: String,
+    pub(crate) synonyms: Vec<(String, String)>,
+    pub(crate) comment: String,
+}
+
+pub(crate) fn metadata_header(value: &NativeMetadataHeader) -> NativeValue {
     styled_list(
         vec![
             token("3"),
@@ -116,7 +135,7 @@ pub(super) fn metadata_header(value: &NativeMetadataHeader) -> NativeValue {
     )
 }
 
-pub(super) fn localized(values: &[(String, String)]) -> NativeValue {
+pub(crate) fn localized(values: &[(String, String)]) -> NativeValue {
     let mut fields = Vec::with_capacity(values.len() * 2 + 1);
     fields.push(token(values.len().to_string()));
     for (language, content) in values {
@@ -126,7 +145,7 @@ pub(super) fn localized(values: &[(String, String)]) -> NativeValue {
     inline_list(fields)
 }
 
-pub(super) fn parse_metadata_header(
+pub(crate) fn parse_metadata_header(
     value: &NativeValue,
 ) -> Result<NativeMetadataHeader, NativeError> {
     let fields = exact_list(value, 9, "metadata header")?;
@@ -154,7 +173,7 @@ pub(super) fn parse_metadata_header(
     })
 }
 
-pub(super) fn parse_localized(value: &NativeValue) -> Result<Vec<(String, String)>, NativeError> {
+pub(crate) fn parse_localized(value: &NativeValue) -> Result<Vec<(String, String)>, NativeError> {
     let fields = required_list(value, "localized value")?;
     let count = required_token(
         fields.first().ok_or(NativeError::Shape {
@@ -185,14 +204,14 @@ pub(super) fn parse_localized(value: &NativeValue) -> Result<Vec<(String, String
     Ok(values)
 }
 
-pub(super) fn required_list<'a>(
+pub(crate) fn required_list<'a>(
     value: &'a NativeValue,
     field: &'static str,
 ) -> Result<&'a [NativeValue], NativeError> {
     value.as_list().ok_or(NativeError::Shape { field })
 }
 
-pub(super) fn exact_list<'a>(
+pub(crate) fn exact_list<'a>(
     value: &'a NativeValue,
     length: usize,
     field: &'static str,
@@ -204,21 +223,21 @@ pub(super) fn exact_list<'a>(
     Ok(values)
 }
 
-pub(super) fn required_token<'a>(
+pub(crate) fn required_token<'a>(
     value: &'a NativeValue,
     field: &'static str,
 ) -> Result<&'a str, NativeError> {
     value.as_token().ok_or(NativeError::Shape { field })
 }
 
-pub(super) fn required_text<'a>(
+pub(crate) fn required_text<'a>(
     value: &'a NativeValue,
     field: &'static str,
 ) -> Result<&'a str, NativeError> {
     value.as_text().ok_or(NativeError::Shape { field })
 }
 
-pub(super) fn exact_token(
+pub(crate) fn exact_token(
     value: &NativeValue,
     expected: &str,
     field: &'static str,
@@ -229,7 +248,7 @@ pub(super) fn exact_token(
     Ok(())
 }
 
-pub(super) fn parse_bool_token(
+pub(crate) fn parse_bool_token(
     value: &NativeValue,
     field: &'static str,
 ) -> Result<bool, NativeError> {
@@ -240,23 +259,23 @@ pub(super) fn parse_bool_token(
     }
 }
 
-pub(super) fn serialize(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
+pub(crate) fn serialize(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
     let mut output = Vec::new();
     output.extend_from_slice(UTF8_BOM);
     write_value(value, &mut output, 0)?;
     Ok(output)
 }
 
-pub(super) fn serialize_without_bom(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
+pub(crate) fn serialize_without_bom(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
     let bytes = serialize(value)?;
     Ok(bytes[UTF8_BOM.len()..].to_vec())
 }
 
-pub(super) fn parse(input: &[u8]) -> Result<NativeValue, NativeError> {
+pub(crate) fn parse(input: &[u8]) -> Result<NativeValue, NativeError> {
     NativeParser::new(input).parse()
 }
 
-pub(super) fn parse_without_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
+pub(crate) fn parse_without_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
     let total =
         input
             .len()
@@ -277,25 +296,25 @@ pub(super) fn parse_without_bom(input: &[u8]) -> Result<NativeValue, NativeError
     parse(&bytes)
 }
 
-pub(super) fn raw_deflate(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
+pub(crate) fn raw_deflate(value: &NativeValue) -> Result<Vec<u8>, NativeError> {
     let plain = serialize(value)?;
     encode_payload(PayloadEncoding::RawDeflate, &plain, payload_limits())
         .map_err(|error| NativeError::Payload(error.to_string()))
 }
 
-pub(super) fn inflate_and_parse(blob: &[u8]) -> Result<NativeValue, NativeError> {
+pub(crate) fn inflate_and_parse(blob: &[u8]) -> Result<NativeValue, NativeError> {
     let plain = decode_payload(PayloadEncoding::RawDeflate, blob, payload_limits())
         .map_err(|error| NativeError::Payload(error.to_string()))?;
     parse(plain.bytes())
 }
 
-pub(super) fn inflate(blob: &[u8]) -> Result<Vec<u8>, NativeError> {
+pub(crate) fn inflate(blob: &[u8]) -> Result<Vec<u8>, NativeError> {
     decode_payload(PayloadEncoding::RawDeflate, blob, payload_limits())
         .map(|payload| payload.into_bytes())
         .map_err(|error| NativeError::Payload(error.to_string()))
 }
 
-pub(super) fn deflate_bytes(bytes: &[u8]) -> Result<Vec<u8>, NativeError> {
+pub(crate) fn deflate_bytes(bytes: &[u8]) -> Result<Vec<u8>, NativeError> {
     encode_payload(PayloadEncoding::RawDeflate, bytes, payload_limits())
         .map_err(|error| NativeError::Payload(error.to_string()))
 }
@@ -339,10 +358,14 @@ fn write_value(value: &NativeValue, output: &mut Vec<u8>, depth: usize) -> Resul
         }
         NativeValue::List {
             values,
+            leading_break,
             line_breaks,
             trailing_break,
         } => {
             output.push(b'{');
+            if *leading_break && !values.is_empty() {
+                output.extend_from_slice(b"\r\n");
+            }
             for (index, child) in values.iter().enumerate() {
                 if index != 0 {
                     output.push(b',');
@@ -420,12 +443,17 @@ impl<'a> NativeParser<'a> {
 
     fn list(&mut self, depth: usize) -> Result<NativeValue, NativeError> {
         self.offset += 1;
+        let whitespace_start = self.offset;
         self.whitespace();
+        let leading_break = self.input[whitespace_start..self.offset]
+            .iter()
+            .any(|byte| matches!(byte, b'\r' | b'\n'));
         let mut values = Vec::new();
         if self.input.get(self.offset) == Some(&b'}') {
             self.offset += 1;
             return Ok(NativeValue::List {
                 values,
+                leading_break: false,
                 line_breaks: Vec::new(),
                 trailing_break: false,
             });
@@ -457,6 +485,7 @@ impl<'a> NativeParser<'a> {
                     self.offset += 1;
                     return Ok(NativeValue::List {
                         values,
+                        leading_break,
                         line_breaks,
                         trailing_break,
                     });
@@ -521,7 +550,7 @@ impl<'a> NativeParser<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) enum NativeError {
+pub(crate) enum NativeError {
     MissingBom,
     UnexpectedEnd,
     TrailingBytes,

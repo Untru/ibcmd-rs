@@ -218,13 +218,18 @@ pub(super) fn dynamic_source_asset(
     }
 
     let owner = context.body_owners.get(owner_uuid)?;
-    if owner.kind == "Role"
-        && suffix == "0"
+    if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
+        .route(
+            "Role",
+            crate::compiler::families::assets::SourceAssetRole::Rights,
+        )
+        .filter(|route| route.suffix().strip_prefix('.') == Some(suffix))
+        && owner.kind == "Role"
         && parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
             .is_some()
     {
         return Some(SourceAsset {
-            primary_path: owner.object_path.join("Ext").join("Rights.xml"),
+            primary_path: owner.object_path.join(route.relative_path()),
             kind: SourceAssetKind::RoleRights,
         });
     }
@@ -277,11 +282,12 @@ pub(super) fn dynamic_source_asset(
         });
     }
     if let Some(model) = predefined_data_source_model(&owner.kind)
-        && suffix == model.suffix
+        && predefined_data_suffix(&owner.kind) == Some(suffix)
         && parse_predefined_data_blob_with_model(bytes, context.type_index, model).is_some()
     {
+        let route = predefined_data_route(&owner.kind)?;
         return Some(SourceAsset {
-            primary_path: owner.object_path.join("Ext").join("Predefined.xml"),
+            primary_path: owner.object_path.join(route.relative_path()),
             kind: SourceAssetKind::PredefinedData { model },
         });
     }
@@ -445,7 +451,6 @@ pub(crate) enum PredefinedItemLayout {
 
 #[derive(Clone, Copy)]
 pub(crate) struct PredefinedDataSourceModel {
-    suffix: &'static str,
     xsi_type: &'static str,
     root_tag: &'static str,
     rowset_layout: PredefinedDataRowsetLayout,
@@ -875,8 +880,12 @@ pub(super) fn source_assets_from_metadata_text_inner(
                     .and_then(|bytes| parse_role_rights_blob(&bytes, object_refs, field_refs))
                     .is_some() =>
             {
+                let route = crate::compiler::families::assets::SourceAssetRegistry.route(
+                    "Role",
+                    crate::compiler::families::assets::SourceAssetRole::Rights,
+                )?;
                 Some(SourceAsset {
-                    primary_path: object_path.join("Ext").join("Rights.xml"),
+                    primary_path: object_path.join(route.relative_path()),
                     kind: SourceAssetKind::RoleRights,
                 })
             }
@@ -940,14 +949,15 @@ pub(super) fn source_assets_from_metadata_text_inner(
             continue;
         }
         if let Some(model) = predefined_data_source_model(kind)
-            && (*body_id).strip_prefix(&object_row_prefix) == Some(model.suffix)
+            && (*body_id).strip_prefix(&object_row_prefix) == predefined_data_suffix(kind)
             && let Ok(predefined_bytes) = decode_hex(&body_row.binary_hex)
             && parse_predefined_data_blob_with_model(&predefined_bytes, type_index, model).is_some()
         {
+            let route = predefined_data_route(kind)?;
             assets.push((
                 (*body_id).to_string(),
                 SourceAsset {
-                    primary_path: object_path.join("Ext").join("Predefined.xml"),
+                    primary_path: object_path.join(route.relative_path()),
                     kind: SourceAssetKind::PredefinedData { model },
                 },
             ));
@@ -1906,7 +1916,6 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
     (
         "Catalog",
         PredefinedDataSourceModel {
-            suffix: "1c",
             xsi_type: "CatalogPredefinedItems",
             root_tag: "0",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
@@ -1917,7 +1926,6 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
     (
         "ChartOfCharacteristicTypes",
         PredefinedDataSourceModel {
-            suffix: "7",
             xsi_type: "PlanOfCharacteristicKindPredefinedItems",
             root_tag: "1",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
@@ -1928,7 +1936,6 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
     (
         "ChartOfAccounts",
         PredefinedDataSourceModel {
-            suffix: "9",
             xsi_type: "ChartOfAccountsPredefinedItems",
             root_tag: "2",
             rowset_layout: PredefinedDataRowsetLayout::NestedTable,
@@ -1939,7 +1946,6 @@ const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
     (
         "ChartOfCalculationTypes",
         PredefinedDataSourceModel {
-            suffix: "2",
             xsi_type: "CalculationTypePredefinedItems",
             root_tag: "9",
             rowset_layout: PredefinedDataRowsetLayout::Root,
@@ -1955,6 +1961,19 @@ pub(super) fn predefined_data_source_model(kind: &str) -> Option<PredefinedDataS
         .find_map(|(candidate, model)| (*candidate == kind).then_some(*model))
 }
 
+fn predefined_data_route(
+    kind: &str,
+) -> Option<&'static crate::compiler::families::assets::SourceAssetRoute> {
+    crate::compiler::families::assets::SourceAssetRegistry.route(
+        kind,
+        crate::compiler::families::assets::SourceAssetRole::Predefined,
+    )
+}
+
+fn predefined_data_suffix(kind: &str) -> Option<&'static str> {
+    predefined_data_route(kind)?.suffix().strip_prefix('.')
+}
+
 pub(super) fn predefined_data_needs_item_references(
     file_names: &BTreeSet<String>,
     body_owners: &BTreeMap<String, BodyOwnerSourceReference>,
@@ -1966,7 +1985,8 @@ pub(super) fn predefined_data_needs_item_references(
         matches!(
             model.item_layout,
             PredefinedItemLayout::Account | PredefinedItemLayout::Calculation
-        ) && file_names.contains(&format!("{owner_uuid}.{}", model.suffix))
+        ) && predefined_data_suffix(&owner.kind)
+            .is_some_and(|suffix| file_names.contains(&format!("{owner_uuid}.{suffix}")))
     })
 }
 
@@ -1976,8 +1996,8 @@ pub(super) fn predefined_data_body_file_names(
     body_owners
         .iter()
         .filter_map(|(owner_uuid, owner)| {
-            predefined_data_source_model(&owner.kind)
-                .map(|model| format!("{owner_uuid}.{}", model.suffix))
+            predefined_data_source_model(&owner.kind)?;
+            predefined_data_suffix(&owner.kind).map(|suffix| format!("{owner_uuid}.{suffix}"))
         })
         .collect()
 }
@@ -2000,7 +2020,10 @@ pub(super) fn build_predefined_item_reference_index(
         let Some(model) = predefined_data_source_model(&owner.kind) else {
             continue;
         };
-        let file_name = format!("{owner_uuid}.{}", model.suffix);
+        let Some(suffix) = predefined_data_suffix(&owner.kind) else {
+            continue;
+        };
+        let file_name = format!("{owner_uuid}.{suffix}");
         let Some(row) = rows_by_file_name.get(file_name.as_str()) else {
             continue;
         };

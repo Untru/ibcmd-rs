@@ -24,6 +24,7 @@ use crate::module_blob::{
     pack_module_blob_container_bytes, pack_raw_deflated_blob_from_bytes,
 };
 
+pub mod bodies;
 pub mod families;
 pub mod graph;
 pub mod identity;
