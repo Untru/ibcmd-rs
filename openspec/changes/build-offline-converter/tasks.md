@@ -280,7 +280,7 @@
 
 ### CF-013 — Выделить pure source → `StoragePatch`
 
-- **Статус:** `[ ]`; **зависимости:** CORE-006, CORE-009, CORE-010
+- **Статус:** `[x]`; **зависимости:** CORE-006, CORE-009, CORE-010
 - **Файлы:** создать `src/compiler/mod.rs`, `src/compiler/overlay.rs`; изменить `src/mssql.rs`, `src/module_blob.rs`
 - **Действия:** packers возвращают `Compiled|NeedsBase|Unsupported` entries без SQL; MSSQL staging использует тот же API.
 - **Проверка:** pure unit tests; ни один compiler API не принимает connection/process types.

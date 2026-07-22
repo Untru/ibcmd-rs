@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=22 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=23 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 22 of 56 accepted leaf issues in the
+As of 2026-07-22, 23 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (39.3%). Live workflow statuses are tracked in
+are complete (41.1%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -43,11 +43,11 @@ compiler work continues on separate roadmap lanes.
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 0/15 | 0% |
+| Phase 3 CF | 1/15 | 6.7% |
 | Phase 4 bootstrap | 0/13 | 0% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **22/56** | **39.3%** |
+| **Overall** | **23/56** | **41.1%** |
 
 ## Export Compatibility Status
 
