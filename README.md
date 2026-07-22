@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=41 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=42 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 41 of 56 accepted leaf issues in the
+As of 2026-07-23, 42 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (73.2%). Live workflow statuses are tracked in
+are complete (75.0%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -64,6 +64,15 @@ block headers, 24-byte address records, relative 64-bit page addresses, entry
 order, absent data, and multi-page payloads. Truncated headers, malformed
 markers, out-of-range addresses, and `u64` arithmetic overflow fail closed.
 See [Format16 reader evidence](docs/evidence/cf-format16-reader.md).
+
+CF-006 adds bounded `Read + Seek` indexing and visitor-based nested traversal.
+Opening a streaming reader loads only TOC/name bytes and page headers; data
+pages are range-checked and indexed but read only when selected. A virtual
+Format15 source with a sparse 1 GiB page proves that opening and reading its
+four logical bytes performs less than 512 bytes of actual I/O. Nested stored or
+raw-DEFLATE containers share one depth/entry/encoded/decoded/ratio budget, and
+recursive bombs return the exact typed limit without retaining an in-memory
+tree. See [streaming traversal evidence](docs/evidence/cf-streaming-tree.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -223,11 +232,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 6/15 | 40.0% |
+| Phase 3 CF | 7/15 | 46.7% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **41/56** | **73.2%** |
+| **Overall** | **42/56** | **75.0%** |
 
 ## Export Compatibility Status
 

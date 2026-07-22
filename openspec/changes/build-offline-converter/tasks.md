@@ -224,7 +224,7 @@
 
 ### CF-006 — Добавить bounded streaming и nested traversal
 
-- **Статус:** `[ ]`; **зависимости:** CF-003–CF-005
+- **Статус:** `[x]`; **зависимости:** CF-003–CF-005
 - **Файлы:** создать `crates/ibcmd-v8/src/reader.rs`, `crates/ibcmd-cf/src/tree.rs`
 - **Действия:** `Read + Seek`, lazy selected entry, nested traversal, limits propagation.
 - **Проверка:** large/sparse fixture не загружается целиком; recursive bomb получает typed limit error.

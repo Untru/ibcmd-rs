@@ -9,6 +9,7 @@ pub mod block;
 pub mod format;
 pub mod format15;
 pub mod format16;
+pub mod reader;
 
 #[cfg(test)]
 mod tests {
