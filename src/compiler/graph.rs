@@ -318,6 +318,22 @@ impl BootstrapGraph {
         self.entries.iter().map(BootstrapStorageIdentity::key)
     }
 
+    /// Resolves the exact unsuffixed physical row owned by a top-level object.
+    ///
+    /// Family compilers use this lookup instead of reconstructing storage keys
+    /// from UUID text, so their targets cannot drift from the validated graph.
+    pub fn primary_object_entry(&self, uuid: ObjectUuid) -> Option<&BootstrapStorageIdentity> {
+        self.entries.iter().find(|entry| {
+            matches!(
+                entry.owner(),
+                BootstrapStorageOwner::Object {
+                    uuid: owner,
+                    suffix: None,
+                } if *owner == uuid
+            )
+        })
+    }
+
     /// Resolves a generated type to its owning canonical object.
     pub fn generated_type_owner(&self, uuid: ObjectUuid) -> Option<ObjectUuid> {
         self.generated_types.get(&uuid).copied()
