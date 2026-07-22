@@ -50,6 +50,14 @@ pub fn bundled_metadata_registry() -> MetadataRegistry {
         .expect("bundled families are unique and bounded");
     super::business_objects::register_document_codec(&mut registry)
         .expect("bundled families are unique and bounded");
+    super::hierarchical_objects::register_subsystem_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
+    super::hierarchical_objects::register_exchange_plan_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
+    super::hierarchical_objects::register_business_process_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
+    super::hierarchical_objects::register_task_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
     super::utility_objects::register_report_codec(&mut registry)
         .expect("bundled families are unique and bounded");
     super::utility_objects::register_data_processor_codec(&mut registry)

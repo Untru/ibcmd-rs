@@ -354,7 +354,7 @@
 
 ### BOOT-007 — Base-free codecs Subsystem/ExchangePlan/BusinessProcess/Task
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002
+- **Статус:** `[x]`; **зависимости:** BOOT-002
 - **Файлы:** создать `src/compiler/families/subsystem.rs`, `exchange_plan.rs`, `business_process.rs`, `task.rs`
 - **Действия:** hierarchical content, routes, tables, child refs and generated types.
 - **Проверка:** nested subsystem и BP/Task fixtures; ownership/reference validation; no base dependency.

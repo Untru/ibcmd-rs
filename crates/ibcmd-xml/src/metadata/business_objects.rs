@@ -698,7 +698,7 @@ pub(super) fn collect_embedded_elements<'a>(
     Ok(output)
 }
 
-fn project_attribute(
+pub(super) fn project_attribute(
     parts: &mut CanonicalObjectParts,
     element: &XmlElement,
     family: &str,
@@ -825,7 +825,7 @@ pub(super) fn project_type(
     Ok(())
 }
 
-fn project_tabular_section(
+pub(super) fn project_tabular_section(
     parts: &mut CanonicalObjectParts,
     element: &XmlElement,
     family: &str,
@@ -927,7 +927,7 @@ pub(super) fn push_bool(
     Ok(())
 }
 
-fn push_u32(
+pub(super) fn push_u32(
     parts: &mut CanonicalObjectParts,
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
@@ -965,7 +965,7 @@ pub(super) fn push_enum(
     Ok(())
 }
 
-fn push_reference_collection(
+pub(super) fn push_reference_collection(
     parts: &mut CanonicalObjectParts,
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
@@ -997,7 +997,7 @@ fn push_reference_collection(
     Ok(())
 }
 
-fn push_field_collection(
+pub(super) fn push_field_collection(
     parts: &mut CanonicalObjectParts,
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
@@ -1121,7 +1121,7 @@ pub(super) fn only_element_child<'a>(
     result.ok_or(MetadataDecodeError::Missing(label))
 }
 
-fn uuid_attribute(element: &XmlElement) -> Result<ObjectUuid, MetadataDecodeError> {
+pub(super) fn uuid_attribute(element: &XmlElement) -> Result<ObjectUuid, MetadataDecodeError> {
     let mut value = None;
     for attribute in element.attributes() {
         if let crate::AttributeKind::Ordinary(name) = attribute.kind()

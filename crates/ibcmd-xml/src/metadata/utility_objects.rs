@@ -516,7 +516,7 @@ fn project_enum_value(
     Ok(())
 }
 
-fn validate_standard_attributes(
+pub(super) fn validate_standard_attributes(
     container: &XmlElement,
     expected_names: &[&str],
     uris: &ResolvedNamespaces,

@@ -7,6 +7,7 @@ mod defined_type;
 mod fallback;
 mod functional_option;
 mod functional_options_parameter;
+mod hierarchical_objects;
 mod language;
 mod registry;
 mod services;
@@ -22,6 +23,10 @@ pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;
 pub use functional_option::register_functional_option_codec;
 pub use functional_options_parameter::register_functional_options_parameter_codec;
+pub use hierarchical_objects::{
+    register_business_process_codec, register_exchange_plan_codec, register_subsystem_codec,
+    register_task_codec,
+};
 pub use language::register_language_codec;
 pub use registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,

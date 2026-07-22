@@ -97,16 +97,26 @@ uniqueness, and child order fail closed. All four emitted semantic native trees
 were also matched against independently inflated laboratory rows. See
 [utility-object native layout evidence](docs/evidence/utility-objects-8.3.27.md).
 
+BOOT-007 is complete for `Subsystem`, `ExchangePlan`, `BusinessProcess`, and
+`Task`. Their strict XCF 2.20/2.21 codecs retain subsystem content and nested
+subsystems, exchange-plan children, workflow tables and routes, generated
+TypeId/ValueId pairs, and task addressing dimensions. The independently
+selected 8.3.27 layouts compile deterministic base-free rows and validate them
+through a bounded native parser. Ownership, reference targets, child order,
+duplicate identities, standard-field inventories, and unsupported native tails
+all fail closed. See
+[hierarchical/workflow native layout evidence](docs/evidence/hierarchical-workflow-8.3.27.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 1/15 | 6.7% |
-| Phase 4 bootstrap | 5/13 | 38.5% |
+| Phase 4 bootstrap | 6/13 | 46.2% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **28/56** | **50.0%** |
+| **Overall** | **29/56** | **51.8%** |
 
 ## Export Compatibility Status
 

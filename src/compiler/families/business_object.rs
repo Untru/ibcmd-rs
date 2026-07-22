@@ -31,6 +31,14 @@ pub(crate) const CATALOG_LAYOUT_KEY: &str = "bootstrap.metadata.catalog.layout";
 pub(crate) const CATALOG_LAYOUT: &str = "catalog-v1-crlf-utf8-bom";
 pub(crate) const DOCUMENT_LAYOUT_KEY: &str = "bootstrap.metadata.document.layout";
 pub(crate) const DOCUMENT_LAYOUT: &str = "document-v1-crlf-utf8-bom";
+pub(crate) const SUBSYSTEM_LAYOUT_KEY: &str = "bootstrap.metadata.subsystem.layout";
+pub(crate) const SUBSYSTEM_LAYOUT: &str = "subsystem-v1-crlf-utf8-bom";
+pub(crate) const EXCHANGE_PLAN_LAYOUT_KEY: &str = "bootstrap.metadata.exchange_plan.layout";
+pub(crate) const EXCHANGE_PLAN_LAYOUT: &str = "exchange-plan-v1-crlf-utf8-bom";
+pub(crate) const BUSINESS_PROCESS_LAYOUT_KEY: &str = "bootstrap.metadata.business_process.layout";
+pub(crate) const BUSINESS_PROCESS_LAYOUT: &str = "business-process-v1-crlf-utf8-bom";
+pub(crate) const TASK_LAYOUT_KEY: &str = "bootstrap.metadata.task.layout";
+pub(crate) const TASK_LAYOUT: &str = "task-v1-crlf-utf8-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
@@ -49,6 +57,20 @@ const DOCUMENT_COMMAND_COLLECTION_UUID: &str = "b544fc6a-2ba3-4885-8fb2-cb289fb6
 const DOCUMENT_FORM_COLLECTION_UUID: &str = "fb880e93-47d7-4127-9357-a20e69c17545";
 const CATALOG_TABULAR_ATTRIBUTE_COLLECTION_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
 const DOCUMENT_TABULAR_ATTRIBUTE_COLLECTION_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
+const SUBSYSTEM_COLLECTION_UUID: &str = "37f2fa9a-b276-11d4-9435-004095e12fc7";
+const EXCHANGE_ATTRIBUTE_COLLECTION_UUID: &str = "1a1b4fea-e093-470d-94ff-1d2f16cda2ab";
+const EXCHANGE_TABULAR_COLLECTION_UUID: &str = "52293f4b-f98c-43ea-a80f-41047ae7ab58";
+const EXCHANGE_FORM_COLLECTION_UUID: &str = "87c509ab-3d38-4d67-b379-aca796298578";
+const EXCHANGE_COMMAND_COLLECTION_UUID: &str = "d5207c64-11d5-4d46-bba2-55b7b07ff4eb";
+const BUSINESS_PROCESS_FORM_COLLECTION_UUID: &str = "3f7a8120-b71a-4265-98bf-4d9bc09b7719";
+const BUSINESS_PROCESS_COMMAND_COLLECTION_UUID: &str = "7a3e533c-f232-40d5-a932-6a311d2480bf";
+const BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID: &str = "87c988de-ecbf-413b-87b0-b9516df05e28";
+const BUSINESS_PROCESS_TABULAR_COLLECTION_UUID: &str = "a3fe6537-d787-40f7-8a06-419d2f0c1cfd";
+const TASK_FORM_COLLECTION_UUID: &str = "3f58cbfb-4172-4e54-be49-561a579bb38b";
+const TASK_ATTRIBUTE_COLLECTION_UUID: &str = "8ddfb495-c5fc-46b9-bdc5-bcf58341bff0";
+const TASK_ADDRESSING_ATTRIBUTE_COLLECTION_UUID: &str = "e97c0570-251c-4566-b0f1-10686820f143";
+const TASK_RESERVED_COLLECTION_UUID: &str = "ee865d4b-a458-48a0-b38f-5a26898feeb0";
+const TASK_COMMAND_COLLECTION_UUID: &str = "f27c2152-a2c9-4c30-adb1-130f5eb2590f";
 
 const MAX_PLAIN_BYTES: usize = 64 * 1_048_576;
 const MAX_NATIVE_DEPTH: usize = 32;
@@ -58,6 +80,10 @@ const MAX_NATIVE_NODES: usize = 500_000;
 pub enum BusinessObjectFamily {
     Catalog,
     Document,
+    Subsystem,
+    ExchangePlan,
+    BusinessProcess,
+    Task,
 }
 
 impl BusinessObjectFamily {
@@ -65,6 +91,10 @@ impl BusinessObjectFamily {
         match self {
             Self::Catalog => "Catalog",
             Self::Document => "Document",
+            Self::Subsystem => "Subsystem",
+            Self::ExchangePlan => "ExchangePlan",
+            Self::BusinessProcess => "BusinessProcess",
+            Self::Task => "Task",
         }
     }
 
@@ -72,6 +102,10 @@ impl BusinessObjectFamily {
         match self {
             Self::Catalog => CATALOG_LAYOUT_KEY,
             Self::Document => DOCUMENT_LAYOUT_KEY,
+            Self::Subsystem => SUBSYSTEM_LAYOUT_KEY,
+            Self::ExchangePlan => EXCHANGE_PLAN_LAYOUT_KEY,
+            Self::BusinessProcess => BUSINESS_PROCESS_LAYOUT_KEY,
+            Self::Task => TASK_LAYOUT_KEY,
         }
     }
 
@@ -79,6 +113,10 @@ impl BusinessObjectFamily {
         match self {
             Self::Catalog => CATALOG_LAYOUT,
             Self::Document => DOCUMENT_LAYOUT,
+            Self::Subsystem => SUBSYSTEM_LAYOUT,
+            Self::ExchangePlan => EXCHANGE_PLAN_LAYOUT,
+            Self::BusinessProcess => BUSINESS_PROCESS_LAYOUT,
+            Self::Task => TASK_LAYOUT,
         }
     }
 }
@@ -87,6 +125,10 @@ impl BusinessObjectFamily {
 enum BusinessObjectLayout {
     CatalogV1,
     DocumentV1,
+    SubsystemV1,
+    ExchangePlanV1,
+    BusinessProcessV1,
+    TaskV1,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,6 +190,10 @@ impl BusinessObjectMetadataProfile {
             layout: match family {
                 BusinessObjectFamily::Catalog => BusinessObjectLayout::CatalogV1,
                 BusinessObjectFamily::Document => BusinessObjectLayout::DocumentV1,
+                BusinessObjectFamily::Subsystem => BusinessObjectLayout::SubsystemV1,
+                BusinessObjectFamily::ExchangePlan => BusinessObjectLayout::ExchangePlanV1,
+                BusinessObjectFamily::BusinessProcess => BusinessObjectLayout::BusinessProcessV1,
+                BusinessObjectFamily::Task => BusinessObjectLayout::TaskV1,
             },
         })
     }
@@ -162,6 +208,10 @@ impl BusinessObjectMetadataProfile {
             layout: match family {
                 BusinessObjectFamily::Catalog => BusinessObjectLayout::CatalogV1,
                 BusinessObjectFamily::Document => BusinessObjectLayout::DocumentV1,
+                BusinessObjectFamily::Subsystem => BusinessObjectLayout::SubsystemV1,
+                BusinessObjectFamily::ExchangePlan => BusinessObjectLayout::ExchangePlanV1,
+                BusinessObjectFamily::BusinessProcess => BusinessObjectLayout::BusinessProcessV1,
+                BusinessObjectFamily::Task => BusinessObjectLayout::TaskV1,
             },
         }
     }
@@ -374,6 +424,9 @@ pub struct BusinessObjectNativeIr {
     pub command_uuids: Vec<ObjectUuid>,
     pub form_uuids: Vec<ObjectUuid>,
     pub template_uuids: Vec<ObjectUuid>,
+    pub addressing_attribute_uuids: Vec<ObjectUuid>,
+    pub content_uuids: Vec<ObjectUuid>,
+    pub child_subsystem_uuids: Vec<ObjectUuid>,
 }
 
 pub(crate) fn compile_business_object(
@@ -413,6 +466,18 @@ pub(crate) fn compile_business_object(
         }
         (BusinessObjectFamily::Document, BusinessObjectLayout::DocumentV1) => {
             build_document(validated, object, &indexes)?
+        }
+        (BusinessObjectFamily::Subsystem, BusinessObjectLayout::SubsystemV1) => {
+            build_subsystem(validated, object, &indexes)?
+        }
+        (BusinessObjectFamily::ExchangePlan, BusinessObjectLayout::ExchangePlanV1) => {
+            build_exchange_plan(validated, object, &indexes)?
+        }
+        (BusinessObjectFamily::BusinessProcess, BusinessObjectLayout::BusinessProcessV1) => {
+            build_business_process(validated, object, &indexes)?
+        }
+        (BusinessObjectFamily::Task, BusinessObjectLayout::TaskV1) => {
+            build_task(validated, object, &indexes)?
         }
         _ => return native("profile family and layout disagree"),
     };
@@ -773,6 +838,153 @@ const DOCUMENT_PROPERTY_SCHEMA: &[&str] = &[
     "ChildTemplates",
 ];
 
+const SUBSYSTEM_PROPERTY_SCHEMA: &[&str] = &[
+    "Name",
+    "Synonym",
+    "Comment",
+    "IncludeHelpInContents",
+    "IncludeInCommandInterface",
+    "UseOneCommand",
+    "Explanation",
+    "Picture",
+    "PictureLoadTransparent",
+    "Content",
+    "ChildSubsystems",
+];
+
+const EXCHANGE_PLAN_PROPERTY_SCHEMA: &[&str] = &[
+    "Name",
+    "Synonym",
+    "Comment",
+    "UseStandardCommands",
+    "QuickChoice",
+    "DistributedInfoBase",
+    "IncludeConfigurationExtensions",
+    "IncludeHelpInContents",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "CodeLength",
+    "DescriptionLength",
+    "CodeAllowedLength",
+    "DefaultPresentation",
+    "EditType",
+    "ChoiceMode",
+    "SearchStringModeOnInputByString",
+    "FullTextSearchOnInputByString",
+    "ChoiceDataGetModeOnInputByString",
+    "CreateOnInput",
+    "ChoiceHistoryOnInput",
+    "DataLockControlMode",
+    "FullTextSearch",
+    "DataHistory",
+    "ThisNode",
+    "DefaultObjectForm",
+    "DefaultListForm",
+    "DefaultChoiceForm",
+    "AuxiliaryObjectForm",
+    "AuxiliaryListForm",
+    "AuxiliaryChoiceForm",
+    "BasedOn",
+    "InputByString",
+    "DataLockFields",
+    "ObjectPresentation",
+    "ExtendedObjectPresentation",
+    "ListPresentation",
+    "ExtendedListPresentation",
+    "Explanation",
+    "ChildForms",
+    "ChildTemplates",
+];
+
+const BUSINESS_PROCESS_PROPERTY_SCHEMA: &[&str] = &[
+    "Name",
+    "Synonym",
+    "Comment",
+    "UseStandardCommands",
+    "CheckUnique",
+    "Autonumbering",
+    "CreateTaskInPrivilegedMode",
+    "IncludeHelpInContents",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "NumberLength",
+    "EditType",
+    "CreateOnInput",
+    "SearchStringModeOnInputByString",
+    "ChoiceDataGetModeOnInputByString",
+    "FullTextSearchOnInputByString",
+    "ChoiceHistoryOnInput",
+    "NumberType",
+    "NumberAllowedLength",
+    "NumberPeriodicity",
+    "DataLockControlMode",
+    "FullTextSearch",
+    "DataHistory",
+    "Task",
+    "DefaultObjectForm",
+    "DefaultListForm",
+    "DefaultChoiceForm",
+    "AuxiliaryObjectForm",
+    "AuxiliaryListForm",
+    "AuxiliaryChoiceForm",
+    "BasedOn",
+    "InputByString",
+    "DataLockFields",
+    "ObjectPresentation",
+    "ExtendedObjectPresentation",
+    "ListPresentation",
+    "ExtendedListPresentation",
+    "Explanation",
+    "ChildForms",
+    "ChildTemplates",
+];
+
+const TASK_PROPERTY_SCHEMA: &[&str] = &[
+    "Name",
+    "Synonym",
+    "Comment",
+    "UseStandardCommands",
+    "CheckUnique",
+    "Autonumbering",
+    "IncludeHelpInContents",
+    "UpdateDataHistoryImmediatelyAfterWrite",
+    "ExecuteAfterWriteDataHistoryVersionProcessing",
+    "NumberLength",
+    "DescriptionLength",
+    "NumberType",
+    "NumberAllowedLength",
+    "TaskNumberAutoPrefix",
+    "DefaultPresentation",
+    "EditType",
+    "SearchStringModeOnInputByString",
+    "FullTextSearchOnInputByString",
+    "ChoiceDataGetModeOnInputByString",
+    "CreateOnInput",
+    "ChoiceHistoryOnInput",
+    "DataLockControlMode",
+    "FullTextSearch",
+    "DataHistory",
+    "Addressing",
+    "MainAddressingAttribute",
+    "CurrentPerformer",
+    "DefaultObjectForm",
+    "DefaultListForm",
+    "DefaultChoiceForm",
+    "AuxiliaryObjectForm",
+    "AuxiliaryListForm",
+    "AuxiliaryChoiceForm",
+    "BasedOn",
+    "InputByString",
+    "DataLockFields",
+    "ObjectPresentation",
+    "ExtendedObjectPresentation",
+    "ListPresentation",
+    "ExtendedListPresentation",
+    "Explanation",
+    "ChildForms",
+    "ChildTemplates",
+];
+
 fn build_catalog(
     validated: &ValidatedConfiguration<'_>,
     object: &CanonicalObject,
@@ -1047,12 +1259,425 @@ fn build_document(
     ]))
 }
 
+fn build_subsystem(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    let uuid = object.identity().uuid();
+    validate_root_object(validated, object, SUBSYSTEM_PROPERTY_SCHEMA)?;
+    if !object.generated_types().is_empty() {
+        return invalid_model(uuid, "Subsystem generated type inventory is not empty");
+    }
+    if validated
+        .configuration()
+        .objects()
+        .iter()
+        .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(uuid, "Subsystem has an unsupported embedded child");
+    }
+    let child_subsystems = reference_sequence_targets(object, "ChildSubsystems", indexes)?;
+    validate_named_children(uuid, &child_subsystems, "Subsystem", indexes)?;
+    if child_subsystems.contains(&uuid) {
+        return invalid_model(uuid, "Subsystem contains itself as a child");
+    }
+    let owner = list(vec![
+        token("22"),
+        native_header(object)?,
+        bool_token(object, "IncludeHelpInContents")?,
+        list(vec![token("0"), token("0")]),
+        bool_token(object, "IncludeInCommandInterface")?,
+        subsystem_picture(object, indexes)?,
+        localized_value(object, "Explanation", "language")?,
+        metadata_reference_collection(object, "Content", indexes)?,
+        bool_token(object, "UseOneCommand")?,
+    ]);
+    Ok(list(vec![
+        token("1"),
+        owner,
+        token("1"),
+        native_collection(
+            SUBSYSTEM_COLLECTION_UUID,
+            child_subsystems.into_iter().map(uuid_value).collect(),
+        ),
+    ]))
+}
+
+fn build_exchange_plan(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    validate_root_object(validated, object, EXCHANGE_PLAN_PROPERTY_SCHEMA)?;
+    let children = collect_children(
+        validated,
+        object,
+        BusinessObjectFamily::ExchangePlan,
+        indexes,
+    )?;
+    let generated = generated_pairs(object, &["Object", "Ref", "Selection", "List", "Manager"])?;
+    require_enum_value(object, "DefaultPresentation", "AsDescription")?;
+    require_enum_value(object, "EditType", "InDialog")?;
+    require_enum_value(object, "ChoiceMode", "BothWays")?;
+    require_enum_value(object, "CreateOnInput", "DontUse")?;
+    require_enum_value(object, "DataHistory", "DontUse")?;
+    require_bool_value(object, "UpdateDataHistoryImmediatelyAfterWrite", false)?;
+    require_bool_value(
+        object,
+        "ExecuteAfterWriteDataHistoryVersionProcessing",
+        false,
+    )?;
+
+    let mut fields = vec![token("0"); 51];
+    fields[0] = token("37");
+    put_generated_pairs(&mut fields, &[1, 3, 5, 7, 9], &generated);
+    fields[11] = parsed_uuid_property(object, "ThisNode")?;
+    fields[12] = native_header(object)?;
+    fields[13] = bool_token(object, "UseStandardCommands")?;
+    fields[14] = optional_owned_reference(object, "DefaultObjectForm", &children.forms, indexes)?;
+    fields[15] = token(u32_property(object, "CodeLength")?.to_string());
+    fields[16] = token("0");
+    fields[17] = token(u32_property(object, "DescriptionLength")?.to_string());
+    fields[18] = bool_token(object, "IncludeHelpInContents")?;
+    fields[19] = optional_owned_reference(object, "DefaultListForm", &children.forms, indexes)?;
+    fields[20] = optional_owned_reference(object, "DefaultChoiceForm", &children.forms, indexes)?;
+    fields[21] = token("1");
+    fields[22] = token("2");
+    fields[23] = bool_token(object, "QuickChoice")?;
+    fields[24] = metadata_reference_collection(object, "BasedOn", indexes)?;
+    fields[25] = token("1");
+    fields[26] = bool_token(object, "DistributedInfoBase")?;
+    fields[27] = field_reference_collection(
+        object,
+        "InputByString",
+        BusinessObjectFamily::ExchangePlan,
+        indexes,
+    )?;
+    fields[28] = enum_code(
+        object,
+        "DataLockControlMode",
+        &[("Automatic", "0"), ("Managed", "1")],
+    )?;
+    fields[29] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[30] = standard_attributes(&["-14", "-13", "-10", "-9", "-6", "-4", "-3", "-2"])?;
+    for (slot, name) in (31..=33).zip([
+        "AuxiliaryObjectForm",
+        "AuxiliaryListForm",
+        "AuxiliaryChoiceForm",
+    ]) {
+        fields[slot] = optional_owned_reference(object, name, &children.forms, indexes)?;
+    }
+    for (slot, name) in (34..=38).zip([
+        "ObjectPresentation",
+        "ExtendedObjectPresentation",
+        "ListPresentation",
+        "ExtendedListPresentation",
+        "Explanation",
+    ]) {
+        fields[slot] = localized_value(object, name, "language")?;
+    }
+    fields[39] = enum_code(
+        object,
+        "CodeAllowedLength",
+        &[("Fixed", "0"), ("Variable", "1")],
+    )?;
+    fields[40] = list(vec![token("0"), list(vec![token("0")])]);
+    fields[41] = token("1");
+    fields[42] = field_reference_collection(
+        object,
+        "DataLockFields",
+        BusinessObjectFamily::ExchangePlan,
+        indexes,
+    )?;
+    fields[43] = input_modes(object)?;
+    fields[44] = enum_code(
+        object,
+        "ChoiceHistoryOnInput",
+        &[("Auto", "0"), ("DontUse", "1")],
+    )?;
+    fields[45] = bool_token(object, "IncludeConfigurationExtensions")?;
+    fields[50] = token("1");
+
+    Ok(list(vec![
+        token("1"),
+        list(fields),
+        token("5"),
+        native_collection(EXCHANGE_ATTRIBUTE_COLLECTION_UUID, children.attributes),
+        native_collection(
+            TEMPLATE_COLLECTION_UUID,
+            children.templates.into_iter().map(uuid_value).collect(),
+        ),
+        native_collection(EXCHANGE_TABULAR_COLLECTION_UUID, children.tabular_sections),
+        native_collection(
+            EXCHANGE_FORM_COLLECTION_UUID,
+            children.forms.into_iter().map(uuid_value).collect(),
+        ),
+        native_collection(EXCHANGE_COMMAND_COLLECTION_UUID, children.commands),
+    ]))
+}
+
+fn build_business_process(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    let uuid = object.identity().uuid();
+    validate_root_object(validated, object, BUSINESS_PROCESS_PROPERTY_SCHEMA)?;
+    let children = collect_children(
+        validated,
+        object,
+        BusinessObjectFamily::BusinessProcess,
+        indexes,
+    )?;
+    if !children.templates.is_empty() || !children.addressing_attributes.is_empty() {
+        return invalid_model(
+            uuid,
+            "BusinessProcess reserved child collection is not empty",
+        );
+    }
+    let generated = generated_pairs(
+        object,
+        &[
+            "Object",
+            "Ref",
+            "Selection",
+            "List",
+            "Manager",
+            "RoutePointRef",
+        ],
+    )?;
+    require_enum_value(object, "EditType", "InDialog")?;
+    require_enum_value(object, "NumberType", "String")?;
+    require_enum_value(object, "NumberPeriodicity", "Nonperiodical")?;
+
+    let mut fields = vec![token("0"); 49];
+    fields[0] = token("30");
+    fields[1] = native_header(object)?;
+    fields[2] = bool_token(object, "UseStandardCommands")?;
+    put_generated_pairs(&mut fields, &[3, 5, 7, 9, 11, 13], &generated);
+    fields[15] = metadata_reference_collection(object, "BasedOn", indexes)?;
+    fields[16] = token("1");
+    fields[17] = token("0");
+    fields[18] = token(u32_property(object, "NumberLength")?.to_string());
+    fields[19] = enum_code(
+        object,
+        "CreateOnInput",
+        &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
+    )?;
+    fields[20] = bool_token(object, "CheckUnique")?;
+    fields[21] = bool_token(object, "Autonumbering")?;
+    for (slot, name) in (22..=24).zip(["DefaultObjectForm", "DefaultListForm", "DefaultChoiceForm"])
+    {
+        fields[slot] = optional_owned_reference(object, name, &children.forms, indexes)?;
+    }
+    fields[25] = optional_metadata_reference_kind(object, "Task", "Task", indexes)?;
+    fields[26] = bool_token(object, "IncludeHelpInContents")?;
+    fields[27] = field_reference_collection(
+        object,
+        "InputByString",
+        BusinessObjectFamily::BusinessProcess,
+        indexes,
+    )?;
+    fields[28] = enum_code(
+        object,
+        "NumberAllowedLength",
+        &[("Fixed", "0"), ("Variable", "1")],
+    )?;
+    fields[29] = bool_token(object, "CreateTaskInPrivilegedMode")?;
+    fields[30] = standard_attributes(&["-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
+    fields[31] = token("1");
+    for (slot, name) in (32..=34).zip([
+        "AuxiliaryObjectForm",
+        "AuxiliaryListForm",
+        "AuxiliaryChoiceForm",
+    ]) {
+        fields[slot] = optional_owned_reference(object, name, &children.forms, indexes)?;
+    }
+    for (slot, name) in (35..=39).zip([
+        "ObjectPresentation",
+        "ExtendedObjectPresentation",
+        "ListPresentation",
+        "ExtendedListPresentation",
+        "Explanation",
+    ]) {
+        fields[slot] = localized_value(object, name, "language")?;
+    }
+    fields[40] = enum_code(
+        object,
+        "DataLockControlMode",
+        &[("Automatic", "0"), ("Managed", "1")],
+    )?;
+    fields[41] = list(vec![token("0"), list(vec![token("0")])]);
+    fields[42] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[43] = field_reference_collection(
+        object,
+        "DataLockFields",
+        BusinessObjectFamily::BusinessProcess,
+        indexes,
+    )?;
+    fields[44] = input_modes(object)?;
+    fields[45] = enum_code(
+        object,
+        "ChoiceHistoryOnInput",
+        &[("Auto", "0"), ("DontUse", "1")],
+    )?;
+    fields[46] = enum_code(object, "DataHistory", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[47] = bool_token(object, "UpdateDataHistoryImmediatelyAfterWrite")?;
+    fields[48] = bool_token(object, "ExecuteAfterWriteDataHistoryVersionProcessing")?;
+
+    Ok(list(vec![
+        token("1"),
+        list(fields),
+        token("5"),
+        native_collection(TEMPLATE_COLLECTION_UUID, Vec::new()),
+        native_collection(
+            BUSINESS_PROCESS_FORM_COLLECTION_UUID,
+            children.forms.into_iter().map(uuid_value).collect(),
+        ),
+        native_collection(BUSINESS_PROCESS_COMMAND_COLLECTION_UUID, children.commands),
+        native_collection(
+            BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID,
+            children.attributes,
+        ),
+        native_collection(
+            BUSINESS_PROCESS_TABULAR_COLLECTION_UUID,
+            children.tabular_sections,
+        ),
+    ]))
+}
+
+fn build_task(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    let uuid = object.identity().uuid();
+    validate_root_object(validated, object, TASK_PROPERTY_SCHEMA)?;
+    let children = collect_children(validated, object, BusinessObjectFamily::Task, indexes)?;
+    if !children.templates.is_empty() || !children.tabular_sections.is_empty() {
+        return invalid_model(uuid, "Task reserved child collection is not empty");
+    }
+    let generated = generated_pairs(object, &["Object", "Ref", "Selection", "List", "Manager"])?;
+    require_enum_value(object, "TaskNumberAutoPrefix", "BusinessProcessNumber")?;
+    require_enum_value(object, "DefaultPresentation", "AsDescription")?;
+    require_enum_value(object, "EditType", "InDialog")?;
+    require_enum_value(object, "CreateOnInput", "DontUse")?;
+    require_enum_value(object, "DataHistory", "DontUse")?;
+    require_bool_value(object, "UpdateDataHistoryImmediatelyAfterWrite", false)?;
+    require_bool_value(
+        object,
+        "ExecuteAfterWriteDataHistoryVersionProcessing",
+        false,
+    )?;
+
+    let addressing =
+        optional_metadata_reference_kind(object, "Addressing", "InformationRegister", indexes)?;
+    let mut fields = vec![token("0"); 52];
+    fields[0] = token("33");
+    fields[1] = native_header(object)?;
+    fields[2] = bool_token(object, "UseStandardCommands")?;
+    put_generated_pairs(&mut fields, &[3, 5, 7, 9, 11], &generated);
+    fields[13] = token(NIL_UUID);
+    fields[14] = token(NIL_UUID);
+    for (slot, name) in (15..=17).zip(["DefaultObjectForm", "DefaultListForm", "DefaultChoiceForm"])
+    {
+        fields[slot] = optional_owned_reference(object, name, &children.forms, indexes)?;
+    }
+    fields[18] = enum_code(object, "NumberType", &[("Number", "0"), ("String", "1")])?;
+    fields[19] = token(u32_property(object, "NumberLength")?.to_string());
+    fields[20] = enum_code(
+        object,
+        "NumberAllowedLength",
+        &[("Variable", "0"), ("Fixed", "1")],
+    )?;
+    fields[21] = bool_token(object, "CheckUnique")?;
+    fields[22] = token(u32_property(object, "DescriptionLength")?.to_string());
+    fields[23] = bool_token(object, "Autonumbering")?;
+    fields[24] = token("1");
+    fields[25] = addressing.clone();
+    fields[26] = optional_owned_member_reference(
+        object,
+        "MainAddressingAttribute",
+        &children.addressing_attribute_uuids,
+        "AddressingAttribute",
+        indexes,
+    )?;
+    if token_is_nil(&addressing) && !children.addressing_attributes.is_empty() {
+        return invalid_model(uuid, "Task addressing attributes exist without Addressing");
+    }
+    fields[27] = token("1");
+    fields[28] =
+        field_reference_collection(object, "InputByString", BusinessObjectFamily::Task, indexes)?;
+    fields[29] =
+        optional_metadata_reference_kind(object, "CurrentPerformer", "SessionParameter", indexes)?;
+    fields[30] = metadata_reference_collection_kind(object, "BasedOn", "BusinessProcess", indexes)?;
+    fields[31] = token("0");
+    fields[32] = enum_code(
+        object,
+        "DataLockControlMode",
+        &[("Automatic", "0"), ("Managed", "1")],
+    )?;
+    fields[33] = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    fields[34] = standard_attributes(&["-10", "-9", "-8", "-7", "-5", "-4", "-3", "-2"])?;
+    for (slot, name) in (35..=37).zip([
+        "AuxiliaryObjectForm",
+        "AuxiliaryListForm",
+        "AuxiliaryChoiceForm",
+    ]) {
+        fields[slot] = optional_owned_reference(object, name, &children.forms, indexes)?;
+    }
+    for (slot, name) in (38..=42).zip([
+        "ObjectPresentation",
+        "ExtendedObjectPresentation",
+        "ListPresentation",
+        "ExtendedListPresentation",
+        "Explanation",
+    ]) {
+        fields[slot] = localized_value(object, name, "language")?;
+    }
+    fields[43] = enum_code(
+        object,
+        "ChoiceHistoryOnInput",
+        &[("Auto", "0"), ("DontUse", "1")],
+    )?;
+    fields[44] = list(vec![token("0"), list(vec![token("0")])]);
+    fields[45] = bool_token(object, "IncludeHelpInContents")?;
+    fields[46] = field_reference_collection(
+        object,
+        "DataLockFields",
+        BusinessObjectFamily::Task,
+        indexes,
+    )?;
+    fields[47] = input_modes(object)?;
+
+    Ok(list(vec![
+        token("1"),
+        list(fields),
+        token("6"),
+        native_collection(TEMPLATE_COLLECTION_UUID, Vec::new()),
+        native_collection(
+            TASK_FORM_COLLECTION_UUID,
+            children.forms.into_iter().map(uuid_value).collect(),
+        ),
+        native_collection(TASK_ATTRIBUTE_COLLECTION_UUID, children.attributes),
+        native_collection(
+            TASK_ADDRESSING_ATTRIBUTE_COLLECTION_UUID,
+            children.addressing_attributes,
+        ),
+        native_collection(TASK_RESERVED_COLLECTION_UUID, Vec::new()),
+        native_collection(TASK_COMMAND_COLLECTION_UUID, children.commands),
+    ]))
+}
+
 struct CompiledChildren {
     attributes: Vec<NativeValue>,
     tabular_sections: Vec<NativeValue>,
     commands: Vec<NativeValue>,
     forms: Vec<ObjectUuid>,
     templates: Vec<ObjectUuid>,
+    addressing_attributes: Vec<NativeValue>,
+    addressing_attribute_uuids: Vec<ObjectUuid>,
 }
 
 fn collect_children(
@@ -1066,10 +1691,18 @@ fn collect_children(
     let templates = reference_sequence_targets(root, "ChildTemplates", indexes)?;
     validate_named_children(root_uuid, &forms, "Form", indexes)?;
     validate_named_children(root_uuid, &templates, "Template", indexes)?;
+    let addressing_owner = if family == BusinessObjectFamily::Task {
+        optional_reference_uuid_kind(root, "Addressing", "InformationRegister", indexes)?
+    } else {
+        None
+    };
 
     let mut attributes = Vec::new();
     let mut tabular_sections = Vec::new();
     let mut commands = Vec::new();
+    let mut addressing_attributes = Vec::new();
+    let mut addressing_attribute_uuids = Vec::new();
+    let mut addressing_dimensions = BTreeSet::new();
     let mut accepted = BTreeSet::new();
     for object in validated.configuration().objects() {
         if object.owner() != Some(root_uuid) {
@@ -1081,6 +1714,15 @@ fn collect_children(
                 accepted.insert(object.identity().uuid());
             }
             "TabularSection" => {
+                if matches!(
+                    family,
+                    BusinessObjectFamily::Task | BusinessObjectFamily::Subsystem
+                ) {
+                    return invalid_model(
+                        root_uuid,
+                        "metadata family does not support TabularSection children",
+                    );
+                }
                 let mut nested = Vec::new();
                 for candidate in validated.configuration().objects() {
                     if candidate.owner() == Some(object.identity().uuid()) {
@@ -1103,11 +1745,31 @@ fn collect_children(
                 commands.push(build_command(object, indexes)?);
                 accepted.insert(object.identity().uuid());
             }
+            "AddressingAttribute" if family == BusinessObjectFamily::Task => {
+                let dimension = indexes.object(
+                    object.identity().uuid(),
+                    text_property(object, "AddressingDimension")?,
+                )?;
+                if !addressing_dimensions.insert(dimension) {
+                    return invalid_model(
+                        root_uuid,
+                        "Task AddressingDimension is used more than once",
+                    );
+                }
+                addressing_attributes.push(build_addressing_attribute(
+                    object,
+                    root_uuid,
+                    addressing_owner,
+                    indexes,
+                )?);
+                addressing_attribute_uuids.push(object.identity().uuid());
+                accepted.insert(object.identity().uuid());
+            }
             "Form" | "Template" => {}
             _ => {
                 return invalid_model(
                     root_uuid,
-                    "Catalog/Document contains an unsupported direct child object",
+                    "business object contains an unsupported direct child object",
                 );
             }
         }
@@ -1115,7 +1777,7 @@ fn collect_children(
     for object in validated.configuration().objects() {
         if matches!(
             object.kind().as_str(),
-            "Attribute" | "TabularSection" | "Command"
+            "Attribute" | "TabularSection" | "Command" | "AddressingAttribute"
         ) && is_descendant_of(validated, object, root_uuid)
             && !accepted.contains(&object.identity().uuid())
         {
@@ -1128,6 +1790,8 @@ fn collect_children(
         commands,
         forms,
         templates,
+        addressing_attributes,
+        addressing_attribute_uuids,
     })
 }
 
@@ -1296,6 +1960,25 @@ fn build_attribute(
             full_text,
             data_history,
         ]),
+        (BusinessObjectFamily::ExchangePlan, false) => list(vec![
+            token("4"),
+            list(payload),
+            indexing,
+            full_text,
+            data_history,
+            token("0"),
+            list(vec![token("1"), token(NIL_UUID)]),
+        ]),
+        (BusinessObjectFamily::BusinessProcess | BusinessObjectFamily::Task, false) => list(vec![
+            token("2"),
+            list(payload),
+            indexing,
+            full_text,
+            data_history,
+        ]),
+        (BusinessObjectFamily::Subsystem, false) => {
+            return invalid_model(uuid, "Subsystem cannot own an Attribute");
+        }
         (_, true) => list(vec![
             token("8"),
             list(payload),
@@ -1337,10 +2020,14 @@ fn build_tabular_section(
         "FillChecking",
         &[("DontCheck", "0"), ("ShowError", "1")],
     )?);
+    payload.push(if family == BusinessObjectFamily::ExchangePlan {
+        standard_attributes(&["-10"])?
+    } else {
+        list(vec![token("0")])
+    });
     payload.push(list(vec![token("0")]));
-    payload.push(list(vec![token("0")]));
-    let wrapper = if family == BusinessObjectFamily::Catalog {
-        list(vec![
+    let wrapper = match family {
+        BusinessObjectFamily::Catalog => list(vec![
             token("1"),
             list(payload),
             enum_code(
@@ -1348,9 +2035,16 @@ fn build_tabular_section(
                 "Use",
                 &[("ForItem", "0"), ("ForFolderAndItem", "2")],
             )?,
-        ])
-    } else {
-        list(vec![token("1"), list(payload)])
+        ]),
+        BusinessObjectFamily::ExchangePlan => list(vec![token("1"), list(payload), token("5")]),
+        BusinessObjectFamily::BusinessProcess => list(vec![token("0"), list(payload)]),
+        BusinessObjectFamily::Document => list(vec![token("1"), list(payload)]),
+        BusinessObjectFamily::Task | BusinessObjectFamily::Subsystem => {
+            return invalid_model(
+                object.identity().uuid(),
+                "metadata family cannot compile a TabularSection",
+            );
+        }
     };
     let marker = if family == BusinessObjectFamily::Catalog {
         CATALOG_TABULAR_ATTRIBUTE_COLLECTION_UUID
@@ -1361,6 +2055,107 @@ fn build_tabular_section(
         wrapper,
         token("1"),
         native_collection(marker, nested_attributes),
+    ]))
+}
+
+fn build_addressing_attribute(
+    object: &CanonicalObject,
+    root_uuid: ObjectUuid,
+    addressing_owner: Option<ObjectUuid>,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    validate_embedded_object(object, "AddressingAttribute")?;
+    let uuid = object.identity().uuid();
+    if object.owner() != Some(root_uuid) {
+        return invalid_model(uuid, "AddressingAttribute owner is not the Task");
+    }
+    require_attribute_schema(object, ADDRESSING_ATTRIBUTE_SCHEMA)?;
+    let addressing_owner = addressing_owner.ok_or(BusinessObjectBuildError::InvalidModel {
+        object: uuid,
+        reason: "AddressingAttribute exists without Task Addressing",
+    })?;
+    let dimension_reference = text_property(object, "AddressingDimension")?;
+    let dimension = indexes.object(uuid, dimension_reference)?;
+    if indexes.kind(dimension) != Some("Dimension")
+        || indexes.owner(dimension) != Some(Some(addressing_owner))
+    {
+        return invalid_model(
+            uuid,
+            "AddressingDimension is not owned by the Task addressing register",
+        );
+    }
+
+    let payload = vec![
+        token("27"),
+        list(vec![
+            token("2"),
+            native_header(object)?,
+            type_pattern(object, indexes)?,
+        ]),
+        bool_token(object, "PasswordMode")?,
+        list(vec![token("0")]),
+        list(vec![token("0")]),
+        bool_token(object, "MarkNegatives")?,
+        text(text_property(object, "Mask")?),
+        bool_token(object, "MultiLine")?,
+        list(vec![text("U")]),
+        list(vec![text("U")]),
+        enum_code(
+            object,
+            "ChoiceFoldersAndItems",
+            &[("Items", "0"), ("Folders", "1"), ("FoldersAndItems", "2")],
+        )?,
+        token(NIL_UUID),
+        enum_code(
+            object,
+            "QuickChoice",
+            &[("DontUse", "0"), ("Use", "1"), ("Auto", "2")],
+        )?,
+        enum_code(
+            object,
+            "FillChecking",
+            &[("DontCheck", "0"), ("ShowError", "1")],
+        )?,
+        list(vec![token("5006"), token("0")]),
+        list(vec![token("3"), token("0"), token("0")]),
+        list(vec![token("0"), token("0")]),
+        bool_token(object, "ExtendedEdit")?,
+        list(vec![token("0")]),
+        list(vec![text("S"), text("")]),
+        bool_token(object, "FillFromFillingValue")?,
+        enum_code(
+            object,
+            "CreateOnInput",
+            &[("Auto", "0"), ("DontUse", "1"), ("Use", "2")],
+        )?,
+        enum_code(
+            object,
+            "ChoiceHistoryOnInput",
+            &[("Auto", "0"), ("DontUse", "1")],
+        )?,
+    ];
+
+    let indexing = enum_code(
+        object,
+        "Indexing",
+        &[
+            ("DontIndex", "0"),
+            ("Index", "1"),
+            ("IndexWithAdditionalOrder", "2"),
+        ],
+    )?;
+    let full_text = enum_code(object, "FullTextSearch", &[("DontUse", "0"), ("Use", "1")])?;
+    let data_history = enum_code(object, "DataHistory", &[("DontUse", "0"), ("Use", "1")])?;
+    Ok(list(vec![
+        list(vec![
+            token("4"),
+            list(payload),
+            indexing,
+            uuid_value(dimension),
+            full_text,
+            data_history,
+        ]),
+        token("0"),
     ]))
 }
 
@@ -1519,6 +2314,34 @@ const NESTED_ATTRIBUTE_SCHEMA: &[&str] = &[
     "DataHistory",
     "Mask",
     "ChoiceForm",
+];
+const ADDRESSING_ATTRIBUTE_SCHEMA: &[&str] = &[
+    "Name",
+    "Synonym",
+    "Comment",
+    "Types",
+    "StringLength",
+    "StringAllowedLength",
+    "NumberDigits",
+    "NumberFractionDigits",
+    "NumberAllowedSign",
+    "DateFractions",
+    "PasswordMode",
+    "MarkNegatives",
+    "MultiLine",
+    "ExtendedEdit",
+    "FillFromFillingValue",
+    "FillChecking",
+    "ChoiceFoldersAndItems",
+    "QuickChoice",
+    "CreateOnInput",
+    "ChoiceHistoryOnInput",
+    "Indexing",
+    "FullTextSearch",
+    "DataHistory",
+    "Mask",
+    "ChoiceForm",
+    "AddressingDimension",
 ];
 const CATALOG_TABULAR_SCHEMA: &[&str] = &[
     "Name",
@@ -1758,6 +2581,34 @@ fn enum_property<'a>(
     }
 }
 
+fn require_enum_value(
+    object: &CanonicalObject,
+    name: &str,
+    expected: &str,
+) -> Result<(), BusinessObjectBuildError> {
+    if enum_property(object, name)? != expected {
+        return invalid_model(
+            object.identity().uuid(),
+            "enum value differs from the evidenced fixed value",
+        );
+    }
+    Ok(())
+}
+
+fn require_bool_value(
+    object: &CanonicalObject,
+    name: &str,
+    expected: bool,
+) -> Result<(), BusinessObjectBuildError> {
+    if bool_property(object, name)? != expected {
+        return invalid_model(
+            object.identity().uuid(),
+            "boolean differs from the evidenced fixed value",
+        );
+    }
+    Ok(())
+}
+
 fn enum_code(
     object: &CanonicalObject,
     name: &str,
@@ -1788,6 +2639,38 @@ fn native_header(object: &CanonicalObject) -> Result<NativeValue, BusinessObject
         token("0"),
         token(NIL_UUID),
         token("0"),
+    ]))
+}
+
+fn subsystem_picture(
+    object: &CanonicalObject,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    let reference = text_property(object, "Picture")?;
+    let (kind, payload) = if reference.is_empty() {
+        ("0", list(vec![token("0"), token(NIL_UUID)]))
+    } else if reference == "StdPicture.Print" {
+        ("1", list(vec![token("-13")]))
+    } else {
+        let uuid = indexes.object(object.identity().uuid(), reference)?;
+        if indexes.kind(uuid) != Some("CommonPicture") {
+            return invalid_model(
+                object.identity().uuid(),
+                "Subsystem Picture is not a CommonPicture",
+            );
+        }
+        ("1", list(vec![token("0"), uuid_value(uuid)]))
+    };
+    Ok(list(vec![
+        token("4"),
+        token(kind),
+        payload,
+        text(""),
+        token("-1"),
+        token("-1"),
+        bool_token(object, "PictureLoadTransparent")?,
+        token("0"),
+        text(""),
     ]))
 }
 
@@ -1947,6 +2830,66 @@ fn optional_metadata_reference(
     ))
 }
 
+fn optional_reference_uuid_kind(
+    object: &CanonicalObject,
+    name: &str,
+    expected_kind: &'static str,
+    indexes: &ReferenceIndexes,
+) -> Result<Option<ObjectUuid>, BusinessObjectBuildError> {
+    let reference = text_property(object, name)?;
+    if reference.is_empty() {
+        return Ok(None);
+    }
+    let uuid = indexes.object(object.identity().uuid(), reference)?;
+    if indexes.kind(uuid) != Some(expected_kind) {
+        return invalid_model(
+            object.identity().uuid(),
+            "metadata reference resolves to the wrong kind",
+        );
+    }
+    Ok(Some(uuid))
+}
+
+fn optional_metadata_reference_kind(
+    object: &CanonicalObject,
+    name: &str,
+    expected_kind: &'static str,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    Ok(
+        optional_reference_uuid_kind(object, name, expected_kind, indexes)?
+            .map(uuid_value)
+            .unwrap_or_else(|| token(NIL_UUID)),
+    )
+}
+
+fn metadata_reference_collection_kind(
+    object: &CanonicalObject,
+    name: &str,
+    expected_kind: &'static str,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    let targets = reference_sequence_targets(object, name, indexes)?;
+    if targets
+        .iter()
+        .any(|uuid| indexes.kind(*uuid) != Some(expected_kind))
+    {
+        return invalid_model(
+            object.identity().uuid(),
+            "metadata reference collection resolves to the wrong kind",
+        );
+    }
+    let mut values = vec![token("0"), token(targets.len().to_string())];
+    for uuid in targets {
+        values.push(list(vec![
+            text("#"),
+            token(METADATA_OBJECT_REF_TYPE_UUID),
+            list(vec![token("1"), uuid_value(uuid)]),
+        ]));
+    }
+    Ok(list(values))
+}
+
 fn optional_owned_reference(
     object: &CanonicalObject,
     name: &str,
@@ -1965,6 +2908,46 @@ fn optional_owned_reference(
         );
     }
     Ok(uuid_value(uuid))
+}
+
+fn optional_owned_member_reference(
+    object: &CanonicalObject,
+    name: &str,
+    owned: &[ObjectUuid],
+    expected_kind: &'static str,
+    indexes: &ReferenceIndexes,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    let reference = text_property(object, name)?;
+    if reference.is_empty() {
+        return Ok(token(NIL_UUID));
+    }
+    let uuid = indexes.object(object.identity().uuid(), reference)?;
+    if indexes.kind(uuid) != Some(expected_kind)
+        || indexes.owner(uuid) != Some(Some(object.identity().uuid()))
+        || !owned.contains(&uuid)
+    {
+        return invalid_model(
+            object.identity().uuid(),
+            "member reference is not an owned child of the expected kind",
+        );
+    }
+    Ok(uuid_value(uuid))
+}
+
+fn parsed_uuid_property(
+    object: &CanonicalObject,
+    name: &str,
+) -> Result<NativeValue, BusinessObjectBuildError> {
+    let value = text_property(object, name)?;
+    let uuid = ObjectUuid::parse(value).map_err(|_| BusinessObjectBuildError::InvalidModel {
+        object: object.identity().uuid(),
+        reason: "UUID property is not canonical",
+    })?;
+    Ok(uuid_value(uuid))
+}
+
+fn token_is_nil(value: &NativeValue) -> bool {
+    matches!(value, NativeValue::Token(value) if value == NIL_UUID)
 }
 
 fn field_reference_collection(
@@ -2042,6 +3025,14 @@ fn standard_attribute_marker(family: BusinessObjectFamily, name: &str) -> Option
             ("Date", "-3"),
             ("Number", "-2"),
         ],
+        BusinessObjectFamily::ExchangePlan => &[("Description", "-3"), ("Code", "-2")],
+        BusinessObjectFamily::BusinessProcess => &[("HeadTask", "-8"), ("Number", "-2")],
+        BusinessObjectFamily::Task => &[
+            ("Description", "-9"),
+            ("BusinessProcess", "-7"),
+            ("Number", "-2"),
+        ],
+        BusinessObjectFamily::Subsystem => &[],
     };
     values
         .iter()
@@ -2310,6 +3301,24 @@ fn native<T>(reason: impl Into<String>) -> Result<T, BusinessObjectBuildError> {
     Err(BusinessObjectBuildError::Native(reason.into()))
 }
 
+fn standard_attributes(markers: &[&str]) -> Result<NativeValue, BusinessObjectBuildError> {
+    if markers.is_empty() {
+        return native("standard attribute marker inventory is empty");
+    }
+    let descriptor_source = super::utility::SHARED_STANDARD_ATTRIBUTE_DESCRIPTOR;
+    let mut source = Vec::with_capacity(UTF8_BOM.len() + descriptor_source.len());
+    source.extend_from_slice(UTF8_BOM);
+    source.extend_from_slice(descriptor_source.as_bytes());
+    let descriptor = NativeParser::new(&source).parse()?;
+    let mut body = vec![token("1"), token(markers.len().to_string())];
+    for marker in markers {
+        body.push(list(vec![token(*marker)]));
+        body.push(token("510405d3-2a0c-4fea-960a-7fee59b32f9b"));
+        body.push(descriptor.clone());
+    }
+    Ok(list(vec![token("1"), list(body)]))
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum NativeValue {
     Token(String),
@@ -2552,72 +3561,199 @@ fn decode_native_ir(
     value: &NativeValue,
     family: BusinessObjectFamily,
 ) -> Result<BusinessObjectNativeIr, BusinessObjectBuildError> {
-    let root = exact_list(value, 8, "business-object root")?;
+    if family == BusinessObjectFamily::Subsystem {
+        return decode_subsystem_native_ir(value);
+    }
+    let root_len = if family == BusinessObjectFamily::Task {
+        9
+    } else {
+        8
+    };
+    let root = exact_list(value, root_len, "business-object root")?;
     exact_token(&root[0], "1", "root discriminator")?;
-    exact_token(&root[2], "5", "root collection count")?;
-    let (field_count, discriminator, generated_slots) = match family {
-        BusinessObjectFamily::Catalog => (61, "57", [1, 3, 5, 7, 34]),
-        BusinessObjectFamily::Document => (53, "40", [1, 3, 5, 7, 26]),
+    exact_token(
+        &root[2],
+        if family == BusinessObjectFamily::Task {
+            "6"
+        } else {
+            "5"
+        },
+        "root collection count",
+    )?;
+    let (field_count, discriminator, generated_slots): (usize, &str, &[usize]) = match family {
+        BusinessObjectFamily::Catalog => (61, "57", &[1, 3, 5, 7, 34]),
+        BusinessObjectFamily::Document => (53, "40", &[1, 3, 5, 7, 26]),
+        BusinessObjectFamily::ExchangePlan => (51, "37", &[1, 3, 5, 7, 9]),
+        BusinessObjectFamily::BusinessProcess => (49, "30", &[3, 5, 7, 9, 11, 13]),
+        BusinessObjectFamily::Task => (52, "33", &[3, 5, 7, 9, 11]),
+        BusinessObjectFamily::Subsystem => unreachable!("handled above"),
     };
     let fields = exact_list(&root[1], field_count, "business-object fields")?;
     exact_token(&fields[0], discriminator, "business-object discriminator")?;
-    let header_wrapper = exact_list(&fields[9], 2, "business-object header wrapper")?;
-    exact_token(
-        &header_wrapper[0],
-        "0",
-        "business-object header wrapper discriminator",
-    )?;
-    let uuid = parse_header_uuid(&header_wrapper[1])?;
+    let uuid = match family {
+        BusinessObjectFamily::Catalog | BusinessObjectFamily::Document => {
+            let header_wrapper = exact_list(&fields[9], 2, "business-object header wrapper")?;
+            exact_token(
+                &header_wrapper[0],
+                "0",
+                "business-object header wrapper discriminator",
+            )?;
+            parse_header_uuid(&header_wrapper[1])?
+        }
+        BusinessObjectFamily::ExchangePlan => parse_header_uuid(&fields[12])?,
+        BusinessObjectFamily::BusinessProcess | BusinessObjectFamily::Task => {
+            parse_header_uuid(&fields[1])?
+        }
+        BusinessObjectFamily::Subsystem => unreachable!("handled above"),
+    };
     let mut generated_types = Vec::with_capacity(generated_slots.len());
-    for slot in generated_slots {
+    for slot in generated_slots.iter().copied() {
         generated_types.push((
             non_nil_uuid(&fields[slot], "generated TypeId")?,
             non_nil_uuid(&fields[slot + 1], "generated ValueId")?,
         ));
     }
 
-    let (templates, commands, tabular_sections, attributes, forms) = match family {
-        BusinessObjectFamily::Catalog => {
-            let templates = parse_uuid_collection(&root[3], TEMPLATE_COLLECTION_UUID, "templates")?;
-            let command_values =
-                parse_collection(&root[4], CATALOG_COMMAND_COLLECTION_UUID, "commands")?;
-            let tabular_values = parse_collection(
-                &root[5],
-                CATALOG_TABULAR_COLLECTION_UUID,
-                "tabular sections",
-            )?;
-            let attribute_values =
-                parse_collection(&root[6], CATALOG_ATTRIBUTE_COLLECTION_UUID, "attributes")?;
-            let forms = parse_uuid_collection(&root[7], CATALOG_FORM_COLLECTION_UUID, "forms")?;
-            (
-                templates,
-                parse_commands(command_values)?,
-                parse_tabular_sections(tabular_values, family)?,
-                parse_attributes(attribute_values, family, false)?,
-                forms,
-            )
-        }
-        BusinessObjectFamily::Document => {
-            let tabular_values = parse_collection(
-                &root[3],
-                DOCUMENT_TABULAR_COLLECTION_UUID,
-                "tabular sections",
-            )?;
-            let templates = parse_uuid_collection(&root[4], TEMPLATE_COLLECTION_UUID, "templates")?;
-            let attribute_values =
-                parse_collection(&root[5], DOCUMENT_ATTRIBUTE_COLLECTION_UUID, "attributes")?;
-            let command_values =
-                parse_collection(&root[6], DOCUMENT_COMMAND_COLLECTION_UUID, "commands")?;
-            let forms = parse_uuid_collection(&root[7], DOCUMENT_FORM_COLLECTION_UUID, "forms")?;
-            (
-                templates,
-                parse_commands(command_values)?,
-                parse_tabular_sections(tabular_values, family)?,
-                parse_attributes(attribute_values, family, false)?,
-                forms,
-            )
-        }
-    };
+    let (templates, commands, tabular_sections, attributes, forms, addressing_attributes) =
+        match family {
+            BusinessObjectFamily::Catalog => {
+                let templates =
+                    parse_uuid_collection(&root[3], TEMPLATE_COLLECTION_UUID, "templates")?;
+                let command_values =
+                    parse_collection(&root[4], CATALOG_COMMAND_COLLECTION_UUID, "commands")?;
+                let tabular_values = parse_collection(
+                    &root[5],
+                    CATALOG_TABULAR_COLLECTION_UUID,
+                    "tabular sections",
+                )?;
+                let attribute_values =
+                    parse_collection(&root[6], CATALOG_ATTRIBUTE_COLLECTION_UUID, "attributes")?;
+                let forms = parse_uuid_collection(&root[7], CATALOG_FORM_COLLECTION_UUID, "forms")?;
+                (
+                    templates,
+                    parse_commands(command_values)?,
+                    parse_tabular_sections(tabular_values, family)?,
+                    parse_attributes(attribute_values, family, false)?,
+                    forms,
+                    Vec::new(),
+                )
+            }
+            BusinessObjectFamily::Document => {
+                let tabular_values = parse_collection(
+                    &root[3],
+                    DOCUMENT_TABULAR_COLLECTION_UUID,
+                    "tabular sections",
+                )?;
+                let templates =
+                    parse_uuid_collection(&root[4], TEMPLATE_COLLECTION_UUID, "templates")?;
+                let attribute_values =
+                    parse_collection(&root[5], DOCUMENT_ATTRIBUTE_COLLECTION_UUID, "attributes")?;
+                let command_values =
+                    parse_collection(&root[6], DOCUMENT_COMMAND_COLLECTION_UUID, "commands")?;
+                let forms =
+                    parse_uuid_collection(&root[7], DOCUMENT_FORM_COLLECTION_UUID, "forms")?;
+                (
+                    templates,
+                    parse_commands(command_values)?,
+                    parse_tabular_sections(tabular_values, family)?,
+                    parse_attributes(attribute_values, family, false)?,
+                    forms,
+                    Vec::new(),
+                )
+            }
+            BusinessObjectFamily::ExchangePlan => {
+                let attribute_values =
+                    parse_collection(&root[3], EXCHANGE_ATTRIBUTE_COLLECTION_UUID, "attributes")?;
+                let templates =
+                    parse_uuid_collection(&root[4], TEMPLATE_COLLECTION_UUID, "templates")?;
+                let tabular_values = parse_collection(
+                    &root[5],
+                    EXCHANGE_TABULAR_COLLECTION_UUID,
+                    "tabular sections",
+                )?;
+                let forms =
+                    parse_uuid_collection(&root[6], EXCHANGE_FORM_COLLECTION_UUID, "forms")?;
+                let command_values =
+                    parse_collection(&root[7], EXCHANGE_COMMAND_COLLECTION_UUID, "commands")?;
+                (
+                    templates,
+                    parse_commands(command_values)?,
+                    parse_tabular_sections(tabular_values, family)?,
+                    parse_attributes(attribute_values, family, false)?,
+                    forms,
+                    Vec::new(),
+                )
+            }
+            BusinessObjectFamily::BusinessProcess => {
+                let templates =
+                    parse_uuid_collection(&root[3], TEMPLATE_COLLECTION_UUID, "templates")?;
+                if !templates.is_empty() {
+                    return native("BusinessProcess template collection is not empty");
+                }
+                let forms = parse_uuid_collection(
+                    &root[4],
+                    BUSINESS_PROCESS_FORM_COLLECTION_UUID,
+                    "forms",
+                )?;
+                let command_values = parse_collection(
+                    &root[5],
+                    BUSINESS_PROCESS_COMMAND_COLLECTION_UUID,
+                    "commands",
+                )?;
+                let attribute_values = parse_collection(
+                    &root[6],
+                    BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID,
+                    "attributes",
+                )?;
+                let tabular_values = parse_collection(
+                    &root[7],
+                    BUSINESS_PROCESS_TABULAR_COLLECTION_UUID,
+                    "tabular sections",
+                )?;
+                (
+                    templates,
+                    parse_commands(command_values)?,
+                    parse_tabular_sections(tabular_values, family)?,
+                    parse_attributes(attribute_values, family, false)?,
+                    forms,
+                    Vec::new(),
+                )
+            }
+            BusinessObjectFamily::Task => {
+                let templates =
+                    parse_uuid_collection(&root[3], TEMPLATE_COLLECTION_UUID, "templates")?;
+                if !templates.is_empty() {
+                    return native("Task template collection is not empty");
+                }
+                let forms = parse_uuid_collection(&root[4], TASK_FORM_COLLECTION_UUID, "forms")?;
+                let attribute_values =
+                    parse_collection(&root[5], TASK_ATTRIBUTE_COLLECTION_UUID, "attributes")?;
+                let addressing_values = parse_collection(
+                    &root[6],
+                    TASK_ADDRESSING_ATTRIBUTE_COLLECTION_UUID,
+                    "addressing attributes",
+                )?;
+                let reserved = parse_collection(
+                    &root[7],
+                    TASK_RESERVED_COLLECTION_UUID,
+                    "Task reserved collection",
+                )?;
+                if !reserved.is_empty() {
+                    return native("Task reserved collection is not empty");
+                }
+                let command_values =
+                    parse_collection(&root[8], TASK_COMMAND_COLLECTION_UUID, "commands")?;
+                (
+                    templates,
+                    parse_commands(command_values)?,
+                    Vec::new(),
+                    parse_attributes(attribute_values, family, false)?,
+                    forms,
+                    parse_addressing_attributes(addressing_values)?,
+                )
+            }
+            BusinessObjectFamily::Subsystem => unreachable!("handled above"),
+        };
     validate_native_identity_inventory(
         uuid,
         &generated_types,
@@ -2626,6 +3762,7 @@ fn decode_native_ir(
         &commands,
         &forms,
         &templates,
+        &addressing_attributes,
     )?;
     Ok(BusinessObjectNativeIr {
         family,
@@ -2636,6 +3773,40 @@ fn decode_native_ir(
         command_uuids: commands,
         form_uuids: forms,
         template_uuids: templates,
+        addressing_attribute_uuids: addressing_attributes,
+        content_uuids: Vec::new(),
+        child_subsystem_uuids: Vec::new(),
+    })
+}
+
+fn decode_subsystem_native_ir(
+    value: &NativeValue,
+) -> Result<BusinessObjectNativeIr, BusinessObjectBuildError> {
+    let root = exact_list(value, 4, "Subsystem root")?;
+    exact_token(&root[0], "1", "Subsystem root discriminator")?;
+    exact_token(&root[2], "1", "Subsystem root collection count")?;
+    let fields = exact_list(&root[1], 9, "Subsystem fields")?;
+    exact_token(&fields[0], "22", "Subsystem discriminator")?;
+    let uuid = parse_header_uuid(&fields[1])?;
+    let content = parse_metadata_reference_collection(&fields[7], "Subsystem Content")?;
+    let children = parse_uuid_collection(&root[3], SUBSYSTEM_COLLECTION_UUID, "child Subsystems")?;
+    if content.iter().copied().collect::<BTreeSet<_>>().len() != content.len()
+        || children.iter().copied().collect::<BTreeSet<_>>().len() != children.len()
+    {
+        return native("Subsystem reference inventory contains duplicates");
+    }
+    Ok(BusinessObjectNativeIr {
+        family: BusinessObjectFamily::Subsystem,
+        uuid,
+        generated_types: Vec::new(),
+        attribute_uuids: Vec::new(),
+        tabular_sections: Vec::new(),
+        command_uuids: Vec::new(),
+        form_uuids: Vec::new(),
+        template_uuids: Vec::new(),
+        addressing_attribute_uuids: Vec::new(),
+        content_uuids: content,
+        child_subsystem_uuids: children,
     })
 }
 
@@ -2667,6 +3838,32 @@ fn parse_uuid_collection(
         .collect()
 }
 
+fn parse_metadata_reference_collection(
+    value: &NativeValue,
+    label: &'static str,
+) -> Result<Vec<ObjectUuid>, BusinessObjectBuildError> {
+    let values = as_list(value, label)?;
+    if values.len() < 2 {
+        return native(format!("{label} is too short"));
+    }
+    exact_token(&values[0], "0", label)?;
+    let count = usize_token(&values[1], label)?;
+    if values.len() != count + 2 {
+        return native(format!("{label} count is not exact"));
+    }
+    values[2..]
+        .iter()
+        .map(|value| {
+            let typed = exact_list(value, 3, label)?;
+            exact_text(&typed[0], "#", label)?;
+            exact_token(&typed[1], METADATA_OBJECT_REF_TYPE_UUID, label)?;
+            let payload = exact_list(&typed[2], 2, label)?;
+            exact_token(&payload[0], "1", label)?;
+            non_nil_uuid(&payload[1], label)
+        })
+        .collect()
+}
+
 fn parse_attributes(
     values: &[NativeValue],
     family: BusinessObjectFamily,
@@ -2675,6 +3872,35 @@ fn parse_attributes(
     values
         .iter()
         .map(|value| parse_attribute_uuid(value, family, nested))
+        .collect()
+}
+
+fn parse_addressing_attributes(
+    values: &[NativeValue],
+) -> Result<Vec<ObjectUuid>, BusinessObjectBuildError> {
+    values
+        .iter()
+        .map(|value| {
+            let item = exact_list(value, 2, "AddressingAttribute item")?;
+            exact_token(&item[1], "0", "AddressingAttribute item tail")?;
+            let wrapper = exact_list(&item[0], 6, "AddressingAttribute wrapper")?;
+            exact_token(
+                &wrapper[0],
+                "4",
+                "AddressingAttribute wrapper discriminator",
+            )?;
+            let _ = non_nil_uuid(&wrapper[3], "AddressingAttribute dimension")?;
+            let payload = exact_list(&wrapper[1], 23, "AddressingAttribute payload")?;
+            exact_token(
+                &payload[0],
+                "27",
+                "AddressingAttribute payload discriminator",
+            )?;
+            let typed = exact_list(&payload[1], 3, "AddressingAttribute typed body")?;
+            exact_token(&typed[0], "2", "AddressingAttribute typed discriminator")?;
+            validate_type_pattern(&typed[2])?;
+            parse_header_uuid(&typed[1])
+        })
         .collect()
 }
 
@@ -2689,6 +3915,11 @@ fn parse_attribute_uuid(
     let expected_len = match (family, nested) {
         (BusinessObjectFamily::Catalog, false) => 8,
         (BusinessObjectFamily::Document, false) => 5,
+        (BusinessObjectFamily::ExchangePlan, false) => 7,
+        (BusinessObjectFamily::BusinessProcess | BusinessObjectFamily::Task, false) => 5,
+        (BusinessObjectFamily::Subsystem, false) => {
+            return native("Subsystem cannot contain an Attribute");
+        }
         (_, true) => 5,
     };
     if wrapper.len() != expected_len {
@@ -2699,10 +3930,25 @@ fn parse_attribute_uuid(
         match (family, nested) {
             (BusinessObjectFamily::Catalog, false) => "6",
             (BusinessObjectFamily::Document, false) => "5",
+            (BusinessObjectFamily::ExchangePlan, false) => "4",
+            (BusinessObjectFamily::BusinessProcess | BusinessObjectFamily::Task, false) => "2",
+            (BusinessObjectFamily::Subsystem, false) => {
+                return native("Subsystem cannot contain an Attribute");
+            }
             (_, true) => "8",
         },
         "Attribute wrapper discriminator",
     )?;
+    if family == BusinessObjectFamily::ExchangePlan && !nested {
+        exact_token(&wrapper[5], "0", "ExchangePlan Attribute reserved field")?;
+        let tail = exact_list(&wrapper[6], 2, "ExchangePlan Attribute reserved tail")?;
+        exact_token(&tail[0], "1", "ExchangePlan Attribute reserved tail marker")?;
+        exact_token(
+            &tail[1],
+            NIL_UUID,
+            "ExchangePlan Attribute reserved tail UUID",
+        )?;
+    }
     let payload = exact_list(&wrapper[1], 23, "Attribute payload")?;
     exact_token(&payload[0], "27", "Attribute payload discriminator")?;
     let typed = exact_list(&payload[1], 3, "Attribute typed body")?;
@@ -2720,15 +3966,28 @@ fn parse_tabular_sections(
         let item = exact_list(value, 3, "TabularSection item")?;
         exact_token(&item[1], "1", "TabularSection item discriminator")?;
         let wrapper = as_list(&item[0], "TabularSection wrapper")?;
-        let expected_wrapper_len = if family == BusinessObjectFamily::Catalog {
-            3
-        } else {
-            2
+        let expected_wrapper_len = match family {
+            BusinessObjectFamily::Catalog | BusinessObjectFamily::ExchangePlan => 3,
+            BusinessObjectFamily::Document | BusinessObjectFamily::BusinessProcess => 2,
+            BusinessObjectFamily::Task | BusinessObjectFamily::Subsystem => {
+                return native("metadata family cannot contain a TabularSection");
+            }
         };
         if wrapper.len() != expected_wrapper_len {
             return native("TabularSection wrapper field count is not exact");
         }
-        exact_token(&wrapper[0], "1", "TabularSection wrapper discriminator")?;
+        exact_token(
+            &wrapper[0],
+            if family == BusinessObjectFamily::BusinessProcess {
+                "0"
+            } else {
+                "1"
+            },
+            "TabularSection wrapper discriminator",
+        )?;
+        if family == BusinessObjectFamily::ExchangePlan {
+            exact_token(&wrapper[2], "5", "ExchangePlan TabularSection layout")?;
+        }
         let payload = exact_list(&wrapper[1], 9, "TabularSection payload")?;
         exact_token(&payload[0], "11", "TabularSection payload discriminator")?;
         for generated in payload.iter().take(5).skip(1) {
@@ -2815,6 +4074,7 @@ fn validate_native_identity_inventory(
     commands: &[ObjectUuid],
     forms: &[ObjectUuid],
     templates: &[ObjectUuid],
+    addressing_attributes: &[ObjectUuid],
 ) -> Result<(), BusinessObjectBuildError> {
     let mut seen = BTreeSet::from([root]);
     for (type_id, value_id) in generated {
@@ -2827,6 +4087,7 @@ fn validate_native_identity_inventory(
         .chain(commands)
         .chain(forms)
         .chain(templates)
+        .chain(addressing_attributes)
     {
         if !seen.insert(*uuid) {
             return native("native identity inventory contains duplicates");
@@ -2995,6 +4256,29 @@ mod tests {
     const DOCUMENT_COMMAND_UUID: &str = "00000000-0000-4000-8000-000000000230";
     const DOCUMENT_FORM_UUID: &str = "00000000-0000-4000-8000-000000000240";
     const DOCUMENT_TEMPLATE_UUID: &str = "00000000-0000-4000-8000-000000000250";
+    const SUBSYSTEM_UUID: &str = "00000000-0000-4000-8000-000000000300";
+    const CHILD_SUBSYSTEM_UUID: &str = "00000000-0000-4000-8000-000000000301";
+    const SUBSYSTEM_CONTENT_UUID: &str = "00000000-0000-4000-8000-000000000302";
+    const EXCHANGE_UUID: &str = "00000000-0000-4000-8000-000000000400";
+    const EXCHANGE_ATTRIBUTE_UUID: &str = "00000000-0000-4000-8000-000000000410";
+    const EXCHANGE_SECTION_UUID: &str = "00000000-0000-4000-8000-000000000420";
+    const EXCHANGE_NESTED_UUID: &str = "00000000-0000-4000-8000-000000000421";
+    const EXCHANGE_COMMAND_UUID: &str = "00000000-0000-4000-8000-000000000430";
+    const EXCHANGE_FORM_UUID: &str = "00000000-0000-4000-8000-000000000440";
+    const EXCHANGE_TEMPLATE_UUID: &str = "00000000-0000-4000-8000-000000000450";
+    const BUSINESS_PROCESS_UUID: &str = "00000000-0000-4000-8000-000000000500";
+    const BUSINESS_PROCESS_ATTRIBUTE_UUID: &str = "00000000-0000-4000-8000-000000000510";
+    const BUSINESS_PROCESS_SECTION_UUID: &str = "00000000-0000-4000-8000-000000000520";
+    const BUSINESS_PROCESS_NESTED_UUID: &str = "00000000-0000-4000-8000-000000000521";
+    const BUSINESS_PROCESS_COMMAND_UUID: &str = "00000000-0000-4000-8000-000000000530";
+    const BUSINESS_PROCESS_FORM_UUID: &str = "00000000-0000-4000-8000-000000000540";
+    const TASK_UUID: &str = "00000000-0000-4000-8000-000000000600";
+    const TASK_ATTRIBUTE_UUID: &str = "00000000-0000-4000-8000-000000000610";
+    const TASK_ADDRESSING_ATTRIBUTE_UUID: &str = "00000000-0000-4000-8000-000000000620";
+    const TASK_COMMAND_UUID: &str = "00000000-0000-4000-8000-000000000630";
+    const TASK_FORM_UUID: &str = "00000000-0000-4000-8000-000000000640";
+    const ADDRESSING_REGISTER_UUID: &str = "00000000-0000-4000-8000-000000000700";
+    const ADDRESSING_DIMENSION_UUID: &str = "00000000-0000-4000-8000-000000000710";
 
     fn fixture_uuid(seed: u32) -> String {
         format!("00000000-0000-4000-8000-{seed:012x}")
@@ -3156,6 +4440,120 @@ mod tests {
         ).into_bytes()
     }
 
+    fn workflow_generated(family: BusinessObjectFamily, name: &str, seed: u32) -> String {
+        let mut result = root_generated(family, name, seed);
+        if family == BusinessObjectFamily::BusinessProcess {
+            result.push_str(&generated(
+                &format!("BusinessProcessRoutePointRef.{name}"),
+                "RoutePointRef",
+                seed + 50,
+            ));
+        }
+        result
+    }
+
+    fn workflow_tabular_xml(
+        family: BusinessObjectFamily,
+        section_uuid: &str,
+        nested_uuid: &str,
+        seed: u32,
+    ) -> String {
+        let standard = if family == BusinessObjectFamily::ExchangePlan {
+            "<StandardAttributes/>"
+        } else {
+            ""
+        };
+        format!(
+            "<TabularSection uuid=\"{section_uuid}\"><InternalInfo>{}</InternalInfo><Properties><Name>Lines</Name><Synonym/><Comment/><ToolTip/><FillChecking>DontCheck</FillChecking>{standard}<LineNumberLength>5</LineNumberLength></Properties><ChildObjects>{}</ChildObjects></TabularSection>",
+            tabular_generated(family, seed),
+            attribute_xml(family, nested_uuid, "LineValue", true, false),
+        )
+    }
+
+    fn subsystem_xml() -> Vec<u8> {
+        format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"2.20\"><Subsystem uuid=\"{SUBSYSTEM_UUID}\"><Properties><Name>Main</Name><Synonym/><Comment/><IncludeHelpInContents>false</IncludeHelpInContents><IncludeInCommandInterface>true</IncludeInCommandInterface><UseOneCommand>false</UseOneCommand><Explanation/><Picture/><Content><xr:Item>Constant.ContentTarget</xr:Item></Content></Properties><ChildObjects><Subsystem>Child</Subsystem></ChildObjects></Subsystem></MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn exchange_plan_xml() -> Vec<u8> {
+        let children = format!(
+            "{}<Form>Main</Form>{}<Template>Print</Template>{}",
+            attribute_xml(
+                BusinessObjectFamily::ExchangePlan,
+                EXCHANGE_ATTRIBUTE_UUID,
+                "ExternalCode",
+                false,
+                false,
+            ),
+            workflow_tabular_xml(
+                BusinessObjectFamily::ExchangePlan,
+                EXCHANGE_SECTION_UUID,
+                EXCHANGE_NESTED_UUID,
+                4_200,
+            ),
+            command_xml(EXCHANGE_COMMAND_UUID),
+        );
+        format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"2.20\"><ExchangePlan uuid=\"{EXCHANGE_UUID}\"><InternalInfo><xr:ThisNode>{}</xr:ThisNode>{}</InternalInfo><Properties><Name>Mobile</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><CodeLength>9</CodeLength><CodeAllowedLength>Variable</CodeAllowedLength><DescriptionLength>100</DescriptionLength><DefaultPresentation>AsDescription</DefaultPresentation><EditType>InDialog</EditType><QuickChoice>false</QuickChoice><ChoiceMode>BothWays</ChoiceMode><InputByString><xr:Field>ExchangePlan.Mobile.StandardAttribute.Description</xr:Field><xr:Field>ExchangePlan.Mobile.StandardAttribute.Code</xr:Field></InputByString><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><DefaultObjectForm>ExchangePlan.Mobile.Form.Main</DefaultObjectForm><DefaultListForm/><DefaultChoiceForm/><AuxiliaryObjectForm/><AuxiliaryListForm/><AuxiliaryChoiceForm/><StandardAttributes/><Characteristics/><BasedOn/><DistributedInfoBase>true</DistributedInfoBase><IncludeConfigurationExtensions>false</IncludeConfigurationExtensions><CreateOnInput>DontUse</CreateOnInput><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><IncludeHelpInContents>false</IncludeHelpInContents><DataLockFields/><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><ObjectPresentation/><ExtendedObjectPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing></Properties><ChildObjects>{children}</ChildObjects></ExchangePlan></MetaDataObject>",
+            fixture_uuid(4_099),
+            workflow_generated(BusinessObjectFamily::ExchangePlan, "Mobile", 4_000),
+        )
+        .into_bytes()
+    }
+
+    fn business_process_xml() -> Vec<u8> {
+        let children = format!(
+            "{}<Form>Main</Form>{}{}",
+            attribute_xml(
+                BusinessObjectFamily::BusinessProcess,
+                BUSINESS_PROCESS_ATTRIBUTE_UUID,
+                "Owner",
+                false,
+                false,
+            ),
+            workflow_tabular_xml(
+                BusinessObjectFamily::BusinessProcess,
+                BUSINESS_PROCESS_SECTION_UUID,
+                BUSINESS_PROCESS_NESTED_UUID,
+                5_200,
+            ),
+            command_xml(BUSINESS_PROCESS_COMMAND_UUID),
+        );
+        format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"2.20\"><BusinessProcess uuid=\"{BUSINESS_PROCESS_UUID}\"><InternalInfo>{}</InternalInfo><Properties><Name>Approval</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><EditType>InDialog</EditType><InputByString><xr:Field>BusinessProcess.Approval.StandardAttribute.Number</xr:Field></InputByString><CreateOnInput>DontUse</CreateOnInput><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><DefaultObjectForm>BusinessProcess.Approval.Form.Main</DefaultObjectForm><DefaultListForm/><DefaultChoiceForm/><AuxiliaryObjectForm/><AuxiliaryListForm/><AuxiliaryChoiceForm/><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><NumberType>String</NumberType><NumberLength>11</NumberLength><NumberAllowedLength>Variable</NumberAllowedLength><CheckUnique>true</CheckUnique><StandardAttributes/><Characteristics/><Autonumbering>true</Autonumbering><BasedOn/><NumberPeriodicity>Nonperiodical</NumberPeriodicity><Task/><CreateTaskInPrivilegedMode>false</CreateTaskInPrivilegedMode><DataLockFields><xr:Field>BusinessProcess.Approval.StandardAttribute.HeadTask</xr:Field></DataLockFields><DataLockControlMode>Managed</DataLockControlMode><IncludeHelpInContents>false</IncludeHelpInContents><FullTextSearch>Use</FullTextSearch><ObjectPresentation/><ExtendedObjectPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing></Properties><ChildObjects>{children}</ChildObjects></BusinessProcess></MetaDataObject>",
+            workflow_generated(BusinessObjectFamily::BusinessProcess, "Approval", 5_000),
+        )
+        .into_bytes()
+    }
+
+    fn addressing_attribute_xml() -> String {
+        format!(
+            "<AddressingAttribute uuid=\"{TASK_ADDRESSING_ATTRIBUTE_UUID}\"><Properties><Name>Performer</Name><Synonym/><Comment/><Type><v8:Type>xs:string</v8:Type></Type><PasswordMode>false</PasswordMode><Format/><EditFormat/><ToolTip/><MarkNegatives>false</MarkNegatives><Mask/><MultiLine>false</MultiLine><ExtendedEdit>false</ExtendedEdit><MinValue/><MaxValue/><FillFromFillingValue>false</FillFromFillingValue><FillValue/><FillChecking>DontCheck</FillChecking><ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems><ChoiceParameterLinks/><ChoiceParameters/><QuickChoice>Auto</QuickChoice><CreateOnInput>Auto</CreateOnInput><ChoiceForm/><LinkByType/><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><Indexing>Index</Indexing><AddressingDimension>InformationRegister.Routing.Dimension.Performer</AddressingDimension><FullTextSearch>Use</FullTextSearch><DataHistory>DontUse</DataHistory></Properties><ChildObjects/></AddressingAttribute>"
+        )
+    }
+
+    fn task_xml() -> Vec<u8> {
+        let children = format!(
+            "{}{}<Form>Main</Form>{}",
+            attribute_xml(
+                BusinessObjectFamily::Task,
+                TASK_ATTRIBUTE_UUID,
+                "CommentText",
+                false,
+                false,
+            ),
+            addressing_attribute_xml(),
+            command_xml(TASK_COMMAND_UUID),
+        );
+        format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"2.20\"><Task uuid=\"{TASK_UUID}\"><InternalInfo>{}</InternalInfo><Properties><Name>Work</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><NumberType>String</NumberType><NumberLength>14</NumberLength><NumberAllowedLength>Fixed</NumberAllowedLength><CheckUnique>true</CheckUnique><Autonumbering>true</Autonumbering><TaskNumberAutoPrefix>BusinessProcessNumber</TaskNumberAutoPrefix><DescriptionLength>150</DescriptionLength><Addressing>InformationRegister.Routing</Addressing><MainAddressingAttribute>Task.Work.AddressingAttribute.Performer</MainAddressingAttribute><CurrentPerformer/><BasedOn/><StandardAttributes/><Characteristics/><DefaultPresentation>AsDescription</DefaultPresentation><EditType>InDialog</EditType><InputByString><xr:Field>Task.Work.StandardAttribute.Description</xr:Field><xr:Field>Task.Work.StandardAttribute.Number</xr:Field></InputByString><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><CreateOnInput>DontUse</CreateOnInput><DefaultObjectForm>Task.Work.Form.Main</DefaultObjectForm><DefaultListForm/><DefaultChoiceForm/><AuxiliaryObjectForm/><AuxiliaryListForm/><AuxiliaryChoiceForm/><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><IncludeHelpInContents>false</IncludeHelpInContents><DataLockFields><xr:Field>Task.Work.StandardAttribute.BusinessProcess</xr:Field></DataLockFields><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><ObjectPresentation/><ExtendedObjectPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing></Properties><ChildObjects>{children}</ChildObjects></Task></MetaDataObject>",
+            workflow_generated(BusinessObjectFamily::Task, "Work", 6_000),
+        )
+        .into_bytes()
+    }
+
     fn simple_object(
         seed: u32,
         uuid: &str,
@@ -3191,6 +4589,170 @@ mod tests {
             );
         }
         CanonicalObject::new(parts).unwrap()
+    }
+
+    fn simple_owned_object(
+        seed: u32,
+        uuid: &str,
+        kind: &str,
+        name: &str,
+        owner: &str,
+    ) -> CanonicalObject {
+        let object = simple_object(seed, uuid, kind, name, None);
+        let mut parts = CanonicalObjectParts::new(
+            object.identity().clone(),
+            object.kind().clone(),
+            object.provenance().clone(),
+        );
+        parts.owner = Some(ObjectUuid::parse(owner).unwrap());
+        parts.properties = object.properties().to_vec();
+        CanonicalObject::new(parts).unwrap()
+    }
+
+    fn hierarchical_configuration(family: BusinessObjectFamily) -> CanonicalConfiguration {
+        let xml = match family {
+            BusinessObjectFamily::Subsystem => subsystem_xml(),
+            BusinessObjectFamily::ExchangePlan => exchange_plan_xml(),
+            BusinessObjectFamily::BusinessProcess => business_process_xml(),
+            BusinessObjectFamily::Task => task_xml(),
+            _ => unreachable!("hierarchical fixture family is exact"),
+        };
+        hierarchical_configuration_from_xml(family, xml)
+    }
+
+    fn hierarchical_configuration_from_xml(
+        family: BusinessObjectFamily,
+        xml: Vec<u8>,
+    ) -> CanonicalConfiguration {
+        let document = XmlReader::from_slice(&xml).unwrap();
+        let envelope = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse(family.as_str()).unwrap(),
+                &document,
+                ProfileId::parse("xml-2.20").unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap();
+        let mut objects = vec![simple_object(
+            900,
+            CONFIGURATION_UUID,
+            "Configuration",
+            "Fixture",
+            None,
+        )];
+        objects.push(envelope.root().clone());
+        objects.extend(envelope.descendants().iter().cloned());
+        match family {
+            BusinessObjectFamily::Subsystem => {
+                objects.push(simple_object(
+                    901,
+                    CHILD_SUBSYSTEM_UUID,
+                    "Subsystem",
+                    "Child",
+                    None,
+                ));
+                objects.push(simple_object(
+                    902,
+                    SUBSYSTEM_CONTENT_UUID,
+                    "Constant",
+                    "ContentTarget",
+                    None,
+                ));
+            }
+            BusinessObjectFamily::ExchangePlan => {
+                objects.push(simple_object(
+                    903,
+                    EXCHANGE_FORM_UUID,
+                    "Form",
+                    "Main",
+                    Some("ExchangePlan.Mobile.Form.Main"),
+                ));
+                objects.push(simple_object(
+                    904,
+                    EXCHANGE_TEMPLATE_UUID,
+                    "Template",
+                    "Print",
+                    Some("ExchangePlan.Mobile.Template.Print"),
+                ));
+            }
+            BusinessObjectFamily::BusinessProcess => objects.push(simple_object(
+                905,
+                BUSINESS_PROCESS_FORM_UUID,
+                "Form",
+                "Main",
+                Some("BusinessProcess.Approval.Form.Main"),
+            )),
+            BusinessObjectFamily::Task => {
+                objects.push(simple_object(
+                    906,
+                    TASK_FORM_UUID,
+                    "Form",
+                    "Main",
+                    Some("Task.Work.Form.Main"),
+                ));
+                objects.push(simple_object(
+                    907,
+                    ADDRESSING_REGISTER_UUID,
+                    "InformationRegister",
+                    "Routing",
+                    None,
+                ));
+                objects.push(simple_owned_object(
+                    908,
+                    ADDRESSING_DIMENSION_UUID,
+                    "Dimension",
+                    "Performer",
+                    ADDRESSING_REGISTER_UUID,
+                ));
+            }
+            _ => unreachable!("hierarchical fixture family is exact"),
+        }
+        CanonicalConfiguration::new(objects).unwrap()
+    }
+
+    fn hierarchical_root_uuid(family: BusinessObjectFamily) -> ObjectUuid {
+        ObjectUuid::parse(match family {
+            BusinessObjectFamily::Subsystem => SUBSYSTEM_UUID,
+            BusinessObjectFamily::ExchangePlan => EXCHANGE_UUID,
+            BusinessObjectFamily::BusinessProcess => BUSINESS_PROCESS_UUID,
+            BusinessObjectFamily::Task => TASK_UUID,
+            _ => unreachable!("hierarchical fixture family is exact"),
+        })
+        .unwrap()
+    }
+
+    fn compile_hierarchical_and_decode(
+        family: BusinessObjectFamily,
+    ) -> (BusinessObjectNativeIr, BootstrapGraph) {
+        let configuration = hierarchical_configuration(family);
+        let validated = validate_configuration(&configuration).unwrap();
+        let identities = collect_bootstrap_identities(&validated).unwrap();
+        let routes = validated
+            .configuration()
+            .objects()
+            .iter()
+            .filter(|object| object.owner().is_none())
+            .map(|object| ObjectStorageRoute::new(object.identity().uuid(), Vec::new()).unwrap())
+            .collect();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            routes,
+        )
+        .unwrap();
+        let root_uuid = hierarchical_root_uuid(family);
+        let profile = BusinessObjectMetadataProfile::fixture("platform-test", family);
+        let first =
+            compile_business_object(&validated, &graph, root_uuid, &axes(), &profile).unwrap();
+        let second =
+            compile_business_object(&validated, &graph, root_uuid, &axes(), &profile).unwrap();
+        assert_eq!(first, second);
+        let ir = decode_business_object_blob(
+            first.outcome().compiled_payload().unwrap().bytes(),
+            &profile,
+        )
+        .unwrap();
+        (ir, graph)
     }
 
     fn axes() -> CompileAxes {
@@ -3278,6 +4840,7 @@ mod tests {
         let root_uuid = ObjectUuid::parse(match family {
             BusinessObjectFamily::Catalog => CATALOG_UUID,
             BusinessObjectFamily::Document => DOCUMENT_UUID,
+            _ => unreachable!("legacy fixture covers Catalog and Document only"),
         })
         .unwrap();
         let profile = BusinessObjectMetadataProfile::fixture("platform-test", family);
@@ -3345,7 +4908,91 @@ mod tests {
     }
 
     #[test]
-    fn bundled_profile_selects_catalog_and_document_layouts_explicitly() {
+    fn hierarchical_and_workflow_families_are_deterministic_and_base_free() {
+        let (subsystem, subsystem_graph) =
+            compile_hierarchical_and_decode(BusinessObjectFamily::Subsystem);
+        assert!(subsystem.generated_types.is_empty());
+        assert_eq!(subsystem.content_uuids.len(), 1);
+        assert_eq!(subsystem.child_subsystem_uuids.len(), 1);
+        assert!(subsystem_graph.contains_key(SUBSYSTEM_CONTENT_UUID));
+        assert!(subsystem_graph.contains_key(CHILD_SUBSYSTEM_UUID));
+
+        let (exchange, exchange_graph) =
+            compile_hierarchical_and_decode(BusinessObjectFamily::ExchangePlan);
+        assert_eq!(exchange.generated_types.len(), 5);
+        assert_eq!(
+            exchange.attribute_uuids,
+            [ObjectUuid::parse(EXCHANGE_ATTRIBUTE_UUID).unwrap()]
+        );
+        assert_eq!(exchange.tabular_sections.len(), 1);
+        assert_eq!(exchange.tabular_sections[0].attribute_uuids.len(), 1);
+        assert_eq!(exchange.command_uuids.len(), 1);
+        assert_eq!(exchange.form_uuids.len(), 1);
+        assert_eq!(exchange.template_uuids.len(), 1);
+        assert!(!exchange_graph.contains_key(EXCHANGE_ATTRIBUTE_UUID));
+        assert!(exchange_graph.contains_key(EXCHANGE_FORM_UUID));
+
+        let (process, process_graph) =
+            compile_hierarchical_and_decode(BusinessObjectFamily::BusinessProcess);
+        assert_eq!(process.generated_types.len(), 6);
+        assert_eq!(process.attribute_uuids.len(), 1);
+        assert_eq!(process.tabular_sections.len(), 1);
+        assert_eq!(process.tabular_sections[0].attribute_uuids.len(), 1);
+        assert_eq!(process.command_uuids.len(), 1);
+        assert_eq!(process.form_uuids.len(), 1);
+        assert!(process.template_uuids.is_empty());
+        assert!(!process_graph.contains_key(BUSINESS_PROCESS_SECTION_UUID));
+
+        let (task, task_graph) = compile_hierarchical_and_decode(BusinessObjectFamily::Task);
+        assert_eq!(task.generated_types.len(), 5);
+        assert_eq!(task.attribute_uuids.len(), 1);
+        assert_eq!(task.addressing_attribute_uuids.len(), 1);
+        assert_eq!(task.command_uuids.len(), 1);
+        assert_eq!(task.form_uuids.len(), 1);
+        assert!(!task_graph.contains_key(TASK_ADDRESSING_ATTRIBUTE_UUID));
+        assert!(task_graph.contains_key(ADDRESSING_REGISTER_UUID));
+        assert!(!task_graph.contains_key(ADDRESSING_DIMENSION_UUID));
+    }
+
+    #[test]
+    fn task_member_reference_must_resolve_to_its_owned_addressing_attribute() {
+        let xml = String::from_utf8(task_xml()).unwrap().replace(
+            "Task.Work.AddressingAttribute.Performer</MainAddressingAttribute>",
+            "Task.Work.Attribute.CommentText</MainAddressingAttribute>",
+        );
+        let configuration =
+            hierarchical_configuration_from_xml(BusinessObjectFamily::Task, xml.into_bytes());
+        let validated = validate_configuration(&configuration).unwrap();
+        let identities = collect_bootstrap_identities(&validated).unwrap();
+        let routes = validated
+            .configuration()
+            .objects()
+            .iter()
+            .filter(|object| object.owner().is_none())
+            .map(|object| ObjectStorageRoute::new(object.identity().uuid(), Vec::new()).unwrap())
+            .collect();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            routes,
+        )
+        .unwrap();
+        let profile =
+            BusinessObjectMetadataProfile::fixture("platform-test", BusinessObjectFamily::Task);
+        assert!(matches!(
+            compile_business_object(
+                &validated,
+                &graph,
+                ObjectUuid::parse(TASK_UUID).unwrap(),
+                &axes(),
+                &profile,
+            ),
+            Err(BusinessObjectBuildError::InvalidModel { .. })
+        ));
+    }
+
+    #[test]
+    fn bundled_profile_selects_business_object_layouts_explicitly() {
         let registry = crate::profile_registry::load_bundled_profile_registry().unwrap();
         let effective = registry
             .get(&ProfileId::parse("platform-8.3.27.1989").unwrap())
@@ -3354,6 +5001,10 @@ mod tests {
         for family in [
             BusinessObjectFamily::Catalog,
             BusinessObjectFamily::Document,
+            BusinessObjectFamily::Subsystem,
+            BusinessObjectFamily::ExchangePlan,
+            BusinessObjectFamily::BusinessProcess,
+            BusinessObjectFamily::Task,
         ] {
             assert_eq!(
                 BusinessObjectMetadataProfile::from_effective(effective, family)
@@ -3413,6 +5064,7 @@ mod tests {
             let root_uuid = ObjectUuid::parse(match family {
                 BusinessObjectFamily::Catalog => CATALOG_UUID,
                 BusinessObjectFamily::Document => DOCUMENT_UUID,
+                _ => unreachable!("legacy fixture covers Catalog and Document only"),
             })
             .unwrap();
             let profile = BusinessObjectMetadataProfile::fixture("platform-test", family);
