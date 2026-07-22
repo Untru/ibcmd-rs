@@ -217,7 +217,7 @@
         "storage_version": null,
         "container_revision": null
       },
-      "sha256": "667647d03a2a22ef02a0b3b456ece9b112b42921454685c96bf5413fe6ee3f5b",
+      "sha256": "44d48e42f38e1d1b088d6ece20e30040872da58b2f40a0e46f923c7949b8bd64",
       "provenance": {
         "origin": "hand-authored-clean-room",
         "issue": "XML-006",
@@ -227,6 +227,7 @@
         "nested-child-objects",
         "opaque-future-siblings",
         "ordered-preorder",
+        "palette-namespace",
         "utf8-bom"
       ],
       "expected": {
@@ -294,7 +295,7 @@
         "storage_version": null,
         "container_revision": null
       },
-      "sha256": "3d40818536732a84d6775c08ecc722de4fd4716f2d6081b99b92840578435ce1",
+      "sha256": "e59d2bd04c7116b0920a2646e0dc743b7896915412cfa4f089edb9348f5e01f9",
       "provenance": {
         "origin": "hand-authored-clean-room",
         "issue": "XML-006",
@@ -303,8 +304,6 @@
       "features": [
         "configuration-metadata",
         "opaque-future-siblings",
-        "palette-namespace",
-        "use-in-interface-compatibility-mode",
         "utf8-bom"
       ],
       "expected": {

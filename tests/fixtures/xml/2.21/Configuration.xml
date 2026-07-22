@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
-<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:f="urn:ibcmd-rs:xml-corpus:future" xmlns:pal="http://v8.1c.ru/8.1/data/ui/colors/palette" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.21">
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:f="urn:ibcmd-rs:xml-corpus:future" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.21">
   <Configuration uuid="10000000-0000-4000-8000-000000000001">
     <Properties>
       <Name>OfflineCorpus</Name>
@@ -13,7 +13,6 @@
       <DefaultRunMode>ManagedApplication</DefaultRunMode>
       <ScriptVariant>English</ScriptVariant>
       <CompatibilityMode>Version8_3_8</CompatibilityMode>
-      <UseInInterfaceCompatibilityMode>Any</UseInInterfaceCompatibilityMode>
       <f:FutureSetting f:mode="preserve">configuration-opaque</f:FutureSetting>
     </Properties>
     <ChildObjects>

@@ -42,16 +42,6 @@ const CONFIGURATION_ORDER: [&str; 7] = [
     "CompatibilityMode",
     "FutureSetting",
 ];
-const CONFIGURATION_221_ORDER: [&str; 8] = [
-    "Name",
-    "Synonym",
-    "Comment",
-    "DefaultRunMode",
-    "ScriptVariant",
-    "CompatibilityMode",
-    "UseInInterfaceCompatibilityMode",
-    "FutureSetting",
-];
 const COMMON_MODULE_ORDER: [&str; 12] = [
     "Name",
     "Synonym",
@@ -385,7 +375,7 @@ fn namespace_declarations(element: &XmlElement) -> Vec<(Option<String>, String)>
         .collect()
 }
 
-fn delta_markers(document: &XmlDocument) -> BTreeSet<&'static str> {
+fn catalog_delta_markers(document: &XmlDocument) -> BTreeSet<&'static str> {
     let mut markers = BTreeSet::new();
     if namespace_declarations(document.root())
         .iter()
@@ -393,25 +383,29 @@ fn delta_markers(document: &XmlDocument) -> BTreeSet<&'static str> {
     {
         markers.insert("palette_namespace");
     }
-    if element_children(properties(document)).any(|element| {
-        element.name().prefix().is_none()
-            && element.name().local() == "UseInInterfaceCompatibilityMode"
-            && direct_text(element).is_ok_and(|value| value == "Any")
-    }) {
-        markers.insert("use_in_interface_compatibility_mode");
-    }
     markers
 }
 
-fn qualifies_as_221_golden(document: &XmlDocument) -> bool {
+fn catalog_defaults_are_explicit(document: &XmlDocument) -> bool {
+    [
+        ("UseStandardCommands", "true"),
+        ("Hierarchical", "false"),
+        ("CodeLength", "9"),
+        ("DescriptionLength", "100"),
+    ]
+    .into_iter()
+    .all(|(name, expected)| property_value(document, name) == expected)
+}
+
+fn qualifies_as_221_catalog_golden(document: &XmlDocument) -> bool {
     let Ok(detection) = bundled_dialect_registry().and_then(|registry| registry.detect(document))
     else {
         return false;
     };
     exact_profile(&detection) == Some("xml-2.21")
-        && delta_markers(document)
-            == BTreeSet::from(["palette_namespace", "use_in_interface_compatibility_mode"])
-        && require_property_order(document, &CONFIGURATION_221_ORDER).is_ok()
+        && catalog_delta_markers(document) == BTreeSet::from(["palette_namespace"])
+        && require_property_order(document, &CATALOG_ORDER).is_ok()
+        && catalog_defaults_are_explicit(document)
 }
 
 #[test]
@@ -520,31 +514,38 @@ fn corpus_xml_is_byte_exact_reparseable_and_detected_exactly() {
 #[test]
 fn corpus_namespaces_properties_defaults_and_delta_provenance_are_explicit() {
     assert_manifest_valid();
+    let mut common_configuration_xml = None;
     let mut common_configuration_values = None;
     for version in DIALECTS {
-        let configuration = XmlReader::from_slice(&fixture_bytes(version, "Configuration.xml"))
-            .expect("Configuration fixture must parse");
-        let mut expected_namespaces = vec![
+        let configuration_bytes = fixture_bytes(version, "Configuration.xml");
+        let configuration_text =
+            std::str::from_utf8(&configuration_bytes).expect("Configuration is UTF-8");
+        let version_attribute = format!("version=\"{version}\"");
+        assert!(configuration_text.contains(&version_attribute));
+        let normalized_configuration =
+            configuration_text.replacen(&version_attribute, "version=\"normalized\"", 1);
+        if let Some(common) = &common_configuration_xml {
+            assert_eq!(
+                &normalized_configuration, common,
+                "Configuration differs beyond its root version in {version}"
+            );
+        } else {
+            common_configuration_xml = Some(normalized_configuration);
+        }
+
+        let configuration =
+            XmlReader::from_slice(&configuration_bytes).expect("Configuration fixture must parse");
+        let expected_namespaces = vec![
             (None, MD_NAMESPACE.to_owned()),
             (Some("f".to_owned()), FUTURE_NAMESPACE.to_owned()),
+            (Some("v8".to_owned()), V8_NAMESPACE.to_owned()),
         ];
-        if version == "2.21" {
-            expected_namespaces.push((Some("pal".to_owned()), PALETTE_NAMESPACE.to_owned()));
-        }
-        expected_namespaces.push((Some("v8".to_owned()), V8_NAMESPACE.to_owned()));
         assert_eq!(
             namespace_declarations(configuration.root()),
             expected_namespaces
         );
-        require_property_order(
-            &configuration,
-            if version == "2.21" {
-                &CONFIGURATION_221_ORDER
-            } else {
-                &CONFIGURATION_ORDER
-            },
-        )
-        .expect("Configuration property order must be explicit");
+        require_property_order(&configuration, &CONFIGURATION_ORDER)
+            .expect("Configuration property order must be explicit");
         assert_eq!(
             property_value(&configuration, "DefaultRunMode"),
             "ManagedApplication"
@@ -554,12 +555,6 @@ fn corpus_namespaces_properties_defaults_and_delta_provenance_are_explicit() {
             property_value(&configuration, "CompatibilityMode"),
             "Version8_3_8"
         );
-        if version == "2.21" {
-            assert_eq!(
-                property_value(&configuration, "UseInInterfaceCompatibilityMode"),
-                "Any"
-            );
-        }
         let common_values = [
             "Name",
             "DefaultRunMode",
@@ -594,6 +589,20 @@ fn corpus_namespaces_properties_defaults_and_delta_provenance_are_explicit() {
 
         let catalog = XmlReader::from_slice(&fixture_bytes(version, "Catalogs/Products.xml"))
             .expect("Catalog fixture must parse");
+        // Family evidence stays on Catalog, where palette behavior is present in the corpus.
+        let mut expected_catalog_namespaces = vec![
+            (None, MD_NAMESPACE.to_owned()),
+            (Some("f".to_owned()), FUTURE_NAMESPACE.to_owned()),
+        ];
+        if version == "2.21" {
+            expected_catalog_namespaces
+                .push((Some("pal".to_owned()), PALETTE_NAMESPACE.to_owned()));
+        }
+        expected_catalog_namespaces.push((Some("v8".to_owned()), V8_NAMESPACE.to_owned()));
+        assert_eq!(
+            namespace_declarations(catalog.root()),
+            expected_catalog_namespaces
+        );
         require_property_order(&catalog, &CATALOG_ORDER)
             .expect("Catalog property order must be explicit");
         assert_eq!(property_value(&catalog, "UseStandardCommands"), "true");
@@ -780,18 +789,21 @@ fn catalog_envelope_preserves_preorder_semantics_and_unknowns() {
 }
 
 #[test]
-fn configuration_221_requires_structural_delta_not_only_version() {
+fn catalog_221_requires_family_delta_not_only_version() {
     assert_manifest_valid();
-    let golden_bytes = fixture_bytes("2.21", "Configuration.xml");
-    let golden = XmlReader::from_slice(&golden_bytes).expect("2.21 golden must parse");
-    assert!(qualifies_as_221_golden(&golden));
+    let golden_bytes = fixture_bytes("2.21", "Catalogs/Products.xml");
+    let golden = XmlReader::from_slice(&golden_bytes).expect("2.21 Catalog golden must parse");
+    assert!(qualifies_as_221_catalog_golden(&golden));
     assert_eq!(
-        delta_markers(&golden),
-        BTreeSet::from(["palette_namespace", "use_in_interface_compatibility_mode",])
+        catalog_delta_markers(&golden),
+        BTreeSet::from(["palette_namespace"])
     );
+    require_property_order(&golden, &CATALOG_ORDER)
+        .expect("2.21 Catalog golden order must be explicit");
+    assert!(catalog_defaults_are_explicit(&golden));
 
-    let source_220 =
-        String::from_utf8(fixture_bytes("2.20", "Configuration.xml")).expect("fixture is UTF-8");
+    let source_220 = String::from_utf8(fixture_bytes("2.20", "Catalogs/Products.xml"))
+        .expect("fixture is UTF-8");
     let naive_bytes = source_220
         .replacen("version=\"2.20\"", "version=\"2.21\"", 1)
         .into_bytes();
@@ -801,8 +813,11 @@ fn configuration_221_requires_structural_delta_not_only_version() {
         .detect(&naive)
         .expect("detection must succeed");
     assert_eq!(exact_profile(&naive_detection), Some("xml-2.21"));
-    assert!(delta_markers(&naive).is_empty());
-    assert!(!qualifies_as_221_golden(&naive));
+    assert!(catalog_delta_markers(&naive).is_empty());
+    require_property_order(&naive, &CATALOG_ORDER)
+        .expect("root-only rewrite must not hide Catalog order");
+    assert!(catalog_defaults_are_explicit(&naive));
+    assert!(!qualifies_as_221_catalog_golden(&naive));
     assert_ne!(naive_bytes, golden_bytes);
 
     let conflicting = String::from_utf8(golden_bytes)
