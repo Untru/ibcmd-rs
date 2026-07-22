@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=39 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=40 total=56 updated=2026-07-23 -->
 
-As of 2026-07-22, 39 of 56 accepted leaf issues in the
+As of 2026-07-23, 40 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (69.6%). Live workflow statuses are tracked in
+are complete (71.4%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -48,9 +48,13 @@ CF-002 moves Format15 structural reads into the portable `ibcmd-v8` crate.
 The reader retains raw file/block/TOC headers, original entry order, observed
 header words `0/1/2/5`, raw payloads, and the absent-data sentinel as a value
 distinct from an empty payload. The legacy module-blob API delegates to it and
-keeps its prior parser/builder behavior. Chained pages remain a precise typed
-boundary until CF-003, where cycle/overlap/range validation is implemented as
-one unit. See [Format15 reader evidence](docs/evidence/cf-format15-reader.md).
+keeps its prior parser/builder behavior. CF-003 adds transactional chained-page
+assembly: every page header is preserved, final-page padding stays outside the
+logical payload, and cycles, reused addresses, partial overlaps, out-of-range
+extents, early endings, and unexpected continuations fail with exact typed
+errors. Two- and three-page integration tests run entirely in memory. See
+[Format15 reader evidence](docs/evidence/cf-format15-reader.md) and
+[chained-page evidence](docs/evidence/cf-chained-pages.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE

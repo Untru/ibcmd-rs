@@ -200,7 +200,7 @@
 
 ### CF-003 — Реализовать безопасное чтение chained pages
 
-- **Статус:** `[ ]`; **зависимости:** CF-002
+- **Статус:** `[x]`; **зависимости:** CF-002
 - **Файлы:** создать `crates/ibcmd-v8/src/block.rs`
 - **Действия:** собрать 2+/3+ page chain; detect cycle, overlap, repeated/out-of-range address, size mismatch.
 - **Проверка:** boundary payloads и corrupt synthetic chains возвращают точные typed errors.

@@ -17,15 +17,15 @@ The reader preserves:
 
 The third file-header word is exposed as `storage_version` for compatibility with the existing code and public reverse-engineering terminology. Observed module containers use `0`, `1`, or `2`; the clean-room configuration envelope uses `5`; independently published configuration files can carry larger values that correlate with element count. The structural layer therefore preserves the word without normalizing it or rejecting future values. Artifact-specific interpretation belongs above `ibcmd-v8`.
 
-## Fail-closed boundary
+## Chained-page boundary
 
-CF-002 reads single-page blocks only. A non-sentinel next-page address returns the typed `ChainedPagesUnsupported` error with exact block and next-page coordinates. This is deliberate: cycle, overlap, repeated-address, range, and size validation are implemented together in CF-003 instead of partially following chains here.
+CF-002 originally stopped at a typed boundary for every non-sentinel next-page address. CF-003 closes that boundary with the transactional reader described in [`cf-chained-pages.md`](cf-chained-pages.md). The Format15 parser now accepts validated multi-page TOC, element-header, and data chains while retaining every raw page header.
 
 Malformed headers, hex fields, TOC widths, markers, ranges, UTF-16LE names, and absent header addresses return typed errors without panic. The parser checks the declared page extent before copying the shorter logical payload.
 
 ## Evidence
 
-- `cargo test -p ibcmd-v8 --locked`: 6/6, including clean-room corpus parsing, raw-header/order preservation, observed header words `0/1/2/5`, absent data, invalid marker, and chained-page boundary.
+- `cargo test -p ibcmd-v8 --locked`: 13/13, including clean-room corpus parsing, raw-header/order preservation, observed header words `0/1/2/5`, absent data, invalid marker, valid two-/three-page chains, and corrupt-chain boundaries.
 - `cargo test --locked v8_container`: 6/6 legacy parser/builder regressions.
 - Targeted module regressions: `packs_module_inner_with_plain_info_and_text`, `module_outer_blob_is_raw_deflate`, and `unpacks_module_blob_text_element` pass.
 - `cargo clippy -p ibcmd-v8 --locked --all-targets -- -D warnings`: pass.

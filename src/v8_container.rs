@@ -148,7 +148,8 @@ fn checked_u32(value: usize, name: &str) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::{
-        V8_MAGIC_NUMBER, V8Element, build_v8_container, make_v8_element_header, parse_v8_container,
+        BLOCK_HEADER_SIZE, V8_MAGIC_NUMBER, V8Element, build_v8_container, make_v8_element_header,
+        parse_v8_container,
     };
 
     #[test]
@@ -218,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_multi_page_block_with_precise_error() {
+    fn parses_multi_page_block_through_portable_reader() {
         let mut inner = build_v8_container(&[V8Element {
             name: "text".to_string(),
             header: make_v8_element_header("text"),
@@ -226,20 +227,22 @@ mod tests {
         }])
         .unwrap();
         let data_addr = u32::from_le_bytes(inner[51..55].try_into().unwrap()) as usize;
-        let next_page = data_addr + 128;
+        let original =
+            inner[data_addr + BLOCK_HEADER_SIZE..data_addr + BLOCK_HEADER_SIZE + 7].to_vec();
+        let split = 3_u32;
+        let next_page = inner.len();
+        inner[data_addr + 11..data_addr + 19].copy_from_slice(format!("{split:08x}").as_bytes());
         inner[data_addr + 20..data_addr + 28]
             .copy_from_slice(format!("{:08x}", next_page).as_bytes());
-
-        let error = parse_v8_container(&inner).unwrap_err();
-        let error_chain = format!("{error:#}");
-
-        assert!(
-            error_chain.contains(&format!(
-                "multi-page V8 blocks are not supported yet: block at {} next page address 0x{:08x}",
-                data_addr, next_page
-            )),
-            "{error_chain}"
+        inner.extend_from_slice(
+            format!("\r\n00000000 00000004 {V8_MAGIC_NUMBER:08x} \r\n").as_bytes(),
         );
+        inner.extend_from_slice(&original[split as usize..]);
+
+        let elements = parse_v8_container(&inner).unwrap();
+
+        assert_eq!(elements[0].name, "text");
+        assert_eq!(elements[0].data, original);
     }
 
     #[test]

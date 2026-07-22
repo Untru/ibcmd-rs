@@ -8,10 +8,14 @@
 
 use std::{error::Error, fmt};
 
-pub const SENTINEL: u32 = 0x7fff_ffff;
+use crate::block::{BlockError, BlockPage, BlockReader};
+
+pub use crate::block::BlockHeader;
+
+pub const SENTINEL: u32 = crate::block::FORMAT15_SENTINEL;
 pub const DEFAULT_PAGE_SIZE: u32 = 512;
 pub const FILE_HEADER_SIZE: usize = 16;
-pub const BLOCK_HEADER_SIZE: usize = 31;
+pub const BLOCK_HEADER_SIZE: usize = crate::block::FORMAT15_BLOCK_HEADER_SIZE;
 pub const ELEMENT_ADDRESS_SIZE: usize = 12;
 pub const ELEMENT_HEADER_PREFIX_SIZE: usize = 20;
 
@@ -22,14 +26,6 @@ pub struct FileHeader {
     pub page_size: u32,
     pub storage_version: u32,
     pub reserved: u32,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct BlockHeader {
-    pub raw: [u8; BLOCK_HEADER_SIZE],
-    pub data_size: u32,
-    pub page_size: u32,
-    pub next_page_address: u32,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -45,8 +41,10 @@ pub struct Element {
     pub name: String,
     pub address: ElementAddress,
     pub header_block: BlockHeader,
+    pub header_pages: Vec<BlockPage>,
     pub raw_header: Vec<u8>,
     pub data_block: Option<BlockHeader>,
+    pub data_pages: Option<Vec<BlockPage>>,
     pub data: Option<Vec<u8>>,
 }
 
@@ -54,6 +52,7 @@ pub struct Element {
 pub struct Container {
     pub file_header: FileHeader,
     pub toc_block: BlockHeader,
+    pub toc_pages: Vec<BlockPage>,
     pub elements: Vec<Element>,
 }
 
@@ -86,12 +85,7 @@ pub enum Format15Error {
     UnexpectedFileMarker {
         found: u32,
     },
-    InvalidBlockHeader {
-        offset: usize,
-    },
-    InvalidHexField {
-        offset: usize,
-    },
+    Block(BlockError),
     TocSizeNotDivisible {
         size: u32,
     },
@@ -101,15 +95,6 @@ pub enum Format15Error {
     },
     AbsentHeaderAddress {
         index: usize,
-    },
-    ChainedPagesUnsupported {
-        offset: usize,
-        next_page_address: u32,
-    },
-    BlockSizeMismatch {
-        offset: usize,
-        data_size: u32,
-        page_size: u32,
     },
     ElementHeaderTooShort {
         index: usize,
@@ -147,15 +132,7 @@ impl fmt::Display for Format15Error {
                 formatter,
                 "unexpected file header next page marker 0x{found:08x}"
             ),
-            Self::InvalidBlockHeader { offset } => {
-                write!(formatter, "invalid block header at {offset}")
-            }
-            Self::InvalidHexField { offset } => {
-                write!(
-                    formatter,
-                    "invalid hexadecimal block-header field at {offset}"
-                )
-            }
+            Self::Block(error) => error.fmt(formatter),
             Self::TocSizeNotDivisible { size } => write!(
                 formatter,
                 "TOC size {size} is not divisible by element address size {ELEMENT_ADDRESS_SIZE}"
@@ -167,21 +144,6 @@ impl fmt::Display for Format15Error {
             Self::AbsentHeaderAddress { index } => {
                 write!(formatter, "element {index} has an absent header address")
             }
-            Self::ChainedPagesUnsupported {
-                offset,
-                next_page_address,
-            } => write!(
-                formatter,
-                "multi-page V8 blocks are not supported yet: block at {offset} next page address 0x{next_page_address:08x}"
-            ),
-            Self::BlockSizeMismatch {
-                offset,
-                data_size,
-                page_size,
-            } => write!(
-                formatter,
-                "single-page block at {offset} declares data size {data_size} larger than page size {page_size}"
-            ),
             Self::ElementHeaderTooShort { index, actual } => write!(
                 formatter,
                 "element {index} header is too short: expected at least {ELEMENT_HEADER_PREFIX_SIZE} bytes, got {actual}"
@@ -197,7 +159,20 @@ impl fmt::Display for Format15Error {
     }
 }
 
-impl Error for Format15Error {}
+impl Error for Format15Error {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Block(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<BlockError> for Format15Error {
+    fn from(error: BlockError) -> Self {
+        Self::Block(error)
+    }
+}
 
 pub fn parse(bytes: &[u8]) -> Result<Container, Format15Error> {
     let minimum = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE;
@@ -215,8 +190,12 @@ pub fn parse(bytes: &[u8]) -> Result<Container, Format15Error> {
         });
     }
 
-    let toc_block = read_block_header(bytes, FILE_HEADER_SIZE)?;
-    let toc = read_single_page_payload(bytes, FILE_HEADER_SIZE, &toc_block)?;
+    let mut block_reader = BlockReader::new(bytes);
+    block_reader.reserve(0, FILE_HEADER_SIZE as u32)?;
+    let toc_chain = block_reader.read_chain(FILE_HEADER_SIZE as u32)?;
+    let toc_block = toc_chain.pages[0].header.clone();
+    let toc_pages = toc_chain.pages;
+    let toc = toc_chain.data;
     if toc.len() % ELEMENT_ADDRESS_SIZE != 0 {
         return Err(Format15Error::TocSizeNotDivisible {
             size: toc_block.data_size,
@@ -228,19 +207,20 @@ pub fn parse(bytes: &[u8]) -> Result<Container, Format15Error> {
         let address = read_element_address(raw_address, index)?;
         let header_address = match address.header_address {
             SENTINEL => return Err(Format15Error::AbsentHeaderAddress { index }),
-            value => value as usize,
+            value => value,
         };
-        let header_block = read_block_header(bytes, header_address)?;
-        let raw_header = read_single_page_payload(bytes, header_address, &header_block)?;
+        let header_chain = block_reader.read_chain(header_address)?;
+        let header_block = header_chain.pages[0].header.clone();
+        let header_pages = header_chain.pages;
+        let raw_header = header_chain.data;
         let name = element_name(&raw_header, index)?;
 
-        let (data_block, data) = match address.data_address {
-            None => (None, None),
+        let (data_block, data_pages, data) = match address.data_address {
+            None => (None, None, None),
             Some(data_address) => {
-                let data_address = data_address as usize;
-                let block = read_block_header(bytes, data_address)?;
-                let payload = read_single_page_payload(bytes, data_address, &block)?;
-                (Some(block), Some(payload))
+                let chain = block_reader.read_chain(data_address)?;
+                let block = chain.pages[0].header.clone();
+                (Some(block), Some(chain.pages), Some(chain.data))
             }
         };
 
@@ -248,8 +228,10 @@ pub fn parse(bytes: &[u8]) -> Result<Container, Format15Error> {
             name,
             address,
             header_block,
+            header_pages,
             raw_header,
             data_block,
+            data_pages,
             data,
         });
     }
@@ -257,6 +239,7 @@ pub fn parse(bytes: &[u8]) -> Result<Container, Format15Error> {
     Ok(Container {
         file_header,
         toc_block,
+        toc_pages,
         elements,
     })
 }
@@ -270,26 +253,6 @@ fn read_file_header(bytes: &[u8]) -> Result<FileHeader, Format15Error> {
         page_size: u32::from_le_bytes(raw[4..8].try_into().unwrap()),
         storage_version: u32::from_le_bytes(raw[8..12].try_into().unwrap()),
         reserved: u32::from_le_bytes(raw[12..16].try_into().unwrap()),
-        raw,
-    })
-}
-
-fn read_block_header(bytes: &[u8], offset: usize) -> Result<BlockHeader, Format15Error> {
-    let raw: [u8; BLOCK_HEADER_SIZE] = checked_slice(bytes, offset, BLOCK_HEADER_SIZE)?
-        .try_into()
-        .expect("checked Format15 block-header length");
-    if raw[0..2] != *b"\r\n"
-        || raw[10] != b' '
-        || raw[19] != b' '
-        || raw[28] != b' '
-        || raw[29..31] != *b"\r\n"
-    {
-        return Err(Format15Error::InvalidBlockHeader { offset });
-    }
-    Ok(BlockHeader {
-        data_size: parse_hex_u32(&raw[2..10], offset + 2)?,
-        page_size: parse_hex_u32(&raw[11..19], offset + 11)?,
-        next_page_address: parse_hex_u32(&raw[20..28], offset + 20)?,
         raw,
     })
 }
@@ -313,35 +276,6 @@ fn read_element_address(bytes: &[u8], index: usize) -> Result<ElementAddress, Fo
         data_address: (raw_data_address != SENTINEL).then_some(raw_data_address),
         marker,
     })
-}
-
-fn read_single_page_payload(
-    bytes: &[u8],
-    offset: usize,
-    header: &BlockHeader,
-) -> Result<Vec<u8>, Format15Error> {
-    if header.next_page_address != SENTINEL {
-        return Err(Format15Error::ChainedPagesUnsupported {
-            offset,
-            next_page_address: header.next_page_address,
-        });
-    }
-    if header.data_size > header.page_size {
-        return Err(Format15Error::BlockSizeMismatch {
-            offset,
-            data_size: header.data_size,
-            page_size: header.page_size,
-        });
-    }
-    let payload_offset =
-        offset
-            .checked_add(BLOCK_HEADER_SIZE)
-            .ok_or(Format15Error::RangeOverflow {
-                offset,
-                length: BLOCK_HEADER_SIZE,
-            })?;
-    checked_slice(bytes, payload_offset, header.page_size as usize)?;
-    Ok(checked_slice(bytes, payload_offset, header.data_size as usize)?.to_vec())
 }
 
 fn element_name(header: &[u8], index: usize) -> Result<String, Format15Error> {
@@ -377,20 +311,6 @@ fn checked_slice(bytes: &[u8], offset: usize, length: usize) -> Result<&[u8], Fo
             length,
             input_length: bytes.len(),
         })
-}
-
-fn parse_hex_u32(bytes: &[u8], offset: usize) -> Result<u32, Format15Error> {
-    let mut value = 0_u32;
-    for byte in bytes {
-        let digit = match byte {
-            b'0'..=b'9' => u32::from(byte - b'0'),
-            b'a'..=b'f' => u32::from(byte - b'a' + 10),
-            b'A'..=b'F' => u32::from(byte - b'A' + 10),
-            _ => return Err(Format15Error::InvalidHexField { offset }),
-        };
-        value = (value << 4) | digit;
-    }
-    Ok(value)
 }
 
 #[cfg(test)]
@@ -465,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn chained_page_is_a_precise_typed_error_until_cf_003() {
+    fn follows_two_page_data_chain_and_preserves_both_headers() {
         let mut bytes = fixture();
         let first_address = 16 + BLOCK_HEADER_SIZE;
         let data_address = u32::from_le_bytes(
@@ -473,17 +393,43 @@ mod tests {
                 .try_into()
                 .unwrap(),
         ) as usize;
-        let next_page_address = data_address as u32 + 128;
+        let data_size = u32::from_str_radix(
+            std::str::from_utf8(&bytes[data_address + 2..data_address + 10]).unwrap(),
+            16,
+        )
+        .unwrap();
+        assert!(data_size > 1);
+        let split = data_size / 2;
+        let original = bytes[data_address + BLOCK_HEADER_SIZE
+            ..data_address + BLOCK_HEADER_SIZE + data_size as usize]
+            .to_vec();
+        let next_page_address = bytes.len() as u32;
+        bytes[data_address + 11..data_address + 19]
+            .copy_from_slice(format!("{split:08x}").as_bytes());
         bytes[data_address + 20..data_address + 28]
             .copy_from_slice(format!("{next_page_address:08x}").as_bytes());
+        let remaining = data_size - split;
+        bytes.extend_from_slice(
+            format!(
+                "\r\n{zero:08x} {remaining:08x} {SENTINEL:08x} \r\n",
+                zero = 0
+            )
+            .as_bytes(),
+        );
+        bytes.extend_from_slice(&original[split as usize..]);
+
+        let parsed = parse(&bytes).unwrap();
 
         assert_eq!(
-            parse(&bytes).unwrap_err(),
-            Format15Error::ChainedPagesUnsupported {
-                offset: data_address,
-                next_page_address,
-            }
+            parsed.elements[0].data.as_deref(),
+            Some(original.as_slice())
         );
+        let pages = parsed.elements[0].data_pages.as_ref().unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].address, data_address as u32);
+        assert_eq!(pages[1].address, next_page_address);
+        assert_eq!(pages[0].data_length, split);
+        assert_eq!(pages[1].data_length, remaining);
     }
 
     #[test]
