@@ -6,16 +6,18 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::artifact::ProfileId;
 use crate::diagnostic::{
-    Diagnostic, DiagnosticBuildError, DiagnosticCode, DiagnosticReport, LossDisposition,
-    LossPolicy, ObjectPath, PropertyPath, Severity,
+    CodecLossPermission, Diagnostic, DiagnosticBuildError, DiagnosticCode, DiagnosticReport,
+    LossDisposition, LossDispositionKind, LossPolicy, ObjectPath, PropertyPath, Severity,
 };
 use crate::model::CanonicalConfiguration;
 use crate::validate::validate_configuration;
 
 use super::graph::{MigrationGraph, MigrationPlan};
 use super::report::{
-    MAX_MIGRATION_REPORT_DIAGNOSTICS, MAX_MIGRATION_STEP_DIAGNOSTICS, MigrationLossEvidence,
-    MigrationLossPhase, MigrationReport, MigrationReportError, MigrationStepReport,
+    MAX_MIGRATION_REPORT_DIAGNOSTICS, MAX_MIGRATION_REPORT_LOSS_EVIDENCE,
+    MAX_MIGRATION_STEP_DIAGNOSTICS, MAX_MIGRATION_STEP_LOSS_EVIDENCE, MigrationFailureCode,
+    MigrationFailureStage, MigrationLossEvidence, MigrationLossPhase, MigrationReport,
+    MigrationReportError, MigrationStepFailure, MigrationStepReport, MigrationTerminalFailure,
 };
 use super::step::{
     MigrationAnalyzeRequest, MigrationApplyRequest, MigrationStepDescriptor, MigrationStepId,
@@ -103,16 +105,18 @@ impl<'a> MigrationExecutor<'a> {
         &self,
         request: MigrationExecutionRequest<'_>,
     ) -> Result<MigrationExecution, MigrationExecutionError> {
-        self.validate_plan(request.plan())?;
         if let Err(diagnostics) = validate_configuration(request.source()) {
             ensure_diagnostic_bound(&diagnostics, None, MigrationPhase::InitialValidation)?;
             return Err(MigrationExecutionError::InvalidSource { diagnostics });
         }
+        self.validate_plan(request.plan())?;
 
         let mut working = request.source().clone();
         let mut step_reports = Vec::with_capacity(request.plan().len());
+        let mut budget = ExecutionReportBudget::default();
 
         for (index, step_id) in request.plan().step_ids().iter().enumerate() {
+            budget.begin_step();
             let source_id = &request.plan().route_profiles()[index];
             let target_id = &request.plan().route_profiles()[index + 1];
             let source_profile = self.graph.profile(source_id).ok_or_else(|| {
@@ -136,20 +140,46 @@ impl<'a> MigrationExecutor<'a> {
                 registered.implementation(),
             )?;
 
-            let analysis = registered
+            let analysis = match registered
                 .implementation()
                 .analyze(MigrationAnalyzeRequest::new(
                     source_profile,
                     target_profile,
                     &working,
-                ))
-                .map_err(|error| MigrationExecutionError::AnalysisBuildFailed {
-                    step_id: step_id.clone(),
-                    error,
-                })?;
-            ensure_diagnostic_bound(
-                analysis.diagnostics(),
-                Some(step_id),
+                )) {
+                Ok(analysis) => analysis,
+                Err(error) => {
+                    step_reports.push(MigrationStepReport::failed(
+                        step_id.clone(),
+                        source_profile.id.clone(),
+                        target_profile.id.clone(),
+                        MigrationStepFailure::new(
+                            MigrationFailureStage::Analyze,
+                            MigrationFailureCode::AnalysisBuildFailed,
+                        )?,
+                        DiagnosticReport::new(),
+                        DiagnosticReport::new(),
+                        DiagnosticReport::new(),
+                        Vec::new(),
+                    )?);
+                    let report = compose_failed_report(
+                        request.plan(),
+                        request.loss_policy(),
+                        step_reports,
+                        index,
+                        MigrationFailureStage::Analyze,
+                        MigrationFailureCode::AnalysisBuildFailed,
+                    )?;
+                    return Err(MigrationExecutionError::AnalysisBuildFailed {
+                        step_id: step_id.clone(),
+                        error,
+                        report: Box::new(report),
+                    });
+                }
+            };
+            budget.observe_diagnostics(
+                analysis.diagnostics().diagnostics().len(),
+                step_id,
                 MigrationPhase::Analyze,
             )?;
             let analysis_diagnostics = normalize_report(
@@ -158,20 +188,31 @@ impl<'a> MigrationExecutor<'a> {
                 &target_profile.id,
             );
             if analysis_diagnostics.has_errors() {
-                let step_report = MigrationStepReport::new(
+                let step_report = MigrationStepReport::failed(
                     step_id.clone(),
                     source_profile.id.clone(),
                     target_profile.id.clone(),
+                    MigrationStepFailure::new(
+                        MigrationFailureStage::Analyze,
+                        MigrationFailureCode::AnalysisBlocked,
+                    )?,
                     analysis_diagnostics,
                     DiagnosticReport::new(),
                     DiagnosticReport::new(),
                     Vec::new(),
                 )?;
                 step_reports.push(step_report);
-                let report = compose_report(request.plan(), step_reports)?;
+                let report = compose_failed_report(
+                    request.plan(),
+                    request.loss_policy(),
+                    step_reports,
+                    index,
+                    MigrationFailureStage::Analyze,
+                    MigrationFailureCode::AnalysisBlocked,
+                )?;
                 return Err(MigrationExecutionError::AnalysisFailed {
                     step_id: step_id.clone(),
-                    report,
+                    report: Box::new(report),
                 });
             }
 
@@ -194,96 +235,174 @@ impl<'a> MigrationExecutor<'a> {
                 registered.implementation(),
             )?;
             let (output, raw_apply_diagnostics) = outcome.into_parts();
-            ensure_diagnostic_bound(&raw_apply_diagnostics, Some(step_id), MigrationPhase::Apply)?;
+            budget.observe_diagnostics(
+                raw_apply_diagnostics.diagnostics().len(),
+                step_id,
+                MigrationPhase::Apply,
+            )?;
             let mut apply_diagnostics = normalize_report(
                 &raw_apply_diagnostics,
                 &source_profile.id,
                 &target_profile.id,
             );
             if apply_diagnostics.has_errors() {
-                let step_report = MigrationStepReport::new(
+                let step_report = MigrationStepReport::failed(
                     step_id.clone(),
                     source_profile.id.clone(),
                     target_profile.id.clone(),
+                    MigrationStepFailure::new(
+                        MigrationFailureStage::Apply,
+                        MigrationFailureCode::ApplyBlocked,
+                    )?,
                     analysis_diagnostics,
                     apply_diagnostics,
                     DiagnosticReport::new(),
                     Vec::new(),
                 )?;
                 step_reports.push(step_report);
-                let report = compose_report(request.plan(), step_reports)?;
+                let report = compose_failed_report(
+                    request.plan(),
+                    request.loss_policy(),
+                    step_reports,
+                    index,
+                    MigrationFailureStage::Apply,
+                    MigrationFailureCode::ApplyBlocked,
+                )?;
                 return Err(MigrationExecutionError::ApplyFailed {
                     step_id: step_id.clone(),
-                    report,
+                    report: Box::new(report),
                 });
             }
 
             let Some(output) = output else {
+                budget.observe_diagnostics(1, step_id, MigrationPhase::Apply)?;
                 let diagnostic =
                     missing_value_diagnostic(step_id, &source_profile.id, &target_profile.id)?;
                 apply_diagnostics.push(diagnostic);
-                let step_report = MigrationStepReport::new(
+                let step_report = MigrationStepReport::failed(
                     step_id.clone(),
                     source_profile.id.clone(),
                     target_profile.id.clone(),
+                    MigrationStepFailure::new(
+                        MigrationFailureStage::Apply,
+                        MigrationFailureCode::ApplyMissingValue,
+                    )?,
                     analysis_diagnostics,
                     apply_diagnostics,
                     DiagnosticReport::new(),
                     Vec::new(),
                 )?;
                 step_reports.push(step_report);
-                let report = compose_report(request.plan(), step_reports)?;
+                let report = compose_failed_report(
+                    request.plan(),
+                    request.loss_policy(),
+                    step_reports,
+                    index,
+                    MigrationFailureStage::Apply,
+                    MigrationFailureCode::ApplyMissingValue,
+                )?;
                 return Err(MigrationExecutionError::ApplyMissingValue {
                     step_id: step_id.clone(),
-                    report,
+                    report: Box::new(report),
                 });
             };
 
             let (candidate, losses) = output.into_parts();
-            let loss_evidence = validate_actual_losses(
-                step_id,
+            budget.observe_losses(losses.len(), step_id)?;
+            let loss_evidence = match validate_actual_losses(
                 registered.descriptor(),
                 &losses,
                 &raw_apply_diagnostics,
                 request.loss_policy(),
                 &source_profile.id,
                 &target_profile.id,
-            )?;
+            ) {
+                Ok(evidence) => evidence,
+                Err(violation) => {
+                    let failure_code = violation.failure_code();
+                    step_reports.push(MigrationStepReport::failed(
+                        step_id.clone(),
+                        source_profile.id.clone(),
+                        target_profile.id.clone(),
+                        MigrationStepFailure::new(
+                            MigrationFailureStage::LossContract,
+                            failure_code,
+                        )?,
+                        analysis_diagnostics,
+                        apply_diagnostics,
+                        DiagnosticReport::new(),
+                        Vec::new(),
+                    )?);
+                    let report = compose_failed_report(
+                        request.plan(),
+                        request.loss_policy(),
+                        step_reports,
+                        index,
+                        MigrationFailureStage::LossContract,
+                        failure_code,
+                    )?;
+                    return Err(violation.into_execution_error(step_id.clone(), report));
+                }
+            };
 
             let validation_diagnostics = match validate_configuration(&candidate) {
                 Ok(_) => DiagnosticReport::new(),
                 Err(diagnostics) => {
-                    ensure_diagnostic_bound(
-                        &diagnostics,
-                        Some(step_id),
+                    budget.observe_diagnostics(
+                        diagnostics.diagnostics().len(),
+                        step_id,
                         MigrationPhase::ResultValidation,
                     )?;
                     normalize_report(&diagnostics, &source_profile.id, &target_profile.id)
                 }
             };
             let validation_failed = validation_diagnostics.has_errors();
-            let step_report = MigrationStepReport::new(
-                step_id.clone(),
-                source_profile.id.clone(),
-                target_profile.id.clone(),
-                analysis_diagnostics,
-                apply_diagnostics,
-                validation_diagnostics,
-                loss_evidence,
-            )?;
+            let step_report = if validation_failed {
+                MigrationStepReport::failed(
+                    step_id.clone(),
+                    source_profile.id.clone(),
+                    target_profile.id.clone(),
+                    MigrationStepFailure::new(
+                        MigrationFailureStage::ResultValidation,
+                        MigrationFailureCode::ResultValidationFailed,
+                    )?,
+                    analysis_diagnostics,
+                    apply_diagnostics,
+                    validation_diagnostics,
+                    loss_evidence,
+                )?
+            } else {
+                MigrationStepReport::successful(
+                    step_id.clone(),
+                    source_profile.id.clone(),
+                    target_profile.id.clone(),
+                    analysis_diagnostics,
+                    apply_diagnostics,
+                    validation_diagnostics,
+                    loss_evidence,
+                )?
+            };
             step_reports.push(step_report);
             if validation_failed {
-                let report = compose_report(request.plan(), step_reports)?;
+                let report = compose_failed_report(
+                    request.plan(),
+                    request.loss_policy(),
+                    step_reports,
+                    index,
+                    MigrationFailureStage::ResultValidation,
+                    MigrationFailureCode::ResultValidationFailed,
+                )?;
                 return Err(MigrationExecutionError::ResultValidationFailed {
                     step_id: step_id.clone(),
-                    report,
+                    report: Box::new(report),
                 });
             }
 
             working = candidate;
         }
 
-        let report = compose_report(request.plan(), step_reports)?;
+        let report =
+            compose_successful_report(request.plan(), request.loss_policy(), step_reports)?;
         Ok(MigrationExecution {
             configuration: working,
             report,
@@ -412,41 +531,51 @@ pub enum MigrationExecutionError {
     AnalysisBuildFailed {
         step_id: MigrationStepId,
         error: DiagnosticBuildError,
+        report: Box<MigrationReport>,
     },
     /// Analysis emitted a blocking diagnostic; apply was not called.
     AnalysisFailed {
         step_id: MigrationStepId,
-        report: MigrationReport,
+        report: Box<MigrationReport>,
     },
     /// Apply emitted a blocking diagnostic and returned no accepted value.
     ApplyFailed {
         step_id: MigrationStepId,
-        report: MigrationReport,
+        report: Box<MigrationReport>,
     },
     /// Apply violated its guarded value contract without an explanatory error.
     ApplyMissingValue {
         step_id: MigrationStepId,
-        report: MigrationReport,
+        report: Box<MigrationReport>,
     },
     /// A candidate result failed canonical graph validation.
     ResultValidationFailed {
         step_id: MigrationStepId,
-        report: MigrationReport,
+        report: Box<MigrationReport>,
     },
     /// A step returned an evaluated loss absent from its descriptor.
     UndeclaredAppliedLoss {
         step_id: MigrationStepId,
         code: DiagnosticCode,
+        report: Box<MigrationReport>,
     },
     /// Actual loss evidence was absent from apply diagnostics.
     LossDiagnosticMissing {
         step_id: MigrationStepId,
         code: DiagnosticCode,
+        report: Box<MigrationReport>,
     },
     /// A declared loss warning had no corresponding actual disposition.
     LossDispositionMissing {
         step_id: MigrationStepId,
         code: DiagnosticCode,
+        report: Box<MigrationReport>,
+    },
+    /// The descriptor did not authorize the actual loss disposition.
+    LossPermissionDenied {
+        step_id: MigrationStepId,
+        code: DiagnosticCode,
+        report: Box<MigrationReport>,
     },
     /// A step or initial validation report exceeded execution bounds.
     DiagnosticLimitExceeded {
@@ -489,6 +618,7 @@ impl MigrationExecutionError {
             Self::UndeclaredAppliedLoss { .. } => "migration.execute-undeclared-applied-loss",
             Self::LossDiagnosticMissing { .. } => "migration.execute-loss-diagnostic-missing",
             Self::LossDispositionMissing { .. } => "migration.execute-loss-disposition-missing",
+            Self::LossPermissionDenied { .. } => "migration.execute-loss-permission-denied",
             Self::DiagnosticLimitExceeded { .. } => "migration.execute-diagnostic-limit",
             Self::DiagnosticBuildFailed { .. } => "migration.execute-diagnostic-build-failed",
             Self::InvalidBuiltInDiagnosticCode { .. } => {
@@ -499,12 +629,17 @@ impl MigrationExecutionError {
     }
 
     /// Returns a partial deterministic report when execution reached a step failure.
-    pub const fn report(&self) -> Option<&MigrationReport> {
+    pub fn report(&self) -> Option<&MigrationReport> {
         match self {
-            Self::AnalysisFailed { report, .. }
+            Self::AnalysisBuildFailed { report, .. }
+            | Self::AnalysisFailed { report, .. }
             | Self::ApplyFailed { report, .. }
             | Self::ApplyMissingValue { report, .. }
-            | Self::ResultValidationFailed { report, .. } => Some(report),
+            | Self::ResultValidationFailed { report, .. }
+            | Self::UndeclaredAppliedLoss { report, .. }
+            | Self::LossDiagnosticMissing { report, .. }
+            | Self::LossDispositionMissing { report, .. }
+            | Self::LossPermissionDenied { report, .. } => Some(report.as_ref()),
             _ => None,
         }
     }
@@ -563,7 +698,7 @@ impl Display for MigrationExecutionError {
                 formatter,
                 "migration step `{step_id}` changed its descriptor after registration"
             ),
-            Self::AnalysisBuildFailed { step_id, error } => write!(
+            Self::AnalysisBuildFailed { step_id, error, .. } => write!(
                 formatter,
                 "migration step `{step_id}` analysis could not build diagnostics: {error}"
             ),
@@ -581,17 +716,21 @@ impl Display for MigrationExecutionError {
                 formatter,
                 "migration step `{step_id}` produced an invalid canonical model"
             ),
-            Self::UndeclaredAppliedLoss { step_id, code } => write!(
+            Self::UndeclaredAppliedLoss { step_id, code, .. } => write!(
                 formatter,
                 "migration step `{step_id}` applied undeclared loss `{code}`"
             ),
-            Self::LossDiagnosticMissing { step_id, code } => write!(
+            Self::LossDiagnosticMissing { step_id, code, .. } => write!(
                 formatter,
                 "migration step `{step_id}` loss `{code}` is absent from apply diagnostics"
             ),
-            Self::LossDispositionMissing { step_id, code } => write!(
+            Self::LossDispositionMissing { step_id, code, .. } => write!(
                 formatter,
                 "migration step `{step_id}` diagnostic `{code}` has no actual loss disposition"
+            ),
+            Self::LossPermissionDenied { step_id, code, .. } => write!(
+                formatter,
+                "migration step `{step_id}` loss `{code}` disposition is not permitted by its descriptor"
             ),
             Self::DiagnosticLimitExceeded {
                 step_id,
@@ -648,6 +787,148 @@ pub enum MigrationPhase {
     Apply,
     /// Candidate validation before committing the local working copy.
     ResultValidation,
+}
+
+#[derive(Default)]
+struct ExecutionReportBudget {
+    report_diagnostics: usize,
+    report_losses: usize,
+    step_diagnostics: usize,
+    step_losses: usize,
+}
+
+impl ExecutionReportBudget {
+    fn begin_step(&mut self) {
+        self.step_diagnostics = 0;
+        self.step_losses = 0;
+    }
+
+    fn observe_diagnostics(
+        &mut self,
+        incoming: usize,
+        step_id: &MigrationStepId,
+        phase: MigrationPhase,
+    ) -> Result<(), MigrationExecutionError> {
+        let step_actual =
+            self.step_diagnostics
+                .checked_add(incoming)
+                .ok_or(MigrationExecutionError::Report(
+                    MigrationReportError::ReportCountOverflow {
+                        field: "diagnostics",
+                    },
+                ))?;
+        if step_actual > MAX_MIGRATION_STEP_DIAGNOSTICS {
+            return Err(MigrationExecutionError::DiagnosticLimitExceeded {
+                step_id: Some(step_id.clone()),
+                phase,
+                maximum: MAX_MIGRATION_STEP_DIAGNOSTICS,
+                actual: step_actual,
+            });
+        }
+        let report_actual = self.report_diagnostics.checked_add(incoming).ok_or(
+            MigrationExecutionError::Report(MigrationReportError::ReportCountOverflow {
+                field: "diagnostics",
+            }),
+        )?;
+        if report_actual > MAX_MIGRATION_REPORT_DIAGNOSTICS {
+            return Err(MigrationExecutionError::DiagnosticLimitExceeded {
+                step_id: Some(step_id.clone()),
+                phase,
+                maximum: MAX_MIGRATION_REPORT_DIAGNOSTICS,
+                actual: report_actual,
+            });
+        }
+        self.step_diagnostics = step_actual;
+        self.report_diagnostics = report_actual;
+        Ok(())
+    }
+
+    fn observe_losses(
+        &mut self,
+        incoming: usize,
+        step_id: &MigrationStepId,
+    ) -> Result<(), MigrationExecutionError> {
+        let step_actual =
+            self.step_losses
+                .checked_add(incoming)
+                .ok_or(MigrationExecutionError::Report(
+                    MigrationReportError::ReportCountOverflow { field: "losses" },
+                ))?;
+        if step_actual > MAX_MIGRATION_STEP_LOSS_EVIDENCE {
+            return Err(MigrationExecutionError::Report(
+                MigrationReportError::TooManyStepLosses {
+                    step_id: step_id.clone(),
+                    maximum: MAX_MIGRATION_STEP_LOSS_EVIDENCE,
+                    actual: step_actual,
+                },
+            ));
+        }
+        let report_actual =
+            self.report_losses
+                .checked_add(incoming)
+                .ok_or(MigrationExecutionError::Report(
+                    MigrationReportError::ReportCountOverflow { field: "losses" },
+                ))?;
+        if report_actual > MAX_MIGRATION_REPORT_LOSS_EVIDENCE {
+            return Err(MigrationExecutionError::Report(
+                MigrationReportError::TooManyReportLosses {
+                    maximum: MAX_MIGRATION_REPORT_LOSS_EVIDENCE,
+                    actual: report_actual,
+                },
+            ));
+        }
+        self.step_losses = step_actual;
+        self.report_losses = report_actual;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum LossContractViolation {
+    Undeclared(DiagnosticCode),
+    DiagnosticMissing(DiagnosticCode),
+    DispositionMissing(DiagnosticCode),
+    PermissionDenied(DiagnosticCode),
+}
+
+impl LossContractViolation {
+    const fn failure_code(&self) -> MigrationFailureCode {
+        match self {
+            Self::Undeclared(_) => MigrationFailureCode::UndeclaredAppliedLoss,
+            Self::DiagnosticMissing(_) => MigrationFailureCode::LossDiagnosticMissing,
+            Self::DispositionMissing(_) => MigrationFailureCode::LossDispositionMissing,
+            Self::PermissionDenied(_) => MigrationFailureCode::LossPermissionDenied,
+        }
+    }
+
+    fn into_execution_error(
+        self,
+        step_id: MigrationStepId,
+        report: MigrationReport,
+    ) -> MigrationExecutionError {
+        match self {
+            Self::Undeclared(code) => MigrationExecutionError::UndeclaredAppliedLoss {
+                step_id,
+                code,
+                report: Box::new(report),
+            },
+            Self::DiagnosticMissing(code) => MigrationExecutionError::LossDiagnosticMissing {
+                step_id,
+                code,
+                report: Box::new(report),
+            },
+            Self::DispositionMissing(code) => MigrationExecutionError::LossDispositionMissing {
+                step_id,
+                code,
+                report: Box::new(report),
+            },
+            Self::PermissionDenied(code) => MigrationExecutionError::LossPermissionDenied {
+                step_id,
+                code,
+                report: Box::new(report),
+            },
+        }
+    }
 }
 
 fn ensure_contract_unchanged(
@@ -730,14 +1011,13 @@ fn missing_value_diagnostic(
 
 #[allow(clippy::too_many_arguments)]
 fn validate_actual_losses(
-    step_id: &MigrationStepId,
     descriptor: &MigrationStepDescriptor,
     losses: &[LossDisposition],
     apply_diagnostics: &DiagnosticReport,
     requested_policy: LossPolicy,
     source_profile: &ProfileId,
     target_profile: &ProfileId,
-) -> Result<Vec<MigrationLossEvidence>, MigrationExecutionError> {
+) -> Result<Vec<MigrationLossEvidence>, LossContractViolation> {
     let mut matched_diagnostics = vec![false; apply_diagnostics.diagnostics().len()];
     let mut evidence = Vec::with_capacity(losses.len());
 
@@ -747,10 +1027,19 @@ fn validate_actual_losses(
             .binary_search_by(|declaration| declaration.code().cmp(loss.diagnostic().code()))
             .ok()
             .and_then(|index| descriptor.possible_losses().get(index))
-            .ok_or_else(|| MigrationExecutionError::UndeclaredAppliedLoss {
-                step_id: step_id.clone(),
-                code: loss.diagnostic().code().clone(),
-            })?;
+            .ok_or_else(|| LossContractViolation::Undeclared(loss.diagnostic().code().clone()))?;
+        let disposition_is_permitted = match loss.kind() {
+            LossDispositionKind::ContinueWithWarning => requested_policy == LossPolicy::Warn,
+            LossDispositionKind::DroppedExplicitly => {
+                requested_policy == LossPolicy::DropExplicitly
+                    && declaration.permission() == CodecLossPermission::DropAllowed
+            }
+        };
+        if !disposition_is_permitted {
+            return Err(LossContractViolation::PermissionDenied(
+                loss.diagnostic().code().clone(),
+            ));
+        }
         let diagnostic_index = apply_diagnostics
             .diagnostics()
             .iter()
@@ -759,19 +1048,22 @@ fn validate_actual_losses(
                 !matched_diagnostics[*index] && *diagnostic == loss.diagnostic()
             })
             .map(|(index, _)| index)
-            .ok_or_else(|| MigrationExecutionError::LossDiagnosticMissing {
-                step_id: step_id.clone(),
-                code: loss.diagnostic().code().clone(),
+            .ok_or_else(|| {
+                LossContractViolation::DiagnosticMissing(loss.diagnostic().code().clone())
             })?;
         matched_diagnostics[diagnostic_index] = true;
-        evidence.push(MigrationLossEvidence::from_disposition(
-            MigrationLossPhase::Apply,
-            requested_policy,
-            loss,
-            declaration,
-            source_profile,
-            target_profile,
-        )?);
+        let loss_code = loss.diagnostic().code().clone();
+        evidence.push(
+            MigrationLossEvidence::from_disposition(
+                MigrationLossPhase::Apply,
+                requested_policy,
+                loss,
+                declaration,
+                source_profile,
+                target_profile,
+            )
+            .map_err(|_| LossContractViolation::PermissionDenied(loss_code))?,
+        );
     }
 
     for (index, diagnostic) in apply_diagnostics.diagnostics().iter().enumerate() {
@@ -780,32 +1072,51 @@ fn validate_actual_losses(
             .binary_search_by(|declaration| declaration.code().cmp(diagnostic.code()))
             .is_ok();
         if declared && diagnostic.severity() == Severity::Warning && !matched_diagnostics[index] {
-            return Err(MigrationExecutionError::LossDispositionMissing {
-                step_id: step_id.clone(),
-                code: diagnostic.code().clone(),
-            });
+            return Err(LossContractViolation::DispositionMissing(
+                diagnostic.code().clone(),
+            ));
         }
     }
 
     Ok(evidence)
 }
 
-fn compose_report(
+fn compose_successful_report(
     plan: &MigrationPlan,
+    requested_policy: LossPolicy,
     steps: Vec<MigrationStepReport>,
 ) -> Result<MigrationReport, MigrationReportError> {
-    MigrationReport::new(
+    MigrationReport::successful(
         plan.source_profile().clone(),
         plan.target_profile().clone(),
+        requested_policy,
         plan.step_ids().to_vec(),
         steps,
+    )
+}
+
+fn compose_failed_report(
+    plan: &MigrationPlan,
+    requested_policy: LossPolicy,
+    steps: Vec<MigrationStepReport>,
+    step_index: usize,
+    stage: MigrationFailureStage,
+    code: MigrationFailureCode,
+) -> Result<MigrationReport, MigrationReportError> {
+    MigrationReport::failed(
+        plan.source_profile().clone(),
+        plan.target_profile().clone(),
+        requested_policy,
+        plan.step_ids().to_vec(),
+        steps,
+        MigrationTerminalFailure::new(stage, code, step_index)?,
     )
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use crate::adapter::AdapterOutcome;
     use crate::diagnostic::{
@@ -836,6 +1147,10 @@ mod tests {
         MissingValue,
         InvalidResult,
         EvaluatedLoss,
+        UndeclaredLoss,
+        MissingLossDiagnostic,
+        MissingLossDisposition,
+        ForgedDropPermission,
     }
 
     struct TestStep {
@@ -905,10 +1220,160 @@ mod tests {
                         diagnostics,
                     )
                 }
+                Behavior::UndeclaredLoss => {
+                    let declaration = CodecLossDeclaration::new(
+                        DiagnosticCode::parse("migration.test-loss").unwrap(),
+                        CodecLossPermission::WarnOnly,
+                        "external declaration",
+                    )
+                    .unwrap();
+                    let loss = evaluate_loss(
+                        request.loss_policy(),
+                        diagnostic(
+                            declaration.code().as_str(),
+                            Severity::Error,
+                            &request.source_profile().id,
+                            &request.target_profile().id,
+                        ),
+                        Some(&declaration),
+                    )
+                    .unwrap();
+                    let diagnostics =
+                        DiagnosticReport::from_diagnostics(vec![loss.diagnostic().clone()]);
+                    AdapterOutcome::new(
+                        MigrationStepOutput::new(request.configuration().clone(), vec![loss])
+                            .unwrap(),
+                        diagnostics,
+                    )
+                }
+                Behavior::MissingLossDiagnostic => {
+                    let declaration = &self.descriptor.possible_losses()[0];
+                    let loss = evaluate_loss(
+                        request.loss_policy(),
+                        diagnostic(
+                            declaration.code().as_str(),
+                            Severity::Error,
+                            &request.source_profile().id,
+                            &request.target_profile().id,
+                        ),
+                        Some(declaration),
+                    )
+                    .unwrap();
+                    AdapterOutcome::new(
+                        MigrationStepOutput::new(request.configuration().clone(), vec![loss])
+                            .unwrap(),
+                        DiagnosticReport::new(),
+                    )
+                }
+                Behavior::MissingLossDisposition => AdapterOutcome::new(
+                    MigrationStepOutput::new(request.configuration().clone(), Vec::new()).unwrap(),
+                    diagnostic_report(
+                        self.descriptor.possible_losses()[0].code().as_str(),
+                        Severity::Warning,
+                        &request.source_profile().id,
+                        &request.target_profile().id,
+                    ),
+                ),
+                Behavior::ForgedDropPermission => {
+                    let descriptor_declaration = &self.descriptor.possible_losses()[0];
+                    let external_declaration = CodecLossDeclaration::new(
+                        descriptor_declaration.code().clone(),
+                        CodecLossPermission::DropAllowed,
+                        "untrusted external declaration",
+                    )
+                    .unwrap();
+                    let loss = evaluate_loss(
+                        request.loss_policy(),
+                        diagnostic(
+                            external_declaration.code().as_str(),
+                            Severity::Error,
+                            &request.source_profile().id,
+                            &request.target_profile().id,
+                        ),
+                        Some(&external_declaration),
+                    )
+                    .unwrap();
+                    let diagnostics =
+                        DiagnosticReport::from_diagnostics(vec![loss.diagnostic().clone()]);
+                    AdapterOutcome::new(
+                        MigrationStepOutput::new(request.configuration().clone(), vec![loss])
+                            .unwrap(),
+                        diagnostics,
+                    )
+                }
                 Behavior::Success | Behavior::FatalAnalyze => AdapterOutcome::success(
                     MigrationStepOutput::new(request.configuration().clone(), Vec::new()).unwrap(),
                 ),
             }
+        }
+    }
+
+    struct MutableDescriptorStep {
+        registered: MigrationStepDescriptor,
+        changed: MigrationStepDescriptor,
+        changed_enabled: Arc<AtomicBool>,
+        descriptor_calls: Arc<AtomicUsize>,
+        analyze_calls: Arc<AtomicUsize>,
+        apply_calls: Arc<AtomicUsize>,
+    }
+
+    impl MigrationStep for MutableDescriptorStep {
+        fn descriptor(&self) -> &MigrationStepDescriptor {
+            self.descriptor_calls.fetch_add(1, Ordering::SeqCst);
+            if self.changed_enabled.load(Ordering::SeqCst) {
+                &self.changed
+            } else {
+                &self.registered
+            }
+        }
+
+        fn analyze(
+            &self,
+            _request: MigrationAnalyzeRequest<'_>,
+        ) -> Result<MigrationAnalysis, DiagnosticBuildError> {
+            self.analyze_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(MigrationAnalysis::new(DiagnosticReport::new()))
+        }
+
+        fn apply(&self, request: MigrationApplyRequest<'_>) -> MigrationApplyOutcome {
+            self.apply_calls.fetch_add(1, Ordering::SeqCst);
+            AdapterOutcome::success(
+                MigrationStepOutput::new(request.configuration().clone(), Vec::new()).unwrap(),
+            )
+        }
+    }
+
+    struct DiagnosticFloodStep {
+        descriptor: MigrationStepDescriptor,
+        analysis_count: usize,
+        apply_calls: Arc<AtomicUsize>,
+    }
+
+    impl MigrationStep for DiagnosticFloodStep {
+        fn descriptor(&self) -> &MigrationStepDescriptor {
+            &self.descriptor
+        }
+
+        fn analyze(
+            &self,
+            request: MigrationAnalyzeRequest<'_>,
+        ) -> Result<MigrationAnalysis, DiagnosticBuildError> {
+            let item = diagnostic(
+                "migration.test-budget",
+                Severity::Info,
+                &request.source_profile().id,
+                &request.target_profile().id,
+            );
+            Ok(MigrationAnalysis::new(DiagnosticReport::from_diagnostics(
+                vec![item; self.analysis_count],
+            )))
+        }
+
+        fn apply(&self, request: MigrationApplyRequest<'_>) -> MigrationApplyOutcome {
+            self.apply_calls.fetch_add(1, Ordering::SeqCst);
+            AdapterOutcome::success(
+                MigrationStepOutput::new(request.configuration().clone(), Vec::new()).unwrap(),
+            )
         }
     }
 
@@ -977,17 +1442,29 @@ mod tests {
     ) -> (Arc<dyn MigrationStep>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
         let analyze_calls = Arc::new(AtomicUsize::new(0));
         let apply_calls = Arc::new(AtomicUsize::new(0));
-        let possible_losses = if matches!(behavior, Behavior::EvaluatedLoss) {
-            vec![
+        let possible_losses = match behavior {
+            Behavior::EvaluatedLoss | Behavior::MissingLossDiagnostic => vec![
                 CodecLossDeclaration::new(
                     DiagnosticCode::parse("migration.test-loss").unwrap(),
                     CodecLossPermission::DropAllowed,
                     "test loss",
                 )
                 .unwrap(),
-            ]
-        } else {
-            Vec::new()
+            ],
+            Behavior::MissingLossDisposition | Behavior::ForgedDropPermission => vec![
+                CodecLossDeclaration::new(
+                    DiagnosticCode::parse("migration.test-loss").unwrap(),
+                    CodecLossPermission::WarnOnly,
+                    "test loss",
+                )
+                .unwrap(),
+            ],
+            Behavior::Success
+            | Behavior::FatalAnalyze
+            | Behavior::FatalApply
+            | Behavior::MissingValue
+            | Behavior::InvalidResult
+            | Behavior::UndeclaredLoss => Vec::new(),
         };
         let implementation: Arc<dyn MigrationStep> = Arc::new(TestStep {
             descriptor: MigrationStepDescriptor::new(
@@ -1207,5 +1684,384 @@ mod tests {
             evidence.declaration().code().as_str(),
             "migration.test-loss"
         );
+    }
+
+    #[test]
+    fn descriptor_permission_cannot_be_bypassed_by_an_external_declaration() {
+        let profiles = registry(&["profile:a", "profile:c"]);
+        let (step, _, apply_calls) = test_step(
+            "migration:a-c-forged-drop",
+            "profile:a",
+            "profile:c",
+            Behavior::ForgedDropPermission,
+        );
+        let source = configuration();
+        let snapshot = source.clone();
+
+        let error = execute_route(
+            &profiles,
+            vec![edge(step)],
+            &source,
+            LossPolicy::DropExplicitly,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            MigrationExecutionError::LossPermissionDenied { .. }
+        ));
+        let report = error.report().unwrap();
+        assert_eq!(source, snapshot);
+        assert_eq!(apply_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(report.requested_policy(), LossPolicy::DropExplicitly);
+        assert_eq!(
+            report.outcome(),
+            super::super::report::MigrationOperationOutcome::Failure
+        );
+        assert!(!report.is_complete());
+        assert_eq!(report.completed_step_count(), 0);
+        let terminal = report.terminal_failure().unwrap();
+        assert_eq!(terminal.stage(), MigrationFailureStage::LossContract);
+        assert_eq!(terminal.code(), MigrationFailureCode::LossPermissionDenied);
+        assert_eq!(terminal.step_index(), 0);
+        assert_eq!(terminal.completed_step_count(), 0);
+        let failed = &report.steps()[0];
+        assert_eq!(
+            failed.status(),
+            super::super::report::MigrationStepStatus::Failure
+        );
+        assert_eq!(
+            failed.failure().unwrap().code(),
+            MigrationFailureCode::LossPermissionDenied
+        );
+        assert_eq!(failed.apply_diagnostics().diagnostics().len(), 1);
+        assert_eq!(
+            failed.apply_diagnostics().diagnostics()[0].source_profile(),
+            Some(&ProfileId::parse("profile:a").unwrap())
+        );
+        assert!(failed.losses().is_empty());
+    }
+
+    #[test]
+    fn every_loss_contract_failure_retains_the_failing_apply_diagnostics() {
+        let cases = [
+            (
+                Behavior::UndeclaredLoss,
+                LossPolicy::Warn,
+                "migration.execute-undeclared-applied-loss",
+                MigrationFailureCode::UndeclaredAppliedLoss,
+                1,
+            ),
+            (
+                Behavior::MissingLossDiagnostic,
+                LossPolicy::Warn,
+                "migration.execute-loss-diagnostic-missing",
+                MigrationFailureCode::LossDiagnosticMissing,
+                0,
+            ),
+            (
+                Behavior::MissingLossDisposition,
+                LossPolicy::Warn,
+                "migration.execute-loss-disposition-missing",
+                MigrationFailureCode::LossDispositionMissing,
+                1,
+            ),
+        ];
+
+        for (behavior, policy, expected_error_code, expected_failure_code, diagnostic_count) in
+            cases
+        {
+            let profiles = registry(&["profile:a", "profile:c"]);
+            let (step, _, _) =
+                test_step("migration:a-c-contract", "profile:a", "profile:c", behavior);
+            let source = configuration();
+            let snapshot = source.clone();
+
+            let error = execute_route(&profiles, vec![edge(step)], &source, policy).unwrap_err();
+
+            assert_eq!(error.code(), expected_error_code);
+            let report = error.report().unwrap();
+            assert_eq!(source, snapshot);
+            assert_eq!(report.completed_step_count(), 0);
+            assert!(!report.is_complete());
+            assert_eq!(report.steps().len(), 1);
+            assert_eq!(
+                report.terminal_failure().unwrap().stage(),
+                MigrationFailureStage::LossContract
+            );
+            assert_eq!(
+                report.terminal_failure().unwrap().code(),
+                expected_failure_code
+            );
+            let failed = &report.steps()[0];
+            assert_eq!(failed.failure().unwrap().code(), expected_failure_code);
+            assert_eq!(
+                failed.apply_diagnostics().diagnostics().len(),
+                diagnostic_count
+            );
+            for diagnostic in failed.apply_diagnostics().diagnostics() {
+                assert_eq!(
+                    diagnostic.source_profile(),
+                    Some(&ProfileId::parse("profile:a").unwrap())
+                );
+                assert_eq!(
+                    diagnostic.target_profile(),
+                    Some(&ProfileId::parse("profile:c").unwrap())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn loss_contract_failure_preserves_all_successful_prefix_reports() {
+        let profiles = registry(&["profile:a", "profile:b", "profile:c"]);
+        let (first, _, _) = test_step("migration:a-b", "profile:a", "profile:b", Behavior::Success);
+        let (second, _, _) = test_step(
+            "migration:b-c-contract",
+            "profile:b",
+            "profile:c",
+            Behavior::UndeclaredLoss,
+        );
+        let source = configuration();
+
+        let error = execute_route(
+            &profiles,
+            vec![edge(second), edge(first)],
+            &source,
+            LossPolicy::Warn,
+        )
+        .unwrap_err();
+        let report = error.report().unwrap();
+
+        assert_eq!(report.completed_step_count(), 1);
+        assert_eq!(report.steps().len(), 2);
+        assert_eq!(
+            report.steps()[0].status(),
+            super::super::report::MigrationStepStatus::Success
+        );
+        assert_eq!(
+            report.steps()[1].failure().unwrap().code(),
+            MigrationFailureCode::UndeclaredAppliedLoss
+        );
+        assert_eq!(report.terminal_failure().unwrap().step_index(), 1);
+    }
+
+    #[test]
+    fn invalid_source_wins_before_a_changed_plan_descriptor_is_inspected() {
+        let profiles = registry(&["profile:a", "profile:c"]);
+        let changed_enabled = Arc::new(AtomicBool::new(false));
+        let descriptor_calls = Arc::new(AtomicUsize::new(0));
+        let analyze_calls = Arc::new(AtomicUsize::new(0));
+        let apply_calls = Arc::new(AtomicUsize::new(0));
+        let implementation: Arc<dyn MigrationStep> = Arc::new(MutableDescriptorStep {
+            registered: MigrationStepDescriptor::new(
+                step_id_for_test("migration:a-c-mutable"),
+                ProfileConstraint::exact(ProfileId::parse("profile:a").unwrap()),
+                ProfileConstraint::exact(ProfileId::parse("profile:c").unwrap()),
+                Vec::new(),
+                Vec::new(),
+            )
+            .unwrap(),
+            changed: MigrationStepDescriptor::new(
+                step_id_for_test("migration:a-c-mutable"),
+                ProfileConstraint::exact(ProfileId::parse("profile:c").unwrap()),
+                ProfileConstraint::exact(ProfileId::parse("profile:a").unwrap()),
+                Vec::new(),
+                Vec::new(),
+            )
+            .unwrap(),
+            changed_enabled: Arc::clone(&changed_enabled),
+            descriptor_calls: Arc::clone(&descriptor_calls),
+            analyze_calls: Arc::clone(&analyze_calls),
+            apply_calls: Arc::clone(&apply_calls),
+        });
+        let graph = MigrationGraph::new(&profiles, vec![edge(implementation)]).unwrap();
+        let plan = graph
+            .plan(
+                profiles
+                    .get(&ProfileId::parse("profile:a").unwrap())
+                    .unwrap(),
+                profiles
+                    .get(&ProfileId::parse("profile:c").unwrap())
+                    .unwrap(),
+            )
+            .unwrap();
+        let calls_before_execute = descriptor_calls.load(Ordering::SeqCst);
+        changed_enabled.store(true, Ordering::SeqCst);
+        let object = configuration().objects()[0].clone();
+        let source = CanonicalConfiguration::new(vec![object.clone(), object]).unwrap();
+        let snapshot = source.clone();
+
+        let error = MigrationExecutor::new(&graph)
+            .execute(MigrationExecutionRequest::new(
+                &plan,
+                &source,
+                LossPolicy::Error,
+            ))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            MigrationExecutionError::InvalidSource { .. }
+        ));
+        assert_eq!(
+            descriptor_calls.load(Ordering::SeqCst),
+            calls_before_execute
+        );
+        assert_eq!(analyze_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(apply_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(source, snapshot);
+    }
+
+    #[test]
+    fn streaming_report_budget_accepts_exact_limits_and_rejects_plus_one() {
+        let step_id = step_id_for_test("migration:budget-test");
+        let mut budget = ExecutionReportBudget::default();
+        budget.begin_step();
+        assert!(
+            budget
+                .observe_diagnostics(
+                    MAX_MIGRATION_STEP_DIAGNOSTICS,
+                    &step_id,
+                    MigrationPhase::Analyze,
+                )
+                .is_ok()
+        );
+        assert!(matches!(
+            budget.observe_diagnostics(1, &step_id, MigrationPhase::Apply),
+            Err(MigrationExecutionError::DiagnosticLimitExceeded {
+                maximum: MAX_MIGRATION_STEP_DIAGNOSTICS,
+                actual,
+                ..
+            }) if actual == MAX_MIGRATION_STEP_DIAGNOSTICS + 1
+        ));
+
+        let mut report_budget = ExecutionReportBudget {
+            report_diagnostics: MAX_MIGRATION_REPORT_DIAGNOSTICS - 1,
+            ..ExecutionReportBudget::default()
+        };
+        report_budget.begin_step();
+        assert!(
+            report_budget
+                .observe_diagnostics(1, &step_id, MigrationPhase::Analyze)
+                .is_ok()
+        );
+        report_budget.begin_step();
+        assert!(matches!(
+            report_budget.observe_diagnostics(1, &step_id, MigrationPhase::Analyze),
+            Err(MigrationExecutionError::DiagnosticLimitExceeded {
+                maximum: MAX_MIGRATION_REPORT_DIAGNOSTICS,
+                actual,
+                ..
+            }) if actual == MAX_MIGRATION_REPORT_DIAGNOSTICS + 1
+        ));
+
+        let mut loss_budget = ExecutionReportBudget {
+            report_losses: MAX_MIGRATION_REPORT_LOSS_EVIDENCE - 1,
+            ..ExecutionReportBudget::default()
+        };
+        loss_budget.begin_step();
+        assert!(loss_budget.observe_losses(1, &step_id).is_ok());
+        loss_budget.begin_step();
+        assert!(matches!(
+            loss_budget.observe_losses(1, &step_id),
+            Err(MigrationExecutionError::Report(
+                MigrationReportError::TooManyReportLosses { maximum, actual }
+            )) if maximum == MAX_MIGRATION_REPORT_LOSS_EVIDENCE
+                && actual == MAX_MIGRATION_REPORT_LOSS_EVIDENCE + 1
+        ));
+
+        let mut step_loss_budget = ExecutionReportBudget::default();
+        step_loss_budget.begin_step();
+        assert!(
+            step_loss_budget
+                .observe_losses(MAX_MIGRATION_STEP_LOSS_EVIDENCE, &step_id)
+                .is_ok()
+        );
+        assert!(matches!(
+            step_loss_budget.observe_losses(1, &step_id),
+            Err(MigrationExecutionError::Report(
+                MigrationReportError::TooManyStepLosses {
+                    maximum,
+                    actual,
+                    ..
+                }
+            )) if maximum == MAX_MIGRATION_STEP_LOSS_EVIDENCE
+                && actual == MAX_MIGRATION_STEP_LOSS_EVIDENCE + 1
+        ));
+    }
+
+    #[test]
+    fn cumulative_diagnostic_overflow_is_rejected_before_the_next_apply() {
+        let profile_names = [
+            "profile:a",
+            "profile:b",
+            "profile:c",
+            "profile:d",
+            "profile:e",
+            "profile:f",
+        ];
+        let profiles = registry(&profile_names);
+        let mut edges = Vec::new();
+        let mut apply_calls = Vec::new();
+        for index in 0..5 {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let implementation: Arc<dyn MigrationStep> = Arc::new(DiagnosticFloodStep {
+                descriptor: MigrationStepDescriptor::new(
+                    step_id_for_test(&format!("migration:budget-{index}")),
+                    ProfileConstraint::exact(ProfileId::parse(profile_names[index]).unwrap()),
+                    ProfileConstraint::exact(ProfileId::parse(profile_names[index + 1]).unwrap()),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .unwrap(),
+                analysis_count: if index < 4 {
+                    MAX_MIGRATION_STEP_DIAGNOSTICS
+                } else {
+                    1
+                },
+                apply_calls: Arc::clone(&calls),
+            });
+            apply_calls.push(calls);
+            edges.push(edge(implementation));
+        }
+        let graph = MigrationGraph::new(&profiles, edges).unwrap();
+        let plan = graph
+            .plan(
+                profiles
+                    .get(&ProfileId::parse("profile:a").unwrap())
+                    .unwrap(),
+                profiles
+                    .get(&ProfileId::parse("profile:f").unwrap())
+                    .unwrap(),
+            )
+            .unwrap();
+        let source = configuration();
+
+        let error = MigrationExecutor::new(&graph)
+            .execute(MigrationExecutionRequest::new(
+                &plan,
+                &source,
+                LossPolicy::Error,
+            ))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            MigrationExecutionError::DiagnosticLimitExceeded {
+                phase: MigrationPhase::Analyze,
+                maximum: MAX_MIGRATION_REPORT_DIAGNOSTICS,
+                actual,
+                ..
+            } if actual == MAX_MIGRATION_REPORT_DIAGNOSTICS + 1
+        ));
+        for calls in &apply_calls[..4] {
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        }
+        assert_eq!(apply_calls[4].load(Ordering::SeqCst), 0);
+    }
+
+    fn step_id_for_test(value: &str) -> MigrationStepId {
+        MigrationStepId::parse(value).unwrap()
     }
 }
