@@ -15,6 +15,7 @@ pub mod diagnostic;
 pub mod family;
 pub mod graph;
 pub mod identity;
+pub mod migration;
 pub mod model;
 pub mod opaque;
 pub mod profile;
