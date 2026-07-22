@@ -3,7 +3,7 @@
 //! The types in this module deliberately do not expose SQL rows, CF container
 //! records, filesystem paths, or process handles. Storage adapters translate
 //! their native records into this model and explicitly choose the source
-//! order carried by [`StorageImage`].
+//! order carried by [`StorageImage`] and [`StoragePatch`].
 
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 use std::error::Error;
@@ -38,6 +38,15 @@ pub const MAX_STORAGE_ENTRIES: usize = 262_144;
 /// strings, opaque attributes and headers, and both packed and unpacked payload
 /// buffers. Per-entry limits remain independently enforced.
 pub const MAX_STORAGE_IMAGE_RETAINED_BYTES: usize = 536_870_912;
+/// Maximum UTF-8 size of a stable storage-patch blocker reason.
+pub const MAX_STORAGE_PATCH_REASON_BYTES: usize = 4_096;
+/// Maximum number of target entries in one storage patch.
+pub const MAX_STORAGE_PATCH_ENTRIES: usize = 262_144;
+/// Default aggregate budget for heap-retained buffers in one storage patch.
+///
+/// The 512 MiB budget counts target keys and provenance, compiled payloads,
+/// required base keys, and blocker reasons.
+pub const MAX_STORAGE_PATCH_RETAINED_BYTES: usize = 536_870_912;
 
 /// Error returned while constructing or deserializing neutral storage data.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -304,6 +313,12 @@ bounded_storage_text!(
     "storage provenance",
     "Bounded adapter- or fixture-provided provenance for retained storage bytes."
 );
+bounded_storage_text!(
+    StoragePatchReason,
+    MAX_STORAGE_PATCH_REASON_BYTES,
+    "storage patch reason",
+    "A bounded, non-empty stable explanation for a blocked storage-patch entry."
+);
 
 struct StorageTextVisitor<T>(PhantomData<fn() -> T>);
 
@@ -324,6 +339,12 @@ impl ParseStorageText for StorageKey {
 }
 
 impl ParseStorageText for StorageProvenance {
+    fn parse_storage_text(value: &str) -> Result<Self, StorageBuildError> {
+        Self::new(value)
+    }
+}
+
+impl ParseStorageText for StoragePatchReason {
     fn parse_storage_text(value: &str) -> Result<Self, StorageBuildError> {
         Self::new(value)
     }
@@ -1300,6 +1321,467 @@ fn validate_image_with_retained_byte_limit(
     Ok(())
 }
 
+/// Error returned while constructing a bounded storage patch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StoragePatchBuildError {
+    /// A patch component failed its own storage-model validation.
+    Storage(StorageBuildError),
+    /// The patch contains too many target entries.
+    TooManyEntries { maximum: usize, actual: usize },
+    /// Summing heap-retained patch buffers overflowed the platform `usize`.
+    RetainedByteCountOverflow,
+    /// Aggregate heap-retained patch buffers exceed the patch budget.
+    RetainedBytesExceeded { maximum: usize, actual: usize },
+    /// The same target key and part index occur more than once.
+    DuplicateTarget { key: String, part_index: u32 },
+}
+
+impl Display for StoragePatchBuildError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Storage(source) => write!(formatter, "invalid storage patch component: {source}"),
+            Self::TooManyEntries { maximum, actual } => write!(
+                formatter,
+                "storage patch contains {actual} entries, exceeding the {maximum}-entry bound"
+            ),
+            Self::RetainedByteCountOverflow => {
+                formatter.write_str("storage patch retained-byte count overflow")
+            }
+            Self::RetainedBytesExceeded { maximum, actual } => write!(
+                formatter,
+                "storage patch retains {actual} bytes, exceeding the {maximum}-byte aggregate budget"
+            ),
+            Self::DuplicateTarget { key, part_index } => write!(
+                formatter,
+                "duplicate storage patch target `{key}` part {part_index}"
+            ),
+        }
+    }
+}
+
+impl Error for StoragePatchBuildError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Storage(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl From<StorageBuildError> for StoragePatchBuildError {
+    fn from(source: StorageBuildError) -> Self {
+        Self::Storage(source)
+    }
+}
+
+/// Identity and provenance of one storage-patch destination.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StoragePatchTarget {
+    key: StorageKey,
+    multipart: MultipartIdentity,
+    provenance: StorageProvenance,
+}
+
+impl StoragePatchTarget {
+    /// Creates a target from already validated neutral storage components.
+    pub fn new(
+        key: StorageKey,
+        multipart: MultipartIdentity,
+        provenance: StorageProvenance,
+    ) -> Self {
+        Self {
+            key,
+            multipart,
+            provenance,
+        }
+    }
+
+    /// Returns the target logical key.
+    pub const fn key(&self) -> &StorageKey {
+        &self.key
+    }
+
+    /// Returns the target physical part identity.
+    pub const fn multipart(&self) -> MultipartIdentity {
+        self.multipart
+    }
+
+    /// Returns the exact compiler-provided target provenance.
+    pub const fn provenance(&self) -> &StorageProvenance {
+        &self.provenance
+    }
+
+    fn retained_byte_len(&self) -> Result<usize, StoragePatchBuildError> {
+        self.key
+            .as_str()
+            .len()
+            .checked_add(self.provenance.as_str().len())
+            .ok_or(StoragePatchBuildError::RetainedByteCountOverflow)
+    }
+
+    fn hash_into(&self, hasher: &mut Sha256) {
+        hash_length_prefixed(hasher, self.key.as_str().as_bytes());
+        hasher.update(self.multipart.part_index.to_le_bytes());
+        hasher.update(self.multipart.part_count.to_le_bytes());
+        hash_length_prefixed(hasher, self.provenance.as_str().as_bytes());
+    }
+}
+
+/// Result of compiling one neutral storage-patch target.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub enum StoragePatchOutcome {
+    /// The target was compiled without consulting a base artifact.
+    Compiled(StoragePayload),
+    /// The target can only be produced by overlaying a required base entry.
+    NeedsBase {
+        reason: StoragePatchReason,
+        required: StorageKey,
+    },
+    /// No supported compiler can produce the target.
+    Unsupported { reason: StoragePatchReason },
+}
+
+impl StoragePatchOutcome {
+    /// Retains bounded compiled bytes and computes their digest.
+    pub fn compiled(bytes: Vec<u8>) -> Result<Self, StoragePatchBuildError> {
+        Ok(Self::Compiled(StoragePayload::new(bytes)?))
+    }
+
+    /// Creates a base-dependent outcome with a bounded, non-empty reason.
+    pub fn needs_base(required: StorageKey, reason: &str) -> Result<Self, StoragePatchBuildError> {
+        Ok(Self::NeedsBase {
+            reason: StoragePatchReason::new(reason)?,
+            required,
+        })
+    }
+
+    /// Creates an unsupported outcome with a bounded, non-empty reason.
+    pub fn unsupported(reason: &str) -> Result<Self, StoragePatchBuildError> {
+        Ok(Self::Unsupported {
+            reason: StoragePatchReason::new(reason)?,
+        })
+    }
+
+    /// Returns compiled payload bytes and digest when this target is ready.
+    pub const fn compiled_payload(&self) -> Option<&StoragePayload> {
+        match self {
+            Self::Compiled(payload) => Some(payload),
+            Self::NeedsBase { .. } | Self::Unsupported { .. } => None,
+        }
+    }
+
+    /// Returns the stable blocker reason, if any.
+    pub const fn reason(&self) -> Option<&StoragePatchReason> {
+        match self {
+            Self::Compiled(_) => None,
+            Self::NeedsBase { reason, .. } | Self::Unsupported { reason } => Some(reason),
+        }
+    }
+
+    fn retained_byte_len(&self) -> Result<usize, StoragePatchBuildError> {
+        match self {
+            Self::Compiled(payload) => Ok(payload.bytes().len()),
+            Self::NeedsBase { reason, required } => reason
+                .as_str()
+                .len()
+                .checked_add(required.as_str().len())
+                .ok_or(StoragePatchBuildError::RetainedByteCountOverflow),
+            Self::Unsupported { reason } => Ok(reason.as_str().len()),
+        }
+    }
+
+    fn hash_into(&self, hasher: &mut Sha256) {
+        match self {
+            Self::Compiled(payload) => {
+                hasher.update([0]);
+                hasher.update(payload.byte_len().to_le_bytes());
+                hasher.update(payload.sha256().as_bytes());
+                hash_length_prefixed(hasher, payload.bytes());
+            }
+            Self::NeedsBase { reason, required } => {
+                hasher.update([1]);
+                hash_length_prefixed(hasher, required.as_str().as_bytes());
+                hash_length_prefixed(hasher, reason.as_str().as_bytes());
+            }
+            Self::Unsupported { reason } => {
+                hasher.update([2]);
+                hash_length_prefixed(hasher, reason.as_str().as_bytes());
+            }
+        }
+    }
+}
+
+/// One ordered target and its pure compilation outcome.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StoragePatchEntry {
+    target: StoragePatchTarget,
+    outcome: StoragePatchOutcome,
+}
+
+impl StoragePatchEntry {
+    /// Pairs one validated target with its compilation outcome.
+    pub fn new(target: StoragePatchTarget, outcome: StoragePatchOutcome) -> Self {
+        Self { target, outcome }
+    }
+
+    /// Returns the target identity and provenance.
+    pub const fn target(&self) -> &StoragePatchTarget {
+        &self.target
+    }
+
+    /// Returns the target compilation outcome.
+    pub const fn outcome(&self) -> &StoragePatchOutcome {
+        &self.outcome
+    }
+
+    /// Counts every heap-retained buffer governed by the patch byte budget.
+    pub fn retained_byte_len(&self) -> Result<usize, StoragePatchBuildError> {
+        self.target
+            .retained_byte_len()?
+            .checked_add(self.outcome.retained_byte_len()?)
+            .ok_or(StoragePatchBuildError::RetainedByteCountOverflow)
+    }
+}
+
+/// A typed reason why a storage patch cannot be consumed as fully compiled.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub enum StoragePatchBlocker {
+    /// A target requires a specific base entry before it can be compiled.
+    NeedsBase {
+        target: StoragePatchTarget,
+        reason: StoragePatchReason,
+        required: StorageKey,
+    },
+    /// A target is unsupported by the compiler.
+    Unsupported {
+        target: StoragePatchTarget,
+        reason: StoragePatchReason,
+    },
+}
+
+impl StoragePatchBlocker {
+    /// Returns the blocked patch target.
+    pub const fn target(&self) -> &StoragePatchTarget {
+        match self {
+            Self::NeedsBase { target, .. } | Self::Unsupported { target, .. } => target,
+        }
+    }
+
+    /// Returns the stable blocker reason.
+    pub const fn reason(&self) -> &StoragePatchReason {
+        match self {
+            Self::NeedsBase { reason, .. } | Self::Unsupported { reason, .. } => reason,
+        }
+    }
+
+    /// Returns the required base key for a base-dependent target.
+    pub const fn required(&self) -> Option<&StorageKey> {
+        match self {
+            Self::NeedsBase { required, .. } => Some(required),
+            Self::Unsupported { .. } => None,
+        }
+    }
+}
+
+/// Complete, ordered blocker set returned by storage-patch preflight.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StoragePatchPreflightError {
+    blockers: Vec<StoragePatchBlocker>,
+}
+
+impl StoragePatchPreflightError {
+    /// Returns blockers in their original patch order.
+    pub fn blockers(&self) -> &[StoragePatchBlocker] {
+        &self.blockers
+    }
+
+    /// Consumes the error without changing blocker order.
+    pub fn into_blockers(self) -> Vec<StoragePatchBlocker> {
+        self.blockers
+    }
+}
+
+impl Display for StoragePatchPreflightError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "storage patch preflight found {} blocking entries",
+            self.blockers.len()
+        )
+    }
+}
+
+impl Error for StoragePatchPreflightError {}
+
+/// A target whose compiled payload is proven available after preflight.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct CompiledStoragePatchEntry {
+    target: StoragePatchTarget,
+    payload: StoragePayload,
+}
+
+impl CompiledStoragePatchEntry {
+    /// Returns the compiled target identity and provenance.
+    pub const fn target(&self) -> &StoragePatchTarget {
+        &self.target
+    }
+
+    /// Returns exact compiled bytes, length, and digest.
+    pub const fn payload(&self) -> &StoragePayload {
+        &self.payload
+    }
+
+    /// Consumes the entry into its validated components.
+    pub fn into_parts(self) -> (StoragePatchTarget, StoragePayload) {
+        (self.target, self.payload)
+    }
+}
+
+/// Bounded neutral patch whose exact supplied target order is preserved.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct StoragePatch {
+    entries: Vec<StoragePatchEntry>,
+}
+
+impl StoragePatch {
+    /// Validates a patch without sorting or otherwise changing supplied order.
+    pub fn new(entries: Vec<StoragePatchEntry>) -> Result<Self, StoragePatchBuildError> {
+        validate_patch_with_limits(
+            &entries,
+            MAX_STORAGE_PATCH_ENTRIES,
+            MAX_STORAGE_PATCH_RETAINED_BYTES,
+        )?;
+        Ok(Self { entries })
+    }
+
+    /// Returns entries in their explicitly supplied compiler order.
+    pub fn entries(&self) -> &[StoragePatchEntry] {
+        &self.entries
+    }
+
+    /// Returns the number of patch targets.
+    pub const fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns whether this patch has no targets.
+    pub const fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Consumes the patch without changing supplied order.
+    pub fn into_entries(self) -> Vec<StoragePatchEntry> {
+        self.entries
+    }
+
+    /// Computes an order-sensitive platform-independent patch digest.
+    pub fn sha256(&self) -> Sha256Digest {
+        let mut hasher = Sha256::new();
+        hasher.update(b"ibcmd-storage-patch-v1\0");
+        let count = u64::try_from(self.entries.len()).expect("entry count fits into u64");
+        hasher.update(count.to_le_bytes());
+        for entry in &self.entries {
+            entry.target.hash_into(&mut hasher);
+            entry.outcome.hash_into(&mut hasher);
+        }
+        digest_from_hasher(hasher)
+    }
+
+    /// Succeeds only when every patch target has a compiled payload.
+    pub fn preflight(&self) -> Result<(), StoragePatchPreflightError> {
+        let blockers = collect_patch_blockers(&self.entries);
+        if blockers.is_empty() {
+            Ok(())
+        } else {
+            Err(StoragePatchPreflightError { blockers })
+        }
+    }
+
+    /// Consumes an all-compiled patch into ordered target/payload entries.
+    pub fn into_compiled(
+        self,
+    ) -> Result<Vec<CompiledStoragePatchEntry>, StoragePatchPreflightError> {
+        let blockers = collect_patch_blockers(&self.entries);
+        if !blockers.is_empty() {
+            return Err(StoragePatchPreflightError { blockers });
+        }
+
+        Ok(self
+            .entries
+            .into_iter()
+            .map(|entry| {
+                let StoragePatchEntry { target, outcome } = entry;
+                let StoragePatchOutcome::Compiled(payload) = outcome else {
+                    unreachable!("non-compiled outcomes were rejected by preflight")
+                };
+                CompiledStoragePatchEntry { target, payload }
+            })
+            .collect())
+    }
+}
+
+fn collect_patch_blockers(entries: &[StoragePatchEntry]) -> Vec<StoragePatchBlocker> {
+    entries
+        .iter()
+        .filter_map(|entry| match &entry.outcome {
+            StoragePatchOutcome::Compiled(_) => None,
+            StoragePatchOutcome::NeedsBase { reason, required } => {
+                Some(StoragePatchBlocker::NeedsBase {
+                    target: entry.target.clone(),
+                    reason: reason.clone(),
+                    required: required.clone(),
+                })
+            }
+            StoragePatchOutcome::Unsupported { reason } => Some(StoragePatchBlocker::Unsupported {
+                target: entry.target.clone(),
+                reason: reason.clone(),
+            }),
+        })
+        .collect()
+}
+
+fn checked_patch_retained_bytes(
+    current: usize,
+    entry: &StoragePatchEntry,
+    maximum: usize,
+) -> Result<usize, StoragePatchBuildError> {
+    let actual = current
+        .checked_add(entry.retained_byte_len()?)
+        .ok_or(StoragePatchBuildError::RetainedByteCountOverflow)?;
+    if actual > maximum {
+        return Err(StoragePatchBuildError::RetainedBytesExceeded { maximum, actual });
+    }
+    Ok(actual)
+}
+
+fn validate_patch_with_limits(
+    entries: &[StoragePatchEntry],
+    maximum_entries: usize,
+    maximum_retained_bytes: usize,
+) -> Result<(), StoragePatchBuildError> {
+    if entries.len() > maximum_entries {
+        return Err(StoragePatchBuildError::TooManyEntries {
+            maximum: maximum_entries,
+            actual: entries.len(),
+        });
+    }
+
+    let mut targets = BTreeSet::<(&StorageKey, u32)>::new();
+    let mut retained_bytes = 0_usize;
+    for entry in entries {
+        let part_index = entry.target.multipart.part_index;
+        if !targets.insert((&entry.target.key, part_index)) {
+            return Err(StoragePatchBuildError::DuplicateTarget {
+                key: entry.target.key.as_str().to_owned(),
+                part_index,
+            });
+        }
+        retained_bytes =
+            checked_patch_retained_bytes(retained_bytes, entry, maximum_retained_bytes)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1322,6 +1804,195 @@ mod tests {
             origin(),
         )
         .unwrap()
+    }
+
+    fn patch_target(
+        key: &str,
+        part_index: u32,
+        part_count: u32,
+        provenance: &str,
+    ) -> StoragePatchTarget {
+        StoragePatchTarget::new(
+            StorageKey::new(key).unwrap(),
+            MultipartIdentity::new(part_index, part_count).unwrap(),
+            StorageProvenance::new(provenance).unwrap(),
+        )
+    }
+
+    fn compiled_patch_entry(key: &str, bytes: &[u8]) -> StoragePatchEntry {
+        StoragePatchEntry::new(
+            patch_target(key, 0, 1, "fixture:patch-unit"),
+            StoragePatchOutcome::compiled(bytes.to_vec()).unwrap(),
+        )
+    }
+
+    #[test]
+    fn storage_patch_models_three_bounded_outcomes() {
+        let compiled = StoragePatchOutcome::compiled(b"compiled".to_vec()).unwrap();
+        let payload = compiled.compiled_payload().unwrap();
+        assert_eq!(payload.bytes(), b"compiled");
+        assert_eq!(payload.sha256(), Sha256Digest::for_bytes(b"compiled"));
+        assert!(compiled.reason().is_none());
+
+        let needs_base = StoragePatchOutcome::needs_base(
+            StorageKey::new("base:key").unwrap(),
+            "base-entry-required",
+        )
+        .unwrap();
+        assert!(matches!(
+            &needs_base,
+            StoragePatchOutcome::NeedsBase { reason, required }
+                if reason.as_str() == "base-entry-required" && required.as_str() == "base:key"
+        ));
+
+        let unsupported = StoragePatchOutcome::unsupported("unsupported-family").unwrap();
+        assert!(matches!(
+            &unsupported,
+            StoragePatchOutcome::Unsupported { reason }
+                if reason.as_str() == "unsupported-family"
+        ));
+        assert!(matches!(
+            StoragePatchOutcome::unsupported(""),
+            Err(StoragePatchBuildError::Storage(
+                StorageBuildError::EmptyText {
+                    field: "storage patch reason"
+                }
+            ))
+        ));
+        assert!(matches!(
+            StoragePatchOutcome::unsupported("unstable\nreason"),
+            Err(StoragePatchBuildError::Storage(
+                StorageBuildError::ControlCharacter {
+                    field: "storage patch reason"
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn storage_patch_preserves_order_and_has_a_deterministic_digest() {
+        let patch = StoragePatch::new(vec![
+            compiled_patch_entry("b", b"two"),
+            compiled_patch_entry("a", b"one"),
+        ])
+        .unwrap();
+        assert_eq!(patch.entries()[0].target().key().as_str(), "b");
+        assert_eq!(patch.entries()[1].target().key().as_str(), "a");
+        assert_eq!(patch.sha256(), patch.clone().sha256());
+        assert_eq!(
+            patch.sha256().to_string(),
+            "1bcaeb5f65b178791a0b23c1be009bedc15be0969adc0bb8d8fc0341d15548f4"
+        );
+
+        let reversed = StoragePatch::new(vec![
+            compiled_patch_entry("a", b"one"),
+            compiled_patch_entry("b", b"two"),
+        ])
+        .unwrap();
+        assert_ne!(patch.sha256(), reversed.sha256());
+    }
+
+    #[test]
+    fn storage_patch_rejects_duplicate_target_identity() {
+        let duplicate = StoragePatch::new(vec![
+            StoragePatchEntry::new(
+                patch_target("same", 0, 2, "compiler:first"),
+                StoragePatchOutcome::compiled(vec![1]).unwrap(),
+            ),
+            StoragePatchEntry::new(
+                patch_target("same", 0, 3, "compiler:second"),
+                StoragePatchOutcome::compiled(vec![2]).unwrap(),
+            ),
+        ]);
+        assert!(matches!(
+            duplicate,
+            Err(StoragePatchBuildError::DuplicateTarget {
+                key,
+                part_index: 0
+            }) if key == "same"
+        ));
+    }
+
+    #[test]
+    fn storage_patch_enforces_count_and_aggregate_byte_bounds() {
+        let first = compiled_patch_entry("a", b"first");
+        let second = StoragePatchEntry::new(
+            patch_target("b", 0, 1, "fixture:second"),
+            StoragePatchOutcome::needs_base(StorageKey::new("base:b").unwrap(), "requires-base")
+                .unwrap(),
+        );
+        assert!(matches!(
+            validate_patch_with_limits(&[first.clone(), second.clone()], 1, usize::MAX),
+            Err(StoragePatchBuildError::TooManyEntries {
+                maximum: 1,
+                actual: 2
+            })
+        ));
+
+        let aggregate = first
+            .retained_byte_len()
+            .unwrap()
+            .checked_add(second.retained_byte_len().unwrap())
+            .unwrap();
+        assert!(validate_patch_with_limits(&[first.clone(), second.clone()], 2, aggregate).is_ok());
+        assert!(matches!(
+            validate_patch_with_limits(&[first.clone(), second], 2, aggregate - 1),
+            Err(StoragePatchBuildError::RetainedBytesExceeded { .. })
+        ));
+        assert!(matches!(
+            checked_patch_retained_bytes(usize::MAX, &first, usize::MAX),
+            Err(StoragePatchBuildError::RetainedByteCountOverflow)
+        ));
+    }
+
+    #[test]
+    fn storage_patch_preflight_is_typed_and_all_compiled_only() {
+        let ready = StoragePatch::new(vec![
+            compiled_patch_entry("first", b"one"),
+            compiled_patch_entry("second", b"two"),
+        ])
+        .unwrap();
+        assert!(ready.preflight().is_ok());
+        let compiled = ready.into_compiled().unwrap();
+        assert_eq!(compiled[0].target().key().as_str(), "first");
+        assert_eq!(compiled[0].payload().bytes(), b"one");
+        assert_eq!(compiled[1].target().key().as_str(), "second");
+        assert_eq!(compiled[1].payload().bytes(), b"two");
+
+        let blocked = StoragePatch::new(vec![
+            compiled_patch_entry("ready", b"ready"),
+            StoragePatchEntry::new(
+                patch_target("overlay", 0, 1, "compiler:overlay"),
+                StoragePatchOutcome::needs_base(
+                    StorageKey::new("base:overlay").unwrap(),
+                    "overlay-only",
+                )
+                .unwrap(),
+            ),
+            StoragePatchEntry::new(
+                patch_target("unknown", 0, 1, "compiler:unsupported"),
+                StoragePatchOutcome::unsupported("no-compiler").unwrap(),
+            ),
+        ])
+        .unwrap();
+        let preflight = blocked.preflight().unwrap_err();
+        assert_eq!(preflight.blockers().len(), 2);
+        assert!(matches!(
+            &preflight.blockers()[0],
+            StoragePatchBlocker::NeedsBase {
+                target,
+                reason,
+                required
+            } if target.key().as_str() == "overlay"
+                && reason.as_str() == "overlay-only"
+                && required.as_str() == "base:overlay"
+        ));
+        assert!(matches!(
+            &preflight.blockers()[1],
+            StoragePatchBlocker::Unsupported { target, reason }
+                if target.key().as_str() == "unknown" && reason.as_str() == "no-compiler"
+        ));
+        assert_eq!(blocked.into_compiled().unwrap_err(), preflight);
     }
 
     #[test]
