@@ -332,6 +332,10 @@ mod tests {
                     "functional-option-v1-crlf-no-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.http_service.layout"].value,
+                    "http-service-v1-crlf-no-bom"
+                );
+                assert_eq!(
                     profile.constants["bootstrap.metadata.language.layout"].value,
                     "language-v1-crlf-no-bom"
                 );

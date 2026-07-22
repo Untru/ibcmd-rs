@@ -5,11 +5,12 @@
 //! unknown properties fail closed, while document trivia remains available to
 //! the lossless XML writer.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::diagnostic::ObjectPath;
 use ibcmd_core::family::FamilyId;
+use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::model::CanonicalObject;
 use ibcmd_core::value::{CanonicalInteger, CanonicalValue, EnumToken};
 
@@ -30,6 +31,7 @@ use crate::{AttributeKind, LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlW
 const SCHEDULED_JOB_FAMILY: &str = "ScheduledJob";
 const EVENT_SUBSCRIPTION_FAMILY: &str = "EventSubscription";
 const XDTO_PACKAGE_FAMILY: &str = "XDTOPackage";
+const HTTP_SERVICE_FAMILY: &str = "HTTPService";
 
 /// Registers the strict `ScheduledJob` codec.
 pub fn register_scheduled_job_codec(
@@ -58,6 +60,15 @@ pub fn register_xdto_package_codec(
     }))
 }
 
+/// Registers the strict `HTTPService` metadata codec.
+pub fn register_http_service_codec(
+    registry: &mut MetadataRegistry,
+) -> Result<(), MetadataRegistryError> {
+    registry.register(Box::new(HttpServiceCodec {
+        family: FamilyId::parse(HTTP_SERVICE_FAMILY).expect("family id is stable"),
+    }))
+}
+
 struct ScheduledJobCodec {
     family: FamilyId,
 }
@@ -68,6 +79,33 @@ struct EventSubscriptionCodec {
 
 struct XdtoPackageCodec {
     family: FamilyId,
+}
+
+struct HttpServiceCodec {
+    family: FamilyId,
+}
+
+impl MetadataFamilyCodec for HttpServiceCodec {
+    fn family_id(&self) -> &FamilyId {
+        &self.family
+    }
+
+    fn decode(
+        &self,
+        document: &XmlDocument,
+        source: ProfileId,
+        path: ObjectPath,
+    ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        decode_http_service(document, source, path)
+    }
+
+    fn encode(
+        &self,
+        envelope: &MetadataEnvelope,
+        target: &ProfileId,
+    ) -> Result<Vec<u8>, MetadataEncodeError> {
+        encode_http_service(envelope, target)
+    }
 }
 
 impl MetadataFamilyCodec for XdtoPackageCodec {
@@ -169,6 +207,31 @@ struct EventSubscriptionProjection {
 struct XdtoPackageProjection {
     comment: String,
     namespace: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HttpMethodProjection {
+    uuid: ObjectUuid,
+    comment: String,
+    http_method: String,
+    handler: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HttpUrlProjection {
+    uuid: ObjectUuid,
+    comment: String,
+    template: String,
+    methods: Vec<HttpMethodProjection>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct HttpServiceProjection {
+    comment: String,
+    root_url: String,
+    reuse_sessions: String,
+    session_max_age: u32,
+    urls: Vec<HttpUrlProjection>,
 }
 
 fn decode_scheduled_job(
@@ -314,6 +377,135 @@ fn decode_xdto_package(
     let root = CanonicalObject::new(parts)
         .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
     MetadataEnvelope::from_parts(root, Vec::new(), document.clone())
+}
+
+fn decode_http_service(
+    document: &XmlDocument,
+    source: ProfileId,
+    path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    validate_decode_profile(document, &source, &path)?;
+    let projection = project_http_service(document)?;
+    let generic = decode_metadata_envelope(document, source, path)?;
+    if generic.root().kind().as_str() != HTTP_SERVICE_FAMILY {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "HTTPService codec requires its exact family",
+        ));
+    }
+    if !generic.root().generated_types().is_empty()
+        || !generic.root().references().is_empty()
+        || !generic.root().assets().is_empty()
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "HTTPService cannot contain generated types, references, or assets",
+        ));
+    }
+
+    let mut root_parts = copy_object_parts(generic.root());
+    for (name, value) in [
+        (
+            "Comment",
+            CanonicalValue::text(canonical_text(&projection.comment)?),
+        ),
+        (
+            "RootURL",
+            CanonicalValue::text(canonical_text(&projection.root_url)?),
+        ),
+        ("ReuseSessions", enum_value(&projection.reuse_sessions)?),
+        ("SessionMaxAge", integer_value(projection.session_max_age)?),
+    ] {
+        root_parts.properties.push(canonical_field(name, value)?);
+    }
+    let root = CanonicalObject::new(root_parts)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
+
+    let mut urls = BTreeMap::new();
+    let mut methods = BTreeMap::new();
+    for url in &projection.urls {
+        if urls.insert(url.uuid, url).is_some() {
+            return Err(MetadataDecodeError::Duplicate("URLTemplate uuid"));
+        }
+        for method in &url.methods {
+            if methods.insert(method.uuid, method).is_some() {
+                return Err(MetadataDecodeError::Duplicate("HTTP Method uuid"));
+            }
+        }
+    }
+    if generic.descendants().len() != urls.len() + methods.len() {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "HTTPService descendant inventory is not exact",
+        ));
+    }
+    let mut descendants = Vec::with_capacity(generic.descendants().len());
+    for descendant in generic.descendants() {
+        let uuid = descendant.identity().uuid();
+        let mut parts = copy_object_parts(descendant);
+        match descendant.kind().as_str() {
+            "URLTemplate" => {
+                let projected = urls
+                    .remove(&uuid)
+                    .ok_or(MetadataDecodeError::InvalidEnvelope(
+                        "unknown HTTPService URLTemplate",
+                    ))?;
+                for (name, value) in [
+                    (
+                        "Comment",
+                        CanonicalValue::text(canonical_text(&projected.comment)?),
+                    ),
+                    (
+                        "Template",
+                        CanonicalValue::text(canonical_text(&projected.template)?),
+                    ),
+                ] {
+                    parts.properties.push(canonical_field(name, value)?);
+                }
+            }
+            "Method" => {
+                let projected =
+                    methods
+                        .remove(&uuid)
+                        .ok_or(MetadataDecodeError::InvalidEnvelope(
+                            "unknown HTTPService Method",
+                        ))?;
+                for (name, value) in [
+                    (
+                        "Comment",
+                        CanonicalValue::text(canonical_text(&projected.comment)?),
+                    ),
+                    ("HTTPMethod", enum_value(&projected.http_method)?),
+                    (
+                        "Handler",
+                        CanonicalValue::text(canonical_text(&projected.handler)?),
+                    ),
+                ] {
+                    parts.properties.push(canonical_field(name, value)?);
+                }
+            }
+            _ => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "unknown HTTPService descendant kind",
+                ));
+            }
+        }
+        if !descendant.generated_types().is_empty()
+            || !descendant.references().is_empty()
+            || !descendant.assets().is_empty()
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "HTTPService descendants cannot contain generated types, references, or assets",
+            ));
+        }
+        descendants.push(
+            CanonicalObject::new(parts)
+                .map_err(|error| MetadataDecodeError::Core(error.to_string()))?,
+        );
+    }
+    if !urls.is_empty() || !methods.is_empty() {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "HTTPService projected descendants are missing from canonical inventory",
+        ));
+    }
+    MetadataEnvelope::from_parts(root, descendants, document.clone())
 }
 
 fn event_sources_value(
@@ -538,6 +730,227 @@ fn project_xdto_package(
         comment: required_text(properties, "Comment", expected, &uris)?,
         namespace,
     })
+}
+
+fn project_http_service(
+    document: &XmlDocument,
+) -> Result<HttpServiceProjection, MetadataDecodeError> {
+    let uris = resolve_namespaces(document.root())?;
+    let expected = uri_of(document.root(), &uris);
+    if !matches!(expected, None | Some(MD_NAMESPACE)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "HTTPService root namespace",
+        ));
+    }
+    reject_attributes(document.root(), &["version"])?;
+    let object = required_child(document.root(), HTTP_SERVICE_FAMILY, expected, &uris)?;
+    reject_attributes(object, &["uuid"])?;
+    let (properties, child_objects) = exact_http_sections(object, expected, &uris, true)?;
+    reject_exact_service_properties(
+        properties,
+        &[
+            "Name",
+            "Synonym",
+            "Comment",
+            "RootURL",
+            "ReuseSessions",
+            "SessionMaxAge",
+        ],
+        expected,
+        &uris,
+    )?;
+    let root_url = required_text(properties, "RootURL", expected, &uris)?;
+    if root_url.is_empty() || root_url.chars().any(char::is_whitespace) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "HTTPService RootURL is empty or contains whitespace",
+        ));
+    }
+    let reuse_sessions = required_text(properties, "ReuseSessions", expected, &uris)?;
+    if !matches!(reuse_sessions.as_str(), "DontUse" | "Use" | "AutoUse") {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "HTTPService ReuseSessions is unsupported",
+        ));
+    }
+    let mut uuids = BTreeSet::new();
+    let mut urls = Vec::new();
+    let child_objects = child_objects.expect("required above");
+    reject_attributes(child_objects, &[])?;
+    for node in child_objects.children() {
+        let XmlNode::Element(url) = node else {
+            continue;
+        };
+        if !typed(url, "URLTemplate", expected, &uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "HTTPService contains an unknown child",
+            ));
+        }
+        reject_attributes(url, &["uuid"])?;
+        let uuid = required_uuid(url)?;
+        if !uuids.insert(uuid) {
+            return Err(MetadataDecodeError::Duplicate("HTTPService child uuid"));
+        }
+        let (url_properties, method_objects) = exact_http_sections(url, expected, &uris, true)?;
+        reject_exact_service_properties(
+            url_properties,
+            &["Name", "Synonym", "Comment", "Template"],
+            expected,
+            &uris,
+        )?;
+        let template = required_text(url_properties, "Template", expected, &uris)?;
+        if template.is_empty() || template.chars().any(char::is_whitespace) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "HTTPService URLTemplate Template is empty or contains whitespace",
+            ));
+        }
+        let method_objects = method_objects.expect("required above");
+        reject_attributes(method_objects, &[])?;
+        let mut methods = Vec::new();
+        for method_node in method_objects.children() {
+            let XmlNode::Element(method) = method_node else {
+                continue;
+            };
+            if !typed(method, "Method", expected, &uris) {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "HTTPService URLTemplate contains an unknown child",
+                ));
+            }
+            reject_attributes(method, &["uuid"])?;
+            let method_uuid = required_uuid(method)?;
+            if !uuids.insert(method_uuid) {
+                return Err(MetadataDecodeError::Duplicate("HTTPService child uuid"));
+            }
+            let (method_properties, nested) = exact_http_sections(method, expected, &uris, false)?;
+            if nested.is_some() {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "HTTPService Method cannot own child objects",
+                ));
+            }
+            reject_exact_service_properties(
+                method_properties,
+                &["Name", "Synonym", "Comment", "HTTPMethod", "Handler"],
+                expected,
+                &uris,
+            )?;
+            let http_method = required_text(method_properties, "HTTPMethod", expected, &uris)?;
+            if !matches!(http_method.as_str(), "DELETE" | "GET" | "POST" | "PUT") {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "HTTPService HTTPMethod has no evidenced native code",
+                ));
+            }
+            let handler = required_text(method_properties, "Handler", expected, &uris)?;
+            if !valid_identifier(&handler) {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "HTTPService Handler is not an exact identifier",
+                ));
+            }
+            methods.push(HttpMethodProjection {
+                uuid: method_uuid,
+                comment: required_text(method_properties, "Comment", expected, &uris)?,
+                http_method,
+                handler,
+            });
+        }
+        if methods.is_empty() {
+            return Err(MetadataDecodeError::Missing("HTTPService Method"));
+        }
+        urls.push(HttpUrlProjection {
+            uuid,
+            comment: required_text(url_properties, "Comment", expected, &uris)?,
+            template,
+            methods,
+        });
+    }
+    if urls.is_empty() {
+        return Err(MetadataDecodeError::Missing("HTTPService URLTemplate"));
+    }
+    Ok(HttpServiceProjection {
+        comment: required_text(properties, "Comment", expected, &uris)?,
+        root_url,
+        reuse_sessions,
+        session_max_age: required_u32(properties, "SessionMaxAge", expected, &uris)?,
+        urls,
+    })
+}
+
+fn exact_http_sections<'a>(
+    object: &'a XmlElement,
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+    require_children: bool,
+) -> Result<(&'a XmlElement, Option<&'a XmlElement>), MetadataDecodeError> {
+    let mut properties = None;
+    let mut children = None;
+    for node in object.children() {
+        let XmlNode::Element(child) = node else {
+            continue;
+        };
+        if typed(child, "Properties", expected, uris) {
+            if properties.replace(child).is_some() {
+                return Err(MetadataDecodeError::Duplicate("Properties"));
+            }
+        } else if typed(child, "ChildObjects", expected, uris) {
+            if children.replace(child).is_some() {
+                return Err(MetadataDecodeError::Duplicate("ChildObjects"));
+            }
+        } else {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "HTTPService object contains an unknown section",
+            ));
+        }
+    }
+    let properties = properties.ok_or(MetadataDecodeError::Missing("Properties"))?;
+    if require_children && children.is_none() {
+        return Err(MetadataDecodeError::Missing("ChildObjects"));
+    }
+    Ok((properties, children))
+}
+
+fn reject_exact_service_properties(
+    properties: &XmlElement,
+    required: &[&str],
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<(), MetadataDecodeError> {
+    reject_attributes(properties, &[])?;
+    let mut seen = BTreeSet::new();
+    for node in properties.children() {
+        let XmlNode::Element(child) = node else {
+            continue;
+        };
+        let local = child.name().local();
+        if !required.contains(&local) || !typed(child, local, expected, uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "service object contains an unknown property",
+            ));
+        }
+        reject_attributes_recursive(child)?;
+        if !seen.insert(local) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "service object contains a duplicate property",
+            ));
+        }
+    }
+    if required.iter().any(|required| !seen.contains(required)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "service object is missing a required property",
+        ));
+    }
+    Ok(())
+}
+
+fn required_uuid(element: &XmlElement) -> Result<ObjectUuid, MetadataDecodeError> {
+    let mut value = None;
+    for attribute in element.attributes() {
+        if let AttributeKind::Ordinary(name) = attribute.kind()
+            && name.prefix().is_none()
+            && name.local() == "uuid"
+            && value.replace(attribute.value()).is_some()
+        {
+            return Err(MetadataDecodeError::Duplicate("uuid"));
+        }
+    }
+    let value = value.ok_or(MetadataDecodeError::Missing("uuid"))?;
+    ObjectUuid::parse(value).map_err(|_| MetadataDecodeError::InvalidUuid(value.to_owned()))
 }
 
 fn exact_properties_child<'a>(
@@ -911,6 +1324,49 @@ fn encode_xdto_package(
     .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
 }
 
+fn encode_http_service(
+    envelope: &MetadataEnvelope,
+    target: &ProfileId,
+) -> Result<Vec<u8>, MetadataEncodeError> {
+    let path = envelope.root().identity().path().clone();
+    let target_version =
+        profile_version(target).ok_or_else(|| MetadataEncodeError::UnsupportedProfile {
+            object_path: path.clone(),
+            profile: target.clone(),
+        })?;
+    if envelope.root().kind().as_str() != HTTP_SERVICE_FAMILY {
+        return Err(invalid_model(&path, "kind"));
+    }
+    let source_profile = envelope.root().provenance().source_profile().clone();
+    validate_decode_profile(envelope.source_document(), &source_profile, &path)
+        .map_err(decode_to_encode)?;
+    let source = decode_http_service(envelope.source_document(), source_profile, path.clone())
+        .map_err(decode_to_encode)?;
+    if source.root() != envelope.root() || source.descendants() != envelope.descendants() {
+        return Err(invalid_model(
+            &path,
+            "HTTPService semantic mutation is not implemented",
+        ));
+    }
+    let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
+        == target_version
+    {
+        envelope.source_document().root().clone()
+    } else {
+        set_unprefixed_attribute(
+            envelope.source_document().root(),
+            "version",
+            target_version,
+            &path,
+        )?
+    };
+    XmlWriter::to_vec(
+        &envelope.source_document().with_root(root),
+        LexicalPolicy::Preserve,
+    )
+    .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use ibcmd_core::value::CanonicalValueKind;
@@ -1160,6 +1616,97 @@ mod tests {
                 registry
                     .decode(
                         &FamilyId::parse(XDTO_PACKAGE_FAMILY).unwrap(),
+                        &document,
+                        profile("2.20"),
+                        ObjectPath::root(),
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    fn http_fixture(version: &str, http_method: &str, extra: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"{MD_NAMESPACE}\" xmlns:v8=\"{V8_NAMESPACE}\" version=\"{version}\">\r\n\
+\t<HTTPService uuid=\"db821e7a-ff22-4889-b166-1a1bc1118587\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>Биллинг</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Биллинг</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<RootURL>billing</RootURL>\r\n\
+\t\t\t<ReuseSessions>AutoUse</ReuseSessions>\r\n\
+\t\t\t<SessionMaxAge>20</SessionMaxAge>{extra}\r\n\
+\t\t</Properties>\r\n\
+\t\t<ChildObjects>\r\n\
+\t\t\t<URLTemplate uuid=\"bbd4d7c8-2488-474c-b92c-8f689a56e62e\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>Версия</Name><Synonym/><Comment/><Template>/version</Template>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t\t<ChildObjects>\r\n\
+\t\t\t\t\t<Method uuid=\"f909d950-4db8-490c-aaf6-7a2e975a310d\">\r\n\
+\t\t\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t\t\t<Name>Получить</Name><Synonym/><Comment/><HTTPMethod>{http_method}</HTTPMethod><Handler>ВерсияПолучить</Handler>\r\n\
+\t\t\t\t\t\t</Properties>\r\n\
+\t\t\t\t\t</Method>\r\n\
+\t\t\t\t</ChildObjects>\r\n\
+\t\t\t</URLTemplate>\r\n\
+\t\t</ChildObjects>\r\n\
+\t</HTTPService>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn http_service_children_are_typed_and_cross_version_roundtrip() {
+        let mut registry = MetadataRegistry::default();
+        register_http_service_codec(&mut registry).unwrap();
+        for version in ["2.20", "2.21"] {
+            let document = XmlReader::from_slice(&http_fixture(version, "GET", "")).unwrap();
+            let envelope = registry
+                .decode(
+                    &FamilyId::parse(HTTP_SERVICE_FAMILY).unwrap(),
+                    &document,
+                    profile(version),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+            assert_eq!(envelope.root().properties().len(), 6);
+            assert_eq!(envelope.descendants().len(), 2);
+            assert_eq!(envelope.descendants()[0].properties().len(), 4);
+            assert_eq!(envelope.descendants()[1].properties().len(), 5);
+            assert!(matches!(
+                envelope.descendants()[1].properties()[3].value().kind(),
+                CanonicalValueKind::EnumToken(_)
+            ));
+            let target = if version == "2.20" { "2.21" } else { "2.20" };
+            let output = registry.encode(&envelope, &profile(target)).unwrap();
+            let reparsed = XmlReader::from_slice(&output).unwrap();
+            registry
+                .decode(
+                    &FamilyId::parse(HTTP_SERVICE_FAMILY).unwrap(),
+                    &reparsed,
+                    profile(target),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn http_service_unknown_method_property_and_code_fail_closed() {
+        let mut registry = MetadataRegistry::default();
+        register_http_service_codec(&mut registry).unwrap();
+        for input in [
+            http_fixture("2.20", "PATCH", ""),
+            http_fixture("2.20", "GET", "<Future/>"),
+        ] {
+            let document = XmlReader::from_slice(&input).unwrap();
+            assert!(
+                registry
+                    .decode(
+                        &FamilyId::parse(HTTP_SERVICE_FAMILY).unwrap(),
                         &document,
                         profile("2.20"),
                         ObjectPath::root(),

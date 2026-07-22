@@ -24,6 +24,7 @@ pub use registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
 pub use services::{
-    register_event_subscription_codec, register_scheduled_job_codec, register_xdto_package_codec,
+    register_event_subscription_codec, register_http_service_codec, register_scheduled_job_codec,
+    register_xdto_package_codec,
 };
 pub use session_parameter::register_session_parameter_codec;
