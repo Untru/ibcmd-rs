@@ -9,7 +9,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::adapter::AdapterOutcome;
 use crate::artifact::{ParseIdentifierError, ProfileId};
-use crate::diagnostic::{CodecLossDeclaration, DiagnosticCode, DiagnosticReport, LossPolicy};
+use crate::diagnostic::{
+    CodecLossDeclaration, DiagnosticBuildError, DiagnosticCode, DiagnosticReport, LossPolicy,
+};
 use crate::model::CanonicalConfiguration;
 use crate::profile::{CapabilityId, CapabilityState, EffectiveProfile};
 
@@ -423,7 +425,10 @@ pub trait MigrationStep: Send + Sync {
     fn descriptor(&self) -> &MigrationStepDescriptor;
 
     /// Analyzes compatibility without mutating the source configuration.
-    fn analyze(&self, request: MigrationAnalyzeRequest<'_>) -> MigrationAnalysis;
+    fn analyze(
+        &self,
+        request: MigrationAnalyzeRequest<'_>,
+    ) -> Result<MigrationAnalysis, DiagnosticBuildError>;
 
     /// Applies this step and returns a guarded independently owned model.
     fn apply(&self, request: MigrationApplyRequest<'_>) -> MigrationApplyOutcome;

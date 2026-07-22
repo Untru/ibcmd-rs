@@ -1,11 +1,20 @@
-//! Path-scoped compatibility analysis for migration steps.
+//! Bounded path-scoped compatibility analysis for migration steps.
+
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
 
 use crate::diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticReport, ObjectPath, PropertyPath, Severity,
+    Diagnostic, DiagnosticBuildError, DiagnosticCode, DiagnosticReport, ObjectPath, PathSegment,
+    PropertyPath, Severity,
 };
+use crate::model::{CanonicalConfiguration, CanonicalObject};
 use crate::profile::{CapabilityId, CapabilityState};
+use crate::value::{CanonicalField, CanonicalValue, CanonicalValueKind};
 
 use super::step::{MigrationAnalysis, MigrationAnalyzeRequest, MigrationStepDescriptor};
+
+/// Maximum path-scoped requirements accepted by one migration step.
+pub const MAX_COMPATIBILITY_REQUIREMENTS: usize = 16_384;
 
 /// Stable code for a source profile that does not satisfy a step constraint.
 pub const SOURCE_CONSTRAINT_MISMATCH_CODE: &str = "migration.source-constraint-mismatch";
@@ -15,8 +24,14 @@ pub const TARGET_CONSTRAINT_MISMATCH_CODE: &str = "migration.target-constraint-m
 pub const CAPABILITY_UNSUPPORTED_CODE: &str = "migration.capability-unsupported";
 /// Stable code for a capability not declared by the target profile.
 pub const CAPABILITY_UNDECLARED_CODE: &str = "migration.capability-undeclared";
+/// Stable blocking code for a requirement path absent from the analyzed model.
+pub const REQUIREMENT_PATH_UNKNOWN_CODE: &str = "migration.requirement-path-unknown";
 
 /// One exact capability requirement attached to a concrete model path.
+///
+/// Root object and property paths form an explicit global scope. A non-root
+/// object path must resolve to a canonical object, and its property path must
+/// resolve within that object before capability support is evaluated.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CompatibilityRequirement {
     capability: CapabilityId,
@@ -38,6 +53,11 @@ impl CompatibilityRequirement {
         }
     }
 
+    /// Creates an explicit configuration-wide capability requirement.
+    pub const fn global(capability: CapabilityId) -> Self {
+        Self::new(capability, ObjectPath::root(), PropertyPath::root())
+    }
+
     /// Returns the exact open capability identifier.
     pub const fn capability(&self) -> &CapabilityId {
         &self.capability
@@ -54,16 +74,158 @@ impl CompatibilityRequirement {
     }
 }
 
-/// Evaluates exact route constraints and all path-scoped target requirements.
+/// Failure to bind a bounded requirement set to one exact step descriptor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CompatibilityContractError {
+    /// The caller supplied more requirements than one analysis may retain.
+    TooManyRequirements {
+        /// Maximum accepted requirements.
+        maximum: usize,
+        /// Actual supplied requirements.
+        actual: usize,
+    },
+    /// The exact same capability and path requirement was supplied twice.
+    DuplicateRequirement {
+        /// Duplicate capability.
+        capability: CapabilityId,
+        /// Duplicate object path.
+        object_path: ObjectPath,
+        /// Duplicate property path.
+        property_path: PropertyPath,
+    },
+    /// A requirement names a capability absent from the bound descriptor.
+    CapabilityNotTouched {
+        /// Undeclared requirement capability.
+        capability: CapabilityId,
+    },
+    /// A touched capability has no explicit concrete or global path coverage.
+    MissingCapabilityCoverage {
+        /// Touched capability without coverage.
+        capability: CapabilityId,
+    },
+}
+
+impl Display for CompatibilityContractError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooManyRequirements { maximum, actual } => write!(
+                formatter,
+                "compatibility requirements exceed {maximum} items (actual {actual})"
+            ),
+            Self::DuplicateRequirement {
+                capability,
+                object_path,
+                property_path,
+            } => write!(
+                formatter,
+                "duplicate compatibility requirement `{capability}` at {object_path} {property_path}"
+            ),
+            Self::CapabilityNotTouched { capability } => write!(
+                formatter,
+                "compatibility requirement capability `{capability}` is absent from touched capabilities"
+            ),
+            Self::MissingCapabilityCoverage { capability } => write!(
+                formatter,
+                "touched capability `{capability}` has no explicit compatibility path coverage"
+            ),
+        }
+    }
+}
+
+impl Error for CompatibilityContractError {}
+
+/// Bounded requirements owned together with their exact step descriptor.
 ///
-/// Every incompatible requirement produces its own stable diagnostic. The
-/// analyzed configuration is only available through an immutable borrow in
-/// [`MigrationAnalyzeRequest`].
+/// Owning the descriptor prevents a validated set from being silently reused
+/// with a different route or touched-capability declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompatibilityRequirements {
+    descriptor: MigrationStepDescriptor,
+    requirements: Vec<CompatibilityRequirement>,
+}
+
+impl CompatibilityRequirements {
+    /// Binds, validates, and deterministically orders one complete requirement set.
+    pub fn new(
+        descriptor: MigrationStepDescriptor,
+        mut requirements: Vec<CompatibilityRequirement>,
+    ) -> Result<Self, CompatibilityContractError> {
+        if requirements.len() > MAX_COMPATIBILITY_REQUIREMENTS {
+            return Err(CompatibilityContractError::TooManyRequirements {
+                maximum: MAX_COMPATIBILITY_REQUIREMENTS,
+                actual: requirements.len(),
+            });
+        }
+
+        requirements.sort();
+        if let Some(pair) = requirements.windows(2).find(|pair| pair[0] == pair[1]) {
+            return Err(CompatibilityContractError::DuplicateRequirement {
+                capability: pair[0].capability().clone(),
+                object_path: pair[0].object_path().clone(),
+                property_path: pair[0].property_path().clone(),
+            });
+        }
+
+        for requirement in &requirements {
+            if descriptor
+                .touched_capabilities()
+                .binary_search(requirement.capability())
+                .is_err()
+            {
+                return Err(CompatibilityContractError::CapabilityNotTouched {
+                    capability: requirement.capability().clone(),
+                });
+            }
+        }
+
+        for capability in descriptor.touched_capabilities() {
+            if requirements
+                .binary_search_by(|requirement| requirement.capability().cmp(capability))
+                .is_err()
+            {
+                return Err(CompatibilityContractError::MissingCapabilityCoverage {
+                    capability: capability.clone(),
+                });
+            }
+        }
+
+        Ok(Self {
+            descriptor,
+            requirements,
+        })
+    }
+
+    /// Returns the exact descriptor permanently bound to this set.
+    pub const fn descriptor(&self) -> &MigrationStepDescriptor {
+        &self.descriptor
+    }
+
+    /// Returns requirements in deterministic capability/path order.
+    pub fn requirements(&self) -> &[CompatibilityRequirement] {
+        &self.requirements
+    }
+
+    /// Returns the number of path-scoped requirements.
+    pub const fn len(&self) -> usize {
+        self.requirements.len()
+    }
+
+    /// Returns whether the bound descriptor touches no capabilities.
+    pub const fn is_empty(&self) -> bool {
+        self.requirements.is_empty()
+    }
+}
+
+/// Evaluates the bound route and every path-scoped target requirement.
+///
+/// Every incompatible path produces its own stable diagnostic. Unknown model
+/// paths fail closed before capability evaluation. Diagnostic construction is
+/// fallible rather than panicking on data supplied by profiles or codecs.
 pub fn analyze_compatibility(
-    descriptor: &MigrationStepDescriptor,
+    requirements: &CompatibilityRequirements,
     request: MigrationAnalyzeRequest<'_>,
-    requirements: &[CompatibilityRequirement],
-) -> MigrationAnalysis {
+) -> Result<MigrationAnalysis, DiagnosticBuildError> {
+    let descriptor = requirements.descriptor();
     let mut diagnostics = Vec::new();
     let source_id = &request.source_profile().id;
     let target_id = &request.target_profile().id;
@@ -75,7 +237,7 @@ pub fn analyze_compatibility(
             descriptor,
             source_id,
             target_id,
-        ));
+        )?);
     }
     if !descriptor.target().matches(request.target_profile()) {
         diagnostics.push(route_diagnostic(
@@ -84,10 +246,19 @@ pub fn analyze_compatibility(
             descriptor,
             source_id,
             target_id,
-        ));
+        )?);
     }
 
-    for requirement in requirements {
+    for requirement in requirements.requirements() {
+        if !requirement_path_exists(request.configuration(), requirement) {
+            diagnostics.push(requirement_path_diagnostic(
+                descriptor,
+                request,
+                requirement,
+            )?);
+            continue;
+        }
+
         match request
             .target_profile()
             .capabilities
@@ -97,22 +268,24 @@ pub fn analyze_compatibility(
             Some(CapabilityState::Supported) => {}
             Some(CapabilityState::Unsupported) => diagnostics.push(capability_diagnostic(
                 CAPABILITY_UNSUPPORTED_CODE,
-                "is explicitly unsupported",
+                "unsupported",
                 descriptor,
                 request,
                 requirement,
-            )),
+            )?),
             None => diagnostics.push(capability_diagnostic(
                 CAPABILITY_UNDECLARED_CODE,
-                "is not declared",
+                "undeclared",
                 descriptor,
                 request,
                 requirement,
-            )),
+            )?),
         }
     }
 
-    MigrationAnalysis::new(DiagnosticReport::from_diagnostics(diagnostics))
+    Ok(MigrationAnalysis::new(DiagnosticReport::from_diagnostics(
+        diagnostics,
+    )))
 }
 
 fn route_diagnostic(
@@ -121,26 +294,20 @@ fn route_diagnostic(
     descriptor: &MigrationStepDescriptor,
     source_profile: &crate::artifact::ProfileId,
     target_profile: &crate::artifact::ProfileId,
-) -> Diagnostic {
-    let message = format!(
-        "{endpoint} profile does not satisfy migration step `{}` constraint",
-        descriptor.id()
-    );
+) -> Result<Diagnostic, DiagnosticBuildError> {
     Diagnostic::new(
-        DiagnosticCode::parse(code).expect("built-in migration diagnostic code is valid"),
+        stable_code(code),
         Severity::Error,
         ObjectPath::root(),
         PropertyPath::root(),
-        &message,
+        "profile does not satisfy the migration step constraint",
     )
-    .expect("bounded profile and migration identifiers fit diagnostic text")
-    .with_profiles(Some(source_profile.clone()), Some(target_profile.clone()))
-    .with_recovery_hint("select profiles satisfying the exact migration step constraints")
-    .expect("static recovery hint fits diagnostic bounds")
-    .with_context("endpoint", endpoint)
-    .expect("static context fits diagnostic bounds")
+    .map(|diagnostic| {
+        diagnostic.with_profiles(Some(source_profile.clone()), Some(target_profile.clone()))
+    })?
+    .with_recovery_hint("select profiles satisfying the exact migration step constraints")?
+    .with_context("endpoint", endpoint)?
     .with_context("migration_step", descriptor.id().as_str())
-    .expect("bounded migration identifier fits diagnostic context")
 }
 
 fn capability_diagnostic(
@@ -149,31 +316,159 @@ fn capability_diagnostic(
     descriptor: &MigrationStepDescriptor,
     request: MigrationAnalyzeRequest<'_>,
     requirement: &CompatibilityRequirement,
-) -> Diagnostic {
-    let message = format!(
-        "target profile capability `{}` {state} for this path",
-        requirement.capability()
-    );
+) -> Result<Diagnostic, DiagnosticBuildError> {
     Diagnostic::new(
-        DiagnosticCode::parse(code).expect("built-in migration diagnostic code is valid"),
+        stable_code(code),
         Severity::Error,
         requirement.object_path().clone(),
         requirement.property_path().clone(),
-        &message,
+        "target profile cannot satisfy the required capability at this path",
     )
-    .expect("bounded capability identifier fits diagnostic text")
-    .with_profiles(
-        Some(request.source_profile().id.clone()),
-        Some(request.target_profile().id.clone()),
-    )
+    .map(|diagnostic| {
+        diagnostic.with_profiles(
+            Some(request.source_profile().id.clone()),
+            Some(request.target_profile().id.clone()),
+        )
+    })?
     .with_recovery_hint(
         "add evidence-backed target support or implement an explicit migration rule for this path",
-    )
-    .expect("static recovery hint fits diagnostic bounds")
-    .with_context("capability", requirement.capability().as_str())
-    .expect("bounded capability identifier fits diagnostic context")
+    )?
+    .with_context("capability", requirement.capability().as_str())?
+    .with_context("capability_state", state)?
     .with_context("migration_step", descriptor.id().as_str())
-    .expect("bounded migration identifier fits diagnostic context")
+}
+
+fn requirement_path_diagnostic(
+    descriptor: &MigrationStepDescriptor,
+    request: MigrationAnalyzeRequest<'_>,
+    requirement: &CompatibilityRequirement,
+) -> Result<Diagnostic, DiagnosticBuildError> {
+    Diagnostic::new(
+        stable_code(REQUIREMENT_PATH_UNKNOWN_CODE),
+        Severity::Error,
+        requirement.object_path().clone(),
+        requirement.property_path().clone(),
+        "compatibility requirement path does not exist in the analyzed canonical model",
+    )
+    .map(|diagnostic| {
+        diagnostic.with_profiles(
+            Some(request.source_profile().id.clone()),
+            Some(request.target_profile().id.clone()),
+        )
+    })?
+    .with_recovery_hint("fix the migration requirement or decode the missing model path first")?
+    .with_context("capability", requirement.capability().as_str())?
+    .with_context("migration_step", descriptor.id().as_str())
+}
+
+fn stable_code(value: &'static str) -> DiagnosticCode {
+    DiagnosticCode::parse(value).expect("built-in migration diagnostic code is valid")
+}
+
+fn requirement_path_exists(
+    configuration: &CanonicalConfiguration,
+    requirement: &CompatibilityRequirement,
+) -> bool {
+    if requirement.object_path().segments().is_empty() {
+        return requirement.property_path().segments().is_empty();
+    }
+
+    configuration
+        .objects()
+        .iter()
+        .find(|object| object.identity().path() == requirement.object_path())
+        .is_some_and(|object| object_property_path_exists(object, requirement.property_path()))
+}
+
+fn object_property_path_exists(object: &CanonicalObject, path: &PropertyPath) -> bool {
+    let Some((head, tail)) = path.segments().split_first() else {
+        return true;
+    };
+    let Some(name) = head.as_name() else {
+        return false;
+    };
+
+    match name {
+        "identity" => named_leaf_path_exists(tail, &["uuid", "path"]),
+        "kind" | "owner" | "provenance" => tail.is_empty(),
+        "properties" => canonical_fields_path_exists(object.properties(), tail),
+        "references" => {
+            indexed_struct_path_exists(object.references().len(), tail, &["kind", "target"])
+        }
+        "generated_types" => {
+            indexed_struct_path_exists(object.generated_types().len(), tail, &["uuid", "kind"])
+        }
+        "assets" => indexed_struct_path_exists(
+            object.assets().len(),
+            tail,
+            &["sha256", "byte_len", "media_kind"],
+        ),
+        "opaque_facets" => indexed_struct_path_exists(
+            object.opaque_facets().len(),
+            tail,
+            &["provenance", "placement", "bytes", "media_kind"],
+        ),
+        _ => false,
+    }
+}
+
+fn named_leaf_path_exists(segments: &[PathSegment], names: &[&str]) -> bool {
+    match segments {
+        [] => true,
+        [segment] => segment.as_name().is_some_and(|name| names.contains(&name)),
+        _ => false,
+    }
+}
+
+fn indexed_struct_path_exists(
+    length: usize,
+    segments: &[PathSegment],
+    field_names: &[&str],
+) -> bool {
+    let Some((selection, tail)) = segments.split_first() else {
+        return true;
+    };
+    let Some(index) = selection.as_index().map(|value| value as usize) else {
+        return false;
+    };
+    index < length && named_leaf_path_exists(tail, field_names)
+}
+
+fn canonical_fields_path_exists(fields: &[CanonicalField], segments: &[PathSegment]) -> bool {
+    let Some((selection, tail)) = segments.split_first() else {
+        return true;
+    };
+    let field = if let Some(name) = selection.as_name() {
+        fields.iter().find(|field| field.name().as_str() == name)
+    } else if let Some(index) = selection.as_index() {
+        fields.get(index as usize)
+    } else {
+        None
+    };
+    field.is_some_and(|field| canonical_value_path_exists(field.value(), tail))
+}
+
+fn canonical_value_path_exists(value: &CanonicalValue, segments: &[PathSegment]) -> bool {
+    let Some((selection, tail)) = segments.split_first() else {
+        return true;
+    };
+
+    match value.kind() {
+        CanonicalValueKind::Record(fields) => canonical_fields_path_exists(fields, segments),
+        CanonicalValueKind::Sequence(values) => selection
+            .as_index()
+            .and_then(|index| values.get(index as usize))
+            .is_some_and(|value| canonical_value_path_exists(value, tail)),
+        CanonicalValueKind::Null
+        | CanonicalValueKind::Bool(_)
+        | CanonicalValueKind::Integer(_)
+        | CanonicalValueKind::Decimal(_)
+        | CanonicalValueKind::Text(_)
+        | CanonicalValueKind::EnumToken(_)
+        | CanonicalValueKind::Reference(_)
+        | CanonicalValueKind::Binary(_)
+        | CanonicalValueKind::AssetReference(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -190,6 +485,7 @@ mod tests {
     };
     use crate::provenance::{CanonicalAnchor, SourceProvenance};
     use crate::validate::validate_configuration;
+    use crate::value::{CanonicalField, CanonicalValue};
 
     use super::super::step::{
         MigrationApplyOutcome, MigrationApplyRequest, MigrationStep, MigrationStepId,
@@ -226,37 +522,61 @@ mod tests {
         .unwrap()
     }
 
-    fn configuration() -> CanonicalConfiguration {
-        let path = object_path("Catalog.Test");
+    fn canonical_object(name: &str, suffix: u32, properties: &[&str]) -> CanonicalObject {
+        let path = object_path(name);
         let identity = LogicalIdentity::new(
-            ObjectUuid::parse("00000000-0000-0000-0000-000000000001").unwrap(),
+            ObjectUuid::parse(&format!("00000000-0000-0000-0000-{suffix:012x}")).unwrap(),
             path.clone(),
         );
         let provenance = SourceProvenance::new(
             ProfileId::parse("profile:source").unwrap(),
             CanonicalAnchor::new(path, PropertyPath::root()),
         );
-        let object = CanonicalObject::new(CanonicalObjectParts::new(
-            identity,
-            MetadataKind::new("Catalog").unwrap(),
-            provenance,
-        ))
-        .unwrap();
-        CanonicalConfiguration::new(vec![object]).unwrap()
+        let mut parts =
+            CanonicalObjectParts::new(identity, MetadataKind::new("Catalog").unwrap(), provenance);
+        parts.properties = properties
+            .iter()
+            .map(|name| CanonicalField::named(name, CanonicalValue::boolean(true)).unwrap())
+            .collect();
+        CanonicalObject::new(parts).unwrap()
+    }
+
+    fn configuration() -> CanonicalConfiguration {
+        CanonicalConfiguration::new(vec![
+            canonical_object("Catalog.Test", 1, &["KnownFeature", "FutureFeature"]),
+            canonical_object("Catalog.Second", 2, &["KnownFeature"]),
+        ])
+        .unwrap()
+    }
+
+    fn descriptor(touched: &[&str]) -> MigrationStepDescriptor {
+        MigrationStepDescriptor::new(
+            MigrationStepId::parse("migration:test-edge").unwrap(),
+            ProfileConstraint::exact(ProfileId::parse("profile:source").unwrap()),
+            ProfileConstraint::exact(ProfileId::parse("profile:target").unwrap()),
+            touched
+                .iter()
+                .map(|capability| CapabilityId::parse(capability).unwrap())
+                .collect(),
+            Vec::new(),
+        )
+        .unwrap()
     }
 
     struct TestStep {
-        descriptor: MigrationStepDescriptor,
-        requirements: Vec<CompatibilityRequirement>,
+        requirements: CompatibilityRequirements,
     }
 
     impl MigrationStep for TestStep {
         fn descriptor(&self) -> &MigrationStepDescriptor {
-            &self.descriptor
+            self.requirements.descriptor()
         }
 
-        fn analyze(&self, request: MigrationAnalyzeRequest<'_>) -> MigrationAnalysis {
-            analyze_compatibility(&self.descriptor, request, &self.requirements)
+        fn analyze(
+            &self,
+            request: MigrationAnalyzeRequest<'_>,
+        ) -> Result<MigrationAnalysis, DiagnosticBuildError> {
+            analyze_compatibility(&self.requirements, request)
         }
 
         fn apply(&self, request: MigrationApplyRequest<'_>) -> MigrationApplyOutcome {
@@ -264,98 +584,163 @@ mod tests {
         }
     }
 
-    fn step(requirements: Vec<CompatibilityRequirement>) -> TestStep {
-        TestStep {
-            descriptor: MigrationStepDescriptor::new(
-                MigrationStepId::parse("migration:test-edge").unwrap(),
-                ProfileConstraint::exact(ProfileId::parse("profile:source").unwrap()),
-                ProfileConstraint::exact(ProfileId::parse("profile:target").unwrap()),
-                vec![
-                    CapabilityId::parse("feature:known").unwrap(),
-                    CapabilityId::parse("feature:future").unwrap(),
-                ],
-                Vec::new(),
-            )
-            .unwrap(),
-            requirements,
-        }
+    fn step(
+        touched: &[&str],
+        requirements: Vec<CompatibilityRequirement>,
+    ) -> Result<TestStep, CompatibilityContractError> {
+        Ok(TestStep {
+            requirements: CompatibilityRequirements::new(descriptor(touched), requirements)?,
+        })
     }
 
     #[test]
-    fn every_incompatible_path_has_a_stable_diagnostic() {
-        let source = profile(
-            "profile:source",
-            r#"{"feature:known":"supported","feature:future":"supported"}"#,
-        );
+    fn two_paths_for_one_unsupported_capability_produce_two_diagnostics() {
+        let source = profile("profile:source", r#"{"feature:known":"supported"}"#);
         let target = profile("profile:target", r#"{"feature:known":"unsupported"}"#);
-        let unsupported_object = object_path("Catalog.Test");
-        let unsupported_property = property_path("KnownFeature");
-        let undeclared_object = object_path("Catalog.Future");
-        let undeclared_property = property_path("FutureFeature");
-        let step = step(vec![
-            CompatibilityRequirement::new(
-                CapabilityId::parse("feature:known").unwrap(),
-                unsupported_object.clone(),
-                unsupported_property.clone(),
-            ),
-            CompatibilityRequirement::new(
-                CapabilityId::parse("feature:future").unwrap(),
-                undeclared_object.clone(),
-                undeclared_property.clone(),
-            ),
-        ]);
+        let first_object = object_path("Catalog.Test");
+        let second_object = object_path("Catalog.Second");
+        let property = property_path("KnownFeature");
+        let step = step(
+            &["feature:known"],
+            vec![
+                CompatibilityRequirement::new(
+                    CapabilityId::parse("feature:known").unwrap(),
+                    first_object.clone(),
+                    property.clone(),
+                ),
+                CompatibilityRequirement::new(
+                    CapabilityId::parse("feature:known").unwrap(),
+                    second_object.clone(),
+                    property.clone(),
+                ),
+            ],
+        )
+        .unwrap();
         let configuration = configuration();
 
-        let analysis = step.analyze(MigrationAnalyzeRequest::new(
-            &source,
-            &target,
-            &configuration,
-        ));
+        let analysis = step
+            .analyze(MigrationAnalyzeRequest::new(
+                &source,
+                &target,
+                &configuration,
+            ))
+            .unwrap();
 
         assert!(!analysis.is_compatible());
         assert_eq!(analysis.diagnostics().diagnostics().len(), 2);
-        let unsupported = analysis
-            .diagnostics()
-            .diagnostics()
-            .iter()
-            .find(|diagnostic| diagnostic.code().as_str() == CAPABILITY_UNSUPPORTED_CODE)
-            .unwrap();
-        assert_eq!(unsupported.object_path(), &unsupported_object);
-        assert_eq!(unsupported.property_path(), &unsupported_property);
-        assert_eq!(unsupported.source_profile(), Some(&source.id));
-        assert_eq!(unsupported.target_profile(), Some(&target.id));
-
-        let undeclared = analysis
-            .diagnostics()
-            .diagnostics()
-            .iter()
-            .find(|diagnostic| diagnostic.code().as_str() == CAPABILITY_UNDECLARED_CODE)
-            .unwrap();
-        assert_eq!(undeclared.object_path(), &undeclared_object);
-        assert_eq!(undeclared.property_path(), &undeclared_property);
-        assert_eq!(
-            undeclared.context().get("capability").map(String::as_str),
-            Some("feature:future")
+        assert!(
+            analysis
+                .diagnostics()
+                .diagnostics()
+                .iter()
+                .all(|diagnostic| {
+                    diagnostic.code().as_str() == CAPABILITY_UNSUPPORTED_CODE
+                        && diagnostic.property_path() == &property
+                })
         );
+        let diagnosed_paths = analysis
+            .diagnostics()
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.object_path())
+            .collect::<Vec<_>>();
+        assert!(diagnosed_paths.contains(&&first_object));
+        assert!(diagnosed_paths.contains(&&second_object));
+    }
+
+    #[test]
+    fn touched_capability_without_coverage_is_a_contract_error() {
+        let result = step(
+            &["feature:known", "feature:future"],
+            vec![CompatibilityRequirement::global(
+                CapabilityId::parse("feature:known").unwrap(),
+            )],
+        );
+        assert!(matches!(
+            result,
+            Err(CompatibilityContractError::MissingCapabilityCoverage { capability })
+                if capability == CapabilityId::parse("feature:future").unwrap()
+        ));
+    }
+
+    #[test]
+    fn requirement_capability_absent_from_descriptor_is_a_contract_error() {
+        let result = step(
+            &["feature:known"],
+            vec![CompatibilityRequirement::global(
+                CapabilityId::parse("feature:future").unwrap(),
+            )],
+        );
+        assert!(matches!(
+            result,
+            Err(CompatibilityContractError::CapabilityNotTouched { capability })
+                if capability == CapabilityId::parse("feature:future").unwrap()
+        ));
+    }
+
+    #[test]
+    fn requirement_limit_plus_one_fails_before_analysis() {
+        let capability = CapabilityId::parse("feature:known").unwrap();
+        let requirements =
+            vec![CompatibilityRequirement::global(capability); MAX_COMPATIBILITY_REQUIREMENTS + 1];
+        let result = CompatibilityRequirements::new(descriptor(&["feature:known"]), requirements);
+        assert!(matches!(
+            result,
+            Err(CompatibilityContractError::TooManyRequirements {
+                maximum: MAX_COMPATIBILITY_REQUIREMENTS,
+                actual,
+            }) if actual == MAX_COMPATIBILITY_REQUIREMENTS + 1
+        ));
+    }
+
+    #[test]
+    fn unknown_model_path_is_a_blocking_stable_diagnostic() {
+        let source = profile("profile:source", r#"{"feature:known":"supported"}"#);
+        let target = profile("profile:target", r#"{"feature:known":"supported"}"#);
+        let unknown_object = object_path("Catalog.Missing");
+        let unknown_property = property_path("MissingFeature");
+        let step = step(
+            &["feature:known"],
+            vec![CompatibilityRequirement::new(
+                CapabilityId::parse("feature:known").unwrap(),
+                unknown_object.clone(),
+                unknown_property.clone(),
+            )],
+        )
+        .unwrap();
+        let configuration = configuration();
+
+        let analysis = step
+            .analyze(MigrationAnalyzeRequest::new(
+                &source,
+                &target,
+                &configuration,
+            ))
+            .unwrap();
+
+        assert!(!analysis.is_compatible());
+        assert_eq!(analysis.diagnostics().diagnostics().len(), 1);
+        let diagnostic = &analysis.diagnostics().diagnostics()[0];
+        assert_eq!(diagnostic.code().as_str(), REQUIREMENT_PATH_UNKNOWN_CODE);
+        assert_eq!(diagnostic.object_path(), &unknown_object);
+        assert_eq!(diagnostic.property_path(), &unknown_property);
     }
 
     #[test]
     fn analyze_cannot_change_model_or_semantic_digest() {
         fn assert_object_safe(_: &dyn MigrationStep) {}
 
-        let source = profile(
-            "profile:source",
-            r#"{"feature:known":"supported","feature:future":"supported"}"#,
-        );
-        let target = profile(
-            "profile:target",
-            r#"{"feature:known":"supported","feature:future":"supported"}"#,
-        );
-        let step = step(vec![CompatibilityRequirement::new(
-            CapabilityId::parse("feature:known").unwrap(),
-            object_path("Catalog.Test"),
-            property_path("KnownFeature"),
-        )]);
+        let source = profile("profile:source", r#"{"feature:known":"supported"}"#);
+        let target = profile("profile:target", r#"{"feature:known":"supported"}"#);
+        let step = step(
+            &["feature:known"],
+            vec![CompatibilityRequirement::new(
+                CapabilityId::parse("feature:known").unwrap(),
+                object_path("Catalog.Test"),
+                property_path("KnownFeature"),
+            )],
+        )
+        .unwrap();
         assert_object_safe(&step);
         let configuration = configuration();
         let snapshot = configuration.clone();
@@ -363,11 +748,13 @@ mod tests {
             .unwrap()
             .semantic_digest();
 
-        let analysis = step.analyze(MigrationAnalyzeRequest::new(
-            &source,
-            &target,
-            &configuration,
-        ));
+        let analysis = step
+            .analyze(MigrationAnalyzeRequest::new(
+                &source,
+                &target,
+                &configuration,
+            ))
+            .unwrap();
 
         assert!(analysis.is_compatible());
         assert_eq!(configuration, snapshot);
@@ -392,14 +779,16 @@ mod tests {
     fn route_constraint_failures_are_stable_and_fail_closed() {
         let source = profile("profile:other-source", r#"{}"#);
         let target = profile("profile:other-target", r#"{}"#);
-        let step = step(Vec::new());
+        let step = step(&[], Vec::new()).unwrap();
         let configuration = configuration();
 
-        let analysis = step.analyze(MigrationAnalyzeRequest::new(
-            &source,
-            &target,
-            &configuration,
-        ));
+        let analysis = step
+            .analyze(MigrationAnalyzeRequest::new(
+                &source,
+                &target,
+                &configuration,
+            ))
+            .unwrap();
 
         let codes = analysis
             .diagnostics()
