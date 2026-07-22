@@ -352,6 +352,10 @@ mod tests {
                     "web-service-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.ws_reference.layout"].value,
+                    "ws-reference-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
                     profile.constants["bootstrap.metadata.xdto_package.layout"].value,
                     "xdto-package-v1-crlf-utf8-bom"
                 );

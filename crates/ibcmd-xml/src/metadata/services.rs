@@ -33,6 +33,7 @@ const EVENT_SUBSCRIPTION_FAMILY: &str = "EventSubscription";
 const XDTO_PACKAGE_FAMILY: &str = "XDTOPackage";
 const HTTP_SERVICE_FAMILY: &str = "HTTPService";
 const WEB_SERVICE_FAMILY: &str = "WebService";
+const WS_REFERENCE_FAMILY: &str = "WSReference";
 const XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const XSI_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
@@ -81,6 +82,15 @@ pub fn register_web_service_codec(
     }))
 }
 
+/// Registers the strict `WSReference` metadata codec.
+pub fn register_ws_reference_codec(
+    registry: &mut MetadataRegistry,
+) -> Result<(), MetadataRegistryError> {
+    registry.register(Box::new(WsReferenceCodec {
+        family: FamilyId::parse(WS_REFERENCE_FAMILY).expect("family id is stable"),
+    }))
+}
+
 struct ScheduledJobCodec {
     family: FamilyId,
 }
@@ -99,6 +109,33 @@ struct HttpServiceCodec {
 
 struct WebServiceCodec {
     family: FamilyId,
+}
+
+struct WsReferenceCodec {
+    family: FamilyId,
+}
+
+impl MetadataFamilyCodec for WsReferenceCodec {
+    fn family_id(&self) -> &FamilyId {
+        &self.family
+    }
+
+    fn decode(
+        &self,
+        document: &XmlDocument,
+        source: ProfileId,
+        path: ObjectPath,
+    ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        decode_ws_reference(document, source, path)
+    }
+
+    fn encode(
+        &self,
+        envelope: &MetadataEnvelope,
+        target: &ProfileId,
+    ) -> Result<Vec<u8>, MetadataEncodeError> {
+        encode_ws_reference(envelope, target)
+    }
 }
 
 impl MetadataFamilyCodec for WebServiceCodec {
@@ -310,6 +347,14 @@ struct WebServiceProjection {
     reuse_sessions: String,
     session_max_age: u32,
     operations: Vec<WebOperationProjection>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WsReferenceProjection {
+    comment: String,
+    location_url: String,
+    manager_type_id: ObjectUuid,
+    manager_value_id: ObjectUuid,
 }
 
 fn decode_scheduled_job(
@@ -739,6 +784,51 @@ fn decode_web_service(
         ));
     }
     MetadataEnvelope::from_parts(root, descendants, document.clone())
+}
+
+fn decode_ws_reference(
+    document: &XmlDocument,
+    source: ProfileId,
+    path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    validate_decode_profile(document, &source, &path)?;
+    let projection = project_ws_reference(document)?;
+    let generic = decode_metadata_envelope(document, source, path)?;
+    if generic.root().kind().as_str() != WS_REFERENCE_FAMILY {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference codec requires its exact family",
+        ));
+    }
+    if !generic.descendants().is_empty()
+        || !generic.root().references().is_empty()
+        || !generic.root().assets().is_empty()
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference cannot contain children, references, or assets",
+        ));
+    }
+    let generated = generic.root().generated_types();
+    if generated.len() != 1
+        || generated[0].kind().as_str() != "Manager"
+        || generated[0].uuid() != projection.manager_type_id
+        || generated[0].value_id() != Some(projection.manager_value_id)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference Manager TypeId/ValueId is not exact",
+        ));
+    }
+    let mut parts = copy_object_parts(generic.root());
+    parts.properties.push(canonical_field(
+        "Comment",
+        CanonicalValue::text(canonical_text(&projection.comment)?),
+    )?);
+    parts.properties.push(canonical_field(
+        "LocationURL",
+        CanonicalValue::text(canonical_text(&projection.location_url)?),
+    )?);
+    let root = CanonicalObject::new(parts)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
+    MetadataEnvelope::from_parts(root, Vec::new(), document.clone())
 }
 
 fn xdto_type_value(value: &XdtoTypeProjection) -> Result<CanonicalValue, MetadataDecodeError> {
@@ -1315,6 +1405,140 @@ fn project_web_service(
         reuse_sessions,
         session_max_age: required_u32(properties, "SessionMaxAge", expected, &uris)?,
         operations,
+    })
+}
+
+fn project_ws_reference(
+    document: &XmlDocument,
+) -> Result<WsReferenceProjection, MetadataDecodeError> {
+    let uris = resolve_namespaces(document.root())?;
+    let expected = uri_of(document.root(), &uris);
+    if !matches!(expected, None | Some(MD_NAMESPACE)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference root namespace",
+        ));
+    }
+    reject_attributes(document.root(), &["version"])?;
+    let object = required_child(document.root(), WS_REFERENCE_FAMILY, expected, &uris)?;
+    reject_attributes(object, &["uuid"])?;
+    let sections = object
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if sections.len() != 2
+        || !typed(sections[0], "InternalInfo", expected, &uris)
+        || !typed(sections[1], "Properties", expected, &uris)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference sections or order are unsupported",
+        ));
+    }
+    let internal = sections[0];
+    let properties = sections[1];
+    reject_attributes(internal, &[])?;
+    reject_exact_service_properties(
+        properties,
+        &["Name", "Synonym", "Comment", "LocationURL"],
+        expected,
+        &uris,
+    )?;
+    let name = required_text(properties, "Name", expected, &uris)?;
+    if !valid_identifier(&name) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference Name is not an exact identifier",
+        ));
+    }
+    let generated = internal
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if generated.len() != 1 || !typed(generated[0], "GeneratedType", Some(XR_NAMESPACE), &uris) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference InternalInfo must contain one xr:GeneratedType",
+        ));
+    }
+    let generated = generated[0];
+    reject_attributes(generated, &["name", "category"])?;
+    let expected_generated_name = format!("WSReferenceManager.{name}");
+    if unprefixed_attribute(generated, "name") != Some(expected_generated_name.as_str())
+        || unprefixed_attribute(generated, "category") != Some("Manager")
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference generated type name or category is inconsistent",
+        ));
+    }
+    let identities = generated
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if identities.len() != 2
+        || !typed(identities[0], "TypeId", Some(XR_NAMESPACE), &uris)
+        || !typed(identities[1], "ValueId", Some(XR_NAMESPACE), &uris)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference generated TypeId/ValueId fields or order are unsupported",
+        ));
+    }
+    let manager_type_id = exact_generated_uuid(identities[0], "WSReference Manager TypeId")?;
+    let manager_value_id = exact_generated_uuid(identities[1], "WSReference Manager ValueId")?;
+    if manager_type_id == manager_value_id {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference generated TypeId and ValueId are not independent",
+        ));
+    }
+    let location_url = required_text(properties, "LocationURL", expected, &uris)?;
+    if location_url.is_empty() || location_url.chars().any(char::is_whitespace) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WSReference LocationURL is not exact",
+        ));
+    }
+    Ok(WsReferenceProjection {
+        comment: required_text(properties, "Comment", expected, &uris)?,
+        location_url,
+        manager_type_id,
+        manager_value_id,
+    })
+}
+
+fn exact_generated_uuid(
+    element: &XmlElement,
+    _context: &'static str,
+) -> Result<ObjectUuid, MetadataDecodeError> {
+    reject_attributes(element, &[])?;
+    let value = element_text(element)?.ok_or(MetadataDecodeError::InvalidEnvelope(
+        "generated UUID must contain text only",
+    ))?;
+    let uuid = ObjectUuid::parse(&value).map_err(|_| MetadataDecodeError::InvalidUuid(value))?;
+    if uuid.as_bytes().iter().all(|byte| *byte == 0) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "generated UUID cannot be nil",
+        ));
+    }
+    Ok(uuid)
+}
+
+fn unprefixed_attribute<'a>(element: &'a XmlElement, local: &str) -> Option<&'a str> {
+    element.attributes().iter().find_map(|attribute| {
+        if let AttributeKind::Ordinary(name) = attribute.kind()
+            && name.prefix().is_none()
+            && name.local() == local
+        {
+            Some(attribute.value())
+        } else {
+            None
+        }
     })
 }
 
@@ -2081,6 +2305,49 @@ fn encode_web_service(
     .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
 }
 
+fn encode_ws_reference(
+    envelope: &MetadataEnvelope,
+    target: &ProfileId,
+) -> Result<Vec<u8>, MetadataEncodeError> {
+    let path = envelope.root().identity().path().clone();
+    let target_version =
+        profile_version(target).ok_or_else(|| MetadataEncodeError::UnsupportedProfile {
+            object_path: path.clone(),
+            profile: target.clone(),
+        })?;
+    if envelope.root().kind().as_str() != WS_REFERENCE_FAMILY {
+        return Err(invalid_model(&path, "kind"));
+    }
+    let source_profile = envelope.root().provenance().source_profile().clone();
+    validate_decode_profile(envelope.source_document(), &source_profile, &path)
+        .map_err(decode_to_encode)?;
+    let source = decode_ws_reference(envelope.source_document(), source_profile, path.clone())
+        .map_err(decode_to_encode)?;
+    if source.root() != envelope.root() || source.descendants() != envelope.descendants() {
+        return Err(invalid_model(
+            &path,
+            "WSReference semantic mutation is not implemented",
+        ));
+    }
+    let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
+        == target_version
+    {
+        envelope.source_document().root().clone()
+    } else {
+        set_unprefixed_attribute(
+            envelope.source_document().root(),
+            "version",
+            target_version,
+            &path,
+        )?
+    };
+    XmlWriter::to_vec(
+        &envelope.source_document().with_root(root),
+        LexicalPolicy::Preserve,
+    )
+    .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use ibcmd_core::value::CanonicalValueKind;
@@ -2534,6 +2801,124 @@ mod tests {
                 registry
                     .decode(
                         &FamilyId::parse(WEB_SERVICE_FAMILY).unwrap(),
+                        &document,
+                        profile("2.20"),
+                        ObjectPath::root(),
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    fn ws_reference_fixture(
+        version: &str,
+        generated_name: &str,
+        category: &str,
+        location: &str,
+        extra: &str,
+    ) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"{MD_NAMESPACE}\" xmlns:v8=\"{V8_NAMESPACE}\" xmlns:xr=\"{XR_NAMESPACE}\" version=\"{version}\">\r\n\
+\t<WSReference uuid=\"b409116f-3ba2-4303-9bdc-f14961c879d6\">\r\n\
+\t\t<InternalInfo>\r\n\
+\t\t\t<xr:GeneratedType name=\"{generated_name}\" category=\"{category}\">\r\n\
+\t\t\t\t<xr:TypeId>651f0326-6551-49a6-a840-b6e604b61639</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>dd7a8d59-2aeb-4921-a33b-913be961ec98</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n\
+\t\t</InternalInfo>\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>UpdateFilesApiImplService</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Update files api impl service</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<LocationURL>{location}</LocationURL>{extra}\r\n\
+\t\t</Properties>\r\n\
+\t</WSReference>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn ws_reference_manager_and_location_are_typed_and_roundtrip() {
+        let mut registry = MetadataRegistry::default();
+        register_ws_reference_codec(&mut registry).unwrap();
+        for version in ["2.20", "2.21"] {
+            let document = XmlReader::from_slice(&ws_reference_fixture(
+                version,
+                "WSReferenceManager.UpdateFilesApiImplService",
+                "Manager",
+                "https://update-api.1c.ru/ws/files?wsdl",
+                "",
+            ))
+            .unwrap();
+            let envelope = registry
+                .decode(
+                    &FamilyId::parse(WS_REFERENCE_FAMILY).unwrap(),
+                    &document,
+                    profile(version),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+            assert_eq!(envelope.root().properties().len(), 4);
+            assert_eq!(envelope.root().generated_types().len(), 1);
+            assert_eq!(
+                envelope.root().generated_types()[0].value_id(),
+                Some(ObjectUuid::parse("dd7a8d59-2aeb-4921-a33b-913be961ec98").unwrap())
+            );
+            let target = if version == "2.20" { "2.21" } else { "2.20" };
+            let output = registry.encode(&envelope, &profile(target)).unwrap();
+            let reparsed = XmlReader::from_slice(&output).unwrap();
+            registry
+                .decode(
+                    &FamilyId::parse(WS_REFERENCE_FAMILY).unwrap(),
+                    &reparsed,
+                    profile(target),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn ws_reference_inconsistent_generated_type_and_unknown_property_fail_closed() {
+        let mut registry = MetadataRegistry::default();
+        register_ws_reference_codec(&mut registry).unwrap();
+        for input in [
+            ws_reference_fixture(
+                "2.20",
+                "WSReferenceManager.Other",
+                "Manager",
+                "https://example.test/ws?wsdl",
+                "",
+            ),
+            ws_reference_fixture(
+                "2.20",
+                "WSReferenceManager.UpdateFilesApiImplService",
+                "Other",
+                "https://example.test/ws?wsdl",
+                "",
+            ),
+            ws_reference_fixture(
+                "2.20",
+                "WSReferenceManager.UpdateFilesApiImplService",
+                "Manager",
+                "https://example.test/ws wsdl",
+                "",
+            ),
+            ws_reference_fixture(
+                "2.20",
+                "WSReferenceManager.UpdateFilesApiImplService",
+                "Manager",
+                "https://example.test/ws?wsdl",
+                "<Future/>",
+            ),
+        ] {
+            let document = XmlReader::from_slice(&input).unwrap();
+            assert!(
+                registry
+                    .decode(
+                        &FamilyId::parse(WS_REFERENCE_FAMILY).unwrap(),
                         &document,
                         profile("2.20"),
                         ObjectPath::root(),

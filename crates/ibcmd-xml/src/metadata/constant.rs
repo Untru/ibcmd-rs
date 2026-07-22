@@ -63,6 +63,8 @@ pub fn bundled_metadata_registry() -> MetadataRegistry {
         .expect("bundled families are unique and bounded");
     super::services::register_web_service_codec(&mut registry)
         .expect("bundled families are unique and bounded");
+    super::services::register_ws_reference_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
     super::services::register_scheduled_job_codec(&mut registry)
         .expect("bundled families are unique and bounded");
     super::services::register_xdto_package_codec(&mut registry)

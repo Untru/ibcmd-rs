@@ -40,6 +40,8 @@ const HTTP_SERVICE_LAYOUT_KEY: &str = "bootstrap.metadata.http_service.layout";
 const HTTP_SERVICE_LAYOUT: &str = "http-service-v1-crlf-utf8-bom";
 const WEB_SERVICE_LAYOUT_KEY: &str = "bootstrap.metadata.web_service.layout";
 const WEB_SERVICE_LAYOUT: &str = "web-service-v1-crlf-utf8-bom";
+const WS_REFERENCE_LAYOUT_KEY: &str = "bootstrap.metadata.ws_reference.layout";
+const WS_REFERENCE_LAYOUT: &str = "ws-reference-v1-crlf-utf8-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
@@ -105,6 +107,7 @@ enum ServiceLayout {
     XdtoPackageV1,
     HttpServiceV1,
     WebServiceV1,
+    WsReferenceV1,
 }
 
 /// Independent target coordinates plus one service-family layout.
@@ -170,6 +173,11 @@ impl ServiceMetadataProfile {
                 WEB_SERVICE_LAYOUT_KEY,
                 WEB_SERVICE_LAYOUT,
                 ServiceLayout::WebServiceV1,
+            ),
+            ServiceFamily::WsReference => (
+                WS_REFERENCE_LAYOUT_KEY,
+                WS_REFERENCE_LAYOUT,
+                ServiceLayout::WsReferenceV1,
             ),
             _ => {
                 return Err(ServiceMetadataProfileError::FamilyNotImplemented {
@@ -261,6 +269,17 @@ impl ServiceMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: ServiceFamily::WebService,
             layout: ServiceLayout::WebServiceV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn ws_reference_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: ServiceFamily::WsReference,
+            layout: ServiceLayout::WsReferenceV1,
         }
     }
 }
@@ -559,6 +578,57 @@ impl XdtoPackageNativeIr {
         write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
         write_xml_text_element(&mut xml, "\t\t\t", "Namespace", &self.namespace);
         xml.push_str("\t\t</Properties>\r\n\t</XDTOPackage>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
+}
+
+/// Complete base-free native IR for a `WSReference` metadata row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WsReferenceNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub location_url: String,
+    pub manager_type_id: ObjectUuid,
+    pub manager_value_id: ObjectUuid,
+}
+
+impl WsReferenceNativeIr {
+    /// Renders standalone XCF; `Ext/WSDefinition.xml` remains a separate asset.
+    pub fn to_xml(&self, profile: &ProfileId) -> Result<Vec<u8>, ServiceMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| ServiceMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        validate_ws_reference_ir(self)?;
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"{version}\">\r\n\t<WSReference uuid=\"{}\">\r\n\t\t<InternalInfo>\r\n\t\t\t<xr:GeneratedType name=\"WSReferenceManager.",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        push_xml_attribute(&mut xml, &self.name);
+        xml.push_str("\" category=\"Manager\">\r\n");
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t\t",
+            "xr:TypeId",
+            &self.manager_type_id.to_string(),
+        );
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t\t",
+            "xr:ValueId",
+            &self.manager_value_id.to_string(),
+        );
+        xml.push_str("\t\t\t</xr:GeneratedType>\r\n\t\t</InternalInfo>\r\n\t\t<Properties>\r\n");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonyms_at(&mut xml, "\t\t\t", &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        write_xml_text_element(&mut xml, "\t\t\t", "LocationURL", &self.location_url);
+        xml.push_str("\t\t</Properties>\r\n\t</WSReference>\r\n</MetaDataObject>");
         Ok(xml.into_bytes())
     }
 }
@@ -1072,6 +1142,9 @@ pub fn compile_service_metadata(
         (ServiceFamily::WebService, ServiceLayout::WebServiceV1) => {
             serialize_web_service(&project_web_service(validated, object)?)
         }
+        (ServiceFamily::WsReference, ServiceLayout::WsReferenceV1) => {
+            serialize_ws_reference(&project_ws_reference(validated, object)?)
+        }
         (family, _) => return Err(ServiceMetadataBuildError::UnsupportedFamily(family)),
     };
     let bytes = raw_deflate(&plaintext)?;
@@ -1148,6 +1221,19 @@ pub fn decode_web_service_blob(
         return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
     }
     parse_web_service(&inflate_bounded(blob)?)
+}
+
+/// Strictly decodes a raw-DEFLATE `WSReference` metadata row.
+pub fn decode_ws_reference_blob(
+    blob: &[u8],
+    profile: &ServiceMetadataProfile,
+) -> Result<WsReferenceNativeIr, ServiceMetadataBuildError> {
+    if profile.family != ServiceFamily::WsReference
+        || profile.layout != ServiceLayout::WsReferenceV1
+    {
+        return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    parse_ws_reference(&inflate_bounded(blob)?)
 }
 
 fn validate_coordinates(
@@ -1495,6 +1581,53 @@ fn project_xdto_package(
         comment: text_property(object, "Comment")?.to_owned(),
         namespace,
     })
+}
+
+fn project_ws_reference(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<WsReferenceNativeIr, ServiceMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    if object.owner().is_some()
+        || !object.references().is_empty()
+        || !object.assets().is_empty()
+        || validated
+            .configuration()
+            .objects()
+            .iter()
+            .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(
+            uuid,
+            "WSReference must be top-level without children, references, or inline assets",
+        );
+    }
+    require_property_schema(object, &["Name", "Synonym", "Comment", "LocationURL"])?;
+    let generated = object.generated_types();
+    if generated.len() != 1 || generated[0].kind().as_str() != "Manager" {
+        return invalid_model(uuid, "WSReference requires one Manager generated type");
+    }
+    let manager_type_id = generated[0].uuid();
+    let manager_value_id =
+        generated[0]
+            .value_id()
+            .ok_or(ServiceMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "WSReference Manager ValueId is missing",
+            })?;
+    let location_url = text_property(object, "LocationURL")?.to_owned();
+    let (name, synonyms, comment) = project_service_header(object)?;
+    let result = WsReferenceNativeIr {
+        uuid,
+        name,
+        synonyms,
+        comment,
+        location_url,
+        manager_type_id,
+        manager_value_id,
+    };
+    validate_ws_reference_ir(&result)?;
+    Ok(result)
 }
 
 fn project_http_service(
@@ -2247,6 +2380,40 @@ fn http_method_from_code(value: &str) -> Option<&'static str> {
     }
 }
 
+fn validate_ws_reference_ir(value: &WsReferenceNativeIr) -> Result<(), ServiceMetadataBuildError> {
+    if value.location_url.is_empty()
+        || value.location_url.chars().any(char::is_whitespace)
+        || value.uuid.to_string() == NIL_UUID
+        || value.manager_type_id.to_string() == NIL_UUID
+        || value.manager_value_id.to_string() == NIL_UUID
+        || value.uuid == value.manager_type_id
+        || value.uuid == value.manager_value_id
+        || value.manager_type_id == value.manager_value_id
+        || !valid_identifier_segment(&value.name)
+    {
+        return Err(native("WSReference identity or LocationURL is not exact"));
+    }
+    validate_native_text(&value.location_url, "LocationURL")?;
+    validate_native_text(&value.comment, "Comment")?;
+    if value.synonyms.len() > MAX_CANONICAL_COLLECTION_ITEMS {
+        return Err(native("WSReference Synonym collection is too large"));
+    }
+    let mut languages = BTreeSet::new();
+    for synonym in &value.synonyms {
+        validate_native_text(&synonym.language, "Synonym language")?;
+        validate_native_text(&synonym.content, "Synonym content")?;
+        if synonym.language.is_empty()
+            || synonym.language.len() > MAX_LANGUAGE_CODE_BYTES
+            || !languages.insert(synonym.language.as_str())
+        {
+            return Err(native(
+                "WSReference Synonym language is invalid or duplicated",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_http_ir(value: &HttpServiceNativeIr) -> Result<(), ServiceMetadataBuildError> {
     if value.urls.is_empty() || value.urls.len() > MAX_CANONICAL_COLLECTION_ITEMS {
         return Err(native(
@@ -2580,6 +2747,26 @@ fn serialize_xdto_package(value: &XdtoPackageNativeIr) -> Vec<u8> {
     );
     plain.push(',');
     push_1c_string(&mut plain, &value.namespace);
+    plain.push_str("},0}");
+    native_plaintext(plain)
+}
+
+fn serialize_ws_reference(value: &WsReferenceNativeIr) -> Vec<u8> {
+    let mut plain = String::new();
+    plain.push_str("{1,\r\n{2,\r\n{");
+    push_1c_string(&mut plain, &value.location_url);
+    plain.push_str(",0},\r\n");
+    push_native_header(
+        &mut plain,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plain.push(',');
+    plain.push_str(&value.manager_type_id.to_string());
+    plain.push(',');
+    plain.push_str(&value.manager_value_id.to_string());
     plain.push_str("},0}");
     native_plaintext(plain)
 }
@@ -3079,6 +3266,32 @@ fn parse_xdto_package(plain: &[u8]) -> Result<XdtoPackageNativeIr, ServiceMetada
         comment: header.comment,
         namespace,
     })
+}
+
+fn parse_ws_reference(plain: &[u8]) -> Result<WsReferenceNativeIr, ServiceMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 3, "WSReference root")?;
+    exact_token(&root[0], "1", "WSReference root discriminator")?;
+    exact_token(&root[2], "0", "WSReference root tail")?;
+    let object = exact_list(&root[1], 5, "WSReference object")?;
+    exact_token(&object[0], "2", "WSReference discriminator")?;
+    let location = exact_list(&object[1], 2, "WSReference location")?;
+    let location_url = text(&location[0], "WSReference LocationURL")?.to_owned();
+    exact_token(&location[1], "0", "WSReference location tail")?;
+    let header = parse_native_header(&object[2])?;
+    let manager_type_id = canonical_uuid_token(&object[3], "WSReference Manager TypeId")?;
+    let manager_value_id = canonical_uuid_token(&object[4], "WSReference Manager ValueId")?;
+    let result = WsReferenceNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        location_url,
+        manager_type_id,
+        manager_value_id,
+    };
+    validate_ws_reference_ir(&result)?;
+    Ok(result)
 }
 
 fn parse_http_service(plain: &[u8]) -> Result<HttpServiceNativeIr, ServiceMetadataBuildError> {
@@ -3705,6 +3918,9 @@ mod tests {
     const WEB_PARAMETER_IN_UUID: &str = "93aa5247-6823-4f70-9d47-e5a0f409828a";
     const WEB_PARAMETER_OUT_UUID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     const WEB_PARAMETER_IN_OUT_UUID: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const WS_UUID: &str = "b409116f-3ba2-4303-9bdc-f14961c879d6";
+    const WS_MANAGER_TYPE_ID: &str = "651f0326-6551-49a6-a840-b6e604b61639";
+    const WS_MANAGER_VALUE_ID: &str = "dd7a8d59-2aeb-4921-a33b-913be961ec98";
 
     fn xml(version: &str, module: &str) -> Vec<u8> {
         format!(
@@ -3832,6 +4048,23 @@ mod tests {
 \t\t\t</Operation>\r\n\
 \t\t</ChildObjects>\r\n\
 \t</WebService>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn ws_reference_xml(version: &str, location_url: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"{version}\">\r\n\
+\t<WSReference uuid=\"{WS_UUID}\">\r\n\
+\t\t<InternalInfo><xr:GeneratedType name=\"WSReferenceManager.UpdateFilesApiImplService\" category=\"Manager\"><xr:TypeId>{WS_MANAGER_TYPE_ID}</xr:TypeId><xr:ValueId>{WS_MANAGER_VALUE_ID}</xr:ValueId></xr:GeneratedType></InternalInfo>\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>UpdateFilesApiImplService</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Update files api impl service</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/><LocationURL>{location_url}</LocationURL>\r\n\
+\t\t</Properties>\r\n\
+\t</WSReference>\r\n\
 </MetaDataObject>"
         )
         .into_bytes()
@@ -4033,6 +4266,25 @@ mod tests {
         CanonicalConfiguration::new(objects).unwrap()
     }
 
+    fn ws_reference_configuration(version: &str, location_url: &str) -> CanonicalConfiguration {
+        let document = XmlReader::from_slice(&ws_reference_xml(version, location_url)).unwrap();
+        let reference = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("WSReference").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        CanonicalConfiguration::new(vec![
+            object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            reference,
+        ])
+        .unwrap()
+    }
+
     fn axes(version: &str) -> CompileAxes {
         CompileAxes::new(
             XmlDialect::parse(version).unwrap(),
@@ -4151,6 +4403,27 @@ mod tests {
         (
             graph,
             ServiceMetadataProfile::web_service_fixture("platform-test"),
+        )
+    }
+
+    fn ws_reference_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, ServiceMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [CONFIGURATION_UUID, WS_UUID]
+                .into_iter()
+                .map(|uuid| {
+                    ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+                })
+                .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            ServiceMetadataProfile::ws_reference_fixture("platform-test"),
         )
     }
 
@@ -4705,6 +4978,109 @@ mod tests {
     }
 
     #[test]
+    fn ws_reference_roundtrips_without_a_base_for_both_dialects() {
+        let location = "https://update-api.1c.ru/ws/files?wsdl";
+        for version in ["2.20", "2.21"] {
+            let configuration = ws_reference_configuration(version, location);
+            let validated = validate_configuration(&configuration).unwrap();
+            let (graph, profile) = ws_reference_graph(&validated);
+            let uuid = ObjectUuid::parse(WS_UUID).unwrap();
+            let first =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            let second =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            assert_eq!(first, second);
+            let ir = decode_ws_reference_blob(
+                first.outcome().compiled_payload().unwrap().bytes(),
+                &profile,
+            )
+            .unwrap();
+            assert_eq!(ir.location_url, location);
+            assert_eq!(
+                ir.manager_type_id,
+                ObjectUuid::parse(WS_MANAGER_TYPE_ID).unwrap()
+            );
+            assert_eq!(
+                ir.manager_value_id,
+                ObjectUuid::parse(WS_MANAGER_VALUE_ID).unwrap()
+            );
+            let output = ir
+                .to_xml(&ProfileId::parse(&format!("xml-{version}")).unwrap())
+                .unwrap();
+            let document = XmlReader::from_slice(&output).unwrap();
+            bundled_metadata_registry()
+                .decode(
+                    &FamilyId::parse("WSReference").unwrap(),
+                    &document,
+                    ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn ws_reference_plaintext_matches_repository_native_fixture() {
+        let configuration =
+            ws_reference_configuration("2.20", "https://update-api.1c.ru/ws/files?wsdl");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = ws_reference_graph(&validated);
+        let entry = compile_service_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(WS_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
+        assert_eq!(
+            &plain[UTF8_BOM.len()..],
+            format!(
+                "{{1,\r\n{{2,\r\n{{\"https://update-api.1c.ru/ws/files?wsdl\",0}},\r\n{{3,\r\n{{1,0,{WS_UUID}}},\"UpdateFilesApiImplService\",\r\n{{1,\"ru\",\"Update files api impl service\"}},\"\",0,0,{NIL_UUID},0}},{WS_MANAGER_TYPE_ID},{WS_MANAGER_VALUE_ID}}},0}}"
+            )
+            .as_bytes()
+        );
+    }
+
+    #[test]
+    fn ws_reference_unknown_native_wrapper_and_extra_field_fail_closed() {
+        let configuration =
+            ws_reference_configuration("2.20", "https://update-api.1c.ru/ws/files?wsdl");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = ws_reference_graph(&validated);
+        let entry = compile_service_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(WS_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = String::from_utf8(
+            inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap(),
+        )
+        .unwrap();
+        let unknown_location_tail = plain.replacen("?wsdl\",0}", "?wsdl\",1}", 1);
+        assert!(matches!(
+            parse_ws_reference(unknown_location_tail.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+        let extra_field = plain.replacen(
+            &format!(",{WS_MANAGER_VALUE_ID}}},0}}"),
+            &format!(",{WS_MANAGER_VALUE_ID},future}},0}}"),
+            1,
+        );
+        assert!(matches!(
+            parse_ws_reference(extra_field.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+    }
+
+    #[test]
     fn implemented_service_profiles_are_explicit_and_others_stay_blocked() {
         let json = format!(
             r#"{{
@@ -4718,7 +5094,8 @@ mod tests {
                     "{EVENT_SUBSCRIPTION_LAYOUT_KEY}": "{EVENT_SUBSCRIPTION_LAYOUT}",
                     "{XDTO_PACKAGE_LAYOUT_KEY}": "{XDTO_PACKAGE_LAYOUT}",
                     "{HTTP_SERVICE_LAYOUT_KEY}": "{HTTP_SERVICE_LAYOUT}",
-                    "{WEB_SERVICE_LAYOUT_KEY}": "{WEB_SERVICE_LAYOUT}"
+                    "{WEB_SERVICE_LAYOUT_KEY}": "{WEB_SERVICE_LAYOUT}",
+                    "{WS_REFERENCE_LAYOUT_KEY}": "{WS_REFERENCE_LAYOUT}"
                 }}
             }}"#
         );
@@ -4772,6 +5149,15 @@ mod tests {
             .unwrap()
             .family(),
             ServiceFamily::WebService
+        );
+        assert_eq!(
+            ServiceMetadataProfile::from_effective_for_family(
+                effective,
+                ServiceFamily::WsReference,
+            )
+            .unwrap()
+            .family(),
+            ServiceFamily::WsReference
         );
         assert!(matches!(
             ServiceMetadataProfile::from_effective_for_family(

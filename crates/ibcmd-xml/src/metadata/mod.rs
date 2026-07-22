@@ -25,6 +25,6 @@ pub use registry::{
 };
 pub use services::{
     register_event_subscription_codec, register_http_service_codec, register_scheduled_job_codec,
-    register_web_service_codec, register_xdto_package_codec,
+    register_web_service_codec, register_ws_reference_codec, register_xdto_package_codec,
 };
 pub use session_parameter::register_session_parameter_codec;

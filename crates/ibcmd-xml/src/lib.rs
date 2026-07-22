@@ -23,7 +23,7 @@ pub use metadata::{
     register_event_subscription_codec, register_functional_option_codec,
     register_functional_options_parameter_codec, register_http_service_codec,
     register_language_codec, register_scheduled_job_codec, register_session_parameter_codec,
-    register_web_service_codec, register_xdto_package_codec,
+    register_web_service_codec, register_ws_reference_codec, register_xdto_package_codec,
 };
 pub use node::{
     Attribute, AttributeKind, QName, XmlCData, XmlComment, XmlDocument, XmlElement, XmlNode,
