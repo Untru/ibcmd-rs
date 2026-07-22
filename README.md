@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=34 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=35 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 34 of 56 accepted leaf issues in the
+As of 2026-07-22, 35 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (60.7%). Live workflow statuses are tracked in
+are complete (62.5%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -161,16 +161,27 @@ markers and future profiles remain explicit blockers. The legacy MSSQL bridge
 uses the shared decoders and now bypasses a base fetch for supported Form
 bodies. See [Managed Form/CommandInterface evidence](docs/evidence/forms-command-interface-8.3.27.md).
 
+BOOT-012 is complete for all eight recognized Template kinds. A typed,
+profile-gated dispatcher now owns MXL, DCS, HTML, binary and raw XML/text body
+framing. Spreadsheet staging emits the strict MOXCEL marker-8 layout without
+reading a base row; DCS emits the evidenced 24-byte header and three BOM-XML
+documents, including semantic extraction/reinsertion of non-empty Settings.
+HTML nested files and AddIn/BinaryData payloads preserve exact bytes. Unknown
+template kinds, native tails, unsafe nested names, unsupported DCS area
+templates and future profiles fail closed. The legacy export bridge delegates
+MXL/DCS framing to the same bounded readers. See
+[Template body evidence](docs/evidence/template-bodies-8.3.27.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 2/15 | 13.3% |
-| Phase 4 bootstrap | 10/13 | 76.9% |
+| Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **34/56** | **60.7%** |
+| **Overall** | **35/56** | **62.5%** |
 
 ## Export Compatibility Status
 

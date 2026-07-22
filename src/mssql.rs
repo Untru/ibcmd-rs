@@ -45,6 +45,7 @@ use crate::cli::{
     MssqlStageWebServiceObjectArgs, MssqlStageXdtopackageObjectArgs, MssqlStorageExportArgs,
     MssqlStorageImportArgs,
 };
+use crate::compiler::bodies::template::{TemplateKind, TemplateSource, compile_evidenced_template};
 use crate::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
 use crate::compiler::{
     AdditionalIndexesMapping, CompileAxes, CompileRequest, SourcePayload, compile_source,
@@ -55,20 +56,20 @@ use crate::module_blob::{
     command_interface_base_free_blockers, command_interface_xml_can_pack_without_base,
     common_module_metadata_base_free_blockers, form_body_base_free_blockers,
     form_body_base_free_compilation_blockers, hex_sha256, metadata_xml_base_free_blockers,
-    module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
-    pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
-    pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_base_free,
+    module_blob_text_sha256, pack_business_process_flowchart_blob_from_xml,
+    pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
+    pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_bytes,
+    pack_form_body_blob_from_form_xml_base_free,
     pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
-    pack_module_blob_container_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint,
-    pack_predefined_data_blob_from_xml, pack_role_rights_blob_from_xml_with_source,
-    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
-    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
-    parse_ext_picture_file_name_from_xml, parse_help_pages_from_xml,
-    parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes,
-    patch_versions_blob_bytes_allowing_additions, predefined_data_base_free_blockers,
-    raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
-    raw_deflated_plain_sha256, role_rights_base_free_blockers, versions_base_free_blockers,
+    pack_module_blob_container_bytes, pack_predefined_data_blob_from_xml,
+    pack_role_rights_blob_from_xml_with_source, pack_schedule_blob_from_xml,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
+    parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
+    patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
+    predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
+    raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
+    versions_base_free_blockers,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -1438,27 +1439,68 @@ fn template_bootstrap_rows(
         return Ok(Vec::new());
     };
     let mut rows = Vec::new();
-    match template_type.as_str() {
-        "DataCompositionAppearanceTemplate"
-        | "DataCompositionSchema"
-        | "GraphicalSchema"
-        | "TextDocument" => {
-            if let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type)
-            {
+    let kind = match TemplateKind::parse(&template_type) {
+        Ok(kind) => kind,
+        Err(error) => {
+            rows.push(bootstrap_row_report(
+                "metadata_object",
+                &properties.kind,
+                object_path,
+                source_relative_path(source_root, xml_path),
+                format!("{}.0", properties.uuid),
+                "template_unsupported_body",
+                BootstrapGeneration::RequiresBaseBlob,
+                false,
+                &format!("standalone bootstrap is blocked: {error}"),
+            ));
+            return Ok(rows);
+        }
+    };
+    match kind {
+        TemplateKind::DataCompositionAppearanceTemplate
+        | TemplateKind::DataCompositionSchema
+        | TemplateKind::GraphicalSchema
+        | TemplateKind::TextDocument => {
+            if let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, kind.as_str()) {
+                if body_path.exists() && kind == TemplateKind::DataCompositionSchema {
+                    let source = fs::read(&body_path).with_context(|| {
+                        format!("failed to read DCS Template body {}", body_path.display())
+                    })?;
+                    if let Err(error) =
+                        compile_evidenced_template(kind, TemplateSource::Bytes(&source))
+                    {
+                        rows.push(bootstrap_row_report(
+                            "metadata_object",
+                            &properties.kind,
+                            object_path,
+                            source_relative_path(source_root, &body_path),
+                            format!("{}.0", properties.uuid),
+                            "template_dcs_body",
+                            BootstrapGeneration::RequiresBaseBlob,
+                            false,
+                            &format!("DCS bootstrap is blocked: {error}"),
+                        ));
+                        return Ok(rows);
+                    }
+                }
                 rows.extend(optional_body_bootstrap_row(
                     source_root,
                     properties,
                     object_path,
                     body_path,
                     "0",
-                    "template_raw_body",
+                    if kind == TemplateKind::DataCompositionSchema {
+                        "template_dcs_body"
+                    } else {
+                        "template_raw_body"
+                    },
                     BootstrapGeneration::CanGenerateWithoutBaseBlob,
                     false,
-                    "raw template body packer builds the Config blob directly from source bytes without reading the active Config row",
+                    "profile-selected Template codec builds the native body directly from source bytes without reading the active Config row",
                 ));
             }
         }
-        "HTMLDocument" => rows.extend(optional_body_bootstrap_row(
+        TemplateKind::HtmlDocument => rows.extend(optional_body_bootstrap_row(
             source_root,
             properties,
             object_path,
@@ -1467,9 +1509,9 @@ fn template_bootstrap_rows(
             "template_html_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "HTML template body uses the help-style packer and does not need an active base blob",
+            "HTML Template codec preserves its ordered page/file container without reading an active base blob",
         )),
-        "SpreadsheetDocument" => rows.extend(optional_body_bootstrap_row(
+        TemplateKind::SpreadsheetDocument => rows.extend(optional_body_bootstrap_row(
             source_root,
             properties,
             object_path,
@@ -1478,9 +1520,9 @@ fn template_bootstrap_rows(
             "template_spreadsheet_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "SpreadsheetDocument packer builds the MOXCEL blob from Template.xml without reading the active Config row",
+            "profile-selected MXL codec builds the MOXCEL blob from Template.xml without reading the active Config row",
         )),
-        "AddIn" | "BinaryData" => rows.extend(optional_body_bootstrap_row(
+        TemplateKind::AddIn | TemplateKind::BinaryData => rows.extend(optional_body_bootstrap_row(
             source_root,
             properties,
             object_path,
@@ -1489,9 +1531,8 @@ fn template_bootstrap_rows(
             "template_binary_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "binary template body packer builds the Config blob directly from Template.bin without reading the active Config row",
+            "binary Template codec preserves exact bytes in the evidenced marker-1 base64 container without reading the active Config row",
         )),
-        _ => {}
     }
     Ok(rows)
 }
@@ -3910,46 +3951,80 @@ fn prepare_template_body_row(
     let Some(template_type) = parse_template_type_from_xml(xml)? else {
         return Ok(Vec::new());
     };
-    match template_type.as_str() {
-        "DataCompositionAppearanceTemplate"
-        | "DataCompositionSchema"
-        | "GraphicalSchema"
-        | "TextDocument" => {
-            let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, &template_type)
+    ensure_template_axes(axes)?;
+    let kind = TemplateKind::parse(&template_type)
+        .map_err(|error| anyhow!("unsupported Template body: {error}"))?;
+    match kind {
+        TemplateKind::DataCompositionAppearanceTemplate
+        | TemplateKind::DataCompositionSchema
+        | TemplateKind::GraphicalSchema
+        | TemplateKind::TextDocument => {
+            let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, kind.as_str())
             else {
                 return Ok(Vec::new());
             };
-            prepare_raw_deflated_body_row(
-                sqlcmd,
-                server,
-                database,
-                body_path,
-                properties,
-                "Template body",
-                axes,
-            )
+            prepare_raw_template_body_row(body_path, properties, kind)
         }
-        "HTMLDocument" => {
-            prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties)
+        TemplateKind::HtmlDocument => {
+            prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties, axes)
         }
-        "SpreadsheetDocument" => prepare_spreadsheet_template_body_row(
-            sqlcmd, server, database, xml_path, properties, source,
+        TemplateKind::SpreadsheetDocument => prepare_spreadsheet_template_body_row(
+            sqlcmd, server, database, xml_path, properties, source, axes,
         ),
-        "AddIn" | "BinaryData" => {
-            prepare_binary_template_body_row(sqlcmd, server, database, xml_path, properties)
-        }
-        _ => Ok(Vec::new()),
+        TemplateKind::AddIn | TemplateKind::BinaryData => prepare_binary_template_body_row(
+            sqlcmd, server, database, xml_path, properties, kind, axes,
+        ),
     }
 }
 
+fn ensure_template_axes(axes: &CompileAxes) -> Result<()> {
+    if let Some(reason) = crate::compiler::unsupported_axes_reason(axes) {
+        Err(anyhow!("unsupported Template body: {reason}"))
+    } else {
+        Ok(())
+    }
+}
+
+fn prepare_raw_template_body_row(
+    body_path: PathBuf,
+    properties: &SimpleMetadataXmlProperties,
+    kind: TemplateKind,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let body_id = format!("{}.0", properties.uuid);
+    let bytes = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read {kind} Template body {}",
+            body_path.display()
+        )
+    })?;
+    let blob =
+        compile_evidenced_template(kind, TemplateSource::Bytes(&bytes)).with_context(|| {
+            format!(
+                "failed to compile base-free {kind} Template body {}",
+                body_path.display()
+            )
+        })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob_sha256: hex_sha256(&blob),
+        blob,
+    }])
+}
+
 fn prepare_spreadsheet_template_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    ensure_template_axes(axes)?;
     let body_path = infer_spreadsheet_template_body_path(xml_path);
     if !body_path.exists() {
         return Ok(Vec::new());
@@ -3961,30 +4036,13 @@ fn prepare_spreadsheet_template_body_row(
             body_path.display()
         )
     })?;
-    let base_blob = source.and_then(|_| {
-        fetch_config_blob_with_auth(sqlcmd, server, SqlAuth::integrated(), database, &body_id).ok()
-    });
-    if let Some(source) = source
-        && let Some(base_blob) = base_blob.as_ref()
-        && let Ok(object_refs) = source.moxel_object_refs()
-        && let Some(native_xml) =
-            crate::mssql_dump::extract_moxel_spreadsheet_xml(base_blob, &object_refs)
-        && native_xml == String::from_utf8_lossy(&xml)
-    {
-        return Ok(vec![PreparedMetadataBodyStage {
-            body_id,
-            path: body_path,
-            blob: base_blob.clone(),
-            blob_sha256: hex_sha256(base_blob),
-        }]);
-    }
-    let number_format_hint = base_blob
-        .as_ref()
-        .and_then(|blob| crate::mssql_dump::spreadsheet_number_format_hint_from_blob(blob));
-    let packed_with_hint = pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
-        &xml,
-        source,
-        number_format_hint.as_ref(),
+    let packed = compile_evidenced_template(
+        TemplateKind::SpreadsheetDocument,
+        TemplateSource::Spreadsheet {
+            xml: &xml,
+            source,
+            number_format_hint: None,
+        },
     )
     .with_context(|| {
         format!(
@@ -3992,31 +4050,11 @@ fn prepare_spreadsheet_template_body_row(
             body_path.display()
         )
     })?;
-    let packed = if number_format_hint.is_some() {
-        let source_xml = String::from_utf8_lossy(&xml);
-        let hinted_roundtrip_matches = source.and_then(|source| {
-            let object_refs = source.moxel_object_refs().ok()?;
-            crate::mssql_dump::extract_moxel_spreadsheet_xml(&packed_with_hint.blob, &object_refs)
-        }) == Some(source_xml.as_ref().to_string());
-        if hinted_roundtrip_matches {
-            packed_with_hint
-        } else {
-            pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(&xml, source, None)
-                .with_context(|| {
-                    format!(
-                        "failed to repack SpreadsheetDocument Template body without native number-format hint {}",
-                        body_path.display()
-                    )
-                })?
-        }
-    } else {
-        packed_with_hint
-    };
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
+        blob_sha256: hex_sha256(&packed),
+        blob: packed,
     }])
 }
 
@@ -4026,13 +4064,29 @@ fn prepare_html_template_body_row(
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    ensure_template_axes(axes)?;
     let body_path = infer_html_template_body_path(xml_path);
     if !body_path.exists() {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    prepare_help_blob_body_row(Path::new(""), "", "", body_id, body_path, "HTML Template")
+    let (pages, files) = read_help_source_parts(&body_path, "HTML Template")?;
+    let blob = compile_evidenced_template(
+        TemplateKind::HtmlDocument,
+        TemplateSource::Html {
+            pages: &pages,
+            files: &files,
+        },
+    )
+    .with_context(|| format!("failed to compile HTML Template {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob_sha256: hex_sha256(&blob),
+        blob,
+    }])
 }
 
 fn prepare_binary_template_body_row(
@@ -4041,7 +4095,10 @@ fn prepare_binary_template_body_row(
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    kind: TemplateKind,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    ensure_template_axes(axes)?;
     let body_path = infer_binary_template_body_path(xml_path);
     if !body_path.exists() {
         return Ok(Vec::new());
@@ -4053,17 +4110,18 @@ fn prepare_binary_template_body_row(
             body_path.display()
         )
     })?;
-    let packed = pack_base64_payload_blob_from_bytes(&bytes).with_context(|| {
-        format!(
-            "failed to pack binary Template body {}",
-            body_path.display()
-        )
-    })?;
+    let blob =
+        compile_evidenced_template(kind, TemplateSource::Bytes(&bytes)).with_context(|| {
+            format!(
+                "failed to pack binary Template body {}",
+                body_path.display()
+            )
+        })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
+        blob_sha256: hex_sha256(&blob),
+        blob,
     }])
 }
 
@@ -4662,6 +4720,21 @@ fn prepare_help_blob_body_row(
     body_path: PathBuf,
     label: &str,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let (pages, files) = read_help_source_parts(&body_path, label)?;
+    let packed = pack_help_blob_from_parts(&pages, &files)
+        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+fn read_help_source_parts(
+    body_path: &Path,
+    label: &str,
+) -> Result<(Vec<(String, Vec<u8>)>, Vec<(String, Vec<u8>)>)> {
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read {label} XML {}", body_path.display()))?;
     let page_names = parse_help_pages_from_xml(&xml)
@@ -4699,14 +4772,7 @@ fn prepare_help_blob_body_row(
         }
         files.sort_by(|left, right| left.0.cmp(&right.0));
     }
-    let packed = pack_help_blob_from_parts(&pages, &files)
-        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
-    Ok(vec![PreparedMetadataBodyStage {
-        body_id,
-        path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
-    }])
+    Ok((pages, files))
 }
 
 fn infer_help_body_id(properties: &SimpleMetadataXmlProperties) -> String {
@@ -7077,6 +7143,7 @@ mod tests {
         validate_storage_manifest,
     };
     use crate::cli::InfobaseConfigSourceVersion;
+    use crate::compiler::bodies::template::TemplateKind;
     #[cfg(feature = "mssql-live-tests")]
     use crate::module_blob::parse_simple_metadata_xml_properties;
     use crate::module_blob::{
@@ -7094,6 +7161,7 @@ mod tests {
     use anyhow::Context;
     #[cfg(feature = "mssql-live-tests")]
     use flate2::read::DeflateDecoder;
+    use std::collections::BTreeMap;
     use std::fs;
     #[cfg(feature = "mssql-live-tests")]
     use std::io::Read;
@@ -7297,6 +7365,7 @@ mod tests {
             owner_xml,
             &properties,
             Some(&source),
+            &test_compile_axes(),
         )?;
         let local_blob = local_rows
             .first()
@@ -7617,6 +7686,15 @@ mod tests {
 <Help xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" version="2.20">
 	<Page>index</Page>
 </Help>
+"#
+    }
+
+    fn sample_data_composition_template_xml() -> &'static [u8] {
+        br#"<?xml version="1.0" encoding="UTF-8"?>
+<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>
+	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings/></settingsVariant>
+</DataCompositionSchema>
 "#
     }
 
@@ -10499,7 +10577,7 @@ mod tests {
         );
         assert_eq!(row.source_path, "CommonTemplates/Web/Ext/Template.xml");
         assert!(!row.current_staging_fetches_base_blob);
-        assert!(row.reason.contains("does not need an active base blob"));
+        assert!(row.reason.contains("without reading an active base blob"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -11156,6 +11234,8 @@ mod tests {
             "missing-database",
             &template_xml,
             &properties,
+            TemplateKind::BinaryData,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11164,8 +11244,134 @@ mod tests {
         assert_eq!(rows[0].path, body_path);
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
-            hex_sha256(b"{#base64:UEsDBA==}")
+            hex_sha256(b"{1,\r\n{#base64:UEsDBA==}}")
         );
+        assert_eq!(
+            crate::compiler::bodies::template::decode_compatible_template(
+                TemplateKind::BinaryData,
+                &rows[0].blob,
+            )
+            .unwrap()
+            .exact_bytes(),
+            Some(b"PK\x03\x04".as_slice())
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn prepares_evidenced_dcs_template_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-dcs-template-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Schema.xml");
+        let body_path = root
+            .join("CommonTemplates")
+            .join("Schema")
+            .join("Ext")
+            .join("Template.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        let owner = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonTemplate uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties><Name>Schema</Name><TemplateType>DataCompositionSchema</TemplateType></Properties>
+  </CommonTemplate>
+</MetaDataObject>"#;
+        fs::write(&template_xml, owner).unwrap();
+        fs::write(&body_path, sample_data_composition_template_xml()).unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonTemplate",
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+            "Schema",
+        );
+
+        let rows = super::prepare_template_body_row(
+            Path::new("missing-sqlcmd-dcs-template-must-not-fetch"),
+            "missing-server",
+            "missing-database",
+            &template_xml,
+            owner,
+            &properties,
+            None,
+            &test_compile_axes(),
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, body_path);
+        let decoded = crate::compiler::bodies::template::decode_compatible_template(
+            TemplateKind::DataCompositionSchema,
+            &rows[0].blob,
+        )
+        .unwrap();
+        assert_eq!(
+            decoded.data_composition().unwrap().layout(),
+            crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument
+        );
+        let exported = crate::mssql_dump::normalize_data_composition_schema_template_xml(
+            decoded.data_composition().unwrap().plaintext(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(
+            String::from_utf8(exported)
+                .unwrap()
+                .contains("<name>Source1</name>")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unknown_template_kind_blocks_staging_and_readiness() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-unknown-template-kind-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let template_xml = root.join("CommonTemplates").join("Future.xml");
+        fs::create_dir_all(template_xml.parent().unwrap()).unwrap();
+        let owner = br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21">
+  <CommonTemplate uuid="dddddddd-dddd-4ddd-dddd-dddddddddddd">
+    <Properties><Name>Future</Name><TemplateType>FutureTemplate</TemplateType></Properties>
+  </CommonTemplate>
+</MetaDataObject>"#;
+        fs::write(&template_xml, owner).unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonTemplate",
+            "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+            "Future",
+        );
+
+        let error = super::prepare_template_body_row(
+            Path::new("missing-sqlcmd-unknown-template-must-not-run"),
+            "missing-server",
+            "missing-database",
+            &template_xml,
+            owner,
+            &properties,
+            None,
+            &test_compile_axes(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("FutureTemplate"));
+
+        let report = super::source_bootstrap_readiness_report(
+            &root,
+            std::slice::from_ref(&template_xml),
+            &[],
+        )
+        .unwrap();
+        let row = report
+            .rows
+            .iter()
+            .find(|row| row.row_kind == "template_unsupported_body")
+            .unwrap();
+        assert_eq!(row.generation, "requires_base_blob");
+        assert!(!row.current_staging_fetches_base_blob);
+        assert!(row.reason.contains("FutureTemplate"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -11198,6 +11404,7 @@ mod tests {
             &template_xml,
             &properties,
             None,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11314,6 +11521,7 @@ mod tests {
             "missing-database",
             &template_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 

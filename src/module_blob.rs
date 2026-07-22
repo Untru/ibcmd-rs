@@ -24490,7 +24490,7 @@ fn deflate_raw(input: &[u8]) -> Result<Vec<u8>> {
     encoder.finish().context("failed to finish deflate stream")
 }
 
-fn encode_base64(bytes: &[u8]) -> String {
+pub(crate) fn encode_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -24513,7 +24513,7 @@ fn encode_base64(bytes: &[u8]) -> String {
     output
 }
 
-fn decode_base64_mime(input: &str) -> Option<Vec<u8>> {
+pub(crate) fn decode_base64_mime(input: &str) -> Option<Vec<u8>> {
     let values = input
         .bytes()
         .filter(|byte| !byte.is_ascii_whitespace())

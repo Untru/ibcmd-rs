@@ -543,13 +543,8 @@ pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let inflated = inflate_raw_deflate(bytes).ok()?;
-    if !inflated.starts_with(b"MOXCEL") {
-        return None;
-    }
-    let text = String::from_utf8(inflated).ok()?;
-    let body_start = text.find("{8,")?;
-    let spreadsheet = parse_moxel_spreadsheet_text(&text[body_start..], object_refs)?;
+    let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
+    let spreadsheet = parse_moxel_spreadsheet_text(body.native_body_text(), object_refs)?;
     Some(format_moxel_spreadsheet_xml(&spreadsheet))
 }
 
@@ -970,6 +965,7 @@ pub(super) fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnS
     }]
 }
 
+#[cfg(test)]
 pub(super) fn parse_moxel_column_sets(
     fields: &[&str],
 ) -> (Vec<MoxelColumnSet>, BTreeMap<usize, String>, Option<usize>) {
@@ -3193,6 +3189,7 @@ pub(super) fn parse_moxel_number_format_refs(
     Vec::new()
 }
 
+#[cfg(all(test, feature = "mssql-live-tests"))]
 pub(super) fn spreadsheet_number_format_hint_from_text(
     raw_text: &str,
 ) -> Option<SpreadsheetNumberFormatHint> {
@@ -3308,14 +3305,6 @@ pub(super) fn spreadsheet_number_format_hint_from_text(
         }
     }
     None
-}
-
-pub(crate) fn spreadsheet_number_format_hint_from_blob(
-    blob: &[u8],
-) -> Option<SpreadsheetNumberFormatHint> {
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let raw_text = String::from_utf8(inflated).ok()?;
-    spreadsheet_number_format_hint_from_text(&raw_text)
 }
 
 #[cfg(all(test, feature = "mssql-live-tests"))]

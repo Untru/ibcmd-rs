@@ -25,15 +25,15 @@ const DATA_COMPOSITION_SCHEMA_DOCUMENT_PREFIX: &str = "\u{feff}<?xml version=\"1
 const DATA_COMPOSITION_SCHEMA_DOCUMENT_SUFFIX: &str = "\r\n</DataCompositionSchema>";
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) enum DcsTypeResolution {
+pub(crate) enum DcsTypeResolution {
     KeepId,
     Type { qname: String },
     TypeSet { qname: String },
 }
 
-pub(super) type DcsTypeIndex = BTreeMap<String, DcsTypeResolution>;
+pub(crate) type DcsTypeIndex = BTreeMap<String, DcsTypeResolution>;
 
-pub(super) fn normalize_data_composition_schema_template_xml(
+pub(crate) fn normalize_data_composition_schema_template_xml(
     inflated: &[u8],
     type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,

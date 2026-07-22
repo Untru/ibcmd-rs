@@ -394,7 +394,7 @@
 
 ### BOOT-012 — Base-free template codecs MXL/DCS и прочих bodies
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002, CF-005
+- **Статус:** `[x]`; **зависимости:** BOOT-002, CF-005
 - **Файлы:** создать `src/compiler/bodies/mxl.rs`, `dcs.rs`, `template.rs`; адаптировать `src/mssql_dump/moxel.rs`, `dcs.rs`
 - **Действия:** compile supported template types, preserve binary identity and nested containers.
 - **Проверка:** fixture на каждый заявленный template kind; semantic roundtrip; unknown template blocks bootstrap.

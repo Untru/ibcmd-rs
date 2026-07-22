@@ -19,10 +19,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::adapters::mssql_legacy::MssqlLegacyAdapter;
 use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
-use crate::module_blob::{
-    LocalizedString, ParsedFormBodyBlob, SpreadsheetNumberFormatHint, parse_form_body_blob,
-    unpack_module_blob_text,
-};
+#[cfg(all(test, feature = "mssql-live-tests"))]
+use crate::module_blob::{LocalizedString, SpreadsheetNumberFormatHint};
+use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
 use crate::parallel;
 
 mod command_interface;
@@ -43,7 +42,7 @@ mod timing;
 use command_interface::*;
 use config_dump_info::*;
 use config_rows::*;
-use dcs::*;
+pub(crate) use dcs::*;
 use fetch::*;
 use form_body::*;
 use forms::*;
@@ -62,11 +61,11 @@ pub(crate) fn resolve_form_item_picture_owner(
 }
 
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
+pub(crate) use moxel::extract_moxel_spreadsheet_xml;
 #[cfg(all(test, feature = "mssql-live-tests"))]
 pub(crate) use moxel::{
     debug_moxel_number_format_usage, debug_moxel_spreadsheet_summary_from_blob,
 };
-pub(crate) use moxel::{extract_moxel_spreadsheet_xml, spreadsheet_number_format_hint_from_blob};
 
 pub use timing::{
     MssqlDumpTableTimingSummary, MssqlDumpTimingReport, MssqlDumpTimingSummary,

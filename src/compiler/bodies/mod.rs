@@ -8,10 +8,13 @@ use ibcmd_core::profile::EffectiveProfile;
 use ibcmd_core::version::PlatformBuild;
 
 pub mod command_interface;
+pub mod dcs;
 pub mod form;
+pub mod mxl;
 pub mod predefined;
 pub mod rights;
 pub mod support;
+pub mod template;
 
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 
@@ -150,10 +153,13 @@ impl Error for BodyProfileError {}
 mod tests {
     use super::*;
     use crate::compiler::bodies::command_interface::CommandInterfaceCodecProfile;
+    use crate::compiler::bodies::dcs::DcsCodecProfile;
     use crate::compiler::bodies::form::ManagedFormCodecProfile;
+    use crate::compiler::bodies::mxl::MxlCodecProfile;
     use crate::compiler::bodies::predefined::PredefinedCodecProfile;
     use crate::compiler::bodies::rights::RightsCodecProfile;
     use crate::compiler::bodies::support::SupportPolicyProfile;
+    use crate::compiler::bodies::template::TemplateCodecProfile;
 
     #[test]
     fn bundled_profile_selects_only_the_evidenced_body_cohort() {
@@ -165,6 +171,9 @@ mod tests {
         assert!(PredefinedCodecProfile::from_effective(supported).is_ok());
         assert!(CommandInterfaceCodecProfile::from_effective(supported).is_ok());
         assert!(ManagedFormCodecProfile::from_effective(supported).is_ok());
+        assert!(MxlCodecProfile::from_effective(supported).is_ok());
+        assert!(DcsCodecProfile::from_effective(supported).is_ok());
+        assert!(TemplateCodecProfile::from_effective(supported).is_ok());
         assert!(SupportPolicyProfile::from_effective(supported).is_ok());
 
         for id in ["platform-8.3.24.1819", "platform-8.5.1.1150"] {
@@ -173,6 +182,9 @@ mod tests {
             assert!(PredefinedCodecProfile::from_effective(profile).is_err());
             assert!(CommandInterfaceCodecProfile::from_effective(profile).is_err());
             assert!(ManagedFormCodecProfile::from_effective(profile).is_err());
+            assert!(MxlCodecProfile::from_effective(profile).is_err());
+            assert!(DcsCodecProfile::from_effective(profile).is_err());
+            assert!(TemplateCodecProfile::from_effective(profile).is_err());
             assert!(SupportPolicyProfile::from_effective(profile).is_err());
         }
     }

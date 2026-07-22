@@ -1199,12 +1199,17 @@ pub(super) fn write_source_asset(
             )?;
         }
         SourceAssetKind::DataCompositionSchema => {
-            let inflated = inflate_raw_deflate(bytes).with_context(|| {
+            let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+                crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+                bytes,
+            )
+            .with_context(|| {
                 format!(
-                    "failed to inflate source asset {}",
+                    "failed to decode data-composition source asset {}",
                     asset.primary_path.display()
                 )
             })?;
+            let inflated = body.plaintext().to_vec();
             let content = normalize_data_composition_schema_template_xml(
                 &inflated,
                 context.dcs_type_index,
