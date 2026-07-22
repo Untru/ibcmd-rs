@@ -26,4 +26,3 @@ Any research-only oracle integration MUST be compile-time isolated from default/
 
 - **WHEN** a release artifact is built
 - **THEN** it contains no platform executable, EDT JAR, JNI/OSGi bridge or code path that probes an installed 1C distribution
-

@@ -27,4 +27,3 @@ Portable tests MUST run on Windows and Linux with no platform components availab
 
 - **WHEN** the clean-environment smoke suite runs
 - **THEN** the test fails and reports the attempted executable
-

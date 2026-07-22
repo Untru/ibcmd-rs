@@ -213,4 +213,3 @@ Compatibility report генерируется из `operation x artifact x sourc
 - Generated type IDs, `root`, `version` и `versions` — самостоятельные компиляторы.
 - Формы, MXL/DCS, права, predefined и support/signature data требуют отдельных codecs.
 - Downgrade в общем случае lossy и не может быть обещан для произвольной конфигурации.
-

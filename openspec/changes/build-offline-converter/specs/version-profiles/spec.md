@@ -35,4 +35,3 @@ Artifact detection MUST return evidence and distinguish exact, ambiguous and unk
 
 - **WHEN** the user does not specify a target profile
 - **THEN** preflight fails and lists the competing profiles and evidence
-

@@ -40,4 +40,3 @@ The system MUST distinguish inspect, repack, export, overlay, bootstrap and cros
 - **GIVEN** one required entry is `NeedsBase`
 - **WHEN** XML-to-new-CF is requested
 - **THEN** the build is rejected, while an explicitly supplied base-CF overlay may remain available
-

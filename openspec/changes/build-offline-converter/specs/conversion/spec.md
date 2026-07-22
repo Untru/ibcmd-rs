@@ -29,4 +29,3 @@ Every warning or loss MUST contain a stable code, object/property path, source/t
 - **THEN** conversion fails
 - **WHEN** explicit `drop` is used and the codec declares the drop safe
 - **THEN** the property is removed and recorded in the report
-

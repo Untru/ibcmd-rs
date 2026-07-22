@@ -34,4 +34,3 @@ Unknown data MUST be stored as anchored opaque facets with source profile, media
 
 - **WHEN** no migration rule exists for an opaque facet
 - **THEN** conversion fails by default instead of copying or dropping it silently
-

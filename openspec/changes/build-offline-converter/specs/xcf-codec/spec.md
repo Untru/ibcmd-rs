@@ -27,4 +27,3 @@ The writer MUST reject traversal/duplicate paths, run complete preflight and pub
 #### Scenario: One object cannot be encoded
 
 - **THEN** no partial output tree replaces the destination
-

@@ -166,7 +166,7 @@
 
 ### XML-005 — Перевести Constant как pilot codec
 
-- **Статус:** `[ ]`; **зависимости:** XML-004, CORE-010
+- **Статус:** `[x]`; **зависимости:** XML-004, CORE-010
 - **Файлы:** создать `crates/ibcmd-xml/src/metadata/constant.rs`; изменить Constant routing в `src/mssql_dump/mod.rs`
 - **Действия:** XML 2.20/2.21 ↔ IR без base blob; shadow comparison со старым formatter.
 - **Проверка:** semantic equality, сохранение unknown sibling, отсутствие regressions в существующих Constant fixtures.
