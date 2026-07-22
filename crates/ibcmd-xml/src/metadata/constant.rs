@@ -29,6 +29,7 @@ use crate::{
 const CONSTANT_FAMILY: &str = "Constant";
 const PROFILE_220: &str = "xml-2.20";
 const PROFILE_221: &str = "xml-2.21";
+const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 
 /// Registers the exact `Constant` family codec in a caller-owned registry.
 pub fn register_constant_codec(
@@ -1010,6 +1011,10 @@ fn patch_generated_container(
         if let XmlNode::Element(child) = node
             && typed(child, "GeneratedType", expected, uris)
         {
+            if generated_type_is_placeholder(child, uris, expected)? {
+                children.push(node.clone());
+                continue;
+            }
             let source_type = source
                 .get(*index)
                 .ok_or_else(|| invalid_model(path, "generated type source slot"))?;
@@ -1030,6 +1035,23 @@ fn patch_generated_container(
         }
     }
     Ok(container.with_children(children))
+}
+
+fn generated_type_is_placeholder(
+    element: &XmlElement,
+    uris: &ResolvedNamespaces,
+    expected: Option<&str>,
+) -> Result<bool, MetadataEncodeError> {
+    for node in element.children() {
+        if let XmlNode::Element(child) = node
+            && typed(child, "TypeId", expected, uris)
+        {
+            return Ok(element_text(child)
+                .map_err(decode_to_encode)?
+                .is_some_and(|value| value.trim() == NIL_UUID));
+        }
+    }
+    Ok(false)
 }
 
 fn patch_generated_type(
@@ -1641,6 +1663,70 @@ mod tests {
         assert!(text.contains(&format!("<xr:ValueId>{VALUE_UUID}</xr:ValueId>")));
         assert!(text.contains("<f:Future f:flag='yes'>opaque&amp;</f:Future>"));
         decode(&output, "2.21");
+    }
+
+    #[test]
+    fn nil_generated_type_placeholder_remains_opaque_and_byte_exact() {
+        let input = String::from_utf8(boolean_fixture("2.20", false))
+            .unwrap()
+            .replace(TYPE_UUID, NIL_UUID)
+            .into_bytes();
+        let envelope = decode(&input, "2.20");
+        assert!(envelope.root().generated_types().is_empty());
+        assert_eq!(
+            bundled_metadata_registry()
+                .encode(&envelope, &profile("2.20"))
+                .unwrap(),
+            input
+        );
+        let expected_cross = String::from_utf8(input)
+            .unwrap()
+            .replace("version=\"2.20\"", "version=\"2.21\"")
+            .into_bytes();
+        assert_eq!(
+            bundled_metadata_registry()
+                .encode(&envelope, &profile("2.21"))
+                .unwrap(),
+            expected_cross
+        );
+    }
+
+    #[test]
+    fn mixed_nil_and_valid_generated_types_keep_canonical_alignment() {
+        let valid_start =
+            "\t\t\t<xr:GeneratedType name=\"ConstantManager.UseFeature\" category=\"Manager\">";
+        let placeholder = format!(
+            "\t\t\t<xr:GeneratedType name=\"Placeholder\" category=\"Manager\">\r\n\
+\t\t\t\t<xr:TypeId>{NIL_UUID}</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>{NIL_UUID}</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n"
+        );
+        let input = String::from_utf8(boolean_fixture("2.20", false))
+            .unwrap()
+            .replacen(valid_start, &format!("{placeholder}{valid_start}"), 1)
+            .into_bytes();
+        let envelope = decode(&input, "2.20");
+        assert_eq!(envelope.root().generated_types().len(), 1);
+        assert_eq!(
+            envelope.root().generated_types()[0].uuid().to_string(),
+            TYPE_UUID
+        );
+        assert_eq!(
+            bundled_metadata_registry()
+                .encode(&envelope, &profile("2.20"))
+                .unwrap(),
+            input
+        );
+        let expected_cross = String::from_utf8(input)
+            .unwrap()
+            .replace("version=\"2.20\"", "version=\"2.21\"")
+            .into_bytes();
+        assert_eq!(
+            bundled_metadata_registry()
+                .encode(&envelope, &profile("2.21"))
+                .unwrap(),
+            expected_cross
+        );
     }
 
     #[test]

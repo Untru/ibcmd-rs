@@ -29442,8 +29442,10 @@ fn constant_canonical_shadow_matches_legacy_bytes_and_semantics() {
             legacy_20.as_bytes()
         );
 
-        let validated_20 = validate_configuration(&envelope_20.configuration().unwrap()).unwrap();
-        let validated_21 = validate_configuration(&envelope_21.configuration().unwrap()).unwrap();
+        let configuration_20 = envelope_20.configuration().unwrap();
+        let configuration_21 = envelope_21.configuration().unwrap();
+        let validated_20 = validate_configuration(&configuration_20).unwrap();
+        let validated_21 = validate_configuration(&configuration_21).unwrap();
         assert_eq!(
             semantic_digest(&validated_20),
             semantic_digest(&validated_21)

@@ -934,6 +934,21 @@ fn decode_generated_types(
         let category = category.unwrap_or("generated");
         let uuid =
             ObjectUuid::parse(&type_id).map_err(|_| MetadataDecodeError::InvalidUuid(type_id))?;
+        if uuid.as_bytes().iter().all(|byte| *byte == 0) {
+            // Legacy storage can expose an all-zero placeholder in a generated
+            // type slot. It is not a graph identity, so retain the complete XML
+            // projection as opaque data instead of inventing a replacement ID.
+            retain_as(
+                node,
+                ordinal,
+                profile,
+                path,
+                layout.projection_anchor,
+                layout.projection_placement,
+                facets,
+            )?;
+            continue;
+        }
         if !generated.insert(uuid) {
             return Err(MetadataDecodeError::Duplicate("GeneratedType UUID"));
         }
