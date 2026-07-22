@@ -1334,6 +1334,12 @@ pub enum StoragePatchBuildError {
     RetainedBytesExceeded { maximum: usize, actual: usize },
     /// The same target key and part index occur more than once.
     DuplicateTarget { key: String, part_index: u32 },
+    /// Parts of one target key disagree about their declared part count.
+    ConflictingPartCount {
+        key: String,
+        expected: u32,
+        actual: u32,
+    },
 }
 
 impl Display for StoragePatchBuildError {
@@ -1354,6 +1360,14 @@ impl Display for StoragePatchBuildError {
             Self::DuplicateTarget { key, part_index } => write!(
                 formatter,
                 "duplicate storage patch target `{key}` part {part_index}"
+            ),
+            Self::ConflictingPartCount {
+                key,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "storage patch target `{key}` declares both {expected} and {actual} parts"
             ),
         }
     }
@@ -1767,6 +1781,7 @@ fn validate_patch_with_limits(
     }
 
     let mut targets = BTreeSet::<(&StorageKey, u32)>::new();
+    let mut part_counts = BTreeMap::<&StorageKey, u32>::new();
     let mut retained_bytes = 0_usize;
     for entry in entries {
         let part_index = entry.target.multipart.part_index;
@@ -1775,6 +1790,20 @@ fn validate_patch_with_limits(
                 key: entry.target.key.as_str().to_owned(),
                 part_index,
             });
+        }
+        let part_count = entry.target.multipart.part_count;
+        match part_counts.entry(&entry.target.key) {
+            Entry::Vacant(slot) => {
+                slot.insert(part_count);
+            }
+            Entry::Occupied(slot) if *slot.get() != part_count => {
+                return Err(StoragePatchBuildError::ConflictingPartCount {
+                    key: entry.target.key.as_str().to_owned(),
+                    expected: *slot.get(),
+                    actual: part_count,
+                });
+            }
+            Entry::Occupied(_) => {}
         }
         retained_bytes =
             checked_patch_retained_bytes(retained_bytes, entry, maximum_retained_bytes)?;
@@ -1910,6 +1939,49 @@ mod tests {
                 key,
                 part_index: 0
             }) if key == "same"
+        ));
+    }
+
+    #[test]
+    fn storage_patch_accepts_partial_multipart_overlay() {
+        let partial = StoragePatch::new(vec![
+            StoragePatchEntry::new(
+                patch_target("partial", 0, 3, "compiler:first-part"),
+                StoragePatchOutcome::compiled(vec![1]).unwrap(),
+            ),
+            StoragePatchEntry::new(
+                patch_target("partial", 2, 3, "compiler:last-part"),
+                StoragePatchOutcome::compiled(vec![3]).unwrap(),
+            ),
+        ])
+        .unwrap();
+
+        assert_eq!(partial.len(), 2);
+        assert_eq!(partial.entries()[0].target().multipart().part_index(), 0);
+        assert_eq!(partial.entries()[1].target().multipart().part_index(), 2);
+        assert!(partial.preflight().is_ok());
+    }
+
+    #[test]
+    fn storage_patch_rejects_conflicting_part_counts_for_one_key() {
+        let conflicting = StoragePatch::new(vec![
+            StoragePatchEntry::new(
+                patch_target("conflict", 0, 2, "compiler:first"),
+                StoragePatchOutcome::compiled(vec![1]).unwrap(),
+            ),
+            StoragePatchEntry::new(
+                patch_target("conflict", 1, 3, "compiler:second"),
+                StoragePatchOutcome::compiled(vec![2]).unwrap(),
+            ),
+        ]);
+
+        assert!(matches!(
+            conflicting,
+            Err(StoragePatchBuildError::ConflictingPartCount {
+                key,
+                expected: 2,
+                actual: 3
+            }) if key == "conflict"
         ));
     }
 
