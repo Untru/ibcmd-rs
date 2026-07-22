@@ -174,7 +174,7 @@
 
 ### XML-006 — Добавить versioned XML corpus и 2.20/2.21 delta tests
 
-- **Статус:** `[ ]`; **зависимости:** XML-003–XML-005
+- **Статус:** `[x]`; **зависимости:** XML-003–XML-005
 - **Файлы:** создать `tests/fixtures/xml/{2.17,2.20,2.21}/`, `tests/xml_profiles.rs`
 - **Действия:** минимальная configuration/module/object-with-child fixture на диалект; expected namespaces/order/defaults.
 - **Проверка:** parse→emit→parse, UUID/order/opaque preservation; root-version-only conversion тестом запрещена.
