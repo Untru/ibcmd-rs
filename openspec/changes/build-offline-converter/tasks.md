@@ -346,7 +346,7 @@
 
 ### BOOT-006 — Base-free codecs Report/DataProcessor/Enum/Settings
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002
+- **Статус:** `[x]` (4/4: Report, DataProcessor, Enum, SettingsStorage); **зависимости:** BOOT-002
 - **Файлы:** создать `src/compiler/families/report.rs`, `data_processor.rs`, `enum.rs`, `settings.rs`
 - **Действия:** metadata roots/children/assets refs для cohort.
 - **Проверка:** XML→storage→XML semantic roundtrip; generated types и child order стабильны.

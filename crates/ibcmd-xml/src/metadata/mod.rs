@@ -11,6 +11,7 @@ mod language;
 mod registry;
 mod services;
 mod session_parameter;
+mod utility_objects;
 
 pub use business_objects::{register_catalog_codec, register_document_codec};
 pub use common::{
@@ -31,3 +32,7 @@ pub use services::{
     register_ws_reference_codec, register_xdto_package_codec,
 };
 pub use session_parameter::register_session_parameter_codec;
+pub use utility_objects::{
+    register_data_processor_codec, register_enum_codec, register_report_codec,
+    register_settings_storage_codec,
+};

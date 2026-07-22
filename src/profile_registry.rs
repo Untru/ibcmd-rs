@@ -325,6 +325,22 @@ mod tests {
                     "document-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.data_processor.layout"].value,
+                    "data-processor-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
+                    profile.constants["bootstrap.metadata.enum.layout"].value,
+                    "enum-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
+                    profile.constants["bootstrap.metadata.report.layout"].value,
+                    "report-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
+                    profile.constants["bootstrap.metadata.settings_storage.layout"].value,
+                    "settings-storage-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
                     profile.storage_profile.as_ref().unwrap().value.as_str(),
                     "storage:mssql-config-configsave"
                 );

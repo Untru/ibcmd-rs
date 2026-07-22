@@ -400,12 +400,12 @@ fn decode_business_object(
     MetadataEnvelope::from_parts(root, descendants, document.clone())
 }
 
-struct ObjectSections<'a> {
-    properties: &'a XmlElement,
-    children: &'a XmlElement,
+pub(super) struct ObjectSections<'a> {
+    pub(super) properties: &'a XmlElement,
+    pub(super) children: &'a XmlElement,
 }
 
-fn exact_object_sections<'a>(
+pub(super) fn exact_object_sections<'a>(
     object: &'a XmlElement,
     family: &str,
     uris: &ResolvedNamespaces,
@@ -438,7 +438,7 @@ fn exact_object_sections<'a>(
     })
 }
 
-fn exact_property_map<'a>(
+pub(super) fn exact_property_map<'a>(
     properties: &'a XmlElement,
     expected_names: &[&'static str],
     uris: &ResolvedNamespaces,
@@ -597,7 +597,7 @@ fn project_root_properties(
     Ok(())
 }
 
-fn project_name_only_children(
+pub(super) fn project_name_only_children(
     parts: &mut CanonicalObjectParts,
     family: &str,
     owner_name: String,
@@ -657,7 +657,7 @@ fn project_name_only_children(
     Ok(())
 }
 
-fn collect_embedded_elements<'a>(
+pub(super) fn collect_embedded_elements<'a>(
     children: &'a XmlElement,
     uris: &ResolvedNamespaces,
 ) -> Result<BTreeMap<ObjectUuid, &'a XmlElement>, MetadataDecodeError> {
@@ -759,7 +759,7 @@ fn project_attribute(
     Ok(())
 }
 
-fn project_type(
+pub(super) fn project_type(
     parts: &mut CanonicalObjectParts,
     element: &XmlElement,
     uris: &ResolvedNamespaces,
@@ -849,7 +849,7 @@ fn project_tabular_section(
     Ok(())
 }
 
-fn project_command(
+pub(super) fn project_command(
     parts: &mut CanonicalObjectParts,
     element: &XmlElement,
     uris: &ResolvedNamespaces,
@@ -868,7 +868,7 @@ fn project_command(
     Ok(())
 }
 
-fn required_properties<'a>(
+pub(super) fn required_properties<'a>(
     object: &'a XmlElement,
     uris: &ResolvedNamespaces,
 ) -> Result<&'a XmlElement, MetadataDecodeError> {
@@ -894,7 +894,7 @@ fn required_properties<'a>(
     result.ok_or(MetadataDecodeError::Missing("embedded Properties"))
 }
 
-fn push_text(
+pub(super) fn push_text(
     parts: &mut CanonicalObjectParts,
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
@@ -907,7 +907,7 @@ fn push_text(
     Ok(())
 }
 
-fn push_bool(
+pub(super) fn push_bool(
     parts: &mut CanonicalObjectParts,
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
@@ -950,7 +950,7 @@ fn push_u32(
     Ok(())
 }
 
-fn push_enum(
+pub(super) fn push_enum(
     parts: &mut CanonicalObjectParts,
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
@@ -1026,7 +1026,7 @@ fn push_field_collection(
     Ok(())
 }
 
-fn push_localized(
+pub(super) fn push_localized(
     parts: &mut CanonicalObjectParts,
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
@@ -1084,7 +1084,7 @@ fn nested_text(
     result.ok_or(MetadataDecodeError::Missing(local))
 }
 
-fn text_field(
+pub(super) fn text_field(
     map: &BTreeMap<&str, &XmlElement>,
     name: &str,
 ) -> Result<String, MetadataDecodeError> {
@@ -1093,7 +1093,7 @@ fn text_field(
     ))
 }
 
-fn require_empty(element: &XmlElement, _name: &str) -> Result<(), MetadataDecodeError> {
+pub(super) fn require_empty(element: &XmlElement, _name: &str) -> Result<(), MetadataDecodeError> {
     if element.children().iter().any(|node| match node {
         XmlNode::Element(_) => true,
         XmlNode::Text(text) => !text.value().trim().is_empty(),
@@ -1106,7 +1106,7 @@ fn require_empty(element: &XmlElement, _name: &str) -> Result<(), MetadataDecode
     Ok(())
 }
 
-fn only_element_child<'a>(
+pub(super) fn only_element_child<'a>(
     parent: &'a XmlElement,
     label: &'static str,
 ) -> Result<&'a XmlElement, MetadataDecodeError> {
