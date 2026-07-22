@@ -343,6 +343,10 @@ mod tests {
                     profile.constants["bootstrap.metadata.session_parameter.layout"].value,
                     "session-parameter-v1-crlf-no-bom"
                 );
+                assert_eq!(
+                    profile.constants["bootstrap.metadata.xdto_package.layout"].value,
+                    "xdto-package-v1-crlf-no-bom"
+                );
             } else {
                 assert!(profile.constants.is_empty());
             }

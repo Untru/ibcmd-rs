@@ -29,6 +29,7 @@ use crate::{AttributeKind, LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlW
 
 const SCHEDULED_JOB_FAMILY: &str = "ScheduledJob";
 const EVENT_SUBSCRIPTION_FAMILY: &str = "EventSubscription";
+const XDTO_PACKAGE_FAMILY: &str = "XDTOPackage";
 
 /// Registers the strict `ScheduledJob` codec.
 pub fn register_scheduled_job_codec(
@@ -48,12 +49,48 @@ pub fn register_event_subscription_codec(
     }))
 }
 
+/// Registers the strict `XDTOPackage` metadata codec.
+pub fn register_xdto_package_codec(
+    registry: &mut MetadataRegistry,
+) -> Result<(), MetadataRegistryError> {
+    registry.register(Box::new(XdtoPackageCodec {
+        family: FamilyId::parse(XDTO_PACKAGE_FAMILY).expect("family id is stable"),
+    }))
+}
+
 struct ScheduledJobCodec {
     family: FamilyId,
 }
 
 struct EventSubscriptionCodec {
     family: FamilyId,
+}
+
+struct XdtoPackageCodec {
+    family: FamilyId,
+}
+
+impl MetadataFamilyCodec for XdtoPackageCodec {
+    fn family_id(&self) -> &FamilyId {
+        &self.family
+    }
+
+    fn decode(
+        &self,
+        document: &XmlDocument,
+        source: ProfileId,
+        path: ObjectPath,
+    ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        decode_xdto_package(document, source, path)
+    }
+
+    fn encode(
+        &self,
+        envelope: &MetadataEnvelope,
+        target: &ProfileId,
+    ) -> Result<Vec<u8>, MetadataEncodeError> {
+        encode_xdto_package(envelope, target)
+    }
 }
 
 impl MetadataFamilyCodec for EventSubscriptionCodec {
@@ -126,6 +163,12 @@ struct EventSubscriptionProjection {
     sources: Vec<EventSourceProjection>,
     event: String,
     handler: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct XdtoPackageProjection {
+    comment: String,
+    namespace: String,
 }
 
 fn decode_scheduled_job(
@@ -224,6 +267,46 @@ fn decode_event_subscription(
         (
             "Handler",
             CanonicalValue::text(canonical_text(&projection.handler)?),
+        ),
+    ] {
+        parts.properties.push(canonical_field(name, value)?);
+    }
+    let root = CanonicalObject::new(parts)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
+    MetadataEnvelope::from_parts(root, Vec::new(), document.clone())
+}
+
+fn decode_xdto_package(
+    document: &XmlDocument,
+    source: ProfileId,
+    path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    validate_decode_profile(document, &source, &path)?;
+    let projection = project_xdto_package(document)?;
+    let generic = decode_metadata_envelope(document, source, path)?;
+    if generic.root().kind().as_str() != XDTO_PACKAGE_FAMILY {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "XDTOPackage codec requires its exact family",
+        ));
+    }
+    if !generic.descendants().is_empty()
+        || !generic.root().generated_types().is_empty()
+        || !generic.root().references().is_empty()
+        || !generic.root().assets().is_empty()
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "XDTOPackage metadata cannot contain children, generated types, references, or inline assets",
+        ));
+    }
+    let mut parts = copy_object_parts(generic.root());
+    for (name, value) in [
+        (
+            "Comment",
+            CanonicalValue::text(canonical_text(&projection.comment)?),
+        ),
+        (
+            "Namespace",
+            CanonicalValue::text(canonical_text(&projection.namespace)?),
         ),
     ] {
         parts.properties.push(canonical_field(name, value)?);
@@ -429,6 +512,34 @@ fn valid_identifier(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_whitespace) && !value.contains('.')
 }
 
+fn project_xdto_package(
+    document: &XmlDocument,
+) -> Result<XdtoPackageProjection, MetadataDecodeError> {
+    let uris = resolve_namespaces(document.root())?;
+    let expected = uri_of(document.root(), &uris);
+    if !matches!(expected, None | Some(MD_NAMESPACE)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "XDTOPackage root namespace",
+        ));
+    }
+    reject_attributes(document.root(), &["version"])?;
+    let object = required_child(document.root(), XDTO_PACKAGE_FAMILY, expected, &uris)?;
+    reject_attributes(object, &["uuid"])?;
+    let properties = exact_properties_child(object, expected, &uris)?;
+    reject_attributes(properties, &[])?;
+    reject_xdto_package_properties(properties, expected, &uris)?;
+    let namespace = required_text(properties, "Namespace", expected, &uris)?;
+    if namespace.is_empty() || namespace.chars().any(char::is_whitespace) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "XDTOPackage Namespace is empty or contains whitespace",
+        ));
+    }
+    Ok(XdtoPackageProjection {
+        comment: required_text(properties, "Comment", expected, &uris)?,
+        namespace,
+    })
+}
+
 fn exact_properties_child<'a>(
     object: &'a XmlElement,
     expected: Option<&str>,
@@ -530,6 +641,42 @@ fn reject_event_subscription_properties(
                 "Source" => "Source",
                 "Event" => "Event",
                 "Handler" => "Handler",
+                _ => unreachable!("allowed property matched above"),
+            }));
+        }
+    }
+    for required in REQUIRED {
+        if !seen.contains(required) {
+            return Err(MetadataDecodeError::Missing(required));
+        }
+    }
+    Ok(())
+}
+
+fn reject_xdto_package_properties(
+    properties: &XmlElement,
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<(), MetadataDecodeError> {
+    const REQUIRED: [&str; 4] = ["Name", "Synonym", "Comment", "Namespace"];
+    let mut seen = BTreeSet::new();
+    for node in properties.children() {
+        let XmlNode::Element(child) = node else {
+            continue;
+        };
+        let local = child.name().local();
+        if !REQUIRED.contains(&local) || !typed(child, local, expected, uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "unknown XDTOPackage property",
+            ));
+        }
+        reject_attributes_recursive(child)?;
+        if !seen.insert(local) {
+            return Err(MetadataDecodeError::Duplicate(match local {
+                "Name" => "Name",
+                "Synonym" => "Synonym",
+                "Comment" => "Comment",
+                "Namespace" => "Namespace",
                 _ => unreachable!("allowed property matched above"),
             }));
         }
@@ -700,6 +847,49 @@ fn encode_event_subscription(
         return Err(invalid_model(
             &path,
             "EventSubscription semantic mutation is not implemented",
+        ));
+    }
+    let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
+        == target_version
+    {
+        envelope.source_document().root().clone()
+    } else {
+        set_unprefixed_attribute(
+            envelope.source_document().root(),
+            "version",
+            target_version,
+            &path,
+        )?
+    };
+    XmlWriter::to_vec(
+        &envelope.source_document().with_root(root),
+        LexicalPolicy::Preserve,
+    )
+    .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
+fn encode_xdto_package(
+    envelope: &MetadataEnvelope,
+    target: &ProfileId,
+) -> Result<Vec<u8>, MetadataEncodeError> {
+    let path = envelope.root().identity().path().clone();
+    let target_version =
+        profile_version(target).ok_or_else(|| MetadataEncodeError::UnsupportedProfile {
+            object_path: path.clone(),
+            profile: target.clone(),
+        })?;
+    if envelope.root().kind().as_str() != XDTO_PACKAGE_FAMILY {
+        return Err(invalid_model(&path, "kind"));
+    }
+    let source_profile = envelope.root().provenance().source_profile().clone();
+    validate_decode_profile(envelope.source_document(), &source_profile, &path)
+        .map_err(decode_to_encode)?;
+    let source = decode_xdto_package(envelope.source_document(), source_profile, path.clone())
+        .map_err(decode_to_encode)?;
+    if source.root() != envelope.root() || source.descendants() != envelope.descendants() {
+        return Err(invalid_model(
+            &path,
+            "XDTOPackage semantic mutation is not implemented",
         ));
     }
     let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
@@ -892,6 +1082,84 @@ mod tests {
                 registry
                     .decode(
                         &FamilyId::parse(EVENT_SUBSCRIPTION_FAMILY).unwrap(),
+                        &document,
+                        profile("2.20"),
+                        ObjectPath::root(),
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    fn xdto_fixture(version: &str, namespace: &str, extra: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"{MD_NAMESPACE}\" xmlns:v8=\"{V8_NAMESPACE}\" version=\"{version}\">\r\n\
+\t<XDTOPackage uuid=\"ac7ea771-4b10-4d43-9c0a-9cd36e4c49a4\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>АдминистрированиеОбменаДанными_2_4_5_1</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Администрирование обмена данными 2.4.5.1</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Namespace>{namespace}</Namespace>{extra}\r\n\
+\t\t</Properties>\r\n\
+\t</XDTOPackage>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn xdto_package_is_typed_and_cross_version_roundtrips() {
+        let mut registry = MetadataRegistry::default();
+        register_xdto_package_codec(&mut registry).unwrap();
+        for version in ["2.20", "2.21"] {
+            let document = XmlReader::from_slice(&xdto_fixture(
+                version,
+                "http://www.1c.ru/SaaS/ExchangeAdministration/Common/2.4.5.1",
+                "",
+            ))
+            .unwrap();
+            let envelope = registry
+                .decode(
+                    &FamilyId::parse(XDTO_PACKAGE_FAMILY).unwrap(),
+                    &document,
+                    profile(version),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+            assert_eq!(envelope.root().properties().len(), 4);
+            assert!(matches!(
+                envelope.root().properties()[3].value().kind(),
+                CanonicalValueKind::Text(_)
+            ));
+            let target = if version == "2.20" { "2.21" } else { "2.20" };
+            let output = registry.encode(&envelope, &profile(target)).unwrap();
+            let reparsed = XmlReader::from_slice(&output).unwrap();
+            registry
+                .decode(
+                    &FamilyId::parse(XDTO_PACKAGE_FAMILY).unwrap(),
+                    &reparsed,
+                    profile(target),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn xdto_package_unknown_and_invalid_namespace_fail_closed() {
+        let mut registry = MetadataRegistry::default();
+        register_xdto_package_codec(&mut registry).unwrap();
+        for input in [
+            xdto_fixture("2.20", "", ""),
+            xdto_fixture("2.20", "http://example.test/has space", ""),
+            xdto_fixture("2.20", "http://example.test", "<Future/>"),
+        ] {
+            let document = XmlReader::from_slice(&input).unwrap();
+            assert!(
+                registry
+                    .decode(
+                        &FamilyId::parse(XDTO_PACKAGE_FAMILY).unwrap(),
                         &document,
                         profile("2.20"),
                         ObjectPath::root(),

@@ -34,6 +34,8 @@ const SCHEDULED_JOB_LAYOUT_KEY: &str = "bootstrap.metadata.scheduled_job.layout"
 const SCHEDULED_JOB_LAYOUT: &str = "scheduled-job-v1-crlf-no-bom";
 const EVENT_SUBSCRIPTION_LAYOUT_KEY: &str = "bootstrap.metadata.event_subscription.layout";
 const EVENT_SUBSCRIPTION_LAYOUT: &str = "event-subscription-v1-crlf-no-bom";
+const XDTO_PACKAGE_LAYOUT_KEY: &str = "bootstrap.metadata.xdto_package.layout";
+const XDTO_PACKAGE_LAYOUT: &str = "xdto-package-v1-crlf-no-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const MAX_SERVICE_METADATA_PLAIN_BYTES: usize = MAX_CANONICAL_RETAINED_BYTES + 4 * 1_048_576;
@@ -84,6 +86,7 @@ impl ServiceFamily {
 enum ServiceLayout {
     ScheduledJobV1,
     EventSubscriptionV1,
+    XdtoPackageV1,
 }
 
 /// Independent target coordinates plus one service-family layout.
@@ -134,6 +137,11 @@ impl ServiceMetadataProfile {
                 EVENT_SUBSCRIPTION_LAYOUT_KEY,
                 EVENT_SUBSCRIPTION_LAYOUT,
                 ServiceLayout::EventSubscriptionV1,
+            ),
+            ServiceFamily::XdtoPackage => (
+                XDTO_PACKAGE_LAYOUT_KEY,
+                XDTO_PACKAGE_LAYOUT,
+                ServiceLayout::XdtoPackageV1,
             ),
             _ => {
                 return Err(ServiceMetadataProfileError::FamilyNotImplemented {
@@ -192,6 +200,17 @@ impl ServiceMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: ServiceFamily::EventSubscription,
             layout: ServiceLayout::EventSubscriptionV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn xdto_package_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: ServiceFamily::XdtoPackage,
+            layout: ServiceLayout::XdtoPackageV1,
         }
     }
 }
@@ -458,6 +477,42 @@ impl EventSubscriptionNativeIr {
     }
 }
 
+/// Complete base-free native IR for an `XDTOPackage` metadata row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XdtoPackageNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub namespace: String,
+}
+
+impl XdtoPackageNativeIr {
+    /// Renders the metadata XML; `Ext/Package.bin` remains a separate raw asset.
+    pub fn to_xml(&self, profile: &ProfileId) -> Result<Vec<u8>, ServiceMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| ServiceMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        if !valid_xdto_namespace(&self.namespace) {
+            return Err(native("XDTOPackage Namespace is not exact"));
+        }
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"{version}\">\r\n\t<XDTOPackage uuid=\"{}\">\r\n\t\t<Properties>\r\n",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonyms(&mut xml, &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        write_xml_text_element(&mut xml, "\t\t\t", "Namespace", &self.namespace);
+        xml.push_str("\t\t</Properties>\r\n\t</XDTOPackage>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
+}
+
 #[derive(Debug)]
 pub enum ServiceMetadataBuildError {
     Profile(ServiceMetadataProfileError),
@@ -620,6 +675,9 @@ pub fn compile_service_metadata(
         (ServiceFamily::EventSubscription, ServiceLayout::EventSubscriptionV1) => {
             serialize_event_subscription(&project_event_subscription(validated, object)?)
         }
+        (ServiceFamily::XdtoPackage, ServiceLayout::XdtoPackageV1) => {
+            serialize_xdto_package(&project_xdto_package(validated, object)?)
+        }
         (family, _) => return Err(ServiceMetadataBuildError::UnsupportedFamily(family)),
     };
     let bytes = raw_deflate(&plaintext)?;
@@ -658,6 +716,19 @@ pub fn decode_event_subscription_blob(
         return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
     }
     parse_event_subscription(&inflate_bounded(blob)?)
+}
+
+/// Strictly decodes a raw-DEFLATE `XDTOPackage` metadata row.
+pub fn decode_xdto_package_blob(
+    blob: &[u8],
+    profile: &ServiceMetadataProfile,
+) -> Result<XdtoPackageNativeIr, ServiceMetadataBuildError> {
+    if profile.family != ServiceFamily::XdtoPackage
+        || profile.layout != ServiceLayout::XdtoPackageV1
+    {
+        return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    parse_xdto_package(&inflate_bounded(blob)?)
 }
 
 fn validate_coordinates(
@@ -957,6 +1028,56 @@ fn generated_type_reference_index(
     Ok(references)
 }
 
+fn project_xdto_package(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<XdtoPackageNativeIr, ServiceMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    if object.owner().is_some()
+        || !object.references().is_empty()
+        || !object.generated_types().is_empty()
+        || !object.assets().is_empty()
+    {
+        return invalid_model(
+            uuid,
+            "XDTOPackage metadata must be top-level without inline references, generated types, or assets",
+        );
+    }
+    if validated
+        .configuration()
+        .objects()
+        .iter()
+        .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(uuid, "XDTOPackage metadata cannot own child objects");
+    }
+    let expected = ["Name", "Synonym", "Comment", "Namespace"];
+    if object.properties().len() != expected.len()
+        || object
+            .properties()
+            .iter()
+            .zip(expected)
+            .any(|(field, expected)| field.name().as_str() != expected)
+    {
+        return invalid_model(uuid, "typed property schema is not exact");
+    }
+    let name = text_property(object, "Name")?.to_owned();
+    if name.is_empty() {
+        return invalid_model(uuid, "Name must not be empty");
+    }
+    let namespace = text_property(object, "Namespace")?.to_owned();
+    if !valid_xdto_namespace(&namespace) {
+        return invalid_model(uuid, "XDTOPackage Namespace is not exact");
+    }
+    Ok(XdtoPackageNativeIr {
+        uuid,
+        name,
+        synonyms: synonym_property(object, "Synonym")?,
+        comment: text_property(object, "Comment")?.to_owned(),
+        namespace,
+    })
+}
+
 fn resolve_common_module(
     validated: &ValidatedConfiguration<'_>,
     compiling: ObjectUuid,
@@ -1114,6 +1235,10 @@ fn valid_cfg_reference(value: &str) -> bool {
     !tail.is_empty() && !tail.chars().any(char::is_whitespace)
 }
 
+fn valid_xdto_namespace(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(char::is_whitespace)
+}
+
 fn native_event_name(event: &str) -> Option<&'static str> {
     match event {
         "BeforeDelete" => Some("BeforeDelete_ПередУдалением"),
@@ -1219,6 +1344,22 @@ fn serialize_event_subscription(value: &EventSubscriptionNativeIr) -> Vec<u8> {
     plain.push_str(&value.module_uuid.to_string());
     plain.push(',');
     push_1c_string(&mut plain, &value.method_name);
+    plain.push_str("},0}");
+    plain.into_bytes()
+}
+
+fn serialize_xdto_package(value: &XdtoPackageNativeIr) -> Vec<u8> {
+    let mut plain = String::new();
+    plain.push_str("{1,\r\n{1,\r\n");
+    push_native_header(
+        &mut plain,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plain.push(',');
+    push_1c_string(&mut plain, &value.namespace);
     plain.push_str("},0}");
     plain.into_bytes()
 }
@@ -1532,6 +1673,27 @@ fn parse_event_source_type_ids(
     Ok(result)
 }
 
+fn parse_xdto_package(plain: &[u8]) -> Result<XdtoPackageNativeIr, ServiceMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 3, "root")?;
+    exact_token(&root[0], "1", "root discriminator")?;
+    exact_token(&root[2], "0", "root tail")?;
+    let object = exact_list(&root[1], 3, "XDTOPackage object")?;
+    exact_token(&object[0], "1", "XDTOPackage discriminator")?;
+    let header = parse_native_header(&object[1])?;
+    let namespace = text(&object[2], "Namespace")?.to_owned();
+    if !valid_xdto_namespace(&namespace) {
+        return Err(native("XDTOPackage Namespace is not exact"));
+    }
+    Ok(XdtoPackageNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        namespace,
+    })
+}
+
 struct NativeHeader {
     uuid: ObjectUuid,
     name: String,
@@ -1791,6 +1953,7 @@ mod tests {
     const EVENT_MODULE_UUID: &str = "f96cbb27-7619-41e0-8577-e623ef02dc58";
     const SOURCE_ONE_TYPE_ID: &str = "48667aa7-1fec-4d7b-b697-2bfe84bbb82b";
     const SOURCE_TWO_TYPE_ID: &str = "db719ff3-91c0-4d23-8d18-afa5fc3221cf";
+    const XDTO_UUID: &str = "ac7ea771-4b10-4d43-9c0a-9cd36e4c49a4";
 
     fn xml(version: &str, module: &str) -> Vec<u8> {
         format!(
@@ -1829,6 +1992,23 @@ mod tests {
 \t\t\t<Handler>CommonModule.{module}.ПередУдалениемИдентификатораОбъектаМетаданных</Handler>\r\n\
 \t\t</Properties>\r\n\
 \t</EventSubscription>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn xdto_xml(version: &str, namespace: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"{version}\">\r\n\
+\t<XDTOPackage uuid=\"{XDTO_UUID}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>АдминистрированиеОбменаДанными_2_4_5_1</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Администрирование обмена данными 2.4.5.1</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Namespace>{namespace}</Namespace>\r\n\
+\t\t</Properties>\r\n\
+\t</XDTOPackage>\r\n\
 </MetaDataObject>"
         )
         .into_bytes()
@@ -1959,6 +2139,25 @@ mod tests {
         .unwrap()
     }
 
+    fn xdto_configuration(version: &str, namespace: &str) -> CanonicalConfiguration {
+        let document = XmlReader::from_slice(&xdto_xml(version, namespace)).unwrap();
+        let package = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("XDTOPackage").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        CanonicalConfiguration::new(vec![
+            object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            package,
+        ])
+        .unwrap()
+    }
+
     fn axes(version: &str) -> CompileAxes {
         CompileAxes::new(
             XmlDialect::parse(version).unwrap(),
@@ -2014,6 +2213,27 @@ mod tests {
         (
             graph,
             ServiceMetadataProfile::event_subscription_fixture("platform-test"),
+        )
+    }
+
+    fn xdto_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, ServiceMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [CONFIGURATION_UUID, XDTO_UUID]
+                .into_iter()
+                .map(|uuid| {
+                    ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+                })
+                .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            ServiceMetadataProfile::xdto_package_fixture("platform-test"),
         )
     }
 
@@ -2234,6 +2454,89 @@ mod tests {
     }
 
     #[test]
+    fn xdto_package_roundtrips_without_a_base_for_both_dialects() {
+        let namespace = "http://www.1c.ru/SaaS/ExchangeAdministration/Common/2.4.5.1";
+        for version in ["2.20", "2.21"] {
+            let configuration = xdto_configuration(version, namespace);
+            let validated = validate_configuration(&configuration).unwrap();
+            let (graph, profile) = xdto_graph(&validated);
+            let uuid = ObjectUuid::parse(XDTO_UUID).unwrap();
+            let first =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            let second =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            assert_eq!(first, second);
+            let ir = decode_xdto_package_blob(
+                first.outcome().compiled_payload().unwrap().bytes(),
+                &profile,
+            )
+            .unwrap();
+            assert_eq!(ir.namespace, namespace);
+            let output = ir
+                .to_xml(&ProfileId::parse(&format!("xml-{version}")).unwrap())
+                .unwrap();
+            let document = XmlReader::from_slice(&output).unwrap();
+            bundled_metadata_registry()
+                .decode(
+                    &FamilyId::parse("XDTOPackage").unwrap(),
+                    &document,
+                    ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn xdto_package_plaintext_matches_observed_golden() {
+        let namespace = "http://www.1c.ru/SaaS/ExchangeAdministration/Common/2.4.5.1";
+        let configuration = xdto_configuration("2.20", namespace);
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = xdto_graph(&validated);
+        let entry = compile_service_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(XDTO_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert_eq!(
+            plain,
+            format!(
+                "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{XDTO_UUID}}},\"АдминистрированиеОбменаДанными_2_4_5_1\",\r\n{{1,\"ru\",\"Администрирование обмена данными 2.4.5.1\"}},\"\",0,0,{NIL_UUID},0}},\"{namespace}\"}},0}}"
+            )
+            .as_bytes()
+        );
+    }
+
+    #[test]
+    fn xdto_package_native_unknown_field_and_invalid_xml_profile_fail_closed() {
+        let namespace = "http://www.1c.ru/SaaS/ExchangeAdministration/Common/2.4.5.1";
+        let observed = format!(
+            "{{1,{{1,{{3,{{1,0,{XDTO_UUID}}},\"Package\",{{0}},\"\",0,0,{NIL_UUID},0}},\"{namespace}\",future}},0}}"
+        );
+        assert!(matches!(
+            parse_xdto_package(observed.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+        let ir = XdtoPackageNativeIr {
+            uuid: ObjectUuid::parse(XDTO_UUID).unwrap(),
+            name: "Package".to_owned(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            namespace: namespace.to_owned(),
+        };
+        assert!(matches!(
+            ir.to_xml(&ProfileId::parse("xml-future").unwrap()),
+            Err(ServiceMetadataBuildError::InvalidXmlProfile(_))
+        ));
+    }
+
+    #[test]
     fn implemented_service_profiles_are_explicit_and_others_stay_blocked() {
         let json = format!(
             r#"{{
@@ -2244,7 +2547,8 @@ mod tests {
                 "storage_profile": "{SUPPORTED_STORAGE_PROFILE}",
                 "constants": {{
                     "{SCHEDULED_JOB_LAYOUT_KEY}": "{SCHEDULED_JOB_LAYOUT}",
-                    "{EVENT_SUBSCRIPTION_LAYOUT_KEY}": "{EVENT_SUBSCRIPTION_LAYOUT}"
+                    "{EVENT_SUBSCRIPTION_LAYOUT_KEY}": "{EVENT_SUBSCRIPTION_LAYOUT}",
+                    "{XDTO_PACKAGE_LAYOUT_KEY}": "{XDTO_PACKAGE_LAYOUT}"
                 }}
             }}"#
         );
@@ -2271,6 +2575,15 @@ mod tests {
             .unwrap()
             .family(),
             ServiceFamily::EventSubscription
+        );
+        assert_eq!(
+            ServiceMetadataProfile::from_effective_for_family(
+                effective,
+                ServiceFamily::XdtoPackage
+            )
+            .unwrap()
+            .family(),
+            ServiceFamily::XdtoPackage
         );
         assert!(matches!(
             ServiceMetadataProfile::from_effective_for_family(

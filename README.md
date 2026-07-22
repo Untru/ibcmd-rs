@@ -54,13 +54,14 @@ The core now also retains generated `ValueId` as a typed optional identity
 type pattern and `UseStandardCommands`; unknown native shell fields and
 unevidenced qualifier mappings fail closed.
 
-BOOT-004 is in progress. Two of seven service-family slices, `ScheduledJob`
-and `EventSubscription`, now support XML 2.20/2.21 -> typed IR ->
-deterministic base-free native row -> strict native IR/XML. CommonModule
+BOOT-004 is in progress. Three of seven service-family slices, `ScheduledJob`,
+`EventSubscription`, and `XDTOPackage`, now support XML 2.20/2.21 -> typed IR
+-> deterministic base-free native row -> strict native IR/XML. CommonModule
 handlers and event-source TypeIds are resolved only through the validated
 canonical graph; independently evidenced 8.3.27 layouts reject unknown or
-reordered native fields. Because #217 is still open, these partial slices do
-not yet increase the issue-count percentage below.
+reordered native fields. `XDTOPackage/Ext/Package.bin` remains a separate
+opaque asset and is copied without the platform. Because #217 is still open,
+these partial slices do not yet increase the issue-count percentage below.
 
 | Phase | Completed | Progress |
 |---|---:|---:|

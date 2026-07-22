@@ -23,5 +23,7 @@ pub use language::register_language_codec;
 pub use registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
-pub use services::{register_event_subscription_codec, register_scheduled_job_codec};
+pub use services::{
+    register_event_subscription_codec, register_scheduled_job_codec, register_xdto_package_codec,
+};
 pub use session_parameter::register_session_parameter_codec;
