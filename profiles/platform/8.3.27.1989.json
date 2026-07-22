@@ -5,6 +5,7 @@
   "platform_build": "8.3.27.1989",
   "storage_profile": "storage:mssql-config-configsave",
   "constants": {
+    "bootstrap.metadata.functional_option.layout": "functional-option-v1-crlf-no-bom",
     "bootstrap.metadata.functional_options_parameter.layout": "functional-options-parameter-v1-crlf-no-bom",
     "bootstrap.metadata.language.layout": "language-v1-crlf-no-bom",
     "bootstrap.root.layout": "root-v2-empty-tail",
@@ -16,6 +17,7 @@
     "docs/ssl-lab-2026-06-25.md",
     "docs/evidence/bootstrap-special-8.3.27.md",
     "docs/evidence/configuration-body-8.3.27-partial.md",
+    "docs/evidence/simple-functional-option-8.3.27.md",
     "docs/evidence/simple-functional-options-parameter-8.3.27.md",
     "docs/evidence/simple-language-8.3.27.md"
   ]

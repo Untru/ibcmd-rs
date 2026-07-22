@@ -47,6 +47,8 @@ pub fn register_constant_codec(
 pub fn bundled_metadata_registry() -> MetadataRegistry {
     let mut registry = MetadataRegistry::default();
     register_constant_codec(&mut registry).expect("bundled families are unique and bounded");
+    super::functional_option::register_functional_option_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
     super::functional_options_parameter::register_functional_options_parameter_codec(&mut registry)
         .expect("bundled families are unique and bounded");
     super::language::register_language_codec(&mut registry)

@@ -1,9 +1,9 @@
 //! Base-free native codecs for compact metadata families.
 //!
-//! Implemented vertical slices are `Language` and
+//! Implemented vertical slices are `Language`, `FunctionalOption`, and
 //! `FunctionalOptionsParameter`. Other BOOT-003 families remain explicit
 //! profile-selection failures until their complete native layouts and
-//! required UUID/reference inputs are represented.
+//! required UUID/type inputs are represented.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -33,12 +33,15 @@ use super::super::graph::BootstrapGraph;
 
 const LANGUAGE_LAYOUT_KEY: &str = "bootstrap.metadata.language.layout";
 const LANGUAGE_LAYOUT: &str = "language-v1-crlf-no-bom";
+const FUNCTIONAL_OPTION_LAYOUT_KEY: &str = "bootstrap.metadata.functional_option.layout";
+const FUNCTIONAL_OPTION_LAYOUT: &str = "functional-option-v1-crlf-no-bom";
 const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY: &str =
     "bootstrap.metadata.functional_options_parameter.layout";
 const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT: &str = "functional-options-parameter-v1-crlf-no-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const DESIGN_TIME_REFERENCE_CLASS_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
+const FUNCTIONAL_OPTION_CONTENT_CLASS_UUID: &str = "3ea29ea5-66f6-4e3b-8595-d8940db766a2";
 
 const MAX_LANGUAGE_CODE_BYTES: usize = 256;
 const MAX_SIMPLE_METADATA_PLAIN_BYTES: usize = MAX_CANONICAL_RETAINED_BYTES + 4 * 1_048_576;
@@ -86,6 +89,7 @@ impl SimpleFamily {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SimpleLayout {
     LanguageV1,
+    FunctionalOptionV1,
     FunctionalOptionsParameterV1,
 }
 
@@ -134,6 +138,11 @@ impl SimpleMetadataProfile {
                 LANGUAGE_LAYOUT_KEY,
                 LANGUAGE_LAYOUT,
                 SimpleLayout::LanguageV1,
+            ),
+            SimpleFamily::FunctionalOption => (
+                FUNCTIONAL_OPTION_LAYOUT_KEY,
+                FUNCTIONAL_OPTION_LAYOUT,
+                SimpleLayout::FunctionalOptionV1,
             ),
             SimpleFamily::FunctionalOptionsParameter => (
                 FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY,
@@ -197,6 +206,17 @@ impl SimpleMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: SimpleFamily::FunctionalOptionsParameter,
             layout: SimpleLayout::FunctionalOptionsParameterV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn functional_option_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: SimpleFamily::FunctionalOption,
+            layout: SimpleLayout::FunctionalOptionV1,
         }
     }
 }
@@ -291,6 +311,18 @@ pub struct LanguageNativeIr {
     pub language_code: String,
 }
 
+/// Complete base-free native IR for a `FunctionalOption` row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FunctionalOptionNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<NativeLocalizedString>,
+    pub comment: String,
+    pub location: Option<ObjectUuid>,
+    pub privileged_get_mode: bool,
+    pub content: Vec<ObjectUuid>,
+}
+
 /// Complete base-free native IR for a `FunctionalOptionsParameter` row.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FunctionalOptionsParameterNativeIr {
@@ -299,6 +331,71 @@ pub struct FunctionalOptionsParameterNativeIr {
     pub synonyms: Vec<NativeLocalizedString>,
     pub comment: String,
     pub uses: Vec<ObjectUuid>,
+}
+
+impl FunctionalOptionNativeIr {
+    /// Renders XCF using caller-supplied readable names for every native UUID.
+    pub fn to_xml(
+        &self,
+        profile: &ProfileId,
+        references: &BTreeMap<ObjectUuid, String>,
+    ) -> Result<Vec<u8>, SimpleMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| SimpleMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        let location = self
+            .location
+            .map(|uuid| {
+                references
+                    .get(&uuid)
+                    .cloned()
+                    .ok_or(SimpleMetadataBuildError::MissingReadableReference(uuid))
+            })
+            .transpose()?;
+        let mut content = Vec::with_capacity(self.content.len());
+        for uuid in &self.content {
+            content.push(
+                references
+                    .get(uuid)
+                    .cloned()
+                    .ok_or(SimpleMetadataBuildError::MissingReadableReference(*uuid))?,
+            );
+        }
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"{version}\">\r\n\t<FunctionalOption uuid=\"{}\">\r\n\t\t<Properties>\r\n",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonym_xml(&mut xml, &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        if let Some(location) = location {
+            write_xml_text_element(&mut xml, "\t\t\t", "Location", &location);
+        }
+        xml.push_str("\t\t\t<PrivilegedGetMode>");
+        xml.push_str(if self.privileged_get_mode {
+            "true"
+        } else {
+            "false"
+        });
+        xml.push_str("</PrivilegedGetMode>\r\n");
+        if content.is_empty() {
+            xml.push_str("\t\t\t<Content/>\r\n");
+        } else {
+            xml.push_str("\t\t\t<Content>\r\n");
+            for reference in content {
+                xml.push_str("\t\t\t\t<xr:Object>");
+                push_xml_text(&mut xml, &reference);
+                xml.push_str("</xr:Object>\r\n");
+            }
+            xml.push_str("\t\t\t</Content>\r\n");
+        }
+        xml.push_str("\t\t</Properties>\r\n\t</FunctionalOption>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
 }
 
 impl FunctionalOptionsParameterNativeIr {
@@ -568,6 +665,10 @@ pub fn compile_simple_metadata(
             let projection = project_language(validated, object)?;
             serialize_language(&projection)
         }
+        (SimpleFamily::FunctionalOption, SimpleLayout::FunctionalOptionV1) => {
+            let projection = project_functional_option(validated, object)?;
+            serialize_functional_option(&projection)
+        }
         (SimpleFamily::FunctionalOptionsParameter, SimpleLayout::FunctionalOptionsParameterV1) => {
             let projection = project_functional_options_parameter(validated, object)?;
             serialize_functional_options_parameter(&projection)
@@ -596,6 +697,20 @@ pub fn decode_language_blob(
     }
     let plain = inflate_bounded(blob)?;
     parse_language(&plain)
+}
+
+/// Strictly decodes a raw-DEFLATE `FunctionalOption` primary row.
+pub fn decode_functional_option_blob(
+    blob: &[u8],
+    profile: &SimpleMetadataProfile,
+) -> Result<FunctionalOptionNativeIr, SimpleMetadataBuildError> {
+    if profile.family != SimpleFamily::FunctionalOption
+        || profile.layout != SimpleLayout::FunctionalOptionV1
+    {
+        return Err(SimpleMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    let plain = inflate_bounded(blob)?;
+    parse_functional_option(&plain)
 }
 
 /// Strictly decodes a raw-DEFLATE `FunctionalOptionsParameter` primary row.
@@ -725,6 +840,115 @@ fn project_language(
         synonyms,
         comment,
         language_code,
+    })
+}
+
+fn project_functional_option(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<FunctionalOptionNativeIr, SimpleMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    match object.provenance().source_profile().as_str() {
+        "xml-2.20" | "xml-2.21" => {}
+        _ => {
+            return invalid_model(uuid, "source profile is not xml-2.20 or xml-2.21");
+        }
+    }
+    if object.owner().is_some() {
+        return invalid_model(uuid, "FunctionalOption must be top-level");
+    }
+    if !object.references().is_empty()
+        || !object.generated_types().is_empty()
+        || !object.assets().is_empty()
+    {
+        return invalid_model(
+            uuid,
+            "FunctionalOption cannot own canonical references, generated types, or assets",
+        );
+    }
+    if validated
+        .configuration()
+        .objects()
+        .iter()
+        .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(uuid, "FunctionalOption cannot own child objects");
+    }
+    let expected = [
+        "Name",
+        "Synonym",
+        "Comment",
+        "Location",
+        "PrivilegedGetMode",
+        "Content",
+    ];
+    if object.properties().len() != expected.len()
+        || object
+            .properties()
+            .iter()
+            .zip(expected)
+            .any(|(field, expected)| field.name().as_str() != expected)
+    {
+        return invalid_model(uuid, "typed property schema is not exact");
+    }
+    let name = text_property(object, "Name")?.to_owned();
+    if name.is_empty() {
+        return invalid_model(uuid, "Name must not be empty");
+    }
+    let comment = text_property(object, "Comment")?.to_owned();
+    let synonyms = synonym_property(object, "Synonym")?;
+    let references = readable_reference_index(validated, uuid)?;
+    let location = match property(object, "Location")?.kind() {
+        CanonicalValueKind::Null => None,
+        CanonicalValueKind::Text(value) if !value.as_str().is_empty() => {
+            Some(references.get(value.as_str()).copied().ok_or(
+                SimpleMetadataBuildError::InvalidModel {
+                    object: uuid,
+                    reason: "Location contains an unresolved readable reference",
+                },
+            )?)
+        }
+        _ => return invalid_model(uuid, "Location is not null or non-empty text"),
+    };
+    let privileged_get_mode = match property(object, "PrivilegedGetMode")?.kind() {
+        CanonicalValueKind::Bool(value) => value,
+        _ => return invalid_model(uuid, "PrivilegedGetMode is not boolean"),
+    };
+    let content_values = property(object, "Content")?.as_sequence().ok_or(
+        SimpleMetadataBuildError::InvalidModel {
+            object: uuid,
+            reason: "Content is not a sequence",
+        },
+    )?;
+    let mut seen_names = BTreeSet::new();
+    let mut seen_uuids = BTreeSet::new();
+    let mut content = Vec::with_capacity(content_values.len());
+    for value in content_values {
+        let readable = canonical_text(value, uuid)?;
+        if readable.is_empty() || !seen_names.insert(readable) {
+            return invalid_model(uuid, "Content contains an empty or duplicate reference");
+        }
+        let target =
+            references
+                .get(readable)
+                .copied()
+                .ok_or(SimpleMetadataBuildError::InvalidModel {
+                    object: uuid,
+                    reason: "Content contains an unresolved readable reference",
+                })?;
+        if !seen_uuids.insert(target) {
+            return invalid_model(uuid, "Content resolves more than once to the same object");
+        }
+        content.push(target);
+    }
+    Ok(FunctionalOptionNativeIr {
+        uuid,
+        name,
+        synonyms,
+        comment,
+        location,
+        privileged_get_mode,
+        content,
     })
 }
 
@@ -955,7 +1179,7 @@ fn canonical_text(
 ) -> Result<&str, SimpleMetadataBuildError> {
     match value.kind() {
         CanonicalValueKind::Text(value) => Ok(value.as_str()),
-        _ => invalid_model(object, "Synonym field is not text"),
+        _ => invalid_model(object, "typed value is not text"),
     }
 }
 
@@ -971,6 +1195,44 @@ fn serialize_language(value: &LanguageNativeIr) -> Vec<u8> {
     );
     plaintext.push(',');
     push_1c_string(&mut plaintext, &value.language_code);
+    plaintext.push_str("},0}");
+    plaintext.into_bytes()
+}
+
+fn serialize_functional_option(value: &FunctionalOptionNativeIr) -> Vec<u8> {
+    let mut plaintext = String::new();
+    plaintext.push_str("{1,\r\n{2,\r\n");
+    push_native_header(
+        &mut plaintext,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plaintext.push(',');
+    plaintext.push_str(
+        &value
+            .location
+            .map(|uuid| uuid.to_string())
+            .unwrap_or_else(|| NIL_UUID.to_owned()),
+    );
+    plaintext.push_str(",\r\n");
+    if value.content.is_empty() {
+        plaintext.push_str("{0,0}");
+    } else {
+        write!(&mut plaintext, "{{0,{}", value.content.len())
+            .expect("writing to String cannot fail");
+        for uuid in &value.content {
+            plaintext.push_str(",\r\n{\"#\",");
+            plaintext.push_str(FUNCTIONAL_OPTION_CONTENT_CLASS_UUID);
+            plaintext.push_str(",\r\n{0,\r\n");
+            push_design_time_reference(&mut plaintext, *uuid);
+            plaintext.push_str("\r\n}\r\n}");
+        }
+        plaintext.push_str("\r\n}");
+    }
+    plaintext.push(',');
+    plaintext.push(if value.privileged_get_mode { '1' } else { '0' });
     plaintext.push_str("},0}");
     plaintext.into_bytes()
 }
@@ -991,16 +1253,21 @@ fn serialize_functional_options_parameter(value: &FunctionalOptionsParameterNati
     } else {
         write!(&mut plaintext, "{{0,{}", value.uses.len()).expect("writing to String cannot fail");
         for uuid in &value.uses {
-            plaintext.push_str(",\r\n{\"#\",");
-            plaintext.push_str(DESIGN_TIME_REFERENCE_CLASS_UUID);
-            plaintext.push_str(",\r\n{1,");
-            plaintext.push_str(&uuid.to_string());
-            plaintext.push_str("}\r\n}");
+            plaintext.push_str(",\r\n");
+            push_design_time_reference(&mut plaintext, *uuid);
         }
         plaintext.push_str("\r\n}");
     }
     plaintext.push_str("\r\n},0}");
     plaintext.into_bytes()
+}
+
+fn push_design_time_reference(output: &mut String, uuid: ObjectUuid) {
+    output.push_str("{\"#\",");
+    output.push_str(DESIGN_TIME_REFERENCE_CLASS_UUID);
+    output.push_str(",\r\n{1,");
+    output.push_str(&uuid.to_string());
+    output.push_str("}\r\n}");
 }
 
 fn push_native_header(
@@ -1096,7 +1363,7 @@ impl<'a> NativeParser<'a> {
 
     fn parse(mut self) -> Result<NativeValue, SimpleMetadataBuildError> {
         if self.input.starts_with(b"\xef\xbb\xbf") {
-            return Err(native("unexpected BOM for language-v1-crlf-no-bom"));
+            return Err(native("unexpected BOM for simple metadata no-BOM layout"));
         }
         let value = self.value(0)?;
         self.whitespace();
@@ -1226,6 +1493,39 @@ fn parse_language(plain: &[u8]) -> Result<LanguageNativeIr, SimpleMetadataBuildE
     })
 }
 
+fn parse_functional_option(
+    plain: &[u8],
+) -> Result<FunctionalOptionNativeIr, SimpleMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 3, "root")?;
+    exact_token(&root[0], "1", "root discriminator")?;
+    exact_token(&root[2], "0", "root tail")?;
+    let object = exact_list(&root[1], 5, "FunctionalOption object")?;
+    exact_token(&object[0], "2", "FunctionalOption discriminator")?;
+    let header = parse_native_header(&object[1])?;
+    let location_text = token(&object[2], "Location UUID")?;
+    let location = if location_text == NIL_UUID {
+        None
+    } else {
+        Some(canonical_uuid_token(&object[2], "Location UUID")?)
+    };
+    let content = parse_native_functional_option_content(&object[3])?;
+    let privileged_get_mode = match token(&object[4], "PrivilegedGetMode")? {
+        "0" => false,
+        "1" => true,
+        _ => return Err(native("PrivilegedGetMode is not 0 or 1")),
+    };
+    Ok(FunctionalOptionNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        location,
+        privileged_get_mode,
+        content,
+    })
+}
+
 fn parse_functional_options_parameter(
     plain: &[u8],
 ) -> Result<FunctionalOptionsParameterNativeIr, SimpleMetadataBuildError> {
@@ -1303,24 +1603,76 @@ fn parse_native_use_references(
     let mut unique = BTreeSet::new();
     let mut uses = Vec::with_capacity(count);
     for value in &fields[2..] {
-        let reference = exact_list(value, 3, "Use reference")?;
-        if text(&reference[0], "Use reference marker")? != "#" {
-            return Err(native("Use reference marker is not #"));
-        }
-        exact_token(
-            &reference[1],
-            DESIGN_TIME_REFERENCE_CLASS_UUID,
-            "Use reference class",
-        )?;
-        let target = exact_list(&reference[2], 2, "Use reference target")?;
-        exact_token(&target[0], "1", "Use reference target discriminator")?;
-        let uuid = canonical_uuid_token(&target[1], "Use target UUID")?;
-        if uuid.to_string() == NIL_UUID || !unique.insert(uuid) {
+        let uuid = parse_design_time_reference(value)?;
+        if !unique.insert(uuid) {
             return Err(native("Use target UUID is nil or duplicated"));
         }
         uses.push(uuid);
     }
     Ok(uses)
+}
+
+fn parse_native_functional_option_content(
+    value: &NativeValue,
+) -> Result<Vec<ObjectUuid>, SimpleMetadataBuildError> {
+    let fields = list(value, "Content")?;
+    if fields.len() < 2 {
+        return Err(native("Content discriminator or count is missing"));
+    }
+    exact_token(&fields[0], "0", "Content discriminator")?;
+    let count_text = token(&fields[1], "Content count")?;
+    let count = count_text
+        .parse::<usize>()
+        .ok()
+        .filter(|count| count.to_string() == count_text)
+        .ok_or_else(|| native("Content count is not canonical decimal"))?;
+    if count > MAX_CANONICAL_COLLECTION_ITEMS || fields.len() != count + 2 {
+        return Err(native(
+            "Content count is out of bounds or does not match fields",
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    let mut content = Vec::with_capacity(count);
+    for value in &fields[2..] {
+        let outer = exact_list(value, 3, "Content reference")?;
+        if text(&outer[0], "Content reference marker")? != "#" {
+            return Err(native("Content reference marker is not #"));
+        }
+        exact_token(
+            &outer[1],
+            FUNCTIONAL_OPTION_CONTENT_CLASS_UUID,
+            "Content reference class",
+        )?;
+        let payload = exact_list(&outer[2], 2, "Content reference payload")?;
+        exact_token(&payload[0], "0", "Content payload discriminator")?;
+        let uuid = parse_design_time_reference(&payload[1])?;
+        if !unique.insert(uuid) {
+            return Err(native("Content target UUID is duplicated"));
+        }
+        content.push(uuid);
+    }
+    Ok(content)
+}
+
+fn parse_design_time_reference(
+    value: &NativeValue,
+) -> Result<ObjectUuid, SimpleMetadataBuildError> {
+    let reference = exact_list(value, 3, "design-time reference")?;
+    if text(&reference[0], "design-time reference marker")? != "#" {
+        return Err(native("design-time reference marker is not #"));
+    }
+    exact_token(
+        &reference[1],
+        DESIGN_TIME_REFERENCE_CLASS_UUID,
+        "design-time reference class",
+    )?;
+    let target = exact_list(&reference[2], 2, "design-time reference target")?;
+    exact_token(&target[0], "1", "design-time reference discriminator")?;
+    let uuid = canonical_uuid_token(&target[1], "design-time target UUID")?;
+    if uuid.to_string() == NIL_UUID {
+        return Err(native("design-time target UUID is nil"));
+    }
+    Ok(uuid)
 }
 
 fn canonical_uuid_token(
@@ -1518,6 +1870,8 @@ mod tests {
     const CONFIGURATION_UUID: &str = "22222222-2222-4222-8222-222222222222";
     const FUNCTIONAL_OPTIONS_PARAMETER_UUID: &str = "33333333-3333-4333-8333-333333333333";
     const CATALOG_UUID: &str = "44444444-4444-4444-8444-444444444444";
+    const FUNCTIONAL_OPTION_UUID: &str = "55555555-5555-4555-8555-555555555555";
+    const CONSTANT_UUID: &str = "66666666-6666-4666-8666-666666666666";
 
     fn xml(version: &str) -> Vec<u8> {
         format!(
@@ -1608,6 +1962,25 @@ mod tests {
         .into_bytes()
     }
 
+    fn functional_option_xml(version: &str, location: &str, content: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"{version}\">\r\n\
+\t<FunctionalOption uuid=\"{FUNCTIONAL_OPTION_UUID}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>UseFeature</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>en</v8:lang><v8:content>Use feature</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Location>{location}</Location>\r\n\
+\t\t\t<PrivilegedGetMode>true</PrivilegedGetMode>\r\n\
+\t\t\t<Content><xr:Object>{content}</xr:Object></Content>\r\n\
+\t\t</Properties>\r\n\
+\t</FunctionalOption>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
     fn simple_object(version: &str, uuid: &str, kind: &str, name: &str) -> CanonicalObject {
         let path = ObjectPath::new(vec![
             PathSegment::name(&format!(
@@ -1665,6 +2038,32 @@ mod tests {
         .unwrap()
     }
 
+    fn functional_option_configuration(
+        version: &str,
+        location: &str,
+        content: &str,
+    ) -> CanonicalConfiguration {
+        let document =
+            XmlReader::from_slice(&functional_option_xml(version, location, content)).unwrap();
+        let option = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("FunctionalOption").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        CanonicalConfiguration::new(vec![
+            simple_object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            simple_object(version, CONSTANT_UUID, "Constant", "FeatureState"),
+            simple_object(version, CATALOG_UUID, "Catalog", "Products"),
+            option,
+        ])
+        .unwrap()
+    }
+
     fn functional_options_parameter_graph<'a>(
         validated: &ValidatedConfiguration<'a>,
     ) -> (BootstrapGraph, SimpleMetadataProfile) {
@@ -1687,6 +2086,32 @@ mod tests {
         (
             graph,
             SimpleMetadataProfile::functional_options_parameter_fixture("platform-test"),
+        )
+    }
+
+    fn functional_option_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, SimpleMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [
+                CONFIGURATION_UUID,
+                CONSTANT_UUID,
+                CATALOG_UUID,
+                FUNCTIONAL_OPTION_UUID,
+            ]
+            .into_iter()
+            .map(|uuid| {
+                ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+            })
+            .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            SimpleMetadataProfile::functional_option_fixture("platform-test"),
         )
     }
 
@@ -1759,6 +2184,7 @@ mod tests {
                 "storage_profile": "{SUPPORTED_STORAGE_PROFILE}",
                 "constants": {{
                     "{LANGUAGE_LAYOUT_KEY}": "{LANGUAGE_LAYOUT}",
+                    "{FUNCTIONAL_OPTION_LAYOUT_KEY}": "{FUNCTIONAL_OPTION_LAYOUT}",
                     "{FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY}": "{FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT}"
                 }}
             }}"#
@@ -1791,6 +2217,158 @@ mod tests {
             .family(),
             SimpleFamily::FunctionalOptionsParameter
         );
+        assert_eq!(
+            SimpleMetadataProfile::from_effective_for_family(
+                effective,
+                SimpleFamily::FunctionalOption
+            )
+            .unwrap()
+            .family(),
+            SimpleFamily::FunctionalOption
+        );
+    }
+
+    #[test]
+    fn bundled_8_3_27_profile_selects_only_committed_simple_layouts() {
+        let registry = crate::profile_registry::load_bundled_profile_registry().unwrap();
+        let effective = registry
+            .get(&ProfileId::parse("platform-8.3.27.1989").unwrap())
+            .unwrap();
+        for family in [
+            SimpleFamily::Language,
+            SimpleFamily::FunctionalOption,
+            SimpleFamily::FunctionalOptionsParameter,
+        ] {
+            assert_eq!(
+                SimpleMetadataProfile::from_effective_for_family(effective, family)
+                    .unwrap()
+                    .family(),
+                family
+            );
+        }
+        assert!(matches!(
+            SimpleMetadataProfile::from_effective_for_family(
+                effective,
+                SimpleFamily::SessionParameter
+            ),
+            Err(SimpleMetadataProfileError::FamilyNotImplemented { .. })
+        ));
+    }
+
+    #[test]
+    fn functional_option_roundtrips_references_without_a_base() {
+        for version in ["2.20", "2.21"] {
+            let configuration = functional_option_configuration(
+                version,
+                "Constant.FeatureState",
+                "Catalog.Products",
+            );
+            let validated = validate_configuration(&configuration).unwrap();
+            let (graph, profile) = functional_option_graph(&validated);
+            let uuid = ObjectUuid::parse(FUNCTIONAL_OPTION_UUID).unwrap();
+            let first = compile_simple_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                .unwrap();
+            let second =
+                compile_simple_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            assert_eq!(first, second);
+            let ir = decode_functional_option_blob(
+                first.outcome().compiled_payload().unwrap().bytes(),
+                &profile,
+            )
+            .unwrap();
+            assert_eq!(ir.location, Some(ObjectUuid::parse(CONSTANT_UUID).unwrap()));
+            assert_eq!(ir.content, [ObjectUuid::parse(CATALOG_UUID).unwrap()]);
+            assert!(ir.privileged_get_mode);
+            let references = BTreeMap::from([
+                (
+                    ObjectUuid::parse(CONSTANT_UUID).unwrap(),
+                    "Constant.FeatureState".to_owned(),
+                ),
+                (
+                    ObjectUuid::parse(CATALOG_UUID).unwrap(),
+                    "Catalog.Products".to_owned(),
+                ),
+            ]);
+            let xml = ir
+                .to_xml(
+                    &ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    &references,
+                )
+                .unwrap();
+            let document = XmlReader::from_slice(&xml).unwrap();
+            bundled_metadata_registry()
+                .decode(
+                    &FamilyId::parse("FunctionalOption").unwrap(),
+                    &document,
+                    ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn functional_option_plaintext_matches_evidenced_layout() {
+        let configuration =
+            functional_option_configuration("2.20", "Constant.FeatureState", "Catalog.Products");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = functional_option_graph(&validated);
+        let entry = compile_simple_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(FUNCTIONAL_OPTION_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert_eq!(
+            plain,
+            format!(
+                "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{FUNCTIONAL_OPTION_UUID}}},\"UseFeature\",{{1,\"en\",\"Use feature\"}},\"\",0,0,{NIL_UUID},0}},{CONSTANT_UUID},\r\n{{0,1,\r\n{{\"#\",{FUNCTIONAL_OPTION_CONTENT_CLASS_UUID},\r\n{{0,\r\n{{\"#\",{DESIGN_TIME_REFERENCE_CLASS_UUID},\r\n{{1,{CATALOG_UUID}}}\r\n}}\r\n}}\r\n}}\r\n}},1}},0}}"
+            )
+            .as_bytes()
+        );
+    }
+
+    #[test]
+    fn functional_option_does_not_guess_unresolved_references() {
+        let configuration =
+            functional_option_configuration("2.20", "Constant.Missing", "Catalog.Products");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = functional_option_graph(&validated);
+        assert!(matches!(
+            compile_simple_metadata(
+                &validated,
+                &graph,
+                ObjectUuid::parse(FUNCTIONAL_OPTION_UUID).unwrap(),
+                &axes("2.20"),
+                &profile,
+            ),
+            Err(SimpleMetadataBuildError::InvalidModel {
+                reason: "Location contains an unresolved readable reference",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn functional_option_decodes_the_observed_empty_content_row_shape() {
+        let plain = format!(
+            "{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,46e0522b-b88b-43b2-9067-a5359e90994b}},\"АктуальнаяДатаОбновленияПовторноИспользуемыхЗначенийМРО\",\r\n{{1,\"ru\",\"Актуальная дата обновления повторно используемых значений МРО\"}},\"\",0,0,{NIL_UUID},0}},94e08dcf-3885-4a73-82ab-cb291f1cf95f,\r\n{{0,0}},1}},0}}"
+        );
+        let ir = parse_functional_option(plain.as_bytes()).unwrap();
+        assert_eq!(
+            ir.uuid,
+            ObjectUuid::parse("46e0522b-b88b-43b2-9067-a5359e90994b").unwrap()
+        );
+        assert_eq!(
+            ir.location,
+            Some(ObjectUuid::parse("94e08dcf-3885-4a73-82ab-cb291f1cf95f").unwrap())
+        );
+        assert!(ir.content.is_empty());
+        assert!(ir.privileged_get_mode);
     }
 
     #[test]
@@ -1930,6 +2508,32 @@ mod tests {
         let malformed = raw_deflate(malformed.as_bytes()).unwrap();
         assert!(matches!(
             decode_functional_options_parameter_blob(&malformed, &profile),
+            Err(SimpleMetadataBuildError::Native(_))
+        ));
+    }
+
+    #[test]
+    fn functional_option_rejects_an_unknown_native_content_class() {
+        let configuration =
+            functional_option_configuration("2.20", "Constant.FeatureState", "Catalog.Products");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = functional_option_graph(&validated);
+        let entry = compile_simple_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(FUNCTIONAL_OPTION_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        let malformed = String::from_utf8(plain).unwrap().replace(
+            FUNCTIONAL_OPTION_CONTENT_CLASS_UUID,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        );
+        let malformed = raw_deflate(malformed.as_bytes()).unwrap();
+        assert!(matches!(
+            decode_functional_option_blob(&malformed, &profile),
             Err(SimpleMetadataBuildError::Native(_))
         ));
     }

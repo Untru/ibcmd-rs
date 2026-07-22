@@ -303,11 +303,29 @@ mod tests {
             );
             assert!(profile.xml_dialect.is_none());
             assert!(profile.compatibility_mode.is_none());
-            assert!(profile.storage_profile.is_none());
+            if version == "8.3.27.1989" {
+                assert_eq!(
+                    profile.storage_profile.as_ref().unwrap().value.as_str(),
+                    "storage:mssql-config-configsave"
+                );
+            } else {
+                assert!(profile.storage_profile.is_none());
+            }
             assert!(profile.container_revision.is_none());
             assert!(profile.dbms.is_none());
             assert!(profile.fingerprints.is_empty());
-            assert!(profile.constants.is_empty());
+            if version == "8.3.27.1989" {
+                assert_eq!(
+                    profile.constants["bootstrap.metadata.functional_option.layout"].value,
+                    "functional-option-v1-crlf-no-bom"
+                );
+                assert_eq!(
+                    profile.constants["bootstrap.metadata.language.layout"].value,
+                    "language-v1-crlf-no-bom"
+                );
+            } else {
+                assert!(profile.constants.is_empty());
+            }
             assert!(profile.capabilities.is_empty());
             assert_eq!(profile.inheritance_chain, [id]);
             assert_eq!(profile.source_chain.len(), 1);
@@ -320,13 +338,13 @@ mod tests {
                 .evidence
                 .is_empty()
         );
-        assert_eq!(
+        assert!(
             registry
                 .get(&ProfileId::parse("platform-8.3.27.1989").unwrap())
                 .unwrap()
-                .evidence[0]
-                .value,
-            "docs/ssl-lab-2026-06-25.md"
+                .evidence
+                .iter()
+                .any(|value| value.value == "docs/ssl-lab-2026-06-25.md")
         );
         assert!(
             registry

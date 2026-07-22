@@ -41,13 +41,14 @@ compiler work continues on separate roadmap lanes.
 BOOT-002 is paused only on the native `Configuration` body: the bounded
 identity/inventory graph and deterministic `root`, `version`, and `versions`
 codecs are implemented, while the unproven seven-section body remains
-fail-closed. BOOT-003 is in progress. Two complete vertical slices, `Language`
-and `FunctionalOptionsParameter`, now support XML 2.20/2.21 -> typed IR ->
-deterministic base-free native row -> strict native IR/XML under independently
-selected 8.3.27 family layouts. Readable `<Use>` references are resolved only
-through the validated canonical graph. The other four simple families remain
-unsupported until their own layouts and UUID/type inputs are proven. These
-partial results do not increment the accepted-issue percentage above.
+fail-closed. BOOT-003 is in progress. Three complete vertical slices,
+`Language`, `FunctionalOption`, and `FunctionalOptionsParameter`, now support
+XML 2.20/2.21 -> typed IR -> deterministic base-free native row -> strict
+native IR/XML under independently selected 8.3.27 family layouts. Readable
+`Location`, `Content`, and `Use` references are resolved only through the
+validated canonical graph. The other three simple families remain unsupported
+until their own layouts and UUID/type inputs are proven. These partial results
+do not increment the accepted-issue percentage above.
 
 | Phase | Completed | Progress |
 |---|---:|---:|
