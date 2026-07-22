@@ -436,7 +436,7 @@
 
 ### MIG-004 — Реализовать 2.21 → 2.20 downgrade с loss policies
 
-- **Статус:** `[ ]`; **зависимости:** MIG-003
+- **Статус:** `[x]`; **зависимости:** MIG-003
 - **Файлы:** создать `crates/ibcmd-core/src/migration/v2_21_to_v2_20.rs`, downgrade fixtures
 - **Действия:** error/warn/drop rules и path-addressed losses.
 - **Проверка:** default error; explicit safe drop записан в report; unsupported property не исчезает молча.

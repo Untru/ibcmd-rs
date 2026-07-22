@@ -19,9 +19,12 @@
   },
   "evidence": [
     "docs/evidence/migration-xcf-2.20-to-2.21.md",
+    "docs/evidence/migration-xcf-2.21-to-2.20.md",
     "src/module_blob.rs",
     "src/mssql.rs",
     "tests/fixtures/migrations/2.20-to-2.21/manifest.json",
-    "tests/migration_2_20_to_2_21.rs"
+    "tests/fixtures/migrations/2.21-to-2.20/manifest.json",
+    "tests/migration_2_20_to_2_21.rs",
+    "tests/migration_2_21_to_2_20.rs"
   ]
 }

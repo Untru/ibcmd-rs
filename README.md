@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=36 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=37 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 36 of 56 accepted leaf issues in the
+As of 2026-07-22, 37 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (64.3%). Live workflow statuses are tracked in
+are complete (66.1%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -182,6 +182,15 @@ unchanged, changed, and newly-supported fixtures are decoded by the target
 codec without 1C, EDT, Java, or a JVM. See
 [XCF 2.20 to 2.21 migration evidence](docs/evidence/migration-xcf-2.20-to-2.21.md).
 
+MIG-004 completes the migration phase with a verified reverse edge. Portable
+`Constant`/`Catalog` inputs downgrade to XML 2.20 with no semantic loss; the
+target adapter removes the 2.21 palette namespace and reads its own output.
+The evidenced managed-form `UseInInterfaceCompatibilityMode=Any` delta is
+never silent: default `error` blocks, `warn` retains it in canonical IR, and
+only explicit `drop` removes it while recording an exact path and loss code in
+the migration report. Other values and unknown form content fail closed. See
+[guarded XCF 2.21 to 2.20 downgrade evidence](docs/evidence/migration-xcf-2.21-to-2.20.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
@@ -189,9 +198,9 @@ codec without 1C, EDT, Java, or a JVM. See
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 2/15 | 13.3% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
-| Phase 5a migrations | 3/4 | 75% |
+| Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **36/56** | **64.3%** |
+| **Overall** | **37/56** | **66.1%** |
 
 ## Export Compatibility Status
 
