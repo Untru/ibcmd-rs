@@ -7,6 +7,7 @@ mod functional_option;
 mod functional_options_parameter;
 mod language;
 mod registry;
+mod session_parameter;
 
 pub use common::{
     MetadataDecodeError, MetadataEnvelope, decode_metadata_envelope,
@@ -19,3 +20,4 @@ pub use language::register_language_codec;
 pub use registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
+pub use session_parameter::register_session_parameter_codec;

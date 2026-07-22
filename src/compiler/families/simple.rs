@@ -1,9 +1,9 @@
 //! Base-free native codecs for compact metadata families.
 //!
-//! Implemented vertical slices are `Language`, `FunctionalOption`, and
-//! `FunctionalOptionsParameter`. Other BOOT-003 families remain explicit
-//! profile-selection failures until their complete native layouts and
-//! required UUID/type inputs are represented.
+//! Implemented vertical slices are `Language`, `SessionParameter`,
+//! `FunctionalOption`, and `FunctionalOptionsParameter`. Other BOOT-003
+//! families remain explicit profile-selection failures until their complete
+//! native layouts and required UUID/type inputs are represented.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -38,10 +38,17 @@ const FUNCTIONAL_OPTION_LAYOUT: &str = "functional-option-v1-crlf-no-bom";
 const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY: &str =
     "bootstrap.metadata.functional_options_parameter.layout";
 const FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT: &str = "functional-options-parameter-v1-crlf-no-bom";
+const SESSION_PARAMETER_LAYOUT_KEY: &str = "bootstrap.metadata.session_parameter.layout";
+const SESSION_PARAMETER_LAYOUT: &str = "session-parameter-v1-crlf-no-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const DESIGN_TIME_REFERENCE_CLASS_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 const FUNCTIONAL_OPTION_CONTENT_CLASS_UUID: &str = "3ea29ea5-66f6-4e3b-8595-d8940db766a2";
+const FIXED_ARRAY_TYPE_UUID: &str = "4500381b-db30-4a10-9db4-990038032acf";
+const FIXED_MAP_TYPE_UUID: &str = "220455ea-6c85-4513-996f-bbe79ed07774";
+const FIXED_STRUCTURE_TYPE_UUID: &str = "3ee983d7-ace7-40f9-bb7e-2e916fcddd56";
+const UUID_TYPE_UUID: &str = "fc01b5df-97fe-449b-83d4-218a090e681e";
+const VALUE_STORAGE_TYPE_UUID: &str = "e199ca70-93cf-46ce-a54b-6edc88c3a296";
 
 const MAX_LANGUAGE_CODE_BYTES: usize = 256;
 const MAX_SIMPLE_METADATA_PLAIN_BYTES: usize = MAX_CANONICAL_RETAINED_BYTES + 4 * 1_048_576;
@@ -89,6 +96,7 @@ impl SimpleFamily {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SimpleLayout {
     LanguageV1,
+    SessionParameterV1,
     FunctionalOptionV1,
     FunctionalOptionsParameterV1,
 }
@@ -138,6 +146,11 @@ impl SimpleMetadataProfile {
                 LANGUAGE_LAYOUT_KEY,
                 LANGUAGE_LAYOUT,
                 SimpleLayout::LanguageV1,
+            ),
+            SimpleFamily::SessionParameter => (
+                SESSION_PARAMETER_LAYOUT_KEY,
+                SESSION_PARAMETER_LAYOUT,
+                SimpleLayout::SessionParameterV1,
             ),
             SimpleFamily::FunctionalOption => (
                 FUNCTIONAL_OPTION_LAYOUT_KEY,
@@ -217,6 +230,17 @@ impl SimpleMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: SimpleFamily::FunctionalOption,
             layout: SimpleLayout::FunctionalOptionV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn session_parameter_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: SimpleFamily::SessionParameter,
+            layout: SimpleLayout::SessionParameterV1,
         }
     }
 }
@@ -333,6 +357,32 @@ pub struct FunctionalOptionsParameterNativeIr {
     pub uses: Vec<ObjectUuid>,
 }
 
+/// One exact native `SessionParameter` type-pattern item.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SessionParameterTypeNativeIr {
+    Boolean,
+    String {
+        length: u32,
+    },
+    Number {
+        digits: u32,
+        fraction_digits: u32,
+        nonnegative: bool,
+    },
+    DateTime,
+    Reference(ObjectUuid),
+}
+
+/// Complete base-free native IR for a `SessionParameter` row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionParameterNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<NativeLocalizedString>,
+    pub comment: String,
+    pub types: Vec<SessionParameterTypeNativeIr>,
+}
+
 impl FunctionalOptionNativeIr {
     /// Renders XCF using caller-supplied readable names for every native UUID.
     pub fn to_xml(
@@ -440,6 +490,132 @@ impl FunctionalOptionsParameterNativeIr {
             xml.push_str("\t\t\t</Use>\r\n");
         }
         xml.push_str("\t\t</Properties>\r\n\t</FunctionalOptionsParameter>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
+}
+
+impl SessionParameterNativeIr {
+    /// Renders XCF, resolving non-built-in native TypeIds through the
+    /// caller-supplied `TypeId -> cfg:*` map.
+    pub fn to_xml(
+        &self,
+        profile: &ProfileId,
+        type_names: &BTreeMap<ObjectUuid, String>,
+    ) -> Result<Vec<u8>, SimpleMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| SimpleMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        if self.types.is_empty() {
+            return Err(native("SessionParameter Type pattern is empty"));
+        }
+
+        let mut scalar_names = Vec::with_capacity(self.types.len());
+        let mut unique_names = BTreeSet::new();
+        let mut string_qualifiers = None;
+        let mut number_qualifiers = None;
+        let mut date_qualifiers = false;
+        for item in &self.types {
+            let name = match item {
+                SessionParameterTypeNativeIr::Boolean => "xs:boolean".to_owned(),
+                SessionParameterTypeNativeIr::String { length } => {
+                    if string_qualifiers.replace(*length).is_some() {
+                        return Err(native("duplicate String type in SessionParameter pattern"));
+                    }
+                    "xs:string".to_owned()
+                }
+                SessionParameterTypeNativeIr::Number {
+                    digits,
+                    fraction_digits,
+                    nonnegative,
+                } => {
+                    if fraction_digits > digits {
+                        return Err(native("Number FractionDigits exceeds Digits"));
+                    }
+                    if number_qualifiers
+                        .replace((*digits, *fraction_digits, *nonnegative))
+                        .is_some()
+                    {
+                        return Err(native("duplicate Number type in SessionParameter pattern"));
+                    }
+                    "xs:decimal".to_owned()
+                }
+                SessionParameterTypeNativeIr::DateTime => {
+                    if date_qualifiers {
+                        return Err(native(
+                            "duplicate DateTime type in SessionParameter pattern",
+                        ));
+                    }
+                    date_qualifiers = true;
+                    "xs:dateTime".to_owned()
+                }
+                SessionParameterTypeNativeIr::Reference(type_id) => {
+                    if let Some(name) = builtin_type_name(*type_id) {
+                        name.to_owned()
+                    } else {
+                        let name = type_names
+                            .get(type_id)
+                            .ok_or(SimpleMetadataBuildError::MissingReadableReference(*type_id))?;
+                        if !supported_cfg_type_name(name) {
+                            return Err(native(
+                                "readable generated type is not an exact cfg:* name",
+                            ));
+                        }
+                        name.clone()
+                    }
+                }
+            };
+            if !unique_names.insert(name.clone()) {
+                return Err(native("duplicate SessionParameter Type scalar"));
+            }
+            scalar_names.push(name);
+        }
+
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"{version}\">\r\n\t<SessionParameter uuid=\"{}\">\r\n\t\t<Properties>\r\n",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonym_xml(&mut xml, &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        xml.push_str("\t\t\t<Type>\r\n");
+        for name in scalar_names {
+            write_xml_text_element(&mut xml, "\t\t\t\t", "v8:Type", &name);
+        }
+        if let Some(length) = string_qualifiers {
+            xml.push_str("\t\t\t\t<v8:StringQualifiers>\r\n");
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "v8:Length", &length.to_string());
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "v8:AllowedLength", "Variable");
+            xml.push_str("\t\t\t\t</v8:StringQualifiers>\r\n");
+        }
+        if let Some((digits, fraction_digits, nonnegative)) = number_qualifiers {
+            xml.push_str("\t\t\t\t<v8:NumberQualifiers>\r\n");
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "v8:Digits", &digits.to_string());
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "v8:FractionDigits",
+                &fraction_digits.to_string(),
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "v8:AllowedSign",
+                if nonnegative { "Nonnegative" } else { "Any" },
+            );
+            xml.push_str("\t\t\t\t</v8:NumberQualifiers>\r\n");
+        }
+        if date_qualifiers {
+            xml.push_str("\t\t\t\t<v8:DateQualifiers>\r\n");
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "v8:DateFractions", "DateTime");
+            xml.push_str("\t\t\t\t</v8:DateQualifiers>\r\n");
+        }
+        xml.push_str(
+            "\t\t\t</Type>\r\n\t\t</Properties>\r\n\t</SessionParameter>\r\n</MetaDataObject>",
+        );
         Ok(xml.into_bytes())
     }
 }
@@ -665,6 +841,10 @@ pub fn compile_simple_metadata(
             let projection = project_language(validated, object)?;
             serialize_language(&projection)
         }
+        (SimpleFamily::SessionParameter, SimpleLayout::SessionParameterV1) => {
+            let projection = project_session_parameter(validated, object)?;
+            serialize_session_parameter(&projection)
+        }
         (SimpleFamily::FunctionalOption, SimpleLayout::FunctionalOptionV1) => {
             let projection = project_functional_option(validated, object)?;
             serialize_functional_option(&projection)
@@ -697,6 +877,20 @@ pub fn decode_language_blob(
     }
     let plain = inflate_bounded(blob)?;
     parse_language(&plain)
+}
+
+/// Strictly decodes a raw-DEFLATE `SessionParameter` primary row.
+pub fn decode_session_parameter_blob(
+    blob: &[u8],
+    profile: &SimpleMetadataProfile,
+) -> Result<SessionParameterNativeIr, SimpleMetadataBuildError> {
+    if profile.family != SimpleFamily::SessionParameter
+        || profile.layout != SimpleLayout::SessionParameterV1
+    {
+        return Err(SimpleMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    let plain = inflate_bounded(blob)?;
+    parse_session_parameter(&plain)
 }
 
 /// Strictly decodes a raw-DEFLATE `FunctionalOption` primary row.
@@ -840,6 +1034,167 @@ fn project_language(
         synonyms,
         comment,
         language_code,
+    })
+}
+
+fn project_session_parameter(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<SessionParameterNativeIr, SimpleMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    match object.provenance().source_profile().as_str() {
+        "xml-2.20" | "xml-2.21" => {}
+        _ => return invalid_model(uuid, "source profile is not xml-2.20 or xml-2.21"),
+    }
+    if object.owner().is_some() {
+        return invalid_model(uuid, "SessionParameter must be top-level");
+    }
+    if !object.references().is_empty()
+        || !object.generated_types().is_empty()
+        || !object.assets().is_empty()
+    {
+        return invalid_model(
+            uuid,
+            "SessionParameter cannot own canonical references, generated types, or assets",
+        );
+    }
+    if validated
+        .configuration()
+        .objects()
+        .iter()
+        .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(uuid, "SessionParameter cannot own child objects");
+    }
+    let expected = ["Name", "Synonym", "Comment", "Type"];
+    if object.properties().len() != expected.len()
+        || object
+            .properties()
+            .iter()
+            .zip(expected)
+            .any(|(field, expected)| field.name().as_str() != expected)
+    {
+        return invalid_model(uuid, "typed property schema is not exact");
+    }
+    let name = text_property(object, "Name")?.to_owned();
+    if name.is_empty() {
+        return invalid_model(uuid, "Name must not be empty");
+    }
+    let synonyms = synonym_property(object, "Synonym")?;
+    let comment = text_property(object, "Comment")?.to_owned();
+    let values =
+        property(object, "Type")?
+            .as_sequence()
+            .ok_or(SimpleMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "Type is not a sequence",
+            })?;
+    if values.is_empty() {
+        return invalid_model(uuid, "Type pattern is empty");
+    }
+
+    let generated_types = generated_type_reference_index(validated, uuid)?;
+    let mut seen_scalars = BTreeSet::new();
+    let mut seen_type_ids = BTreeSet::new();
+    let mut types = Vec::with_capacity(values.len());
+    for value in values {
+        let fields = value
+            .as_record()
+            .ok_or(SimpleMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "Type item is not a record",
+            })?;
+        let kind = canonical_enum_field(fields.first(), uuid, "Type kind is not an enum token")?;
+        let native = match kind {
+            "Boolean" => {
+                require_record_schema(fields, &["kind"], uuid)?;
+                SessionParameterTypeNativeIr::Boolean
+            }
+            "String" => {
+                require_record_schema(fields, &["kind", "length", "allowed_length"], uuid)?;
+                let length = canonical_u32_field(&fields[1], uuid)?;
+                let allowed = canonical_enum_field(
+                    Some(&fields[2]),
+                    uuid,
+                    "String allowed_length is not an enum token",
+                )?;
+                if allowed != "Variable" {
+                    return invalid_model(
+                        uuid,
+                        "Fixed String has no evidenced SessionParameter native mapping",
+                    );
+                }
+                SessionParameterTypeNativeIr::String { length }
+            }
+            "Number" => {
+                require_record_schema(
+                    fields,
+                    &["kind", "digits", "fraction_digits", "allowed_sign"],
+                    uuid,
+                )?;
+                let digits = canonical_u32_field(&fields[1], uuid)?;
+                let fraction_digits = canonical_u32_field(&fields[2], uuid)?;
+                if fraction_digits > digits {
+                    return invalid_model(uuid, "Number FractionDigits exceeds Digits");
+                }
+                let allowed = canonical_enum_field(
+                    Some(&fields[3]),
+                    uuid,
+                    "Number allowed_sign is not an enum token",
+                )?;
+                let nonnegative = match allowed {
+                    "Any" => false,
+                    "Nonnegative" => true,
+                    _ => return invalid_model(uuid, "Number allowed_sign is unsupported"),
+                };
+                SessionParameterTypeNativeIr::Number {
+                    digits,
+                    fraction_digits,
+                    nonnegative,
+                }
+            }
+            "DateTime" => {
+                require_record_schema(fields, &["kind", "date_fractions"], uuid)?;
+                if canonical_enum_field(
+                    Some(&fields[1]),
+                    uuid,
+                    "DateTime date_fractions is not an enum token",
+                )? != "DateTime"
+                {
+                    return invalid_model(
+                        uuid,
+                        "Date or Time-only type has no evidenced native mapping",
+                    );
+                }
+                SessionParameterTypeNativeIr::DateTime
+            }
+            "Reference" => {
+                require_record_schema(fields, &["kind", "reference"], uuid)?;
+                let readable = canonical_text(fields[1].value(), uuid)?;
+                let type_id = builtin_type_uuid(readable)
+                    .or_else(|| generated_types.get(readable).copied())
+                    .ok_or(SimpleMetadataBuildError::InvalidModel {
+                        object: uuid,
+                        reason: "Type contains an unresolved readable generated type",
+                    })?;
+                if !seen_type_ids.insert(type_id) {
+                    return invalid_model(uuid, "Type resolves more than once to the same TypeId");
+                }
+                SessionParameterTypeNativeIr::Reference(type_id)
+            }
+            _ => return invalid_model(uuid, "Type item kind is unsupported"),
+        };
+        if kind != "Reference" && !seen_scalars.insert(kind) {
+            return invalid_model(uuid, "Type contains a duplicate primitive scalar");
+        }
+        types.push(native);
+    }
+    Ok(SessionParameterNativeIr {
+        uuid,
+        name,
+        synonyms,
+        comment,
+        types,
     })
 }
 
@@ -1058,6 +1413,53 @@ fn readable_reference_index(
     Ok(references)
 }
 
+fn generated_type_reference_index(
+    validated: &ValidatedConfiguration<'_>,
+    compiling: ObjectUuid,
+) -> Result<BTreeMap<String, ObjectUuid>, SimpleMetadataBuildError> {
+    let mut references = BTreeMap::new();
+    for object in validated.configuration().objects() {
+        if object.generated_types().is_empty() {
+            continue;
+        }
+        let Some(name) = object
+            .properties()
+            .iter()
+            .find(|field| field.name().as_str() == "Name")
+            .and_then(|field| match field.value().kind() {
+                CanonicalValueKind::Text(value)
+                    if !value.as_str().is_empty()
+                        && !value.as_str().contains('.')
+                        && !value.as_str().chars().any(char::is_whitespace) =>
+                {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        for generated_type in object.generated_types() {
+            if builtin_type_name(generated_type.uuid()).is_some() {
+                return invalid_model(
+                    compiling,
+                    "generated TypeId collides with an evidenced built-in TypeId",
+                );
+            }
+            let readable = format!(
+                "cfg:{}{}.{}",
+                object.kind().as_str(),
+                generated_type.kind().as_str(),
+                name
+            );
+            if references.insert(readable, generated_type.uuid()).is_some() {
+                return invalid_model(compiling, "readable generated type name is ambiguous");
+            }
+        }
+    }
+    Ok(references)
+}
+
 fn readable_reference_for_object(
     validated: &ValidatedConfiguration<'_>,
     index: usize,
@@ -1183,6 +1585,52 @@ fn canonical_text(
     }
 }
 
+fn require_record_schema(
+    fields: &[CanonicalField],
+    expected: &[&str],
+    object: ObjectUuid,
+) -> Result<(), SimpleMetadataBuildError> {
+    if fields.len() != expected.len()
+        || fields
+            .iter()
+            .zip(expected)
+            .any(|(field, expected)| field.name().as_str() != *expected)
+    {
+        invalid_model(object, "Type item schema is not exact")
+    } else {
+        Ok(())
+    }
+}
+
+fn canonical_enum_field<'a>(
+    field: Option<&'a CanonicalField>,
+    object: ObjectUuid,
+    reason: &'static str,
+) -> Result<&'a str, SimpleMetadataBuildError> {
+    match field.map(CanonicalField::value).map(CanonicalValue::kind) {
+        Some(CanonicalValueKind::EnumToken(value)) => Ok(value.as_str()),
+        _ => invalid_model(object, reason),
+    }
+}
+
+fn canonical_u32_field(
+    field: &CanonicalField,
+    object: ObjectUuid,
+) -> Result<u32, SimpleMetadataBuildError> {
+    match field.value().kind() {
+        CanonicalValueKind::Integer(value) => {
+            value
+                .as_str()
+                .parse::<u32>()
+                .map_err(|_| SimpleMetadataBuildError::InvalidModel {
+                    object,
+                    reason: "Type qualifier is not u32",
+                })
+        }
+        _ => invalid_model(object, "Type qualifier is not an integer"),
+    }
+}
+
 fn serialize_language(value: &LanguageNativeIr) -> Vec<u8> {
     let mut plaintext = String::new();
     plaintext.push_str("{1,\r\n{0,\r\n");
@@ -1196,6 +1644,50 @@ fn serialize_language(value: &LanguageNativeIr) -> Vec<u8> {
     plaintext.push(',');
     push_1c_string(&mut plaintext, &value.language_code);
     plaintext.push_str("},0}");
+    plaintext.into_bytes()
+}
+
+fn serialize_session_parameter(value: &SessionParameterNativeIr) -> Vec<u8> {
+    let mut plaintext = String::new();
+    plaintext.push_str("{1,\r\n{1,\r\n{2,\r\n");
+    push_native_header(
+        &mut plaintext,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plaintext.push_str(",\r\n{\"Pattern\"");
+    for item in &value.types {
+        plaintext.push_str(",\r\n");
+        match item {
+            SessionParameterTypeNativeIr::Boolean => plaintext.push_str("{\"B\"}"),
+            SessionParameterTypeNativeIr::String { length: 0 } => plaintext.push_str("{\"S\"}"),
+            SessionParameterTypeNativeIr::String { length } => {
+                write!(&mut plaintext, "{{\"S\",{length},1}}")
+                    .expect("writing to String cannot fail");
+            }
+            SessionParameterTypeNativeIr::Number {
+                digits,
+                fraction_digits,
+                nonnegative,
+            } => {
+                write!(
+                    &mut plaintext,
+                    "{{\"N\",{digits},{fraction_digits},{}}}",
+                    if *nonnegative { 1 } else { 0 }
+                )
+                .expect("writing to String cannot fail");
+            }
+            SessionParameterTypeNativeIr::DateTime => plaintext.push_str("{\"D\"}"),
+            SessionParameterTypeNativeIr::Reference(type_id) => {
+                plaintext.push_str("{\"#\",");
+                plaintext.push_str(&type_id.to_string());
+                plaintext.push('}');
+            }
+        }
+    }
+    plaintext.push_str("\r\n}\r\n}\r\n},0}");
     plaintext.into_bytes()
 }
 
@@ -1493,6 +1985,106 @@ fn parse_language(plain: &[u8]) -> Result<LanguageNativeIr, SimpleMetadataBuildE
     })
 }
 
+fn parse_session_parameter(
+    plain: &[u8],
+) -> Result<SessionParameterNativeIr, SimpleMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 3, "root")?;
+    exact_token(&root[0], "1", "root discriminator")?;
+    exact_token(&root[2], "0", "root tail")?;
+    let wrapper = exact_list(&root[1], 2, "SessionParameter wrapper")?;
+    exact_token(&wrapper[0], "1", "SessionParameter wrapper discriminator")?;
+    let object = exact_list(&wrapper[1], 3, "SessionParameter object")?;
+    exact_token(&object[0], "2", "SessionParameter discriminator")?;
+    let header = parse_native_header(&object[1])?;
+    let types = parse_native_type_pattern(&object[2])?;
+    Ok(SessionParameterNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        types,
+    })
+}
+
+fn parse_native_type_pattern(
+    value: &NativeValue,
+) -> Result<Vec<SessionParameterTypeNativeIr>, SimpleMetadataBuildError> {
+    let fields = list(value, "Type pattern")?;
+    if fields.len() < 2 {
+        return Err(native("Type pattern is empty"));
+    }
+    if text(&fields[0], "Type pattern marker")? != "Pattern" {
+        return Err(native("Type pattern marker is not Pattern"));
+    }
+    if fields.len() - 1 > MAX_CANONICAL_COLLECTION_ITEMS {
+        return Err(native("Type pattern exceeds canonical collection bound"));
+    }
+    let mut scalar_tags = BTreeSet::new();
+    let mut type_ids = BTreeSet::new();
+    let mut types = Vec::with_capacity(fields.len() - 1);
+    for value in &fields[1..] {
+        let item = list(value, "Type pattern item")?;
+        let tag = item
+            .first()
+            .ok_or_else(|| native("Type pattern item is empty"))
+            .and_then(|value| text(value, "Type pattern item tag"))?;
+        let parsed = match tag {
+            "B" if item.len() == 1 => SessionParameterTypeNativeIr::Boolean,
+            "S" if item.len() == 1 => SessionParameterTypeNativeIr::String { length: 0 },
+            "S" if item.len() == 3 => {
+                let length = canonical_u32_token(&item[1], "String length")?;
+                if length == 0 {
+                    return Err(native(
+                        "zero-length String must use the compact native shape",
+                    ));
+                }
+                exact_token(&item[2], "1", "String Variable flag")?;
+                SessionParameterTypeNativeIr::String { length }
+            }
+            "N" if item.len() == 4 => {
+                let digits = canonical_u32_token(&item[1], "Number digits")?;
+                let fraction_digits = canonical_u32_token(&item[2], "Number fraction digits")?;
+                if fraction_digits > digits {
+                    return Err(native("Number FractionDigits exceeds Digits"));
+                }
+                let nonnegative = match token(&item[3], "Number sign flag")? {
+                    "0" => false,
+                    "1" => true,
+                    _ => return Err(native("Number sign flag is not 0 or 1")),
+                };
+                SessionParameterTypeNativeIr::Number {
+                    digits,
+                    fraction_digits,
+                    nonnegative,
+                }
+            }
+            "D" if item.len() == 1 => SessionParameterTypeNativeIr::DateTime,
+            "#" if item.len() == 2 => {
+                let type_id = canonical_uuid_token(&item[1], "TypeId")?;
+                if type_id.to_string() == NIL_UUID || !type_ids.insert(type_id) {
+                    return Err(native("TypeId is nil or duplicated"));
+                }
+                types.push(SessionParameterTypeNativeIr::Reference(type_id));
+                continue;
+            }
+            "B" | "S" | "N" | "D" | "#" => {
+                return Err(native(
+                    "Type pattern item has unexpected field count or flag",
+                ));
+            }
+            _ => return Err(native("unknown SessionParameter Type pattern item")),
+        };
+        if !scalar_tags.insert(tag) {
+            return Err(native(
+                "duplicate primitive in SessionParameter Type pattern",
+            ));
+        }
+        types.push(parsed);
+    }
+    Ok(types)
+}
+
 fn parse_functional_option(
     plain: &[u8],
 ) -> Result<FunctionalOptionNativeIr, SimpleMetadataBuildError> {
@@ -1687,6 +2279,18 @@ fn canonical_uuid_token(
     Ok(uuid)
 }
 
+fn canonical_u32_token(
+    value: &NativeValue,
+    field: &'static str,
+) -> Result<u32, SimpleMetadataBuildError> {
+    let value = token(value, field)?;
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|parsed| parsed.to_string() == value)
+        .ok_or_else(|| native(&format!("{field} is not canonical u32")))
+}
+
 fn parse_synonyms(
     value: &NativeValue,
 ) -> Result<Vec<NativeLocalizedString>, SimpleMetadataBuildError> {
@@ -1803,6 +2407,42 @@ fn xml_profile_version(profile: &ProfileId) -> Option<&'static str> {
     }
 }
 
+fn builtin_type_uuid(name: &str) -> Option<ObjectUuid> {
+    let value = match name {
+        "v8:FixedArray" => FIXED_ARRAY_TYPE_UUID,
+        "v8:FixedMap" => FIXED_MAP_TYPE_UUID,
+        "v8:FixedStructure" => FIXED_STRUCTURE_TYPE_UUID,
+        "v8:UUID" => UUID_TYPE_UUID,
+        "v8:ValueStorage" => VALUE_STORAGE_TYPE_UUID,
+        _ => return None,
+    };
+    Some(ObjectUuid::parse(value).expect("evidenced built-in TypeId UUID is stable"))
+}
+
+fn builtin_type_name(type_id: ObjectUuid) -> Option<&'static str> {
+    match type_id.to_string().as_str() {
+        FIXED_ARRAY_TYPE_UUID => Some("v8:FixedArray"),
+        FIXED_MAP_TYPE_UUID => Some("v8:FixedMap"),
+        FIXED_STRUCTURE_TYPE_UUID => Some("v8:FixedStructure"),
+        UUID_TYPE_UUID => Some("v8:UUID"),
+        VALUE_STORAGE_TYPE_UUID => Some("v8:ValueStorage"),
+        _ => None,
+    }
+}
+
+fn supported_cfg_type_name(value: &str) -> bool {
+    let Some(tail) = value.strip_prefix("cfg:") else {
+        return false;
+    };
+    let Some((kind, name)) = tail.split_once('.') else {
+        return false;
+    };
+    !kind.is_empty()
+        && !name.is_empty()
+        && !tail.chars().any(char::is_whitespace)
+        && !name.contains('.')
+}
+
 fn write_xml_text_element(output: &mut String, indent: &str, name: &str, value: &str) {
     output.push_str(indent);
     output.push('<');
@@ -1851,7 +2491,8 @@ mod tests {
     use ibcmd_core::family::FamilyId;
     use ibcmd_core::identity::LogicalIdentity;
     use ibcmd_core::model::{
-        CanonicalConfiguration, CanonicalObject, CanonicalObjectParts, MetadataKind,
+        CanonicalConfiguration, CanonicalObject, CanonicalObjectParts, GeneratedType,
+        GeneratedTypeKind, MetadataKind,
     };
     use ibcmd_core::profile::{ProfileSourceKind, parse_profile_source, resolve_profiles};
     use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
@@ -1872,6 +2513,10 @@ mod tests {
     const CATALOG_UUID: &str = "44444444-4444-4444-8444-444444444444";
     const FUNCTIONAL_OPTION_UUID: &str = "55555555-5555-4555-8555-555555555555";
     const CONSTANT_UUID: &str = "66666666-6666-4666-8666-666666666666";
+    const SESSION_PARAMETER_UUID: &str = "77777777-7777-4777-8777-777777777777";
+    const SECOND_CATALOG_UUID: &str = "88888888-8888-4888-8888-888888888888";
+    const FIRST_CATALOG_REF_TYPE_ID: &str = "3997c341-4065-4af6-813f-99750a01052b";
+    const SECOND_CATALOG_REF_TYPE_ID: &str = "c54edff0-c3a1-44d7-9707-1fe05700b055";
 
     fn xml(version: &str) -> Vec<u8> {
         format!(
@@ -1981,7 +2626,29 @@ mod tests {
         .into_bytes()
     }
 
-    fn simple_object(version: &str, uuid: &str, kind: &str, name: &str) -> CanonicalObject {
+    fn session_parameter_xml(version: &str, type_body: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"{version}\">\r\n\
+\t<SessionParameter uuid=\"{SESSION_PARAMETER_UUID}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>AuthorizedUser</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>en</v8:lang><v8:content>Authorized user</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Type>{type_body}</Type>\r\n\
+\t\t</Properties>\r\n\
+\t</SessionParameter>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn simple_object_parts(
+        version: &str,
+        uuid: &str,
+        kind: &str,
+        name: &str,
+    ) -> CanonicalObjectParts {
         let path = ObjectPath::new(vec![
             PathSegment::name(&format!(
                 "{}-{}",
@@ -2007,6 +2674,26 @@ mod tests {
             )
             .unwrap(),
         );
+        parts
+    }
+
+    fn simple_object(version: &str, uuid: &str, kind: &str, name: &str) -> CanonicalObject {
+        CanonicalObject::new(simple_object_parts(version, uuid, kind, name)).unwrap()
+    }
+
+    fn simple_object_with_generated_type(
+        version: &str,
+        uuid: &str,
+        kind: &str,
+        name: &str,
+        type_id: &str,
+        type_kind: &str,
+    ) -> CanonicalObject {
+        let mut parts = simple_object_parts(version, uuid, kind, name);
+        parts.generated_types.push(GeneratedType::new(
+            ObjectUuid::parse(type_id).unwrap(),
+            GeneratedTypeKind::new(type_kind).unwrap(),
+        ));
         CanonicalObject::new(parts).unwrap()
     }
 
@@ -2064,6 +2751,41 @@ mod tests {
         .unwrap()
     }
 
+    fn session_parameter_configuration(version: &str, type_body: &str) -> CanonicalConfiguration {
+        let document = XmlReader::from_slice(&session_parameter_xml(version, type_body)).unwrap();
+        let parameter = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("SessionParameter").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        CanonicalConfiguration::new(vec![
+            simple_object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            simple_object_with_generated_type(
+                version,
+                CATALOG_UUID,
+                "Catalog",
+                "ExternalUsers",
+                FIRST_CATALOG_REF_TYPE_ID,
+                "Ref",
+            ),
+            simple_object_with_generated_type(
+                version,
+                SECOND_CATALOG_UUID,
+                "Catalog",
+                "Users",
+                SECOND_CATALOG_REF_TYPE_ID,
+                "Ref",
+            ),
+            parameter,
+        ])
+        .unwrap()
+    }
+
     fn functional_options_parameter_graph<'a>(
         validated: &ValidatedConfiguration<'a>,
     ) -> (BootstrapGraph, SimpleMetadataProfile) {
@@ -2112,6 +2834,32 @@ mod tests {
         (
             graph,
             SimpleMetadataProfile::functional_option_fixture("platform-test"),
+        )
+    }
+
+    fn session_parameter_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, SimpleMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [
+                CONFIGURATION_UUID,
+                CATALOG_UUID,
+                SECOND_CATALOG_UUID,
+                SESSION_PARAMETER_UUID,
+            ]
+            .into_iter()
+            .map(|uuid| {
+                ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+            })
+            .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            SimpleMetadataProfile::session_parameter_fixture("platform-test"),
         )
     }
 
@@ -2184,6 +2932,7 @@ mod tests {
                 "storage_profile": "{SUPPORTED_STORAGE_PROFILE}",
                 "constants": {{
                     "{LANGUAGE_LAYOUT_KEY}": "{LANGUAGE_LAYOUT}",
+                    "{SESSION_PARAMETER_LAYOUT_KEY}": "{SESSION_PARAMETER_LAYOUT}",
                     "{FUNCTIONAL_OPTION_LAYOUT_KEY}": "{FUNCTIONAL_OPTION_LAYOUT}",
                     "{FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT_KEY}": "{FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT}"
                 }}
@@ -2208,6 +2957,15 @@ mod tests {
                 ..
             })
         ));
+        assert_eq!(
+            SimpleMetadataProfile::from_effective_for_family(
+                effective,
+                SimpleFamily::SessionParameter
+            )
+            .unwrap()
+            .family(),
+            SimpleFamily::SessionParameter
+        );
         assert_eq!(
             SimpleMetadataProfile::from_effective_for_family(
                 effective,
@@ -2236,6 +2994,7 @@ mod tests {
             .unwrap();
         for family in [
             SimpleFamily::Language,
+            SimpleFamily::SessionParameter,
             SimpleFamily::FunctionalOption,
             SimpleFamily::FunctionalOptionsParameter,
         ] {
@@ -2247,11 +3006,155 @@ mod tests {
             );
         }
         assert!(matches!(
-            SimpleMetadataProfile::from_effective_for_family(
-                effective,
-                SimpleFamily::SessionParameter
-            ),
+            SimpleMetadataProfile::from_effective_for_family(effective, SimpleFamily::DefinedType),
             Err(SimpleMetadataProfileError::FamilyNotImplemented { .. })
+        ));
+    }
+
+    #[test]
+    fn session_parameter_roundtrips_generated_type_ids_without_a_base() {
+        let type_body = "<v8:Type>cfg:CatalogRef.ExternalUsers</v8:Type><v8:Type>cfg:CatalogRef.Users</v8:Type>";
+        for version in ["2.20", "2.21"] {
+            let configuration = session_parameter_configuration(version, type_body);
+            let validated = validate_configuration(&configuration).unwrap();
+            let (graph, profile) = session_parameter_graph(&validated);
+            let uuid = ObjectUuid::parse(SESSION_PARAMETER_UUID).unwrap();
+            let first = compile_simple_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                .unwrap();
+            let second =
+                compile_simple_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            assert_eq!(first, second);
+            let plain =
+                inflate_bounded(first.outcome().compiled_payload().unwrap().bytes()).unwrap();
+            assert_eq!(
+                plain,
+                format!(
+                    "{{1,\r\n{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,{SESSION_PARAMETER_UUID}}},\"AuthorizedUser\",{{1,\"en\",\"Authorized user\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"#\",{FIRST_CATALOG_REF_TYPE_ID}}},\r\n{{\"#\",{SECOND_CATALOG_REF_TYPE_ID}}}\r\n}}\r\n}}\r\n}},0}}"
+                )
+                .as_bytes()
+            );
+            let ir = decode_session_parameter_blob(
+                first.outcome().compiled_payload().unwrap().bytes(),
+                &profile,
+            )
+            .unwrap();
+            assert_eq!(
+                ir.types,
+                [
+                    SessionParameterTypeNativeIr::Reference(
+                        ObjectUuid::parse(FIRST_CATALOG_REF_TYPE_ID).unwrap()
+                    ),
+                    SessionParameterTypeNativeIr::Reference(
+                        ObjectUuid::parse(SECOND_CATALOG_REF_TYPE_ID).unwrap()
+                    ),
+                ]
+            );
+            let type_names = BTreeMap::from([
+                (
+                    ObjectUuid::parse(FIRST_CATALOG_REF_TYPE_ID).unwrap(),
+                    "cfg:CatalogRef.ExternalUsers".to_owned(),
+                ),
+                (
+                    ObjectUuid::parse(SECOND_CATALOG_REF_TYPE_ID).unwrap(),
+                    "cfg:CatalogRef.Users".to_owned(),
+                ),
+            ]);
+            let xml = ir
+                .to_xml(
+                    &ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    &type_names,
+                )
+                .unwrap();
+            let document = XmlReader::from_slice(&xml).unwrap();
+            bundled_metadata_registry()
+                .decode(
+                    &FamilyId::parse("SessionParameter").unwrap(),
+                    &document,
+                    ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn session_parameter_builtin_and_variable_string_use_evidenced_pattern_items() {
+        let type_body = "<v8:Type>v8:FixedArray</v8:Type><v8:Type>xs:string</v8:Type><v8:StringQualifiers><v8:Length>1</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength></v8:StringQualifiers>";
+        let configuration = session_parameter_configuration("2.20", type_body);
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = session_parameter_graph(&validated);
+        let entry = compile_simple_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(SESSION_PARAMETER_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(String::from_utf8(plain).unwrap().contains(&format!(
+            "{{\"#\",{FIXED_ARRAY_TYPE_UUID}}},\r\n{{\"S\",1,1}}"
+        )));
+        let ir = decode_session_parameter_blob(
+            entry.outcome().compiled_payload().unwrap().bytes(),
+            &profile,
+        )
+        .unwrap();
+        let xml = ir
+            .to_xml(&ProfileId::parse("xml-2.21").unwrap(), &BTreeMap::new())
+            .unwrap();
+        let document = XmlReader::from_slice(&xml).unwrap();
+        bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("SessionParameter").unwrap(),
+                &document,
+                ProfileId::parse("xml-2.21").unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn session_parameter_does_not_guess_unresolved_generated_types() {
+        let configuration =
+            session_parameter_configuration("2.20", "<v8:Type>cfg:CatalogRef.Missing</v8:Type>");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = session_parameter_graph(&validated);
+        assert!(matches!(
+            compile_simple_metadata(
+                &validated,
+                &graph,
+                ObjectUuid::parse(SESSION_PARAMETER_UUID).unwrap(),
+                &axes("2.20"),
+                &profile,
+            ),
+            Err(SimpleMetadataBuildError::InvalidModel {
+                reason: "Type contains an unresolved readable generated type",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn session_parameter_decodes_observed_row_and_rejects_unknown_pattern_items() {
+        let observed = format!(
+            "{{1,\r\n{{1,\r\n{{2,\r\n{{3,\r\n{{1,0,5efc4bc4-b711-4620-8d2e-9d947c6cc141}},\"АвторизованныйПользователь\",\r\n{{1,\"ru\",\"Авторизованный пользователь\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"#\",{FIRST_CATALOG_REF_TYPE_ID}}},\r\n{{\"#\",{SECOND_CATALOG_REF_TYPE_ID}}}\r\n}}\r\n}}\r\n}},0}}"
+        );
+        let ir = parse_session_parameter(observed.as_bytes()).unwrap();
+        assert_eq!(ir.types.len(), 2);
+        let unknown = observed.replace(
+            &format!("{{\"#\",{FIRST_CATALOG_REF_TYPE_ID}}}"),
+            "{\"Future\"}",
+        );
+        assert!(matches!(
+            parse_session_parameter(unknown.as_bytes()),
+            Err(SimpleMetadataBuildError::Native(_))
+        ));
+        let nil = observed.replace(FIRST_CATALOG_REF_TYPE_ID, NIL_UUID);
+        assert!(matches!(
+            parse_session_parameter(nil.as_bytes()),
+            Err(SimpleMetadataBuildError::Native(_))
         ));
     }
 
