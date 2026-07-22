@@ -306,7 +306,7 @@
 
 ### BOOT-001 — Сгенерировать bootstrap readiness manifest
 
-- **Статус:** `[ ]`; **зависимости:** CF-013, CORE-009
+- **Статус:** `[x]`; **зависимости:** CF-013, CORE-009
 - **Файлы:** создать `src/compiler/readiness.rs`, `compatibility/bootstrap.json`
 - **Действия:** для каждого source artifact указать expected entries, codec и blocker; инвентаризировать все base reads.
 - **Проверка:** manifest покрывает все маршруты source scan; build запрещён при любом NeedsBase/Unsupported.
