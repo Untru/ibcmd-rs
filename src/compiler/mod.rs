@@ -25,6 +25,7 @@ use crate::module_blob::{
 };
 
 pub mod overlay;
+pub mod readiness;
 
 pub use overlay::compile_overlay;
 
@@ -973,9 +974,10 @@ mod tests {
         }
 
         let source = format!(
-            "{}\n{}",
+            "{}\n{}\n{}",
             production(include_str!("mod.rs")),
-            production(include_str!("overlay.rs"))
+            production(include_str!("overlay.rs")),
+            production(include_str!("readiness.rs"))
         );
         let forbidden = [
             ["std", "path"].join("::"),
