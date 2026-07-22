@@ -348,6 +348,10 @@ mod tests {
                     "session-parameter-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.web_service.layout"].value,
+                    "web-service-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
                     profile.constants["bootstrap.metadata.xdto_package.layout"].value,
                     "xdto-package-v1-crlf-utf8-bom"
                 );

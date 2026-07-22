@@ -16,7 +16,7 @@ use ibcmd_core::value::{CanonicalInteger, CanonicalValue, EnumToken};
 
 use super::common::{
     MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces, V8_NAMESPACE,
-    element_text, resolve_namespaces, typed, uri_of,
+    XR_NAMESPACE, element_text, resolve_namespaces, typed, uri_of,
 };
 use super::decode_metadata_envelope;
 use super::language::{
@@ -32,6 +32,9 @@ const SCHEDULED_JOB_FAMILY: &str = "ScheduledJob";
 const EVENT_SUBSCRIPTION_FAMILY: &str = "EventSubscription";
 const XDTO_PACKAGE_FAMILY: &str = "XDTOPackage";
 const HTTP_SERVICE_FAMILY: &str = "HTTPService";
+const WEB_SERVICE_FAMILY: &str = "WebService";
+const XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
+const XSI_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
 /// Registers the strict `ScheduledJob` codec.
 pub fn register_scheduled_job_codec(
@@ -69,6 +72,15 @@ pub fn register_http_service_codec(
     }))
 }
 
+/// Registers the strict `WebService` metadata codec.
+pub fn register_web_service_codec(
+    registry: &mut MetadataRegistry,
+) -> Result<(), MetadataRegistryError> {
+    registry.register(Box::new(WebServiceCodec {
+        family: FamilyId::parse(WEB_SERVICE_FAMILY).expect("family id is stable"),
+    }))
+}
+
 struct ScheduledJobCodec {
     family: FamilyId,
 }
@@ -83,6 +95,33 @@ struct XdtoPackageCodec {
 
 struct HttpServiceCodec {
     family: FamilyId,
+}
+
+struct WebServiceCodec {
+    family: FamilyId,
+}
+
+impl MetadataFamilyCodec for WebServiceCodec {
+    fn family_id(&self) -> &FamilyId {
+        &self.family
+    }
+
+    fn decode(
+        &self,
+        document: &XmlDocument,
+        source: ProfileId,
+        path: ObjectPath,
+    ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        decode_web_service(document, source, path)
+    }
+
+    fn encode(
+        &self,
+        envelope: &MetadataEnvelope,
+        target: &ProfileId,
+    ) -> Result<Vec<u8>, MetadataEncodeError> {
+        encode_web_service(envelope, target)
+    }
 }
 
 impl MetadataFamilyCodec for HttpServiceCodec {
@@ -232,6 +271,45 @@ struct HttpServiceProjection {
     reuse_sessions: String,
     session_max_age: u32,
     urls: Vec<HttpUrlProjection>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct XdtoTypeProjection {
+    namespace: String,
+    name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WebParameterProjection {
+    uuid: ObjectUuid,
+    comment: String,
+    value_type: XdtoTypeProjection,
+    nillable: bool,
+    transfer_direction: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WebOperationProjection {
+    uuid: ObjectUuid,
+    comment: String,
+    returning_type: XdtoTypeProjection,
+    nillable: bool,
+    transactioned: bool,
+    procedure_name: String,
+    data_lock_control_mode: String,
+    parameters: Vec<WebParameterProjection>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WebServiceProjection {
+    comment: String,
+    namespace: String,
+    package_references: Vec<String>,
+    package_namespaces: Vec<String>,
+    descriptor_file_name: String,
+    reuse_sessions: String,
+    session_max_age: u32,
+    operations: Vec<WebOperationProjection>,
 }
 
 fn decode_scheduled_job(
@@ -506,6 +584,191 @@ fn decode_http_service(
         ));
     }
     MetadataEnvelope::from_parts(root, descendants, document.clone())
+}
+
+fn decode_web_service(
+    document: &XmlDocument,
+    source: ProfileId,
+    path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    validate_decode_profile(document, &source, &path)?;
+    let projection = project_web_service(document)?;
+    let generic = decode_metadata_envelope(document, source, path)?;
+    if generic.root().kind().as_str() != WEB_SERVICE_FAMILY {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService codec requires its exact family",
+        ));
+    }
+    if !generic.root().generated_types().is_empty()
+        || !generic.root().references().is_empty()
+        || !generic.root().assets().is_empty()
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService cannot contain generated types, references, or assets",
+        ));
+    }
+
+    let mut root_parts = copy_object_parts(generic.root());
+    for (name, value) in [
+        (
+            "Comment",
+            CanonicalValue::text(canonical_text(&projection.comment)?),
+        ),
+        (
+            "Namespace",
+            CanonicalValue::text(canonical_text(&projection.namespace)?),
+        ),
+        (
+            "XDTOPackages",
+            web_packages_value(
+                &projection.package_references,
+                &projection.package_namespaces,
+            )?,
+        ),
+        (
+            "DescriptorFileName",
+            CanonicalValue::text(canonical_text(&projection.descriptor_file_name)?),
+        ),
+        ("ReuseSessions", enum_value(&projection.reuse_sessions)?),
+        ("SessionMaxAge", integer_value(projection.session_max_age)?),
+    ] {
+        root_parts.properties.push(canonical_field(name, value)?);
+    }
+    let root = CanonicalObject::new(root_parts)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
+
+    let mut operations = BTreeMap::new();
+    let mut parameters = BTreeMap::new();
+    for operation in &projection.operations {
+        if operations.insert(operation.uuid, operation).is_some() {
+            return Err(MetadataDecodeError::Duplicate("WebService Operation uuid"));
+        }
+        for parameter in &operation.parameters {
+            if parameters.insert(parameter.uuid, parameter).is_some() {
+                return Err(MetadataDecodeError::Duplicate("WebService Parameter uuid"));
+            }
+        }
+    }
+    if generic.descendants().len() != operations.len() + parameters.len() {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService descendant inventory is not exact",
+        ));
+    }
+    let mut descendants = Vec::with_capacity(generic.descendants().len());
+    for descendant in generic.descendants() {
+        let uuid = descendant.identity().uuid();
+        let mut parts = copy_object_parts(descendant);
+        match descendant.kind().as_str() {
+            "Operation" => {
+                let projected =
+                    operations
+                        .remove(&uuid)
+                        .ok_or(MetadataDecodeError::InvalidEnvelope(
+                            "unknown WebService Operation",
+                        ))?;
+                for (name, value) in [
+                    (
+                        "Comment",
+                        CanonicalValue::text(canonical_text(&projected.comment)?),
+                    ),
+                    (
+                        "XDTOReturningValueType",
+                        xdto_type_value(&projected.returning_type)?,
+                    ),
+                    ("Nillable", CanonicalValue::boolean(projected.nillable)),
+                    (
+                        "Transactioned",
+                        CanonicalValue::boolean(projected.transactioned),
+                    ),
+                    (
+                        "ProcedureName",
+                        CanonicalValue::text(canonical_text(&projected.procedure_name)?),
+                    ),
+                    (
+                        "DataLockControlMode",
+                        enum_value(&projected.data_lock_control_mode)?,
+                    ),
+                ] {
+                    parts.properties.push(canonical_field(name, value)?);
+                }
+            }
+            "Parameter" => {
+                let projected =
+                    parameters
+                        .remove(&uuid)
+                        .ok_or(MetadataDecodeError::InvalidEnvelope(
+                            "unknown WebService Parameter",
+                        ))?;
+                for (name, value) in [
+                    (
+                        "Comment",
+                        CanonicalValue::text(canonical_text(&projected.comment)?),
+                    ),
+                    ("XDTOValueType", xdto_type_value(&projected.value_type)?),
+                    ("Nillable", CanonicalValue::boolean(projected.nillable)),
+                    (
+                        "TransferDirection",
+                        enum_value(&projected.transfer_direction)?,
+                    ),
+                ] {
+                    parts.properties.push(canonical_field(name, value)?);
+                }
+            }
+            _ => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "unknown WebService descendant kind",
+                ));
+            }
+        }
+        if !descendant.generated_types().is_empty()
+            || !descendant.references().is_empty()
+            || !descendant.assets().is_empty()
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService descendants cannot contain generated types, references, or assets",
+            ));
+        }
+        descendants.push(
+            CanonicalObject::new(parts)
+                .map_err(|error| MetadataDecodeError::Core(error.to_string()))?,
+        );
+    }
+    if !operations.is_empty() || !parameters.is_empty() {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService projected descendants are missing from canonical inventory",
+        ));
+    }
+    MetadataEnvelope::from_parts(root, descendants, document.clone())
+}
+
+fn xdto_type_value(value: &XdtoTypeProjection) -> Result<CanonicalValue, MetadataDecodeError> {
+    CanonicalValue::record(vec![
+        canonical_field(
+            "Namespace",
+            CanonicalValue::text(canonical_text(&value.namespace)?),
+        )?,
+        canonical_field("Name", CanonicalValue::text(canonical_text(&value.name)?))?,
+    ])
+    .map_err(|error| MetadataDecodeError::Core(error.to_string()))
+}
+
+fn web_packages_value(
+    references: &[String],
+    namespaces: &[String],
+) -> Result<CanonicalValue, MetadataDecodeError> {
+    CanonicalValue::record(vec![
+        canonical_field("References", text_sequence(references)?)?,
+        canonical_field("Namespaces", text_sequence(namespaces)?)?,
+    ])
+    .map_err(|error| MetadataDecodeError::Core(error.to_string()))
+}
+
+fn text_sequence(values: &[String]) -> Result<CanonicalValue, MetadataDecodeError> {
+    let values = values
+        .iter()
+        .map(|value| canonical_text(value).map(CanonicalValue::text))
+        .collect::<Result<Vec<_>, _>>()?;
+    CanonicalValue::sequence(values).map_err(|error| MetadataDecodeError::Core(error.to_string()))
 }
 
 fn event_sources_value(
@@ -870,6 +1133,414 @@ fn project_http_service(
         session_max_age: required_u32(properties, "SessionMaxAge", expected, &uris)?,
         urls,
     })
+}
+
+fn project_web_service(
+    document: &XmlDocument,
+) -> Result<WebServiceProjection, MetadataDecodeError> {
+    let uris = resolve_namespaces(document.root())?;
+    let expected = uri_of(document.root(), &uris);
+    if !matches!(expected, None | Some(MD_NAMESPACE)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService root namespace",
+        ));
+    }
+    reject_attributes(document.root(), &["version"])?;
+    let object = required_child(document.root(), WEB_SERVICE_FAMILY, expected, &uris)?;
+    reject_attributes(object, &["uuid"])?;
+    let (properties, child_objects) = exact_http_sections(object, expected, &uris, true)?;
+    reject_exact_web_root_properties(properties, expected, &uris)?;
+    let namespace = required_text(properties, "Namespace", expected, &uris)?;
+    if !valid_namespace(&namespace) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService Namespace is empty or contains whitespace",
+        ));
+    }
+    let descriptor_file_name = required_text(properties, "DescriptorFileName", expected, &uris)?;
+    if !valid_descriptor_file_name(&descriptor_file_name) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService DescriptorFileName is invalid",
+        ));
+    }
+    let reuse_sessions = required_text(properties, "ReuseSessions", expected, &uris)?;
+    if reuse_sessions != "DontUse" {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService ReuseSessions has no evidenced native code",
+        ));
+    }
+    let (package_references, package_namespaces) = project_web_packages(
+        required_child(properties, "XDTOPackages", expected, &uris)?,
+        document.root(),
+        &uris,
+    )?;
+
+    let child_objects = child_objects.expect("required above");
+    reject_attributes(child_objects, &[])?;
+    let mut uuids = BTreeSet::new();
+    let mut operations = Vec::new();
+    for node in child_objects.children() {
+        let XmlNode::Element(operation) = node else {
+            continue;
+        };
+        if !typed(operation, "Operation", expected, &uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService contains an unknown child",
+            ));
+        }
+        reject_attributes(operation, &["uuid"])?;
+        let uuid = required_uuid(operation)?;
+        if !uuids.insert(uuid) {
+            return Err(MetadataDecodeError::Duplicate("WebService child uuid"));
+        }
+        let (operation_properties, parameter_objects) =
+            exact_http_sections(operation, expected, &uris, true)?;
+        reject_exact_service_properties(
+            operation_properties,
+            &[
+                "Name",
+                "Synonym",
+                "Comment",
+                "XDTOReturningValueType",
+                "Nillable",
+                "Transactioned",
+                "ProcedureName",
+                "DataLockControlMode",
+            ],
+            expected,
+            &uris,
+        )?;
+        let procedure_name = required_text(operation_properties, "ProcedureName", expected, &uris)?;
+        if !valid_identifier(&procedure_name) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService ProcedureName is not an exact identifier",
+            ));
+        }
+        let data_lock_control_mode =
+            required_text(operation_properties, "DataLockControlMode", expected, &uris)?;
+        if data_lock_control_mode != "Managed" {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService DataLockControlMode has no evidenced native code",
+            ));
+        }
+        let transactioned = required_bool(operation_properties, "Transactioned", expected, &uris)?;
+        if transactioned {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService Transactioned has no evidenced native code",
+            ));
+        }
+        let parameter_objects = parameter_objects.expect("required above");
+        reject_attributes(parameter_objects, &[])?;
+        let mut parameters = Vec::new();
+        for parameter_node in parameter_objects.children() {
+            let XmlNode::Element(parameter) = parameter_node else {
+                continue;
+            };
+            if !typed(parameter, "Parameter", expected, &uris) {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "WebService Operation contains an unknown child",
+                ));
+            }
+            reject_attributes(parameter, &["uuid"])?;
+            let parameter_uuid = required_uuid(parameter)?;
+            if !uuids.insert(parameter_uuid) {
+                return Err(MetadataDecodeError::Duplicate("WebService child uuid"));
+            }
+            let (parameter_properties, nested) =
+                exact_http_sections(parameter, expected, &uris, false)?;
+            if nested.is_some() {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "WebService Parameter cannot own child objects",
+                ));
+            }
+            reject_exact_service_properties(
+                parameter_properties,
+                &[
+                    "Name",
+                    "Synonym",
+                    "Comment",
+                    "XDTOValueType",
+                    "Nillable",
+                    "TransferDirection",
+                ],
+                expected,
+                &uris,
+            )?;
+            let transfer_direction =
+                required_text(parameter_properties, "TransferDirection", expected, &uris)?;
+            if !matches!(transfer_direction.as_str(), "In" | "Out" | "InOut") {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "WebService TransferDirection has no evidenced native code",
+                ));
+            }
+            parameters.push(WebParameterProjection {
+                uuid: parameter_uuid,
+                comment: required_text(parameter_properties, "Comment", expected, &uris)?,
+                value_type: project_xdto_type(
+                    parameter_properties,
+                    "XDTOValueType",
+                    expected,
+                    &uris,
+                    document.root(),
+                )?,
+                nillable: required_bool(parameter_properties, "Nillable", expected, &uris)?,
+                transfer_direction,
+            });
+        }
+        operations.push(WebOperationProjection {
+            uuid,
+            comment: required_text(operation_properties, "Comment", expected, &uris)?,
+            returning_type: project_xdto_type(
+                operation_properties,
+                "XDTOReturningValueType",
+                expected,
+                &uris,
+                document.root(),
+            )?,
+            nillable: required_bool(operation_properties, "Nillable", expected, &uris)?,
+            transactioned,
+            procedure_name,
+            data_lock_control_mode,
+            parameters,
+        });
+    }
+    if operations.is_empty() {
+        return Err(MetadataDecodeError::Missing("WebService Operation"));
+    }
+    Ok(WebServiceProjection {
+        comment: required_text(properties, "Comment", expected, &uris)?,
+        namespace,
+        package_references,
+        package_namespaces,
+        descriptor_file_name,
+        reuse_sessions,
+        session_max_age: required_u32(properties, "SessionMaxAge", expected, &uris)?,
+        operations,
+    })
+}
+
+fn reject_exact_web_root_properties(
+    properties: &XmlElement,
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+) -> Result<(), MetadataDecodeError> {
+    const REQUIRED: [&str; 8] = [
+        "Name",
+        "Synonym",
+        "Comment",
+        "Namespace",
+        "XDTOPackages",
+        "DescriptorFileName",
+        "ReuseSessions",
+        "SessionMaxAge",
+    ];
+    reject_attributes(properties, &[])?;
+    let mut seen = BTreeSet::new();
+    for node in properties.children() {
+        let XmlNode::Element(child) = node else {
+            continue;
+        };
+        let local = child.name().local();
+        if !REQUIRED.contains(&local) || !typed(child, local, expected, uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService contains an unknown property",
+            ));
+        }
+        if local == "XDTOPackages" {
+            reject_attributes(child, &[])?;
+        } else {
+            reject_attributes_recursive(child)?;
+        }
+        if !seen.insert(local) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService contains a duplicate property",
+            ));
+        }
+    }
+    if REQUIRED.iter().any(|required| !seen.contains(required)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService is missing a required property",
+        ));
+    }
+    Ok(())
+}
+
+fn project_web_packages(
+    packages: &XmlElement,
+    root: &XmlElement,
+    uris: &ResolvedNamespaces,
+) -> Result<(Vec<String>, Vec<String>), MetadataDecodeError> {
+    let mut references = Vec::new();
+    let mut namespaces = Vec::new();
+    let mut seen_references = BTreeSet::new();
+    let mut seen_namespaces = BTreeSet::new();
+    for node in packages.children() {
+        let XmlNode::Element(item) = node else {
+            continue;
+        };
+        if !typed(item, "Item", Some(XR_NAMESPACE), uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService XDTOPackages contains an unknown item",
+            ));
+        }
+        reject_attributes(item, &[])?;
+        let presentation = required_child(item, "Presentation", Some(XR_NAMESPACE), uris)?;
+        let check_state = required_child(item, "CheckState", Some(XR_NAMESPACE), uris)?;
+        let value = required_child(item, "Value", Some(XR_NAMESPACE), uris)?;
+        if item
+            .children()
+            .iter()
+            .filter(|node| matches!(node, XmlNode::Element(_)))
+            .count()
+            != 3
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService XDTOPackages item is not exact",
+            ));
+        }
+        reject_attributes_recursive(presentation)?;
+        if element_text(presentation)?.as_deref() != Some("") {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService XDTOPackages Presentation is not empty",
+            ));
+        }
+        reject_attributes_recursive(check_state)?;
+        if element_text(check_state)?.as_deref() != Some("0") {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "WebService XDTOPackages CheckState is not zero",
+            ));
+        }
+        let value_type = exact_xsi_type(value)?;
+        let content = element_text(value)?.ok_or(MetadataDecodeError::InvalidEnvelope(
+            "WebService XDTOPackages Value is not text-only",
+        ))?;
+        match value_type {
+            "xr:MDObjectRef" => {
+                require_namespace_binding(root, "xr", XR_NAMESPACE)?;
+                let Some(name) = content.strip_prefix("XDTOPackage.") else {
+                    return Err(MetadataDecodeError::InvalidEnvelope(
+                        "WebService XDTOPackage reference has an invalid prefix",
+                    ));
+                };
+                if !valid_identifier(name) || !seen_references.insert(content.clone()) {
+                    return Err(MetadataDecodeError::InvalidEnvelope(
+                        "WebService XDTOPackage reference is invalid or duplicated",
+                    ));
+                }
+                references.push(content);
+            }
+            "xs:string" => {
+                require_namespace_binding(root, "xs", XML_SCHEMA_NAMESPACE)?;
+                if !valid_namespace(&content) || !seen_namespaces.insert(content.clone()) {
+                    return Err(MetadataDecodeError::InvalidEnvelope(
+                        "WebService XDTO namespace is invalid or duplicated",
+                    ));
+                }
+                namespaces.push(content);
+            }
+            _ => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "WebService XDTOPackages Value type is unsupported",
+                ));
+            }
+        }
+    }
+    if !references.is_empty() || !namespaces.is_empty() {
+        require_namespace_binding(root, "xsi", XSI_NAMESPACE)?;
+    }
+    Ok((references, namespaces))
+}
+
+fn exact_xsi_type(value: &XmlElement) -> Result<&str, MetadataDecodeError> {
+    let mut found = None;
+    for attribute in value.attributes() {
+        match attribute.kind() {
+            AttributeKind::Ordinary(name)
+                if name.prefix() == Some("xsi") && name.local() == "type" =>
+            {
+                if found.replace(attribute.value()).is_some() {
+                    return Err(MetadataDecodeError::Duplicate("xsi:type"));
+                }
+            }
+            _ => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "WebService XDTOPackages Value attribute is unknown",
+                ));
+            }
+        }
+    }
+    found.ok_or(MetadataDecodeError::Missing("xsi:type"))
+}
+
+fn project_xdto_type(
+    properties: &XmlElement,
+    local: &'static str,
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+    root: &XmlElement,
+) -> Result<XdtoTypeProjection, MetadataDecodeError> {
+    let value = required_text(properties, local, expected, uris)?;
+    let Some((prefix, name)) = value.split_once(':') else {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService XDTO type is not a qualified name",
+        ));
+    };
+    if prefix.is_empty()
+        || !valid_identifier(name)
+        || name.contains(':')
+        || prefix.chars().any(char::is_whitespace)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService XDTO type qualified name is invalid",
+        ));
+    }
+    let namespace = namespace_binding(root, prefix).ok_or(MetadataDecodeError::InvalidEnvelope(
+        "WebService XDTO type prefix is not root-bound",
+    ))?;
+    if !valid_namespace(namespace) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService XDTO type namespace is invalid",
+        ));
+    }
+    Ok(XdtoTypeProjection {
+        namespace: namespace.to_owned(),
+        name: name.to_owned(),
+    })
+}
+
+fn require_namespace_binding(
+    root: &XmlElement,
+    prefix: &str,
+    expected: &str,
+) -> Result<(), MetadataDecodeError> {
+    if namespace_binding(root, prefix) == Some(expected) {
+        Ok(())
+    } else {
+        Err(MetadataDecodeError::InvalidEnvelope(
+            "WebService requires an exact root namespace binding",
+        ))
+    }
+}
+
+fn namespace_binding<'a>(root: &'a XmlElement, prefix: &str) -> Option<&'a str> {
+    root.attributes().iter().find_map(|attribute| {
+        if let AttributeKind::Namespace(Some(candidate)) = attribute.kind()
+            && candidate == prefix
+        {
+            Some(attribute.value())
+        } else {
+            None
+        }
+    })
+}
+
+fn valid_namespace(value: &str) -> bool {
+    !value.is_empty() && !value.chars().any(char::is_whitespace)
+}
+
+fn valid_descriptor_file_name(value: &str) -> bool {
+    value.ends_with(".1cws")
+        && value.len() > ".1cws".len()
+        && !value.chars().any(char::is_whitespace)
 }
 
 fn exact_http_sections<'a>(
@@ -1367,6 +2038,49 @@ fn encode_http_service(
     .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
 }
 
+fn encode_web_service(
+    envelope: &MetadataEnvelope,
+    target: &ProfileId,
+) -> Result<Vec<u8>, MetadataEncodeError> {
+    let path = envelope.root().identity().path().clone();
+    let target_version =
+        profile_version(target).ok_or_else(|| MetadataEncodeError::UnsupportedProfile {
+            object_path: path.clone(),
+            profile: target.clone(),
+        })?;
+    if envelope.root().kind().as_str() != WEB_SERVICE_FAMILY {
+        return Err(invalid_model(&path, "kind"));
+    }
+    let source_profile = envelope.root().provenance().source_profile().clone();
+    validate_decode_profile(envelope.source_document(), &source_profile, &path)
+        .map_err(decode_to_encode)?;
+    let source = decode_web_service(envelope.source_document(), source_profile, path.clone())
+        .map_err(decode_to_encode)?;
+    if source.root() != envelope.root() || source.descendants() != envelope.descendants() {
+        return Err(invalid_model(
+            &path,
+            "WebService semantic mutation is not implemented",
+        ));
+    }
+    let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
+        == target_version
+    {
+        envelope.source_document().root().clone()
+    } else {
+        set_unprefixed_attribute(
+            envelope.source_document().root(),
+            "version",
+            target_version,
+            &path,
+        )?
+    };
+    XmlWriter::to_vec(
+        &envelope.source_document().with_root(root),
+        LexicalPolicy::Preserve,
+    )
+    .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use ibcmd_core::value::CanonicalValueKind;
@@ -1707,6 +2421,119 @@ mod tests {
                 registry
                     .decode(
                         &FamilyId::parse(HTTP_SERVICE_FAMILY).unwrap(),
+                        &document,
+                        profile("2.20"),
+                        ObjectPath::root(),
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    fn web_fixture(
+        version: &str,
+        data_lock_mode: &str,
+        package_type: &str,
+        extra: &str,
+    ) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"{MD_NAMESPACE}\" xmlns:v8=\"{V8_NAMESPACE}\" xmlns:xr=\"{XR_NAMESPACE}\" xmlns:xs=\"{XML_SCHEMA_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\" xmlns:svc=\"http://example.test/types\" version=\"{version}\">\r\n\
+\t<WebService uuid=\"a4ed8b24-bd23-45a7-9f34-61b25b91d0c6\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>InterfaceVersion</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Interface version</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Namespace>http://www.1c.ru/SaaS/1.0/WS</Namespace>\r\n\
+\t\t\t<XDTOPackages>\r\n\
+\t\t\t\t<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState><xr:Value xsi:type=\"{package_type}\">XDTOPackage.Custom</xr:Value></xr:Item>\r\n\
+\t\t\t\t<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState><xr:Value xsi:type=\"xs:string\">http://v8.1c.ru/8.1/data/core</xr:Value></xr:Item>\r\n\
+\t\t\t</XDTOPackages>\r\n\
+\t\t\t<DescriptorFileName>InterfaceVersion.1cws</DescriptorFileName>\r\n\
+\t\t\t<ReuseSessions>DontUse</ReuseSessions>\r\n\
+\t\t\t<SessionMaxAge>20</SessionMaxAge>{extra}\r\n\
+\t\t</Properties>\r\n\
+\t\t<ChildObjects>\r\n\
+\t\t\t<Operation uuid=\"65efaa10-3239-4f0f-a08e-88c89d9d8d5a\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>GetVersions</Name><Synonym/><Comment/>\r\n\
+\t\t\t\t\t<XDTOReturningValueType>svc:Result</XDTOReturningValueType>\r\n\
+\t\t\t\t\t<Nillable>true</Nillable><Transactioned>false</Transactioned>\r\n\
+\t\t\t\t\t<ProcedureName>GetVersions</ProcedureName><DataLockControlMode>{data_lock_mode}</DataLockControlMode>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t\t<ChildObjects>\r\n\
+\t\t\t\t\t<Parameter uuid=\"93aa5247-6823-4f70-9d47-e5a0f409828a\"><Properties><Name>InterfaceName</Name><Synonym/><Comment/><XDTOValueType>xs:string</XDTOValueType><Nillable>false</Nillable><TransferDirection>In</TransferDirection></Properties></Parameter>\r\n\
+\t\t\t\t\t<Parameter uuid=\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\"><Properties><Name>ResultId</Name><Synonym/><Comment/><XDTOValueType>v8:UUID</XDTOValueType><Nillable>true</Nillable><TransferDirection>Out</TransferDirection></Properties></Parameter>\r\n\
+\t\t\t\t</ChildObjects>\r\n\
+\t\t\t</Operation>\r\n\
+\t\t</ChildObjects>\r\n\
+\t</WebService>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn web_service_tree_packages_and_types_are_typed_and_roundtrip() {
+        let mut registry = MetadataRegistry::default();
+        register_web_service_codec(&mut registry).unwrap();
+        for version in ["2.20", "2.21"] {
+            let document =
+                XmlReader::from_slice(&web_fixture(version, "Managed", "xr:MDObjectRef", ""))
+                    .unwrap();
+            let envelope = registry
+                .decode(
+                    &FamilyId::parse(WEB_SERVICE_FAMILY).unwrap(),
+                    &document,
+                    profile(version),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+            assert_eq!(envelope.root().properties().len(), 8);
+            assert_eq!(envelope.descendants().len(), 3);
+            assert_eq!(envelope.descendants()[0].properties().len(), 8);
+            assert_eq!(envelope.descendants()[1].properties().len(), 6);
+            assert!(matches!(
+                envelope.root().properties()[4].value().kind(),
+                CanonicalValueKind::Record(_)
+            ));
+            assert!(matches!(
+                envelope.descendants()[0].properties()[3].value().kind(),
+                CanonicalValueKind::Record(_)
+            ));
+            let target = if version == "2.20" { "2.21" } else { "2.20" };
+            let output = registry.encode(&envelope, &profile(target)).unwrap();
+            let reparsed = XmlReader::from_slice(&output).unwrap();
+            registry
+                .decode(
+                    &FamilyId::parse(WEB_SERVICE_FAMILY).unwrap(),
+                    &reparsed,
+                    profile(target),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn web_service_unknown_package_type_lock_mode_and_property_fail_closed() {
+        let mut registry = MetadataRegistry::default();
+        register_web_service_codec(&mut registry).unwrap();
+        let transactioned = String::from_utf8(web_fixture("2.20", "Managed", "xr:MDObjectRef", ""))
+            .unwrap()
+            .replacen("<Transactioned>false", "<Transactioned>true", 1)
+            .into_bytes();
+        for input in [
+            web_fixture("2.20", "Automatic", "xr:MDObjectRef", ""),
+            web_fixture("2.20", "Managed", "xs:int", ""),
+            web_fixture("2.20", "Managed", "xr:MDObjectRef", "<Future/>"),
+            transactioned,
+        ] {
+            let document = XmlReader::from_slice(&input).unwrap();
+            assert!(
+                registry
+                    .decode(
+                        &FamilyId::parse(WEB_SERVICE_FAMILY).unwrap(),
                         &document,
                         profile("2.20"),
                         ObjectPath::root(),

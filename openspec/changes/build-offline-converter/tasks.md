@@ -330,7 +330,7 @@
 
 ### BOOT-004 — Base-free codecs service metadata
 
-- **Статус:** `[ ]` (4/7: ScheduledJob, EventSubscription, HTTPService, XDTOPackage); **зависимости:** BOOT-002, XML-004
+- **Статус:** `[ ]` (5/7: ScheduledJob, EventSubscription, HTTPService, WebService, XDTOPackage); **зависимости:** BOOT-002, XML-004
 - **Файлы:** создать `src/compiler/families/services.rs`
 - **Действия:** ScheduledJob, EventSubscription, HTTP/Web/Integration services, WSReference, XDTOPackage.
 - **Проверка:** family fixtures roundtrip без base; unknown service fields fail-closed/preserved by profile rules.

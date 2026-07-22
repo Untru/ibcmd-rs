@@ -38,6 +38,8 @@ const XDTO_PACKAGE_LAYOUT_KEY: &str = "bootstrap.metadata.xdto_package.layout";
 const XDTO_PACKAGE_LAYOUT: &str = "xdto-package-v1-crlf-utf8-bom";
 const HTTP_SERVICE_LAYOUT_KEY: &str = "bootstrap.metadata.http_service.layout";
 const HTTP_SERVICE_LAYOUT: &str = "http-service-v1-crlf-utf8-bom";
+const WEB_SERVICE_LAYOUT_KEY: &str = "bootstrap.metadata.web_service.layout";
+const WEB_SERVICE_LAYOUT: &str = "web-service-v1-crlf-utf8-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
@@ -49,6 +51,13 @@ const MAX_NATIVE_NODES: usize = 100_000;
 const MAX_LANGUAGE_CODE_BYTES: usize = 256;
 const HTTP_URL_COLLECTION_UUID: &str = "ec6896c2-9b28-42d8-9140-48491146b8ea";
 const HTTP_METHOD_COLLECTION_UUID: &str = "21c96ea8-c8fc-424a-a0b4-e1ffb2fa1a73";
+const WEB_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
+const WEB_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
+const DESIGN_TIME_REFERENCE_CLASS_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
+const XDTO_XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
+const XDTO_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
+const XDTO_XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
+const XDTO_XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
 
 /// BOOT-004 families. Each variant evolves through its own layout constant.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -95,6 +104,7 @@ enum ServiceLayout {
     EventSubscriptionV1,
     XdtoPackageV1,
     HttpServiceV1,
+    WebServiceV1,
 }
 
 /// Independent target coordinates plus one service-family layout.
@@ -155,6 +165,11 @@ impl ServiceMetadataProfile {
                 HTTP_SERVICE_LAYOUT_KEY,
                 HTTP_SERVICE_LAYOUT,
                 ServiceLayout::HttpServiceV1,
+            ),
+            ServiceFamily::WebService => (
+                WEB_SERVICE_LAYOUT_KEY,
+                WEB_SERVICE_LAYOUT,
+                ServiceLayout::WebServiceV1,
             ),
             _ => {
                 return Err(ServiceMetadataProfileError::FamilyNotImplemented {
@@ -235,6 +250,17 @@ impl ServiceMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: ServiceFamily::HttpService,
             layout: ServiceLayout::HttpServiceV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn web_service_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: ServiceFamily::WebService,
+            layout: ServiceLayout::WebServiceV1,
         }
     }
 }
@@ -637,6 +663,244 @@ impl HttpServiceNativeIr {
     }
 }
 
+/// One native XDTO qualified type used by a Web service operation or parameter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebServiceXdtoTypeNativeIr {
+    pub namespace: String,
+    pub name: String,
+}
+
+/// One Web service operation parameter in native storage order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebServiceParameterNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub value_type: WebServiceXdtoTypeNativeIr,
+    pub nillable: bool,
+    pub transfer_direction: String,
+}
+
+/// One Web service operation and its parameter collection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebServiceOperationNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub returning_value_type: WebServiceXdtoTypeNativeIr,
+    pub nillable: bool,
+    pub transactioned: bool,
+    pub procedure_name: String,
+    pub data_lock_control_mode: String,
+    pub parameters: Vec<WebServiceParameterNativeIr>,
+}
+
+/// Complete base-free native IR for a `WebService` primary row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WebServiceNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub namespace: String,
+    pub xdto_package_uuids: Vec<ObjectUuid>,
+    pub xdto_namespaces: Vec<String>,
+    pub descriptor_file_name: String,
+    pub reuse_sessions: String,
+    pub session_max_age: u32,
+    pub operations: Vec<WebServiceOperationNativeIr>,
+}
+
+impl WebServiceNativeIr {
+    /// Renders standalone XCF using exact `XDTOPackage.<name>` mappings.
+    pub fn to_xml(
+        &self,
+        profile: &ProfileId,
+        packages: &BTreeMap<ObjectUuid, String>,
+    ) -> Result<Vec<u8>, ServiceMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| ServiceMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        validate_web_service_ir(self)?;
+
+        let mut readable_packages = Vec::with_capacity(self.xdto_package_uuids.len());
+        let mut seen_readable_packages = BTreeSet::new();
+        for uuid in &self.xdto_package_uuids {
+            let readable = packages
+                .get(uuid)
+                .ok_or(ServiceMetadataBuildError::MissingReadableReference(*uuid))?;
+            if !valid_xdto_package_reference(readable)
+                || !seen_readable_packages.insert(readable.as_str())
+            {
+                return Err(native("WebService XDTOPackage readable name is not exact"));
+            }
+            readable_packages.push(readable.as_str());
+        }
+
+        let mut custom_namespaces = BTreeSet::new();
+        for operation in &self.operations {
+            collect_custom_xdto_namespace(
+                &operation.returning_value_type.namespace,
+                &mut custom_namespaces,
+            );
+            for parameter in &operation.parameters {
+                collect_custom_xdto_namespace(
+                    &parameter.value_type.namespace,
+                    &mut custom_namespaces,
+                );
+            }
+        }
+        let prefixes: BTreeMap<&str, String> = custom_namespaces
+            .iter()
+            .enumerate()
+            .map(|(index, namespace)| (namespace.as_str(), format!("ws{}", index + 1)))
+            .collect();
+
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"{XDTO_CORE_NAMESPACE}\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"{XDTO_XML_SCHEMA_NAMESPACE}\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""
+        )
+        .expect("writing to String cannot fail");
+        for (namespace, prefix) in &prefixes {
+            write!(&mut xml, " xmlns:{prefix}=\"").expect("writing to String cannot fail");
+            push_xml_attribute(&mut xml, namespace);
+            xml.push('"');
+        }
+        write!(
+            &mut xml,
+            " version=\"{version}\">\r\n\t<WebService uuid=\"{}\">\r\n\t\t<Properties>\r\n",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonyms_at(&mut xml, "\t\t\t", &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        write_xml_text_element(&mut xml, "\t\t\t", "Namespace", &self.namespace);
+        if readable_packages.is_empty() && self.xdto_namespaces.is_empty() {
+            xml.push_str("\t\t\t<XDTOPackages/>\r\n");
+        } else {
+            xml.push_str("\t\t\t<XDTOPackages>\r\n");
+            for readable in readable_packages {
+                write_web_package_item(&mut xml, "xr:MDObjectRef", readable);
+            }
+            for namespace in &self.xdto_namespaces {
+                write_web_package_item(&mut xml, "xs:string", namespace);
+            }
+            xml.push_str("\t\t\t</XDTOPackages>\r\n");
+        }
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t",
+            "DescriptorFileName",
+            &self.descriptor_file_name,
+        );
+        write_xml_text_element(&mut xml, "\t\t\t", "ReuseSessions", &self.reuse_sessions);
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t",
+            "SessionMaxAge",
+            &self.session_max_age.to_string(),
+        );
+        xml.push_str("\t\t</Properties>\r\n\t\t<ChildObjects>\r\n");
+        for operation in &self.operations {
+            write!(
+                &mut xml,
+                "\t\t\t<Operation uuid=\"{}\">\r\n\t\t\t\t<Properties>\r\n",
+                operation.uuid
+            )
+            .expect("writing to String cannot fail");
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "Name", &operation.name);
+            write_synonyms_at(&mut xml, "\t\t\t\t\t", &operation.synonyms);
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "Comment", &operation.comment);
+            write_xdto_type_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "XDTOReturningValueType",
+                &operation.returning_value_type,
+                &prefixes,
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "Nillable",
+                if operation.nillable { "true" } else { "false" },
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "Transactioned",
+                if operation.transactioned {
+                    "true"
+                } else {
+                    "false"
+                },
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "ProcedureName",
+                &operation.procedure_name,
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "DataLockControlMode",
+                &operation.data_lock_control_mode,
+            );
+            xml.push_str("\t\t\t\t</Properties>\r\n");
+            if operation.parameters.is_empty() {
+                xml.push_str("\t\t\t\t<ChildObjects/>\r\n");
+            } else {
+                xml.push_str("\t\t\t\t<ChildObjects>\r\n");
+                for parameter in &operation.parameters {
+                    write!(
+                        &mut xml,
+                        "\t\t\t\t\t<Parameter uuid=\"{}\">\r\n\t\t\t\t\t\t<Properties>\r\n",
+                        parameter.uuid
+                    )
+                    .expect("writing to String cannot fail");
+                    write_xml_text_element(&mut xml, "\t\t\t\t\t\t\t", "Name", &parameter.name);
+                    write_synonyms_at(&mut xml, "\t\t\t\t\t\t\t", &parameter.synonyms);
+                    write_xml_text_element(
+                        &mut xml,
+                        "\t\t\t\t\t\t\t",
+                        "Comment",
+                        &parameter.comment,
+                    );
+                    write_xdto_type_element(
+                        &mut xml,
+                        "\t\t\t\t\t\t\t",
+                        "XDTOValueType",
+                        &parameter.value_type,
+                        &prefixes,
+                    );
+                    write_xml_text_element(
+                        &mut xml,
+                        "\t\t\t\t\t\t\t",
+                        "Nillable",
+                        if parameter.nillable { "true" } else { "false" },
+                    );
+                    write_xml_text_element(
+                        &mut xml,
+                        "\t\t\t\t\t\t\t",
+                        "TransferDirection",
+                        &parameter.transfer_direction,
+                    );
+                    xml.push_str("\t\t\t\t\t\t</Properties>\r\n\t\t\t\t\t</Parameter>\r\n");
+                }
+                xml.push_str("\t\t\t\t</ChildObjects>\r\n");
+            }
+            xml.push_str("\t\t\t</Operation>\r\n");
+        }
+        xml.push_str("\t\t</ChildObjects>\r\n\t</WebService>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
+}
+
 #[derive(Debug)]
 pub enum ServiceMetadataBuildError {
     Profile(ServiceMetadataProfileError),
@@ -805,6 +1069,9 @@ pub fn compile_service_metadata(
         (ServiceFamily::HttpService, ServiceLayout::HttpServiceV1) => {
             serialize_http_service(&project_http_service(validated, object)?)
         }
+        (ServiceFamily::WebService, ServiceLayout::WebServiceV1) => {
+            serialize_web_service(&project_web_service(validated, object)?)
+        }
         (family, _) => return Err(ServiceMetadataBuildError::UnsupportedFamily(family)),
     };
     let bytes = raw_deflate(&plaintext)?;
@@ -869,6 +1136,18 @@ pub fn decode_http_service_blob(
         return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
     }
     parse_http_service(&inflate_bounded(blob)?)
+}
+
+/// Strictly decodes a raw-DEFLATE `WebService` primary row.
+pub fn decode_web_service_blob(
+    blob: &[u8],
+    profile: &ServiceMetadataProfile,
+) -> Result<WebServiceNativeIr, ServiceMetadataBuildError> {
+    if profile.family != ServiceFamily::WebService || profile.layout != ServiceLayout::WebServiceV1
+    {
+        return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    parse_web_service(&inflate_bounded(blob)?)
 }
 
 fn validate_coordinates(
@@ -1206,7 +1485,7 @@ fn project_xdto_package(
         return invalid_model(uuid, "Name must not be empty");
     }
     let namespace = text_property(object, "Namespace")?.to_owned();
-    if !valid_xdto_namespace(&namespace) {
+    if !valid_web_xdto_namespace(&namespace) {
         return invalid_model(uuid, "XDTOPackage Namespace is not exact");
     }
     Ok(XdtoPackageNativeIr {
@@ -1347,6 +1626,311 @@ fn project_http_service(
     };
     validate_http_ir(&result)?;
     Ok(result)
+}
+
+fn project_web_service(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<WebServiceNativeIr, ServiceMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    if object.owner().is_some()
+        || !object.references().is_empty()
+        || !object.generated_types().is_empty()
+        || !object.assets().is_empty()
+    {
+        return invalid_model(
+            uuid,
+            "WebService must be top-level without references, generated types, or assets",
+        );
+    }
+    require_property_schema(
+        object,
+        &[
+            "Name",
+            "Synonym",
+            "Comment",
+            "Namespace",
+            "XDTOPackages",
+            "DescriptorFileName",
+            "ReuseSessions",
+            "SessionMaxAge",
+        ],
+    )?;
+    let namespace = text_property(object, "Namespace")?.to_owned();
+    if !valid_xdto_namespace(&namespace) {
+        return invalid_model(uuid, "WebService Namespace is not exact");
+    }
+    let descriptor_file_name = text_property(object, "DescriptorFileName")?.to_owned();
+    if !valid_web_descriptor_file_name(&descriptor_file_name) {
+        return invalid_model(uuid, "WebService DescriptorFileName is not exact");
+    }
+    let reuse_sessions = enum_property(object, "ReuseSessions")?.to_owned();
+    if reuse_sessions != "DontUse" {
+        return invalid_model(uuid, "WebService ReuseSessions is unsupported");
+    }
+    let session_max_age = u32_property(object, "SessionMaxAge")?;
+    if session_max_age != 20 {
+        return invalid_model(uuid, "WebService SessionMaxAge is unsupported");
+    }
+    let (xdto_package_uuids, xdto_namespaces) =
+        project_web_packages(validated, object, property(object, "XDTOPackages")?)?;
+    let (name, synonyms, comment) = project_service_header(object)?;
+
+    let mut operations = Vec::new();
+    for operation in validated
+        .configuration()
+        .objects()
+        .iter()
+        .filter(|candidate| candidate.owner() == Some(uuid))
+    {
+        if operation.kind().as_str() != "Operation"
+            || !operation.references().is_empty()
+            || !operation.generated_types().is_empty()
+            || !operation.assets().is_empty()
+        {
+            return invalid_model(uuid, "WebService owns an unsupported child object");
+        }
+        require_property_schema(
+            operation,
+            &[
+                "Name",
+                "Synonym",
+                "Comment",
+                "XDTOReturningValueType",
+                "Nillable",
+                "Transactioned",
+                "ProcedureName",
+                "DataLockControlMode",
+            ],
+        )?;
+        let procedure_name = text_property(operation, "ProcedureName")?.to_owned();
+        if !valid_identifier_segment(&procedure_name) {
+            return invalid_model(
+                operation.identity().uuid(),
+                "WebService ProcedureName is not exact",
+            );
+        }
+        let transactioned = bool_property(operation, "Transactioned")?;
+        if transactioned {
+            return invalid_model(
+                operation.identity().uuid(),
+                "WebService Transactioned value is unsupported",
+            );
+        }
+        let data_lock_control_mode = enum_property(operation, "DataLockControlMode")?.to_owned();
+        if data_lock_control_mode != "Managed" {
+            return invalid_model(
+                operation.identity().uuid(),
+                "WebService DataLockControlMode is unsupported",
+            );
+        }
+        let (operation_name, operation_synonyms, operation_comment) =
+            project_service_header(operation)?;
+        let mut parameters = Vec::new();
+        for parameter in validated
+            .configuration()
+            .objects()
+            .iter()
+            .filter(|candidate| candidate.owner() == Some(operation.identity().uuid()))
+        {
+            if parameter.kind().as_str() != "Parameter"
+                || !parameter.references().is_empty()
+                || !parameter.generated_types().is_empty()
+                || !parameter.assets().is_empty()
+                || validated
+                    .configuration()
+                    .objects()
+                    .iter()
+                    .any(|candidate| candidate.owner() == Some(parameter.identity().uuid()))
+            {
+                return invalid_model(
+                    operation.identity().uuid(),
+                    "WebService Operation owns an unsupported descendant",
+                );
+            }
+            require_property_schema(
+                parameter,
+                &[
+                    "Name",
+                    "Synonym",
+                    "Comment",
+                    "XDTOValueType",
+                    "Nillable",
+                    "TransferDirection",
+                ],
+            )?;
+            let transfer_direction = enum_property(parameter, "TransferDirection")?.to_owned();
+            if transfer_direction_code(&transfer_direction).is_none() {
+                return invalid_model(
+                    parameter.identity().uuid(),
+                    "WebService TransferDirection is unsupported",
+                );
+            }
+            let (parameter_name, parameter_synonyms, parameter_comment) =
+                project_service_header(parameter)?;
+            parameters.push(WebServiceParameterNativeIr {
+                uuid: parameter.identity().uuid(),
+                name: parameter_name,
+                synonyms: parameter_synonyms,
+                comment: parameter_comment,
+                value_type: project_web_xdto_type(parameter, "XDTOValueType")?,
+                nillable: bool_property(parameter, "Nillable")?,
+                transfer_direction,
+            });
+        }
+        operations.push(WebServiceOperationNativeIr {
+            uuid: operation.identity().uuid(),
+            name: operation_name,
+            synonyms: operation_synonyms,
+            comment: operation_comment,
+            returning_value_type: project_web_xdto_type(operation, "XDTOReturningValueType")?,
+            nillable: bool_property(operation, "Nillable")?,
+            transactioned,
+            procedure_name,
+            data_lock_control_mode,
+            parameters,
+        });
+    }
+    if operations.is_empty() {
+        return invalid_model(uuid, "WebService has no Operation");
+    }
+    let result = WebServiceNativeIr {
+        uuid,
+        name,
+        synonyms,
+        comment,
+        namespace,
+        xdto_package_uuids,
+        xdto_namespaces,
+        descriptor_file_name,
+        reuse_sessions,
+        session_max_age,
+        operations,
+    };
+    validate_web_service_ir(&result)?;
+    Ok(result)
+}
+
+fn project_web_packages(
+    validated: &ValidatedConfiguration<'_>,
+    compiling: &CanonicalObject,
+    value: &CanonicalValue,
+) -> Result<(Vec<ObjectUuid>, Vec<String>), ServiceMetadataBuildError> {
+    let fields = value
+        .as_record()
+        .ok_or(ServiceMetadataBuildError::InvalidModel {
+            object: compiling.identity().uuid(),
+            reason: "WebService XDTOPackages is not a record",
+        })?;
+    require_canonical_record_schema(
+        fields,
+        &["References", "Namespaces"],
+        compiling.identity().uuid(),
+        "WebService XDTOPackages schema is not exact",
+    )?;
+    let references = canonical_text_sequence(
+        fields[0].value(),
+        compiling.identity().uuid(),
+        "WebService XDTOPackage references are not a text sequence",
+    )?;
+    let namespaces = canonical_text_sequence(
+        fields[1].value(),
+        compiling.identity().uuid(),
+        "WebService XDTO namespaces are not a text sequence",
+    )?;
+
+    let mut package_names = BTreeMap::new();
+    for candidate in validated.configuration().objects() {
+        if candidate.kind().as_str() != "XDTOPackage" || candidate.owner().is_some() {
+            continue;
+        }
+        let Some(name) = candidate
+            .properties()
+            .iter()
+            .find(|field| field.name().as_str() == "Name")
+            .and_then(|field| match field.value().kind() {
+                CanonicalValueKind::Text(value) => Some(value.as_str()),
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        if package_names
+            .insert(name.to_owned(), candidate.identity().uuid())
+            .is_some()
+        {
+            return invalid_model(
+                compiling.identity().uuid(),
+                "WebService XDTOPackage readable name is ambiguous",
+            );
+        }
+    }
+
+    let mut seen_uuids = BTreeSet::new();
+    let mut resolved = Vec::with_capacity(references.len());
+    for reference in references {
+        let Some(name) = reference.strip_prefix("XDTOPackage.") else {
+            return invalid_model(
+                compiling.identity().uuid(),
+                "WebService XDTOPackage reference is not exact",
+            );
+        };
+        if !valid_identifier_segment(name) {
+            return invalid_model(
+                compiling.identity().uuid(),
+                "WebService XDTOPackage reference is not exact",
+            );
+        }
+        let uuid =
+            package_names
+                .get(name)
+                .copied()
+                .ok_or(ServiceMetadataBuildError::InvalidModel {
+                    object: compiling.identity().uuid(),
+                    reason: "WebService XDTOPackage reference is unresolved",
+                })?;
+        if !seen_uuids.insert(uuid) {
+            return invalid_model(
+                compiling.identity().uuid(),
+                "WebService XDTOPackage reference is duplicated",
+            );
+        }
+        resolved.push(uuid);
+    }
+    let mut seen_namespaces = BTreeSet::new();
+    for namespace in &namespaces {
+        if !valid_web_xdto_namespace(namespace) || !seen_namespaces.insert(namespace.as_str()) {
+            return invalid_model(
+                compiling.identity().uuid(),
+                "WebService XDTO namespace is invalid or duplicated",
+            );
+        }
+    }
+    Ok((resolved, namespaces))
+}
+
+fn project_web_xdto_type(
+    object: &CanonicalObject,
+    property_name: &str,
+) -> Result<WebServiceXdtoTypeNativeIr, ServiceMetadataBuildError> {
+    let fields = property(object, property_name)?.as_record().ok_or(
+        ServiceMetadataBuildError::InvalidModel {
+            object: object.identity().uuid(),
+            reason: "WebService XDTO type is not a record",
+        },
+    )?;
+    require_canonical_record_schema(
+        fields,
+        &["Namespace", "Name"],
+        object.identity().uuid(),
+        "WebService XDTO type schema is not exact",
+    )?;
+    let value = WebServiceXdtoTypeNativeIr {
+        namespace: canonical_text(fields[0].value(), object.identity().uuid())?.to_owned(),
+        name: canonical_text(fields[1].value(), object.identity().uuid())?.to_owned(),
+    };
+    validate_web_xdto_type(&value)?;
+    Ok(value)
 }
 
 fn project_service_header(
@@ -1526,6 +2110,38 @@ fn canonical_text(
     }
 }
 
+fn canonical_text_sequence(
+    value: &CanonicalValue,
+    object: ObjectUuid,
+    reason: &'static str,
+) -> Result<Vec<String>, ServiceMetadataBuildError> {
+    let values = value
+        .as_sequence()
+        .ok_or(ServiceMetadataBuildError::InvalidModel { object, reason })?;
+    values
+        .iter()
+        .map(|value| canonical_text(value, object).map(ToOwned::to_owned))
+        .collect()
+}
+
+fn require_canonical_record_schema(
+    fields: &[CanonicalField],
+    expected: &[&str],
+    object: ObjectUuid,
+    reason: &'static str,
+) -> Result<(), ServiceMetadataBuildError> {
+    if fields.len() != expected.len()
+        || fields
+            .iter()
+            .zip(expected)
+            .any(|(field, expected)| field.name().as_str() != *expected)
+    {
+        invalid_model(object, reason)
+    } else {
+        Ok(())
+    }
+}
+
 fn invalid_model<T>(
     object: ObjectUuid,
     reason: &'static str,
@@ -1555,6 +2171,42 @@ fn valid_cfg_reference(value: &str) -> bool {
 
 fn valid_xdto_namespace(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_whitespace)
+}
+
+fn valid_xdto_package_reference(value: &str) -> bool {
+    value
+        .strip_prefix("XDTOPackage.")
+        .is_some_and(valid_identifier_segment)
+}
+
+fn valid_web_descriptor_file_name(value: &str) -> bool {
+    value.ends_with(".1cws")
+        && value.len() > ".1cws".len()
+        && !value.chars().any(char::is_whitespace)
+}
+
+fn valid_web_xdto_namespace(value: &str) -> bool {
+    valid_xdto_namespace(value)
+        && !value.chars().any(char::is_control)
+        && !matches!(value, XDTO_XML_NAMESPACE | XDTO_XMLNS_NAMESPACE)
+}
+
+fn transfer_direction_code(value: &str) -> Option<&'static str> {
+    match value {
+        "In" => Some("0"),
+        "Out" => Some("1"),
+        "InOut" => Some("2"),
+        _ => None,
+    }
+}
+
+fn transfer_direction_from_code(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("In"),
+        "1" => Some("Out"),
+        "2" => Some("InOut"),
+        _ => None,
+    }
 }
 
 fn reuse_sessions_code(value: &str) -> Option<&'static str> {
@@ -1660,6 +2312,151 @@ fn validate_http_header(
         }
     }
     Ok(())
+}
+
+fn validate_web_service_ir(value: &WebServiceNativeIr) -> Result<(), ServiceMetadataBuildError> {
+    if value.operations.is_empty()
+        || value.operations.len() > MAX_CANONICAL_COLLECTION_ITEMS
+        || value.xdto_package_uuids.len() > MAX_CANONICAL_COLLECTION_ITEMS
+        || value.xdto_namespaces.len() > MAX_CANONICAL_COLLECTION_ITEMS
+        || !valid_web_xdto_namespace(&value.namespace)
+        || !valid_web_descriptor_file_name(&value.descriptor_file_name)
+        || value.reuse_sessions != "DontUse"
+        || value.session_max_age != 20
+    {
+        return Err(native("WebService root properties are not exact"));
+    }
+    validate_web_header(value.uuid, &value.name, &value.synonyms, &value.comment)?;
+
+    let mut uuids = BTreeSet::from([value.uuid]);
+    for uuid in &value.xdto_package_uuids {
+        if uuid.to_string() == NIL_UUID || !uuids.insert(*uuid) {
+            return Err(native("WebService XDTOPackage UUID is nil or duplicated"));
+        }
+    }
+    let mut namespaces = BTreeSet::new();
+    for namespace in &value.xdto_namespaces {
+        if !valid_web_xdto_namespace(namespace) || !namespaces.insert(namespace.as_str()) {
+            return Err(native("WebService XDTO namespace is invalid or duplicated"));
+        }
+    }
+
+    let mut operation_names = BTreeSet::new();
+    for operation in &value.operations {
+        if !uuids.insert(operation.uuid)
+            || !operation_names.insert(case_insensitive_name_key(&operation.name))
+            || operation.transactioned
+            || operation.data_lock_control_mode != "Managed"
+            || !valid_identifier_segment(&operation.procedure_name)
+            || operation.parameters.len() > MAX_CANONICAL_COLLECTION_ITEMS
+        {
+            return Err(native("WebService Operation is not exact"));
+        }
+        validate_web_header(
+            operation.uuid,
+            &operation.name,
+            &operation.synonyms,
+            &operation.comment,
+        )?;
+        validate_web_xdto_type(&operation.returning_value_type)?;
+        let mut parameter_names = BTreeSet::new();
+        for parameter in &operation.parameters {
+            if !uuids.insert(parameter.uuid)
+                || !parameter_names.insert(case_insensitive_name_key(&parameter.name))
+                || transfer_direction_code(&parameter.transfer_direction).is_none()
+            {
+                return Err(native("WebService Parameter is not exact"));
+            }
+            validate_web_header(
+                parameter.uuid,
+                &parameter.name,
+                &parameter.synonyms,
+                &parameter.comment,
+            )?;
+            validate_web_xdto_type(&parameter.value_type)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_web_header(
+    uuid: ObjectUuid,
+    name: &str,
+    synonyms: &[ServiceLocalizedString],
+    comment: &str,
+) -> Result<(), ServiceMetadataBuildError> {
+    if uuid.to_string() == NIL_UUID || !valid_identifier_segment(name) {
+        return Err(native("WebService metadata header is nil or unnamed"));
+    }
+    validate_native_text(name, "Name")?;
+    validate_native_text(comment, "Comment")?;
+    if synonyms.len() > MAX_CANONICAL_COLLECTION_ITEMS {
+        return Err(native("WebService Synonym collection is too large"));
+    }
+    let mut languages = BTreeSet::new();
+    for synonym in synonyms {
+        validate_native_text(&synonym.language, "Synonym language")?;
+        validate_native_text(&synonym.content, "Synonym content")?;
+        if synonym.language.is_empty()
+            || synonym.language.len() > MAX_LANGUAGE_CODE_BYTES
+            || !languages.insert(synonym.language.as_str())
+        {
+            return Err(native(
+                "WebService Synonym language is invalid or duplicated",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_web_xdto_type(
+    value: &WebServiceXdtoTypeNativeIr,
+) -> Result<(), ServiceMetadataBuildError> {
+    if !valid_web_xdto_namespace(&value.namespace) || !is_xml_ncname(&value.name) {
+        return Err(native("WebService XDTO type is not exact"));
+    }
+    Ok(())
+}
+
+fn case_insensitive_name_key(value: &str) -> String {
+    value.chars().flat_map(char::to_lowercase).collect()
+}
+
+fn is_xml_ncname(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    is_xml_ncname_start_char(first) && chars.all(is_xml_ncname_char)
+}
+
+fn is_xml_ncname_start_char(character: char) -> bool {
+    matches!(
+        character,
+        'A'..='Z'
+            | '_'
+            | 'a'..='z'
+            | '\u{00c0}'..='\u{00d6}'
+            | '\u{00d8}'..='\u{00f6}'
+            | '\u{00f8}'..='\u{02ff}'
+            | '\u{0370}'..='\u{037d}'
+            | '\u{037f}'..='\u{1fff}'
+            | '\u{200c}'..='\u{200d}'
+            | '\u{2070}'..='\u{218f}'
+            | '\u{2c00}'..='\u{2fef}'
+            | '\u{3001}'..='\u{d7ff}'
+            | '\u{f900}'..='\u{fdcf}'
+            | '\u{fdf0}'..='\u{fffd}'
+            | '\u{10000}'..='\u{effff}'
+    )
+}
+
+fn is_xml_ncname_char(character: char) -> bool {
+    is_xml_ncname_start_char(character)
+        || matches!(
+            character,
+            '-' | '.' | '0'..='9' | '\u{00b7}' | '\u{0300}'..='\u{036f}' | '\u{203f}'..='\u{2040}'
+        )
 }
 
 fn native_event_name(event: &str) -> Option<&'static str> {
@@ -1846,6 +2643,104 @@ fn serialize_http_service(value: &HttpServiceNativeIr) -> Vec<u8> {
     }
     plain.push_str("\r\n}\r\n}");
     native_plaintext(plain)
+}
+
+fn serialize_web_service(value: &WebServiceNativeIr) -> Vec<u8> {
+    let mut plain = String::new();
+    plain.push_str("{1,\r\n{4,");
+    push_1c_string(&mut plain, &value.namespace);
+    plain.push_str(",\r\n");
+    push_native_header(
+        &mut plain,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plain.push_str(",\r\n{0,");
+    write!(&mut plain, "{}", value.xdto_package_uuids.len())
+        .expect("writing to String cannot fail");
+    for uuid in &value.xdto_package_uuids {
+        plain.push_str(",\r\n{\"#\",");
+        plain.push_str(DESIGN_TIME_REFERENCE_CLASS_UUID);
+        plain.push_str(",\r\n{1,");
+        plain.push_str(&uuid.to_string());
+        plain.push_str("}\r\n}");
+    }
+    if !value.xdto_package_uuids.is_empty() {
+        plain.push_str("\r\n");
+    }
+    plain.push_str("},");
+    push_1c_string(&mut plain, &value.descriptor_file_name);
+    plain.push_str(",\r\n{");
+    write!(&mut plain, "{}", value.xdto_namespaces.len()).expect("writing to String cannot fail");
+    for namespace in &value.xdto_namespaces {
+        plain.push(',');
+        push_1c_string(&mut plain, namespace);
+    }
+    write!(
+        &mut plain,
+        "}},0,{}}},1,\r\n{{{WEB_OPERATION_COLLECTION_UUID},{}",
+        value.session_max_age,
+        value.operations.len()
+    )
+    .expect("writing to String cannot fail");
+    for operation in &value.operations {
+        plain.push_str(",\r\n{\r\n{1,\r\n");
+        push_native_header(
+            &mut plain,
+            operation.uuid,
+            &operation.name,
+            &operation.synonyms,
+            &operation.comment,
+        );
+        plain.push_str(",\r\n");
+        push_native_xdto_type(&mut plain, &operation.returning_value_type);
+        plain.push(',');
+        plain.push(if operation.nillable { '1' } else { '0' });
+        plain.push(',');
+        plain.push(if operation.transactioned { '1' } else { '0' });
+        plain.push(',');
+        push_1c_string(&mut plain, &operation.procedure_name);
+        plain.push_str(",1},1,\r\n{");
+        plain.push_str(WEB_PARAMETER_COLLECTION_UUID);
+        write!(&mut plain, ",{}", operation.parameters.len())
+            .expect("writing to String cannot fail");
+        for parameter in &operation.parameters {
+            plain.push_str(",\r\n{\r\n{0,\r\n");
+            push_native_header(
+                &mut plain,
+                parameter.uuid,
+                &parameter.name,
+                &parameter.synonyms,
+                &parameter.comment,
+            );
+            plain.push_str(",\r\n");
+            push_native_xdto_type(&mut plain, &parameter.value_type);
+            plain.push(',');
+            plain.push(if parameter.nillable { '1' } else { '0' });
+            plain.push(',');
+            plain.push_str(
+                transfer_direction_code(&parameter.transfer_direction)
+                    .expect("validated WebService parameter direction has an evidenced code"),
+            );
+            plain.push_str("},0}");
+        }
+        if !operation.parameters.is_empty() {
+            plain.push_str("\r\n");
+        }
+        plain.push_str("}\r\n}");
+    }
+    plain.push_str("\r\n}\r\n}");
+    native_plaintext(plain)
+}
+
+fn push_native_xdto_type(output: &mut String, value: &WebServiceXdtoTypeNativeIr) {
+    output.push_str("{0,");
+    push_1c_string(output, &value.namespace);
+    output.push(',');
+    push_1c_string(output, &value.name);
+    output.push('}');
 }
 
 fn native_plaintext(plain: String) -> Vec<u8> {
@@ -2284,6 +3179,195 @@ fn parse_http_service(plain: &[u8]) -> Result<HttpServiceNativeIr, ServiceMetada
     Ok(result)
 }
 
+fn parse_web_service(plain: &[u8]) -> Result<WebServiceNativeIr, ServiceMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 4, "WebService root")?;
+    exact_token(&root[0], "1", "WebService root discriminator")?;
+    exact_token(&root[2], "1", "WebService collection marker")?;
+    let service = exact_list(&root[1], 8, "WebService object")?;
+    exact_token(&service[0], "4", "WebService discriminator")?;
+    let namespace = text(&service[1], "WebService Namespace")?.to_owned();
+    let header = parse_native_header(&service[2])?;
+    let xdto_package_uuids = parse_web_package_references(&service[3])?;
+    let descriptor_file_name = text(&service[4], "DescriptorFileName")?.to_owned();
+    let xdto_namespaces = parse_web_namespace_packages(&service[5])?;
+    exact_token(&service[6], "0", "WebService ReuseSessions")?;
+    let session_max_age = canonical_u32_token(&service[7], "SessionMaxAge")?;
+    if session_max_age != 20 {
+        return Err(native("WebService SessionMaxAge code is unsupported"));
+    }
+
+    let collection = list(&root[3], "WebService Operation collection")?;
+    if collection.len() < 2 {
+        return Err(native("WebService Operation collection is truncated"));
+    }
+    exact_token(
+        &collection[0],
+        WEB_OPERATION_COLLECTION_UUID,
+        "WebService Operation collection UUID",
+    )?;
+    let count = canonical_usize_token(&collection[1], "WebService Operation count")?;
+    if count == 0 || count > MAX_CANONICAL_COLLECTION_ITEMS || collection.len() != count + 2 {
+        return Err(native(
+            "WebService Operation count is out of bounds or mismatched",
+        ));
+    }
+    let mut operations = Vec::with_capacity(count);
+    for value in &collection[2..] {
+        let entry = exact_list(value, 3, "WebService Operation entry")?;
+        exact_token(&entry[1], "1", "WebService Operation parameter marker")?;
+        let operation = exact_list(&entry[0], 7, "WebService Operation")?;
+        exact_token(&operation[0], "1", "WebService Operation discriminator")?;
+        let operation_header = parse_native_header(&operation[1])?;
+        let returning_value_type = parse_web_xdto_type(&operation[2])?;
+        let nillable = bool_token(&operation[3], "WebService Operation Nillable")?;
+        let transactioned = bool_token(&operation[4], "WebService Transactioned")?;
+        if transactioned {
+            return Err(native("WebService Transactioned code is unsupported"));
+        }
+        let procedure_name = text(&operation[5], "WebService ProcedureName")?.to_owned();
+        exact_token(&operation[6], "1", "WebService DataLockControlMode")?;
+
+        let parameter_collection = list(&entry[2], "WebService Parameter collection")?;
+        if parameter_collection.len() < 2 {
+            return Err(native("WebService Parameter collection is truncated"));
+        }
+        exact_token(
+            &parameter_collection[0],
+            WEB_PARAMETER_COLLECTION_UUID,
+            "WebService Parameter collection UUID",
+        )?;
+        let parameter_count =
+            canonical_usize_token(&parameter_collection[1], "WebService Parameter count")?;
+        if parameter_count > MAX_CANONICAL_COLLECTION_ITEMS
+            || parameter_collection.len() != parameter_count + 2
+        {
+            return Err(native(
+                "WebService Parameter count is out of bounds or mismatched",
+            ));
+        }
+        let mut parameters = Vec::with_capacity(parameter_count);
+        for parameter_value in &parameter_collection[2..] {
+            let parameter_entry = exact_list(parameter_value, 2, "WebService Parameter entry")?;
+            exact_token(&parameter_entry[1], "0", "WebService Parameter tail")?;
+            let parameter = exact_list(&parameter_entry[0], 5, "WebService Parameter")?;
+            exact_token(&parameter[0], "0", "WebService Parameter discriminator")?;
+            let parameter_header = parse_native_header(&parameter[1])?;
+            let value_type = parse_web_xdto_type(&parameter[2])?;
+            let parameter_nillable = bool_token(&parameter[3], "WebService Nillable")?;
+            let transfer_direction =
+                transfer_direction_from_code(token(&parameter[4], "TransferDirection")?)
+                    .ok_or_else(|| native("WebService TransferDirection code is unsupported"))?
+                    .to_owned();
+            parameters.push(WebServiceParameterNativeIr {
+                uuid: parameter_header.uuid,
+                name: parameter_header.name,
+                synonyms: parameter_header.synonyms,
+                comment: parameter_header.comment,
+                value_type,
+                nillable: parameter_nillable,
+                transfer_direction,
+            });
+        }
+        operations.push(WebServiceOperationNativeIr {
+            uuid: operation_header.uuid,
+            name: operation_header.name,
+            synonyms: operation_header.synonyms,
+            comment: operation_header.comment,
+            returning_value_type,
+            nillable,
+            transactioned,
+            procedure_name,
+            data_lock_control_mode: "Managed".to_owned(),
+            parameters,
+        });
+    }
+    let result = WebServiceNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        namespace,
+        xdto_package_uuids,
+        xdto_namespaces,
+        descriptor_file_name,
+        reuse_sessions: "DontUse".to_owned(),
+        session_max_age,
+        operations,
+    };
+    validate_web_service_ir(&result)?;
+    Ok(result)
+}
+
+fn parse_web_package_references(
+    value: &NativeValue,
+) -> Result<Vec<ObjectUuid>, ServiceMetadataBuildError> {
+    let fields = list(value, "WebService XDTOPackage references")?;
+    if fields.len() < 2 {
+        return Err(native("WebService XDTOPackage references are truncated"));
+    }
+    exact_token(&fields[0], "0", "WebService XDTOPackage marker")?;
+    let count = canonical_usize_token(&fields[1], "WebService XDTOPackage count")?;
+    if count > MAX_CANONICAL_COLLECTION_ITEMS || fields.len() != count + 2 {
+        return Err(native(
+            "WebService XDTOPackage count is out of bounds or mismatched",
+        ));
+    }
+    let mut result = Vec::with_capacity(count);
+    for value in &fields[2..] {
+        let typed = exact_list(value, 3, "WebService XDTOPackage reference")?;
+        if text(&typed[0], "WebService XDTOPackage reference marker")? != "#" {
+            return Err(native(
+                "WebService XDTOPackage reference marker is unsupported",
+            ));
+        }
+        exact_token(
+            &typed[1],
+            DESIGN_TIME_REFERENCE_CLASS_UUID,
+            "WebService XDTOPackage reference class",
+        )?;
+        let target = exact_list(&typed[2], 2, "WebService XDTOPackage target")?;
+        exact_token(&target[0], "1", "WebService XDTOPackage target marker")?;
+        result.push(canonical_uuid_token(
+            &target[1],
+            "WebService XDTOPackage UUID",
+        )?);
+    }
+    Ok(result)
+}
+
+fn parse_web_namespace_packages(
+    value: &NativeValue,
+) -> Result<Vec<String>, ServiceMetadataBuildError> {
+    let fields = list(value, "WebService XDTO namespace packages")?;
+    if fields.is_empty() {
+        return Err(native("WebService XDTO namespace packages are truncated"));
+    }
+    let count = canonical_usize_token(&fields[0], "WebService XDTO namespace count")?;
+    if count > MAX_CANONICAL_COLLECTION_ITEMS || fields.len() != count + 1 {
+        return Err(native(
+            "WebService XDTO namespace count is out of bounds or mismatched",
+        ));
+    }
+    fields[1..]
+        .iter()
+        .map(|value| text(value, "WebService XDTO namespace").map(ToOwned::to_owned))
+        .collect()
+}
+
+fn parse_web_xdto_type(
+    value: &NativeValue,
+) -> Result<WebServiceXdtoTypeNativeIr, ServiceMetadataBuildError> {
+    let fields = exact_list(value, 3, "WebService XDTO type")?;
+    exact_token(&fields[0], "0", "WebService XDTO type discriminator")?;
+    let result = WebServiceXdtoTypeNativeIr {
+        namespace: text(&fields[1], "WebService XDTO type namespace")?.to_owned(),
+        name: text(&fields[2], "WebService XDTO type name")?.to_owned(),
+    };
+    validate_web_xdto_type(&result)?;
+    Ok(result)
+}
+
 struct NativeHeader {
     uuid: ObjectUuid,
     name: String,
@@ -2513,6 +3597,64 @@ fn write_xml_text_element(output: &mut String, indent: &str, name: &str, value: 
     output.push_str(">\r\n");
 }
 
+fn collect_custom_xdto_namespace(namespace: &str, target: &mut BTreeSet<String>) {
+    if !matches!(namespace, XDTO_XML_SCHEMA_NAMESPACE | XDTO_CORE_NAMESPACE) {
+        target.insert(namespace.to_owned());
+    }
+}
+
+fn write_web_package_item(output: &mut String, value_type: &str, value: &str) {
+    output.push_str("\t\t\t\t<xr:Item>\r\n");
+    output.push_str("\t\t\t\t\t<xr:Presentation/>\r\n");
+    output.push_str("\t\t\t\t\t<xr:CheckState>0</xr:CheckState>\r\n");
+    output.push_str("\t\t\t\t\t<xr:Value xsi:type=\"");
+    output.push_str(value_type);
+    output.push_str("\">");
+    push_xml_text(output, value);
+    output.push_str("</xr:Value>\r\n");
+    output.push_str("\t\t\t\t</xr:Item>\r\n");
+}
+
+fn write_xdto_type_element(
+    output: &mut String,
+    indent: &str,
+    element: &str,
+    value: &WebServiceXdtoTypeNativeIr,
+    prefixes: &BTreeMap<&str, String>,
+) {
+    let prefix = match value.namespace.as_str() {
+        XDTO_XML_SCHEMA_NAMESPACE => "xs",
+        XDTO_CORE_NAMESPACE => "v8",
+        namespace => prefixes
+            .get(namespace)
+            .expect("custom XDTO namespace was collected")
+            .as_str(),
+    };
+    output.push_str(indent);
+    output.push('<');
+    output.push_str(element);
+    output.push('>');
+    output.push_str(prefix);
+    output.push(':');
+    output.push_str(&value.name);
+    output.push_str("</");
+    output.push_str(element);
+    output.push_str(">\r\n");
+}
+
+fn push_xml_attribute(output: &mut String, value: &str) {
+    for character in value.chars() {
+        match character {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            '\'' => output.push_str("&apos;"),
+            _ => output.push(character),
+        }
+    }
+}
+
 fn push_xml_text(output: &mut String, value: &str) {
     for character in value.chars() {
         match character {
@@ -2558,6 +3700,11 @@ mod tests {
     const HTTP_UUID: &str = "db821e7a-ff22-4889-b166-1a1bc1118587";
     const HTTP_URL_UUID: &str = "bbd4d7c8-2488-474c-b92c-8f689a56e62e";
     const HTTP_METHOD_UUID: &str = "f909d950-4db8-490c-aaf6-7a2e975a310d";
+    const WEB_UUID: &str = "a4ed8b24-bd23-45a7-9f34-61b25b91d0c6";
+    const WEB_OPERATION_UUID: &str = "65efaa10-3239-4f0f-a08e-88c89d9d8d5a";
+    const WEB_PARAMETER_IN_UUID: &str = "93aa5247-6823-4f70-9d47-e5a0f409828a";
+    const WEB_PARAMETER_OUT_UUID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const WEB_PARAMETER_IN_OUT_UUID: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
     fn xml(version: &str, module: &str) -> Vec<u8> {
         format!(
@@ -2646,6 +3793,45 @@ mod tests {
 \t\t\t</URLTemplate>\r\n\
 \t\t</ChildObjects>\r\n\
 \t</HTTPService>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn web_xml(version: &str, lock_mode: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"{XDTO_CORE_NAMESPACE}\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"{XDTO_XML_SCHEMA_NAMESPACE}\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:svc=\"http://example.test/types\" version=\"{version}\">\r\n\
+\t<WebService uuid=\"{WEB_UUID}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>InterfaceVersion</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Interface version</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Namespace>http://www.1c.ru/SaaS/1.0/WS</Namespace>\r\n\
+\t\t\t<XDTOPackages>\r\n\
+\t\t\t\t<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState><xr:Value xsi:type=\"xr:MDObjectRef\">XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1</xr:Value></xr:Item>\r\n\
+\t\t\t\t<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState><xr:Value xsi:type=\"xs:string\">{XDTO_CORE_NAMESPACE}</xr:Value></xr:Item>\r\n\
+\t\t\t</XDTOPackages>\r\n\
+\t\t\t<DescriptorFileName>InterfaceVersion.1cws</DescriptorFileName>\r\n\
+\t\t\t<ReuseSessions>DontUse</ReuseSessions>\r\n\
+\t\t\t<SessionMaxAge>20</SessionMaxAge>\r\n\
+\t\t</Properties>\r\n\
+\t\t<ChildObjects>\r\n\
+\t\t\t<Operation uuid=\"{WEB_OPERATION_UUID}\">\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>GetVersions</Name><Synonym/><Comment/>\r\n\
+\t\t\t\t\t<XDTOReturningValueType>svc:Result</XDTOReturningValueType>\r\n\
+\t\t\t\t\t<Nillable>true</Nillable><Transactioned>false</Transactioned>\r\n\
+\t\t\t\t\t<ProcedureName>GetVersions</ProcedureName><DataLockControlMode>{lock_mode}</DataLockControlMode>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t\t<ChildObjects>\r\n\
+\t\t\t\t\t<Parameter uuid=\"{WEB_PARAMETER_IN_UUID}\"><Properties><Name>InterfaceName</Name><Synonym/><Comment/><XDTOValueType>xs:string</XDTOValueType><Nillable>false</Nillable><TransferDirection>In</TransferDirection></Properties></Parameter>\r\n\
+\t\t\t\t\t<Parameter uuid=\"{WEB_PARAMETER_OUT_UUID}\"><Properties><Name>ResultId</Name><Synonym/><Comment/><XDTOValueType>v8:UUID</XDTOValueType><Nillable>true</Nillable><TransferDirection>Out</TransferDirection></Properties></Parameter>\r\n\
+\t\t\t\t\t<Parameter uuid=\"{WEB_PARAMETER_IN_OUT_UUID}\"><Properties><Name>Payload</Name><Synonym/><Comment/><XDTOValueType>svc:Input</XDTOValueType><Nillable>false</Nillable><TransferDirection>InOut</TransferDirection></Properties></Parameter>\r\n\
+\t\t\t\t</ChildObjects>\r\n\
+\t\t\t</Operation>\r\n\
+\t\t</ChildObjects>\r\n\
+\t</WebService>\r\n\
 </MetaDataObject>"
         )
         .into_bytes()
@@ -2813,6 +3999,40 @@ mod tests {
         CanonicalConfiguration::new(objects).unwrap()
     }
 
+    fn web_configuration(version: &str, lock_mode: &str) -> CanonicalConfiguration {
+        let package_document = XmlReader::from_slice(&xdto_xml(
+            version,
+            "http://www.1c.ru/SaaS/ExchangeAdministration/Common/2.4.5.1",
+        ))
+        .unwrap();
+        let package = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("XDTOPackage").unwrap(),
+                &package_document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::new(vec![PathSegment::name("xdto-package").unwrap()]).unwrap(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        let web_document = XmlReader::from_slice(&web_xml(version, lock_mode)).unwrap();
+        let envelope = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("WebService").unwrap(),
+                &web_document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::new(vec![PathSegment::name("web-service").unwrap()]).unwrap(),
+            )
+            .unwrap();
+        let mut objects = vec![
+            object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            package,
+            envelope.root().clone(),
+        ];
+        objects.extend(envelope.descendants().iter().cloned());
+        CanonicalConfiguration::new(objects).unwrap()
+    }
+
     fn axes(version: &str) -> CompileAxes {
         CompileAxes::new(
             XmlDialect::parse(version).unwrap(),
@@ -2910,6 +4130,27 @@ mod tests {
         (
             graph,
             ServiceMetadataProfile::http_service_fixture("platform-test"),
+        )
+    }
+
+    fn web_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, ServiceMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [CONFIGURATION_UUID, XDTO_UUID, WEB_UUID]
+                .into_iter()
+                .map(|uuid| {
+                    ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+                })
+                .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            ServiceMetadataProfile::web_service_fixture("platform-test"),
         )
     }
 
@@ -3311,6 +4552,159 @@ mod tests {
     }
 
     #[test]
+    fn web_service_roundtrips_without_a_base_for_both_dialects() {
+        for version in ["2.20", "2.21"] {
+            let configuration = web_configuration(version, "Managed");
+            let validated = validate_configuration(&configuration).unwrap();
+            let (graph, profile) = web_graph(&validated);
+            let uuid = ObjectUuid::parse(WEB_UUID).unwrap();
+            let first =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            let second =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            assert_eq!(first, second);
+            let ir = decode_web_service_blob(
+                first.outcome().compiled_payload().unwrap().bytes(),
+                &profile,
+            )
+            .unwrap();
+            assert_eq!(
+                ir.xdto_package_uuids,
+                [ObjectUuid::parse(XDTO_UUID).unwrap()]
+            );
+            assert_eq!(ir.xdto_namespaces, [XDTO_CORE_NAMESPACE]);
+            assert_eq!(ir.operations.len(), 1);
+            assert_eq!(ir.operations[0].parameters.len(), 3);
+            assert_eq!(
+                ir.operations[0]
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.transfer_direction.as_str())
+                    .collect::<Vec<_>>(),
+                ["In", "Out", "InOut"]
+            );
+            let packages = BTreeMap::from([(
+                ObjectUuid::parse(XDTO_UUID).unwrap(),
+                "XDTOPackage.АдминистрированиеОбменаДанными_2_4_5_1".to_owned(),
+            )]);
+            let output = ir
+                .to_xml(
+                    &ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    &packages,
+                )
+                .unwrap();
+            assert!(
+                String::from_utf8_lossy(&output)
+                    .contains("xmlns:ws1=\"http://example.test/types\"")
+            );
+            let document = XmlReader::from_slice(&output).unwrap();
+            bundled_metadata_registry()
+                .decode(
+                    &FamilyId::parse("WebService").unwrap(),
+                    &document,
+                    ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn web_service_plaintext_matches_observed_remote_control_golden() {
+        let value = WebServiceNativeIr {
+            uuid: ObjectUuid::parse("03d08c14-f814-4e12-8f96-020c36cca2bf").unwrap(),
+            name: "RemoteControl".to_owned(),
+            synonyms: vec![ServiceLocalizedString {
+                language: "ru".to_owned(),
+                content: "Remote control".to_owned(),
+            }],
+            comment: String::new(),
+            namespace: "http://www.1c.ru/SSL/RemoteControl_1_0_0_1".to_owned(),
+            xdto_package_uuids: Vec::new(),
+            xdto_namespaces: Vec::new(),
+            descriptor_file_name: "RemoteControl.1cws".to_owned(),
+            reuse_sessions: "DontUse".to_owned(),
+            session_max_age: 20,
+            operations: vec![WebServiceOperationNativeIr {
+                uuid: ObjectUuid::parse("a1a7aab6-cf35-42ce-97bb-c112638a2748").unwrap(),
+                name: "GetCurrentState".to_owned(),
+                synonyms: vec![ServiceLocalizedString {
+                    language: "ru".to_owned(),
+                    content: "Get current state".to_owned(),
+                }],
+                comment: String::new(),
+                returning_value_type: WebServiceXdtoTypeNativeIr {
+                    namespace: XDTO_XML_SCHEMA_NAMESPACE.to_owned(),
+                    name: "boolean".to_owned(),
+                },
+                nillable: false,
+                transactioned: false,
+                procedure_name: "GetCurrentState".to_owned(),
+                data_lock_control_mode: "Managed".to_owned(),
+                parameters: Vec::new(),
+            }],
+        };
+        let plain = serialize_web_service(&value);
+        assert!(plain.starts_with(UTF8_BOM));
+        assert_eq!(
+            &plain[UTF8_BOM.len()..],
+            concat!(
+                "{1,\r\n{4,\"http://www.1c.ru/SSL/RemoteControl_1_0_0_1\",\r\n",
+                "{3,\r\n{1,0,03d08c14-f814-4e12-8f96-020c36cca2bf},\"RemoteControl\",\r\n",
+                "{1,\"ru\",\"Remote control\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n",
+                "{0,0},\"RemoteControl.1cws\",\r\n{0},0,20},1,\r\n",
+                "{36186084-c23a-43bd-876c-a3a8ba1a9622,1,\r\n{\r\n{1,\r\n",
+                "{3,\r\n{1,0,a1a7aab6-cf35-42ce-97bb-c112638a2748},\"GetCurrentState\",\r\n",
+                "{1,\"ru\",\"Get current state\"},\"\",0,0,00000000-0000-0000-0000-000000000000,0},\r\n",
+                "{0,\"http://www.w3.org/2001/XMLSchema\",\"boolean\"},0,0,\"GetCurrentState\",1},1,\r\n",
+                "{b78a00b2-2260-4ef5-a70c-17889cfee695,0}\r\n}\r\n}\r\n}"
+            )
+            .as_bytes()
+        );
+        assert_eq!(parse_web_service(&plain).unwrap(), value);
+    }
+
+    #[test]
+    fn web_service_unknown_native_code_extra_field_and_reference_fail_closed() {
+        let configuration = web_configuration("2.20", "Managed");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = web_graph(&validated);
+        let entry = compile_service_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(WEB_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = String::from_utf8(
+            inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap(),
+        )
+        .unwrap();
+        let unknown_lock = plain.replacen("\"GetVersions\",1},1,", "\"GetVersions\",99},1,", 1);
+        assert!(matches!(
+            parse_web_service(unknown_lock.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+        let wrong_reference_class = plain.replacen(
+            DESIGN_TIME_REFERENCE_CLASS_UUID,
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            1,
+        );
+        assert!(matches!(
+            parse_web_service(wrong_reference_class.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+        let extra_field = format!("{},future}}", &plain[..plain.len() - 1]);
+        assert!(matches!(
+            parse_web_service(extra_field.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+    }
+
+    #[test]
     fn implemented_service_profiles_are_explicit_and_others_stay_blocked() {
         let json = format!(
             r#"{{
@@ -3323,7 +4717,8 @@ mod tests {
                     "{SCHEDULED_JOB_LAYOUT_KEY}": "{SCHEDULED_JOB_LAYOUT}",
                     "{EVENT_SUBSCRIPTION_LAYOUT_KEY}": "{EVENT_SUBSCRIPTION_LAYOUT}",
                     "{XDTO_PACKAGE_LAYOUT_KEY}": "{XDTO_PACKAGE_LAYOUT}",
-                    "{HTTP_SERVICE_LAYOUT_KEY}": "{HTTP_SERVICE_LAYOUT}"
+                    "{HTTP_SERVICE_LAYOUT_KEY}": "{HTTP_SERVICE_LAYOUT}",
+                    "{WEB_SERVICE_LAYOUT_KEY}": "{WEB_SERVICE_LAYOUT}"
                 }}
             }}"#
         );
@@ -3369,8 +4764,20 @@ mod tests {
             .family(),
             ServiceFamily::HttpService
         );
+        assert_eq!(
+            ServiceMetadataProfile::from_effective_for_family(
+                effective,
+                ServiceFamily::WebService,
+            )
+            .unwrap()
+            .family(),
+            ServiceFamily::WebService
+        );
         assert!(matches!(
-            ServiceMetadataProfile::from_effective_for_family(effective, ServiceFamily::WebService,),
+            ServiceMetadataProfile::from_effective_for_family(
+                effective,
+                ServiceFamily::IntegrationService,
+            ),
             Err(ServiceMetadataProfileError::FamilyNotImplemented { .. })
         ));
     }
