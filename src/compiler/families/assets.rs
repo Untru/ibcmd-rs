@@ -35,6 +35,8 @@ pub enum SourceAssetCodec {
     Rights,
     Predefined,
     OpaqueSupport,
+    ManagedForm,
+    CommandInterface,
     Deferred,
 }
 
@@ -45,6 +47,8 @@ impl SourceAssetCodec {
             Self::RawBinary => Some("bootstrap.asset.raw_binary.layout"),
             Self::Picture => Some("bootstrap.asset.picture.layout"),
             Self::Help => Some("bootstrap.asset.help.layout"),
+            Self::ManagedForm => Some("bootstrap.body.form.layout"),
+            Self::CommandInterface => Some("bootstrap.body.command_interface.layout"),
             Self::Rights | Self::Predefined | Self::OpaqueSupport | Self::Deferred => None,
         }
     }
@@ -55,6 +59,8 @@ impl SourceAssetCodec {
             Self::RawBinary => Some("raw-deflate-v1"),
             Self::Picture => Some("ext-picture-v1"),
             Self::Help => Some("help-v1"),
+            Self::ManagedForm => Some("managed-form-marker50-v1-raw-deflate-utf8-bom"),
+            Self::CommandInterface => Some("command-interface-v7-sections-v1-raw-deflate-utf8-bom"),
             Self::Rights | Self::Predefined | Self::OpaqueSupport | Self::Deferred => None,
         }
     }
@@ -178,14 +184,14 @@ const ROUTES: &[SourceAssetRoute] = &[
         CommandInterface,
         ".1",
         "Ext/CommandInterface.xml",
-        Deferred
+        CommandInterface
     ),
     route!(
         "CommonCommand",
         CommandInterface,
         ".0",
         "Ext/CommandInterface.xml",
-        Deferred
+        CommandInterface
     ),
     route!(
         "CommonCommand",
@@ -201,13 +207,13 @@ const ROUTES: &[SourceAssetRoute] = &[
         "Ext/CommandModule.bsl",
         Module
     ),
-    route!("Form", FormModule, ".0", "Ext/Form/Module.bsl", Deferred),
+    route!("Form", FormModule, ".0", "Ext/Form/Module.bsl", ManagedForm),
     route!(
         "CommonForm",
         FormModule,
         ".0",
         "Ext/Form/Module.bsl",
-        Deferred
+        ManagedForm
     ),
     route!(
         "FilterCriterion",
@@ -490,7 +496,7 @@ const ROUTES: &[SourceAssetRoute] = &[
         CommandInterface,
         ".a",
         "Ext/CommandInterface.xml",
-        Deferred
+        CommandInterface
     ),
     route!(
         "Configuration",
@@ -845,6 +851,8 @@ pub fn compile_source_asset(
             SourceAssetCodec::Rights
             | SourceAssetCodec::Predefined
             | SourceAssetCodec::OpaqueSupport
+            | SourceAssetCodec::ManagedForm
+            | SourceAssetCodec::CommandInterface
             | SourceAssetCodec::Deferred,
             _,
         ) => return Err(AssetCodecError::DeferredRoute),
@@ -894,6 +902,8 @@ pub fn decode_source_asset(
         SourceAssetCodec::Rights
         | SourceAssetCodec::Predefined
         | SourceAssetCodec::OpaqueSupport
+        | SourceAssetCodec::ManagedForm
+        | SourceAssetCodec::CommandInterface
         | SourceAssetCodec::Deferred => Err(AssetCodecError::DeferredRoute),
     }
 }
@@ -1373,6 +1383,22 @@ mod tests {
                 .codec(),
             SourceAssetCodec::OpaqueSupport
         );
+        assert_eq!(
+            SourceAssetRegistry
+                .route("CommonForm", SourceAssetRole::FormModule)
+                .unwrap()
+                .codec(),
+            SourceAssetCodec::ManagedForm
+        );
+        for family in ["Configuration", "Subsystem", "CommonCommand"] {
+            assert_eq!(
+                SourceAssetRegistry
+                    .route(family, SourceAssetRole::CommandInterface)
+                    .unwrap()
+                    .codec(),
+                SourceAssetCodec::CommandInterface
+            );
+        }
         assert_eq!(
             SourceAssetRegistry
                 .source_path_by_suffix(Path::new("Configuration.xml"), "Configuration", "6")

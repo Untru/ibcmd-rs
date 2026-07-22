@@ -7,6 +7,8 @@ use ibcmd_core::artifact::{ProfileId, StorageProfileId};
 use ibcmd_core::profile::EffectiveProfile;
 use ibcmd_core::version::PlatformBuild;
 
+pub mod command_interface;
+pub mod form;
 pub mod predefined;
 pub mod rights;
 pub mod support;
@@ -147,6 +149,8 @@ impl Error for BodyProfileError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::bodies::command_interface::CommandInterfaceCodecProfile;
+    use crate::compiler::bodies::form::ManagedFormCodecProfile;
     use crate::compiler::bodies::predefined::PredefinedCodecProfile;
     use crate::compiler::bodies::rights::RightsCodecProfile;
     use crate::compiler::bodies::support::SupportPolicyProfile;
@@ -159,12 +163,16 @@ mod tests {
             .unwrap();
         assert!(RightsCodecProfile::from_effective(supported).is_ok());
         assert!(PredefinedCodecProfile::from_effective(supported).is_ok());
+        assert!(CommandInterfaceCodecProfile::from_effective(supported).is_ok());
+        assert!(ManagedFormCodecProfile::from_effective(supported).is_ok());
         assert!(SupportPolicyProfile::from_effective(supported).is_ok());
 
         for id in ["platform-8.3.24.1819", "platform-8.5.1.1150"] {
             let profile = registry.get(&ProfileId::parse(id).unwrap()).unwrap();
             assert!(RightsCodecProfile::from_effective(profile).is_err());
             assert!(PredefinedCodecProfile::from_effective(profile).is_err());
+            assert!(CommandInterfaceCodecProfile::from_effective(profile).is_err());
+            assert!(ManagedFormCodecProfile::from_effective(profile).is_err());
             assert!(SupportPolicyProfile::from_effective(profile).is_err());
         }
     }

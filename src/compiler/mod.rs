@@ -469,7 +469,7 @@ fn compile_source_with_payload_limit(
     }
 }
 
-fn unsupported_axes_reason(axes: &CompileAxes) -> Option<String> {
+pub(crate) fn unsupported_axes_reason(axes: &CompileAxes) -> Option<String> {
     let dialect = axes.xml_dialect().as_version().components();
     if dialect != [2, 20] && dialect != [2, 21] {
         return Some(format!(

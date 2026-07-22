@@ -4605,145 +4605,113 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
     })
 }
 
-pub fn form_body_base_free_blockers(
+/// Builds a managed Form body from source XML and a profile-known empty
+/// marker-50 container. No external/base artifact participates in this path.
+pub fn pack_form_body_blob_from_form_xml_base_free(
     form_xml: &[u8],
-    has_module_text: bool,
-    form_item_asset_files: usize,
-) -> Result<Vec<String>> {
-    let mut blockers = Vec::new();
-    if form_xml.is_empty() {
-        if has_module_text {
-            blockers.push(
-                "Module.bsl is stored in the same Form body row as layout and trailing sections"
-                    .to_string(),
-            );
-        }
-    } else {
-        let properties = parse_form_xml_body_properties(form_xml)?;
-        if form_xml_requires_existing_layout(&properties) {
-            let root_signals = form_xml_root_layout_signal_count(&properties);
-            blockers.push(format!(
-                "Form.xml layout/root/child-item data is currently applied by patching an existing layout section ({root_signals} root/layout scalar(s), {} form event handler(s), {} child item(s))",
-                properties.events.len(),
-                properties.child_items.len()
-            ));
-        }
-        if properties.attributes_present {
-            blockers.push(format!(
-                "Form attributes require the existing trailing attributes section shape ({} attribute definition(s))",
-                properties.attributes.len()
-            ));
-        }
-        if properties.parameters_present {
-            blockers.push(format!(
-                "Form parameters require the existing trailing parameters section shape ({} parameter definition(s))",
-                properties.parameters.len()
-            ));
-        }
-        if properties.commands_present {
-            blockers.push(format!(
-                "Form commands require the existing trailing commands section shape ({} command definition(s))",
-                properties.commands.len()
-            ));
-        }
-        if properties.command_interface_present {
-            blockers.push(format!(
-                "Form command interface requires the existing trailing command-interface section shape ({} navigation item(s))",
-                properties.command_interface_items.len()
-            ));
-        }
-        if has_module_text {
-            blockers.push(
-                "Module.bsl shares the Form body row with layout and trailing sections".to_string(),
-            );
-        }
-    }
-    if form_item_asset_files > 0 {
-        blockers.push(format!(
-            "form item assets replace existing embedded picture payload slots ({form_item_asset_files} source asset file(s))"
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<PackedRawDeflatedBlob> {
+    validate_form_xml_document(form_xml)?;
+    let properties = parse_form_xml_body_properties(form_xml)?;
+    let blockers = form_base_free_model_blockers(&properties, source.is_some());
+    if !blockers.is_empty() {
+        return Err(anyhow!(
+            "Form XML is outside the evidenced base-free marker-50 cohort: {}",
+            blockers.join("; ")
         ));
     }
-    if blockers.is_empty() {
-        if form_xml.is_empty() {
-            blockers.push(
-                "Form body source is absent, and base-free staging cannot synthesize the native Form body row skeleton".to_string(),
-            );
-        } else {
-            blockers.push(
-                "Form.xml has no exported layout, attribute, parameter, command, command-interface, module, or item-asset sections, but the Config row still stores a native Form body container skeleton with layout defaults, trailing empty section fields, and platform-specific tail slots that source XML does not represent".to_string(),
-            );
+
+    let template = format_form_base_free_template(&properties)?;
+    let template_blob = deflate_raw(template.as_bytes())?;
+    let packed = pack_form_body_blob_from_form_xml_with_source(
+        &template_blob,
+        form_xml,
+        module_text,
+        source,
+    )?;
+    validate_base_free_form_output(&packed.blob, &properties)?;
+    Ok(packed)
+}
+
+fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut root_seen = false;
+    let mut root_closed = false;
+    let mut depth = 0usize;
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if depth == 0 {
+                    if root_seen || local != "Form" {
+                        return Err(anyhow!("Form XML must contain exactly one Form root"));
+                    }
+                    root_seen = true;
+                }
+                if local == "MobileDeviceCommandBarContent" {
+                    return Err(anyhow!(
+                        "Form MobileDeviceCommandBarContent has no evidenced base-free layout"
+                    ));
+                }
+                depth += 1;
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if depth == 0 {
+                    if root_seen || local != "Form" {
+                        return Err(anyhow!("Form XML must contain exactly one Form root"));
+                    }
+                    root_seen = true;
+                    root_closed = true;
+                }
+                if local == "MobileDeviceCommandBarContent" {
+                    return Err(anyhow!(
+                        "Form MobileDeviceCommandBarContent has no evidenced base-free layout"
+                    ));
+                }
+            }
+            Ok(Event::End(_)) => {
+                if depth == 0 {
+                    return Err(anyhow!("Form XML contains an unexpected closing element"));
+                }
+                depth -= 1;
+                if depth == 0 {
+                    root_closed = true;
+                }
+            }
+            Ok(Event::Text(text)) if depth == 0 => {
+                if !text
+                    .xml_content()?
+                    .trim_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
+                    .is_empty()
+                {
+                    return Err(anyhow!("Form XML contains text outside the root"));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error).context("failed to parse Form XML document"),
         }
+        buffer.clear();
     }
-    Ok(blockers)
+    if !root_seen || !root_closed || depth != 0 {
+        return Err(anyhow!("Form XML root is absent or not closed"));
+    }
+    Ok(())
 }
 
-fn form_xml_root_layout_signal_count(properties: &FormXmlBodyProperties) -> usize {
-    usize::from(!properties.title.is_empty())
-        + usize::from(properties.width.is_some())
-        + usize::from(properties.height.is_some())
-        + usize::from(properties.window_opening_mode.is_some())
-        + usize::from(properties.enter_key_behavior.is_some())
-        + usize::from(properties.save_window_settings.is_some())
-        + usize::from(properties.auto_title.is_some())
-        + usize::from(properties.auto_url.is_some())
-        + usize::from(properties.save_data_in_settings.is_some())
-        + usize::from(properties.auto_save_data_in_settings.is_some())
-        + usize::from(properties.group.is_some())
-        + usize::from(properties.scaling_mode.is_some())
-        + usize::from(properties.auto_time.is_some())
-        + usize::from(properties.use_posting_mode.is_some())
-        + usize::from(properties.repost_on_write.is_some())
-        + usize::from(properties.auto_fill_check.is_some())
-        + properties.command_set_excluded_commands.len()
-        + usize::from(properties.use_for_folders_and_items.is_some())
-        + usize::from(properties.customizable.is_some())
-        + usize::from(properties.vertical_align.is_some())
-        + usize::from(properties.command_bar_location.is_some())
-        + usize::from(properties.vertical_scroll.is_some())
-        + usize::from(properties.horizontal_align.is_some())
-        + usize::from(properties.conversations_representation.is_some())
-        + usize::from(properties.show_title.is_some())
-        + usize::from(properties.show_close_button.is_some())
-        + usize::from(properties.report_result.is_some())
-        + usize::from(properties.details_data.is_some())
-        + usize::from(properties.report_form_type.is_some())
-        + usize::from(properties.auto_show_state.is_some())
-        + usize::from(properties.report_result_view_mode.is_some())
-        + usize::from(
-            properties
-                .view_mode_application_on_set_report_result
-                .is_some(),
-        )
-        + usize::from(properties.auto_command_bar.is_some())
-}
-
-fn form_xml_requires_existing_layout(properties: &FormXmlBodyProperties) -> bool {
-    properties.window_opening_mode.is_some()
-        || properties.enter_key_behavior.is_some()
-        || properties.save_window_settings.is_some()
-        || !properties.title.is_empty()
-        || properties.width.is_some()
-        || properties.height.is_some()
-        || properties.auto_title.is_some()
-        || properties.auto_url.is_some()
-        || properties.save_data_in_settings.is_some()
-        || properties.auto_save_data_in_settings.is_some()
-        || properties.group.is_some()
-        || properties.scaling_mode.is_some()
-        || properties.auto_time.is_some()
+fn form_base_free_model_blockers(
+    properties: &FormXmlBodyProperties,
+    has_source: bool,
+) -> Vec<String> {
+    let mut blockers = Vec::new();
+    if properties.auto_time.is_some()
         || properties.use_posting_mode.is_some()
         || properties.repost_on_write.is_some()
-        || properties.auto_fill_check.is_some()
-        || !properties.command_set_excluded_commands.is_empty()
         || properties.use_for_folders_and_items.is_some()
-        || properties.customizable.is_some()
-        || properties.vertical_align.is_some()
-        || properties.command_bar_location.is_some()
-        || properties.vertical_scroll.is_some()
-        || properties.horizontal_align.is_some()
         || properties.conversations_representation.is_some()
-        || properties.show_title.is_some()
-        || properties.show_close_button.is_some()
         || properties.report_result.is_some()
         || properties.details_data.is_some()
         || properties.report_form_type.is_some()
@@ -4752,10 +4720,413 @@ fn form_xml_requires_existing_layout(properties: &FormXmlBodyProperties) -> bool
         || properties
             .view_mode_application_on_set_report_result
             .is_some()
-        || properties.events_present
-        || properties.auto_command_bar.is_some()
-        || properties.child_items_present
-        || !properties.child_items.is_empty()
+    {
+        blockers.push(
+            "one or more root property-bag/report facets require a separately evidenced marker-50 template"
+                .to_string(),
+        );
+    }
+
+    let mut ids = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let top_level = properties
+        .child_items
+        .iter()
+        .filter(|item| item.depth == 0)
+        .collect::<Vec<_>>();
+    collect_form_item_blockers(
+        &top_level,
+        true,
+        &mut ids,
+        &mut names,
+        has_source,
+        &mut blockers,
+    );
+    if let Some(command_bar) = &properties.auto_command_bar {
+        if command_bar.id.parse::<i64>().is_err() || command_bar.name.trim().is_empty() {
+            blockers.push("AutoCommandBar requires a numeric id and non-empty name".to_string());
+        }
+        let children = command_bar.child_items.iter().collect::<Vec<_>>();
+        collect_form_item_blockers(
+            &children,
+            false,
+            &mut ids,
+            &mut names,
+            has_source,
+            &mut blockers,
+        );
+    }
+
+    let mut command_ids = BTreeSet::new();
+    let mut command_names = BTreeSet::new();
+    for command in &properties.commands {
+        if command.id.parse::<i64>().is_err() || command.name.trim().is_empty() {
+            blockers.push(format!(
+                "Form command `{}` requires a numeric id and non-empty name",
+                command.name
+            ));
+        }
+        if !command_ids.insert(command.id.as_str()) || !command_names.insert(command.name.as_str())
+        {
+            blockers.push(format!(
+                "Form command id/name is duplicated: {} / {}",
+                command.id, command.name
+            ));
+        }
+        if !has_source && !command.functional_options.is_empty() {
+            blockers.push(format!(
+                "Form command `{}` has FunctionalOptions but no source resolver",
+                command.name
+            ));
+        }
+    }
+
+    let mut attribute_ids = BTreeSet::new();
+    let mut attribute_names = BTreeSet::new();
+    for attribute in &properties.attributes {
+        if attribute.id.parse::<i64>().is_err()
+            || attribute.name.trim().is_empty()
+            || attribute.types.is_empty()
+        {
+            blockers.push(format!(
+                "Form attribute `{}` requires numeric id, name and a typed pattern",
+                attribute.name
+            ));
+        }
+        if !attribute_ids.insert(attribute.id.as_str())
+            || !attribute_names.insert(attribute.name.as_str())
+        {
+            blockers.push(format!(
+                "Form attribute id/name is duplicated: {} / {}",
+                attribute.id, attribute.name
+            ));
+        }
+        if !has_source
+            && attribute
+                .settings
+                .as_ref()
+                .and_then(|settings| settings.main_table.as_ref())
+                .is_some()
+        {
+            blockers.push(format!(
+                "Form attribute `{}` has a dynamic-list MainTable but no source resolver",
+                attribute.name
+            ));
+        }
+    }
+
+    let mut parameter_names = BTreeSet::new();
+    for parameter in &properties.parameters {
+        if !parameter_names.insert(parameter.name.as_str()) {
+            blockers.push(format!(
+                "Form parameter name is duplicated: {}",
+                parameter.name
+            ));
+        }
+    }
+
+    for event in &properties.events {
+        if form_root_event_uuid(&event.name).is_err() {
+            blockers.push(format!(
+                "Form root event `{}` has no unambiguous platform event UUID",
+                event.name
+            ));
+        }
+    }
+
+    for item in &properties.command_interface_items {
+        if item.command.as_deref().is_none_or(str::is_empty) {
+            blockers.push(
+                "Form CommandInterface item requires an explicit Command reference".to_string(),
+            );
+        }
+        if !has_source {
+            blockers
+                .push("Form CommandInterface requires the source identity resolver".to_string());
+            break;
+        }
+    }
+    blockers.sort();
+    blockers.dedup();
+    blockers
+}
+
+fn collect_form_item_blockers(
+    items: &[&FormXmlChildItem],
+    top_level: bool,
+    ids: &mut BTreeSet<String>,
+    names: &mut BTreeSet<String>,
+    has_source: bool,
+    blockers: &mut Vec<String>,
+) {
+    for item in items {
+        let creatable = if top_level {
+            is_form_layout_creatable_top_level_item(item)
+        } else {
+            is_form_layout_creatable_nested_item(item)
+        };
+        if !creatable {
+            blockers.push(format!(
+                "Form item `{}` uses unsupported base-free element {}",
+                item.name, item.tag
+            ));
+        }
+        if form_child_item_strict_properties_require_existing_layout(item) {
+            blockers.push(format!(
+                "Form item `{}` uses strict-schema properties without an evidenced creation layout",
+                item.name
+            ));
+        }
+        if item.id.parse::<i64>().is_err() || item.name.trim().is_empty() {
+            blockers.push(format!(
+                "Form item `{}` requires a numeric id and non-empty name",
+                item.name
+            ));
+        }
+        if !ids.insert(item.id.clone()) || !names.insert(item.name.clone()) {
+            blockers.push(format!(
+                "Form item id/name is duplicated: {} / {}",
+                item.id, item.name
+            ));
+        }
+        if item.extended_tooltip.is_some() || item.title_font.is_some() || item.control_border_seen
+        {
+            blockers.push(format!(
+                "Form item `{}` uses an unsupported decoration/font/border creation facet",
+                item.name
+            ));
+        }
+        if !has_source
+            && item.command_name.as_ref().is_some_and(|name| {
+                !name.starts_with("Form.Command.") && form_standard_command_uuid(name).is_none()
+            })
+        {
+            blockers.push(format!(
+                "Form item `{}` has an external CommandName but no source resolver",
+                item.name
+            ));
+        }
+        let children = item.child_items.iter().collect::<Vec<_>>();
+        collect_form_item_blockers(&children, false, ids, names, has_source, blockers);
+    }
+}
+
+fn format_form_base_free_template(properties: &FormXmlBodyProperties) -> Result<String> {
+    let events = format_form_root_events(&properties.events)?;
+    let command_set = format_form_command_set(&properties.command_set_excluded_commands);
+    let mut fields = vec![
+        "50".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "00000000-0000-0000-0000-000000000000".to_string(),
+        "1".to_string(),
+        "{0}".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        events,
+        command_set,
+    ];
+    if let Some(command_bar) = &properties.auto_command_bar {
+        fields.push("1".to_string());
+        fields.push(format_form_base_free_auto_command_bar(command_bar));
+    } else {
+        fields.push("0".to_string());
+    }
+    fields.push("0".to_string());
+    fields.extend(
+        [
+            "\"\"", "\"\"", "0", "1", "\"\"", "2", "0", "0", "0", "0", "0", "3", "3", "0", "0",
+            "2", "100", "1", "1", "0", "0", "0", "{50,0}", "1",
+        ]
+        .into_iter()
+        .map(str::to_string),
+    );
+    let layout = format!("{{{}}}", fields.join(","));
+    Ok(format!(
+        "\u{feff}{{4,{layout},\"\",{{0}},{{0,0}},{{0,0}},{{0}}}}"
+    ))
+}
+
+fn format_form_base_free_auto_command_bar(command_bar: &FormXmlAutoCommandBar) -> String {
+    format!(
+        "{{22,{{{},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,9,{},{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{0,0,1}},0,1,0,0,0,3,3,0}}",
+        command_bar.id,
+        format_1c_string(&command_bar.name)
+    )
+}
+
+fn format_form_root_events(events: &[FormXmlEvent]) -> Result<String> {
+    if events.is_empty() {
+        return Ok("{0}".to_string());
+    }
+    let mut uuids = Vec::with_capacity(events.len());
+    let mut fields = vec![events.len().to_string()];
+    for event in events {
+        let uuid = form_root_event_uuid(&event.name)?;
+        fields.push(uuid.clone());
+        fields.push(format_1c_string(&event.handler));
+        uuids.push(uuid);
+    }
+    fields.push("1".to_string());
+    for uuid in uuids {
+        fields.push("0".to_string());
+        fields.push(uuid);
+        fields.push("0".to_string());
+        fields.push("1".to_string());
+    }
+    Ok(format!("{{{}}}", fields.join(",")))
+}
+
+fn form_root_event_uuid(name: &str) -> Result<String> {
+    let mut uuids = form_event_layout_identifiers(name)
+        .into_iter()
+        .filter(|value| Uuid::parse_str(value).is_ok())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    uuids.sort();
+    uuids.dedup();
+    if uuids.len() != 1 {
+        return Err(anyhow!(
+            "Form root event {name} has {} candidate UUIDs",
+            uuids.len()
+        ));
+    }
+    Ok(uuids.remove(0))
+}
+
+fn validate_base_free_form_output(blob: &[u8], properties: &FormXmlBodyProperties) -> Result<()> {
+    let plain = inflate_raw(blob)?;
+    if !plain.starts_with(b"\xef\xbb\xbf") {
+        return Err(anyhow!("base-free Form output has no UTF-8 BOM"));
+    }
+    let parsed = parse_form_body_blob(blob)?;
+    let layout_fields = scan_braced_fields(&parsed.layout, 0)?;
+    if layout_fields
+        .first()
+        .map(|range| parsed.layout[range.clone()].trim())
+        != Some("50")
+        || parsed.trailing_fields != 4
+    {
+        return Err(anyhow!(
+            "base-free Form output is not a marker-50/four-section body"
+        ));
+    }
+    let span = form_layout_root_child_items_span(&parsed.layout, &layout_fields)
+        .ok_or_else(|| anyhow!("base-free Form output has no typed child-item span"))?;
+    let expected_children = properties
+        .child_items
+        .iter()
+        .filter(|item| item.depth == 0)
+        .count();
+    if span.count != expected_children {
+        return Err(anyhow!(
+            "base-free Form child count {} differs from source {}",
+            span.count,
+            expected_children
+        ));
+    }
+    let expected = [
+        properties.attributes.len(),
+        properties.parameters.len(),
+        properties.commands.len(),
+        properties.command_interface_items.len(),
+    ];
+    for (index, expected) in expected.into_iter().enumerate() {
+        let actual = form_trailing_section_count(&parsed.trailing[index], index)?;
+        if actual != expected {
+            return Err(anyhow!(
+                "base-free Form trailing section {index} count {actual} differs from source {expected}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn form_trailing_section_count(value: &str, index: usize) -> Result<usize> {
+    let fields = scan_braced_fields(value, 0)?;
+    let marker = fields
+        .first()
+        .map(|range| value[range.clone()].trim())
+        .ok_or_else(|| anyhow!("Form trailing section is empty"))?;
+    match (index, marker, fields.len()) {
+        (0, "0", 1) | (3, "0", 1) => Ok(0),
+        (0, "4", _) | (1..=3, "0", _) => fields
+            .get(1)
+            .ok_or_else(|| anyhow!("Form trailing section has no count"))
+            .and_then(|range| {
+                value[range.clone()]
+                    .trim()
+                    .parse::<usize>()
+                    .context("Form trailing section count is invalid")
+            }),
+        _ => Err(anyhow!("Form trailing section uses an unsupported layout")),
+    }
+}
+
+pub fn form_body_base_free_blockers(
+    form_xml: &[u8],
+    has_module_text: bool,
+    form_item_asset_files: usize,
+) -> Result<Vec<String>> {
+    form_body_base_free_blockers_with_resolver(
+        form_xml,
+        has_module_text,
+        form_item_asset_files,
+        true,
+    )
+}
+
+pub(crate) fn form_body_base_free_compilation_blockers(
+    form_xml: &[u8],
+    has_module_text: bool,
+    form_item_asset_files: usize,
+    has_source_resolver: bool,
+) -> Result<Vec<String>> {
+    form_body_base_free_blockers_with_resolver(
+        form_xml,
+        has_module_text,
+        form_item_asset_files,
+        has_source_resolver,
+    )
+}
+
+fn form_body_base_free_blockers_with_resolver(
+    form_xml: &[u8],
+    has_module_text: bool,
+    form_item_asset_files: usize,
+    has_source_resolver: bool,
+) -> Result<Vec<String>> {
+    let _ = has_module_text;
+    if form_xml.is_empty() {
+        return Ok(vec![
+            "Form body source is absent, so the marker-50 source model cannot be validated"
+                .to_string(),
+        ]);
+    }
+    validate_form_xml_document(form_xml)?;
+    let properties = parse_form_xml_body_properties(form_xml)?;
+    // The readiness audit runs over a complete source tree. Actual compilation
+    // still requires and verifies the resolver whenever readable refs occur.
+    let mut blockers = form_base_free_model_blockers(&properties, has_source_resolver);
+    if form_item_asset_files > 0 {
+        blockers.push(format!(
+            "embedded Form item assets have no evidenced base-free payload slot ({form_item_asset_files} source asset file(s))"
+        ));
+    }
+    blockers.sort();
+    blockers.dedup();
+    Ok(blockers)
 }
 
 fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Result<()> {
@@ -10735,6 +11106,13 @@ fn form_layout_uses_property_bag(layout: &str, fields: &[Range<usize>]) -> bool 
 }
 
 fn form_layout_child_items_tail_start(layout: &str, fields: &[Range<usize>]) -> Option<usize> {
+    if fields
+        .first()
+        .is_some_and(|range| layout[range.clone()].trim() == "50")
+    {
+        let span = form_layout_root_child_items_span(layout, fields)?;
+        return Some(span.first_uuid_index + span.count * 2);
+    }
     for index in 0..fields.len() {
         let Some(count) = fields
             .get(index)
@@ -10778,6 +11156,13 @@ fn form_layout_child_items_tail_start(layout: &str, fields: &[Range<usize>]) -> 
 }
 
 fn form_layout_child_item_pairs_tail_start(layout: &str, fields: &[Range<usize>]) -> Option<usize> {
+    if fields
+        .first()
+        .is_some_and(|range| layout[range.clone()].trim() == "50")
+    {
+        let span = form_layout_root_child_items_span(layout, fields)?;
+        return Some(span.first_uuid_index + span.count * 2);
+    }
     for index in 0..fields.len() {
         let Some(count) = fields
             .get(index)
@@ -11227,11 +11612,26 @@ fn form_command_uuids_for_pack(
         collect_form_command_uuids(&plain[commands_range.clone()], &mut uuids)?;
     }
     for command in commands {
-        uuids
-            .entry(command.name.clone())
-            .or_insert_with(|| Uuid::new_v4().hyphenated().to_string());
+        let deterministic = deterministic_form_local_uuid("command", &command.id, &command.name);
+        uuids.entry(command.name.clone()).or_insert(deterministic);
     }
     Ok(uuids)
+}
+
+fn deterministic_form_local_uuid(kind: &str, id: &str, name: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"ibcmd-rs/form-local-id/v1\0");
+    hasher.update(kind.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(id.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(name.as_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes).hyphenated().to_string()
 }
 
 fn collect_form_command_uuids(text: &str, uuids: &mut BTreeMap<String, String>) -> Result<()> {
@@ -11473,18 +11873,9 @@ fn retain_form_layout_top_level_child_items(
     items: &[FormXmlChildItem],
 ) -> Result<()> {
     let fields = scan_braced_fields(text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) != Some("59") {
-        return Ok(());
-    }
-    let Some(count_range) = fields.get(1).cloned() else {
+    let Some(span) = form_layout_root_child_items_span(text, &fields) else {
         return Ok(());
     };
-    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
-        return Ok(());
-    };
-    if fields.len() != 2 + count * 2 {
-        return Ok(());
-    }
 
     let top_level_items = items
         .iter()
@@ -11493,9 +11884,9 @@ fn retain_form_layout_top_level_child_items(
     let mut retained = Vec::<(String, String)>::new();
     let mut changed = false;
 
-    for index in 0..count {
-        let uuid_range = fields[2 + index * 2].clone();
-        let item_range = fields[3 + index * 2].clone();
+    for index in 0..span.count {
+        let uuid_range = fields[span.first_uuid_index + index * 2].clone();
+        let item_range = fields[span.first_uuid_index + 1 + index * 2].clone();
         let uuid = text[uuid_range].trim().to_string();
         if !is_uuid_text(&uuid) {
             return Ok(());
@@ -11527,15 +11918,19 @@ fn retain_form_layout_top_level_child_items(
         return Ok(());
     }
 
-    let mut replacement = format!("{{59,{}", retained.len());
+    let replace_end = if span.count == 0 {
+        span.count_range.end
+    } else {
+        fields[span.first_uuid_index - 1 + span.count * 2].end
+    };
+    let mut replacement = retained.len().to_string();
     for (uuid, item_text) in retained {
         replacement.push(',');
         replacement.push_str(&uuid);
         replacement.push(',');
         replacement.push_str(&item_text);
     }
-    replacement.push('}');
-    *text = replacement;
+    text.replace_range(span.count_range.start..replace_end, &replacement);
     Ok(())
 }
 
@@ -11611,25 +12006,11 @@ fn append_form_layout_top_level_child_item(
         return Ok(false);
     }
     let fields = scan_braced_fields(text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) != Some("59") {
-        return Ok(false);
-    }
-    let Some(count_range) = fields.get(1).cloned() else {
+    let Some(span) = form_layout_root_child_items_span(text, &fields) else {
         return Ok(false);
     };
-    let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
-        return Ok(false);
-    };
-    if fields.len() != 2 + count * 2 {
-        return Ok(false);
-    }
-    for range in fields.iter().skip(2).step_by(2) {
-        if !is_uuid_text(text[range.clone()].trim()) {
-            return Ok(false);
-        }
-    }
 
-    let item_uuid = Uuid::new_v4().hyphenated().to_string();
+    let item_uuid = deterministic_form_local_uuid("item", &item.id, &item.name);
     let item_text = format_form_layout_new_top_level_item(
         item,
         &item_uuid,
@@ -11640,12 +12021,55 @@ fn append_form_layout_top_level_child_item(
         command_uuids,
         source,
     )?;
-    text.replace_range(count_range, &(count + 1).to_string());
-    let insert_at = text
-        .rfind('}')
-        .ok_or_else(|| anyhow!("Form layout root is not closed"))?;
+    let insert_at = if span.count == 0 {
+        span.count_range.end
+    } else {
+        fields
+            .get(span.first_uuid_index - 1 + span.count * 2)
+            .map(|range| range.end)
+            .ok_or_else(|| anyhow!("Form layout root child span is truncated"))?
+    };
     text.insert_str(insert_at, &format!(",{item_uuid},{item_text}"));
+    text.replace_range(span.count_range, &(span.count + 1).to_string());
     Ok(true)
+}
+
+fn form_layout_root_child_items_span(
+    text: &str,
+    fields: &[Range<usize>],
+) -> Option<FormLayoutDirectChildItemsSpan> {
+    let marker = fields.first().map(|range| text[range.clone()].trim())?;
+    if marker == "59" {
+        return form_layout_direct_child_items_span_at(text, fields, 1, 2);
+    }
+    if marker != "50" {
+        return None;
+    }
+
+    const ROOT_TRAILER_FIELDS: usize = 24;
+    let tail_start = fields.len().checked_sub(ROOT_TRAILER_FIELDS)?;
+    let max_count = tail_start.saturating_sub(1).div_euclid(2).min(200);
+    let mut matched = None;
+    for count in 0..=max_count {
+        let count_index = tail_start.checked_sub(1 + count * 2)?;
+        if text[fields.get(count_index)?.clone()]
+            .trim()
+            .parse::<usize>()
+            .ok()
+            != Some(count)
+        {
+            continue;
+        }
+        let Some(span) =
+            form_layout_direct_child_items_span_at(text, fields, count_index, count_index + 1)
+        else {
+            continue;
+        };
+        if matched.replace(span).is_some() {
+            return None;
+        }
+    }
+    matched
 }
 
 fn is_form_layout_creatable_top_level_item(item: &FormXmlChildItem) -> bool {
@@ -12228,7 +12652,7 @@ fn format_form_layout_new_label_field_item(item: &FormXmlChildItem, item_uuid: &
     }
 
     let mut text = format!(
-        "{{48,{{{},{}}},0,0,1,2,{},1,0,{}",
+        "{{48,{{{},{}}},0,0,0,1,{},1,0,{}",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
@@ -12414,7 +12838,7 @@ fn format_form_layout_new_table_item(
         creatable_children.len()
     );
     for child in creatable_children {
-        let child_uuid = Uuid::new_v4().hyphenated().to_string();
+        let child_uuid = deterministic_form_local_uuid("item", &child.id, &child.name);
         let child_text = format_form_layout_new_child_item(
             child,
             &child_uuid,
@@ -12575,7 +12999,7 @@ fn format_form_layout_new_group_item(
         creatable_children.len()
     );
     for child in creatable_children {
-        let child_uuid = Uuid::new_v4().hyphenated().to_string();
+        let child_uuid = deterministic_form_local_uuid("item", &child.id, &child.name);
         let child_text = format_form_layout_new_child_item(
             child,
             &child_uuid,
@@ -12725,7 +13149,7 @@ fn format_form_layout_new_extended_group_with_child_span(
         creatable_children.len()
     );
     for child in creatable_children {
-        let child_uuid = Uuid::new_v4().hyphenated().to_string();
+        let child_uuid = deterministic_form_local_uuid("item", &child.id, &child.name);
         let child_text = format_form_layout_new_child_item(
             child,
             &child_uuid,
@@ -15049,7 +15473,7 @@ fn patch_or_append_form_layout_single_child_item(
         return Ok(true);
     }
 
-    let child_uuid = Uuid::new_v4().hyphenated().to_string();
+    let child_uuid = deterministic_form_local_uuid("item", &child.id, &child.name);
     let child_text = format_form_layout_new_child_item(
         child,
         &child_uuid,
@@ -15199,7 +15623,7 @@ fn patch_or_append_form_layout_direct_child_item(
         return Ok(true);
     }
 
-    let child_uuid = Uuid::new_v4().hyphenated().to_string();
+    let child_uuid = deterministic_form_local_uuid("item", &child.id, &child.name);
     let child_text = format_form_layout_new_child_item(
         child,
         &child_uuid,
@@ -17921,10 +18345,11 @@ fn format_form_body_new_command(
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     let action = command.action.as_deref().unwrap_or("");
-    let current_row_use = command
-        .current_row_use
-        .map(form_command_current_row_use_code)
-        .unwrap_or("0");
+    let current_row_use = if command.current_row_use == Some(FormXmlCommandCurrentRowUse::DontUse) {
+        "1"
+    } else {
+        "2"
+    };
     let modifies_saved_data = if command.modifies_saved_data == Some(true) {
         "1"
     } else {
@@ -17939,16 +18364,16 @@ fn format_form_body_new_command(
     };
 
     Ok(format!(
-        "{{11,{{{},{}}},{},{},{},0,0,0,{},{},{},0,{}}}",
+        "{{11,{{{},{}}},{},{},{},0,0,{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{},3,{},0,{},1,0,1,0,0,{}}}",
         command.id,
         uuid,
         format_1c_string(&command.name),
         format_1c_synonyms(&command.title),
         format_1c_synonyms(&command.tooltip),
         format_1c_string(action),
-        current_row_use,
         modifies_saved_data,
-        functional_options
+        functional_options,
+        current_row_use
     ))
 }
 
@@ -18391,41 +18816,54 @@ pub fn command_interface_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
 fn pack_command_interface_entries_without_base(
     entries: &[CommandInterfaceXmlEntry],
 ) -> Result<PackedRawDeflatedBlob> {
-    let mut fields = Vec::with_capacity(3 + entries.len() * 2 + 5);
-    fields.push("7".to_string());
-    fields.push("1".to_string());
-    fields.push(entries.len().to_string());
-    for entry in entries {
-        fields.push(format_raw_command_interface_ref(&entry.name)?);
-        let common = if entry.common { "1" } else { "0" };
-        fields.push(format!("{{0,{{0,{{\"B\",{common}}},0}}}}"));
-    }
-    fields.extend(["0", "0", "0", "0", "0"].into_iter().map(String::from));
-    let plain = format!("{{{}}}", fields.join(","));
-    let blob = deflate_raw(plain.as_bytes())?;
+    use crate::compiler::bodies::command_interface::{
+        CommandInterfaceModel, CommandReference, CommandVisibility,
+        compile_evidenced_command_interface,
+    };
+
+    let commands_visibility = entries
+        .iter()
+        .map(|entry| {
+            let (kind, uuid) = parse_raw_command_interface_ref(&entry.name)?;
+            Ok(CommandVisibility {
+                command: CommandReference::resolved(kind, uuid),
+                common: entry.common,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let model = CommandInterfaceModel {
+        commands_visibility,
+        ..CommandInterfaceModel::default()
+    };
+    let blob = compile_evidenced_command_interface(&model)
+        .map_err(|error| anyhow!("failed to compile CommandInterface model: {error}"))?;
+    let plain_bytes = inflate_raw(&blob)?.len();
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
         blob,
-        plain_bytes: plain.len(),
+        plain_bytes,
         output_sha256,
     })
 }
 
 fn format_raw_command_interface_ref(name: &str) -> Result<String> {
+    let (kind, uuid) = parse_raw_command_interface_ref(name)?;
+    Ok(format!("{{{kind},{uuid}}}"))
+}
+
+fn parse_raw_command_interface_ref(name: &str) -> Result<(u32, ibcmd_core::identity::ObjectUuid)> {
     let (kind, uuid) = name
         .split_once(':')
         .ok_or_else(|| anyhow!("base-free CommandInterface command must be kind:uuid: {name}"))?;
     let kind = kind.trim();
     let uuid = uuid.trim();
-    if kind.is_empty()
-        || !kind.chars().all(|ch| ch.is_ascii_digit())
-        || uuid::Uuid::parse_str(uuid).is_err()
-    {
-        return Err(anyhow!(
-            "base-free CommandInterface command must be numeric kind and UUID: {name}"
-        ));
-    }
-    Ok(format!("{{{kind},{uuid}}}"))
+    let kind = kind.parse::<u32>().map_err(|_| {
+        anyhow!("base-free CommandInterface command must be numeric kind and UUID: {name}")
+    })?;
+    let uuid = ibcmd_core::identity::ObjectUuid::parse(uuid).map_err(|_| {
+        anyhow!("base-free CommandInterface command must be numeric kind and UUID: {name}")
+    })?;
+    Ok((kind, uuid))
 }
 
 pub fn pack_exchange_plan_content_blob_from_xml(
@@ -34340,7 +34778,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(&parsed.layout[group_fields[0].clone()], "22");
         assert_eq!(&parsed.layout[group_fields[10].clone()], "1");
         assert_eq!(&parsed.layout[label_fields[0].clone()], "48");
-        assert_eq!(&parsed.layout[label_fields[4].clone()], "1");
+        assert_eq!(&parsed.layout[label_fields[4].clone()], "0");
+        assert_eq!(&parsed.layout[label_fields[5].clone()], "1");
         assert_eq!(
             &parsed.layout[label_fields[6].clone()],
             r#""DescriptionLabel""#
@@ -34895,29 +35334,26 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn audits_module_only_form_body_as_base_dependent() -> anyhow::Result<()> {
+    fn audits_module_only_form_body_as_missing_layout_source() -> anyhow::Result<()> {
         let blockers = super::form_body_base_free_blockers(&[], true, 0)?;
 
         assert_eq!(blockers.len(), 1);
-        assert!(blockers[0].contains("same Form body row as layout"));
+        assert!(blockers[0].contains("Form body source is absent"));
+        assert!(blockers[0].contains("marker-50 source model"));
         Ok(())
     }
 
     #[test]
-    fn audits_sectionless_form_body_as_base_dependent() -> anyhow::Result<()> {
+    fn audits_sectionless_form_body_as_base_free() -> anyhow::Result<()> {
         let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"/>"#;
         let blockers = super::form_body_base_free_blockers(xml, false, 0)?;
 
-        assert_eq!(blockers.len(), 1);
-        assert!(blockers[0].contains("Form.xml has no exported layout"));
-        assert!(blockers[0].contains("native Form body container skeleton"));
-        assert!(blockers[0].contains("trailing empty section fields"));
-        assert!(blockers[0].contains("platform-specific tail slots"));
+        assert!(blockers.is_empty(), "{blockers:?}");
         Ok(())
     }
 
     #[test]
-    fn audits_form_body_sections_as_base_dependent() -> anyhow::Result<()> {
+    fn audits_supported_form_sections_and_embedded_assets_separately() -> anyhow::Result<()> {
         let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
 	<Width>480</Width>
 	<Attributes>
@@ -34941,41 +35377,11 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let blockers = super::form_body_base_free_blockers(xml, true, 2)?;
 
+        assert_eq!(blockers.len(), 1, "{blockers:?}");
         assert!(
             blockers
                 .iter()
-                .any(|blocker| blocker.contains("layout/root/child-item")
-                    && blocker.contains("1 root/layout scalar")
-                    && blocker.contains("1 child item"))
-        );
-        assert!(
-            blockers
-                .iter()
-                .any(|blocker| blocker.contains("trailing attributes")
-                    && blocker.contains("1 attribute definition"))
-        );
-        assert!(
-            blockers
-                .iter()
-                .any(|blocker| blocker.contains("trailing parameters")
-                    && blocker.contains("1 parameter definition"))
-        );
-        assert!(
-            blockers
-                .iter()
-                .any(|blocker| blocker.contains("trailing commands")
-                    && blocker.contains("1 command definition"))
-        );
-        assert!(
-            blockers
-                .iter()
-                .any(|blocker| blocker.contains("command-interface")
-                    && blocker.contains("0 navigation item"))
-        );
-        assert!(
-            blockers
-                .iter()
-                .any(|blocker| blocker.contains("embedded picture payload")
+                .any(|blocker| blocker.contains("embedded Form item assets")
                     && blocker.contains("2 source asset file"))
         );
         Ok(())
@@ -35490,7 +35896,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "{7,1,2,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",0},0}},0,0,0,0,0}"
+            "\u{feff}{7,1,2,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",0},0}},0,0,0,0,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 

@@ -71,8 +71,8 @@ pub(crate) fn extract_form_body_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let body = parse_form_body_blob(bytes).ok()?;
-    extract_form_body_xml_from_body(&body, object_refs, object_refs)
+    let body = crate::compiler::bodies::form::decode_compatible_managed_form(bytes).ok()?;
+    extract_form_body_xml_from_body(body.parsed(), object_refs, object_refs)
 }
 
 pub(super) fn extract_form_body_xml_from_body(
@@ -15954,8 +15954,8 @@ pub(super) fn format_form_command_interface_xml(
 }
 
 pub(crate) fn unpack_form_body_module_text(blob: &[u8]) -> Option<Vec<u8>> {
-    let body = parse_form_body_blob(blob).ok()?;
-    form_body_module_text_bytes(&body)
+    let body = crate::compiler::bodies::form::decode_compatible_managed_form(blob).ok()?;
+    form_body_module_text_bytes(body.parsed())
 }
 
 pub(super) fn form_body_module_text_bytes(body: &ParsedFormBodyBlob) -> Option<Vec<u8>> {

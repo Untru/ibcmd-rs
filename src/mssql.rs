@@ -53,21 +53,22 @@ use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, business_process_flowchart_base_free_blockers,
     command_interface_base_free_blockers, command_interface_xml_can_pack_without_base,
-    common_module_metadata_base_free_blockers, form_body_base_free_blockers, hex_sha256,
-    metadata_xml_base_free_blockers, module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
+    common_module_metadata_base_free_blockers, form_body_base_free_blockers,
+    form_body_base_free_compilation_blockers, hex_sha256, metadata_xml_base_free_blockers,
+    module_blob_text_sha256, pack_base64_payload_blob_from_bytes,
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
-    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
-    pack_help_blob_from_parts, pack_module_blob_container_bytes,
-    pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint, pack_predefined_data_blob_from_xml,
-    pack_role_rights_blob_from_xml_with_source, pack_schedule_blob_from_xml,
-    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
-    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
-    parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
-    patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
-    predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
-    raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
-    versions_base_free_blockers,
+    pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_base_free,
+    pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
+    pack_module_blob_container_bytes, pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint,
+    pack_predefined_data_blob_from_xml, pack_role_rights_blob_from_xml_with_source,
+    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
+    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
+    parse_ext_picture_file_name_from_xml, parse_help_pages_from_xml,
+    parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes,
+    patch_versions_blob_bytes_allowing_additions, predefined_data_base_free_blockers,
+    raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
+    raw_deflated_plain_sha256, role_rights_base_free_blockers, versions_base_free_blockers,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -1267,13 +1268,30 @@ fn metadata_body_bootstrap_rows(
                 } else {
                     &module_path
                 };
-                let reason = form_body_base_free_blocker_reason(&form_path, &module_path)
+                let blockers = form_body_base_free_blockers_for_paths(&form_path, &module_path)
                     .with_context(|| {
                         format!(
                             "failed to audit Form body base-free blockers for {}",
                             source_path.display()
                         )
                     })?;
+                let (generation, current_staging_fetches_base_blob, reason) =
+                    if blockers.is_empty() {
+                        (
+                            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                            false,
+                            "Form.xml and optional Module.bsl compile through the profile-selected marker-50 body codec without reading an active Config row".to_string(),
+                        )
+                    } else {
+                        (
+                            BootstrapGeneration::RequiresBaseBlob,
+                            true,
+                            format!(
+                                "Form body requires active base blob: {}",
+                                blockers.join("; ")
+                            ),
+                        )
+                    };
                 rows.push(bootstrap_row_report(
                     "metadata_object",
                     &properties.kind,
@@ -1281,8 +1299,8 @@ fn metadata_body_bootstrap_rows(
                     source_relative_path(source_root, source_path),
                     format!("{}.0", properties.uuid),
                     "form_body",
-                    BootstrapGeneration::RequiresBaseBlob,
-                    true,
+                    generation,
+                    current_staging_fetches_base_blob,
                     &reason,
                 ));
             }
@@ -1532,6 +1550,17 @@ fn command_interface_bootstrap_row(
 }
 
 fn form_body_base_free_blocker_reason(form_path: &Path, module_path: &Path) -> Result<String> {
+    let blockers = form_body_base_free_blockers_for_paths(form_path, module_path)?;
+    Ok(format!(
+        "Form body requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
+fn form_body_base_free_blockers_for_paths(
+    form_path: &Path,
+    module_path: &Path,
+) -> Result<Vec<String>> {
     let form_xml = if form_path.exists() {
         fs::read(form_path)
             .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
@@ -1541,11 +1570,7 @@ fn form_body_base_free_blocker_reason(form_path: &Path, module_path: &Path) -> R
     let has_module_text = module_path.exists();
     let form_item_asset_files =
         count_form_item_asset_files(&form_path.with_extension("").join("Items"))?;
-    let blockers = form_body_base_free_blockers(&form_xml, has_module_text, form_item_asset_files)?;
-    Ok(format!(
-        "Form body requires active base blob: {}",
-        blockers.join("; ")
-    ))
+    form_body_base_free_blockers(&form_xml, has_module_text, form_item_asset_files)
 }
 
 fn count_form_item_asset_files(path: &Path) -> Result<usize> {
@@ -4431,16 +4456,10 @@ fn prepare_form_body_row(
     if !form_path.exists() && !module_path.exists() {
         return Ok(Vec::new());
     }
+    if let Some(reason) = crate::compiler::unsupported_axes_reason(axes) {
+        return Err(anyhow!("unsupported Form body: {reason}"));
+    }
     let body_id = format!("{}.0", properties.uuid);
-    let reason = form_body_base_free_blocker_reason(&form_path, &module_path)?;
-    let provenance = if form_path.exists() {
-        &form_path
-    } else {
-        &module_path
-    };
-    let required = classify_required_base(axes, &body_id, provenance, &reason, "Form body")?;
-    let base_body =
-        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let form_xml = if form_path.exists() {
         fs::read(&form_path)
             .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
@@ -4456,6 +4475,43 @@ fn prepare_form_body_row(
         None
     };
     let form_item_assets_root = form_path.with_extension("").join("Items");
+    if !form_xml.is_empty() && !form_item_assets_root.exists() {
+        let blockers = form_body_base_free_compilation_blockers(
+            &form_xml,
+            module_text.is_some(),
+            0,
+            source.is_some(),
+        )?;
+        if blockers.is_empty() {
+            let packed = pack_form_body_blob_from_form_xml_base_free(
+                &form_xml,
+                module_text.as_deref(),
+                source,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to compile base-free Form body {}",
+                    form_path.display()
+                )
+            })?;
+            return Ok(vec![PreparedMetadataBodyStage {
+                body_id,
+                path: form_path,
+                blob: packed.blob,
+                blob_sha256: packed.output_sha256,
+            }]);
+        }
+    }
+
+    let reason = form_body_base_free_blocker_reason(&form_path, &module_path)?;
+    let provenance = if form_path.exists() {
+        &form_path
+    } else {
+        &module_path
+    };
+    let required = classify_required_base(axes, &body_id, provenance, &reason, "Form body")?;
+    let base_body =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     if !form_item_assets_root.exists() {
         let native_form_matches = if form_xml.is_empty() {
             true
@@ -7670,6 +7726,108 @@ mod tests {
     }
 
     #[test]
+    fn prepares_evidenced_marker_50_form_without_fetching_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-no-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let metadata_xml = root.join("CommonForms").join("Item.xml");
+        let ext = root.join("CommonForms").join("Item").join("Ext");
+        let form_path = ext.join("Form.xml");
+        let module_path = ext.join("Form").join("Module.bsl");
+        fs::create_dir_all(module_path.parent().unwrap()).unwrap();
+        fs::write(&metadata_xml, b"<CommonForm/>").unwrap();
+        fs::write(
+            &form_path,
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><Button name="Run" id="1"/></ChildItems></Form>"#,
+        )
+        .unwrap();
+        fs::write(&module_path, b"Procedure Run()\r\nEndProcedure").unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonForm",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Item",
+        );
+
+        let rows = super::prepare_form_body_row(
+            Path::new("missing-sqlcmd-marker-50-form-must-not-fetch"),
+            "missing-server",
+            super::SqlAuth::integrated(),
+            "missing-database",
+            &metadata_xml,
+            &properties,
+            None,
+            &test_compile_axes(),
+        )
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0");
+        assert_eq!(rows[0].path, form_path);
+        let registry = crate::profile_registry::load_bundled_profile_registry().unwrap();
+        let effective = registry
+            .get(&ibcmd_core::artifact::ProfileId::parse("platform-8.3.27.1989").unwrap())
+            .unwrap();
+        let profile =
+            crate::compiler::bodies::form::ManagedFormCodecProfile::from_effective(effective)
+                .unwrap();
+        let decoded =
+            crate::compiler::bodies::form::decode_managed_form(&profile, &rows[0].blob).unwrap();
+        assert_eq!(decoded.module_text(), "Procedure Run()\r\nEndProcedure");
+        assert!(decoded.parsed().layout.starts_with("{50,"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn external_form_command_without_source_resolver_falls_back_to_base_blob() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-form-external-command-base-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let metadata_xml = root.join("CommonForms").join("Item.xml");
+        let form_path = root
+            .join("CommonForms")
+            .join("Item")
+            .join("Ext")
+            .join("Form.xml");
+        fs::create_dir_all(form_path.parent().unwrap()).unwrap();
+        fs::write(&metadata_xml, b"<CommonForm/>").unwrap();
+        fs::write(
+            &form_path,
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"><ChildItems><Button name="Run" id="1"><CommandName>CommonCommand.Run</CommandName></Button></ChildItems></Form>"#,
+        )
+        .unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonForm",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Item",
+        );
+        let missing_sqlcmd = Path::new("missing-sqlcmd-external-form-must-fetch-base");
+
+        let error = super::prepare_form_body_row(
+            missing_sqlcmd,
+            "missing-server",
+            super::SqlAuth::integrated(),
+            "missing-database",
+            &metadata_xml,
+            &properties,
+            None,
+            &test_compile_axes(),
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains(&format!(
+                "failed to launch sqlcmd at {}",
+                missing_sqlcmd.display()
+            )),
+            "unexpected error: {error:#}"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn readable_command_interface_fetches_the_required_base_key() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-readable-command-interface-fetch-{}",
@@ -9299,13 +9457,14 @@ mod tests {
         assert_eq!(row.generation, "requires_base_blob");
         assert!(row.current_staging_fetches_base_blob);
         assert_eq!(row.source_path, "CommonForms/Item/Ext/Form/Module.bsl");
-        assert!(row.reason.contains("same Form body row as layout"));
+        assert!(row.reason.contains("Form body source is absent"));
+        assert!(row.reason.contains("marker-50 source model"));
 
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn reports_sectionless_form_body_with_precise_base_blocker() {
+    fn reports_sectionless_form_body_as_base_free_marker_50() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-form-empty-readiness-{}",
             uuid::Uuid::new_v4().hyphenated()
@@ -9345,20 +9504,17 @@ mod tests {
             .find(|row| row.row_kind == "form_body")
             .unwrap();
 
-        assert_eq!(row.generation, "requires_base_blob");
-        assert!(row.current_staging_fetches_base_blob);
+        assert_eq!(row.generation, "can_generate_without_base_blob");
+        assert!(!row.current_staging_fetches_base_blob);
         assert_eq!(row.source_path, "CommonForms/Item/Ext/Form.xml");
-        assert!(row.reason.contains("Form body requires active base blob"));
-        assert!(row.reason.contains("Form.xml has no exported layout"));
-        assert!(row.reason.contains("native Form body container skeleton"));
-        assert!(row.reason.contains("trailing empty section fields"));
-        assert!(row.reason.contains("platform-specific tail slots"));
+        assert!(row.reason.contains("marker-50 body codec"));
+        assert!(row.reason.contains("without reading an active Config row"));
 
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn reports_form_body_section_blockers_in_readiness_audit() {
+    fn reports_embedded_form_asset_blocker_in_readiness_audit() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-form-section-readiness-{}",
             uuid::Uuid::new_v4().hyphenated()
@@ -9419,13 +9575,8 @@ mod tests {
 
         assert_eq!(row.generation, "requires_base_blob");
         assert_eq!(row.source_path, "CommonForms/Item/Ext/Form.xml");
-        assert!(row.reason.contains("layout/root/child-item"));
-        assert!(row.reason.contains("1 root/layout scalar"));
-        assert!(row.reason.contains("1 child item"));
-        assert!(row.reason.contains("1 attribute definition"));
-        assert!(row.reason.contains("1 command definition"));
         assert!(row.reason.contains("1 source asset file"));
-        assert!(row.reason.contains("embedded picture payload"));
+        assert!(row.reason.contains("embedded Form item assets"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -11811,7 +11962,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
             )
         );
 
@@ -11856,7 +12007,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
             )
         );
 
@@ -11945,7 +12096,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
             )
         );
 
@@ -12037,7 +12188,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
             )
         );
 

@@ -41,8 +41,10 @@ version unless a future dialect migration explicitly defines semantic changes.
 `SourceAssetRegistry` is the single table for family, semantic role, native
 suffix, relative source path and codec. Both standalone compilation and the
 legacy MSSQL source import/export bridge consume this table. Form modules are
-registered as contributors to their aggregate form body and therefore remain
-deferred rather than being incorrectly emitted as independent module rows.
+registered as contributors to the aggregate `ManagedForm` body codec rather
+than being incorrectly emitted as independent module rows; the evidenced
+marker-50 codec is documented in
+[Managed Form and CommandInterface evidence](forms-command-interface-8.3.27.md).
 
 The codecs enforce the shared compressed/uncompressed size and expansion-ratio
 limits. Tests compare exact module bytes and content SHA-256 values after

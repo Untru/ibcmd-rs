@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=33 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=34 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 33 of 56 accepted leaf issues in the
+As of 2026-07-22, 34 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (58.9%). Live workflow statuses are tracked in
+are complete (60.7%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -148,16 +148,29 @@ through an explicit policy that emits a loss report. Source paths and native
 suffixes for Rights/Predefined/support data are centralized in the same asset
 registry. See [Rights/Predefined/support evidence](docs/evidence/rights-predefined-support-8.3.27.md).
 
+BOOT-011 is complete for the evidenced 8.3.27 managed Form and
+CommandInterface layouts. `Form.xml` plus optional `Module.bsl` now compile
+without a base row into a deterministic UTF-8-BOM marker-50 body with typed
+root properties, nested controls, attributes, parameters, commands and local
+command references. The strict decoder requires the four native trailing
+sections; the representative element matrix is exported back to XML and
+checked semantically. CommandInterface owns all five ordered native sections
+and emits raw-reference XML through the same bounded typed codec. Unsupported
+Form facets, embedded item assets, incomplete readable command tuples, legacy
+markers and future profiles remain explicit blockers. The legacy MSSQL bridge
+uses the shared decoders and now bypasses a base fetch for supported Form
+bodies. See [Managed Form/CommandInterface evidence](docs/evidence/forms-command-interface-8.3.27.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 2/15 | 13.3% |
-| Phase 4 bootstrap | 9/13 | 69.2% |
+| Phase 4 bootstrap | 10/13 | 76.9% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **33/56** | **58.9%** |
+| **Overall** | **34/56** | **60.7%** |
 
 ## Export Compatibility Status
 

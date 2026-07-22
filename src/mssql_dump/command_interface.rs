@@ -71,7 +71,11 @@ pub(super) fn parse_command_interface_blob_with_subsystem_refs(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<CommandInterface> {
-    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let inflated =
+        crate::compiler::bodies::command_interface::decode_compatible_command_interface(bytes)
+            .ok()?
+            .plaintext()
+            .ok()?;
     let text = String::from_utf8(inflated).ok()?;
     let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
     if fields.first()?.trim() != "7" {

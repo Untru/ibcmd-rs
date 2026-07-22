@@ -386,7 +386,7 @@
 
 ### BOOT-011 — Base-free managed Form и CommandInterface codecs
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002, CORE-008
+- **Статус:** `[x]`; **зависимости:** BOOT-002, CORE-008
 - **Файлы:** создать `src/compiler/bodies/form.rs`, `command_interface.rs`; адаптировать `src/mssql_dump/form_body.rs`, `command_interface.rs`
 - **Действия:** full typed form tree/refs/commands, deterministic IDs/order, no base blob.
 - **Проверка:** representative element matrix; XML→blob→XML semantic equality; unknown layouts block bootstrap.
