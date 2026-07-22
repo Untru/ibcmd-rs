@@ -313,6 +313,10 @@ mod tests {
                     "defined-type-v1-crlf-no-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.event_subscription.layout"].value,
+                    "event-subscription-v1-crlf-no-bom"
+                );
+                assert_eq!(
                     profile.storage_profile.as_ref().unwrap().value.as_str(),
                     "storage:mssql-config-configsave"
                 );

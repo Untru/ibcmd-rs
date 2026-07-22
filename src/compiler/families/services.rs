@@ -4,7 +4,7 @@
 //! families remain profile-selection failures until their full native shell is
 //! independently evidenced.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter, Write as _};
 use std::io::{self, Read, Write};
@@ -32,6 +32,8 @@ use super::super::graph::BootstrapGraph;
 
 const SCHEDULED_JOB_LAYOUT_KEY: &str = "bootstrap.metadata.scheduled_job.layout";
 const SCHEDULED_JOB_LAYOUT: &str = "scheduled-job-v1-crlf-no-bom";
+const EVENT_SUBSCRIPTION_LAYOUT_KEY: &str = "bootstrap.metadata.event_subscription.layout";
+const EVENT_SUBSCRIPTION_LAYOUT: &str = "event-subscription-v1-crlf-no-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const MAX_SERVICE_METADATA_PLAIN_BYTES: usize = MAX_CANONICAL_RETAINED_BYTES + 4 * 1_048_576;
@@ -81,6 +83,7 @@ impl ServiceFamily {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ServiceLayout {
     ScheduledJobV1,
+    EventSubscriptionV1,
 }
 
 /// Independent target coordinates plus one service-family layout.
@@ -126,6 +129,11 @@ impl ServiceMetadataProfile {
                 SCHEDULED_JOB_LAYOUT_KEY,
                 SCHEDULED_JOB_LAYOUT,
                 ServiceLayout::ScheduledJobV1,
+            ),
+            ServiceFamily::EventSubscription => (
+                EVENT_SUBSCRIPTION_LAYOUT_KEY,
+                EVENT_SUBSCRIPTION_LAYOUT,
+                ServiceLayout::EventSubscriptionV1,
             ),
             _ => {
                 return Err(ServiceMetadataProfileError::FamilyNotImplemented {
@@ -173,6 +181,17 @@ impl ServiceMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: ServiceFamily::ScheduledJob,
             layout: ServiceLayout::ScheduledJobV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn event_subscription_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: ServiceFamily::EventSubscription,
+            layout: ServiceLayout::EventSubscriptionV1,
         }
     }
 }
@@ -331,6 +350,110 @@ impl ScheduledJobNativeIr {
             &self.restart_interval_on_failure.to_string(),
         );
         xml.push_str("\t\t</Properties>\r\n\t</ScheduledJob>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
+}
+
+/// Readable XCF spelling for one native EventSubscription TypeId.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventSourceReference {
+    pub reference: String,
+    pub type_set: bool,
+}
+
+/// Complete base-free native IR for an `EventSubscription` row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventSubscriptionNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub source_type_ids: Vec<ObjectUuid>,
+    pub event: String,
+    pub module_uuid: ObjectUuid,
+    pub method_name: String,
+}
+
+impl EventSubscriptionNativeIr {
+    /// Renders standalone XCF from exact TypeId and CommonModule mappings.
+    pub fn to_xml(
+        &self,
+        profile: &ProfileId,
+        sources: &std::collections::BTreeMap<ObjectUuid, EventSourceReference>,
+        modules: &std::collections::BTreeMap<ObjectUuid, String>,
+    ) -> Result<Vec<u8>, ServiceMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| ServiceMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        let native_event = native_event_name(&self.event)
+            .ok_or_else(|| native("EventSubscription Event has no evidenced mapping"))?;
+        if event_from_native(native_event) != Some(self.event.as_str()) {
+            return Err(native("EventSubscription Event mapping is not reversible"));
+        }
+        let module = modules.get(&self.module_uuid).ok_or(
+            ServiceMetadataBuildError::MissingReadableReference(self.module_uuid),
+        )?;
+        if !valid_common_module_reference(module) || !valid_identifier_segment(&self.method_name) {
+            return Err(native(
+                "EventSubscription module or method readable name is not exact",
+            ));
+        }
+        if self.source_type_ids.is_empty() {
+            return Err(native("EventSubscription Source type pattern is empty"));
+        }
+        let mut unique = BTreeSet::new();
+        let mut readable_sources = Vec::with_capacity(self.source_type_ids.len());
+        for type_id in &self.source_type_ids {
+            if !unique.insert(*type_id) {
+                return Err(native("EventSubscription Source TypeId is duplicated"));
+            }
+            let source =
+                sources
+                    .get(type_id)
+                    .ok_or(ServiceMetadataBuildError::MissingReadableReference(
+                        *type_id,
+                    ))?;
+            if !valid_cfg_reference(&source.reference) {
+                return Err(native(
+                    "EventSubscription Source reference is not an exact cfg:* name",
+                ));
+            }
+            readable_sources.push(source);
+        }
+
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"{version}\">\r\n\t<EventSubscription uuid=\"{}\">\r\n\t\t<Properties>\r\n",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonyms(&mut xml, &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        xml.push_str("\t\t\t<Source>\r\n");
+        for source in readable_sources {
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t",
+                if source.type_set {
+                    "v8:TypeSet"
+                } else {
+                    "v8:Type"
+                },
+                &source.reference,
+            );
+        }
+        xml.push_str("\t\t\t</Source>\r\n");
+        write_xml_text_element(&mut xml, "\t\t\t", "Event", &self.event);
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t",
+            "Handler",
+            &format!("{module}.{}", self.method_name),
+        );
+        xml.push_str("\t\t</Properties>\r\n\t</EventSubscription>\r\n</MetaDataObject>");
         Ok(xml.into_bytes())
     }
 }
@@ -494,6 +617,9 @@ pub fn compile_service_metadata(
         (ServiceFamily::ScheduledJob, ServiceLayout::ScheduledJobV1) => {
             serialize_scheduled_job(&project_scheduled_job(validated, object)?)
         }
+        (ServiceFamily::EventSubscription, ServiceLayout::EventSubscriptionV1) => {
+            serialize_event_subscription(&project_event_subscription(validated, object)?)
+        }
         (family, _) => return Err(ServiceMetadataBuildError::UnsupportedFamily(family)),
     };
     let bytes = raw_deflate(&plaintext)?;
@@ -519,6 +645,19 @@ pub fn decode_scheduled_job_blob(
         return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
     }
     parse_scheduled_job(&inflate_bounded(blob)?)
+}
+
+/// Strictly decodes a raw-DEFLATE `EventSubscription` row.
+pub fn decode_event_subscription_blob(
+    blob: &[u8],
+    profile: &ServiceMetadataProfile,
+) -> Result<EventSubscriptionNativeIr, ServiceMetadataBuildError> {
+    if profile.family != ServiceFamily::EventSubscription
+        || profile.layout != ServiceLayout::EventSubscriptionV1
+    {
+        return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    parse_event_subscription(&inflate_bounded(blob)?)
 }
 
 fn validate_coordinates(
@@ -650,6 +789,172 @@ fn project_scheduled_job(
         restart_count_on_failure: u32_property(object, "RestartCountOnFailure")?,
         restart_interval_on_failure: u32_property(object, "RestartIntervalOnFailure")?,
     })
+}
+
+fn project_event_subscription(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<EventSubscriptionNativeIr, ServiceMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    if object.owner().is_some()
+        || !object.references().is_empty()
+        || !object.generated_types().is_empty()
+        || !object.assets().is_empty()
+    {
+        return invalid_model(
+            uuid,
+            "EventSubscription must be top-level without references, generated types, or assets",
+        );
+    }
+    if validated
+        .configuration()
+        .objects()
+        .iter()
+        .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(uuid, "EventSubscription cannot own child objects");
+    }
+    let expected = ["Name", "Synonym", "Comment", "Source", "Event", "Handler"];
+    if object.properties().len() != expected.len()
+        || object
+            .properties()
+            .iter()
+            .zip(expected)
+            .any(|(field, expected)| field.name().as_str() != expected)
+    {
+        return invalid_model(uuid, "typed property schema is not exact");
+    }
+    let name = text_property(object, "Name")?.to_owned();
+    if name.is_empty() {
+        return invalid_model(uuid, "Name must not be empty");
+    }
+    let source_names = event_source_property(object)?;
+    let generated_types = generated_type_reference_index(validated, uuid)?;
+    let mut source_type_ids = Vec::with_capacity(source_names.len());
+    let mut unique = BTreeSet::new();
+    for (_, reference) in source_names {
+        let type_id = generated_types.get(&reference).copied().ok_or(
+            ServiceMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "EventSubscription Source TypeId is unresolved",
+            },
+        )?;
+        if !unique.insert(type_id) {
+            return invalid_model(uuid, "EventSubscription Source TypeId is duplicated");
+        }
+        source_type_ids.push(type_id);
+    }
+    let event = text_property(object, "Event")?.to_owned();
+    if native_event_name(&event).is_none() {
+        return invalid_model(uuid, "Event has no evidenced native mapping");
+    }
+    let handler = text_property(object, "Handler")?;
+    let mut parts = handler.split('.');
+    if parts.next() != Some("CommonModule") {
+        return invalid_model(uuid, "Handler does not start with CommonModule");
+    }
+    let module_name = parts.next().unwrap_or_default();
+    let method_name = parts.next().unwrap_or_default();
+    if parts.next().is_some()
+        || !valid_identifier_segment(module_name)
+        || !valid_identifier_segment(method_name)
+    {
+        return invalid_model(uuid, "Handler is not CommonModule.<name>.<method>");
+    }
+    Ok(EventSubscriptionNativeIr {
+        uuid,
+        name,
+        synonyms: synonym_property(object, "Synonym")?,
+        comment: text_property(object, "Comment")?.to_owned(),
+        source_type_ids,
+        event,
+        module_uuid: resolve_common_module(validated, uuid, module_name)?,
+        method_name: method_name.to_owned(),
+    })
+}
+
+fn event_source_property(
+    object: &CanonicalObject,
+) -> Result<Vec<(bool, String)>, ServiceMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    let values = property(object, "Source")?.as_sequence().ok_or(
+        ServiceMetadataBuildError::InvalidModel {
+            object: uuid,
+            reason: "EventSubscription Source is not a sequence",
+        },
+    )?;
+    if values.is_empty() {
+        return invalid_model(uuid, "EventSubscription Source is empty");
+    }
+    let mut unique = BTreeSet::new();
+    let mut result = Vec::with_capacity(values.len());
+    for value in values {
+        let fields = value
+            .as_record()
+            .ok_or(ServiceMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "EventSubscription Source item is not a record",
+            })?;
+        if fields.len() != 2
+            || fields[0].name().as_str() != "kind"
+            || fields[1].name().as_str() != "reference"
+        {
+            return invalid_model(uuid, "EventSubscription Source item schema is not exact");
+        }
+        let type_set = match fields[0].value().kind() {
+            CanonicalValueKind::EnumToken(value) if value.as_str() == "Type" => false,
+            CanonicalValueKind::EnumToken(value) if value.as_str() == "TypeSet" => true,
+            _ => return invalid_model(uuid, "EventSubscription Source kind is unsupported"),
+        };
+        let reference = canonical_text(fields[1].value(), uuid)?.to_owned();
+        if !valid_cfg_reference(&reference) || !unique.insert((type_set, reference.clone())) {
+            return invalid_model(
+                uuid,
+                "EventSubscription Source reference is invalid or duplicated",
+            );
+        }
+        result.push((type_set, reference));
+    }
+    Ok(result)
+}
+
+fn generated_type_reference_index(
+    validated: &ValidatedConfiguration<'_>,
+    compiling: ObjectUuid,
+) -> Result<BTreeMap<String, ObjectUuid>, ServiceMetadataBuildError> {
+    let mut references = BTreeMap::new();
+    for object in validated.configuration().objects() {
+        if object.generated_types().is_empty() {
+            continue;
+        }
+        let Some(name) = object
+            .properties()
+            .iter()
+            .find(|field| field.name().as_str() == "Name")
+            .and_then(|field| match field.value().kind() {
+                CanonicalValueKind::Text(value) if valid_identifier_segment(value.as_str()) => {
+                    Some(value.as_str())
+                }
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        for generated in object.generated_types() {
+            let readable_kind = if object.kind().as_str() == "DefinedType"
+                && generated.kind().as_str() == "DefinedType"
+            {
+                "DefinedType".to_owned()
+            } else {
+                format!("{}{}", object.kind().as_str(), generated.kind().as_str())
+            };
+            let readable = format!("cfg:{readable_kind}.{name}");
+            if references.insert(readable, generated.uuid()).is_some() {
+                return invalid_model(compiling, "readable generated type name is ambiguous");
+            }
+        }
+    }
+    Ok(references)
 }
 
 fn resolve_common_module(
@@ -802,6 +1107,61 @@ fn valid_common_module_reference(value: &str) -> bool {
         .is_some_and(valid_identifier_segment)
 }
 
+fn valid_cfg_reference(value: &str) -> bool {
+    let Some(tail) = value.strip_prefix("cfg:") else {
+        return false;
+    };
+    !tail.is_empty() && !tail.chars().any(char::is_whitespace)
+}
+
+fn native_event_name(event: &str) -> Option<&'static str> {
+    match event {
+        "BeforeDelete" => Some("BeforeDelete_ПередУдалением"),
+        "BeforeWrite" => Some("BeforeWrite_ПередЗаписью"),
+        "FillCheckProcessing" => Some("FillCheckProcessing_ОбработкаПроверкиЗаполнения"),
+        "Filling" => Some("Filling_ОбработкаЗаполнения"),
+        "FormGetProcessing" => Some("FormGetProcessing_ОбработкаПолученияФормы"),
+        "OnReceiveDataFromMaster" => Some("OnReceiveDataFromMaster_ПриПолученииДанныхОтГлавного"),
+        "OnReceiveDataFromSlave" => Some("OnReceiveDataFromSlave_ПриПолученииДанныхОтПодчиненного"),
+        "OnSendDataToMaster" => Some("OnSendDataToMaster_ПриОтправкеДанныхГлавному"),
+        "OnSendDataToSlave" => Some("OnSendDataToSlave_ПриОтправкеДанныхПодчиненному"),
+        "OnSendNodeDataToSlave" => Some("OnSendNodeDataToSlave_ПриОтправкеДанныхУзлаПодчиненному"),
+        "OnSetNewNumber" => Some("OnSetNewNumber_ПриУстановкеНовогоНомера"),
+        "OnWrite" => Some("OnWrite_ПриЗаписи"),
+        "Posting" => Some("Posting_ОбработкаПроведения"),
+        "PresentationFieldsGetProcessing" => {
+            Some("PresentationFieldsGetProcessing_ОбработкаПолученияПолейПредставления")
+        }
+        "PresentationGetProcessing" => {
+            Some("PresentationGetProcessing_ОбработкаПолученияПредставления")
+        }
+        _ => None,
+    }
+}
+
+fn event_from_native(value: &str) -> Option<&'static str> {
+    const EVENTS: [&str; 15] = [
+        "BeforeDelete",
+        "BeforeWrite",
+        "FillCheckProcessing",
+        "Filling",
+        "FormGetProcessing",
+        "OnReceiveDataFromMaster",
+        "OnReceiveDataFromSlave",
+        "OnSendDataToMaster",
+        "OnSendDataToSlave",
+        "OnSendNodeDataToSlave",
+        "OnSetNewNumber",
+        "OnWrite",
+        "Posting",
+        "PresentationFieldsGetProcessing",
+        "PresentationGetProcessing",
+    ];
+    EVENTS
+        .into_iter()
+        .find(|event| native_event_name(event) == Some(value))
+}
+
 fn serialize_scheduled_job(value: &ScheduledJobNativeIr) -> Vec<u8> {
     let mut plain = String::new();
     plain.push_str("{1,\r\n{2,\r\n");
@@ -830,6 +1190,36 @@ fn serialize_scheduled_job(value: &ScheduledJobNativeIr) -> Vec<u8> {
         value.restart_count_on_failure, value.restart_interval_on_failure
     )
     .expect("writing to String cannot fail");
+    plain.into_bytes()
+}
+
+fn serialize_event_subscription(value: &EventSubscriptionNativeIr) -> Vec<u8> {
+    let mut plain = String::new();
+    plain.push_str("{1,\r\n{1,\r\n");
+    push_native_header(
+        &mut plain,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plain.push_str(",\r\n{\"Pattern\"");
+    for type_id in &value.source_type_ids {
+        plain.push_str(",\r\n{\"#\",");
+        plain.push_str(&type_id.to_string());
+        plain.push('}');
+    }
+    plain.push_str("\r\n},");
+    push_1c_string(
+        &mut plain,
+        native_event_name(&value.event)
+            .expect("projection accepts only independently evidenced Event values"),
+    );
+    plain.push(',');
+    plain.push_str(&value.module_uuid.to_string());
+    plain.push(',');
+    push_1c_string(&mut plain, &value.method_name);
+    plain.push_str("},0}");
     plain.into_bytes()
 }
 
@@ -1074,6 +1464,74 @@ fn parse_scheduled_job(plain: &[u8]) -> Result<ScheduledJobNativeIr, ServiceMeta
     })
 }
 
+fn parse_event_subscription(
+    plain: &[u8],
+) -> Result<EventSubscriptionNativeIr, ServiceMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 3, "root")?;
+    exact_token(&root[0], "1", "root discriminator")?;
+    exact_token(&root[2], "0", "root tail")?;
+    let object = exact_list(&root[1], 6, "EventSubscription object")?;
+    exact_token(&object[0], "1", "EventSubscription discriminator")?;
+    let header = parse_native_header(&object[1])?;
+    let source_type_ids = parse_event_source_type_ids(&object[2])?;
+    let native_event = text(&object[3], "Event")?;
+    let event = event_from_native(native_event)
+        .ok_or_else(|| native("EventSubscription Event has no evidenced mapping"))?
+        .to_owned();
+    let module_uuid = canonical_uuid_token(&object[4], "CommonModule UUID")?;
+    if module_uuid.to_string() == NIL_UUID {
+        return Err(native("EventSubscription CommonModule UUID is nil"));
+    }
+    let method_name = text(&object[5], "method name")?.to_owned();
+    if !valid_identifier_segment(&method_name) {
+        return Err(native("EventSubscription method name is not exact"));
+    }
+    Ok(EventSubscriptionNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        source_type_ids,
+        event,
+        module_uuid,
+        method_name,
+    })
+}
+
+fn parse_event_source_type_ids(
+    value: &NativeValue,
+) -> Result<Vec<ObjectUuid>, ServiceMetadataBuildError> {
+    let fields = list(value, "EventSubscription Source")?;
+    if fields.len() < 2 {
+        return Err(native("EventSubscription Source type pattern is empty"));
+    }
+    if text(&fields[0], "EventSubscription Source marker")? != "Pattern" {
+        return Err(native("EventSubscription Source marker is not Pattern"));
+    }
+    if fields.len() - 1 > MAX_CANONICAL_COLLECTION_ITEMS {
+        return Err(native(
+            "EventSubscription Source exceeds canonical collection bound",
+        ));
+    }
+    let mut unique = BTreeSet::new();
+    let mut result = Vec::with_capacity(fields.len() - 1);
+    for item in &fields[1..] {
+        let item = exact_list(item, 2, "EventSubscription Source item")?;
+        if text(&item[0], "EventSubscription Source item marker")? != "#" {
+            return Err(native("EventSubscription Source item is not a TypeId"));
+        }
+        let type_id = canonical_uuid_token(&item[1], "EventSubscription Source TypeId")?;
+        if type_id.to_string() == NIL_UUID || !unique.insert(type_id) {
+            return Err(native(
+                "EventSubscription Source TypeId is nil or duplicated",
+            ));
+        }
+        result.push(type_id);
+    }
+    Ok(result)
+}
+
 struct NativeHeader {
     uuid: ObjectUuid,
     name: String,
@@ -1310,7 +1768,10 @@ mod tests {
     use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
     use ibcmd_core::family::FamilyId;
     use ibcmd_core::identity::LogicalIdentity;
-    use ibcmd_core::model::{CanonicalConfiguration, CanonicalObjectParts, MetadataKind};
+    use ibcmd_core::model::{
+        CanonicalConfiguration, CanonicalObjectParts, GeneratedType, GeneratedTypeKind,
+        MetadataKind,
+    };
     use ibcmd_core::profile::{ProfileSourceKind, parse_profile_source, resolve_profiles};
     use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
     use ibcmd_core::validate::validate_configuration;
@@ -1326,6 +1787,10 @@ mod tests {
     const CONFIGURATION_UUID: &str = "11111111-1111-4111-8111-111111111111";
     const MODULE_UUID: &str = "dc2b7a9e-132b-4a30-b7a8-ec72bf3d2e63";
     const JOB_UUID: &str = "c7ffd8ab-15e9-4cf1-a7fd-d05534dff000";
+    const EVENT_UUID: &str = "a64b15fa-fc34-43fe-a366-d27c0f1c3df2";
+    const EVENT_MODULE_UUID: &str = "f96cbb27-7619-41e0-8577-e623ef02dc58";
+    const SOURCE_ONE_TYPE_ID: &str = "48667aa7-1fec-4d7b-b697-2bfe84bbb82b";
+    const SOURCE_TWO_TYPE_ID: &str = "db719ff3-91c0-4d23-8d18-afa5fc3221cf";
 
     fn xml(version: &str, module: &str) -> Vec<u8> {
         format!(
@@ -1345,6 +1810,25 @@ mod tests {
 \t\t\t<RestartIntervalOnFailure>600</RestartIntervalOnFailure>\r\n\
 \t\t</Properties>\r\n\
 \t</ScheduledJob>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn event_xml(version: &str, module: &str, first_source: &str) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" version=\"{version}\">\r\n\
+\t<EventSubscription uuid=\"{EVENT_UUID}\">\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Варианты отчетов перед удалением идентификатора объекта метаданных</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Source><v8:Type>cfg:CatalogObject.{first_source}</v8:Type><v8:Type>cfg:CatalogObject.ИдентификаторыОбъектовМетаданных</v8:Type></Source>\r\n\
+\t\t\t<Event>BeforeDelete</Event>\r\n\
+\t\t\t<Handler>CommonModule.{module}.ПередУдалениемИдентификатораОбъектаМетаданных</Handler>\r\n\
+\t\t</Properties>\r\n\
+\t</EventSubscription>\r\n\
 </MetaDataObject>"
         )
         .into_bytes()
@@ -1379,6 +1863,31 @@ mod tests {
         CanonicalObject::new(parts).unwrap()
     }
 
+    fn object_with_generated_type(
+        version: &str,
+        uuid: &str,
+        kind: &str,
+        name: &str,
+        type_id: &str,
+        generated_kind: &str,
+    ) -> CanonicalObject {
+        let mut object = object(version, uuid, kind, name);
+        let path = object.identity().path().clone();
+        let provenance = object.provenance().clone();
+        let mut parts = CanonicalObjectParts::new(
+            LogicalIdentity::new(object.identity().uuid(), path),
+            object.kind().clone(),
+            provenance,
+        );
+        parts.properties = object.properties().to_vec();
+        parts.generated_types.push(GeneratedType::new(
+            ObjectUuid::parse(type_id).unwrap(),
+            GeneratedTypeKind::new(generated_kind).unwrap(),
+        ));
+        object = CanonicalObject::new(parts).unwrap();
+        object
+    }
+
     fn configuration(version: &str, method_module: &str) -> CanonicalConfiguration {
         let document = XmlReader::from_slice(&xml(version, method_module)).unwrap();
         let job = bundled_metadata_registry()
@@ -1400,6 +1909,52 @@ mod tests {
                 "РаботаСКурсамиВалютЛокализация",
             ),
             job,
+        ])
+        .unwrap()
+    }
+
+    fn event_configuration(
+        version: &str,
+        method_module: &str,
+        first_source: &str,
+    ) -> CanonicalConfiguration {
+        let document =
+            XmlReader::from_slice(&event_xml(version, method_module, first_source)).unwrap();
+        let event = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("EventSubscription").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        CanonicalConfiguration::new(vec![
+            object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            object(
+                version,
+                EVENT_MODULE_UUID,
+                "CommonModule",
+                "ВариантыОтчетов",
+            ),
+            object_with_generated_type(
+                version,
+                "22222222-2222-4222-8222-222222222222",
+                "Catalog",
+                "ИдентификаторыОбъектовРасширений",
+                SOURCE_ONE_TYPE_ID,
+                "Object",
+            ),
+            object_with_generated_type(
+                version,
+                "33333333-3333-4333-8333-333333333333",
+                "Catalog",
+                "ИдентификаторыОбъектовМетаданных",
+                SOURCE_TWO_TYPE_ID,
+                "Object",
+            ),
+            event,
         ])
         .unwrap()
     }
@@ -1432,6 +1987,33 @@ mod tests {
         (
             graph,
             ServiceMetadataProfile::scheduled_job_fixture("platform-test"),
+        )
+    }
+
+    fn event_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, ServiceMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [
+                CONFIGURATION_UUID,
+                EVENT_MODULE_UUID,
+                "22222222-2222-4222-8222-222222222222",
+                "33333333-3333-4333-8333-333333333333",
+                EVENT_UUID,
+            ]
+            .into_iter()
+            .map(|uuid| {
+                ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+            })
+            .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            ServiceMetadataProfile::event_subscription_fixture("platform-test"),
         )
     }
 
@@ -1530,7 +2112,129 @@ mod tests {
     }
 
     #[test]
-    fn scheduled_job_profile_is_explicit_and_other_services_stay_blocked() {
+    fn event_subscription_roundtrips_without_a_base_for_both_dialects() {
+        for version in ["2.20", "2.21"] {
+            let configuration = event_configuration(
+                version,
+                "ВариантыОтчетов",
+                "ИдентификаторыОбъектовРасширений",
+            );
+            let validated = validate_configuration(&configuration).unwrap();
+            let (graph, profile) = event_graph(&validated);
+            let uuid = ObjectUuid::parse(EVENT_UUID).unwrap();
+            let first =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            let second =
+                compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                    .unwrap();
+            assert_eq!(first, second);
+            let ir = decode_event_subscription_blob(
+                first.outcome().compiled_payload().unwrap().bytes(),
+                &profile,
+            )
+            .unwrap();
+            assert_eq!(
+                ir.source_type_ids,
+                [SOURCE_ONE_TYPE_ID, SOURCE_TWO_TYPE_ID]
+                    .map(|value| ObjectUuid::parse(value).unwrap())
+            );
+            assert_eq!(ir.event, "BeforeDelete");
+            let sources = BTreeMap::from([
+                (
+                    ObjectUuid::parse(SOURCE_ONE_TYPE_ID).unwrap(),
+                    EventSourceReference {
+                        reference: "cfg:CatalogObject.ИдентификаторыОбъектовРасширений".to_owned(),
+                        type_set: false,
+                    },
+                ),
+                (
+                    ObjectUuid::parse(SOURCE_TWO_TYPE_ID).unwrap(),
+                    EventSourceReference {
+                        reference: "cfg:CatalogObject.ИдентификаторыОбъектовМетаданных".to_owned(),
+                        type_set: false,
+                    },
+                ),
+            ]);
+            let modules = BTreeMap::from([(
+                ObjectUuid::parse(EVENT_MODULE_UUID).unwrap(),
+                "CommonModule.ВариантыОтчетов".to_owned(),
+            )]);
+            let output = ir
+                .to_xml(
+                    &ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    &sources,
+                    &modules,
+                )
+                .unwrap();
+            let document = XmlReader::from_slice(&output).unwrap();
+            bundled_metadata_registry()
+                .decode(
+                    &FamilyId::parse("EventSubscription").unwrap(),
+                    &document,
+                    ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn event_subscription_plaintext_matches_observed_golden() {
+        let configuration = event_configuration(
+            "2.20",
+            "ВариантыОтчетов",
+            "ИдентификаторыОбъектовРасширений",
+        );
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = event_graph(&validated);
+        let entry = compile_service_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(EVENT_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert_eq!(
+            plain,
+            format!(
+                "{{1,\r\n{{1,\r\n{{3,\r\n{{1,0,{EVENT_UUID}}},\"ВариантыОтчетовПередУдалениемИдентификатораОбъектаМетаданных\",\r\n{{1,\"ru\",\"Варианты отчетов перед удалением идентификатора объекта метаданных\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"#\",{SOURCE_ONE_TYPE_ID}}},\r\n{{\"#\",{SOURCE_TWO_TYPE_ID}}}\r\n}},\"BeforeDelete_ПередУдалением\",{EVENT_MODULE_UUID},\"ПередУдалениемИдентификатораОбъектаМетаданных\"}},0}}"
+            )
+            .as_bytes()
+        );
+    }
+
+    #[test]
+    fn event_subscription_unresolved_type_and_native_extra_field_fail_closed() {
+        let configuration = event_configuration("2.20", "ВариантыОтчетов", "ОтсутствующийИсточник");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = event_graph(&validated);
+        assert!(matches!(
+            compile_service_metadata(
+                &validated,
+                &graph,
+                ObjectUuid::parse(EVENT_UUID).unwrap(),
+                &axes("2.20"),
+                &profile,
+            ),
+            Err(ServiceMetadataBuildError::InvalidModel {
+                reason: "EventSubscription Source TypeId is unresolved",
+                ..
+            })
+        ));
+        let observed = format!(
+            "{{1,{{1,{{3,{{1,0,{EVENT_UUID}}},\"Event\",{{0}},\"\",0,0,{NIL_UUID},0}},{{\"Pattern\",{{\"#\",{SOURCE_ONE_TYPE_ID}}}}},\"BeforeDelete_ПередУдалением\",{EVENT_MODULE_UUID},\"Run\",future}},0}}"
+        );
+        assert!(matches!(
+            parse_event_subscription(observed.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+    }
+
+    #[test]
+    fn implemented_service_profiles_are_explicit_and_others_stay_blocked() {
         let json = format!(
             r#"{{
                 "schema_version": 1,
@@ -1539,7 +2243,8 @@ mod tests {
                 "platform_build": "8.3.27.1989",
                 "storage_profile": "{SUPPORTED_STORAGE_PROFILE}",
                 "constants": {{
-                    "{SCHEDULED_JOB_LAYOUT_KEY}": "{SCHEDULED_JOB_LAYOUT}"
+                    "{SCHEDULED_JOB_LAYOUT_KEY}": "{SCHEDULED_JOB_LAYOUT}",
+                    "{EVENT_SUBSCRIPTION_LAYOUT_KEY}": "{EVENT_SUBSCRIPTION_LAYOUT}"
                 }}
             }}"#
         );
@@ -1558,10 +2263,19 @@ mod tests {
             .family(),
             ServiceFamily::ScheduledJob
         );
-        assert!(matches!(
+        assert_eq!(
             ServiceMetadataProfile::from_effective_for_family(
                 effective,
                 ServiceFamily::EventSubscription
+            )
+            .unwrap()
+            .family(),
+            ServiceFamily::EventSubscription
+        );
+        assert!(matches!(
+            ServiceMetadataProfile::from_effective_for_family(
+                effective,
+                ServiceFamily::HttpService
             ),
             Err(ServiceMetadataProfileError::FamilyNotImplemented { .. })
         ));
