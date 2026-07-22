@@ -192,7 +192,7 @@
 
 ### CF-002 — Поддержать storage versions и raw headers Format15
 
-- **Статус:** `[ ]`; **зависимости:** BASE-003, CF-001
+- **Статус:** `[x]`; **зависимости:** BASE-003, CF-001
 - **Файлы:** перенести/изменить `src/v8_container.rs` в `crates/ibcmd-v8/src/format15.rs`
 - **Действия:** версии 0/1/2/5, порядок, raw headers, absent-data sentinel; сохранить module-blob behavior.
 - **Проверка:** fixtures перечисляют ожидаемые entries; существующие `module_blob` tests зелёные.

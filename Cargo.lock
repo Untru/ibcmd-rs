@@ -288,6 +288,7 @@ dependencies = [
  "flate2",
  "ibcmd-cf",
  "ibcmd-core",
+ "ibcmd-v8",
  "ibcmd-xml",
  "quick-xml",
  "rayon",

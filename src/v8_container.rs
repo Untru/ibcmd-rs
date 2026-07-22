@@ -14,16 +14,8 @@ pub(crate) struct V8Element {
     pub(crate) data: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct BlockHeader {
-    data_size: usize,
-    page_size: usize,
-    next_page_addr: u32,
-}
-
 pub(crate) fn parse_v8_container(bytes: &[u8]) -> Result<Vec<V8Element>> {
-    let container =
-        ibcmd_v8::format15::parse(bytes).context("failed to parse Format15 container")?;
+    let container = ibcmd_v8::format15::parse(bytes).map_err(anyhow::Error::new)?;
     container
         .elements
         .into_iter()
@@ -112,82 +104,6 @@ pub(crate) fn make_v8_element_header(name: &str) -> Vec<u8> {
     header
 }
 
-fn validate_block_address(
-    bytes: &[u8],
-    offset: usize,
-    element_index: usize,
-    kind: &str,
-) -> Result<()> {
-    if offset >= bytes.len() {
-        return Err(anyhow!(
-            "element {} {} address {} exceeds container length {}",
-            element_index,
-            kind,
-            offset,
-            bytes.len()
-        ));
-    }
-    Ok(())
-}
-
-fn read_block_payload(bytes: &[u8], offset: usize) -> Result<Vec<u8>> {
-    let header = read_block_header(bytes, offset)?;
-    let start = offset
-        .checked_add(BLOCK_HEADER_SIZE)
-        .ok_or_else(|| anyhow!("block at {} payload offset overflows usize", offset))?;
-    let data_end = start
-        .checked_add(header.data_size)
-        .ok_or_else(|| anyhow!("block at {} data end overflows usize", offset))?;
-    let page_end = start
-        .checked_add(header.page_size)
-        .ok_or_else(|| anyhow!("block at {} page end overflows usize", offset))?;
-    if data_end > bytes.len() || page_end > bytes.len() {
-        return Err(anyhow!("block at {} exceeds container length", offset));
-    }
-    if header.next_page_addr != V8_MAGIC_NUMBER {
-        return Err(anyhow!(
-            "multi-page V8 blocks are not supported yet: block at {} next page address 0x{:08x}",
-            offset,
-            header.next_page_addr
-        ));
-    }
-    Ok(bytes[start..data_end].to_vec())
-}
-
-fn read_block_header(bytes: &[u8], offset: usize) -> Result<BlockHeader> {
-    let end = offset
-        .checked_add(BLOCK_HEADER_SIZE)
-        .ok_or_else(|| anyhow!("block header at {} overflows input length", offset))?;
-    if end > bytes.len() {
-        return Err(anyhow!("block header at {} exceeds input length", offset));
-    }
-    let raw = &bytes[offset..end];
-    if raw[0] != b'\r'
-        || raw[1] != b'\n'
-        || raw[10] != b' '
-        || raw[19] != b' '
-        || raw[28] != b' '
-        || raw[29] != b'\r'
-        || raw[30] != b'\n'
-    {
-        return Err(anyhow!("invalid block header at {}", offset));
-    }
-    let header = BlockHeader {
-        data_size: parse_hex_u32(&raw[2..10])? as usize,
-        page_size: parse_hex_u32(&raw[11..19])? as usize,
-        next_page_addr: parse_hex_u32(&raw[20..28])?,
-    };
-    if header.page_size < header.data_size {
-        return Err(anyhow!(
-            "block at {} page size {} is smaller than data size {}",
-            offset,
-            header.page_size,
-            header.data_size
-        ));
-    }
-    Ok(header)
-}
-
 fn write_block(target: &mut Vec<u8>, data: &[u8], page_size: usize) -> Result<()> {
     if page_size < data.len() {
         return Err(anyhow!(
@@ -217,37 +133,6 @@ fn page_size_for_data(len: usize) -> usize {
     } else {
         len
     }
-}
-
-fn element_name(header: &[u8]) -> Result<String> {
-    if header.len() < ELEM_HEADER_PREFIX_SIZE {
-        return Err(anyhow!("element header is too short"));
-    }
-    let raw = &header[ELEM_HEADER_PREFIX_SIZE..];
-    let mut units = Vec::new();
-    for pair in raw.chunks_exact(2) {
-        let unit = u16::from_le_bytes([pair[0], pair[1]]);
-        if unit == 0 {
-            break;
-        }
-        units.push(unit);
-    }
-    String::from_utf16(&units).context("element name is not valid UTF-16LE")
-}
-
-fn parse_hex_u32(bytes: &[u8]) -> Result<u32> {
-    let text = std::str::from_utf8(bytes)?;
-    Ok(u32::from_str_radix(text, 16)?)
-}
-
-fn read_u32(bytes: &[u8], offset: usize) -> Result<u32> {
-    let end = offset
-        .checked_add(4)
-        .ok_or_else(|| anyhow!("u32 at {} overflows input length", offset))?;
-    if end > bytes.len() {
-        return Err(anyhow!("u32 at {} exceeds input length", offset));
-    }
-    Ok(u32::from_le_bytes(bytes[offset..end].try_into()?))
 }
 
 fn write_u32(target: &mut Vec<u8>, value: u32) {

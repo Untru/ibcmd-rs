@@ -352,7 +352,7 @@ fn element_name(header: &[u8], index: usize) -> Result<String, Format15Error> {
         });
     }
     let name_region = &header[ELEMENT_HEADER_PREFIX_SIZE..];
-    if name_region.len() % 2 != 0 {
+    if !name_region.len().is_multiple_of(2) {
         return Err(Format15Error::OddElementNameLength {
             index,
             actual: name_region.len(),
