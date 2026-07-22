@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_profile": "xml-2.20",
+  "target_profile": "xml-2.21",
+  "fixtures": [
+    {
+      "id": "unchanged-constant",
+      "path": "unchanged-constant.xml",
+      "family": "Constant",
+      "case": "unchanged",
+      "sha256": "367b6edaa3f6ebfaef22f209ec3bf380256533f92789bae171df0e66b8666327",
+      "expected_losses": []
+    },
+    {
+      "id": "changed-catalog",
+      "path": "changed-catalog.xml",
+      "family": "Catalog",
+      "case": "changed",
+      "sha256": "3e13f629a7e7b761bd8021dd2def856fce13dbe74587f233570b8af8f8d9611f",
+      "expected_losses": []
+    },
+    {
+      "id": "newly-supported-capabilities",
+      "path": "newly-supported.json",
+      "family": "profile",
+      "case": "newly-supported",
+      "sha256": "824bdba6147a63f63b58dbbbe88ee20f1895e86cec0af23458a5d68892b57c2c",
+      "expected_losses": []
+    }
+  ]
+}

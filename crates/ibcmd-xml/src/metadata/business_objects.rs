@@ -27,10 +27,12 @@ use super::language::{
 use super::registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };
-use crate::{LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlWriter};
+use crate::{Attribute, AttributeKind, LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlWriter};
 
 const CATALOG: &str = "Catalog";
 const DOCUMENT: &str = "Document";
+const PALETTE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/ui/colors/palette";
+const PALETTE_PREFIX: &str = "pal";
 
 const CATALOG_PROPERTIES: &[&str] = &[
     "Name",
@@ -1178,11 +1180,63 @@ fn encode_business_object(
             &path,
         )?
     };
+    let root = if family == CATALOG {
+        rewrite_catalog_palette_namespace(&root, target_version, &path)?
+    } else {
+        root
+    };
     XmlWriter::to_vec(
         &envelope.source_document().with_root(root),
         LexicalPolicy::Preserve,
     )
     .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
+fn rewrite_catalog_palette_namespace(
+    root: &XmlElement,
+    target_version: &str,
+    path: &ObjectPath,
+) -> Result<XmlElement, MetadataEncodeError> {
+    let target_has_palette = target_version == "2.21";
+    let mut attributes =
+        Vec::with_capacity(root.attributes().len() + usize::from(target_has_palette));
+    let mut exact_binding = false;
+    for attribute in root.attributes() {
+        match attribute.kind() {
+            AttributeKind::Namespace(Some(prefix)) if prefix == PALETTE_PREFIX => {
+                if attribute.value() != PALETTE_NAMESPACE || exact_binding {
+                    return Err(invalid_model(path, "palette namespace"));
+                }
+                exact_binding = true;
+                if target_has_palette {
+                    attributes.push(attribute.clone());
+                }
+            }
+            AttributeKind::Namespace(_) if attribute.value() == PALETTE_NAMESPACE => {
+                return Err(invalid_model(path, "palette namespace prefix"));
+            }
+            _ => attributes.push(attribute.clone()),
+        }
+    }
+    if target_has_palette && !exact_binding {
+        let insertion = attributes
+            .iter()
+            .position(|attribute| match attribute.kind() {
+                AttributeKind::Namespace(None) => false,
+                AttributeKind::Namespace(Some(prefix)) => prefix.as_str() > PALETTE_PREFIX,
+                AttributeKind::Ordinary(_) => true,
+            })
+            .unwrap_or(attributes.len());
+        attributes.insert(
+            insertion,
+            Attribute::namespace(Some(PALETTE_PREFIX.to_string()), PALETTE_NAMESPACE),
+        );
+    }
+    Ok(XmlElement::with_parts(
+        root.name().clone(),
+        attributes,
+        root.children().to_vec(),
+    ))
 }
 
 #[cfg(test)]
@@ -1283,5 +1337,61 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn catalog_cross_profile_encoding_applies_evidenced_palette_delta() {
+        let document = XmlReader::from_slice(&catalog_xml()).unwrap();
+        let envelope = decode_business_object(
+            &document,
+            ProfileId::parse("xml-2.20").unwrap(),
+            ObjectPath::root(),
+            CATALOG,
+        )
+        .unwrap();
+
+        let upgraded =
+            encode_business_object(&envelope, &ProfileId::parse("xml-2.21").unwrap(), CATALOG)
+                .unwrap();
+        let upgraded_text = std::str::from_utf8(&upgraded).unwrap();
+        assert!(upgraded_text.contains("version=\"2.21\""));
+        assert!(upgraded_text.contains(&format!("xmlns:{PALETTE_PREFIX}=\"{PALETTE_NAMESPACE}\"")));
+        let upgraded_document = XmlReader::from_slice(&upgraded).unwrap();
+        let upgraded_envelope = decode_business_object(
+            &upgraded_document,
+            ProfileId::parse("xml-2.21").unwrap(),
+            ObjectPath::root(),
+            CATALOG,
+        )
+        .unwrap();
+        assert_eq!(
+            upgraded_envelope.root().identity(),
+            envelope.root().identity()
+        );
+        assert_eq!(upgraded_envelope.root().kind(), envelope.root().kind());
+        assert_eq!(upgraded_envelope.root().owner(), envelope.root().owner());
+        assert_eq!(
+            upgraded_envelope.root().properties(),
+            envelope.root().properties()
+        );
+        assert_eq!(
+            upgraded_envelope.root().references(),
+            envelope.root().references()
+        );
+        assert_eq!(
+            upgraded_envelope.root().generated_types(),
+            envelope.root().generated_types()
+        );
+        assert_eq!(upgraded_envelope.root().assets(), envelope.root().assets());
+
+        let downgraded = encode_business_object(
+            &upgraded_envelope,
+            &ProfileId::parse("xml-2.20").unwrap(),
+            CATALOG,
+        )
+        .unwrap();
+        let downgraded_text = std::str::from_utf8(&downgraded).unwrap();
+        assert!(downgraded_text.contains("version=\"2.20\""));
+        assert!(!downgraded_text.contains(PALETTE_NAMESPACE));
     }
 }

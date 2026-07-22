@@ -13,8 +13,15 @@
     "xcf.feature.palette_namespace": "supported",
     "xcf.feature.use_in_interface_compatibility_mode": "supported"
   },
+  "capabilities": {
+    "xcf:palette-namespace": "supported",
+    "xcf:use-in-interface-compatibility-mode": "supported"
+  },
   "evidence": [
+    "docs/evidence/migration-xcf-2.20-to-2.21.md",
     "src/module_blob.rs",
-    "src/mssql.rs"
+    "src/mssql.rs",
+    "tests/fixtures/migrations/2.20-to-2.21/manifest.json",
+    "tests/migration_2_20_to_2_21.rs"
   ]
 }

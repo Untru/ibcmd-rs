@@ -428,7 +428,7 @@
 
 ### MIG-003 — Реализовать доказанный 2.20 → 2.21 edge
 
-- **Статус:** `[ ]`; **зависимости:** MIG-002, XML-006 и соответствующие family codecs
+- **Статус:** `[x]`; **зависимости:** MIG-002, XML-006 и соответствующие family codecs
 - **Файлы:** создать `crates/ibcmd-core/src/migration/v2_20_to_v2_21.rs`, fixtures `tests/fixtures/migrations/2.20-to-2.21/`
 - **Действия:** только подтверждённые feature deltas; unchanged/changed/newly-supported cases.
 - **Проверка:** целевой adapter читает output; переносимые fixtures имеют пустой loss report; неизвестная delta блокируется.

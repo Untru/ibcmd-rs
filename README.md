@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=35 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=36 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 35 of 56 accepted leaf issues in the
+As of 2026-07-22, 36 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (62.5%). Live workflow statuses are tracked in
+are complete (64.3%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -172,6 +172,16 @@ templates and future profiles fail closed. The legacy export bridge delegates
 MXL/DCS framing to the same bounded readers. See
 [Template body evidence](docs/evidence/template-bodies-8.3.27.md).
 
+MIG-003 is complete for the verified XCF `xml-2.20` to `xml-2.21` upgrade
+edge. The migration core accepts only exact 2.20 provenance and the evidenced
+`Constant`/`Catalog` cohort, produces a complete zero-loss report, and blocks
+unknown families or owner chains. Version-specific serialization remains in
+the target XML adapter: `Catalog` gains the evidenced 2.21 palette namespace,
+while unchanged objects retain the same semantic digest. SHA-256-pinned
+unchanged, changed, and newly-supported fixtures are decoded by the target
+codec without 1C, EDT, Java, or a JVM. See
+[XCF 2.20 to 2.21 migration evidence](docs/evidence/migration-xcf-2.20-to-2.21.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
@@ -179,9 +189,9 @@ MXL/DCS framing to the same bounded readers. See
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 2/15 | 13.3% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
-| Phase 5a migrations | 2/4 | 50% |
+| Phase 5a migrations | 3/4 | 75% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **35/56** | **62.5%** |
+| **Overall** | **36/56** | **64.3%** |
 
 ## Export Compatibility Status
 

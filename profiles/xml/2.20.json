@@ -7,8 +7,17 @@
   "fingerprints": {
     "xcf.version": "2.20"
   },
+  "capabilities": {
+    "xcf:metadata-catalog": "supported",
+    "xcf:metadata-constant": "supported",
+    "xcf:palette-namespace": "unsupported",
+    "xcf:use-in-interface-compatibility-mode": "unsupported"
+  },
   "evidence": [
+    "docs/evidence/migration-xcf-2.20-to-2.21.md",
     "src/source.rs",
+    "tests/fixtures/migrations/2.20-to-2.21/manifest.json",
+    "tests/migration_2_20_to_2_21.rs",
     "tests/portable_root_smoke.rs"
   ]
 }
