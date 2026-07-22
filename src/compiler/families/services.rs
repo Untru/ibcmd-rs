@@ -1,8 +1,8 @@
 //! Base-free native codecs for BOOT-004 service metadata families.
 //!
-//! Every family owns an explicit platform-profile layout. Unsupported service
-//! families remain profile-selection failures until their full native shell is
-//! independently evidenced.
+//! Every family owns an explicit platform-profile layout. Future layouts remain
+//! profile-selection failures until their full native shell is independently
+//! evidenced.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -42,6 +42,8 @@ const WEB_SERVICE_LAYOUT_KEY: &str = "bootstrap.metadata.web_service.layout";
 const WEB_SERVICE_LAYOUT: &str = "web-service-v1-crlf-utf8-bom";
 const WS_REFERENCE_LAYOUT_KEY: &str = "bootstrap.metadata.ws_reference.layout";
 const WS_REFERENCE_LAYOUT: &str = "ws-reference-v1-crlf-utf8-bom";
+const INTEGRATION_SERVICE_LAYOUT_KEY: &str = "bootstrap.metadata.integration_service.layout";
+const INTEGRATION_SERVICE_LAYOUT: &str = "integration-service-v1-crlf-utf8-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
@@ -55,6 +57,7 @@ const HTTP_URL_COLLECTION_UUID: &str = "ec6896c2-9b28-42d8-9140-48491146b8ea";
 const HTTP_METHOD_COLLECTION_UUID: &str = "21c96ea8-c8fc-424a-a0b4-e1ffb2fa1a73";
 const WEB_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
+const INTEGRATION_CHANNEL_COLLECTION_UUID: &str = "acb7e81f-0637-4ebd-88ff-954ba075ae51";
 const DESIGN_TIME_REFERENCE_CLASS_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
 const XDTO_XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const XDTO_CORE_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
@@ -108,6 +111,7 @@ enum ServiceLayout {
     HttpServiceV1,
     WebServiceV1,
     WsReferenceV1,
+    IntegrationServiceV1,
 }
 
 /// Independent target coordinates plus one service-family layout.
@@ -179,12 +183,11 @@ impl ServiceMetadataProfile {
                 WS_REFERENCE_LAYOUT,
                 ServiceLayout::WsReferenceV1,
             ),
-            _ => {
-                return Err(ServiceMetadataProfileError::FamilyNotImplemented {
-                    profile: profile.id.clone(),
-                    family,
-                });
-            }
+            ServiceFamily::IntegrationService => (
+                INTEGRATION_SERVICE_LAYOUT_KEY,
+                INTEGRATION_SERVICE_LAYOUT,
+                ServiceLayout::IntegrationServiceV1,
+            ),
         };
         let value = profile.constants.get(key).ok_or_else(|| {
             ServiceMetadataProfileError::MissingConstant {
@@ -282,6 +285,17 @@ impl ServiceMetadataProfile {
             layout: ServiceLayout::WsReferenceV1,
         }
     }
+
+    #[cfg(test)]
+    fn integration_service_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: ServiceFamily::IntegrationService,
+            layout: ServiceLayout::IntegrationServiceV1,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -304,10 +318,6 @@ pub enum ServiceMetadataProfileError {
         family: ServiceFamily,
         key: &'static str,
         value: String,
-    },
-    FamilyNotImplemented {
-        profile: ProfileId,
-        family: ServiceFamily,
     },
 }
 
@@ -343,11 +353,6 @@ impl Display for ServiceMetadataProfileError {
             } => write!(
                 formatter,
                 "profile `{profile}` declares unsupported {} layout `{key}={value}`",
-                family.as_str()
-            ),
-            Self::FamilyNotImplemented { profile, family } => write!(
-                formatter,
-                "profile `{profile}` cannot select {} because its codec is not implemented",
                 family.as_str()
             ),
         }
@@ -629,6 +634,136 @@ impl WsReferenceNativeIr {
         write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
         write_xml_text_element(&mut xml, "\t\t\t", "LocationURL", &self.location_url);
         xml.push_str("\t\t</Properties>\r\n\t</WSReference>\r\n</MetaDataObject>");
+        Ok(xml.into_bytes())
+    }
+}
+
+/// One channel nested under an `IntegrationService`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntegrationServiceChannelNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub manager_type_id: ObjectUuid,
+    pub manager_value_id: ObjectUuid,
+    pub external_name: String,
+    pub receive_message_processing: String,
+    pub message_direction: String,
+    pub transactioned: bool,
+}
+
+/// Complete base-free native IR for an `IntegrationService` primary row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntegrationServiceNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<ServiceLocalizedString>,
+    pub comment: String,
+    pub manager_type_id: ObjectUuid,
+    pub manager_value_id: ObjectUuid,
+    pub external_address: String,
+    pub channels: Vec<IntegrationServiceChannelNativeIr>,
+}
+
+impl IntegrationServiceNativeIr {
+    /// Renders standalone XCF for the complete channel tree.
+    pub fn to_xml(&self, profile: &ProfileId) -> Result<Vec<u8>, ServiceMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| ServiceMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        validate_integration_service_ir(self)?;
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"{version}\">\r\n\t<IntegrationService uuid=\"{}\">\r\n\t\t<InternalInfo>\r\n\t\t\t<xr:GeneratedType name=\"IntegrationServiceManager.",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        push_xml_attribute(&mut xml, &self.name);
+        xml.push_str("\" category=\"Manager\">\r\n");
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t\t",
+            "xr:TypeId",
+            &self.manager_type_id.to_string(),
+        );
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t\t",
+            "xr:ValueId",
+            &self.manager_value_id.to_string(),
+        );
+        xml.push_str("\t\t\t</xr:GeneratedType>\r\n\t\t</InternalInfo>\r\n\t\t<Properties>\r\n");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonyms_at(&mut xml, "\t\t\t", &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t",
+            "ExternalIntegrationServiceAddress",
+            &self.external_address,
+        );
+        xml.push_str("\t\t</Properties>\r\n\t\t<ChildObjects>\r\n");
+        for channel in &self.channels {
+            write!(
+                &mut xml,
+                "\t\t\t<IntegrationServiceChannel uuid=\"{}\">\r\n\t\t\t\t<InternalInfo>\r\n\t\t\t\t\t<xr:GeneratedType name=\"IntegrationServiceChannelManager.",
+                channel.uuid
+            )
+            .expect("writing to String cannot fail");
+            push_xml_attribute(&mut xml, &self.name);
+            xml.push('.');
+            push_xml_attribute(&mut xml, &channel.name);
+            xml.push_str("\" category=\"Manager\">\r\n");
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t\t",
+                "xr:TypeId",
+                &channel.manager_type_id.to_string(),
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t\t",
+                "xr:ValueId",
+                &channel.manager_value_id.to_string(),
+            );
+            xml.push_str("\t\t\t\t\t</xr:GeneratedType>\r\n\t\t\t\t</InternalInfo>\r\n\t\t\t\t<Properties>\r\n");
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "Name", &channel.name);
+            write_synonyms_at(&mut xml, "\t\t\t\t\t", &channel.synonyms);
+            write_xml_text_element(&mut xml, "\t\t\t\t\t", "Comment", &channel.comment);
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "ExternalIntegrationServiceChannelName",
+                &channel.external_name,
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "MessageDirection",
+                &channel.message_direction,
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "ReceiveMessageProcessing",
+                &channel.receive_message_processing,
+            );
+            write_xml_text_element(
+                &mut xml,
+                "\t\t\t\t\t",
+                "Transactioned",
+                if channel.transactioned {
+                    "true"
+                } else {
+                    "false"
+                },
+            );
+            xml.push_str("\t\t\t\t</Properties>\r\n\t\t\t</IntegrationServiceChannel>\r\n");
+        }
+        xml.push_str("\t\t</ChildObjects>\r\n\t</IntegrationService>\r\n</MetaDataObject>");
         Ok(xml.into_bytes())
     }
 }
@@ -1145,6 +1280,9 @@ pub fn compile_service_metadata(
         (ServiceFamily::WsReference, ServiceLayout::WsReferenceV1) => {
             serialize_ws_reference(&project_ws_reference(validated, object)?)
         }
+        (ServiceFamily::IntegrationService, ServiceLayout::IntegrationServiceV1) => {
+            serialize_integration_service(&project_integration_service(validated, object)?)
+        }
         (family, _) => return Err(ServiceMetadataBuildError::UnsupportedFamily(family)),
     };
     let bytes = raw_deflate(&plaintext)?;
@@ -1234,6 +1372,19 @@ pub fn decode_ws_reference_blob(
         return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
     }
     parse_ws_reference(&inflate_bounded(blob)?)
+}
+
+/// Strictly decodes a raw-DEFLATE `IntegrationService` primary row.
+pub fn decode_integration_service_blob(
+    blob: &[u8],
+    profile: &ServiceMetadataProfile,
+) -> Result<IntegrationServiceNativeIr, ServiceMetadataBuildError> {
+    if profile.family != ServiceFamily::IntegrationService
+        || profile.layout != ServiceLayout::IntegrationServiceV1
+    {
+        return Err(ServiceMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    parse_integration_service(&inflate_bounded(blob)?)
 }
 
 fn validate_coordinates(
@@ -1627,6 +1778,118 @@ fn project_ws_reference(
         manager_value_id,
     };
     validate_ws_reference_ir(&result)?;
+    Ok(result)
+}
+
+fn project_integration_service(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<IntegrationServiceNativeIr, ServiceMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    if object.owner().is_some() || !object.references().is_empty() || !object.assets().is_empty() {
+        return invalid_model(
+            uuid,
+            "IntegrationService must be top-level without references or inline assets",
+        );
+    }
+    require_property_schema(
+        object,
+        &[
+            "Name",
+            "Synonym",
+            "Comment",
+            "ExternalIntegrationServiceAddress",
+        ],
+    )?;
+    let generated = object.generated_types();
+    if generated.len() != 1 || generated[0].kind().as_str() != "Manager" {
+        return invalid_model(
+            uuid,
+            "IntegrationService requires one Manager generated type",
+        );
+    }
+    let manager_type_id = generated[0].uuid();
+    let manager_value_id =
+        generated[0]
+            .value_id()
+            .ok_or(ServiceMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "IntegrationService Manager ValueId is missing",
+            })?;
+    let external_address = text_property(object, "ExternalIntegrationServiceAddress")?.to_owned();
+    let (name, synonyms, comment) = project_service_header(object)?;
+    let mut channels = Vec::new();
+    for channel in validated
+        .configuration()
+        .objects()
+        .iter()
+        .filter(|candidate| candidate.owner() == Some(uuid))
+    {
+        let channel_uuid = channel.identity().uuid();
+        if channel.kind().as_str() != "IntegrationServiceChannel"
+            || !channel.references().is_empty()
+            || !channel.assets().is_empty()
+            || validated
+                .configuration()
+                .objects()
+                .iter()
+                .any(|candidate| candidate.owner() == Some(channel_uuid))
+        {
+            return invalid_model(uuid, "IntegrationService owns an unsupported child object");
+        }
+        require_property_schema(
+            channel,
+            &[
+                "Name",
+                "Synonym",
+                "Comment",
+                "ExternalIntegrationServiceChannelName",
+                "MessageDirection",
+                "ReceiveMessageProcessing",
+                "Transactioned",
+            ],
+        )?;
+        let generated = channel.generated_types();
+        if generated.len() != 1 || generated[0].kind().as_str() != "Manager" {
+            return invalid_model(
+                channel_uuid,
+                "IntegrationServiceChannel requires one Manager generated type",
+            );
+        }
+        let channel_manager_value_id =
+            generated[0]
+                .value_id()
+                .ok_or(ServiceMetadataBuildError::InvalidModel {
+                    object: channel_uuid,
+                    reason: "IntegrationServiceChannel Manager ValueId is missing",
+                })?;
+        let (channel_name, channel_synonyms, channel_comment) = project_service_header(channel)?;
+        channels.push(IntegrationServiceChannelNativeIr {
+            uuid: channel_uuid,
+            name: channel_name,
+            synonyms: channel_synonyms,
+            comment: channel_comment,
+            manager_type_id: generated[0].uuid(),
+            manager_value_id: channel_manager_value_id,
+            external_name: text_property(channel, "ExternalIntegrationServiceChannelName")?
+                .to_owned(),
+            receive_message_processing: text_property(channel, "ReceiveMessageProcessing")?
+                .to_owned(),
+            message_direction: enum_property(channel, "MessageDirection")?.to_owned(),
+            transactioned: bool_property(channel, "Transactioned")?,
+        });
+    }
+    let result = IntegrationServiceNativeIr {
+        uuid,
+        name,
+        synonyms,
+        comment,
+        manager_type_id,
+        manager_value_id,
+        external_address,
+        channels,
+    };
+    validate_integration_service_ir(&result)?;
     Ok(result)
 }
 
@@ -2342,6 +2605,22 @@ fn transfer_direction_from_code(value: &str) -> Option<&'static str> {
     }
 }
 
+fn message_direction_code(value: &str) -> Option<&'static str> {
+    match value {
+        "Send" => Some("0"),
+        "Receive" => Some("1"),
+        _ => None,
+    }
+}
+
+fn message_direction_from_code(value: &str) -> Option<&'static str> {
+    match value {
+        "0" => Some("Send"),
+        "1" => Some("Receive"),
+        _ => None,
+    }
+}
+
 fn reuse_sessions_code(value: &str) -> Option<&'static str> {
     match value {
         "DontUse" => Some("0"),
@@ -2408,6 +2687,110 @@ fn validate_ws_reference_ir(value: &WsReferenceNativeIr) -> Result<(), ServiceMe
         {
             return Err(native(
                 "WSReference Synonym language is invalid or duplicated",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_integration_service_ir(
+    value: &IntegrationServiceNativeIr,
+) -> Result<(), ServiceMetadataBuildError> {
+    if value.channels.is_empty()
+        || value.channels.len() > MAX_CANONICAL_COLLECTION_ITEMS
+        || !valid_identifier_segment(&value.name)
+        || value.external_address.chars().any(char::is_whitespace)
+    {
+        return Err(native("IntegrationService root properties are not exact"));
+    }
+    validate_native_text(&value.external_address, "ExternalIntegrationServiceAddress")?;
+    validate_integration_header(value.uuid, &value.name, &value.synonyms, &value.comment)?;
+    let mut identities = BTreeSet::new();
+    for identity in [value.uuid, value.manager_type_id, value.manager_value_id] {
+        if identity.to_string() == NIL_UUID || !identities.insert(identity) {
+            return Err(native(
+                "IntegrationService root identity is nil or duplicated",
+            ));
+        }
+    }
+    let mut names = BTreeSet::new();
+    for channel in &value.channels {
+        if !valid_identifier_segment(&channel.name)
+            || !names.insert(channel.name.to_lowercase())
+            || channel.external_name.is_empty()
+            || channel.external_name.chars().any(char::is_whitespace)
+            || message_direction_code(&channel.message_direction).is_none()
+        {
+            return Err(native("IntegrationServiceChannel properties are not exact"));
+        }
+        for identity in [
+            channel.uuid,
+            channel.manager_type_id,
+            channel.manager_value_id,
+        ] {
+            if identity.to_string() == NIL_UUID || !identities.insert(identity) {
+                return Err(native(
+                    "IntegrationServiceChannel identity is nil or duplicated",
+                ));
+            }
+        }
+        let direction_properties_are_exact = match channel.message_direction.as_str() {
+            "Receive" => {
+                valid_identifier_segment(&channel.receive_message_processing)
+                    && !channel.transactioned
+            }
+            "Send" => channel.receive_message_processing.is_empty() && channel.transactioned,
+            _ => false,
+        };
+        if !direction_properties_are_exact {
+            return Err(native(
+                "IntegrationServiceChannel direction-specific properties are not exact",
+            ));
+        }
+        validate_integration_header(
+            channel.uuid,
+            &channel.name,
+            &channel.synonyms,
+            &channel.comment,
+        )?;
+        validate_native_text(
+            &channel.external_name,
+            "ExternalIntegrationServiceChannelName",
+        )?;
+        validate_native_text(
+            &channel.receive_message_processing,
+            "ReceiveMessageProcessing",
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_integration_header(
+    uuid: ObjectUuid,
+    name: &str,
+    synonyms: &[ServiceLocalizedString],
+    comment: &str,
+) -> Result<(), ServiceMetadataBuildError> {
+    if uuid.to_string() == NIL_UUID || !valid_identifier_segment(name) {
+        return Err(native(
+            "IntegrationService metadata header is nil or unnamed",
+        ));
+    }
+    validate_native_text(name, "Name")?;
+    validate_native_text(comment, "Comment")?;
+    if synonyms.len() > MAX_CANONICAL_COLLECTION_ITEMS {
+        return Err(native("IntegrationService Synonym collection is too large"));
+    }
+    let mut languages = BTreeSet::new();
+    for synonym in synonyms {
+        validate_native_text(&synonym.language, "Synonym language")?;
+        validate_native_text(&synonym.content, "Synonym content")?;
+        if synonym.language.is_empty()
+            || synonym.language.len() > MAX_LANGUAGE_CODE_BYTES
+            || !languages.insert(synonym.language.as_str())
+        {
+            return Err(native(
+                "IntegrationService Synonym language is invalid or duplicated",
             ));
         }
     }
@@ -2771,6 +3154,55 @@ fn serialize_ws_reference(value: &WsReferenceNativeIr) -> Vec<u8> {
     native_plaintext(plain)
 }
 
+fn serialize_integration_service(value: &IntegrationServiceNativeIr) -> Vec<u8> {
+    let mut plain = String::new();
+    plain.push_str("{1,\r\n{0,\r\n");
+    push_integration_native_header(
+        &mut plain,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plain.push(',');
+    plain.push_str(&value.manager_type_id.to_string());
+    plain.push(',');
+    plain.push_str(&value.manager_value_id.to_string());
+    plain.push(',');
+    push_1c_string(&mut plain, &value.external_address);
+    plain.push_str("},1,\r\n{");
+    plain.push_str(INTEGRATION_CHANNEL_COLLECTION_UUID);
+    write!(&mut plain, ",{},\r\n{{", value.channels.len()).expect("writing to String cannot fail");
+    for channel in &value.channels {
+        plain.push_str("\r\n{\r\n{1,\r\n");
+        push_integration_native_header(
+            &mut plain,
+            channel.uuid,
+            &channel.name,
+            &channel.synonyms,
+            &channel.comment,
+        );
+        plain.push(',');
+        plain.push_str(&channel.manager_type_id.to_string());
+        plain.push(',');
+        plain.push_str(&channel.manager_value_id.to_string());
+        plain.push(',');
+        push_1c_string(&mut plain, &channel.external_name);
+        plain.push(',');
+        push_1c_string(&mut plain, &channel.receive_message_processing);
+        plain.push(',');
+        plain.push_str(
+            message_direction_code(&channel.message_direction)
+                .expect("validated IntegrationService channel direction has an evidenced code"),
+        );
+        plain.push(',');
+        plain.push(if channel.transactioned { '1' } else { '0' });
+        plain.push_str("},0}");
+    }
+    plain.push_str("\r\n}\r\n}\r\n}");
+    native_plaintext(plain)
+}
+
 fn serialize_http_service(value: &HttpServiceNativeIr) -> Vec<u8> {
     let mut plain = String::new();
     plain.push_str("{1,\r\n{2,");
@@ -2949,6 +3381,32 @@ fn push_native_header(
     output.push_str("},");
     push_1c_string(output, name);
     output.push_str(",\r\n");
+    write!(output, "{{{}", synonyms.len()).expect("writing to String cannot fail");
+    for synonym in synonyms {
+        output.push(',');
+        push_1c_string(output, &synonym.language);
+        output.push(',');
+        push_1c_string(output, &synonym.content);
+    }
+    output.push_str("},");
+    push_1c_string(output, comment);
+    output.push_str(",0,0,");
+    output.push_str(NIL_UUID);
+    output.push_str(",0}");
+}
+
+fn push_integration_native_header(
+    output: &mut String,
+    uuid: ObjectUuid,
+    name: &str,
+    synonyms: &[ServiceLocalizedString],
+    comment: &str,
+) {
+    output.push_str("{3,\r\n{1,0,");
+    output.push_str(&uuid.to_string());
+    output.push_str("},");
+    push_1c_string(output, name);
+    output.push(',');
     write!(output, "{{{}", synonyms.len()).expect("writing to String cannot fail");
     for synonym in synonyms {
         output.push(',');
@@ -3291,6 +3749,75 @@ fn parse_ws_reference(plain: &[u8]) -> Result<WsReferenceNativeIr, ServiceMetada
         manager_value_id,
     };
     validate_ws_reference_ir(&result)?;
+    Ok(result)
+}
+
+fn parse_integration_service(
+    plain: &[u8],
+) -> Result<IntegrationServiceNativeIr, ServiceMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 4, "IntegrationService root")?;
+    exact_token(&root[0], "1", "IntegrationService root discriminator")?;
+    exact_token(&root[2], "1", "IntegrationService channel marker")?;
+    let service = exact_list(&root[1], 5, "IntegrationService object")?;
+    exact_token(&service[0], "0", "IntegrationService discriminator")?;
+    let header = parse_native_header(&service[1])?;
+    let manager_type_id = canonical_uuid_token(&service[2], "IntegrationService Manager TypeId")?;
+    let manager_value_id = canonical_uuid_token(&service[3], "IntegrationService Manager ValueId")?;
+    let external_address = text(&service[4], "ExternalIntegrationServiceAddress")?.to_owned();
+
+    let collection = exact_list(&root[3], 3, "IntegrationService channel collection")?;
+    exact_token(
+        &collection[0],
+        INTEGRATION_CHANNEL_COLLECTION_UUID,
+        "IntegrationService channel collection UUID",
+    )?;
+    let count = canonical_usize_token(&collection[1], "IntegrationService channel count")?;
+    if count == 0 || count > MAX_CANONICAL_COLLECTION_ITEMS {
+        return Err(native("IntegrationService channel count is out of bounds"));
+    }
+    let wrappers = exact_list(&collection[2], count, "IntegrationService channel wrappers")?;
+    let mut channels = Vec::with_capacity(count);
+    for wrapper in wrappers {
+        let wrapper = exact_list(wrapper, 2, "IntegrationService channel entry")?;
+        exact_token(&wrapper[1], "0", "IntegrationService channel tail")?;
+        let channel = exact_list(&wrapper[0], 8, "IntegrationService channel")?;
+        exact_token(&channel[0], "1", "IntegrationService channel discriminator")?;
+        let channel_header = parse_native_header(&channel[1])?;
+        let message_direction =
+            message_direction_from_code(token(&channel[6], "MessageDirection")?)
+                .ok_or_else(|| native("IntegrationService MessageDirection code is unsupported"))?
+                .to_owned();
+        channels.push(IntegrationServiceChannelNativeIr {
+            uuid: channel_header.uuid,
+            name: channel_header.name,
+            synonyms: channel_header.synonyms,
+            comment: channel_header.comment,
+            manager_type_id: canonical_uuid_token(
+                &channel[2],
+                "IntegrationServiceChannel Manager TypeId",
+            )?,
+            manager_value_id: canonical_uuid_token(
+                &channel[3],
+                "IntegrationServiceChannel Manager ValueId",
+            )?,
+            external_name: text(&channel[4], "ExternalIntegrationServiceChannelName")?.to_owned(),
+            receive_message_processing: text(&channel[5], "ReceiveMessageProcessing")?.to_owned(),
+            message_direction,
+            transactioned: bool_token(&channel[7], "Transactioned")?,
+        });
+    }
+    let result = IntegrationServiceNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        manager_type_id,
+        manager_value_id,
+        external_address,
+        channels,
+    };
+    validate_integration_service_ir(&result)?;
     Ok(result)
 }
 
@@ -3921,6 +4448,12 @@ mod tests {
     const WS_UUID: &str = "b409116f-3ba2-4303-9bdc-f14961c879d6";
     const WS_MANAGER_TYPE_ID: &str = "651f0326-6551-49a6-a840-b6e604b61639";
     const WS_MANAGER_VALUE_ID: &str = "dd7a8d59-2aeb-4921-a33b-913be961ec98";
+    const INTEGRATION_UUID: &str = "c512a1cd-1240-4e46-8bad-8b7b27c5c25a";
+    const INTEGRATION_MANAGER_TYPE_ID: &str = "5362f1d1-1f56-4a61-a52e-6519a060293e";
+    const INTEGRATION_MANAGER_VALUE_ID: &str = "ad884943-3c3a-4073-ab34-ed12a0d67556";
+    const INTEGRATION_CHANNEL_UUID: &str = "1ef0581c-b1d8-4115-87f1-7856f6c06bb6";
+    const INTEGRATION_CHANNEL_TYPE_ID: &str = "71313d47-3c6e-464a-8776-f7eb0626fd6b";
+    const INTEGRATION_CHANNEL_VALUE_ID: &str = "bb1ff475-725d-46cb-8cbc-9ff08970cccc";
 
     fn xml(version: &str, module: &str) -> Vec<u8> {
         format!(
@@ -4065,6 +4598,40 @@ mod tests {
 \t\t\t<Comment/><LocationURL>{location_url}</LocationURL>\r\n\
 \t\t</Properties>\r\n\
 \t</WSReference>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    fn integration_service_xml(
+        version: &str,
+        direction: &str,
+        handler: &str,
+        transactioned: &str,
+    ) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"{version}\">\r\n\
+\t<IntegrationService uuid=\"{INTEGRATION_UUID}\">\r\n\
+\t\t<InternalInfo><xr:GeneratedType name=\"IntegrationServiceManager.MessageExchange\" category=\"Manager\"><xr:TypeId>{INTEGRATION_MANAGER_TYPE_ID}</xr:TypeId><xr:ValueId>{INTEGRATION_MANAGER_VALUE_ID}</xr:ValueId></xr:GeneratedType></InternalInfo>\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>MessageExchange</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>en</v8:lang><v8:content>Message exchange</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/><ExternalIntegrationServiceAddress/>\r\n\
+\t\t</Properties>\r\n\
+\t\t<ChildObjects>\r\n\
+\t\t\t<IntegrationServiceChannel uuid=\"{INTEGRATION_CHANNEL_UUID}\">\r\n\
+\t\t\t\t<InternalInfo><xr:GeneratedType name=\"IntegrationServiceChannelManager.MessageExchange.input\" category=\"Manager\"><xr:TypeId>{INTEGRATION_CHANNEL_TYPE_ID}</xr:TypeId><xr:ValueId>{INTEGRATION_CHANNEL_VALUE_ID}</xr:ValueId></xr:GeneratedType></InternalInfo>\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>input</Name><Synonym/><Comment/>\r\n\
+\t\t\t\t\t<ExternalIntegrationServiceChannelName>external.input</ExternalIntegrationServiceChannelName>\r\n\
+\t\t\t\t\t<MessageDirection>{direction}</MessageDirection>\r\n\
+\t\t\t\t\t<ReceiveMessageProcessing>{handler}</ReceiveMessageProcessing>\r\n\
+\t\t\t\t\t<Transactioned>{transactioned}</Transactioned>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t</IntegrationServiceChannel>\r\n\
+\t\t</ChildObjects>\r\n\
+\t</IntegrationService>\r\n\
 </MetaDataObject>"
         )
         .into_bytes()
@@ -4285,6 +4852,35 @@ mod tests {
         .unwrap()
     }
 
+    fn integration_service_configuration(
+        version: &str,
+        direction: &str,
+        handler: &str,
+        transactioned: &str,
+    ) -> CanonicalConfiguration {
+        let document = XmlReader::from_slice(&integration_service_xml(
+            version,
+            direction,
+            handler,
+            transactioned,
+        ))
+        .unwrap();
+        let envelope = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("IntegrationService").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap();
+        let mut objects = vec![
+            object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            envelope.root().clone(),
+        ];
+        objects.extend(envelope.descendants().iter().cloned());
+        CanonicalConfiguration::new(objects).unwrap()
+    }
+
     fn axes(version: &str) -> CompileAxes {
         CompileAxes::new(
             XmlDialect::parse(version).unwrap(),
@@ -4424,6 +5020,27 @@ mod tests {
         (
             graph,
             ServiceMetadataProfile::ws_reference_fixture("platform-test"),
+        )
+    }
+
+    fn integration_service_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, ServiceMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [CONFIGURATION_UUID, INTEGRATION_UUID]
+                .into_iter()
+                .map(|uuid| {
+                    ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+                })
+                .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            ServiceMetadataProfile::integration_service_fixture("platform-test"),
         )
     }
 
@@ -5081,7 +5698,125 @@ mod tests {
     }
 
     #[test]
-    fn implemented_service_profiles_are_explicit_and_others_stay_blocked() {
+    fn integration_service_roundtrips_without_a_base_for_both_dialects() {
+        for version in ["2.20", "2.21"] {
+            for (direction, handler, transactioned) in
+                [("Receive", "HandleInput", "false"), ("Send", "", "true")]
+            {
+                let configuration =
+                    integration_service_configuration(version, direction, handler, transactioned);
+                let validated = validate_configuration(&configuration).unwrap();
+                let (graph, profile) = integration_service_graph(&validated);
+                let uuid = ObjectUuid::parse(INTEGRATION_UUID).unwrap();
+                let first =
+                    compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                        .unwrap();
+                let second =
+                    compile_service_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                        .unwrap();
+                assert_eq!(first, second);
+                let ir = decode_integration_service_blob(
+                    first.outcome().compiled_payload().unwrap().bytes(),
+                    &profile,
+                )
+                .unwrap();
+                assert_eq!(ir.channels.len(), 1);
+                assert_eq!(ir.channels[0].message_direction, direction);
+                assert_eq!(ir.channels[0].receive_message_processing, handler);
+                assert_eq!(ir.channels[0].transactioned, transactioned == "true");
+                let output = ir
+                    .to_xml(&ProfileId::parse(&format!("xml-{version}")).unwrap())
+                    .unwrap();
+                let document = XmlReader::from_slice(&output).unwrap();
+                bundled_metadata_registry()
+                    .decode(
+                        &FamilyId::parse("IntegrationService").unwrap(),
+                        &document,
+                        ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                        ObjectPath::root(),
+                    )
+                    .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn integration_service_plaintext_matches_repository_native_fixture() {
+        let configuration =
+            integration_service_configuration("2.20", "Receive", "HandleInput", "false");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = integration_service_graph(&validated);
+        let entry = compile_service_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(INTEGRATION_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        assert!(plain.starts_with(UTF8_BOM));
+        assert_eq!(
+            &plain[UTF8_BOM.len()..],
+            format!(
+                "{{1,\r\n{{0,\r\n{{3,\r\n{{1,0,{INTEGRATION_UUID}}},\"MessageExchange\",{{1,\"en\",\"Message exchange\"}},\"\",0,0,{NIL_UUID},0}},{INTEGRATION_MANAGER_TYPE_ID},{INTEGRATION_MANAGER_VALUE_ID},\"\"}},1,\r\n{{{INTEGRATION_CHANNEL_COLLECTION_UUID},1,\r\n{{\r\n{{\r\n{{1,\r\n{{3,\r\n{{1,0,{INTEGRATION_CHANNEL_UUID}}},\"input\",{{0}},\"\",0,0,{NIL_UUID},0}},{INTEGRATION_CHANNEL_TYPE_ID},{INTEGRATION_CHANNEL_VALUE_ID},\"external.input\",\"HandleInput\",1,0}},0}}\r\n}}\r\n}}\r\n}}"
+            )
+            .as_bytes()
+        );
+    }
+
+    #[test]
+    fn integration_service_unknown_native_shells_fail_closed() {
+        let configuration =
+            integration_service_configuration("2.20", "Receive", "HandleInput", "false");
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = integration_service_graph(&validated);
+        let entry = compile_service_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(INTEGRATION_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = String::from_utf8(
+            inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap(),
+        )
+        .unwrap();
+        let unknown_collection = plain.replacen(
+            INTEGRATION_CHANNEL_COLLECTION_UUID,
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            1,
+        );
+        assert!(matches!(
+            parse_integration_service(unknown_collection.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+        let unknown_direction =
+            plain.replacen("\"HandleInput\",1,0},0}", "\"HandleInput\",9,0},0}", 1);
+        assert!(matches!(
+            parse_integration_service(unknown_direction.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+        let wrong_wrapper_tail =
+            plain.replacen("\"HandleInput\",1,0},0}", "\"HandleInput\",1,0},1}", 1);
+        assert!(matches!(
+            parse_integration_service(wrong_wrapper_tail.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+        let extra_field = plain.replacen(
+            "\"HandleInput\",1,0},0}",
+            "\"HandleInput\",1,0,future},0}",
+            1,
+        );
+        assert!(matches!(
+            parse_integration_service(extra_field.as_bytes()),
+            Err(ServiceMetadataBuildError::Native(_))
+        ));
+    }
+
+    #[test]
+    fn all_service_profiles_are_explicit() {
         let json = format!(
             r#"{{
                 "schema_version": 1,
@@ -5095,7 +5830,8 @@ mod tests {
                     "{XDTO_PACKAGE_LAYOUT_KEY}": "{XDTO_PACKAGE_LAYOUT}",
                     "{HTTP_SERVICE_LAYOUT_KEY}": "{HTTP_SERVICE_LAYOUT}",
                     "{WEB_SERVICE_LAYOUT_KEY}": "{WEB_SERVICE_LAYOUT}",
-                    "{WS_REFERENCE_LAYOUT_KEY}": "{WS_REFERENCE_LAYOUT}"
+                    "{WS_REFERENCE_LAYOUT_KEY}": "{WS_REFERENCE_LAYOUT}",
+                    "{INTEGRATION_SERVICE_LAYOUT_KEY}": "{INTEGRATION_SERVICE_LAYOUT}"
                 }}
             }}"#
         );
@@ -5159,12 +5895,14 @@ mod tests {
             .family(),
             ServiceFamily::WsReference
         );
-        assert!(matches!(
+        assert_eq!(
             ServiceMetadataProfile::from_effective_for_family(
                 effective,
                 ServiceFamily::IntegrationService,
-            ),
-            Err(ServiceMetadataProfileError::FamilyNotImplemented { .. })
-        ));
+            )
+            .unwrap()
+            .family(),
+            ServiceFamily::IntegrationService
+        );
     }
 }

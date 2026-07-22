@@ -336,6 +336,10 @@ mod tests {
                     "http-service-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.integration_service.layout"].value,
+                    "integration-service-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
                     profile.constants["bootstrap.metadata.language.layout"].value,
                     "language-v1-crlf-utf8-bom"
                 );

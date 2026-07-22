@@ -34,6 +34,7 @@ const XDTO_PACKAGE_FAMILY: &str = "XDTOPackage";
 const HTTP_SERVICE_FAMILY: &str = "HTTPService";
 const WEB_SERVICE_FAMILY: &str = "WebService";
 const WS_REFERENCE_FAMILY: &str = "WSReference";
+const INTEGRATION_SERVICE_FAMILY: &str = "IntegrationService";
 const XML_SCHEMA_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 const XSI_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
@@ -91,6 +92,15 @@ pub fn register_ws_reference_codec(
     }))
 }
 
+/// Registers the strict `IntegrationService` metadata codec.
+pub fn register_integration_service_codec(
+    registry: &mut MetadataRegistry,
+) -> Result<(), MetadataRegistryError> {
+    registry.register(Box::new(IntegrationServiceCodec {
+        family: FamilyId::parse(INTEGRATION_SERVICE_FAMILY).expect("family id is stable"),
+    }))
+}
+
 struct ScheduledJobCodec {
     family: FamilyId,
 }
@@ -113,6 +123,33 @@ struct WebServiceCodec {
 
 struct WsReferenceCodec {
     family: FamilyId,
+}
+
+struct IntegrationServiceCodec {
+    family: FamilyId,
+}
+
+impl MetadataFamilyCodec for IntegrationServiceCodec {
+    fn family_id(&self) -> &FamilyId {
+        &self.family
+    }
+
+    fn decode(
+        &self,
+        document: &XmlDocument,
+        source: ProfileId,
+        path: ObjectPath,
+    ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+        decode_integration_service(document, source, path)
+    }
+
+    fn encode(
+        &self,
+        envelope: &MetadataEnvelope,
+        target: &ProfileId,
+    ) -> Result<Vec<u8>, MetadataEncodeError> {
+        encode_integration_service(envelope, target)
+    }
 }
 
 impl MetadataFamilyCodec for WsReferenceCodec {
@@ -355,6 +392,27 @@ struct WsReferenceProjection {
     location_url: String,
     manager_type_id: ObjectUuid,
     manager_value_id: ObjectUuid,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IntegrationServiceChannelProjection {
+    uuid: ObjectUuid,
+    comment: String,
+    manager_type_id: ObjectUuid,
+    manager_value_id: ObjectUuid,
+    external_name: String,
+    message_direction: String,
+    receive_message_processing: String,
+    transactioned: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct IntegrationServiceProjection {
+    comment: String,
+    manager_type_id: ObjectUuid,
+    manager_value_id: ObjectUuid,
+    external_address: String,
+    channels: Vec<IntegrationServiceChannelProjection>,
 }
 
 fn decode_scheduled_job(
@@ -829,6 +887,122 @@ fn decode_ws_reference(
     let root = CanonicalObject::new(parts)
         .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
     MetadataEnvelope::from_parts(root, Vec::new(), document.clone())
+}
+
+fn decode_integration_service(
+    document: &XmlDocument,
+    source: ProfileId,
+    path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    validate_decode_profile(document, &source, &path)?;
+    let projection = project_integration_service(document)?;
+    let generic = decode_metadata_envelope(document, source, path)?;
+    if generic.root().kind().as_str() != INTEGRATION_SERVICE_FAMILY {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService codec requires its exact family",
+        ));
+    }
+    if !generic.root().references().is_empty() || !generic.root().assets().is_empty() {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService cannot contain references or assets",
+        ));
+    }
+    let generated = generic.root().generated_types();
+    if generated.len() != 1
+        || generated[0].kind().as_str() != "Manager"
+        || generated[0].uuid() != projection.manager_type_id
+        || generated[0].value_id() != Some(projection.manager_value_id)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService Manager TypeId/ValueId is not exact",
+        ));
+    }
+    let mut root_parts = copy_object_parts(generic.root());
+    root_parts.properties.push(canonical_field(
+        "Comment",
+        CanonicalValue::text(canonical_text(&projection.comment)?),
+    )?);
+    root_parts.properties.push(canonical_field(
+        "ExternalIntegrationServiceAddress",
+        CanonicalValue::text(canonical_text(&projection.external_address)?),
+    )?);
+    let root = CanonicalObject::new(root_parts)
+        .map_err(|error| MetadataDecodeError::Core(error.to_string()))?;
+
+    let mut projected_channels = projection
+        .channels
+        .iter()
+        .map(|channel| (channel.uuid, channel))
+        .collect::<BTreeMap<_, _>>();
+    if projected_channels.len() != projection.channels.len()
+        || generic.descendants().len() != projection.channels.len()
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService channel inventory is not exact",
+        ));
+    }
+    let mut descendants = Vec::with_capacity(generic.descendants().len());
+    for channel in generic.descendants() {
+        if channel.kind().as_str() != "IntegrationServiceChannel"
+            || channel.owner() != Some(root.identity().uuid())
+            || !channel.references().is_empty()
+            || !channel.assets().is_empty()
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationService contains an unsupported child",
+            ));
+        }
+        let projected = projected_channels
+            .remove(&channel.identity().uuid())
+            .ok_or(MetadataDecodeError::InvalidEnvelope(
+                "unknown IntegrationService channel",
+            ))?;
+        let generated = channel.generated_types();
+        if generated.len() != 1
+            || generated[0].kind().as_str() != "Manager"
+            || generated[0].uuid() != projected.manager_type_id
+            || generated[0].value_id() != Some(projected.manager_value_id)
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationServiceChannel Manager TypeId/ValueId is not exact",
+            ));
+        }
+        let mut parts = copy_object_parts(channel);
+        for (name, value) in [
+            (
+                "Comment",
+                CanonicalValue::text(canonical_text(&projected.comment)?),
+            ),
+            (
+                "ExternalIntegrationServiceChannelName",
+                CanonicalValue::text(canonical_text(&projected.external_name)?),
+            ),
+            (
+                "MessageDirection",
+                enum_value(&projected.message_direction)?,
+            ),
+            (
+                "ReceiveMessageProcessing",
+                CanonicalValue::text(canonical_text(&projected.receive_message_processing)?),
+            ),
+            (
+                "Transactioned",
+                CanonicalValue::boolean(projected.transactioned),
+            ),
+        ] {
+            parts.properties.push(canonical_field(name, value)?);
+        }
+        descendants.push(
+            CanonicalObject::new(parts)
+                .map_err(|error| MetadataDecodeError::Core(error.to_string()))?,
+        );
+    }
+    if !projected_channels.is_empty() {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService projected channels are missing",
+        ));
+    }
+    MetadataEnvelope::from_parts(root, descendants, document.clone())
 }
 
 fn xdto_type_value(value: &XdtoTypeProjection) -> Result<CanonicalValue, MetadataDecodeError> {
@@ -1510,6 +1684,258 @@ fn project_ws_reference(
         manager_type_id,
         manager_value_id,
     })
+}
+
+fn project_integration_service(
+    document: &XmlDocument,
+) -> Result<IntegrationServiceProjection, MetadataDecodeError> {
+    let uris = resolve_namespaces(document.root())?;
+    let expected = uri_of(document.root(), &uris);
+    if !matches!(expected, None | Some(MD_NAMESPACE)) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService root namespace",
+        ));
+    }
+    reject_attributes(document.root(), &["version"])?;
+    let object = required_child(document.root(), INTEGRATION_SERVICE_FAMILY, expected, &uris)?;
+    reject_attributes(object, &["uuid"])?;
+    let sections = object
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if sections.len() != 3
+        || !typed(sections[0], "InternalInfo", expected, &uris)
+        || !typed(sections[1], "Properties", expected, &uris)
+        || !typed(sections[2], "ChildObjects", expected, &uris)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService sections or order are unsupported",
+        ));
+    }
+    let properties = sections[1];
+    reject_exact_service_properties(
+        properties,
+        &[
+            "Name",
+            "Synonym",
+            "Comment",
+            "ExternalIntegrationServiceAddress",
+        ],
+        expected,
+        &uris,
+    )?;
+    let name = required_text(properties, "Name", expected, &uris)?;
+    if !valid_identifier(&name) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService Name is not an exact identifier",
+        ));
+    }
+    let expected_manager_name = format!("IntegrationServiceManager.{name}");
+    let (manager_type_id, manager_value_id) =
+        project_exact_manager_generated(sections[0], &uris, &expected_manager_name)?;
+    let root_uuid = required_uuid(object)?;
+    let mut identities = BTreeSet::from([root_uuid, manager_type_id, manager_value_id]);
+    if identities.len() != 3 {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService root identities are duplicated",
+        ));
+    }
+    let external_address = required_text(
+        properties,
+        "ExternalIntegrationServiceAddress",
+        expected,
+        &uris,
+    )?;
+    if external_address.chars().any(char::is_whitespace) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "IntegrationService external address is not exact",
+        ));
+    }
+
+    let child_objects = sections[2];
+    reject_attributes(child_objects, &[])?;
+    let mut channels = Vec::new();
+    let mut names = BTreeSet::new();
+    for node in child_objects.children() {
+        let XmlNode::Element(channel) = node else {
+            continue;
+        };
+        if !typed(channel, "IntegrationServiceChannel", expected, &uris) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationService contains an unknown child",
+            ));
+        }
+        reject_attributes(channel, &["uuid"])?;
+        let uuid = required_uuid(channel)?;
+        let channel_sections = channel
+            .children()
+            .iter()
+            .filter_map(|node| match node {
+                XmlNode::Element(child) => Some(child),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if channel_sections.len() != 2
+            || !typed(channel_sections[0], "InternalInfo", expected, &uris)
+            || !typed(channel_sections[1], "Properties", expected, &uris)
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationServiceChannel sections or order are unsupported",
+            ));
+        }
+        let channel_properties = channel_sections[1];
+        reject_exact_service_properties(
+            channel_properties,
+            &[
+                "Name",
+                "Synonym",
+                "Comment",
+                "ExternalIntegrationServiceChannelName",
+                "MessageDirection",
+                "ReceiveMessageProcessing",
+                "Transactioned",
+            ],
+            expected,
+            &uris,
+        )?;
+        let channel_name = required_text(channel_properties, "Name", expected, &uris)?;
+        if !valid_identifier(&channel_name)
+            || !names.insert(
+                channel_name
+                    .chars()
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>(),
+            )
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationServiceChannel Name is invalid or duplicated",
+            ));
+        }
+        let expected_channel_manager =
+            format!("IntegrationServiceChannelManager.{name}.{channel_name}");
+        let (channel_type_id, channel_value_id) =
+            project_exact_manager_generated(channel_sections[0], &uris, &expected_channel_manager)?;
+        for identity in [uuid, channel_type_id, channel_value_id] {
+            if !identities.insert(identity) {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "IntegrationService identity is duplicated",
+                ));
+            }
+        }
+        let external_name = required_text(
+            channel_properties,
+            "ExternalIntegrationServiceChannelName",
+            expected,
+            &uris,
+        )?;
+        if external_name.is_empty() || external_name.chars().any(char::is_whitespace) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationServiceChannel external name is not exact",
+            ));
+        }
+        let message_direction =
+            required_text(channel_properties, "MessageDirection", expected, &uris)?;
+        if !matches!(message_direction.as_str(), "Send" | "Receive") {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationServiceChannel MessageDirection is unsupported",
+            ));
+        }
+        let receive_message_processing = required_text(
+            channel_properties,
+            "ReceiveMessageProcessing",
+            expected,
+            &uris,
+        )?;
+        let transactioned = required_bool(channel_properties, "Transactioned", expected, &uris)?;
+        let exact_direction_properties = match message_direction.as_str() {
+            "Receive" => valid_identifier(&receive_message_processing) && !transactioned,
+            "Send" => receive_message_processing.is_empty() && transactioned,
+            _ => unreachable!("validated above"),
+        };
+        if !exact_direction_properties {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "IntegrationServiceChannel direction-specific properties are unsupported",
+            ));
+        }
+        channels.push(IntegrationServiceChannelProjection {
+            uuid,
+            comment: required_text(channel_properties, "Comment", expected, &uris)?,
+            manager_type_id: channel_type_id,
+            manager_value_id: channel_value_id,
+            external_name,
+            message_direction,
+            receive_message_processing,
+            transactioned,
+        });
+    }
+    if channels.is_empty() {
+        return Err(MetadataDecodeError::Missing("IntegrationServiceChannel"));
+    }
+    Ok(IntegrationServiceProjection {
+        comment: required_text(properties, "Comment", expected, &uris)?,
+        manager_type_id,
+        manager_value_id,
+        external_address,
+        channels,
+    })
+}
+
+fn project_exact_manager_generated(
+    internal: &XmlElement,
+    uris: &ResolvedNamespaces,
+    expected_name: &str,
+) -> Result<(ObjectUuid, ObjectUuid), MetadataDecodeError> {
+    reject_attributes(internal, &[])?;
+    let generated = internal
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if generated.len() != 1 || !typed(generated[0], "GeneratedType", Some(XR_NAMESPACE), uris) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "Manager InternalInfo must contain one xr:GeneratedType",
+        ));
+    }
+    let generated = generated[0];
+    reject_attributes(generated, &["name", "category"])?;
+    if unprefixed_attribute(generated, "name") != Some(expected_name)
+        || unprefixed_attribute(generated, "category") != Some("Manager")
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "Manager generated type name or category is inconsistent",
+        ));
+    }
+    let identities = generated
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if identities.len() != 2
+        || !typed(identities[0], "TypeId", Some(XR_NAMESPACE), uris)
+        || !typed(identities[1], "ValueId", Some(XR_NAMESPACE), uris)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "Manager generated TypeId/ValueId fields or order are unsupported",
+        ));
+    }
+    let type_id = exact_generated_uuid(identities[0], "Manager TypeId")?;
+    let value_id = exact_generated_uuid(identities[1], "Manager ValueId")?;
+    if type_id == value_id {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "Manager TypeId and ValueId are not independent",
+        ));
+    }
+    Ok((type_id, value_id))
 }
 
 fn exact_generated_uuid(
@@ -2348,6 +2774,50 @@ fn encode_ws_reference(
     .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
 }
 
+fn encode_integration_service(
+    envelope: &MetadataEnvelope,
+    target: &ProfileId,
+) -> Result<Vec<u8>, MetadataEncodeError> {
+    let path = envelope.root().identity().path().clone();
+    let target_version =
+        profile_version(target).ok_or_else(|| MetadataEncodeError::UnsupportedProfile {
+            object_path: path.clone(),
+            profile: target.clone(),
+        })?;
+    if envelope.root().kind().as_str() != INTEGRATION_SERVICE_FAMILY {
+        return Err(invalid_model(&path, "kind"));
+    }
+    let source_profile = envelope.root().provenance().source_profile().clone();
+    validate_decode_profile(envelope.source_document(), &source_profile, &path)
+        .map_err(decode_to_encode)?;
+    let source =
+        decode_integration_service(envelope.source_document(), source_profile, path.clone())
+            .map_err(decode_to_encode)?;
+    if source.root() != envelope.root() || source.descendants() != envelope.descendants() {
+        return Err(invalid_model(
+            &path,
+            "IntegrationService semantic mutation is not implemented",
+        ));
+    }
+    let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
+        == target_version
+    {
+        envelope.source_document().root().clone()
+    } else {
+        set_unprefixed_attribute(
+            envelope.source_document().root(),
+            "version",
+            target_version,
+            &path,
+        )?
+    };
+    XmlWriter::to_vec(
+        &envelope.source_document().with_root(root),
+        LexicalPolicy::Preserve,
+    )
+    .map_err(|error| MetadataEncodeError::Xml(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use ibcmd_core::value::CanonicalValueKind;
@@ -2919,6 +3389,175 @@ mod tests {
                 registry
                     .decode(
                         &FamilyId::parse(WS_REFERENCE_FAMILY).unwrap(),
+                        &document,
+                        profile("2.20"),
+                        ObjectPath::root(),
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    fn integration_service_fixture(
+        version: &str,
+        receive_direction: &str,
+        receive_handler: &str,
+        send_transactioned: &str,
+        extra: &str,
+    ) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"{MD_NAMESPACE}\" xmlns:v8=\"{V8_NAMESPACE}\" xmlns:xr=\"{XR_NAMESPACE}\" version=\"{version}\">\r\n\
+\t<IntegrationService uuid=\"c512a1cd-1240-4e46-8bad-8b7b27c5c25a\">\r\n\
+\t\t<InternalInfo>\r\n\
+\t\t\t<xr:GeneratedType name=\"IntegrationServiceManager.ОбменСообщениями\" category=\"Manager\">\r\n\
+\t\t\t\t<xr:TypeId>5362f1d1-1f56-4a61-a52e-6519a060293e</xr:TypeId>\r\n\
+\t\t\t\t<xr:ValueId>ad884943-3c3a-4073-ab34-ed12a0d67556</xr:ValueId>\r\n\
+\t\t\t</xr:GeneratedType>\r\n\
+\t\t</InternalInfo>\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>ОбменСообщениями</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Обмен сообщениями</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<ExternalIntegrationServiceAddress/>{extra}\r\n\
+\t\t</Properties>\r\n\
+\t\t<ChildObjects>\r\n\
+\t\t\t<IntegrationServiceChannel uuid=\"1ef0581c-b1d8-4115-87f1-7856f6c06bb6\">\r\n\
+\t\t\t\t<InternalInfo>\r\n\
+\t\t\t\t\t<xr:GeneratedType name=\"IntegrationServiceChannelManager.ОбменСообщениями.input_from_SM_normal_priority\" category=\"Manager\">\r\n\
+\t\t\t\t\t\t<xr:TypeId>71313d47-3c6e-464a-8776-f7eb0626fd6b</xr:TypeId>\r\n\
+\t\t\t\t\t\t<xr:ValueId>bb1ff475-725d-46cb-8cbc-9ff08970cccc</xr:ValueId>\r\n\
+\t\t\t\t\t</xr:GeneratedType>\r\n\
+\t\t\t\t</InternalInfo>\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>input_from_SM_normal_priority</Name>\r\n\
+\t\t\t\t\t<Synonym/>\r\n\
+\t\t\t\t\t<Comment/>\r\n\
+\t\t\t\t\t<ExternalIntegrationServiceChannelName>e1c::FreshBus::Main::MessageExchange_v2.input_from_SM_normal_priority</ExternalIntegrationServiceChannelName>\r\n\
+\t\t\t\t\t<MessageDirection>{receive_direction}</MessageDirection>\r\n\
+\t\t\t\t\t<ReceiveMessageProcessing>{receive_handler}</ReceiveMessageProcessing>\r\n\
+\t\t\t\t\t<Transactioned>false</Transactioned>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t</IntegrationServiceChannel>\r\n\
+\t\t\t<IntegrationServiceChannel uuid=\"b017ac62-a4a2-47bd-b963-50e0764a7d4e\">\r\n\
+\t\t\t\t<InternalInfo>\r\n\
+\t\t\t\t\t<xr:GeneratedType name=\"IntegrationServiceChannelManager.ОбменСообщениями.output_to_SM_high_priority\" category=\"Manager\">\r\n\
+\t\t\t\t\t\t<xr:TypeId>fa26d8bb-bc63-4707-926d-64b8c10cd13d</xr:TypeId>\r\n\
+\t\t\t\t\t\t<xr:ValueId>301c529a-896f-4da6-946e-a28690af5399</xr:ValueId>\r\n\
+\t\t\t\t\t</xr:GeneratedType>\r\n\
+\t\t\t\t</InternalInfo>\r\n\
+\t\t\t\t<Properties>\r\n\
+\t\t\t\t\t<Name>output_to_SM_high_priority</Name>\r\n\
+\t\t\t\t\t<Synonym/>\r\n\
+\t\t\t\t\t<Comment/>\r\n\
+\t\t\t\t\t<ExternalIntegrationServiceChannelName>e1c::FreshBus::Main::MessageExchange_v2.output_to_SM_high_priority</ExternalIntegrationServiceChannelName>\r\n\
+\t\t\t\t\t<MessageDirection>Send</MessageDirection>\r\n\
+\t\t\t\t\t<ReceiveMessageProcessing/>\r\n\
+\t\t\t\t\t<Transactioned>{send_transactioned}</Transactioned>\r\n\
+\t\t\t\t</Properties>\r\n\
+\t\t\t</IntegrationServiceChannel>\r\n\
+\t\t</ChildObjects>\r\n\
+\t</IntegrationService>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn integration_service_channels_are_typed_and_cross_version_roundtrip() {
+        let mut registry = MetadataRegistry::default();
+        register_integration_service_codec(&mut registry).unwrap();
+        for version in ["2.20", "2.21"] {
+            let document = XmlReader::from_slice(&integration_service_fixture(
+                version,
+                "Receive",
+                "ОбработатьСообщениеОбычныйПриоритет",
+                "true",
+                "",
+            ))
+            .unwrap();
+            let envelope = registry
+                .decode(
+                    &FamilyId::parse(INTEGRATION_SERVICE_FAMILY).unwrap(),
+                    &document,
+                    profile(version),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+            assert_eq!(envelope.root().properties().len(), 4);
+            assert_eq!(envelope.root().generated_types().len(), 1);
+            assert_eq!(envelope.descendants().len(), 2);
+            assert_eq!(envelope.descendants()[0].properties().len(), 7);
+            assert!(matches!(
+                envelope.descendants()[0].properties()[4].value().kind(),
+                CanonicalValueKind::EnumToken(_)
+            ));
+            assert!(matches!(
+                envelope.descendants()[1].properties()[6].value().kind(),
+                CanonicalValueKind::Bool(true)
+            ));
+            let target = if version == "2.20" { "2.21" } else { "2.20" };
+            let output = registry.encode(&envelope, &profile(target)).unwrap();
+            let reparsed = XmlReader::from_slice(&output).unwrap();
+            registry
+                .decode(
+                    &FamilyId::parse(INTEGRATION_SERVICE_FAMILY).unwrap(),
+                    &reparsed,
+                    profile(target),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn integration_service_unknown_identity_direction_and_property_fail_closed() {
+        let mut registry = MetadataRegistry::default();
+        register_integration_service_codec(&mut registry).unwrap();
+        let wrong_manager = String::from_utf8(integration_service_fixture(
+            "2.20",
+            "Receive",
+            "ОбработатьСообщениеОбычныйПриоритет",
+            "true",
+            "",
+        ))
+        .unwrap()
+        .replacen(
+            "IntegrationServiceManager.ОбменСообщениями",
+            "IntegrationServiceManager.Другое",
+            1,
+        )
+        .into_bytes();
+        for input in [
+            wrong_manager,
+            integration_service_fixture("2.20", "Receive", "", "true", ""),
+            integration_service_fixture(
+                "2.20",
+                "Unknown",
+                "ОбработатьСообщениеОбычныйПриоритет",
+                "true",
+                "",
+            ),
+            integration_service_fixture(
+                "2.20",
+                "Receive",
+                "ОбработатьСообщениеОбычныйПриоритет",
+                "false",
+                "",
+            ),
+            integration_service_fixture(
+                "2.20",
+                "Receive",
+                "ОбработатьСообщениеОбычныйПриоритет",
+                "true",
+                "<Future/>",
+            ),
+        ] {
+            let document = XmlReader::from_slice(&input).unwrap();
+            assert!(
+                registry
+                    .decode(
+                        &FamilyId::parse(INTEGRATION_SERVICE_FAMILY).unwrap(),
                         &document,
                         profile("2.20"),
                         ObjectPath::root(),
