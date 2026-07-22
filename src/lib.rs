@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod cli;
 pub mod compatibility;
+pub mod compiler;
 pub mod dump_sources;
 pub mod form_matrix;
 pub(crate) mod form_schema;
