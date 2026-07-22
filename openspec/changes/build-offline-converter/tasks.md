@@ -420,7 +420,7 @@
 
 ### MIG-002 — Реализовать graph planner, transactional executor и report
 
-- **Статус:** `[ ]`; **зависимости:** MIG-001, CORE-004
+- **Статус:** `[x]`; **зависимости:** MIG-001, CORE-004
 - **Файлы:** создать `crates/ibcmd-core/src/migration/graph.rs`, `executor.rs`, `report.rs`
 - **Действия:** deterministic path, clone/apply/validate, composed loss report.
 - **Проверка:** no-path/ambiguity/cycle errors; fatal step leaves source unchanged; stable JSON route report.
