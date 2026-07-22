@@ -4,11 +4,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
+use ibcmd_core::artifact::StorageProfileId;
+use ibcmd_core::storage::{
+    MultipartIdentity, StorageKey, StoragePatchEntry, StoragePatchOutcome, StoragePatchTarget,
+    StorageProvenance,
+};
+use ibcmd_core::version::XmlDialect;
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::adapters::mssql_legacy::LEGACY_MSSQL_STORAGE_PROFILE_ID;
 use crate::cli::{
     InfobaseConfigSourceVersion, MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs,
     MssqlDeltaExportArgs, MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
@@ -38,6 +45,9 @@ use crate::cli::{
     MssqlStageWebServiceObjectArgs, MssqlStageXdtopackageObjectArgs, MssqlStorageExportArgs,
     MssqlStorageImportArgs,
 };
+use crate::compiler::{
+    AdditionalIndexesMapping, CompileAxes, CompileRequest, SourcePayload, compile_source,
+};
 use crate::module_blob::{
     CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
     VersionReplacement, business_process_flowchart_base_free_blockers,
@@ -47,16 +57,16 @@ use crate::module_blob::{
     pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml,
     pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml,
     pack_ext_picture_blob_from_bytes, pack_form_body_blob_from_form_xml_with_source_and_assets,
-    pack_help_blob_from_parts, pack_module_blob_bytes, pack_module_blob_container_bytes,
+    pack_help_blob_from_parts, pack_module_blob_container_bytes,
     pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint, pack_predefined_data_blob_from_xml,
-    pack_raw_deflated_blob_from_bytes, pack_role_rights_blob_from_xml_with_source,
-    pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source,
-    pack_style_body_blob_from_xml, parse_common_module_xml_properties,
-    parse_ext_picture_file_name_from_xml, parse_help_pages_from_xml,
-    parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes,
-    patch_versions_blob_bytes_allowing_additions, predefined_data_base_free_blockers,
-    raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256,
-    raw_deflated_plain_sha256, role_rights_base_free_blockers, versions_base_free_blockers,
+    pack_role_rights_blob_from_xml_with_source, pack_schedule_blob_from_xml,
+    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
+    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
+    parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
+    patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
+    predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
+    raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
+    versions_base_free_blockers,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -525,6 +535,155 @@ struct PreparedMetadataBodyStage {
     blob_sha256: String,
 }
 
+struct PreparedModuleBody {
+    blob: Vec<u8>,
+    text_bytes: usize,
+    output_sha256: String,
+}
+
+fn mssql_compile_axes(xml_dialect: XmlDialect) -> CompileAxes {
+    CompileAxes::new(
+        xml_dialect,
+        None,
+        None,
+        StorageProfileId::parse(LEGACY_MSSQL_STORAGE_PROFILE_ID)
+            .expect("legacy MSSQL storage profile is valid"),
+        None,
+    )
+}
+
+fn mssql_compile_axes_from_metadata_xml(xml: &[u8]) -> Result<CompileAxes> {
+    let dialect = source_xml_version_from_bytes(xml)?
+        .ok_or_else(|| anyhow!("metadata XML does not declare a source version"))?;
+    let dialect = XmlDialect::parse(&dialect)?;
+    Ok(mssql_compile_axes(dialect))
+}
+
+fn legacy_non_xml_compile_axes() -> CompileAxes {
+    // Standalone module/versions commands have no owning XML document. Keep
+    // their historical dialect explicit; do not infer a platform build from it.
+    mssql_compile_axes(XmlDialect::parse("2.20").expect("legacy XCF dialect is valid"))
+}
+
+fn mssql_patch_target(key: &str, provenance: &str) -> Result<StoragePatchTarget> {
+    Ok(StoragePatchTarget::new(
+        StorageKey::new(key)?,
+        MultipartIdentity::single(),
+        StorageProvenance::new(provenance)?,
+    ))
+}
+
+fn compile_mssql_source(
+    axes: &CompileAxes,
+    key: &str,
+    provenance: &str,
+    source: SourcePayload<'_>,
+) -> Result<StoragePatchEntry> {
+    compile_source(
+        axes,
+        CompileRequest::new(mssql_patch_target(key, provenance)?, source),
+    )
+    .map_err(Into::into)
+}
+
+fn compiled_entry_body(
+    entry: StoragePatchEntry,
+    path: PathBuf,
+    label: &str,
+) -> Result<PreparedMetadataBodyStage> {
+    let body_id = entry.target().key().as_str().to_string();
+    match entry.outcome() {
+        StoragePatchOutcome::Compiled(payload) => Ok(PreparedMetadataBodyStage {
+            body_id,
+            path,
+            blob: payload.bytes().to_vec(),
+            blob_sha256: payload.sha256().to_string(),
+        }),
+        StoragePatchOutcome::NeedsBase { required, reason } => Err(anyhow!(
+            "{label} requires base Config row {required}: {reason}"
+        )),
+        StoragePatchOutcome::Unsupported { reason } => {
+            Err(anyhow!("unsupported {label}: {reason}"))
+        }
+    }
+}
+
+fn required_base_key(entry: &StoragePatchEntry, label: &str) -> Result<StorageKey> {
+    match entry.outcome() {
+        StoragePatchOutcome::NeedsBase { required, .. } => Ok(required.clone()),
+        StoragePatchOutcome::Compiled(_) => Err(anyhow!(
+            "{label} unexpectedly compiled without its active base Config row"
+        )),
+        StoragePatchOutcome::Unsupported { reason } => {
+            Err(anyhow!("unsupported {label}: {reason}"))
+        }
+    }
+}
+
+fn classify_required_base(
+    axes: &CompileAxes,
+    body_id: &str,
+    provenance: &Path,
+    reason: &str,
+    label: &str,
+) -> Result<StorageKey> {
+    let required = StorageKey::new(body_id)?;
+    let dependency = compile_mssql_source(
+        axes,
+        body_id,
+        &provenance.to_string_lossy(),
+        SourcePayload::NeedsBase { required, reason },
+    )?;
+    required_base_key(&dependency, label)
+}
+
+fn classify_versions_dependency(
+    axes: &CompileAxes,
+    selected_config_rows: usize,
+) -> Result<StorageKey> {
+    let reason = versions_base_free_blocker_reason(selected_config_rows);
+    let required = StorageKey::new("versions")?;
+    let entry = compile_mssql_source(
+        axes,
+        "versions",
+        "mssql:active-versions",
+        SourcePayload::NeedsBase {
+            required,
+            reason: &reason,
+        },
+    )?;
+    required_base_key(&entry, "versions")
+}
+
+fn fetch_classified_versions_blob_with_auth(
+    sqlcmd: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+    database: &str,
+    axes: &CompileAxes,
+    selected_config_rows: usize,
+) -> Result<Vec<u8>> {
+    let required = classify_versions_dependency(axes, selected_config_rows)?;
+    fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())
+}
+
+fn fetch_classified_versions_blob(
+    sqlcmd: &Path,
+    server: &str,
+    database: &str,
+    axes: &CompileAxes,
+    selected_config_rows: usize,
+) -> Result<Vec<u8>> {
+    fetch_classified_versions_blob_with_auth(
+        sqlcmd,
+        server,
+        SqlAuth::integrated(),
+        database,
+        axes,
+        selected_config_rows,
+    )
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct NestedCommandModuleSource {
     command_id: String,
@@ -678,8 +837,14 @@ pub fn audit_source_parity(
     let prepare_failure_summary = source_parity_failure_summary(&prepare_failures);
 
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
-    let versions_blob = fetch_config_blob(&args.sqlcmd, &args.server, &args.database, "versions")?;
     let changes = source_stage_change_ids(&metadata_objects, &common_modules);
+    let versions_blob = fetch_classified_versions_blob(
+        &args.sqlcmd,
+        &args.server,
+        &args.database,
+        &legacy_non_xml_compile_axes(),
+        changes.len(),
+    )?;
     let (
         versions_blob_report,
         versions_blob_for_digest,
@@ -2123,12 +2288,20 @@ pub fn stage_common_module_metadata(
     let module_id = normalize_uuid_arg(&args.module_id)?;
     let xml = fs::read(&args.xml)
         .with_context(|| format!("failed to read XML {}", args.xml.display()))?;
+    let axes = mssql_compile_axes_from_metadata_xml(&xml)?;
+    let dependency = compile_mssql_source(
+        &axes,
+        &module_id,
+        &args.xml.to_string_lossy(),
+        SourcePayload::CommonModuleMetadataXml { xml: &xml },
+    )?;
+    let required = required_base_key(&dependency, "CommonModule metadata XML")?;
     let base_metadata_blob = fetch_config_blob_with_auth(
         &args.sqlcmd,
         &args.server,
         sql_auth,
         &args.database,
-        &module_id,
+        required.as_str(),
     )?;
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     if packed_metadata.properties.uuid != module_id {
@@ -2139,12 +2312,13 @@ pub fn stage_common_module_metadata(
         ));
     }
 
-    let versions_blob = fetch_config_blob_with_auth(
+    let versions_blob = fetch_classified_versions_blob_with_auth(
         &args.sqlcmd,
         &args.server,
         sql_auth,
         &args.database,
-        "versions",
+        &axes,
+        1,
     )?;
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &[module_id.clone()], true)?;
 
@@ -2362,13 +2536,6 @@ pub fn stage_metadata_objects(
     })??;
     ensure_unique_metadata_object_ids(&prepared)?;
 
-    let versions_blob = fetch_config_blob_with_auth(
-        &args.sqlcmd,
-        &args.server,
-        sql_auth,
-        &args.database,
-        "versions",
-    )?;
     let changes = prepared
         .iter()
         .flat_map(|object| {
@@ -2376,6 +2543,14 @@ pub fn stage_metadata_objects(
                 .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
         })
         .collect::<Vec<_>>();
+    let versions_blob = fetch_classified_versions_blob_with_auth(
+        &args.sqlcmd,
+        &args.server,
+        sql_auth,
+        &args.database,
+        &legacy_non_xml_compile_axes(),
+        changes.len(),
+    )?;
     let patched_versions =
         patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
@@ -2551,14 +2726,15 @@ pub fn stage_source_objects(
     let common_module_count = common_modules.len();
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
 
-    let versions_blob = fetch_config_blob_with_auth(
+    let changes = source_stage_change_ids(&metadata_objects, &common_modules);
+    let versions_blob = fetch_classified_versions_blob_with_auth(
         &args.sqlcmd,
         &args.server,
         sql_auth,
         &args.database,
-        "versions",
+        &legacy_non_xml_compile_axes(),
+        changes.len(),
     )?;
-    let changes = source_stage_change_ids(&metadata_objects, &common_modules);
     let patched_versions =
         patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
@@ -3450,10 +3626,18 @@ fn prepare_metadata_object_stage(
 ) -> Result<PreparedMetadataObjectStage> {
     let xml = fs::read(&xml_path)
         .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
+    let axes = mssql_compile_axes_from_metadata_xml(&xml)?;
     let properties = parse_simple_metadata_xml_properties(&xml)?;
     let object_id = properties.uuid.clone();
+    let dependency = compile_mssql_source(
+        &axes,
+        &object_id,
+        &xml_path.to_string_lossy(),
+        SourcePayload::MetadataXml { xml: &xml },
+    )?;
+    let required = required_base_key(&dependency, "metadata XML")?;
     let base_metadata_blob =
-        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &object_id)?;
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let packed_metadata =
         pack_simple_metadata_blob_from_xml_with_source(&base_metadata_blob, &xml, source)?;
     if packed_metadata.properties.uuid != object_id {
@@ -3472,6 +3656,7 @@ fn prepare_metadata_object_stage(
         &xml,
         &packed_metadata.properties,
         source,
+        &axes,
     )?;
 
     Ok(PreparedMetadataObjectStage {
@@ -3495,6 +3680,7 @@ fn prepare_metadata_body_rows(
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let mut rows = match properties.kind.as_str() {
         "Style" => prepare_style_body_row(sqlcmd, server, database, xml_path, properties, source),
@@ -3508,6 +3694,7 @@ fn prepare_metadata_body_rows(
             infer_xdto_package_body_path(xml_path),
             properties,
             "XDTOPackage body",
+            axes,
         ),
         "WSReference" => prepare_raw_deflated_body_row(
             sqlcmd,
@@ -3516,30 +3703,31 @@ fn prepare_metadata_body_rows(
             infer_ws_reference_definition_path(xml_path),
             properties,
             "WSReference definition",
+            axes,
         ),
-        "CommonTemplate" | "Template" => {
-            prepare_template_body_row(sqlcmd, server, database, xml_path, xml, properties, source)
-        }
+        "CommonTemplate" | "Template" => prepare_template_body_row(
+            sqlcmd, server, database, xml_path, xml, properties, source, axes,
+        ),
         "CommonPicture" => {
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
         }
         "Configuration" => prepare_configuration_asset_body_rows(
-            sqlcmd, server, sql_auth, database, xml_path, properties,
+            sqlcmd, server, sql_auth, database, xml_path, properties, axes,
         ),
         "BusinessProcess" => prepare_business_process_flowchart_body_row(
-            sqlcmd, server, sql_auth, database, xml_path, properties,
+            sqlcmd, server, sql_auth, database, xml_path, properties, axes,
         ),
         "Catalog" | "ChartOfCharacteristicTypes" => prepare_predefined_data_body_row(
-            sqlcmd, server, sql_auth, database, xml_path, properties,
+            sqlcmd, server, sql_auth, database, xml_path, properties, axes,
         ),
         "ExchangePlan" => prepare_exchange_plan_content_body_row(
             sqlcmd, server, database, xml_path, properties, source,
         ),
         "Form" | "CommonForm" => prepare_form_body_row(
-            sqlcmd, server, sql_auth, database, xml_path, properties, source,
+            sqlcmd, server, sql_auth, database, xml_path, properties, source, axes,
         ),
         "Role" => prepare_role_rights_body_row(
-            sqlcmd, server, sql_auth, database, xml_path, properties, source,
+            sqlcmd, server, sql_auth, database, xml_path, properties, source, axes,
         ),
         _ => Ok(Vec::new()),
     }?;
@@ -3547,16 +3735,16 @@ fn prepare_metadata_body_rows(
         sqlcmd, server, database, xml_path, properties,
     )?);
     rows.extend(prepare_object_module_body_rows(
-        sqlcmd, server, database, xml_path, properties,
+        sqlcmd, server, database, xml_path, properties, axes,
     )?);
     rows.extend(prepare_nested_command_module_body_rows(
-        sqlcmd, server, database, xml_path, xml, properties,
+        sqlcmd, server, database, xml_path, xml, properties, axes,
     )?);
     rows.extend(prepare_command_interface_body_row(
-        sqlcmd, server, sql_auth, database, xml_path, properties,
+        sqlcmd, server, sql_auth, database, xml_path, properties, axes,
     )?);
     rows.extend(prepare_additional_indexes_body_row(
-        sqlcmd, server, database, xml_path, properties,
+        sqlcmd, server, database, xml_path, properties, axes,
     )?);
     Ok(rows)
 }
@@ -3567,25 +3755,38 @@ fn prepare_additional_indexes_body_row(
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    let Some(suffix) = additional_indexes_body_suffix(&properties.kind) else {
-        return Ok(Vec::new());
-    };
     let body_path = infer_additional_indexes_body_path(xml_path);
     if !body_path.exists() {
         return Ok(Vec::new());
     }
-    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let (body_id, mapping) = match additional_indexes_body_suffix(&properties.kind) {
+        Some(suffix) => (
+            format!("{}.{}", properties.uuid, suffix),
+            AdditionalIndexesMapping::Confirmed,
+        ),
+        None => (
+            format!("{}.<unmapped>", properties.uuid),
+            AdditionalIndexesMapping::Unmapped,
+        ),
+    };
     let bytes = fs::read(&body_path)
         .with_context(|| format!("failed to read AdditionalIndexes {}", body_path.display()))?;
-    let packed = pack_raw_deflated_blob_from_bytes(&bytes)
-        .with_context(|| format!("failed to pack AdditionalIndexes {}", body_path.display()))?;
-    Ok(vec![PreparedMetadataBodyStage {
-        body_id,
-        path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
-    }])
+    let entry = compile_mssql_source(
+        axes,
+        &body_id,
+        &body_path.to_string_lossy(),
+        SourcePayload::AdditionalIndexes {
+            bytes: &bytes,
+            mapping,
+        },
+    )?;
+    Ok(vec![compiled_entry_body(
+        entry,
+        body_path,
+        "AdditionalIndexes",
+    )?])
 }
 
 fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
@@ -3658,6 +3859,7 @@ fn prepare_raw_deflated_body_row(
     body_path: PathBuf,
     properties: &SimpleMetadataXmlProperties,
     label: &str,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     if !body_path.exists() {
         return Ok(Vec::new());
@@ -3665,14 +3867,13 @@ fn prepare_raw_deflated_body_row(
     let body_id = format!("{}.0", properties.uuid);
     let bytes = fs::read(&body_path)
         .with_context(|| format!("failed to read {label} {}", body_path.display()))?;
-    let packed = pack_raw_deflated_blob_from_bytes(&bytes)
-        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
-    Ok(vec![PreparedMetadataBodyStage {
-        body_id,
-        path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
-    }])
+    let entry = compile_mssql_source(
+        axes,
+        &body_id,
+        &body_path.to_string_lossy(),
+        SourcePayload::RawDeflated { bytes: &bytes },
+    )?;
+    Ok(vec![compiled_entry_body(entry, body_path, label)?])
 }
 
 fn prepare_template_body_row(
@@ -3683,6 +3884,7 @@ fn prepare_template_body_row(
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let Some(template_type) = parse_template_type_from_xml(xml)? else {
         return Ok(Vec::new());
@@ -3703,6 +3905,7 @@ fn prepare_template_body_row(
                 body_path,
                 properties,
                 "Template body",
+                axes,
             )
         }
         "HTMLDocument" => {
@@ -3879,6 +4082,7 @@ fn prepare_configuration_asset_body_rows(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let mut rows = Vec::new();
     rows.extend(prepare_configuration_ext_picture_body_row(
@@ -3897,6 +4101,7 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin"),
         "4",
         "ParentConfigurations",
+        axes,
     )?);
     rows.extend(prepare_configuration_raw_deflated_body_row(
         sqlcmd,
@@ -3906,6 +4111,7 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
         "8",
         "HomePageWorkArea",
+        axes,
     )?);
     rows.extend(prepare_configuration_raw_deflated_body_row(
         sqlcmd,
@@ -3915,6 +4121,7 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "MobileClientSignature.bin"),
         "10",
         "MobileClientSignature",
+        axes,
     )?);
     rows.extend(prepare_configuration_command_interface_body_row(
         sqlcmd,
@@ -3924,6 +4131,7 @@ fn prepare_configuration_asset_body_rows(
         properties,
         infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
         "a",
+        axes,
     )?);
     rows.extend(prepare_configuration_command_interface_body_row(
         sqlcmd,
@@ -3933,6 +4141,7 @@ fn prepare_configuration_asset_body_rows(
         properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
         "9",
+        axes,
     )?);
     rows.extend(prepare_configuration_raw_deflated_body_row(
         sqlcmd,
@@ -3942,6 +4151,7 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "ClientApplicationInterface.xml"),
         "b",
         "ClientApplicationInterface",
+        axes,
     )?);
     rows.extend(prepare_configuration_ext_picture_body_row(
         sqlcmd,
@@ -3959,6 +4169,7 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "StandaloneConfigurationContent.bin"),
         "f",
         "StandaloneConfigurationContent",
+        axes,
     )?);
     Ok(rows)
 }
@@ -4016,6 +4227,7 @@ fn prepare_configuration_command_interface_body_row(
     properties: &SimpleMetadataXmlProperties,
     body_path: PathBuf,
     suffix: &str,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     if !body_path.exists() {
         return Ok(Vec::new());
@@ -4027,21 +4239,22 @@ fn prepare_configuration_command_interface_body_row(
             body_path.display()
         )
     })?;
-    if command_interface_xml_can_pack_without_base(&xml)? {
-        let packed = pack_command_interface_blob_from_xml(&[], &xml).with_context(|| {
-            format!(
-                "failed to pack base-free Configuration CommandInterface {}",
-                body_path.display()
-            )
-        })?;
-        return Ok(vec![PreparedMetadataBodyStage {
-            body_id,
-            path: body_path,
-            blob: packed.blob,
-            blob_sha256: packed.output_sha256,
-        }]);
+    let classification = compile_mssql_source(
+        axes,
+        &body_id,
+        &body_path.to_string_lossy(),
+        SourcePayload::CommandInterfaceXml { xml: &xml },
+    )?;
+    if matches!(classification.outcome(), StoragePatchOutcome::Compiled(_)) {
+        return Ok(vec![compiled_entry_body(
+            classification,
+            body_path,
+            "Configuration CommandInterface",
+        )?]);
     }
-    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
+    let required = required_base_key(&classification, "Configuration CommandInterface")?;
+    let base_body =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let packed = pack_command_interface_blob_from_xml(&base_body, &xml).with_context(|| {
         format!(
             "failed to pack Configuration CommandInterface {}",
@@ -4064,6 +4277,7 @@ fn prepare_configuration_raw_deflated_body_row(
     body_path: PathBuf,
     suffix: &str,
     label: &str,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     if !body_path.exists() {
         return Ok(Vec::new());
@@ -4075,18 +4289,17 @@ fn prepare_configuration_raw_deflated_body_row(
             body_path.display()
         )
     })?;
-    let packed = pack_raw_deflated_blob_from_bytes(&bytes).with_context(|| {
-        format!(
-            "failed to pack Configuration {label} {}",
-            body_path.display()
-        )
-    })?;
-    Ok(vec![PreparedMetadataBodyStage {
-        body_id,
-        path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
-    }])
+    let entry = compile_mssql_source(
+        axes,
+        &body_id,
+        &body_path.to_string_lossy(),
+        SourcePayload::RawDeflated { bytes: &bytes },
+    )?;
+    Ok(vec![compiled_entry_body(
+        entry,
+        body_path,
+        &format!("Configuration {label}"),
+    )?])
 }
 
 fn prepare_exchange_plan_content_body_row(
@@ -4136,6 +4349,7 @@ fn prepare_predefined_data_body_row(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let Some(suffix) = predefined_data_body_suffix(&properties.kind) else {
         return Ok(Vec::new());
@@ -4145,7 +4359,10 @@ fn prepare_predefined_data_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
+    let reason = predefined_data_base_free_blocker_reason(&body_path)?;
+    let required = classify_required_base(axes, &body_id, &body_path, &reason, "PredefinedData")?;
+    let base_body =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read PredefinedData {}", body_path.display()))?;
     let packed = pack_predefined_data_blob_from_xml(&base_body, &xml)
@@ -4165,13 +4382,23 @@ fn prepare_business_process_flowchart_body_row(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_business_process_flowchart_body_path(xml_path);
     if !body_path.exists() {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.7", properties.uuid);
-    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
+    let reason = business_process_flowchart_base_free_blocker_reason(&body_path)?;
+    let required = classify_required_base(
+        axes,
+        &body_id,
+        &body_path,
+        &reason,
+        "BusinessProcess Flowchart",
+    )?;
+    let base_body =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let xml = fs::read(&body_path).with_context(|| {
         format!(
             "failed to read BusinessProcess Flowchart {}",
@@ -4201,6 +4428,7 @@ fn prepare_form_body_row(
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let form_path = infer_form_body_path(xml_path);
     let module_path = infer_form_module_body_path(xml_path);
@@ -4208,7 +4436,15 @@ fn prepare_form_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
+    let reason = form_body_base_free_blocker_reason(&form_path, &module_path)?;
+    let provenance = if form_path.exists() {
+        &form_path
+    } else {
+        &module_path
+    };
+    let required = classify_required_base(axes, &body_id, provenance, &reason, "Form body")?;
+    let base_body =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let form_xml = if form_path.exists() {
         fs::read(&form_path)
             .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
@@ -4279,13 +4515,17 @@ fn prepare_role_rights_body_row(
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_role_rights_body_path(xml_path);
     if !body_path.exists() {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
+    let reason = role_rights_base_free_blocker_reason(&body_path)?;
+    let required = classify_required_base(axes, &body_id, &body_path, &reason, "Role Rights")?;
+    let base_body =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
     let packed = pack_role_rights_blob_from_xml_with_source(&base_body, &xml, source)
@@ -4305,6 +4545,7 @@ fn prepare_command_interface_body_row(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let Some(suffix) = command_interface_body_suffix(&properties.kind) else {
         return Ok(Vec::new());
@@ -4320,21 +4561,22 @@ fn prepare_command_interface_body_row(
             body_path.display()
         )
     })?;
-    if command_interface_xml_can_pack_without_base(&xml)? {
-        let packed = pack_command_interface_blob_from_xml(&[], &xml).with_context(|| {
-            format!(
-                "failed to pack base-free CommandInterface {}",
-                body_path.display()
-            )
-        })?;
-        return Ok(vec![PreparedMetadataBodyStage {
-            body_id,
-            path: body_path,
-            blob: packed.blob,
-            blob_sha256: packed.output_sha256,
-        }]);
+    let classification = compile_mssql_source(
+        axes,
+        &body_id,
+        &body_path.to_string_lossy(),
+        SourcePayload::CommandInterfaceXml { xml: &xml },
+    )?;
+    if matches!(classification.outcome(), StoragePatchOutcome::Compiled(_)) {
+        return Ok(vec![compiled_entry_body(
+            classification,
+            body_path,
+            "CommandInterface",
+        )?]);
     }
-    let base_body = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id)?;
+    let required = required_base_key(&classification, "CommandInterface")?;
+    let base_body =
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let packed = pack_command_interface_blob_from_xml(&base_body, &xml)
         .with_context(|| format!("failed to pack CommandInterface {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
@@ -4466,6 +4708,7 @@ fn prepare_object_module_body_rows(
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let mut rows = Vec::new();
     for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
@@ -4478,7 +4721,7 @@ fn prepare_object_module_body_rows(
             continue;
         };
         let body_id = format!("{}.{}", properties.uuid, suffix);
-        let packed = pack_module_body_source(&body_path)
+        let packed = pack_module_body_source(&body_path, &body_id, axes)
             .with_context(|| format!("failed to pack module body {}", body_path.display()))?;
         rows.push(PreparedMetadataBodyStage {
             body_id,
@@ -4490,14 +4733,48 @@ fn prepare_object_module_body_rows(
     Ok(rows)
 }
 
-fn pack_module_body_source(path: &Path) -> Result<crate::module_blob::PackedModuleBlob> {
+fn pack_module_body_source(
+    path: &Path,
+    body_id: &str,
+    axes: &CompileAxes,
+) -> Result<PreparedModuleBody> {
     let bytes = fs::read(path)
         .with_context(|| format!("failed to read module body source {}", path.display()))?;
-    if path.extension().and_then(|extension| extension.to_str()) == Some("bin") {
-        pack_module_blob_container_bytes(&bytes)
+    let is_container = path.extension().and_then(|extension| extension.to_str()) == Some("bin");
+    let classification = compile_mssql_source(
+        axes,
+        body_id,
+        &path.to_string_lossy(),
+        if is_container {
+            SourcePayload::ModuleContainer { container: &bytes }
+        } else {
+            SourcePayload::ModuleText {
+                text: &bytes,
+                info: None,
+            }
+        },
+    )?;
+    let payload = match classification.outcome() {
+        StoragePatchOutcome::Compiled(payload) => payload,
+        StoragePatchOutcome::NeedsBase { required, reason } => {
+            return Err(anyhow!(
+                "module body requires base Config row {required}: {reason}"
+            ));
+        }
+        StoragePatchOutcome::Unsupported { reason } => {
+            return Err(anyhow!("unsupported module body: {reason}"));
+        }
+    };
+    let text_bytes = if is_container {
+        pack_module_blob_container_bytes(&bytes)?.text_bytes
     } else {
-        pack_module_blob_bytes(&bytes, None, None)
-    }
+        bytes.len()
+    };
+    Ok(PreparedModuleBody {
+        blob: payload.bytes().to_vec(),
+        text_bytes,
+        output_sha256: payload.sha256().to_string(),
+    })
 }
 
 fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static str)] {
@@ -4557,17 +4834,19 @@ fn prepare_nested_command_module_body_rows(
     xml_path: &Path,
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let sources = nested_command_module_sources(xml_path, xml, properties)?;
     let mut rows = Vec::with_capacity(sources.len());
     for source in sources {
         let body_id = format!("{}.2", source.command_id);
-        let packed = pack_module_body_source(&source.body_path).with_context(|| {
-            format!(
-                "failed to pack nested command module body {}",
-                source.body_path.display()
-            )
-        })?;
+        let packed =
+            pack_module_body_source(&source.body_path, &body_id, axes).with_context(|| {
+                format!(
+                    "failed to pack nested command module body {}",
+                    source.body_path.display()
+                )
+            })?;
         rows.push(PreparedMetadataBodyStage {
             body_id,
             path: source.body_path,
@@ -4803,6 +5082,7 @@ fn prepare_common_module_object_stage(
 ) -> Result<PreparedCommonModuleObjectStage> {
     let xml = fs::read(&xml_path)
         .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
+    let axes = mssql_compile_axes_from_metadata_xml(&xml)?;
     let properties = parse_common_module_xml_properties(&xml)?;
     let module_id = properties.uuid.clone();
     let text_path = match text_path {
@@ -4817,11 +5097,18 @@ fn prepare_common_module_object_stage(
         }
     };
 
+    let dependency = compile_mssql_source(
+        &axes,
+        &module_id,
+        &xml_path.to_string_lossy(),
+        SourcePayload::CommonModuleMetadataXml { xml: &xml },
+    )?;
+    let required = required_base_key(&dependency, "CommonModule metadata XML")?;
     let base_metadata_blob =
-        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &module_id)?;
+        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     let module_body_id = format!("{module_id}.0");
-    let packed_module = pack_module_body_source(&text_path)?;
+    let packed_module = pack_module_body_source(&text_path, &module_body_id, &axes)?;
 
     Ok(PreparedCommonModuleObjectStage {
         module_id,
@@ -4858,12 +5145,18 @@ fn stage_prepared_common_module_objects(
     }
     ensure_unique_common_module_object_ids(&prepared)?;
 
-    let versions_blob =
-        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, "versions")?;
     let changes = prepared
         .iter()
         .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()])
         .collect::<Vec<_>>();
+    let versions_blob = fetch_classified_versions_blob_with_auth(
+        sqlcmd,
+        server,
+        sql_auth,
+        database,
+        &legacy_non_xml_compile_axes(),
+        changes.len(),
+    )?;
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
     let before = storage_table_stats_with_auth(sqlcmd, server, sql_auth, database, "ConfigSave")?;
@@ -4937,13 +5230,15 @@ fn stage_common_module_specs(
             .into_par_iter()
             .map(|spec| {
                 let module_body_id = format!("{}.0", spec.module_id);
-                let text = fs::read(&spec.text)
-                    .with_context(|| format!("failed to read BSL text {}", spec.text.display()))?;
-                let packed_module = pack_module_blob_bytes(&text, None, None)?;
+                let packed_module = pack_module_body_source(
+                    &spec.text,
+                    &module_body_id,
+                    &legacy_non_xml_compile_axes(),
+                )?;
                 Ok(PreparedCommonModuleStage {
                     spec,
                     module_body_id,
-                    text_bytes: text.len(),
+                    text_bytes: packed_module.text_bytes,
                     blob_sha256: packed_module.output_sha256,
                     blob: packed_module.blob,
                 })
@@ -4951,12 +5246,18 @@ fn stage_common_module_specs(
             .collect::<Result<Vec<_>>>()
     })??;
 
-    let versions_blob =
-        fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, "versions")?;
     let changes = prepared
         .iter()
         .flat_map(|module| [module.spec.module_id.clone(), module.module_body_id.clone()])
         .collect::<Vec<_>>();
+    let versions_blob = fetch_classified_versions_blob_with_auth(
+        sqlcmd,
+        server,
+        sql_auth,
+        database,
+        &legacy_non_xml_compile_axes(),
+        changes.len(),
+    )?;
     let patched_versions = patch_versions_blob_bytes(&versions_blob, &changes, true)?;
 
     let before = storage_table_stats_with_auth(sqlcmd, server, sql_auth, database, "ConfigSave")?;
@@ -5360,15 +5661,6 @@ fn fetch_config_blobs_for_files(
         rows.append(&mut chunk_rows);
     }
     Ok(rows)
-}
-
-fn fetch_config_blob(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
-    file_name: &str,
-) -> Result<Vec<u8>> {
-    fetch_config_blob_with_auth(sqlcmd, server, SqlAuth::integrated(), database, file_name)
 }
 
 fn fetch_config_blob_with_auth(
@@ -6801,6 +7093,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn test_compile_axes() -> crate::compiler::CompileAxes {
+        super::legacy_non_xml_compile_axes()
+    }
+
     fn test_simple_metadata_properties(
         kind: &str,
         uuid: &str,
@@ -7337,6 +7633,137 @@ mod tests {
 	</CommandsVisibility>
 </CommandInterface>
 "#
+    }
+
+    #[test]
+    fn versions_dependency_uses_the_exact_config_key() {
+        let required = super::classify_versions_dependency(&test_compile_axes(), 3).unwrap();
+        assert_eq!(required.as_str(), "versions");
+    }
+
+    #[test]
+    fn unsupported_metadata_dialect_blocks_before_sqlcmd() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-unsupported-dialect-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let xml_path = root.join("Documents").join("Order.xml");
+        fs::create_dir_all(xml_path.parent().unwrap()).unwrap();
+        fs::write(
+            &xml_path,
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.22">
+  <Document uuid="aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+    <Properties><Name>Order</Name></Properties>
+  </Document>
+</MetaDataObject>"#,
+        )
+        .unwrap();
+
+        let error = super::prepare_metadata_object_stage(
+            Path::new("missing-sqlcmd-must-not-run-for-unsupported-dialect"),
+            "missing-server",
+            super::SqlAuth::integrated(),
+            "missing-database",
+            xml_path,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unsupported metadata XML"));
+        assert!(error.to_string().contains("XML dialect 2.22"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unsupported_form_dialect_blocks_before_base_fetch() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-unsupported-form-dialect-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let metadata_xml = root.join("CommonForms").join("Item.xml");
+        let body_path = root
+            .join("CommonForms")
+            .join("Item")
+            .join("Ext")
+            .join("Form.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(
+            &body_path,
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20"/>"#,
+        )
+        .unwrap();
+        let properties = test_simple_metadata_properties(
+            "CommonForm",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Item",
+        );
+        let axes =
+            super::mssql_compile_axes(ibcmd_core::version::XmlDialect::parse("2.22").unwrap());
+
+        let error = super::prepare_form_body_row(
+            Path::new("missing-sqlcmd-must-not-run-for-unsupported-form"),
+            "missing-server",
+            super::SqlAuth::integrated(),
+            "missing-database",
+            &metadata_xml,
+            &properties,
+            None,
+            &axes,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unsupported Form body"));
+        assert!(error.to_string().contains("XML dialect 2.22"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn readable_command_interface_fetches_the_required_base_key() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-readable-command-interface-fetch-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        let owner_xml = root.join("Subsystems").join("Sales.xml");
+        let body_path = root
+            .join("Subsystems")
+            .join("Sales")
+            .join("Ext")
+            .join("CommandInterface.xml");
+        fs::create_dir_all(body_path.parent().unwrap()).unwrap();
+        fs::write(&owner_xml, b"<Subsystem/>").unwrap();
+        fs::write(
+            &body_path,
+            br#"<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+  <CommandsVisibility>
+    <Command name="Catalog.Products.StandardCommand.OpenList">
+      <Visibility><xr:Common>true</xr:Common></Visibility>
+    </Command>
+  </CommandsVisibility>
+</CommandInterface>"#,
+        )
+        .unwrap();
+        let properties = test_simple_metadata_properties(
+            "Subsystem",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Sales",
+        );
+
+        let error = super::prepare_command_interface_body_row(
+            Path::new("missing-sqlcmd-readable-command-interface-fetch"),
+            "missing-server",
+            super::SqlAuth::integrated(),
+            "missing-database",
+            &owner_xml,
+            &properties,
+            &test_compile_axes(),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains(
+            "failed to launch sqlcmd at missing-sqlcmd-readable-command-interface-fetch"
+        ));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -9422,6 +9849,7 @@ mod tests {
             "missing-database",
             &catalog_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -9460,6 +9888,7 @@ mod tests {
             "missing-database",
             &configuration_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -9554,6 +9983,7 @@ mod tests {
             "missing-database",
             &processor_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -9596,6 +10026,7 @@ mod tests {
             "missing-database",
             &service_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -9638,6 +10069,7 @@ mod tests {
             "missing-database",
             &filter_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -9694,6 +10126,7 @@ mod tests {
             &xml_path,
             xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -10403,6 +10836,7 @@ mod tests {
             body_path.clone(),
             &properties,
             "XDTOPackage body",
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -10454,6 +10888,7 @@ mod tests {
             xml,
             &properties,
             None,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -10495,6 +10930,7 @@ mod tests {
             body_path.clone(),
             &properties,
             "WSReference definition",
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -10537,6 +10973,7 @@ mod tests {
             "missing-database",
             &document_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -10552,7 +10989,7 @@ mod tests {
     }
 
     #[test]
-    fn skips_unmapped_additional_indexes_without_fetching_base_blob() {
+    fn rejects_unmapped_additional_indexes_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-additional-indexes-unmapped-no-fetch-{}",
             uuid::Uuid::new_v4().hyphenated()
@@ -10572,16 +11009,17 @@ mod tests {
             "Prices",
         );
 
-        let rows = super::prepare_additional_indexes_body_row(
+        let error = super::prepare_additional_indexes_body_row(
             PathBuf::from("missing-sqlcmd-for-unmapped-additional-indexes-test").as_path(),
             "missing-server",
             "missing-database",
             &register_xml,
             &properties,
+            &test_compile_axes(),
         )
-        .unwrap();
+        .unwrap_err();
 
-        assert!(rows.is_empty());
+        assert!(error.to_string().contains("unsupported AdditionalIndexes"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -11146,6 +11584,7 @@ mod tests {
             "missing-database",
             &root.join("Configuration.xml"),
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11230,6 +11669,7 @@ mod tests {
             "missing-database",
             &configuration_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11315,6 +11755,7 @@ mod tests {
             body_path.clone(),
             "8",
             "HomePageWorkArea",
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11406,6 +11847,7 @@ mod tests {
             "missing-database",
             &subsystem_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11450,6 +11892,7 @@ mod tests {
             "missing-database",
             &common_command_xml,
             &properties,
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11538,6 +11981,7 @@ mod tests {
             &properties,
             body_path.clone(),
             "a",
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11629,6 +12073,7 @@ mod tests {
             &properties,
             body_path.clone(),
             "9",
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11717,6 +12162,7 @@ mod tests {
             body_path.clone(),
             "b",
             "ClientApplicationInterface",
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11803,6 +12249,7 @@ mod tests {
             body_path.clone(),
             "10",
             "MobileClientSignature",
+            &test_compile_axes(),
         )
         .unwrap();
 
@@ -11890,6 +12337,7 @@ mod tests {
             body_path.clone(),
             "f",
             "StandaloneConfigurationContent",
+            &test_compile_axes(),
         )
         .unwrap();
 

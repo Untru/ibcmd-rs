@@ -20,8 +20,8 @@ use ibcmd_core::version::{CompatibilityMode, ContainerRevision, PlatformBuild, X
 use crate::module_blob::{
     command_interface_base_free_blockers, command_interface_xml_can_pack_without_base,
     common_module_metadata_base_free_blockers, metadata_xml_base_free_blockers,
-    pack_command_interface_blob_from_xml, pack_module_blob_bytes, pack_module_blob_container_bytes,
-    pack_raw_deflated_blob_from_bytes,
+    pack_command_interface_blob_from_xml_base_free, pack_module_blob_bytes_base_free,
+    pack_module_blob_container_bytes, pack_raw_deflated_blob_from_bytes,
 };
 
 pub mod overlay;
@@ -337,7 +337,7 @@ fn compile_source_with_payload_limit(
                     )
                 })?;
             ensure_source_input_within_limit("module-text", source_bytes, maximum_payload_bytes)?;
-            let packed = pack_module_blob_bytes(text, None, info)
+            let packed = pack_module_blob_bytes_base_free(text, info)
                 .map_err(|source| CompileError::invalid_source("module-text", source))?;
             compiled_entry(target, packed.blob)
         }
@@ -386,7 +386,7 @@ fn compile_source_with_payload_limit(
             if command_interface_xml_can_pack_without_base(xml)
                 .map_err(|source| CompileError::invalid_source("command-interface", source))?
             {
-                let packed = pack_command_interface_blob_from_xml(&[], xml)
+                let packed = pack_command_interface_blob_from_xml_base_free(xml)
                     .map_err(|source| CompileError::invalid_source("command-interface", source))?;
                 compiled_entry(target, packed.blob)
             } else {
@@ -790,7 +790,7 @@ mod tests {
 
     #[test]
     fn malformed_xml_is_a_source_error() {
-        let error = compile_source(
+        let metadata_error = compile_source(
             &supported_axes("2.20"),
             CompileRequest::new(
                 target("broken.0", "Broken.xml"),
@@ -798,7 +798,20 @@ mod tests {
             ),
         )
         .unwrap_err();
-        assert!(matches!(error, CompileError::Source { .. }));
+        assert!(matches!(metadata_error, CompileError::Source { .. }));
+
+        let command_interface_error = compile_source(
+            &supported_axes("2.20"),
+            CompileRequest::new(
+                target("broken.1", "Ext/CommandInterface.xml"),
+                SourcePayload::CommandInterfaceXml { xml: b"not XML" },
+            ),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            command_interface_error,
+            CompileError::Source { family, .. } if family == "command-interface"
+        ));
     }
 
     #[test]
@@ -975,6 +988,10 @@ mod tests {
             ["sql", "cmd"].concat(),
             ["pack_simple_metadata_blob", "_from_xml"].concat(),
             ["pack_common_module_metadata_blob", "_from_xml"].concat(),
+            ["pack_module_blob_bytes", "("].concat(),
+            ["pack_module_blob_bytes", ","].concat(),
+            ["pack_command_interface_blob_from_xml", "("].concat(),
+            ["pack_command_interface_blob_from_xml", ","].concat(),
             ["dyn", " Fn"].concat(),
             ["impl", " Fn"].concat(),
         ];

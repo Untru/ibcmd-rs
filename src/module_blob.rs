@@ -1027,6 +1027,18 @@ pub fn pack_module_blob_bytes(
     })
 }
 
+/// Packs module source without consulting or inheriting a base blob.
+///
+/// `info` must be independently supplied source data. When omitted, the
+/// deterministic default info element and freshly generated element headers
+/// are used.
+pub fn pack_module_blob_bytes_base_free(
+    text: &[u8],
+    info: Option<&[u8]>,
+) -> Result<PackedModuleBlob> {
+    pack_module_blob_bytes(text, None, info)
+}
+
 pub fn pack_module_blob_container_bytes(container: &[u8]) -> Result<PackedModuleBlob> {
     let elements = parse_v8_container(container).context("failed to parse module V8 container")?;
     let info_bytes = elements
@@ -18217,7 +18229,114 @@ pub fn pack_command_interface_blob_from_xml(
     })
 }
 
+/// Packs CommandInterface XML only when every command reference is base-free.
+///
+/// Readable command references are classified as requiring a base and rejected
+/// instead of being routed through the base-capable packer with an empty blob.
+pub fn pack_command_interface_blob_from_xml_base_free(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
+    if !command_interface_xml_can_pack_without_base(xml)? {
+        let blockers = command_interface_base_free_blockers(xml)?;
+        return Err(anyhow!(
+            "CommandInterface XML requires a base entry: {}",
+            blockers.join("; ")
+        ));
+    }
+    pack_command_interface_blob_from_xml(&[], xml)
+}
+
+fn validate_command_interface_xml_document(xml: &[u8]) -> Result<()> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut root_seen = false;
+    let mut root_closed = false;
+    let mut depth = 0usize;
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                if depth == 0 {
+                    if root_seen {
+                        return Err(anyhow!(
+                            "CommandInterface XML contains more than one root element"
+                        ));
+                    }
+                    let local = xml_local_name(event.local_name().as_ref());
+                    if local != "CommandInterface" {
+                        return Err(anyhow!(
+                            "CommandInterface XML root must be CommandInterface, found {local}"
+                        ));
+                    }
+                    root_seen = true;
+                }
+                depth += 1;
+            }
+            Ok(Event::Empty(event)) if depth == 0 => {
+                if root_seen || root_closed {
+                    return Err(anyhow!(
+                        "CommandInterface XML contains more than one root element"
+                    ));
+                }
+                let local = xml_local_name(event.local_name().as_ref());
+                if local != "CommandInterface" {
+                    return Err(anyhow!(
+                        "CommandInterface XML root must be CommandInterface, found {local}"
+                    ));
+                }
+                root_seen = true;
+                root_closed = true;
+            }
+            Ok(Event::End(_)) => {
+                if depth == 0 {
+                    return Err(anyhow!(
+                        "CommandInterface XML contains an unexpected closing element"
+                    ));
+                }
+                depth -= 1;
+                if depth == 0 {
+                    root_closed = true;
+                }
+            }
+            Ok(Event::Text(text)) if depth == 0 => {
+                let text = text.xml_content()?;
+                if !text
+                    .trim_matches(|ch: char| ch.is_whitespace() || ch == '\u{feff}')
+                    .is_empty()
+                {
+                    return Err(anyhow!(
+                        "CommandInterface XML contains text outside the root element"
+                    ));
+                }
+            }
+            Ok(Event::CData(text)) if depth == 0 => {
+                let text = text.xml_content()?;
+                if !text.trim().is_empty() {
+                    return Err(anyhow!(
+                        "CommandInterface XML contains text outside the root element"
+                    ));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => {
+                return Err(error).context("failed to parse CommandInterface XML document");
+            }
+        }
+        buffer.clear();
+    }
+
+    if !root_seen {
+        return Err(anyhow!(
+            "CommandInterface XML has no CommandInterface root element"
+        ));
+    }
+    if !root_closed || depth != 0 {
+        return Err(anyhow!("CommandInterface XML root element is not closed"));
+    }
+    Ok(())
+}
+
 pub fn command_interface_xml_can_pack_without_base(xml: &[u8]) -> Result<bool> {
+    validate_command_interface_xml_document(xml)?;
     let entries = parse_command_interface_xml(xml)?;
     Ok(entries
         .iter()
@@ -24225,6 +24344,23 @@ mod tests {
         let text = b"Procedure Run()\r\nEndProcedure\r\n";
         let packed = super::pack_module_blob_bytes(text, None, None).unwrap();
         assert_eq!(super::unpack_module_blob_text(&packed.blob).unwrap(), text);
+    }
+
+    #[test]
+    fn base_free_module_wrapper_matches_explicit_no_base_pack() -> anyhow::Result<()> {
+        let text = b"Procedure Run()\r\nEndProcedure\r\n";
+        let info = b"{3,1,0,\"source-info\",0}";
+
+        let wrapped = super::pack_module_blob_bytes_base_free(text, Some(info))?;
+        let legacy = super::pack_module_blob_bytes(text, None, Some(info))?;
+
+        assert_eq!(wrapped.blob, legacy.blob);
+        assert_eq!(wrapped.info_bytes, info.len());
+        assert_eq!(wrapped.text_bytes, text.len());
+        assert_eq!(wrapped.inner_bytes, legacy.inner_bytes);
+        assert_eq!(wrapped.output_sha256, legacy.output_sha256);
+        assert_eq!(super::unpack_module_blob_text(&wrapped.blob)?, text);
+        Ok(())
     }
 
     #[test]
@@ -35353,6 +35489,24 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn base_free_command_interface_wrapper_packs_raw_refs() -> anyhow::Result<()> {
+        let xml = br#"<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+  <CommandsVisibility>
+    <Command name="100:aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa">
+      <Visibility><xr:Common>true</xr:Common></Visibility>
+    </Command>
+  </CommandsVisibility>
+</CommandInterface>"#;
+
+        let packed = super::pack_command_interface_blob_from_xml_base_free(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+
+        assert!(text.contains("{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa}"));
+        assert_eq!(packed.plain_bytes, text.len());
+        Ok(())
+    }
+
+    #[test]
     fn command_interface_xml_without_base_rejects_readable_command_refs() {
         let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
@@ -35372,6 +35526,40 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                 .contains("base-free CommandInterface command"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn base_free_command_interface_wrapper_rejects_readable_refs() {
+        let xml = br#"<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+  <CommandsVisibility>
+    <Command name="Catalog.Products.StandardCommand.OpenList">
+      <Visibility><xr:Common>true</xr:Common></Visibility>
+    </Command>
+  </CommandsVisibility>
+</CommandInterface>"#;
+
+        let error = super::pack_command_interface_blob_from_xml_base_free(xml).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("requires a base entry"), "{message}");
+        assert!(
+            message.contains("Catalog.Products.StandardCommand.OpenList"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn base_free_command_interface_wrapper_rejects_malformed_xml() {
+        for xml in [
+            b"not XML".as_slice(),
+            b"<WrongRoot/>".as_slice(),
+            b"<CommandInterface>".as_slice(),
+        ] {
+            let error = super::pack_command_interface_blob_from_xml_base_free(xml).unwrap_err();
+            assert!(
+                error.to_string().contains("CommandInterface XML"),
+                "{error}"
+            );
+        }
     }
 
     #[test]
