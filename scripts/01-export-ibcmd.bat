@@ -3,10 +3,10 @@ setlocal
 
 cd /d "%~dp0\.."
 
-if not defined DB_NAME set "DB_NAME=bsp"
+if not defined DB_NAME set "DB_NAME=ut_ibcmd"
 if not defined DB_SERVER set "DB_SERVER=localhost"
 if not defined DB_USER set "DB_USER=sa"
-if not defined RUN_ROOT set "RUN_ROOT=E:\ibcmd_lab\manual_ibcmd"
+if not defined RUN_ROOT set "RUN_ROOT=E:\ibcmd_lab"
 if not "%~1"=="" set "RUN_ROOT=%~1"
 @REM if not defined USER_NAME set "USER_NAME=Администратор"
 
@@ -30,8 +30,8 @@ if not exist "%IBCMD_EXE%" (
     exit /b 1
 )
 
-set "OUT_DIR=%RUN_ROOT%\bsp"
-set "DATA_DIR=%RUN_ROOT%\bsp_data"
+set "OUT_DIR=%RUN_ROOT%\ut_ibcmd"
+set "DATA_DIR=%RUN_ROOT%\ut_ibcmd_data"
 
 mkdir "%RUN_ROOT%" 2>nul
 mkdir "%DATA_DIR%" 2>nul

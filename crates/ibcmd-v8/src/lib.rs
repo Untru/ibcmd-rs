@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod format15;
+
 #[cfg(test)]
 mod tests {
     use ibcmd_core as _;

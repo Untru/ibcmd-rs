@@ -22,54 +22,22 @@ struct BlockHeader {
 }
 
 pub(crate) fn parse_v8_container(bytes: &[u8]) -> Result<Vec<V8Element>> {
-    if bytes.len() < FILE_HEADER_SIZE + BLOCK_HEADER_SIZE {
-        return Err(anyhow!("container is too short"));
-    }
-    if read_u32(bytes, 0)? != V8_MAGIC_NUMBER {
-        return Err(anyhow!("unexpected file header next page marker"));
-    }
-    if !matches!(read_u32(bytes, 8)?, 1 | 2) {
-        return Err(anyhow!("unsupported module container storage version"));
-    }
-
-    let toc_header = read_block_header(bytes, FILE_HEADER_SIZE)?;
-    let toc_start = FILE_HEADER_SIZE + BLOCK_HEADER_SIZE;
-    let toc_end = toc_start
-        .checked_add(toc_header.data_size)
-        .ok_or_else(|| anyhow!("TOC block size overflows container length"))?;
-    if toc_end > bytes.len() {
-        return Err(anyhow!("TOC block exceeds container length"));
-    }
-    if toc_header.data_size % ELEM_ADDR_SIZE != 0 {
-        return Err(anyhow!("TOC size is not divisible by element address size"));
-    }
-
-    let mut result = Vec::new();
-    for (index, entry) in bytes[toc_start..toc_end]
-        .chunks_exact(ELEM_ADDR_SIZE)
-        .enumerate()
-    {
-        let header_addr = read_u32(entry, 0)? as usize;
-        let data_addr = read_u32(entry, 4)? as usize;
-        let marker = read_u32(entry, 8)?;
-        if marker != V8_MAGIC_NUMBER {
-            return Err(anyhow!(
-                "invalid address table marker at entry {}: 0x{:08x}",
-                index,
-                marker
-            ));
-        }
-        validate_block_address(bytes, header_addr, index, "header")?;
-        validate_block_address(bytes, data_addr, index, "data")?;
-
-        let header = read_block_payload(bytes, header_addr)
-            .with_context(|| format!("failed to read element {index} header block"))?;
-        let data = read_block_payload(bytes, data_addr)
-            .with_context(|| format!("failed to read element {index} data block"))?;
-        let name = element_name(&header)?;
-        result.push(V8Element { name, header, data });
-    }
-    Ok(result)
+    let container =
+        ibcmd_v8::format15::parse(bytes).context("failed to parse Format15 container")?;
+    container
+        .elements
+        .into_iter()
+        .map(|element| {
+            let data = element
+                .data
+                .ok_or_else(|| anyhow!("element {} has an absent data address", element.name))?;
+            Ok(V8Element {
+                name: element.name,
+                header: element.raw_header,
+                data,
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn read_v8_element_data(bytes: &[u8], target_name: &str) -> Result<Option<Vec<u8>>> {
