@@ -216,7 +216,7 @@
 
 ### CF-005 — Реализовать strict raw-DEFLATE и resource limits
 
-- **Статус:** `[ ]`; **зависимости:** CF-001, CORE-005
+- **Статус:** `[x]`; **зависимости:** CF-001, CORE-005
 - **Файлы:** создать `crates/ibcmd-cf/src/payload.rs`, `crates/ibcmd-core/src/limits.rs`
 - **Действия:** `Stored|RawDeflate`, full input consumption/StreamEnd, max depth/count/bytes/ratio.
 - **Проверка:** truncated/trailing stream и decompression bomb контролируемо отклоняются без panic/OOM.

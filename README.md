@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=30 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=31 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 30 of 56 accepted leaf issues in the
+As of 2026-07-22, 31 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (53.6%). Live workflow statuses are tracked in
+are complete (55.4%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -37,6 +37,15 @@ separate from the export parity metrics below.
 CF fixture work is paused until project-owned, independently validated
 Format15/Format16 artifacts are available; platform-independent migration and
 compiler work continues on separate roadmap lanes.
+
+CF-005 is complete independently of those unavailable golden containers. The
+CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
+stream, requires `StreamEnd` and full encoded-input consumption, and rejects
+truncated streams, trailing bytes, aggregate depth/count/byte overrun, and
+excessive expansion ratios through typed errors. Decoding uses fixed-size codec
+buffers and commits its shared resource budget only after complete validation;
+synthetic corruption and decompression-bomb regressions run without 1C, EDT,
+or a JVM. See [bounded CF payload evidence](docs/evidence/cf-payload-limits.md).
 
 BOOT-002 is paused only on the native `Configuration` body: the bounded
 identity/inventory graph and deterministic `root`, `version`, and `versions`
@@ -122,11 +131,11 @@ fail-closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 1/15 | 6.7% |
+| Phase 3 CF | 2/15 | 13.3% |
 | Phase 4 bootstrap | 7/13 | 53.8% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **30/56** | **53.6%** |
+| **Overall** | **31/56** | **55.4%** |
 
 ## Export Compatibility Status
 

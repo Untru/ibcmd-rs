@@ -6,6 +6,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod payload;
+
 #[cfg(test)]
 mod tests {
     use ibcmd_core as _;

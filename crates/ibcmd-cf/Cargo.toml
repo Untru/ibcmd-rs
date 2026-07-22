@@ -5,5 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
+flate2 = "1.1"
 ibcmd-core = { path = "../ibcmd-core" }
 ibcmd-v8 = { path = "../ibcmd-v8" }
