@@ -6,7 +6,9 @@
 #![forbid(unsafe_code)]
 
 pub mod block;
+pub mod format;
 pub mod format15;
+pub mod format16;
 
 #[cfg(test)]
 mod tests {

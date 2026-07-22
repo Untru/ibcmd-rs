@@ -208,7 +208,7 @@
 
 ### CF-004 — Реализовать autodetect и parser Format16
 
-- **Статус:** `[ ]`; **зависимости:** CF-002, CF-003
+- **Статус:** `[x]`; **зависимости:** CF-002, CF-003
 - **Файлы:** создать `crates/ibcmd-v8/src/format16.rs`, `format.rs`
 - **Действия:** 64-bit TOC/block fields, 55-byte headers, sentinel, versioned/base-offset preamble detection.
 - **Проверка:** Format15/16 autodetect; golden fixture даёт ожидаемые names/counts; truncation fail-closed.
