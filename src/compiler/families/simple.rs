@@ -1,9 +1,8 @@
 //! Base-free native codecs for compact metadata families.
 //!
-//! Implemented vertical slices are `Language`, `SessionParameter`,
-//! `FunctionalOption`, and `FunctionalOptionsParameter`. Other BOOT-003
-//! families remain explicit profile-selection failures until their complete
-//! native layouts and required UUID/type inputs are represented.
+//! Every BOOT-003 family has an independently selected, fail-closed layout:
+//! `Constant`, `Language`, `SessionParameter`, `DefinedType`,
+//! `FunctionalOption`, and `FunctionalOptionsParameter`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -42,6 +41,8 @@ const SESSION_PARAMETER_LAYOUT_KEY: &str = "bootstrap.metadata.session_parameter
 const SESSION_PARAMETER_LAYOUT: &str = "session-parameter-v1-crlf-no-bom";
 const DEFINED_TYPE_LAYOUT_KEY: &str = "bootstrap.metadata.defined_type.layout";
 const DEFINED_TYPE_LAYOUT: &str = "defined-type-v1-crlf-no-bom";
+const CONSTANT_LAYOUT_KEY: &str = "bootstrap.metadata.constant.layout";
+const CONSTANT_LAYOUT: &str = "constant-v1-crlf-no-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const DESIGN_TIME_REFERENCE_CLASS_UUID: &str = "157fa490-4ce9-11d4-9415-008048da11f9";
@@ -97,6 +98,7 @@ impl SimpleFamily {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SimpleLayout {
+    ConstantV1,
     LanguageV1,
     SessionParameterV1,
     DefinedTypeV1,
@@ -145,6 +147,11 @@ impl SimpleMetadataProfile {
         }
 
         let (key, expected, layout) = match family {
+            SimpleFamily::Constant => (
+                CONSTANT_LAYOUT_KEY,
+                CONSTANT_LAYOUT,
+                SimpleLayout::ConstantV1,
+            ),
             SimpleFamily::Language => (
                 LANGUAGE_LAYOUT_KEY,
                 LANGUAGE_LAYOUT,
@@ -170,12 +177,6 @@ impl SimpleMetadataProfile {
                 FUNCTIONAL_OPTIONS_PARAMETER_LAYOUT,
                 SimpleLayout::FunctionalOptionsParameterV1,
             ),
-            _ => {
-                return Err(SimpleMetadataProfileError::FamilyNotImplemented {
-                    profile: profile.id.clone(),
-                    family,
-                });
-            }
         };
         let value = profile.constants.get(key).ok_or_else(|| {
             SimpleMetadataProfileError::MissingConstant {
@@ -260,6 +261,17 @@ impl SimpleMetadataProfile {
             storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
             family: SimpleFamily::DefinedType,
             layout: SimpleLayout::DefinedTypeV1,
+        }
+    }
+
+    #[cfg(test)]
+    fn constant_fixture(profile_id: &str) -> Self {
+        Self {
+            profile_id: ProfileId::parse(profile_id).unwrap(),
+            platform_build: PlatformBuild::parse("8.3.27.1989").unwrap(),
+            storage_profile: StorageProfileId::parse(SUPPORTED_STORAGE_PROFILE).unwrap(),
+            family: SimpleFamily::Constant,
+            layout: SimpleLayout::ConstantV1,
         }
     }
 }
@@ -412,6 +424,43 @@ pub struct DefinedTypeNativeIr {
     pub synonyms: Vec<NativeLocalizedString>,
     pub comment: String,
     pub types: Vec<SessionParameterTypeNativeIr>,
+}
+
+/// One exact native value type of a `Constant`.
+///
+/// Native storage uses the same `# + TypeId` shape for direct references and
+/// type sets. The readable `cfg:*` name supplied during XML rendering
+/// deterministically restores the XML element (`Type` or `TypeSet`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConstantTypeNativeIr {
+    Boolean,
+    String {
+        length: u32,
+    },
+    Number {
+        digits: u32,
+        fraction_digits: u32,
+        nonnegative: bool,
+    },
+    DateTime,
+    Reference(ObjectUuid),
+}
+
+/// Complete base-free native IR for a `Constant` row.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConstantNativeIr {
+    pub uuid: ObjectUuid,
+    pub name: String,
+    pub synonyms: Vec<NativeLocalizedString>,
+    pub comment: String,
+    pub manager_type_id: ObjectUuid,
+    pub manager_value_id: ObjectUuid,
+    pub value_manager_type_id: ObjectUuid,
+    pub value_manager_value_id: ObjectUuid,
+    pub value_key_type_id: ObjectUuid,
+    pub value_key_value_id: ObjectUuid,
+    pub value_type: ConstantTypeNativeIr,
+    pub use_standard_commands: bool,
 }
 
 impl FunctionalOptionNativeIr {
@@ -647,6 +696,71 @@ impl SessionParameterNativeIr {
         xml.push_str(
             "\t\t\t</Type>\r\n\t\t</Properties>\r\n\t</SessionParameter>\r\n</MetaDataObject>",
         );
+        Ok(xml.into_bytes())
+    }
+}
+
+impl ConstantNativeIr {
+    /// Renders standalone XCF and resolves a native reference TypeId through
+    /// the caller-supplied `TypeId -> readable type` map.
+    pub fn to_xml(
+        &self,
+        profile: &ProfileId,
+        type_names: &BTreeMap<ObjectUuid, String>,
+    ) -> Result<Vec<u8>, SimpleMetadataBuildError> {
+        let version = xml_profile_version(profile)
+            .ok_or_else(|| SimpleMetadataBuildError::InvalidXmlProfile(profile.clone()))?;
+        validate_constant_generated_ids(self)?;
+
+        let mut xml = String::new();
+        xml.push('\u{feff}');
+        xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        write!(
+            &mut xml,
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"{version}\">\r\n\t<Constant uuid=\"{}\">\r\n\t\t<InternalInfo>\r\n",
+            self.uuid
+        )
+        .expect("writing to String cannot fail");
+        write_constant_generated_type_xml(
+            &mut xml,
+            "ConstantManager",
+            "Manager",
+            &self.name,
+            self.manager_type_id,
+            self.manager_value_id,
+        );
+        write_constant_generated_type_xml(
+            &mut xml,
+            "ConstantValueManager",
+            "ValueManager",
+            &self.name,
+            self.value_manager_type_id,
+            self.value_manager_value_id,
+        );
+        write_constant_generated_type_xml(
+            &mut xml,
+            "ConstantValueKey",
+            "ValueKey",
+            &self.name,
+            self.value_key_type_id,
+            self.value_key_value_id,
+        );
+        xml.push_str("\t\t</InternalInfo>\r\n\t\t<Properties>\r\n");
+        write_xml_text_element(&mut xml, "\t\t\t", "Name", &self.name);
+        write_synonym_xml(&mut xml, &self.synonyms);
+        write_xml_text_element(&mut xml, "\t\t\t", "Comment", &self.comment);
+        write_constant_type_xml(&mut xml, &self.value_type, type_names)?;
+        write_xml_text_element(
+            &mut xml,
+            "\t\t\t",
+            "UseStandardCommands",
+            if self.use_standard_commands {
+                "true"
+            } else {
+                "false"
+            },
+        );
+        xml.push_str("\t\t</Properties>\r\n\t</Constant>\r\n</MetaDataObject>");
         Ok(xml.into_bytes())
     }
 }
@@ -914,6 +1028,10 @@ pub fn compile_simple_metadata(
         .ok_or(SimpleMetadataBuildError::MissingPrimaryRoute(object_uuid))?;
 
     let plaintext = match (family, profile.layout) {
+        (SimpleFamily::Constant, SimpleLayout::ConstantV1) => {
+            let projection = project_constant(validated, object)?;
+            serialize_constant(&projection)
+        }
         (SimpleFamily::Language, SimpleLayout::LanguageV1) => {
             let projection = project_language(validated, object)?;
             serialize_language(&projection)
@@ -946,6 +1064,18 @@ pub fn compile_simple_metadata(
         StoragePatchTarget::new(route.key().clone(), MultipartIdentity::single(), provenance),
         StoragePatchOutcome::compiled(bytes)?,
     ))
+}
+
+/// Strictly decodes a raw-DEFLATE `Constant` primary row.
+pub fn decode_constant_blob(
+    blob: &[u8],
+    profile: &SimpleMetadataProfile,
+) -> Result<ConstantNativeIr, SimpleMetadataBuildError> {
+    if profile.family != SimpleFamily::Constant || profile.layout != SimpleLayout::ConstantV1 {
+        return Err(SimpleMetadataBuildError::UnsupportedFamily(profile.family));
+    }
+    let plain = inflate_bounded(blob)?;
+    parse_constant(&plain)
 }
 
 /// Strictly decodes a raw-DEFLATE `Language` primary row into native IR.
@@ -1066,6 +1196,199 @@ fn validate_coordinates(
         });
     }
     Ok(())
+}
+
+fn project_constant(
+    validated: &ValidatedConfiguration<'_>,
+    object: &CanonicalObject,
+) -> Result<ConstantNativeIr, SimpleMetadataBuildError> {
+    let uuid = object.identity().uuid();
+    match object.provenance().source_profile().as_str() {
+        "xml-2.20" | "xml-2.21" => {}
+        _ => return invalid_model(uuid, "source profile is not xml-2.20 or xml-2.21"),
+    }
+    if object.owner().is_some() {
+        return invalid_model(uuid, "Constant must be top-level");
+    }
+    if !object.references().is_empty() || !object.assets().is_empty() {
+        return invalid_model(uuid, "Constant cannot own canonical references or assets");
+    }
+    if validated
+        .configuration()
+        .objects()
+        .iter()
+        .any(|candidate| candidate.owner() == Some(uuid))
+    {
+        return invalid_model(uuid, "Constant cannot own child objects");
+    }
+    let expected_properties = ["Name", "Synonym", "Comment", "Type", "UseStandardCommands"];
+    if object.properties().len() != expected_properties.len()
+        || object
+            .properties()
+            .iter()
+            .zip(expected_properties)
+            .any(|(field, expected)| field.name().as_str() != expected)
+    {
+        return invalid_model(uuid, "typed property schema is not exact");
+    }
+
+    let generated = object.generated_types();
+    let expected_kinds = ["Manager", "ValueManager", "ValueKey"];
+    if generated.len() != expected_kinds.len()
+        || generated
+            .iter()
+            .zip(expected_kinds)
+            .any(|(generated, expected)| generated.kind().as_str() != expected)
+    {
+        return invalid_model(
+            uuid,
+            "Constant requires Manager, ValueManager, and ValueKey identities in order",
+        );
+    }
+    let mut identities = Vec::with_capacity(6);
+    for generated in generated {
+        identities.push(generated.uuid());
+        identities.push(
+            generated
+                .value_id()
+                .ok_or(SimpleMetadataBuildError::InvalidModel {
+                    object: uuid,
+                    reason: "Constant generated ValueId is missing",
+                })?,
+        );
+    }
+    if !constant_generated_ids_are_valid(&identities) {
+        return invalid_model(uuid, "Constant generated IDs are nil or duplicated");
+    }
+
+    let name = text_property(object, "Name")?.to_owned();
+    if name.is_empty() {
+        return invalid_model(uuid, "Name must not be empty");
+    }
+    let synonyms = synonym_property(object, "Synonym")?;
+    let comment = text_property(object, "Comment")?.to_owned();
+    let fields =
+        property(object, "Type")?
+            .as_record()
+            .ok_or(SimpleMetadataBuildError::InvalidModel {
+                object: uuid,
+                reason: "Constant Type is not a record",
+            })?;
+    let kind = canonical_enum_field(
+        fields.first(),
+        uuid,
+        "Constant Type kind is not an enum token",
+    )?;
+    let value_type = match kind {
+        "Boolean" => {
+            require_record_schema(fields, &["kind"], uuid)?;
+            ConstantTypeNativeIr::Boolean
+        }
+        "String" => {
+            require_record_schema(fields, &["kind", "length", "allowed_length"], uuid)?;
+            let length = canonical_u32_field(&fields[1], uuid)?;
+            match canonical_enum_field(
+                Some(&fields[2]),
+                uuid,
+                "Constant String allowed_length is not an enum token",
+            )? {
+                "Variable" => {}
+                "Fixed" => {
+                    return invalid_model(
+                        uuid,
+                        "Fixed Constant String has no independently retained native evidence",
+                    );
+                }
+                _ => return invalid_model(uuid, "Constant String allowed_length is unsupported"),
+            }
+            ConstantTypeNativeIr::String { length }
+        }
+        "Number" => {
+            require_record_schema(
+                fields,
+                &["kind", "digits", "fraction_digits", "allowed_sign"],
+                uuid,
+            )?;
+            let digits = canonical_u32_field(&fields[1], uuid)?;
+            let fraction_digits = canonical_u32_field(&fields[2], uuid)?;
+            if fraction_digits > digits {
+                return invalid_model(uuid, "Number FractionDigits exceeds Digits");
+            }
+            let nonnegative = match canonical_enum_field(
+                Some(&fields[3]),
+                uuid,
+                "Constant Number allowed_sign is not an enum token",
+            )? {
+                "Any" => false,
+                "Nonnegative" => true,
+                _ => return invalid_model(uuid, "Constant Number allowed_sign is unsupported"),
+            };
+            ConstantTypeNativeIr::Number {
+                digits,
+                fraction_digits,
+                nonnegative,
+            }
+        }
+        "DateTime" => {
+            require_record_schema(fields, &["kind", "date_fractions"], uuid)?;
+            if canonical_enum_field(
+                Some(&fields[1]),
+                uuid,
+                "Constant DateTime date_fractions is not an enum token",
+            )? != "DateTime"
+            {
+                return invalid_model(
+                    uuid,
+                    "Constant Date or Time-only type has no evidenced native mapping",
+                );
+            }
+            ConstantTypeNativeIr::DateTime
+        }
+        "Reference" | "ReferenceTypeSet" => {
+            require_record_schema(fields, &["kind", "reference"], uuid)?;
+            let readable = canonical_text(fields[1].value(), uuid)?;
+            if kind == "ReferenceTypeSet" && !readable.starts_with("cfg:DefinedType.") {
+                return invalid_model(
+                    uuid,
+                    "Constant ReferenceTypeSet is not an exact cfg:DefinedType name",
+                );
+            }
+            if kind == "Reference" && readable.starts_with("cfg:DefinedType.") {
+                return invalid_model(
+                    uuid,
+                    "Constant DefinedType reference must use ReferenceTypeSet",
+                );
+            }
+            let generated_types = generated_type_reference_index(validated, uuid)?;
+            let type_id = builtin_type_uuid(readable)
+                .or_else(|| generated_types.get(readable).copied())
+                .ok_or(SimpleMetadataBuildError::InvalidModel {
+                    object: uuid,
+                    reason: "Constant Type contains an unresolved readable generated type",
+                })?;
+            ConstantTypeNativeIr::Reference(type_id)
+        }
+        _ => return invalid_model(uuid, "Constant Type kind is unsupported"),
+    };
+    let use_standard_commands = match property(object, "UseStandardCommands")?.kind() {
+        CanonicalValueKind::Bool(value) => value,
+        _ => return invalid_model(uuid, "UseStandardCommands is not boolean"),
+    };
+
+    Ok(ConstantNativeIr {
+        uuid,
+        name,
+        synonyms,
+        comment,
+        manager_type_id: identities[0],
+        manager_value_id: identities[1],
+        value_manager_type_id: identities[2],
+        value_manager_value_id: identities[3],
+        value_key_type_id: identities[4],
+        value_key_value_id: identities[5],
+        value_type,
+        use_standard_commands,
+    })
 }
 
 fn project_language(
@@ -1595,12 +1918,18 @@ fn generated_type_reference_index(
                     "generated TypeId collides with an evidenced built-in TypeId",
                 );
             }
-            let readable = format!(
-                "cfg:{}{}.{}",
-                object.kind().as_str(),
-                generated_type.kind().as_str(),
-                name
-            );
+            let readable_kind = if object.kind().as_str() == "DefinedType"
+                && generated_type.kind().as_str() == "DefinedType"
+            {
+                "DefinedType".to_owned()
+            } else {
+                format!(
+                    "{}{}",
+                    object.kind().as_str(),
+                    generated_type.kind().as_str()
+                )
+            };
+            let readable = format!("cfg:{readable_kind}.{name}");
             if references.insert(readable, generated_type.uuid()).is_some() {
                 return invalid_model(compiling, "readable generated type name is ambiguous");
             }
@@ -1778,6 +2107,74 @@ fn canonical_u32_field(
         }
         _ => invalid_model(object, "Type qualifier is not an integer"),
     }
+}
+
+fn serialize_constant(value: &ConstantNativeIr) -> Vec<u8> {
+    let mut plaintext = String::new();
+    plaintext.push_str("{1,\r\n{16,\r\n{27,\r\n{2,\r\n");
+    push_constant_native_header(
+        &mut plaintext,
+        value.uuid,
+        &value.name,
+        &value.synonyms,
+        &value.comment,
+    );
+    plaintext.push_str(",\r\n");
+    push_constant_type_pattern(&mut plaintext, &value.value_type);
+    plaintext.push_str(
+        "\r\n},0,\r\n{0},\r\n{0},0,\"\",0,\r\n{\"U\"},\r\n{\"U\"},0,00000000-0000-0000-0000-000000000000,2,0,\r\n{5006,0},\r\n{3,0,0},\r\n{0,0},0,\r\n{0},\r\n{\"S\",\"\"},0,0,0}",
+    );
+    for id in [
+        value.manager_type_id,
+        value.manager_value_id,
+        value.value_manager_type_id,
+        value.value_manager_value_id,
+    ] {
+        plaintext.push(',');
+        plaintext.push_str(&id.to_string());
+    }
+    plaintext.push_str(",1,");
+    plaintext.push(if value.use_standard_commands {
+        '1'
+    } else {
+        '0'
+    });
+    plaintext.push_str(",\r\n{0},\r\n{0},00000000-0000-0000-0000-000000000000,0,0,");
+    plaintext.push_str(&value.value_key_type_id.to_string());
+    plaintext.push(',');
+    plaintext.push_str(&value.value_key_value_id.to_string());
+    plaintext.push_str(",0,0},0}");
+    plaintext.into_bytes()
+}
+
+fn push_constant_type_pattern(output: &mut String, value: &ConstantTypeNativeIr) {
+    output.push_str("{\"Pattern\",\r\n");
+    match value {
+        ConstantTypeNativeIr::Boolean => output.push_str("{\"B\"}"),
+        ConstantTypeNativeIr::String { length: 0 } => output.push_str("{\"S\"}"),
+        ConstantTypeNativeIr::String { length } => {
+            write!(output, "{{\"S\",{length},0}}").expect("writing to String cannot fail");
+        }
+        ConstantTypeNativeIr::Number {
+            digits,
+            fraction_digits,
+            nonnegative,
+        } => {
+            write!(
+                output,
+                "{{\"N\",{digits},{fraction_digits},{}}}",
+                if *nonnegative { 1 } else { 0 }
+            )
+            .expect("writing to String cannot fail");
+        }
+        ConstantTypeNativeIr::DateTime => output.push_str("{\"D\"}"),
+        ConstantTypeNativeIr::Reference(type_id) => {
+            output.push_str("{\"#\",");
+            output.push_str(&type_id.to_string());
+            output.push('}');
+        }
+    }
+    output.push_str("\r\n}");
 }
 
 fn serialize_language(value: &LanguageNativeIr) -> Vec<u8> {
@@ -1990,6 +2387,32 @@ fn push_native_header(
     output.push_str(",0}");
 }
 
+fn push_constant_native_header(
+    output: &mut String,
+    uuid: ObjectUuid,
+    name: &str,
+    synonyms: &[NativeLocalizedString],
+    comment: &str,
+) {
+    output.push_str("{3,\r\n{1,0,");
+    output.push_str(&uuid.to_string());
+    output.push_str("},");
+    push_1c_string(output, name);
+    output.push_str(",\r\n");
+    write!(output, "{{{}", synonyms.len()).expect("writing to String cannot fail");
+    for synonym in synonyms {
+        output.push(',');
+        push_1c_string(output, &synonym.language);
+        output.push(',');
+        push_1c_string(output, &synonym.content);
+    }
+    output.push_str("},");
+    push_1c_string(output, comment);
+    output.push_str(",0,0,");
+    output.push_str(NIL_UUID);
+    output.push_str(",0}");
+}
+
 fn push_1c_string(output: &mut String, value: &str) {
     output.push('"');
     for character in value.chars() {
@@ -2162,6 +2585,194 @@ impl<'a> NativeParser<'a> {
         {
             self.offset += 1;
         }
+    }
+}
+
+fn parse_constant(plain: &[u8]) -> Result<ConstantNativeIr, SimpleMetadataBuildError> {
+    let root = NativeParser::new(plain).parse()?;
+    let root = exact_list(&root, 3, "root")?;
+    exact_token(&root[0], "1", "root discriminator")?;
+    exact_token(&root[2], "0", "root tail")?;
+    let object = exact_list(&root[1], 17, "Constant object")?;
+    exact_token(&object[0], "16", "Constant discriminator")?;
+
+    let owner = exact_list(&object[1], 23, "Constant owner")?;
+    exact_token(&owner[0], "27", "Constant owner discriminator")?;
+    let typed = exact_list(&owner[1], 3, "Constant typed object")?;
+    exact_token(&typed[0], "2", "Constant typed object discriminator")?;
+    let header = parse_native_header(&typed[1])?;
+    let value_type = parse_constant_type_pattern(&typed[2])?;
+    exact_token(&owner[2], "0", "Constant typed object tail")?;
+    expect_token_list(&owner[3], &["0"], "Constant owner slot 3")?;
+    expect_token_list(&owner[4], &["0"], "Constant owner slot 4")?;
+    exact_token(&owner[5], "0", "Constant owner slot 5")?;
+    if !text(&owner[6], "Constant owner slot 6")?.is_empty() {
+        return Err(native("Constant owner slot 6 is not empty text"));
+    }
+    exact_token(&owner[7], "0", "Constant owner slot 7")?;
+    expect_text_list(&owner[8], &["U"], "Constant owner slot 8")?;
+    expect_text_list(&owner[9], &["U"], "Constant owner slot 9")?;
+    exact_token(&owner[10], "0", "Constant owner slot 10")?;
+    exact_token(&owner[11], NIL_UUID, "Constant owner slot 11")?;
+    exact_token(&owner[12], "2", "Constant owner slot 12")?;
+    exact_token(&owner[13], "0", "Constant owner slot 13")?;
+    expect_token_list(&owner[14], &["5006", "0"], "Constant owner slot 14")?;
+    expect_token_list(&owner[15], &["3", "0", "0"], "Constant owner slot 15")?;
+    expect_token_list(&owner[16], &["0", "0"], "Constant owner slot 16")?;
+    exact_token(&owner[17], "0", "Constant owner slot 17")?;
+    expect_token_list(&owner[18], &["0"], "Constant owner slot 18")?;
+    expect_text_list(&owner[19], &["S", ""], "Constant owner slot 19")?;
+    exact_token(&owner[20], "0", "Constant owner slot 20")?;
+    exact_token(&owner[21], "0", "Constant owner slot 21")?;
+    exact_token(&owner[22], "0", "Constant owner slot 22")?;
+
+    let manager_type_id = canonical_uuid_token(&object[2], "Constant Manager TypeId")?;
+    let manager_value_id = canonical_uuid_token(&object[3], "Constant Manager ValueId")?;
+    let value_manager_type_id = canonical_uuid_token(&object[4], "Constant ValueManager TypeId")?;
+    let value_manager_value_id = canonical_uuid_token(&object[5], "Constant ValueManager ValueId")?;
+    exact_token(&object[6], "1", "Constant generated cohort flag")?;
+    let use_standard_commands = match token(&object[7], "UseStandardCommands")? {
+        "0" => false,
+        "1" => true,
+        _ => return Err(native("UseStandardCommands is not 0 or 1")),
+    };
+    expect_token_list(&object[8], &["0"], "Constant object slot 8")?;
+    expect_token_list(&object[9], &["0"], "Constant object slot 9")?;
+    exact_token(&object[10], NIL_UUID, "Constant object slot 10")?;
+    exact_token(&object[11], "0", "Constant object slot 11")?;
+    exact_token(&object[12], "0", "Constant object slot 12")?;
+    let value_key_type_id = canonical_uuid_token(&object[13], "Constant ValueKey TypeId")?;
+    let value_key_value_id = canonical_uuid_token(&object[14], "Constant ValueKey ValueId")?;
+    exact_token(&object[15], "0", "Constant object slot 15")?;
+    exact_token(&object[16], "0", "Constant object slot 16")?;
+
+    let value = ConstantNativeIr {
+        uuid: header.uuid,
+        name: header.name,
+        synonyms: header.synonyms,
+        comment: header.comment,
+        manager_type_id,
+        manager_value_id,
+        value_manager_type_id,
+        value_manager_value_id,
+        value_key_type_id,
+        value_key_value_id,
+        value_type,
+        use_standard_commands,
+    };
+    validate_constant_generated_ids(&value)?;
+    Ok(value)
+}
+
+fn parse_constant_type_pattern(
+    value: &NativeValue,
+) -> Result<ConstantTypeNativeIr, SimpleMetadataBuildError> {
+    let pattern = exact_list(value, 2, "Constant Type pattern")?;
+    if text(&pattern[0], "Constant Type pattern marker")? != "Pattern" {
+        return Err(native("Constant Type pattern marker is not Pattern"));
+    }
+    let item = list(&pattern[1], "Constant Type pattern item")?;
+    let tag = item
+        .first()
+        .ok_or_else(|| native("Constant Type pattern item is empty"))
+        .and_then(|value| text(value, "Constant Type pattern item tag"))?;
+    match tag {
+        "B" if item.len() == 1 => Ok(ConstantTypeNativeIr::Boolean),
+        "S" if item.len() == 1 => Ok(ConstantTypeNativeIr::String { length: 0 }),
+        "S" if item.len() == 3 => {
+            let length = canonical_u32_token(&item[1], "Constant String length")?;
+            if length == 0 {
+                return Err(native(
+                    "zero-length Constant String must use the compact native shape",
+                ));
+            }
+            exact_token(&item[2], "0", "Constant String evidenced Variable flag")?;
+            Ok(ConstantTypeNativeIr::String { length })
+        }
+        "N" if item.len() == 4 => {
+            let digits = canonical_u32_token(&item[1], "Constant Number digits")?;
+            let fraction_digits = canonical_u32_token(&item[2], "Constant Number fraction digits")?;
+            if fraction_digits > digits {
+                return Err(native("Constant Number FractionDigits exceeds Digits"));
+            }
+            let nonnegative = match token(&item[3], "Constant Number sign flag")? {
+                "0" => false,
+                "1" => true,
+                _ => return Err(native("Constant Number sign flag is not 0 or 1")),
+            };
+            Ok(ConstantTypeNativeIr::Number {
+                digits,
+                fraction_digits,
+                nonnegative,
+            })
+        }
+        "D" if item.len() == 1 => Ok(ConstantTypeNativeIr::DateTime),
+        "#" if item.len() == 2 => {
+            let type_id = canonical_uuid_token(&item[1], "Constant reference TypeId")?;
+            if type_id.to_string() == NIL_UUID {
+                return Err(native("Constant reference TypeId is nil"));
+            }
+            Ok(ConstantTypeNativeIr::Reference(type_id))
+        }
+        "B" | "S" | "N" | "D" | "#" => Err(native(
+            "Constant Type pattern item has unexpected field count or flag",
+        )),
+        _ => Err(native("unknown Constant Type pattern item")),
+    }
+}
+
+fn expect_token_list(
+    value: &NativeValue,
+    expected: &[&str],
+    context: &'static str,
+) -> Result<(), SimpleMetadataBuildError> {
+    let fields = exact_list(value, expected.len(), context)?;
+    for (field, expected) in fields.iter().zip(expected) {
+        exact_token(field, expected, context)?;
+    }
+    Ok(())
+}
+
+fn expect_text_list(
+    value: &NativeValue,
+    expected: &[&str],
+    context: &'static str,
+) -> Result<(), SimpleMetadataBuildError> {
+    let fields = exact_list(value, expected.len(), context)?;
+    for (field, expected) in fields.iter().zip(expected) {
+        if text(field, context)? != *expected {
+            return Err(native("Constant owner text slot is not exact"));
+        }
+    }
+    Ok(())
+}
+
+fn constant_generated_ids(value: &ConstantNativeIr) -> [ObjectUuid; 6] {
+    [
+        value.manager_type_id,
+        value.manager_value_id,
+        value.value_manager_type_id,
+        value.value_manager_value_id,
+        value.value_key_type_id,
+        value.value_key_value_id,
+    ]
+}
+
+fn constant_generated_ids_are_valid(ids: &[ObjectUuid]) -> bool {
+    let mut unique = BTreeSet::new();
+    ids.len() == 6
+        && ids
+            .iter()
+            .all(|id| id.to_string() != NIL_UUID && unique.insert(*id))
+}
+
+fn validate_constant_generated_ids(
+    value: &ConstantNativeIr,
+) -> Result<(), SimpleMetadataBuildError> {
+    if constant_generated_ids_are_valid(&constant_generated_ids(value)) {
+        Ok(())
+    } else {
+        Err(native("Constant generated IDs are nil or duplicated"))
     }
 }
 
@@ -2672,6 +3283,98 @@ fn supported_cfg_type_name(value: &str) -> bool {
         && !name.contains('.')
 }
 
+fn write_constant_generated_type_xml(
+    output: &mut String,
+    readable_kind: &str,
+    category: &str,
+    name: &str,
+    type_id: ObjectUuid,
+    value_id: ObjectUuid,
+) {
+    output.push_str("\t\t\t<xr:GeneratedType name=\"");
+    push_xml_attribute_value(output, readable_kind);
+    output.push('.');
+    push_xml_attribute_value(output, name);
+    output.push_str("\" category=\"");
+    push_xml_attribute_value(output, category);
+    output.push_str("\">\r\n");
+    write_xml_text_element(output, "\t\t\t\t", "xr:TypeId", &type_id.to_string());
+    write_xml_text_element(output, "\t\t\t\t", "xr:ValueId", &value_id.to_string());
+    output.push_str("\t\t\t</xr:GeneratedType>\r\n");
+}
+
+fn write_constant_type_xml(
+    output: &mut String,
+    value: &ConstantTypeNativeIr,
+    type_names: &BTreeMap<ObjectUuid, String>,
+) -> Result<(), SimpleMetadataBuildError> {
+    output.push_str("\t\t\t<Type>\r\n");
+    match value {
+        ConstantTypeNativeIr::Boolean => {
+            write_xml_text_element(output, "\t\t\t\t", "v8:Type", "xs:boolean");
+        }
+        ConstantTypeNativeIr::String { length } => {
+            write_xml_text_element(output, "\t\t\t\t", "v8:Type", "xs:string");
+            output.push_str("\t\t\t\t<v8:StringQualifiers>\r\n");
+            write_xml_text_element(output, "\t\t\t\t\t", "v8:Length", &length.to_string());
+            write_xml_text_element(output, "\t\t\t\t\t", "v8:AllowedLength", "Variable");
+            output.push_str("\t\t\t\t</v8:StringQualifiers>\r\n");
+        }
+        ConstantTypeNativeIr::Number {
+            digits,
+            fraction_digits,
+            nonnegative,
+        } => {
+            if fraction_digits > digits {
+                return Err(native("Constant Number FractionDigits exceeds Digits"));
+            }
+            write_xml_text_element(output, "\t\t\t\t", "v8:Type", "xs:decimal");
+            output.push_str("\t\t\t\t<v8:NumberQualifiers>\r\n");
+            write_xml_text_element(output, "\t\t\t\t\t", "v8:Digits", &digits.to_string());
+            write_xml_text_element(
+                output,
+                "\t\t\t\t\t",
+                "v8:FractionDigits",
+                &fraction_digits.to_string(),
+            );
+            write_xml_text_element(
+                output,
+                "\t\t\t\t\t",
+                "v8:AllowedSign",
+                if *nonnegative { "Nonnegative" } else { "Any" },
+            );
+            output.push_str("\t\t\t\t</v8:NumberQualifiers>\r\n");
+        }
+        ConstantTypeNativeIr::DateTime => {
+            write_xml_text_element(output, "\t\t\t\t", "v8:Type", "xs:dateTime");
+            output.push_str("\t\t\t\t<v8:DateQualifiers>\r\n");
+            write_xml_text_element(output, "\t\t\t\t\t", "v8:DateFractions", "DateTime");
+            output.push_str("\t\t\t\t</v8:DateQualifiers>\r\n");
+        }
+        ConstantTypeNativeIr::Reference(type_id) => {
+            let name = if let Some(name) = builtin_type_name(*type_id) {
+                name
+            } else {
+                let name = type_names
+                    .get(type_id)
+                    .ok_or(SimpleMetadataBuildError::MissingReadableReference(*type_id))?;
+                if !supported_cfg_type_name(name) {
+                    return Err(native("Constant readable type is not an exact cfg:* name"));
+                }
+                name
+            };
+            let element = if name.starts_with("cfg:DefinedType.") {
+                "v8:TypeSet"
+            } else {
+                "v8:Type"
+            };
+            write_xml_text_element(output, "\t\t\t\t", element, name);
+        }
+    }
+    output.push_str("\t\t\t</Type>\r\n");
+    Ok(())
+}
+
 fn write_type_pattern_xml(
     output: &mut String,
     types: &[SessionParameterTypeNativeIr],
@@ -2863,6 +3566,13 @@ mod tests {
     const DEFINED_TYPE_UUID: &str = "ae67dfe5-bb36-4400-81f5-8dab1fd0ca6e";
     const DEFINED_TYPE_TYPE_ID: &str = "5ddef559-eb73-4233-842e-6548a5404b56";
     const DEFINED_TYPE_VALUE_ID: &str = "9de02db3-bd7b-46ba-85da-af983d17f10a";
+    const COMPILED_CONSTANT_UUID: &str = "8cf925d9-6811-4bce-b116-09d6a26ff3cb";
+    const CONSTANT_MANAGER_TYPE_ID: &str = "d38f3e49-2ab6-4543-8172-f0b2946d008a";
+    const CONSTANT_MANAGER_VALUE_ID: &str = "8a48a63b-a685-4d62-8f9f-2845dd54e586";
+    const CONSTANT_VALUE_MANAGER_TYPE_ID: &str = "44842170-ac0d-42ff-82a2-b507ba881373";
+    const CONSTANT_VALUE_MANAGER_VALUE_ID: &str = "13f8c3df-ef49-47c7-9b55-dcc2dc2fc793";
+    const CONSTANT_VALUE_KEY_TYPE_ID: &str = "f4cf40b2-2026-43b2-8266-ab6d6d89db55";
+    const CONSTANT_VALUE_KEY_VALUE_ID: &str = "43aa0577-de1f-44b6-8800-89f4e5d6e78d";
 
     fn xml(version: &str) -> Vec<u8> {
         format!(
@@ -3012,6 +3722,29 @@ mod tests {
         .into_bytes()
     }
 
+    fn constant_xml(version: &str, type_body: &str, use_standard_commands: bool) -> Vec<u8> {
+        format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"{version}\">\r\n\
+\t<Constant uuid=\"{COMPILED_CONSTANT_UUID}\">\r\n\
+\t\t<InternalInfo>\r\n\
+\t\t\t<xr:GeneratedType name=\"ConstantManager.АдресаСерверовМетокВремени\" category=\"Manager\"><xr:TypeId>{CONSTANT_MANAGER_TYPE_ID}</xr:TypeId><xr:ValueId>{CONSTANT_MANAGER_VALUE_ID}</xr:ValueId></xr:GeneratedType>\r\n\
+\t\t\t<xr:GeneratedType name=\"ConstantValueManager.АдресаСерверовМетокВремени\" category=\"ValueManager\"><xr:TypeId>{CONSTANT_VALUE_MANAGER_TYPE_ID}</xr:TypeId><xr:ValueId>{CONSTANT_VALUE_MANAGER_VALUE_ID}</xr:ValueId></xr:GeneratedType>\r\n\
+\t\t\t<xr:GeneratedType name=\"ConstantValueKey.АдресаСерверовМетокВремени\" category=\"ValueKey\"><xr:TypeId>{CONSTANT_VALUE_KEY_TYPE_ID}</xr:TypeId><xr:ValueId>{CONSTANT_VALUE_KEY_VALUE_ID}</xr:ValueId></xr:GeneratedType>\r\n\
+\t\t</InternalInfo>\r\n\
+\t\t<Properties>\r\n\
+\t\t\t<Name>АдресаСерверовМетокВремени</Name>\r\n\
+\t\t\t<Synonym><v8:item><v8:lang>ru</v8:lang><v8:content>Адреса серверов меток времени</v8:content></v8:item></Synonym>\r\n\
+\t\t\t<Comment/>\r\n\
+\t\t\t<Type>{type_body}</Type>\r\n\
+\t\t\t<UseStandardCommands>{use_standard_commands}</UseStandardCommands>\r\n\
+\t\t</Properties>\r\n\
+\t</Constant>\r\n\
+</MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
     fn simple_object_parts(
         version: &str,
         uuid: &str,
@@ -3063,6 +3796,26 @@ mod tests {
             ObjectUuid::parse(type_id).unwrap(),
             GeneratedTypeKind::new(type_kind).unwrap(),
         ));
+        CanonicalObject::new(parts).unwrap()
+    }
+
+    fn simple_object_with_generated_type_and_value(
+        version: &str,
+        uuid: &str,
+        kind: &str,
+        name: &str,
+        type_id: &str,
+        value_id: &str,
+        type_kind: &str,
+    ) -> CanonicalObject {
+        let mut parts = simple_object_parts(version, uuid, kind, name);
+        parts.generated_types.push(
+            GeneratedType::new(
+                ObjectUuid::parse(type_id).unwrap(),
+                GeneratedTypeKind::new(type_kind).unwrap(),
+            )
+            .with_value_id(ObjectUuid::parse(value_id).unwrap()),
+        );
         CanonicalObject::new(parts).unwrap()
     }
 
@@ -3190,6 +3943,48 @@ mod tests {
         .unwrap()
     }
 
+    fn constant_configuration(
+        version: &str,
+        type_body: &str,
+        use_standard_commands: bool,
+    ) -> CanonicalConfiguration {
+        let document =
+            XmlReader::from_slice(&constant_xml(version, type_body, use_standard_commands))
+                .unwrap();
+        let constant = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse("Constant").unwrap(),
+                &document,
+                ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap()
+            .root()
+            .clone();
+        CanonicalConfiguration::new(vec![
+            simple_object(version, CONFIGURATION_UUID, "Configuration", "Fixture"),
+            simple_object_with_generated_type(
+                version,
+                CATALOG_UUID,
+                "Catalog",
+                "ExternalUsers",
+                FIRST_CATALOG_REF_TYPE_ID,
+                "Ref",
+            ),
+            simple_object_with_generated_type_and_value(
+                version,
+                DEFINED_TYPE_UUID,
+                "DefinedType",
+                "SafeMode",
+                DEFINED_TYPE_TYPE_ID,
+                DEFINED_TYPE_VALUE_ID,
+                "DefinedType",
+            ),
+            constant,
+        ])
+        .unwrap()
+    }
+
     fn functional_options_parameter_graph<'a>(
         validated: &ValidatedConfiguration<'a>,
     ) -> (BootstrapGraph, SimpleMetadataProfile) {
@@ -3293,6 +4088,32 @@ mod tests {
         )
     }
 
+    fn constant_graph<'a>(
+        validated: &ValidatedConfiguration<'a>,
+    ) -> (BootstrapGraph, SimpleMetadataProfile) {
+        let identities = collect_bootstrap_identities(validated).unwrap();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            [
+                CONFIGURATION_UUID,
+                CATALOG_UUID,
+                DEFINED_TYPE_UUID,
+                COMPILED_CONSTANT_UUID,
+            ]
+            .into_iter()
+            .map(|uuid| {
+                ObjectStorageRoute::new(ObjectUuid::parse(uuid).unwrap(), Vec::new()).unwrap()
+            })
+            .collect(),
+        )
+        .unwrap();
+        (
+            graph,
+            SimpleMetadataProfile::constant_fixture("platform-test"),
+        )
+    }
+
     #[test]
     fn language_xml_to_blob_to_ir_to_xml_is_base_free_for_both_dialects() {
         for version in ["2.20", "2.21"] {
@@ -3361,6 +4182,7 @@ mod tests {
                 "platform_build": "8.3.27.1989",
                 "storage_profile": "{SUPPORTED_STORAGE_PROFILE}",
                 "constants": {{
+                    "{CONSTANT_LAYOUT_KEY}": "{CONSTANT_LAYOUT}",
                     "{LANGUAGE_LAYOUT_KEY}": "{LANGUAGE_LAYOUT}",
                     "{SESSION_PARAMETER_LAYOUT_KEY}": "{SESSION_PARAMETER_LAYOUT}",
                     "{DEFINED_TYPE_LAYOUT_KEY}": "{DEFINED_TYPE_LAYOUT}",
@@ -3381,13 +4203,12 @@ mod tests {
                 .family(),
             SimpleFamily::Language
         );
-        assert!(matches!(
-            SimpleMetadataProfile::from_effective_for_family(effective, SimpleFamily::Constant),
-            Err(SimpleMetadataProfileError::FamilyNotImplemented {
-                family: SimpleFamily::Constant,
-                ..
-            })
-        ));
+        assert_eq!(
+            SimpleMetadataProfile::from_effective_for_family(effective, SimpleFamily::Constant)
+                .unwrap()
+                .family(),
+            SimpleFamily::Constant
+        );
         assert_eq!(
             SimpleMetadataProfile::from_effective_for_family(effective, SimpleFamily::DefinedType)
                 .unwrap()
@@ -3430,6 +4251,7 @@ mod tests {
             .get(&ProfileId::parse("platform-8.3.27.1989").unwrap())
             .unwrap();
         for family in [
+            SimpleFamily::Constant,
             SimpleFamily::Language,
             SimpleFamily::SessionParameter,
             SimpleFamily::DefinedType,
@@ -3443,9 +4265,163 @@ mod tests {
                 family
             );
         }
+    }
+
+    #[test]
+    fn constant_roundtrips_all_typed_variants_without_a_base() {
+        let cases = [
+            ("<v8:Type>xs:boolean</v8:Type>", false),
+            (
+                "<v8:Type>xs:string</v8:Type><v8:StringQualifiers><v8:Length>80</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength></v8:StringQualifiers>",
+                true,
+            ),
+            (
+                "<v8:Type>xs:decimal</v8:Type><v8:NumberQualifiers><v8:Digits>10</v8:Digits><v8:FractionDigits>2</v8:FractionDigits><v8:AllowedSign>Nonnegative</v8:AllowedSign></v8:NumberQualifiers>",
+                false,
+            ),
+            (
+                "<v8:Type>xs:dateTime</v8:Type><v8:DateQualifiers><v8:DateFractions>DateTime</v8:DateFractions></v8:DateQualifiers>",
+                true,
+            ),
+            ("<v8:Type>cfg:CatalogRef.ExternalUsers</v8:Type>", true),
+            ("<v8:TypeSet>cfg:DefinedType.SafeMode</v8:TypeSet>", false),
+        ];
+        let readable_types = BTreeMap::from([
+            (
+                ObjectUuid::parse(FIRST_CATALOG_REF_TYPE_ID).unwrap(),
+                "cfg:CatalogRef.ExternalUsers".to_owned(),
+            ),
+            (
+                ObjectUuid::parse(DEFINED_TYPE_TYPE_ID).unwrap(),
+                "cfg:DefinedType.SafeMode".to_owned(),
+            ),
+        ]);
+        for version in ["2.20", "2.21"] {
+            for (type_body, use_standard_commands) in cases {
+                let configuration =
+                    constant_configuration(version, type_body, use_standard_commands);
+                let validated = validate_configuration(&configuration).unwrap();
+                let (graph, profile) = constant_graph(&validated);
+                let uuid = ObjectUuid::parse(COMPILED_CONSTANT_UUID).unwrap();
+                let first =
+                    compile_simple_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                        .unwrap();
+                let second =
+                    compile_simple_metadata(&validated, &graph, uuid, &axes(version), &profile)
+                        .unwrap();
+                assert_eq!(first, second);
+                let ir = decode_constant_blob(
+                    first.outcome().compiled_payload().unwrap().bytes(),
+                    &profile,
+                )
+                .unwrap();
+                assert_eq!(ir.uuid, uuid);
+                assert_eq!(ir.use_standard_commands, use_standard_commands);
+                assert_eq!(
+                    ir.manager_value_id,
+                    ObjectUuid::parse(CONSTANT_MANAGER_VALUE_ID).unwrap()
+                );
+                let xml = ir
+                    .to_xml(
+                        &ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                        &readable_types,
+                    )
+                    .unwrap();
+                let text = String::from_utf8(xml.clone()).unwrap();
+                if type_body.contains("TypeSet") {
+                    assert!(text.contains("<v8:TypeSet>cfg:DefinedType.SafeMode</v8:TypeSet>"));
+                }
+                let document = XmlReader::from_slice(&xml).unwrap();
+                let envelope = bundled_metadata_registry()
+                    .decode(
+                        &FamilyId::parse("Constant").unwrap(),
+                        &document,
+                        ProfileId::parse(&format!("xml-{version}")).unwrap(),
+                        ObjectPath::root(),
+                    )
+                    .unwrap();
+                assert_eq!(envelope.root().generated_types().len(), 3);
+                assert!(
+                    envelope
+                        .root()
+                        .generated_types()
+                        .iter()
+                        .all(|generated| generated.value_id().is_some())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn constant_plaintext_matches_observed_golden() {
+        let configuration = constant_configuration(
+            "2.20",
+            "<v8:Type>xs:string</v8:Type><v8:StringQualifiers><v8:Length>0</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength></v8:StringQualifiers>",
+            true,
+        );
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = constant_graph(&validated);
+        let entry = compile_simple_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(COMPILED_CONSTANT_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        let expected = format!(
+            "{{1,\r\n{{16,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{COMPILED_CONSTANT_UUID}}},\"АдресаСерверовМетокВремени\",\r\n{{1,\"ru\",\"Адреса серверов меток времени\"}},\"\",0,0,{NIL_UUID},0}},\r\n{{\"Pattern\",\r\n{{\"S\"}}\r\n}}\r\n}},0,\r\n{{0}},\r\n{{0}},0,\"\",0,\r\n{{\"U\"}},\r\n{{\"U\"}},0,{NIL_UUID},2,0,\r\n{{5006,0}},\r\n{{3,0,0}},\r\n{{0,0}},0,\r\n{{0}},\r\n{{\"S\",\"\"}},0,0,0}},{CONSTANT_MANAGER_TYPE_ID},{CONSTANT_MANAGER_VALUE_ID},{CONSTANT_VALUE_MANAGER_TYPE_ID},{CONSTANT_VALUE_MANAGER_VALUE_ID},1,1,\r\n{{0}},\r\n{{0}},{NIL_UUID},0,0,{CONSTANT_VALUE_KEY_TYPE_ID},{CONSTANT_VALUE_KEY_VALUE_ID},0,0}},0}}"
+        );
+        assert_eq!(plain, expected.as_bytes());
+        let ir = parse_constant(&plain).unwrap();
+        assert_eq!(ir.value_type, ConstantTypeNativeIr::String { length: 0 });
+    }
+
+    #[test]
+    fn constant_decoder_and_projection_fail_closed() {
+        let configuration = constant_configuration("2.20", "<v8:Type>xs:boolean</v8:Type>", false);
+        let validated = validate_configuration(&configuration).unwrap();
+        let (graph, profile) = constant_graph(&validated);
+        let entry = compile_simple_metadata(
+            &validated,
+            &graph,
+            ObjectUuid::parse(COMPILED_CONSTANT_UUID).unwrap(),
+            &axes("2.20"),
+            &profile,
+        )
+        .unwrap();
+        let plain = inflate_bounded(entry.outcome().compiled_payload().unwrap().bytes()).unwrap();
+        let text = String::from_utf8(plain).unwrap();
         assert!(matches!(
-            SimpleMetadataProfile::from_effective_for_family(effective, SimpleFamily::Constant),
-            Err(SimpleMetadataProfileError::FamilyNotImplemented { .. })
+            parse_constant(&text.replacen("{\"U\"}", "{\"Future\"}", 1).into_bytes()),
+            Err(SimpleMetadataBuildError::Native(_))
+        ));
+        assert!(matches!(
+            parse_constant(
+                &text
+                    .replacen(CONSTANT_MANAGER_VALUE_ID, CONSTANT_MANAGER_TYPE_ID, 1)
+                    .into_bytes()
+            ),
+            Err(SimpleMetadataBuildError::Native(_))
+        ));
+
+        let missing =
+            constant_configuration("2.20", "<v8:Type>cfg:CatalogRef.Missing</v8:Type>", true);
+        let validated = validate_configuration(&missing).unwrap();
+        let (graph, profile) = constant_graph(&validated);
+        assert!(matches!(
+            compile_simple_metadata(
+                &validated,
+                &graph,
+                ObjectUuid::parse(COMPILED_CONSTANT_UUID).unwrap(),
+                &axes("2.20"),
+                &profile,
+            ),
+            Err(SimpleMetadataBuildError::InvalidModel {
+                reason: "Constant Type contains an unresolved readable generated type",
+                ..
+            })
         ));
     }
 

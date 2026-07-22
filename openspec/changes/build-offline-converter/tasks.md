@@ -322,7 +322,7 @@
 
 ### BOOT-003 — Base-free codecs простых metadata families
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002, XML-004
+- **Статус:** `[x]`; **зависимости:** BOOT-002, XML-004
 - **Файлы:** создать `src/compiler/families/simple.rs`; адаптировать соответствующие парсеры `src/module_blob.rs`
 - **Действия:** Constant, Language, SessionParameter, DefinedType, FunctionalOption/Parameter.
 - **Проверка:** XML→blob→IR/XML без base для каждой family; readiness становится Compiled только по зелёным fixtures.

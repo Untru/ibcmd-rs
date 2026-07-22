@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=24 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=25 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 24 of 56 accepted leaf issues in the
+As of 2026-07-22, 25 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (42.9%). Live workflow statuses are tracked in
+are complete (44.6%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -41,18 +41,18 @@ compiler work continues on separate roadmap lanes.
 BOOT-002 is paused only on the native `Configuration` body: the bounded
 identity/inventory graph and deterministic `root`, `version`, and `versions`
 codecs are implemented, while the unproven seven-section body remains
-fail-closed. BOOT-003 is in progress. Five complete vertical slices,
+fail-closed. BOOT-003 is complete. Its six vertical slices, `Constant`,
 `Language`, `SessionParameter`, `DefinedType`, `FunctionalOption`, and
-`FunctionalOptionsParameter`, now support XML 2.20/2.21 -> typed IR ->
+`FunctionalOptionsParameter`, support XML 2.20/2.21 -> typed IR ->
 deterministic base-free native row -> strict native IR/XML under independently
 selected 8.3.27 family layouts. Readable `Location`, `Content`, and `Use`
 references are resolved only through the validated canonical graph;
 type-pattern `cfg:*` values resolve only through canonical generated TypeIds.
 The core now also retains generated `ValueId` as a typed optional identity
-(legacy canonical JSON remains readable; semantic digest domain v2). Only
-`Constant` remains unsupported in this issue until its complete generated-ID
-cohort and native layout are committed. These partial results do not increment
-the accepted-issue percentage above.
+(legacy canonical JSON remains readable; semantic digest domain v2). The
+`Constant` codec preserves all three generated TypeId/ValueId pairs, its single
+type pattern and `UseStandardCommands`; unknown native shell fields and
+unevidenced qualifier mappings fail closed.
 
 | Phase | Completed | Progress |
 |---|---:|---:|
@@ -60,10 +60,10 @@ the accepted-issue percentage above.
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 1/15 | 6.7% |
-| Phase 4 bootstrap | 1/13 | 7.7% |
+| Phase 4 bootstrap | 2/13 | 15.4% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **24/56** | **42.9%** |
+| **Overall** | **25/56** | **44.6%** |
 
 ## Export Compatibility Status
 
