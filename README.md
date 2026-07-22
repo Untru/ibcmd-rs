@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=43 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=44 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 43 of 56 accepted leaf issues in the
+As of 2026-07-23, 44 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (76.8%). Live workflow statuses are tracked in
+are complete (78.6%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -83,6 +83,17 @@ logical element headers are retained, and payload sizes
 `0/1/511/512/513/4097` round-trip through the reader. Rewriting canonical
 output is byte-identical. See
 [Format15 writer evidence](docs/evidence/cf-format15-writer.md).
+
+CF-008 adds the complete Format16 archive writer. The primary writer plans
+64-bit relative offsets and page chains without materializing a page table,
+streams declared payloads from arbitrary `Read` sources through an 8 KiB
+buffer, and retains absent/empty data plus raw logical headers. The CF layer
+models the fixed `0x1359` preamble as ordered semantic Format15 entries: it can
+either validate and preserve existing bytes exactly or generate a fresh
+envelope by extending only its final physical page. The clean-room Format16
+fixture rewrites byte-for-byte in preserve mode, while semantic regeneration
+also parses to the same ordered entries and payloads. See
+[Format16 writer evidence](docs/evidence/cf-format16-writer.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -242,11 +253,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 8/15 | 53.3% |
+| Phase 3 CF | 9/15 | 60.0% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **43/56** | **76.8%** |
+| **Overall** | **44/56** | **78.6%** |
 
 ## Export Compatibility Status
 

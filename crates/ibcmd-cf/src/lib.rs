@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod payload;
+pub mod preamble;
 pub mod tree;
 
 #[cfg(test)]

@@ -240,7 +240,7 @@
 
 ### CF-008 — Смоделировать preamble и реализовать Format16 writer
 
-- **Статус:** `[ ]`; **зависимости:** CF-004, CF-006, CF-007, CORE-004
+- **Статус:** `[x]`; **зависимости:** CF-004, CF-006, CF-007, CORE-004
 - **Файлы:** создать `crates/ibcmd-cf/src/preamble.rs`; расширить `crates/ibcmd-v8/src/writer.rs`, `format16.rs`
 - **Действия:** semantic preamble model, 64-bit streaming offsets, preserve/generate modes.
 - **Проверка:** parser принимает output; writer не держит все payloads в RAM; preamble не копируется как недокументированная константа.

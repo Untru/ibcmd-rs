@@ -82,6 +82,10 @@ pub enum Format16Error {
         input_length: usize,
     },
     InvalidPreamble(format15::Format15Error),
+    InvalidPreambleLength {
+        expected: usize,
+        actual: usize,
+    },
     InputTooShort {
         minimum: usize,
         actual: usize,
@@ -135,6 +139,10 @@ impl fmt::Display for Format16Error {
             Self::InvalidPreamble(error) => {
                 write!(formatter, "invalid Format16 preamble: {error}")
             }
+            Self::InvalidPreambleLength { expected, actual } => write!(
+                formatter,
+                "invalid Format16 preamble length: expected {expected} bytes, got {actual}"
+            ),
             Self::InputTooShort { minimum, actual } => write!(
                 formatter,
                 "Format16 primary container is too short: expected at least {minimum} bytes, got {actual}"
@@ -215,6 +223,18 @@ pub fn parse_primary(bytes: &[u8]) -> Result<Container, Format16Error> {
     parse_at(bytes, 0)
 }
 
+/// Validates and parses the semantic Format15 envelope that precedes a
+/// standard Format16 primary container.
+pub fn parse_preamble(bytes: &[u8]) -> Result<format15::Container, Format16Error> {
+    if bytes.len() != BASE_OFFSET {
+        return Err(Format16Error::InvalidPreambleLength {
+            expected: BASE_OFFSET,
+            actual: bytes.len(),
+        });
+    }
+    format15::parse(bytes).map_err(Format16Error::InvalidPreamble)
+}
+
 pub(crate) fn parse_at(bytes: &[u8], base_offset: usize) -> Result<Container, Format16Error> {
     if base_offset > bytes.len() {
         return Err(Format16Error::BaseOffsetOutOfRange {
@@ -227,7 +247,11 @@ pub(crate) fn parse_at(bytes: &[u8], base_offset: usize) -> Result<Container, Fo
         (Vec::new(), None)
     } else {
         let raw = bytes[..base_offset].to_vec();
-        let parsed = format15::parse(&raw).map_err(Format16Error::InvalidPreamble)?;
+        let parsed = if base_offset == BASE_OFFSET {
+            parse_preamble(&raw)?
+        } else {
+            format15::parse(&raw).map_err(Format16Error::InvalidPreamble)?
+        };
         (raw, Some(Box::new(parsed)))
     };
     let primary = &bytes[base_offset..];
