@@ -362,7 +362,7 @@
 
 ### BOOT-008 — Base-free codecs registers и charts
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002
+- **Статус:** `[x]` (8/8: InformationRegister, AccumulationRegister, AccountingRegister, CalculationRegister, Recalculation, ChartOfCharacteristicTypes, ChartOfAccounts, ChartOfCalculationTypes); **зависимости:** BOOT-002
 - **Файлы:** создать `src/compiler/families/registers.rs`, `charts.rs`, `recalculation.rs`
 - **Действия:** information/accumulation/accounting/calculation registers, recalculations, charts of types/accounts.
 - **Проверка:** fixture на каждый layout cohort; standard fields/generated types deterministic; unsupported tail blocks output.

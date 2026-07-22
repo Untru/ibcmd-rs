@@ -4,6 +4,8 @@
 //! module owns only the evidenced 8.3.27 layout and deliberately has no
 //! storage-reader or base-artifact dependency.
 
+mod register_native;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -26,6 +28,8 @@ use ibcmd_core::version::PlatformBuild;
 
 use super::super::CompileAxes;
 use super::super::graph::BootstrapGraph;
+use super::super::identity::derive_generation_uuid_v8;
+use register_native::{build_register_family, decode_register_family};
 
 pub(crate) const CATALOG_LAYOUT_KEY: &str = "bootstrap.metadata.catalog.layout";
 pub(crate) const CATALOG_LAYOUT: &str = "catalog-v1-crlf-utf8-bom";
@@ -39,6 +43,30 @@ pub(crate) const BUSINESS_PROCESS_LAYOUT_KEY: &str = "bootstrap.metadata.busines
 pub(crate) const BUSINESS_PROCESS_LAYOUT: &str = "business-process-v1-crlf-utf8-bom";
 pub(crate) const TASK_LAYOUT_KEY: &str = "bootstrap.metadata.task.layout";
 pub(crate) const TASK_LAYOUT: &str = "task-v1-crlf-utf8-bom";
+pub(crate) const INFORMATION_REGISTER_LAYOUT_KEY: &str =
+    "bootstrap.metadata.information_register.layout";
+pub(crate) const INFORMATION_REGISTER_LAYOUT: &str = "information-register-v1-crlf-utf8-bom";
+pub(crate) const ACCUMULATION_REGISTER_LAYOUT_KEY: &str =
+    "bootstrap.metadata.accumulation_register.layout";
+pub(crate) const ACCUMULATION_REGISTER_LAYOUT: &str = "accumulation-register-v1-crlf-utf8-bom";
+pub(crate) const ACCOUNTING_REGISTER_LAYOUT_KEY: &str =
+    "bootstrap.metadata.accounting_register.layout";
+pub(crate) const ACCOUNTING_REGISTER_LAYOUT: &str = "accounting-register-v1-crlf-utf8-bom";
+pub(crate) const CALCULATION_REGISTER_LAYOUT_KEY: &str =
+    "bootstrap.metadata.calculation_register.layout";
+pub(crate) const CALCULATION_REGISTER_LAYOUT: &str = "calculation-register-v1-crlf-utf8-bom";
+pub(crate) const RECALCULATION_LAYOUT_KEY: &str = "bootstrap.metadata.recalculation.layout";
+pub(crate) const RECALCULATION_LAYOUT: &str = "recalculation-v1-crlf-utf8-bom";
+pub(crate) const CHART_OF_CHARACTERISTIC_TYPES_LAYOUT_KEY: &str =
+    "bootstrap.metadata.chart_of_characteristic_types.layout";
+pub(crate) const CHART_OF_CHARACTERISTIC_TYPES_LAYOUT: &str =
+    "chart-of-characteristic-types-v1-crlf-utf8-bom";
+pub(crate) const CHART_OF_ACCOUNTS_LAYOUT_KEY: &str = "bootstrap.metadata.chart_of_accounts.layout";
+pub(crate) const CHART_OF_ACCOUNTS_LAYOUT: &str = "chart-of-accounts-v1-crlf-utf8-bom";
+pub(crate) const CHART_OF_CALCULATION_TYPES_LAYOUT_KEY: &str =
+    "bootstrap.metadata.chart_of_calculation_types.layout";
+pub(crate) const CHART_OF_CALCULATION_TYPES_LAYOUT: &str =
+    "chart-of-calculation-types-v1-crlf-utf8-bom";
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
@@ -72,6 +100,64 @@ const TASK_ADDRESSING_ATTRIBUTE_COLLECTION_UUID: &str = "e97c0570-251c-4566-b0f1
 const TASK_RESERVED_COLLECTION_UUID: &str = "ee865d4b-a458-48a0-b38f-5a26898feeb0";
 const TASK_COMMAND_COLLECTION_UUID: &str = "f27c2152-a2c9-4c30-adb1-130f5eb2590f";
 
+const INFORMATION_REGISTER_COLLECTION_UUIDS: [&str; 6] = [
+    "13134202-f60b-11d5-a3c7-0050bae0a776",
+    "13134203-f60b-11d5-a3c7-0050bae0a776",
+    "13134204-f60b-11d5-a3c7-0050bae0a776",
+    TEMPLATE_COLLECTION_UUID,
+    "a2207540-1400-11d6-a3c7-0050bae0a776",
+    "b44ba719-945c-445c-8aab-1088fa4df16e",
+];
+const ACCUMULATION_REGISTER_COLLECTION_UUIDS: [&str; 6] = [
+    TEMPLATE_COLLECTION_UUID,
+    "99f328af-a77f-4572-a2d8-80ed20c81890",
+    "b64d9a41-1642-11d6-a3c7-0050bae0a776",
+    "b64d9a42-1642-11d6-a3c7-0050bae0a776",
+    "b64d9a43-1642-11d6-a3c7-0050bae0a776",
+    "b64d9a44-1642-11d6-a3c7-0050bae0a776",
+];
+const ACCOUNTING_REGISTER_COLLECTION_UUIDS: [&str; 6] = [
+    "35b63b9d-0adf-4625-a047-10ae874c19a3",
+    TEMPLATE_COLLECTION_UUID,
+    "63405499-7491-4ce3-ac72-43433cbe4112",
+    "7162da60-f7fe-4d78-ad5d-e31700f9af18",
+    "9d28ee33-9c7e-4a1b-8f13-50aa9b36607b",
+    "d3b5d6eb-4ea2-4610-a3e2-624d4e815934",
+];
+const CALCULATION_REGISTER_COLLECTION_UUIDS: [&str; 7] = [
+    "1b304502-2216-440b-960f-60decd04bb5d",
+    "274bf899-db0e-4df6-8ab5-67bf6371ec0b",
+    TEMPLATE_COLLECTION_UUID,
+    "702b33ad-843e-41aa-8064-112cd38cc92c",
+    "a2cb086c-db98-43e4-a1a9-0760ab048f8d",
+    "acdf0f11-2d59-4e37-9945-c6721871a8fe",
+    "b12fc850-8210-43c8-ae05-89567e698fbb",
+];
+const RECALCULATION_DIMENSION_COLLECTION_UUID: &str = "3c456b74-4ea5-4b22-a957-e9fad9133b54";
+const CHART_OF_CHARACTERISTIC_TYPES_COLLECTION_UUIDS: [&str; 5] = [
+    "31182525-9346-4595-81f8-6f91a72ebe06",
+    TEMPLATE_COLLECTION_UUID,
+    "54e36536-7863-42fd-bea3-c5edd3122fdc",
+    "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73",
+    "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
+];
+const CHART_OF_ACCOUNTS_COLLECTION_UUIDS: [&str; 7] = [
+    "0df30176-6865-4787-9fc8-609eb144174f",
+    TEMPLATE_COLLECTION_UUID,
+    "4c7fec95-d1bd-4508-8a01-f1db090d9af8",
+    "5372e285-03db-4f8c-8565-fe56f1aea40e",
+    "6e65cbf5-daa8-4d8d-bef8-59723f4e5777",
+    "78bd1243-c4df-46c3-8138-e147465cb9a4",
+    "c70ca527-5042-4cad-a315-dcb4007e32a3",
+];
+const CHART_OF_CALCULATION_TYPES_COLLECTION_UUIDS: [&str; 5] = [
+    "054aa8cf-faa6-4634-aef4-1087ca0d88fc",
+    "0dc22ad2-476a-4794-afae-cfa7ed251752",
+    "2e90c75b-2f0c-4899-a7d4-5426eaefc96e",
+    TEMPLATE_COLLECTION_UUID,
+    "a7f8f92a-7a4b-484b-937e-42d242e64144",
+];
+
 const MAX_PLAIN_BYTES: usize = 64 * 1_048_576;
 const MAX_NATIVE_DEPTH: usize = 32;
 const MAX_NATIVE_NODES: usize = 500_000;
@@ -84,6 +170,14 @@ pub enum BusinessObjectFamily {
     ExchangePlan,
     BusinessProcess,
     Task,
+    InformationRegister,
+    AccumulationRegister,
+    AccountingRegister,
+    CalculationRegister,
+    Recalculation,
+    ChartOfCharacteristicTypes,
+    ChartOfAccounts,
+    ChartOfCalculationTypes,
 }
 
 impl BusinessObjectFamily {
@@ -95,6 +189,14 @@ impl BusinessObjectFamily {
             Self::ExchangePlan => "ExchangePlan",
             Self::BusinessProcess => "BusinessProcess",
             Self::Task => "Task",
+            Self::InformationRegister => "InformationRegister",
+            Self::AccumulationRegister => "AccumulationRegister",
+            Self::AccountingRegister => "AccountingRegister",
+            Self::CalculationRegister => "CalculationRegister",
+            Self::Recalculation => "Recalculation",
+            Self::ChartOfCharacteristicTypes => "ChartOfCharacteristicTypes",
+            Self::ChartOfAccounts => "ChartOfAccounts",
+            Self::ChartOfCalculationTypes => "ChartOfCalculationTypes",
         }
     }
 
@@ -106,6 +208,14 @@ impl BusinessObjectFamily {
             Self::ExchangePlan => EXCHANGE_PLAN_LAYOUT_KEY,
             Self::BusinessProcess => BUSINESS_PROCESS_LAYOUT_KEY,
             Self::Task => TASK_LAYOUT_KEY,
+            Self::InformationRegister => INFORMATION_REGISTER_LAYOUT_KEY,
+            Self::AccumulationRegister => ACCUMULATION_REGISTER_LAYOUT_KEY,
+            Self::AccountingRegister => ACCOUNTING_REGISTER_LAYOUT_KEY,
+            Self::CalculationRegister => CALCULATION_REGISTER_LAYOUT_KEY,
+            Self::Recalculation => RECALCULATION_LAYOUT_KEY,
+            Self::ChartOfCharacteristicTypes => CHART_OF_CHARACTERISTIC_TYPES_LAYOUT_KEY,
+            Self::ChartOfAccounts => CHART_OF_ACCOUNTS_LAYOUT_KEY,
+            Self::ChartOfCalculationTypes => CHART_OF_CALCULATION_TYPES_LAYOUT_KEY,
         }
     }
 
@@ -117,6 +227,14 @@ impl BusinessObjectFamily {
             Self::ExchangePlan => EXCHANGE_PLAN_LAYOUT,
             Self::BusinessProcess => BUSINESS_PROCESS_LAYOUT,
             Self::Task => TASK_LAYOUT,
+            Self::InformationRegister => INFORMATION_REGISTER_LAYOUT,
+            Self::AccumulationRegister => ACCUMULATION_REGISTER_LAYOUT,
+            Self::AccountingRegister => ACCOUNTING_REGISTER_LAYOUT,
+            Self::CalculationRegister => CALCULATION_REGISTER_LAYOUT,
+            Self::Recalculation => RECALCULATION_LAYOUT,
+            Self::ChartOfCharacteristicTypes => CHART_OF_CHARACTERISTIC_TYPES_LAYOUT,
+            Self::ChartOfAccounts => CHART_OF_ACCOUNTS_LAYOUT,
+            Self::ChartOfCalculationTypes => CHART_OF_CALCULATION_TYPES_LAYOUT,
         }
     }
 }
@@ -129,6 +247,14 @@ enum BusinessObjectLayout {
     ExchangePlanV1,
     BusinessProcessV1,
     TaskV1,
+    InformationRegisterV1,
+    AccumulationRegisterV1,
+    AccountingRegisterV1,
+    CalculationRegisterV1,
+    RecalculationV1,
+    ChartOfCharacteristicTypesV1,
+    ChartOfAccountsV1,
+    ChartOfCalculationTypesV1,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -194,6 +320,26 @@ impl BusinessObjectMetadataProfile {
                 BusinessObjectFamily::ExchangePlan => BusinessObjectLayout::ExchangePlanV1,
                 BusinessObjectFamily::BusinessProcess => BusinessObjectLayout::BusinessProcessV1,
                 BusinessObjectFamily::Task => BusinessObjectLayout::TaskV1,
+                BusinessObjectFamily::InformationRegister => {
+                    BusinessObjectLayout::InformationRegisterV1
+                }
+                BusinessObjectFamily::AccumulationRegister => {
+                    BusinessObjectLayout::AccumulationRegisterV1
+                }
+                BusinessObjectFamily::AccountingRegister => {
+                    BusinessObjectLayout::AccountingRegisterV1
+                }
+                BusinessObjectFamily::CalculationRegister => {
+                    BusinessObjectLayout::CalculationRegisterV1
+                }
+                BusinessObjectFamily::Recalculation => BusinessObjectLayout::RecalculationV1,
+                BusinessObjectFamily::ChartOfCharacteristicTypes => {
+                    BusinessObjectLayout::ChartOfCharacteristicTypesV1
+                }
+                BusinessObjectFamily::ChartOfAccounts => BusinessObjectLayout::ChartOfAccountsV1,
+                BusinessObjectFamily::ChartOfCalculationTypes => {
+                    BusinessObjectLayout::ChartOfCalculationTypesV1
+                }
             },
         })
     }
@@ -212,6 +358,26 @@ impl BusinessObjectMetadataProfile {
                 BusinessObjectFamily::ExchangePlan => BusinessObjectLayout::ExchangePlanV1,
                 BusinessObjectFamily::BusinessProcess => BusinessObjectLayout::BusinessProcessV1,
                 BusinessObjectFamily::Task => BusinessObjectLayout::TaskV1,
+                BusinessObjectFamily::InformationRegister => {
+                    BusinessObjectLayout::InformationRegisterV1
+                }
+                BusinessObjectFamily::AccumulationRegister => {
+                    BusinessObjectLayout::AccumulationRegisterV1
+                }
+                BusinessObjectFamily::AccountingRegister => {
+                    BusinessObjectLayout::AccountingRegisterV1
+                }
+                BusinessObjectFamily::CalculationRegister => {
+                    BusinessObjectLayout::CalculationRegisterV1
+                }
+                BusinessObjectFamily::Recalculation => BusinessObjectLayout::RecalculationV1,
+                BusinessObjectFamily::ChartOfCharacteristicTypes => {
+                    BusinessObjectLayout::ChartOfCharacteristicTypesV1
+                }
+                BusinessObjectFamily::ChartOfAccounts => BusinessObjectLayout::ChartOfAccountsV1,
+                BusinessObjectFamily::ChartOfCalculationTypes => {
+                    BusinessObjectLayout::ChartOfCalculationTypesV1
+                }
             },
         }
     }
@@ -425,6 +591,9 @@ pub struct BusinessObjectNativeIr {
     pub form_uuids: Vec<ObjectUuid>,
     pub template_uuids: Vec<ObjectUuid>,
     pub addressing_attribute_uuids: Vec<ObjectUuid>,
+    pub dimension_uuids: Vec<ObjectUuid>,
+    pub resource_uuids: Vec<ObjectUuid>,
+    pub recalculation_uuids: Vec<ObjectUuid>,
     pub content_uuids: Vec<ObjectUuid>,
     pub child_subsystem_uuids: Vec<ObjectUuid>,
 }
@@ -479,6 +648,29 @@ pub(crate) fn compile_business_object(
         (BusinessObjectFamily::Task, BusinessObjectLayout::TaskV1) => {
             build_task(validated, object, &indexes)?
         }
+        (
+            BusinessObjectFamily::InformationRegister,
+            BusinessObjectLayout::InformationRegisterV1,
+        )
+        | (
+            BusinessObjectFamily::AccumulationRegister,
+            BusinessObjectLayout::AccumulationRegisterV1,
+        )
+        | (BusinessObjectFamily::AccountingRegister, BusinessObjectLayout::AccountingRegisterV1)
+        | (
+            BusinessObjectFamily::CalculationRegister,
+            BusinessObjectLayout::CalculationRegisterV1,
+        )
+        | (BusinessObjectFamily::Recalculation, BusinessObjectLayout::RecalculationV1)
+        | (
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            BusinessObjectLayout::ChartOfCharacteristicTypesV1,
+        )
+        | (BusinessObjectFamily::ChartOfAccounts, BusinessObjectLayout::ChartOfAccountsV1)
+        | (
+            BusinessObjectFamily::ChartOfCalculationTypes,
+            BusinessObjectLayout::ChartOfCalculationTypesV1,
+        ) => build_register_family(validated, object, &indexes, profile.family)?,
         _ => return native("profile family and layout disagree"),
     };
     let plaintext = serialize_native(&root)?;
@@ -1979,6 +2171,19 @@ fn build_attribute(
         (BusinessObjectFamily::Subsystem, false) => {
             return invalid_model(uuid, "Subsystem cannot own an Attribute");
         }
+        (
+            BusinessObjectFamily::InformationRegister
+            | BusinessObjectFamily::AccumulationRegister
+            | BusinessObjectFamily::AccountingRegister
+            | BusinessObjectFamily::CalculationRegister
+            | BusinessObjectFamily::Recalculation
+            | BusinessObjectFamily::ChartOfCharacteristicTypes
+            | BusinessObjectFamily::ChartOfAccounts
+            | BusinessObjectFamily::ChartOfCalculationTypes,
+            false,
+        ) => {
+            return invalid_model(uuid, "register/chart attributes use the dedicated codec");
+        }
         (_, true) => list(vec![
             token("8"),
             list(payload),
@@ -2039,7 +2244,16 @@ fn build_tabular_section(
         BusinessObjectFamily::ExchangePlan => list(vec![token("1"), list(payload), token("5")]),
         BusinessObjectFamily::BusinessProcess => list(vec![token("0"), list(payload)]),
         BusinessObjectFamily::Document => list(vec![token("1"), list(payload)]),
-        BusinessObjectFamily::Task | BusinessObjectFamily::Subsystem => {
+        BusinessObjectFamily::Task
+        | BusinessObjectFamily::Subsystem
+        | BusinessObjectFamily::InformationRegister
+        | BusinessObjectFamily::AccumulationRegister
+        | BusinessObjectFamily::AccountingRegister
+        | BusinessObjectFamily::CalculationRegister
+        | BusinessObjectFamily::Recalculation
+        | BusinessObjectFamily::ChartOfCharacteristicTypes
+        | BusinessObjectFamily::ChartOfAccounts
+        | BusinessObjectFamily::ChartOfCalculationTypes => {
             return invalid_model(
                 object.identity().uuid(),
                 "metadata family cannot compile a TabularSection",
@@ -3032,7 +3246,17 @@ fn standard_attribute_marker(family: BusinessObjectFamily, name: &str) -> Option
             ("BusinessProcess", "-7"),
             ("Number", "-2"),
         ],
-        BusinessObjectFamily::Subsystem => &[],
+        BusinessObjectFamily::ChartOfCharacteristicTypes => {
+            &[("Description", "-9"), ("Code", "-8")]
+        }
+        BusinessObjectFamily::ChartOfAccounts => &[("Code", "-7"), ("Description", "-8")],
+        BusinessObjectFamily::ChartOfCalculationTypes => &[("Description", "-3"), ("Code", "-2")],
+        BusinessObjectFamily::Subsystem
+        | BusinessObjectFamily::InformationRegister
+        | BusinessObjectFamily::AccumulationRegister
+        | BusinessObjectFamily::AccountingRegister
+        | BusinessObjectFamily::CalculationRegister
+        | BusinessObjectFamily::Recalculation => &[],
     };
     values
         .iter()
@@ -3561,6 +3785,19 @@ fn decode_native_ir(
     value: &NativeValue,
     family: BusinessObjectFamily,
 ) -> Result<BusinessObjectNativeIr, BusinessObjectBuildError> {
+    if matches!(
+        family,
+        BusinessObjectFamily::InformationRegister
+            | BusinessObjectFamily::AccumulationRegister
+            | BusinessObjectFamily::AccountingRegister
+            | BusinessObjectFamily::CalculationRegister
+            | BusinessObjectFamily::Recalculation
+            | BusinessObjectFamily::ChartOfCharacteristicTypes
+            | BusinessObjectFamily::ChartOfAccounts
+            | BusinessObjectFamily::ChartOfCalculationTypes
+    ) {
+        return decode_register_family(value, family);
+    }
     if family == BusinessObjectFamily::Subsystem {
         return decode_subsystem_native_ir(value);
     }
@@ -3586,7 +3823,15 @@ fn decode_native_ir(
         BusinessObjectFamily::ExchangePlan => (51, "37", &[1, 3, 5, 7, 9]),
         BusinessObjectFamily::BusinessProcess => (49, "30", &[3, 5, 7, 9, 11, 13]),
         BusinessObjectFamily::Task => (52, "33", &[3, 5, 7, 9, 11]),
-        BusinessObjectFamily::Subsystem => unreachable!("handled above"),
+        BusinessObjectFamily::Subsystem
+        | BusinessObjectFamily::InformationRegister
+        | BusinessObjectFamily::AccumulationRegister
+        | BusinessObjectFamily::AccountingRegister
+        | BusinessObjectFamily::CalculationRegister
+        | BusinessObjectFamily::Recalculation
+        | BusinessObjectFamily::ChartOfCharacteristicTypes
+        | BusinessObjectFamily::ChartOfAccounts
+        | BusinessObjectFamily::ChartOfCalculationTypes => unreachable!("handled above"),
     };
     let fields = exact_list(&root[1], field_count, "business-object fields")?;
     exact_token(&fields[0], discriminator, "business-object discriminator")?;
@@ -3604,7 +3849,15 @@ fn decode_native_ir(
         BusinessObjectFamily::BusinessProcess | BusinessObjectFamily::Task => {
             parse_header_uuid(&fields[1])?
         }
-        BusinessObjectFamily::Subsystem => unreachable!("handled above"),
+        BusinessObjectFamily::Subsystem
+        | BusinessObjectFamily::InformationRegister
+        | BusinessObjectFamily::AccumulationRegister
+        | BusinessObjectFamily::AccountingRegister
+        | BusinessObjectFamily::CalculationRegister
+        | BusinessObjectFamily::Recalculation
+        | BusinessObjectFamily::ChartOfCharacteristicTypes
+        | BusinessObjectFamily::ChartOfAccounts
+        | BusinessObjectFamily::ChartOfCalculationTypes => unreachable!("handled above"),
     };
     let mut generated_types = Vec::with_capacity(generated_slots.len());
     for slot in generated_slots.iter().copied() {
@@ -3752,7 +4005,15 @@ fn decode_native_ir(
                     parse_addressing_attributes(addressing_values)?,
                 )
             }
-            BusinessObjectFamily::Subsystem => unreachable!("handled above"),
+            BusinessObjectFamily::Subsystem
+            | BusinessObjectFamily::InformationRegister
+            | BusinessObjectFamily::AccumulationRegister
+            | BusinessObjectFamily::AccountingRegister
+            | BusinessObjectFamily::CalculationRegister
+            | BusinessObjectFamily::Recalculation
+            | BusinessObjectFamily::ChartOfCharacteristicTypes
+            | BusinessObjectFamily::ChartOfAccounts
+            | BusinessObjectFamily::ChartOfCalculationTypes => unreachable!("handled above"),
         };
     validate_native_identity_inventory(
         uuid,
@@ -3776,6 +4037,9 @@ fn decode_native_ir(
         addressing_attribute_uuids: addressing_attributes,
         content_uuids: Vec::new(),
         child_subsystem_uuids: Vec::new(),
+        dimension_uuids: Vec::new(),
+        resource_uuids: Vec::new(),
+        recalculation_uuids: Vec::new(),
     })
 }
 
@@ -3807,6 +4071,9 @@ fn decode_subsystem_native_ir(
         addressing_attribute_uuids: Vec::new(),
         content_uuids: content,
         child_subsystem_uuids: children,
+        dimension_uuids: Vec::new(),
+        resource_uuids: Vec::new(),
+        recalculation_uuids: Vec::new(),
     })
 }
 
@@ -3920,6 +4187,17 @@ fn parse_attribute_uuid(
         (BusinessObjectFamily::Subsystem, false) => {
             return native("Subsystem cannot contain an Attribute");
         }
+        (
+            BusinessObjectFamily::InformationRegister
+            | BusinessObjectFamily::AccumulationRegister
+            | BusinessObjectFamily::AccountingRegister
+            | BusinessObjectFamily::CalculationRegister
+            | BusinessObjectFamily::Recalculation
+            | BusinessObjectFamily::ChartOfCharacteristicTypes
+            | BusinessObjectFamily::ChartOfAccounts
+            | BusinessObjectFamily::ChartOfCalculationTypes,
+            false,
+        ) => return native("register/chart attributes use the dedicated decoder"),
         (_, true) => 5,
     };
     if wrapper.len() != expected_len {
@@ -3935,6 +4213,17 @@ fn parse_attribute_uuid(
             (BusinessObjectFamily::Subsystem, false) => {
                 return native("Subsystem cannot contain an Attribute");
             }
+            (
+                BusinessObjectFamily::InformationRegister
+                | BusinessObjectFamily::AccumulationRegister
+                | BusinessObjectFamily::AccountingRegister
+                | BusinessObjectFamily::CalculationRegister
+                | BusinessObjectFamily::Recalculation
+                | BusinessObjectFamily::ChartOfCharacteristicTypes
+                | BusinessObjectFamily::ChartOfAccounts
+                | BusinessObjectFamily::ChartOfCalculationTypes,
+                false,
+            ) => return native("register/chart attributes use the dedicated decoder"),
             (_, true) => "8",
         },
         "Attribute wrapper discriminator",
@@ -3969,7 +4258,16 @@ fn parse_tabular_sections(
         let expected_wrapper_len = match family {
             BusinessObjectFamily::Catalog | BusinessObjectFamily::ExchangePlan => 3,
             BusinessObjectFamily::Document | BusinessObjectFamily::BusinessProcess => 2,
-            BusinessObjectFamily::Task | BusinessObjectFamily::Subsystem => {
+            BusinessObjectFamily::Task
+            | BusinessObjectFamily::Subsystem
+            | BusinessObjectFamily::InformationRegister
+            | BusinessObjectFamily::AccumulationRegister
+            | BusinessObjectFamily::AccountingRegister
+            | BusinessObjectFamily::CalculationRegister
+            | BusinessObjectFamily::Recalculation
+            | BusinessObjectFamily::ChartOfCharacteristicTypes
+            | BusinessObjectFamily::ChartOfAccounts
+            | BusinessObjectFamily::ChartOfCalculationTypes => {
                 return native("metadata family cannot contain a TabularSection");
             }
         };
@@ -4279,6 +4577,18 @@ mod tests {
     const TASK_FORM_UUID: &str = "00000000-0000-4000-8000-000000000640";
     const ADDRESSING_REGISTER_UUID: &str = "00000000-0000-4000-8000-000000000700";
     const ADDRESSING_DIMENSION_UUID: &str = "00000000-0000-4000-8000-000000000710";
+    const INFORMATION_REGISTER_UUID: &str = "00000000-0000-4000-8000-000000000800";
+    const ACCUMULATION_REGISTER_UUID: &str = "00000000-0000-4000-8000-000000000810";
+    const ACCOUNTING_REGISTER_UUID: &str = "00000000-0000-4000-8000-000000000820";
+    const CALCULATION_REGISTER_UUID: &str = "00000000-0000-4000-8000-000000000830";
+    const RECALCULATION_UUID: &str = "00000000-0000-4000-8000-000000000840";
+    const RECALCULATION_DIMENSION_UUID: &str = "00000000-0000-4000-8000-000000000841";
+    const CHART_OF_CHARACTERISTIC_TYPES_UUID: &str = "00000000-0000-4000-8000-000000000850";
+    const CHART_OF_ACCOUNTS_UUID: &str = "00000000-0000-4000-8000-000000000860";
+    const CHART_OF_CALCULATION_TYPES_UUID: &str = "00000000-0000-4000-8000-000000000870";
+    const REGISTER_TARGET_DIMENSION_UUID: &str = "00000000-0000-4000-8000-000000000880";
+    const DEPENDENCY_CHART_UUID: &str = "00000000-0000-4000-8000-000000000890";
+    const DEPENDENCY_CHARACTERISTIC_UUID: &str = "00000000-0000-4000-8000-000000000891";
 
     fn fixture_uuid(seed: u32) -> String {
         format!("00000000-0000-4000-8000-{seed:012x}")
@@ -4554,6 +4864,140 @@ mod tests {
         .into_bytes()
     }
 
+    fn register_root_uuid(family: BusinessObjectFamily) -> &'static str {
+        match family {
+            BusinessObjectFamily::InformationRegister => INFORMATION_REGISTER_UUID,
+            BusinessObjectFamily::AccumulationRegister => ACCUMULATION_REGISTER_UUID,
+            BusinessObjectFamily::AccountingRegister => ACCOUNTING_REGISTER_UUID,
+            BusinessObjectFamily::CalculationRegister => CALCULATION_REGISTER_UUID,
+            BusinessObjectFamily::Recalculation => RECALCULATION_UUID,
+            BusinessObjectFamily::ChartOfCharacteristicTypes => CHART_OF_CHARACTERISTIC_TYPES_UUID,
+            BusinessObjectFamily::ChartOfAccounts => CHART_OF_ACCOUNTS_UUID,
+            BusinessObjectFamily::ChartOfCalculationTypes => CHART_OF_CALCULATION_TYPES_UUID,
+            _ => unreachable!("register fixture family is exact"),
+        }
+    }
+
+    fn register_generated(
+        family: BusinessObjectFamily,
+        name: &str,
+        categories: &[&str],
+        seed: u32,
+    ) -> String {
+        categories
+            .iter()
+            .enumerate()
+            .map(|(index, category)| {
+                generated(
+                    &format!("{}{category}.{name}", family.as_str()),
+                    category,
+                    seed + u32::try_from(index).unwrap() * 10,
+                )
+            })
+            .collect()
+    }
+
+    fn register_xml(family: BusinessObjectFamily) -> Vec<u8> {
+        let (name, categories, properties, children, seed): (
+            &str,
+            &[&str],
+            String,
+            String,
+            u32,
+        ) = match family {
+            BusinessObjectFamily::InformationRegister => (
+                "Prices",
+                &[
+                    "Record",
+                    "Manager",
+                    "Selection",
+                    "List",
+                    "RecordSet",
+                    "RecordKey",
+                    "RecordManager",
+                ],
+                "<Name>Prices</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><EditType>BothWays</EditType><DefaultRecordForm/><DefaultListForm/><AuxiliaryRecordForm/><AuxiliaryListForm/><StandardAttributes/><InformationRegisterPeriodicity>Nonperiodical</InformationRegisterPeriodicity><WriteMode>Independent</WriteMode><MainFilterOnPeriod>false</MainFilterOnPeriod><IncludeHelpInContents>false</IncludeHelpInContents><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><EnableTotalsSliceFirst>false</EnableTotalsSliceFirst><EnableTotalsSliceLast>false</EnableTotalsSliceLast><RecordPresentation/><ExtendedRecordPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>".to_owned(),
+                String::new(),
+                8_000,
+            ),
+            BusinessObjectFamily::AccumulationRegister => (
+                "Stock",
+                &["Record", "Manager", "Selection", "List", "RecordSet", "RecordKey"],
+                "<Name>Stock</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><DefaultListForm/><AuxiliaryListForm/><RegisterType>Balance</RegisterType><IncludeHelpInContents>false</IncludeHelpInContents><StandardAttributes/><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><EnableTotalsSplitting>true</EnableTotalsSplitting><ListPresentation/><ExtendedListPresentation/><Explanation/>".to_owned(),
+                String::new(),
+                8_100,
+            ),
+            BusinessObjectFamily::AccountingRegister => (
+                "Ledger",
+                &[
+                    "Record",
+                    "ExtDimensions",
+                    "RecordSet",
+                    "RecordKey",
+                    "Selection",
+                    "List",
+                    "Manager",
+                ],
+                "<Name>Ledger</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><IncludeHelpInContents>false</IncludeHelpInContents><BasedOn/><ChartOfAccounts>ChartOfAccounts.MainAccounts</ChartOfAccounts><Correspondence>true</Correspondence><PeriodAdjustmentLength>2</PeriodAdjustmentLength><DefaultListForm/><AuxiliaryListForm/><StandardAttributes/><DataLockControlMode>Managed</DataLockControlMode><EnableTotalsSplitting>true</EnableTotalsSplitting><FullTextSearch>Use</FullTextSearch><ListPresentation/><ExtendedListPresentation/><Explanation/>".to_owned(),
+                String::new(),
+                8_200,
+            ),
+            BusinessObjectFamily::CalculationRegister => (
+                "Payroll",
+                &[
+                    "Record",
+                    "Manager",
+                    "Selection",
+                    "List",
+                    "RecordSet",
+                    "RecordKey",
+                    "Recalcs",
+                ],
+                "<Name>Payroll</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><DefaultListForm/><AuxiliaryListForm/><Periodicity>Month</Periodicity><ActionPeriod>true</ActionPeriod><BasePeriod>true</BasePeriod><Schedule/><ScheduleValue/><ScheduleDate/><ChartOfCalculationTypes/><IncludeHelpInContents>false</IncludeHelpInContents><StandardAttributes/><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><ListPresentation/><ExtendedListPresentation/><Explanation/>".to_owned(),
+                String::new(),
+                8_300,
+            ),
+            BusinessObjectFamily::Recalculation => (
+                "Rates",
+                &["Record", "Manager", "RecordSet"],
+                "<Name>Rates</Name><Synonym/><Comment/><DataLockControlMode>Managed</DataLockControlMode>".to_owned(),
+                format!(
+                    "<Dimension uuid=\"{RECALCULATION_DIMENSION_UUID}\"><Properties><Name>Employee</Name><Synonym/><Comment/><RegisterDimension>CalculationRegister.Payroll.Dimension.Employee</RegisterDimension><LeadingRegisterData><xr:Item>CalculationRegister.Payroll.Dimension.Employee</xr:Item></LeadingRegisterData></Properties><ChildObjects/></Dimension>"
+                ),
+                8_400,
+            ),
+            BusinessObjectFamily::ChartOfCharacteristicTypes => (
+                "Kinds",
+                &[],
+                "<Name>Kinds</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><IncludeHelpInContents>false</IncludeHelpInContents><CharacteristicExtValues/><Type><v8:Type>xs:string</v8:Type></Type><Hierarchical>false</Hierarchical><FoldersOnTop>true</FoldersOnTop><CodeLength>9</CodeLength><CodeAllowedLength>Variable</CodeAllowedLength><DescriptionLength>100</DescriptionLength><CodeSeries>WholeCharacteristicKind</CodeSeries><CheckUnique>true</CheckUnique><Autonumbering>true</Autonumbering><DefaultPresentation>AsDescription</DefaultPresentation><StandardAttributes/><Characteristics/><PredefinedDataUpdate>Auto</PredefinedDataUpdate><EditType>InDialog</EditType><QuickChoice>false</QuickChoice><ChoiceMode>BothWays</ChoiceMode><InputByString/><CreateOnInput>DontUse</CreateOnInput><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><DefaultObjectForm/><DefaultFolderForm/><DefaultListForm/><DefaultChoiceForm/><DefaultFolderChoiceForm/><AuxiliaryObjectForm/><AuxiliaryFolderForm/><AuxiliaryListForm/><AuxiliaryChoiceForm/><AuxiliaryFolderChoiceForm/><BasedOn/><DataLockFields/><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><ObjectPresentation/><ExtendedObjectPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>".to_owned(),
+                String::new(),
+                8_500,
+            ),
+            BusinessObjectFamily::ChartOfAccounts => (
+                "MainAccounts",
+                &[],
+                "<Name>MainAccounts</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><IncludeHelpInContents>false</IncludeHelpInContents><BasedOn/><ExtDimensionTypes>ChartOfCharacteristicTypes.Kinds</ExtDimensionTypes><MaxExtDimensionCount>3</MaxExtDimensionCount><CodeMask>###</CodeMask><CodeLength>9</CodeLength><DescriptionLength>100</DescriptionLength><CodeSeries>WithinSubordination</CodeSeries><CheckUnique>true</CheckUnique><DefaultPresentation>AsDescription</DefaultPresentation><StandardAttributes/><Characteristics/><StandardTabularSections/><PredefinedDataUpdate>Auto</PredefinedDataUpdate><EditType>InDialog</EditType><QuickChoice>false</QuickChoice><ChoiceMode>BothWays</ChoiceMode><InputByString/><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><CreateOnInput>DontUse</CreateOnInput><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><DefaultObjectForm/><DefaultListForm/><DefaultChoiceForm/><AuxiliaryObjectForm/><AuxiliaryListForm/><AuxiliaryChoiceForm/><AutoOrderByCode>true</AutoOrderByCode><OrderLength>5</OrderLength><DataLockFields/><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing><ObjectPresentation/><ExtendedObjectPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/>".to_owned(),
+                String::new(),
+                8_600,
+            ),
+            BusinessObjectFamily::ChartOfCalculationTypes => (
+                "MainCalculation",
+                &[],
+                "<Name>MainCalculation</Name><Synonym/><Comment/><UseStandardCommands>true</UseStandardCommands><CodeLength>9</CodeLength><DescriptionLength>100</DescriptionLength><CodeType>String</CodeType><CodeAllowedLength>Variable</CodeAllowedLength><DefaultPresentation>AsDescription</DefaultPresentation><EditType>InDialog</EditType><QuickChoice>false</QuickChoice><ChoiceMode>BothWays</ChoiceMode><InputByString/><SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString><FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString><ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString><CreateOnInput>DontUse</CreateOnInput><ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput><DefaultObjectForm/><DefaultListForm/><DefaultChoiceForm/><AuxiliaryObjectForm/><AuxiliaryListForm/><AuxiliaryChoiceForm/><BasedOn/><DependenceOnCalculationTypes>DontUse</DependenceOnCalculationTypes><BaseCalculationTypes><xr:Item>ChartOfCalculationTypes.MainCalculation</xr:Item></BaseCalculationTypes><ActionPeriodUse>false</ActionPeriodUse><StandardAttributes/><Characteristics/><StandardTabularSections/><PredefinedDataUpdate>Auto</PredefinedDataUpdate><IncludeHelpInContents>false</IncludeHelpInContents><DataLockFields/><DataLockControlMode>Managed</DataLockControlMode><FullTextSearch>Use</FullTextSearch><ObjectPresentation/><ExtendedObjectPresentation/><ListPresentation/><ExtendedListPresentation/><Explanation/><DataHistory>DontUse</DataHistory><UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite><ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>".to_owned(),
+                String::new(),
+                8_700,
+            ),
+            _ => unreachable!("register fixture family is exact"),
+        };
+        let generated = register_generated(family, name, categories, seed);
+        let family_name = family.as_str();
+        let uuid = register_root_uuid(family);
+        format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" version=\"2.20\"><{family_name} uuid=\"{uuid}\"><InternalInfo>{generated}</InternalInfo><Properties>{properties}</Properties><ChildObjects>{children}</ChildObjects></{family_name}></MetaDataObject>"
+        )
+        .into_bytes()
+    }
+
     fn simple_object(
         seed: u32,
         uuid: &str,
@@ -4607,6 +5051,109 @@ mod tests {
         parts.owner = Some(ObjectUuid::parse(owner).unwrap());
         parts.properties = object.properties().to_vec();
         CanonicalObject::new(parts).unwrap()
+    }
+
+    fn copy_with_owner(object: &CanonicalObject, owner: &str) -> CanonicalObject {
+        let mut parts = CanonicalObjectParts::new(
+            object.identity().clone(),
+            object.kind().clone(),
+            object.provenance().clone(),
+        );
+        parts.owner = Some(ObjectUuid::parse(owner).unwrap());
+        parts.properties = object.properties().to_vec();
+        parts.references = object.references().to_vec();
+        parts.generated_types = object.generated_types().to_vec();
+        parts.assets = object.assets().to_vec();
+        parts.opaque_facets = object.opaque_facets().clone();
+        CanonicalObject::new(parts).unwrap()
+    }
+
+    fn register_configuration(family: BusinessObjectFamily) -> CanonicalConfiguration {
+        let document = XmlReader::from_slice(&register_xml(family)).unwrap();
+        let envelope = bundled_metadata_registry()
+            .decode(
+                &FamilyId::parse(family.as_str()).unwrap(),
+                &document,
+                ProfileId::parse("xml-2.20").unwrap(),
+                ObjectPath::root(),
+            )
+            .unwrap();
+        let mut objects = vec![simple_object(
+            920,
+            CONFIGURATION_UUID,
+            "Configuration",
+            "Fixture",
+            None,
+        )];
+        if family == BusinessObjectFamily::Recalculation {
+            objects.push(simple_object(
+                921,
+                CALCULATION_REGISTER_UUID,
+                "CalculationRegister",
+                "Payroll",
+                None,
+            ));
+            objects.push(copy_with_owner(envelope.root(), CALCULATION_REGISTER_UUID));
+        } else {
+            objects.push(envelope.root().clone());
+        }
+        objects.extend(envelope.descendants().iter().cloned());
+        match family {
+            BusinessObjectFamily::AccountingRegister => objects.push(simple_object(
+                922,
+                DEPENDENCY_CHART_UUID,
+                "ChartOfAccounts",
+                "MainAccounts",
+                None,
+            )),
+            BusinessObjectFamily::ChartOfAccounts => objects.push(simple_object(
+                923,
+                DEPENDENCY_CHARACTERISTIC_UUID,
+                "ChartOfCharacteristicTypes",
+                "Kinds",
+                None,
+            )),
+            BusinessObjectFamily::Recalculation => objects.push(simple_owned_object(
+                924,
+                REGISTER_TARGET_DIMENSION_UUID,
+                "Dimension",
+                "Employee",
+                CALCULATION_REGISTER_UUID,
+            )),
+            _ => {}
+        }
+        CanonicalConfiguration::new(objects).unwrap()
+    }
+
+    fn compile_register_and_decode(
+        family: BusinessObjectFamily,
+    ) -> (BusinessObjectNativeIr, Vec<u8>) {
+        let configuration = register_configuration(family);
+        let validated = validate_configuration(&configuration).unwrap();
+        let identities = collect_bootstrap_identities(&validated).unwrap();
+        let root_uuid = ObjectUuid::parse(register_root_uuid(family)).unwrap();
+        let routes = validated
+            .configuration()
+            .objects()
+            .iter()
+            .filter(|object| object.owner().is_none() || object.identity().uuid() == root_uuid)
+            .map(|object| ObjectStorageRoute::new(object.identity().uuid(), Vec::new()).unwrap())
+            .collect();
+        let graph = build_bootstrap_graph(
+            &identities,
+            ProfileId::parse("platform-test").unwrap(),
+            routes,
+        )
+        .unwrap();
+        let profile = BusinessObjectMetadataProfile::fixture("platform-test", family);
+        let first =
+            compile_business_object(&validated, &graph, root_uuid, &axes(), &profile).unwrap();
+        let second =
+            compile_business_object(&validated, &graph, root_uuid, &axes(), &profile).unwrap();
+        assert_eq!(first, second);
+        let blob = first.outcome().compiled_payload().unwrap().bytes().to_vec();
+        let ir = decode_business_object_blob(&blob, &profile).unwrap();
+        (ir, blob)
     }
 
     fn hierarchical_configuration(family: BusinessObjectFamily) -> CanonicalConfiguration {
@@ -4992,6 +5539,110 @@ mod tests {
     }
 
     #[test]
+    fn register_and_chart_xml_codecs_cover_every_layout_and_fail_closed() {
+        let registry = bundled_metadata_registry();
+        for family in [
+            BusinessObjectFamily::InformationRegister,
+            BusinessObjectFamily::AccumulationRegister,
+            BusinessObjectFamily::AccountingRegister,
+            BusinessObjectFamily::CalculationRegister,
+            BusinessObjectFamily::Recalculation,
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            BusinessObjectFamily::ChartOfAccounts,
+            BusinessObjectFamily::ChartOfCalculationTypes,
+        ] {
+            let family_id = FamilyId::parse(family.as_str()).unwrap();
+            let input = register_xml(family);
+            let document = XmlReader::from_slice(&input).unwrap();
+            let envelope = registry
+                .decode(
+                    &family_id,
+                    &document,
+                    ProfileId::parse("xml-2.20").unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+            assert_eq!(envelope.root().kind().as_str(), family.as_str());
+
+            let cross = registry
+                .encode(&envelope, &ProfileId::parse("xml-2.21").unwrap())
+                .unwrap();
+            assert!(
+                std::str::from_utf8(&cross)
+                    .unwrap()
+                    .contains("version=\"2.21\"")
+            );
+            let cross_document = XmlReader::from_slice(&cross).unwrap();
+            registry
+                .decode(
+                    &family_id,
+                    &cross_document,
+                    ProfileId::parse("xml-2.21").unwrap(),
+                    ObjectPath::root(),
+                )
+                .unwrap();
+
+            let future = String::from_utf8(input).unwrap().replacen(
+                "</Properties>",
+                "<Future/></Properties>",
+                1,
+            );
+            let future_document = XmlReader::from_slice(future.as_bytes()).unwrap();
+            assert!(
+                registry
+                    .decode(
+                        &family_id,
+                        &future_document,
+                        ProfileId::parse("xml-2.20").unwrap(),
+                        ObjectPath::root(),
+                    )
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn register_and_chart_native_layouts_are_deterministic_and_strict() {
+        for (family, expected_generated, expected_dimensions) in [
+            (BusinessObjectFamily::InformationRegister, 7, 0),
+            (BusinessObjectFamily::AccumulationRegister, 6, 0),
+            (BusinessObjectFamily::AccountingRegister, 7, 0),
+            (BusinessObjectFamily::CalculationRegister, 7, 0),
+            (BusinessObjectFamily::Recalculation, 3, 1),
+            (BusinessObjectFamily::ChartOfCharacteristicTypes, 6, 0),
+            (BusinessObjectFamily::ChartOfAccounts, 7, 0),
+            (BusinessObjectFamily::ChartOfCalculationTypes, 11, 0),
+        ] {
+            let (ir, blob) = compile_register_and_decode(family);
+            assert_eq!(ir.family, family);
+            assert_eq!(ir.uuid.to_string(), register_root_uuid(family));
+            assert_eq!(ir.generated_types.len(), expected_generated);
+            assert_eq!(ir.dimension_uuids.len(), expected_dimensions);
+            assert!(ir.form_uuids.is_empty());
+            assert!(ir.template_uuids.is_empty());
+
+            let mut identities = BTreeSet::new();
+            for (type_id, value_id) in &ir.generated_types {
+                assert!(identities.insert(*type_id));
+                assert!(identities.insert(*value_id));
+            }
+
+            let plain = inflate_bounded(&blob).unwrap();
+            let mut parsed = NativeParser::new(&plain).parse().unwrap();
+            let NativeValue::List(root) = &mut parsed else {
+                panic!("register compiler must emit a root list");
+            };
+            root.push(token("future"));
+            let future_blob = raw_deflate(&serialize_native(&parsed).unwrap()).unwrap();
+            let profile = BusinessObjectMetadataProfile::fixture("platform-test", family);
+            assert!(matches!(
+                decode_business_object_blob(&future_blob, &profile),
+                Err(BusinessObjectBuildError::Native(_))
+            ));
+        }
+    }
+
+    #[test]
     fn bundled_profile_selects_business_object_layouts_explicitly() {
         let registry = crate::profile_registry::load_bundled_profile_registry().unwrap();
         let effective = registry
@@ -5005,6 +5656,14 @@ mod tests {
             BusinessObjectFamily::ExchangePlan,
             BusinessObjectFamily::BusinessProcess,
             BusinessObjectFamily::Task,
+            BusinessObjectFamily::InformationRegister,
+            BusinessObjectFamily::AccumulationRegister,
+            BusinessObjectFamily::AccountingRegister,
+            BusinessObjectFamily::CalculationRegister,
+            BusinessObjectFamily::Recalculation,
+            BusinessObjectFamily::ChartOfCharacteristicTypes,
+            BusinessObjectFamily::ChartOfAccounts,
+            BusinessObjectFamily::ChartOfCalculationTypes,
         ] {
             assert_eq!(
                 BusinessObjectMetadataProfile::from_effective(effective, family)

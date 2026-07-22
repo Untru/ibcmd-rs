@@ -9,6 +9,7 @@ mod functional_option;
 mod functional_options_parameter;
 mod hierarchical_objects;
 mod language;
+mod register_objects;
 mod registry;
 mod services;
 mod session_parameter;
@@ -28,6 +29,12 @@ pub use hierarchical_objects::{
     register_task_codec,
 };
 pub use language::register_language_codec;
+pub use register_objects::{
+    register_accounting_register_codec, register_accumulation_register_codec,
+    register_calculation_register_codec, register_chart_of_accounts_codec,
+    register_chart_of_calculation_types_codec, register_chart_of_characteristic_types_codec,
+    register_information_register_codec, register_recalculation_codec,
+};
 pub use registry::{
     MetadataEncodeError, MetadataFamilyCodec, MetadataRegistry, MetadataRegistryError,
 };

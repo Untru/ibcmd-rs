@@ -63,7 +63,11 @@ impl StorageSuffix {
     }
 }
 
-/// Additional physical entries emitted for one canonical object.
+/// Explicit physical entries emitted for one canonical object.
+///
+/// A route is independent from semantic ownership: most owned objects are
+/// embedded, while evidenced families such as `Recalculation` own a separate
+/// native row and therefore declare their own route.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjectStorageRoute {
     object_uuid: ObjectUuid,
@@ -168,11 +172,6 @@ pub enum BootstrapGraphError {
     DuplicateRoute { object: ObjectUuid },
     /// A route names an object absent from the validated graph.
     UnknownRouteObject { object: ObjectUuid },
-    /// A route names a canonical descendant embedded in its owner's row.
-    EmbeddedObjectRoute {
-        object: ObjectUuid,
-        owner: ObjectUuid,
-    },
     /// A top-level canonical object has no explicit physical-row declaration.
     MissingObjectRoute { object: ObjectUuid },
     /// Two semantic contributors resolved to the same storage key.
@@ -225,10 +224,6 @@ impl Display for BootstrapGraphError {
                     "storage route references unknown object {object}"
                 )
             }
-            Self::EmbeddedObjectRoute { object, owner } => write!(
-                formatter,
-                "storage route references embedded object {object} owned by {owner}"
-            ),
             Self::MissingObjectRoute { object } => {
                 write!(formatter, "top-level object {object} has no storage route")
             }
@@ -413,17 +408,11 @@ pub fn build_bootstrap_graph(
 ) -> Result<BootstrapGraph, BootstrapGraphError> {
     let mut routes_by_object = BTreeMap::new();
     for route in routes {
-        let object = identities.object(route.object_uuid).ok_or(
-            BootstrapGraphError::UnknownRouteObject {
+        identities
+            .object(route.object_uuid)
+            .ok_or(BootstrapGraphError::UnknownRouteObject {
                 object: route.object_uuid,
-            },
-        )?;
-        if let Some(owner) = object.owner() {
-            return Err(BootstrapGraphError::EmbeddedObjectRoute {
-                object: route.object_uuid,
-                owner,
-            });
-        }
+            })?;
         match routes_by_object.entry(route.object_uuid) {
             Entry::Vacant(slot) => {
                 slot.insert(route);
@@ -452,10 +441,11 @@ pub fn build_bootstrap_graph(
     let mut generated_types = BTreeMap::new();
     for object in identities.objects() {
         let uuid = object.uuid();
-        if object.owner().is_none() {
-            let route = routes_by_object
-                .get(&uuid)
-                .ok_or(BootstrapGraphError::MissingObjectRoute { object: uuid })?;
+        let route = routes_by_object.get(&uuid);
+        if object.owner().is_none() && route.is_none() {
+            return Err(BootstrapGraphError::MissingObjectRoute { object: uuid });
+        }
+        if let Some(route) = route {
             insert_entry(
                 &mut entries,
                 uuid.to_string(),
@@ -656,20 +646,22 @@ mod tests {
             ),
             Err(BootstrapGraphError::UnknownRouteObject { object }) if object == uuid(9)
         ));
-        let embedded = ObjectStorageRoute::new(uuid(3), vec![]).unwrap();
-        assert!(matches!(
-            build_bootstrap_graph(
-                &identities(),
-                ProfileId::parse("platform-test").unwrap(),
-                vec![
-                    ObjectStorageRoute::new(uuid(1), Vec::new()).unwrap(),
-                    ObjectStorageRoute::new(uuid(2), Vec::new()).unwrap(),
-                    embedded,
-                ],
-            ),
-            Err(BootstrapGraphError::EmbeddedObjectRoute { object, owner })
-                if object == uuid(3) && owner == uuid(2)
-        ));
+        let independently_stored_child = build_bootstrap_graph(
+            &identities(),
+            ProfileId::parse("platform-test").unwrap(),
+            vec![
+                ObjectStorageRoute::new(uuid(1), Vec::new()).unwrap(),
+                ObjectStorageRoute::new(uuid(2), Vec::new()).unwrap(),
+                ObjectStorageRoute::new(uuid(3), Vec::new()).unwrap(),
+            ],
+        )
+        .unwrap();
+        assert!(independently_stored_child.contains_key(&uuid(3).to_string()));
+        assert!(
+            independently_stored_child
+                .primary_object_entry(uuid(3))
+                .is_some()
+        );
         assert!(matches!(
             build_bootstrap_graph(
                 &identities(),

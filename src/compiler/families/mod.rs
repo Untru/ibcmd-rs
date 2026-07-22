@@ -5,10 +5,13 @@ mod utility;
 
 pub mod business_process;
 pub mod catalog;
+pub mod charts;
 pub mod data_processor;
 pub mod document;
 pub mod r#enum;
 pub mod exchange_plan;
+pub mod recalculation;
+pub mod registers;
 pub mod report;
 pub mod services;
 pub mod settings;

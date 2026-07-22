@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=28 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=30 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 28 of 56 accepted leaf issues in the
+As of 2026-07-22, 30 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (50.0%). Live workflow statuses are tracked in
+are complete (53.6%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -107,16 +107,26 @@ duplicate identities, standard-field inventories, and unsupported native tails
 all fail closed. See
 [hierarchical/workflow native layout evidence](docs/evidence/hierarchical-workflow-8.3.27.md).
 
+BOOT-008 is complete for all four register families, `Recalculation`, and the
+three chart families. Strict XCF 2.20/2.21 codecs feed independently selected
+8.3.27 native layouts with exact owner sizes, collection markers, standard
+fields, and generated identities. `Recalculation` keeps semantic ownership
+while declaring its independently stored native row; its Dimension targets are
+validated against the owning CalculationRegister. Compact source files that
+omit required defaults and unevidenced embedded register fields remain
+fail-closed. See
+[register/chart native layout evidence](docs/evidence/registers-charts-8.3.27.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 1/15 | 6.7% |
-| Phase 4 bootstrap | 6/13 | 46.2% |
+| Phase 4 bootstrap | 7/13 | 53.8% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **29/56** | **51.8%** |
+| **Overall** | **30/56** | **53.6%** |
 
 ## Export Compatibility Status
 
