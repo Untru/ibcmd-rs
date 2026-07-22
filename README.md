@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=42 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=43 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 42 of 56 accepted leaf issues in the
+As of 2026-07-23, 43 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (75.0%). Live workflow statuses are tracked in
+are complete (76.8%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -73,6 +73,16 @@ four logical bytes performs less than 512 bytes of actual I/O. Nested stored or
 raw-DEFLATE containers share one depth/entry/encoded/decoded/ratio budget, and
 recursive bombs return the exact typed limit without retaining an in-memory
 tree. See [streaming traversal evidence](docs/evidence/cf-streaming-tree.md).
+
+CF-007 adds the deterministic streaming Format15 writer and makes the legacy
+module-container builder delegate to it. TOC and element headers use compact
+page chains; present data uses fixed configured pages with deterministic final
+padding; absent data remains a sentinel distinct from an explicit empty block.
+Allocation is planned and range-checked before the first output byte, raw
+logical element headers are retained, and payload sizes
+`0/1/511/512/513/4097` round-trip through the reader. Rewriting canonical
+output is byte-identical. See
+[Format15 writer evidence](docs/evidence/cf-format15-writer.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -232,11 +242,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 7/15 | 46.7% |
+| Phase 3 CF | 8/15 | 53.3% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **42/56** | **75.0%** |
+| **Overall** | **43/56** | **76.8%** |
 
 ## Export Compatibility Status
 

@@ -10,6 +10,7 @@ pub mod format;
 pub mod format15;
 pub mod format16;
 pub mod reader;
+pub mod writer;
 
 #[cfg(test)]
 mod tests {

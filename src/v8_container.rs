@@ -1,11 +1,4 @@
-use anyhow::{Context, Result, anyhow};
-
-const V8_MAGIC_NUMBER: u32 = 0x7fff_ffff;
-const V8_PAGE_SIZE: u32 = 512;
-const FILE_HEADER_SIZE: usize = 16;
-const BLOCK_HEADER_SIZE: usize = 31;
-const ELEM_ADDR_SIZE: usize = 12;
-const ELEM_HEADER_PREFIX_SIZE: usize = 20;
+use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct V8Element {
@@ -40,117 +33,31 @@ pub(crate) fn read_v8_element_data(bytes: &[u8], target_name: &str) -> Result<Op
 }
 
 pub(crate) fn build_v8_container(elements: &[V8Element]) -> Result<Vec<u8>> {
-    let toc_len = elements
-        .len()
-        .checked_mul(ELEM_ADDR_SIZE)
-        .ok_or_else(|| anyhow!("TOC size overflows usize"))?;
-    let toc_block_total = BLOCK_HEADER_SIZE
-        .checked_add(toc_len)
-        .ok_or_else(|| anyhow!("TOC block size overflows usize"))?;
-    let mut offset = FILE_HEADER_SIZE
-        .checked_add(toc_block_total)
-        .ok_or_else(|| anyhow!("container offset overflows usize"))?;
-
-    let mut addresses = Vec::with_capacity(elements.len());
-    for element in elements {
-        let header_addr = offset;
-        offset = offset
-            .checked_add(BLOCK_HEADER_SIZE)
-            .and_then(|value| value.checked_add(element.header.len()))
-            .ok_or_else(|| anyhow!("header block offset overflows usize"))?;
-
-        let data_addr = offset;
-        let data_page = page_size_for_data(element.data.len());
-        offset = offset
-            .checked_add(BLOCK_HEADER_SIZE)
-            .and_then(|value| value.checked_add(data_page))
-            .ok_or_else(|| anyhow!("data block offset overflows usize"))?;
-
-        addresses.push((header_addr, data_addr));
-    }
-
-    let mut bytes = Vec::with_capacity(offset);
-    write_u32(&mut bytes, V8_MAGIC_NUMBER);
-    write_u32(&mut bytes, V8_PAGE_SIZE);
-    write_u32(&mut bytes, 1);
-    write_u32(&mut bytes, 0);
-
-    let mut toc = Vec::with_capacity(toc_len);
-    for (header_addr, data_addr) in addresses {
-        write_u32(&mut toc, checked_u32(header_addr, "header address")?);
-        write_u32(&mut toc, checked_u32(data_addr, "data address")?);
-        write_u32(&mut toc, V8_MAGIC_NUMBER);
-    }
-    write_block(&mut bytes, &toc, toc.len())?;
-
-    for element in elements {
-        write_block(&mut bytes, &element.header, element.header.len())?;
-        write_block(
-            &mut bytes,
-            &element.data,
-            page_size_for_data(element.data.len()),
-        )?;
-    }
-
-    Ok(bytes)
+    let document = ibcmd_v8::writer::Format15Document::new(
+        1,
+        elements
+            .iter()
+            .map(|element| {
+                ibcmd_v8::writer::Format15Element::preserved(
+                    element.header.clone(),
+                    Some(element.data.clone()),
+                )
+            })
+            .collect(),
+    );
+    ibcmd_v8::writer::write_format15_to_vec(&document).map_err(anyhow::Error::new)
 }
 
 pub(crate) fn make_v8_element_header(name: &str) -> Vec<u8> {
-    let mut header = vec![0; ELEM_HEADER_PREFIX_SIZE];
-    for unit in name.encode_utf16() {
-        header.extend_from_slice(&unit.to_le_bytes());
-    }
-    header.extend_from_slice(&[0, 0, 0, 0]);
-    header
-}
-
-fn write_block(target: &mut Vec<u8>, data: &[u8], page_size: usize) -> Result<()> {
-    if page_size < data.len() {
-        return Err(anyhow!(
-            "page size {} is less than data size {}",
-            page_size,
-            data.len()
-        ));
-    }
-    let header = format!(
-        "\r\n{:08x} {:08x} {:08x} \r\n",
-        data.len(),
-        page_size,
-        V8_MAGIC_NUMBER
-    );
-    if header.len() != BLOCK_HEADER_SIZE {
-        return Err(anyhow!("invalid block header length {}", header.len()));
-    }
-    target.extend_from_slice(header.as_bytes());
-    target.extend_from_slice(data);
-    target.resize(target.len() + (page_size - data.len()), 0);
-    Ok(())
-}
-
-fn page_size_for_data(len: usize) -> usize {
-    if len < V8_PAGE_SIZE as usize {
-        V8_PAGE_SIZE as usize
-    } else {
-        len
-    }
-}
-
-fn write_u32(target: &mut Vec<u8>, value: u32) {
-    target.extend_from_slice(&value.to_le_bytes());
-}
-
-fn checked_u32(value: usize, name: &str) -> Result<u32> {
-    value
-        .try_into()
-        .with_context(|| format!("{name} does not fit into u32: {value}"))
+    ibcmd_v8::writer::make_element_header(name)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BLOCK_HEADER_SIZE, V8_MAGIC_NUMBER, V8Element, build_v8_container, make_v8_element_header,
-        parse_v8_container,
-    };
+    use super::{V8Element, build_v8_container, make_v8_element_header, parse_v8_container};
+
+    const V8_MAGIC_NUMBER: u32 = ibcmd_v8::format15::SENTINEL;
+    const BLOCK_HEADER_SIZE: usize = ibcmd_v8::format15::BLOCK_HEADER_SIZE;
 
     #[test]
     fn parses_synthetic_container_with_two_elements() {

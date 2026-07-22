@@ -232,7 +232,7 @@
 
 ### CF-007 — Реализовать deterministic Format15 writer
 
-- **Статус:** `[ ]`; **зависимости:** CF-002, CF-003
+- **Статус:** `[x]`; **зависимости:** CF-002, CF-003
 - **Файлы:** создать `crates/ibcmd-v8/src/writer.rs`
 - **Действия:** TOC, addresses, page chains, absent sentinel, preserved headers и deterministic allocation.
 - **Проверка:** sizes 0/1/511/512/513/large проходят write→parse; повторная запись byte-identical.
