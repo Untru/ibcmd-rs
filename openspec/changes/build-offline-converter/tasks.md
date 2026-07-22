@@ -184,7 +184,7 @@
 
 ### CF-001 — Добавить versioned CF fixture corpus
 
-- **Статус:** `[ ]`; **зависимости:** BASE-002
+- **Статус:** `[x]`; **зависимости:** BASE-002
 - **Файлы:** создать `tests/fixtures/cf/README.md`, `manifest.json`, `tests/cf_corpus.rs`
 - **Действия:** минимальные Format15/Format16 fixtures, hashes, provenance, exact coordinates; optional external corpus env.
 - **Проверка:** обычные тесты не запускают 1С; corpus не содержит сторонний прикладной код или секреты.
