@@ -3404,10 +3404,13 @@ fn configuration_module_body_paths(file_names: &BTreeSet<&str>) -> BTreeMap<Stri
         if file_names.contains(metadata_id) || !is_configuration_module_group(&suffixes) {
             continue;
         }
-        for (suffix, path) in CONFIGURATION_MODULE_SUFFIXES {
+        for route in
+            crate::compiler::families::assets::SourceAssetRegistry.module_routes("Configuration")
+        {
+            let suffix = route.suffix().trim_start_matches('.');
             let body_id = format!("{metadata_id}.{suffix}");
             if file_names.contains(body_id.as_str()) {
-                paths.insert(body_id, PathBuf::from(path));
+                paths.insert(body_id, PathBuf::from(route.relative_path()));
             }
         }
     }
@@ -3427,29 +3430,29 @@ fn form_module_body_paths(
         }
         let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
-        paths.insert(
-            body_id,
-            form_dir.join("Ext").join("Form").join("Module.bsl"),
-        );
+        let route = crate::compiler::families::assets::SourceAssetRegistry
+            .route(
+                "Form",
+                crate::compiler::families::assets::SourceAssetRole::FormModule,
+            )
+            .expect("form-module route is registered");
+        paths.insert(body_id, form_dir.join(route.relative_path()));
     }
     paths
 }
 
 fn is_configuration_module_group(suffixes: &BTreeSet<&str>) -> bool {
-    ["0", "5", "6", "7"]
-        .iter()
-        .all(|suffix| suffixes.contains(suffix))
-        && ["2", "4", "8", "9", "a", "b", "c"]
-            .iter()
-            .any(|suffix| suffixes.contains(suffix))
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    registry
+        .module_routes("Configuration")
+        .all(|route| suffixes.contains(route.suffix().trim_start_matches('.')))
+        && registry
+            .configuration_routes()
+            .filter(|route| {
+                route.codec() != crate::compiler::families::assets::SourceAssetCodec::Module
+            })
+            .any(|route| suffixes.contains(route.suffix().trim_start_matches('.')))
 }
-
-const CONFIGURATION_MODULE_SUFFIXES: &[(&str, &str)] = &[
-    ("0", "Ext/OrdinaryApplicationModule.bsl"),
-    ("5", "Ext/ExternalConnectionModule.bsl"),
-    ("6", "Ext/ManagedApplicationModule.bsl"),
-    ("7", "Ext/SessionModule.bsl"),
-];
 
 #[allow(dead_code)]
 fn parse_module_body_source_paths_from_metadata_blob(
@@ -3509,12 +3512,17 @@ fn nested_command_module_source_paths(
         if !file_names.contains(body_id.as_str()) {
             continue;
         }
+        let route = crate::compiler::families::assets::SourceAssetRegistry
+            .route(
+                "Command",
+                crate::compiler::families::assets::SourceAssetRole::CommandModule,
+            )
+            .expect("nested-command module route is registered");
         let path = PathBuf::from(folder)
             .join(sanitize_source_path_segment(owner_name))
             .join("Commands")
             .join(sanitize_source_path_segment(&command.name))
-            .join("Ext")
-            .join("CommandModule.bsl");
+            .join(route.relative_path());
         paths.insert(body_id, path);
     }
 
@@ -4012,56 +4020,22 @@ fn contains_metadata_header_name_between(text: &str, start: usize, end: usize, n
 }
 
 fn module_owner_source_path(kind: &str, folder: &str, name: &str, suffix: &str) -> Option<PathBuf> {
-    module_owner_module_file(kind, suffix).map(|module_file| {
+    module_owner_route(kind, suffix).map(|route| {
         PathBuf::from(folder)
             .join(sanitize_source_path_segment(name))
-            .join("Ext")
-            .join(module_file)
+            .join(route.relative_path())
     })
 }
 
-fn module_owner_module_file(kind: &str, suffix: &str) -> Option<&'static str> {
-    match (kind, suffix) {
-        ("CommonModule", "0") | ("HTTPService", "0") | ("WebService", "0") => Some("Module.bsl"),
-        ("Bot", "1") | ("IntegrationService", "0") => Some("Module.bsl"),
-        ("CommonCommand", "2") => Some("CommandModule.bsl"),
-        ("FilterCriterion", "0") => Some("ManagerModule.bsl"),
-        ("Constant", "0") => Some("ValueManagerModule.bsl"),
-        ("Constant", "1") => Some("ManagerModule.bsl"),
-        ("SettingsStorage", "8") => Some("ManagerModule.bsl"),
-        ("Sequence", "0") => Some("RecordSetModule.bsl"),
-        ("Catalog", "0") => Some("ObjectModule.bsl"),
-        ("Catalog", "3") => Some("ManagerModule.bsl"),
-        ("Report", "0") => Some("ObjectModule.bsl"),
-        ("Report", "2") => Some("ManagerModule.bsl"),
-        ("DataProcessor", "0") => Some("ObjectModule.bsl"),
-        ("DataProcessor", "2") => Some("ManagerModule.bsl"),
-        ("Document", "0") => Some("ObjectModule.bsl"),
-        ("Document", "2") => Some("ManagerModule.bsl"),
-        ("Enum", "0") => Some("ManagerModule.bsl"),
-        ("ExchangePlan", "2") => Some("ObjectModule.bsl"),
-        ("ExchangePlan", "3") => Some("ManagerModule.bsl"),
-        ("AccountingRegister", "6") => Some("RecordSetModule.bsl"),
-        ("AccountingRegister", "7") => Some("ManagerModule.bsl"),
-        ("AccumulationRegister", "1")
-        | ("CalculationRegister", "1")
-        | ("InformationRegister", "1") => Some("RecordSetModule.bsl"),
-        ("AccumulationRegister", "2")
-        | ("CalculationRegister", "2")
-        | ("InformationRegister", "2") => Some("ManagerModule.bsl"),
-        ("DocumentJournal", "1") => Some("ManagerModule.bsl"),
-        ("Task", "6") => Some("ObjectModule.bsl"),
-        ("Task", "7") => Some("ManagerModule.bsl"),
-        ("BusinessProcess", "6") => Some("ObjectModule.bsl"),
-        ("BusinessProcess", "8") => Some("ManagerModule.bsl"),
-        ("ChartOfAccounts", "14") => Some("ObjectModule.bsl"),
-        ("ChartOfAccounts", "15") => Some("ManagerModule.bsl"),
-        ("ChartOfCalculationTypes", "0") => Some("ObjectModule.bsl"),
-        ("ChartOfCalculationTypes", "3") => Some("ManagerModule.bsl"),
-        ("ChartOfCharacteristicTypes", "15") => Some("ObjectModule.bsl"),
-        ("ChartOfCharacteristicTypes", "16") => Some("ManagerModule.bsl"),
-        _ => None,
-    }
+fn module_owner_route(
+    kind: &str,
+    suffix: &str,
+) -> Option<&'static crate::compiler::families::assets::SourceAssetRoute> {
+    crate::compiler::families::assets::SourceAssetRegistry
+        .route_by_suffix(kind, suffix)
+        .filter(|route| {
+            route.codec() == crate::compiler::families::assets::SourceAssetCodec::Module
+        })
 }
 
 struct ExtractedMetadataSourceXml {

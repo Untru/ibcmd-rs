@@ -2,6 +2,7 @@
 
 mod business_objects;
 mod common;
+mod common_objects;
 mod constant;
 mod defined_type;
 mod fallback;
@@ -19,6 +20,10 @@ pub use business_objects::{register_catalog_codec, register_document_codec};
 pub use common::{
     MetadataDecodeError, MetadataEnvelope, decode_metadata_envelope,
     decode_metadata_envelope_with_dialect,
+};
+pub use common_objects::{
+    register_command_group_codec, register_common_command_codec, register_common_module_codec,
+    register_common_picture_codec,
 };
 pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;

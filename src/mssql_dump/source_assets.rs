@@ -191,7 +191,8 @@ pub(super) fn dynamic_source_asset(
         let mut form_dir = form_ref.relative_path.clone();
         form_dir.set_extension("");
         return Some(SourceAsset {
-            primary_path: form_dir.join("Ext").join("Help.xml"),
+            primary_path: form_dir
+                .join(crate::compiler::families::assets::SourceAssetRegistry.help_relative_path()),
             kind: SourceAssetKind::Help,
         });
     }
@@ -201,13 +202,17 @@ pub(super) fn dynamic_source_asset(
         && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
             .is_some()
     {
-        let path = if suffix == "9" {
-            "Ext/MainSectionCommandInterface.xml"
-        } else {
-            "Ext/CommandInterface.xml"
-        };
+        let route = crate::compiler::families::assets::SourceAssetRegistry
+            .route_by_suffix("Configuration", suffix)
+            .filter(|route| {
+                matches!(
+                    route.role(),
+                    crate::compiler::families::assets::SourceAssetRole::MainSectionCommandInterface
+                        | crate::compiler::families::assets::SourceAssetRole::CommandInterface
+                )
+            })?;
         return Some(SourceAsset {
-            primary_path: PathBuf::from(path),
+            primary_path: PathBuf::from(route.relative_path()),
             kind: SourceAssetKind::CommandInterface,
         });
     }
@@ -243,12 +248,17 @@ pub(super) fn dynamic_source_asset(
             kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
         });
     }
-    if matches!(suffix, "0" | "1")
+    if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
+        .route_by_suffix(&owner.kind, suffix)
+        .filter(|route| {
+            route.role() == crate::compiler::families::assets::SourceAssetRole::CommandInterface
+        })
+        && matches!(suffix, "0" | "1")
         && parse_command_interface_blob(bytes, context.command_refs, context.metadata_refs)
             .is_some()
     {
         return Some(SourceAsset {
-            primary_path: owner.object_path.join("Ext").join("CommandInterface.xml"),
+            primary_path: owner.object_path.join(route.relative_path()),
             kind: SourceAssetKind::CommandInterface,
         });
     }
@@ -260,7 +270,9 @@ pub(super) fn dynamic_source_asset(
             return None;
         }
         return Some(SourceAsset {
-            primary_path: owner.object_path.join("Ext").join("Help.xml"),
+            primary_path: owner
+                .object_path
+                .join(crate::compiler::families::assets::SourceAssetRegistry.help_relative_path()),
             kind: SourceAssetKind::Help,
         });
     }
@@ -273,15 +285,14 @@ pub(super) fn dynamic_source_asset(
             kind: SourceAssetKind::PredefinedData { model },
         });
     }
-    if let Some(module_file) = module_owner_module_file(&owner.kind, suffix)
+    if let Some(module_route) = module_owner_route(&owner.kind, suffix)
         && unpack_module_blob_text(bytes).is_err()
         && is_binary_module_container(bytes)
     {
         return Some(SourceAsset {
             primary_path: owner
                 .object_path
-                .join("Ext")
-                .join(Path::new(module_file).with_extension("bin")),
+                .join(Path::new(module_route.relative_path()).with_extension("bin")),
             kind: SourceAssetKind::InflatedBinary,
         });
     }
@@ -516,7 +527,11 @@ pub(super) fn source_asset_paths_with_indexes(
             continue;
         }
         let is_configuration_group = is_configuration_module_group(&suffixes);
-        for (suffix, path, kind) in CONFIGURATION_SOURCE_ASSET_SUFFIXES {
+        for route in crate::compiler::families::assets::SourceAssetRegistry.configuration_routes() {
+            let Some(kind) = configuration_source_asset_kind(route.role()) else {
+                continue;
+            };
+            let suffix = route.suffix().trim_start_matches('.');
             if !is_configuration_group && matches!(kind, SourceAssetKind::ExtPicture) {
                 continue;
             }
@@ -528,26 +543,36 @@ pub(super) fn source_asset_paths_with_indexes(
                 paths.insert(
                     body_id,
                     SourceAsset {
-                        primary_path: PathBuf::from(path),
-                        kind: kind.clone(),
+                        primary_path: PathBuf::from(route.relative_path()),
+                        kind,
                     },
                 );
             }
         }
         let standalone_id = format!("{metadata_id}.f");
         if is_configuration_group && file_names.contains(standalone_id.as_str()) {
+            let route = crate::compiler::families::assets::SourceAssetRegistry
+                .route(
+                    "Configuration",
+                    crate::compiler::families::assets::SourceAssetRole::StandaloneContent,
+                )
+                .expect("configuration standalone route is registered");
             paths.insert(
                 standalone_id,
                 SourceAsset {
-                    primary_path: PathBuf::from("Ext/StandaloneConfigurationContent.bin"),
+                    primary_path: PathBuf::from(route.relative_path()),
                     kind: SourceAssetKind::StandaloneContent,
                 },
             );
         }
-        for (suffix, path) in [
-            ("9", "Ext/MainSectionCommandInterface.xml"),
-            ("a", "Ext/CommandInterface.xml"),
+        for role in [
+            crate::compiler::families::assets::SourceAssetRole::MainSectionCommandInterface,
+            crate::compiler::families::assets::SourceAssetRole::CommandInterface,
         ] {
+            let route = crate::compiler::families::assets::SourceAssetRegistry
+                .route("Configuration", role)
+                .expect("configuration command-interface route is registered");
+            let suffix = route.suffix().trim_start_matches('.');
             if !is_configuration_group && !suffixes.contains(suffix) {
                 continue;
             }
@@ -567,7 +592,7 @@ pub(super) fn source_asset_paths_with_indexes(
                 paths.insert(
                     interface_id,
                     SourceAsset {
-                        primary_path: PathBuf::from(path),
+                        primary_path: PathBuf::from(route.relative_path()),
                         kind: SourceAssetKind::CommandInterface,
                     },
                 );
@@ -669,35 +694,25 @@ pub(super) fn form_body_asset_paths(
     paths
 }
 
-const CONFIGURATION_SOURCE_ASSET_SUFFIXES: &[(&str, &str, SourceAssetKind)] = &[
-    ("2", "Ext/Splash.xml", SourceAssetKind::ExtPicture),
-    ("3", "Ext/Help.xml", SourceAssetKind::Help),
-    (
-        "4",
-        "Ext/ParentConfigurations.bin",
-        SourceAssetKind::InflatedBinary,
-    ),
-    (
-        "8",
-        "Ext/HomePageWorkArea.xml",
-        SourceAssetKind::HomePageWorkArea,
-    ),
-    (
-        "10",
-        "Ext/MobileClientSignature.bin",
-        SourceAssetKind::InflatedBinary,
-    ),
-    (
-        "b",
-        "Ext/ClientApplicationInterface.xml",
-        SourceAssetKind::ClientApplicationInterface,
-    ),
-    (
-        "c",
-        "Ext/MainSectionPicture.xml",
-        SourceAssetKind::ExtPicture,
-    ),
-];
+fn configuration_source_asset_kind(
+    role: crate::compiler::families::assets::SourceAssetRole,
+) -> Option<SourceAssetKind> {
+    use crate::compiler::families::assets::SourceAssetRole;
+    match role {
+        SourceAssetRole::Splash | SourceAssetRole::MainSectionPicture => {
+            Some(SourceAssetKind::ExtPicture)
+        }
+        SourceAssetRole::Help => Some(SourceAssetKind::Help),
+        SourceAssetRole::ParentConfigurations | SourceAssetRole::MobileClientSignature => {
+            Some(SourceAssetKind::InflatedBinary)
+        }
+        SourceAssetRole::HomePageWorkArea => Some(SourceAssetKind::HomePageWorkArea),
+        SourceAssetRole::ClientApplicationInterface => {
+            Some(SourceAssetKind::ClientApplicationInterface)
+        }
+        _ => None,
+    }
+}
 
 #[allow(dead_code)]
 pub(super) fn source_assets_from_metadata_blob(
@@ -823,18 +838,28 @@ pub(super) fn source_assets_from_metadata_text_inner(
     let body_id = format!("{uuid}.0");
     if file_names.contains(body_id.as_str()) {
         let asset = match kind {
-            "CommonPicture" => Some(SourceAsset {
-                primary_path: object_path.join("Ext").join("Picture.xml"),
-                kind: SourceAssetKind::ExtPicture,
-            }),
+            "CommonPicture" => crate::compiler::families::assets::SourceAssetRegistry
+                .route(
+                    "CommonPicture",
+                    crate::compiler::families::assets::SourceAssetRole::Picture,
+                )
+                .map(|route| SourceAsset {
+                    primary_path: object_path.join(route.relative_path()),
+                    kind: SourceAssetKind::ExtPicture,
+                }),
             "ScheduledJob" => Some(SourceAsset {
                 primary_path: object_path.join("Ext").join("Schedule.xml"),
                 kind: SourceAssetKind::Schedule,
             }),
-            "XDTOPackage" => Some(SourceAsset {
-                primary_path: object_path.join("Ext").join("Package.bin"),
-                kind: SourceAssetKind::InflatedBinary,
-            }),
+            "XDTOPackage" => crate::compiler::families::assets::SourceAssetRegistry
+                .route(
+                    "XDTOPackage",
+                    crate::compiler::families::assets::SourceAssetRole::Package,
+                )
+                .map(|route| SourceAsset {
+                    primary_path: object_path.join(route.relative_path()),
+                    kind: SourceAssetKind::InflatedBinary,
+                }),
             "Style" => Some(SourceAsset {
                 primary_path: object_path.join("Ext").join("Style.xml"),
                 kind: SourceAssetKind::StyleBody,
@@ -906,7 +931,9 @@ pub(super) fn source_assets_from_metadata_text_inner(
             assets.push((
                 (*body_id).to_string(),
                 SourceAsset {
-                    primary_path: object_path.join("Ext").join("Help.xml"),
+                    primary_path: object_path.join(
+                        crate::compiler::families::assets::SourceAssetRegistry.help_relative_path(),
+                    ),
                     kind: SourceAssetKind::Help,
                 },
             ));
@@ -939,11 +966,10 @@ pub(super) fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str>
 }
 
 pub(super) fn preferred_help_body_id(kind: &str, uuid: &str) -> String {
-    let suffix = if matches!(kind, "Form" | "CommonForm") {
-        "1"
-    } else {
-        "5"
-    };
+    let suffix = crate::compiler::families::assets::SourceAssetRegistry
+        .help_suffix(kind)
+        .expect("source-asset registry defines the help suffix policy")
+        .trim_start_matches('.');
     format!("{uuid}.{suffix}")
 }
 

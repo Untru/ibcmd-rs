@@ -370,7 +370,7 @@
 
 ### BOOT-009 — Base-free codecs modules, commands и source assets
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002, CF-005
+- **Статус:** `[x]`; **зависимости:** BOOT-002, CF-005
 - **Файлы:** создать `src/compiler/families/modules.rs`, `commands.rs`, `assets.rs`; адаптировать `src/mssql_dump/source_assets.rs`
 - **Действия:** CommonModule, CommonCommand/Group, pictures, help and binary assets.
 - **Проверка:** text encoding/compression/assets hashes roundtrip; no source-path heuristics outside registry.

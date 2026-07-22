@@ -1069,6 +1069,15 @@ pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
         .ok_or_else(|| anyhow!("module blob does not contain text element"))
 }
 
+pub(crate) fn unpack_module_container_text(container: &[u8]) -> Result<Vec<u8>> {
+    let elements = parse_v8_container(container).context("failed to parse module V8 container")?;
+    elements
+        .into_iter()
+        .find(|element| element.name == "text")
+        .map(|element| element.data)
+        .ok_or_else(|| anyhow!("module V8 container does not contain text element"))
+}
+
 pub fn module_blob_text_sha256(blob: &[u8]) -> Result<String> {
     let text = unpack_module_blob_text(blob)?;
     Ok(hex_sha256(&text))

@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=31 total=56 updated=2026-07-22 -->
+<!-- offline-converter-progress: completed=32 total=56 updated=2026-07-22 -->
 
-As of 2026-07-22, 31 of 56 accepted leaf issues in the
+As of 2026-07-22, 32 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (55.4%). Live workflow statuses are tracked in
+are complete (57.1%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -126,16 +126,26 @@ omit required defaults and unevidenced embedded register fields remain
 fail-closed. See
 [register/chart native layout evidence](docs/evidence/registers-charts-8.3.27.md).
 
+BOOT-009 is complete for `CommonModule`, `CommonCommand`, `CommandGroup`,
+`CommonPicture`, module bodies, pictures, Help and raw binary assets. Strict XCF
+2.20/2.21 projections feed profile-selected 8.3.27 metadata layouts; module and
+asset codecs preserve exact text/content bytes through bounded compression and
+strict decoding. A single source-asset registry now owns family, semantic role,
+native suffix, relative path and codec mappings for both the standalone
+compiler and the legacy MSSQL bridge. Unknown properties, unresolved graph
+references, unsafe asset names, malformed base64 and future layouts fail
+closed. See [module/command/asset native layout evidence](docs/evidence/modules-commands-assets-8.3.27.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 2/15 | 13.3% |
-| Phase 4 bootstrap | 7/13 | 53.8% |
+| Phase 4 bootstrap | 8/13 | 61.5% |
 | Phase 5a migrations | 2/4 | 50% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **31/56** | **55.4%** |
+| **Overall** | **32/56** | **57.1%** |
 
 ## Export Compatibility Status
 

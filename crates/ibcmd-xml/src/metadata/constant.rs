@@ -82,6 +82,14 @@ pub fn bundled_metadata_registry() -> MetadataRegistry {
         .expect("bundled families are unique and bounded");
     super::utility_objects::register_settings_storage_codec(&mut registry)
         .expect("bundled families are unique and bounded");
+    super::common_objects::register_common_module_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
+    super::common_objects::register_common_command_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
+    super::common_objects::register_command_group_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
+    super::common_objects::register_common_picture_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
     register_constant_codec(&mut registry).expect("bundled families are unique and bounded");
     super::defined_type::register_defined_type_codec(&mut registry)
         .expect("bundled families are unique and bounded");

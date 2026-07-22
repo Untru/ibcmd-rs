@@ -45,6 +45,7 @@ use crate::cli::{
     MssqlStageWebServiceObjectArgs, MssqlStageXdtopackageObjectArgs, MssqlStorageExportArgs,
     MssqlStorageImportArgs,
 };
+use crate::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
 use crate::compiler::{
     AdditionalIndexesMapping, CompileAxes, CompileRequest, SourcePayload, compile_source,
 };
@@ -1311,16 +1312,15 @@ fn metadata_body_bootstrap_rows(
         _ => {}
     }
 
-    let help_suffix = if matches!(properties.kind.as_str(), "Form" | "CommonForm") {
-        "1"
-    } else {
-        "5"
-    };
+    let help_suffix = SourceAssetRegistry
+        .help_suffix(&properties.kind)
+        .expect("source-asset registry defines the help suffix policy")
+        .trim_start_matches('.');
     rows.extend(optional_body_bootstrap_row(
         source_root,
         properties,
         object_path,
-        infer_object_help_body_path(xml_path),
+        infer_object_help_body_path(xml_path, &properties.kind),
         help_suffix,
         "help_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
@@ -1328,12 +1328,8 @@ fn metadata_body_bootstrap_rows(
         "Help packer builds the help blob from Help.xml, pages and files using the deterministic body id without reading active Config rows",
     ));
 
-    for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
-        let body_path = if properties.kind == "Configuration" {
-            infer_configuration_module_body_path(xml_path, file_name)
-        } else {
-            infer_object_module_body_path(xml_path, file_name)
-        };
+    for (suffix, _) in object_module_body_suffixes(&properties.kind) {
+        let body_path = infer_object_module_body_path(xml_path, &properties.kind, suffix);
         rows.extend(optional_module_body_bootstrap_row(
             source_root,
             properties,
@@ -1363,7 +1359,7 @@ fn metadata_body_bootstrap_rows(
             source_root,
             properties,
             object_path,
-            infer_command_interface_body_path(xml_path),
+            infer_command_interface_body_path(xml_path, &properties.kind),
             suffix,
             "command_interface_body",
         ));
@@ -4550,7 +4546,7 @@ fn prepare_command_interface_body_row(
     let Some(suffix) = command_interface_body_suffix(&properties.kind) else {
         return Ok(Vec::new());
     };
-    let body_path = infer_command_interface_body_path(xml_path);
+    let body_path = infer_command_interface_body_path(xml_path, &properties.kind);
     if !body_path.exists() {
         return Ok(Vec::new());
     }
@@ -4594,7 +4590,7 @@ fn prepare_object_help_body_row(
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    let body_path = infer_object_help_body_path(xml_path);
+    let body_path = infer_object_help_body_path(xml_path, &properties.kind);
     if !body_path.exists() {
         return Ok(Vec::new());
     }
@@ -4662,11 +4658,10 @@ fn infer_help_body_id(properties: &SimpleMetadataXmlProperties) -> String {
 }
 
 fn infer_help_body_id_for_kind(kind: &str, uuid: &str) -> String {
-    let suffix = if matches!(kind, "Form" | "CommonForm") {
-        "1"
-    } else {
-        "5"
-    };
+    let suffix = SourceAssetRegistry
+        .help_suffix(kind)
+        .expect("source-asset registry defines the help suffix policy")
+        .trim_start_matches('.');
     format!("{uuid}.{suffix}")
 }
 
@@ -4711,12 +4706,8 @@ fn prepare_object_module_body_rows(
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let mut rows = Vec::new();
-    for (suffix, file_name) in object_module_body_suffixes(&properties.kind) {
-        let body_path = if properties.kind == "Configuration" {
-            infer_configuration_module_body_path(xml_path, file_name)
-        } else {
-            infer_object_module_body_path(xml_path, file_name)
-        };
+    for (suffix, _) in object_module_body_suffixes(&properties.kind) {
+        let body_path = infer_object_module_body_path(xml_path, &properties.kind, suffix);
         let Some(body_path) = source_module_body_path(body_path) else {
             continue;
         };
@@ -4777,46 +4768,17 @@ fn pack_module_body_source(
     })
 }
 
-fn object_module_body_suffixes(kind: &str) -> &'static [(&'static str, &'static str)] {
-    match kind {
-        "Bot" => &[("1", "Module.bsl")],
-        "Configuration" => &[
-            ("0", "OrdinaryApplicationModule.bsl"),
-            ("5", "ExternalConnectionModule.bsl"),
-            ("6", "ManagedApplicationModule.bsl"),
-            ("7", "SessionModule.bsl"),
-        ],
-        "CommonCommand" => &[("2", "CommandModule.bsl")],
-        "Constant" => &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")],
-        "FilterCriterion" => &[("0", "ManagerModule.bsl")],
-        "SettingsStorage" => &[("8", "ManagerModule.bsl")],
-        "Sequence" => &[("0", "RecordSetModule.bsl")],
-        "Catalog" => &[("0", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")],
-        "Report" | "DataProcessor" | "Document" => {
-            &[("0", "ObjectModule.bsl"), ("2", "ManagerModule.bsl")]
-        }
-        "Enum" => &[("0", "ManagerModule.bsl")],
-        "ExchangePlan" => &[("2", "ObjectModule.bsl"), ("3", "ManagerModule.bsl")],
-        "AccumulationRegister"
-        | "AccountingRegister"
-        | "CalculationRegister"
-        | "InformationRegister" => &[("1", "RecordSetModule.bsl"), ("2", "ManagerModule.bsl")],
-        "DocumentJournal" => &[("1", "ManagerModule.bsl")],
-        "Task" => &[("6", "ObjectModule.bsl"), ("7", "ManagerModule.bsl")],
-        "BusinessProcess" => &[("6", "ObjectModule.bsl"), ("8", "ManagerModule.bsl")],
-        "ChartOfCharacteristicTypes" => &[("15", "ObjectModule.bsl"), ("16", "ManagerModule.bsl")],
-        "HTTPService" | "WebService" => &[("0", "Module.bsl")],
-        "IntegrationService" => &[("0", "Module.bsl")],
-        _ => &[],
-    }
+fn object_module_body_suffixes(kind: &str) -> Vec<(&'static str, &'static str)> {
+    SourceAssetRegistry
+        .module_routes(kind)
+        .map(|route| (route.suffix().trim_start_matches('.'), route.file_name()))
+        .collect()
 }
 
 fn command_interface_body_suffix(kind: &str) -> Option<&'static str> {
-    match kind {
-        "CommonCommand" => Some("0"),
-        "Subsystem" => Some("1"),
-        _ => None,
-    }
+    SourceAssetRegistry
+        .route(kind, SourceAssetRole::CommandInterface)
+        .map(|route| route.suffix().trim_start_matches('.'))
 }
 
 fn predefined_data_body_suffix(kind: &str) -> Option<&'static str> {
@@ -4870,6 +4832,9 @@ fn nested_command_module_sources(
         return Ok(Vec::new());
     }
     let command_ids = parse_nested_command_ids_by_name(xml)?;
+    let command_module_route = SourceAssetRegistry
+        .route("Command", SourceAssetRole::CommandModule)
+        .expect("nested-command module route is registered");
     let mut sources = Vec::new();
     for entry in fs::read_dir(&commands_dir)
         .with_context(|| format!("failed to read Commands dir {}", commands_dir.display()))?
@@ -4884,7 +4849,7 @@ fn nested_command_module_sources(
         }
         let command_name = entry.file_name().to_string_lossy().to_string();
         let Some(body_path) =
-            source_module_body_path(entry.path().join("Ext").join("CommandModule.bsl"))
+            source_module_body_path(entry.path().join(command_module_route.relative_path()))
         else {
             continue;
         };
@@ -6863,12 +6828,9 @@ fn sanitize_file_part(value: &str) -> String {
 }
 
 fn infer_common_module_text_path(xml: &Path) -> PathBuf {
-    let module_name = xml.file_stem().unwrap_or_default();
-    xml.parent()
-        .unwrap_or_else(|| Path::new(""))
-        .join(module_name)
-        .join("Ext")
-        .join("Module.bsl")
+    SourceAssetRegistry
+        .source_path(xml, "CommonModule", SourceAssetRole::Module)
+        .expect("common-module route is registered")
 }
 
 fn infer_style_body_path(xml: &Path) -> PathBuf {
@@ -6881,12 +6843,9 @@ fn infer_style_body_path(xml: &Path) -> PathBuf {
 }
 
 fn infer_common_picture_body_path(xml: &Path) -> PathBuf {
-    let picture_name = xml.file_stem().unwrap_or_default();
-    xml.parent()
-        .unwrap_or_else(|| Path::new(""))
-        .join(picture_name)
-        .join("Ext")
-        .join("Picture.xml")
+    SourceAssetRegistry
+        .source_path(xml, "CommonPicture", SourceAssetRole::Picture)
+        .expect("common-picture route is registered")
 }
 
 fn infer_scheduled_job_schedule_path(xml: &Path) -> PathBuf {
@@ -6898,19 +6857,14 @@ fn infer_scheduled_job_schedule_path(xml: &Path) -> PathBuf {
         .join("Schedule.xml")
 }
 
-fn infer_object_help_body_path(xml: &Path) -> PathBuf {
-    xml.with_extension("").join("Ext").join("Help.xml")
+fn infer_object_help_body_path(xml: &Path, owner_family: &str) -> PathBuf {
+    SourceAssetRegistry.help_source_path(xml, owner_family)
 }
 
-fn infer_object_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
-    xml.with_extension("").join("Ext").join(file_name)
-}
-
-fn infer_configuration_module_body_path(xml: &Path, file_name: &str) -> PathBuf {
-    xml.parent()
-        .unwrap_or_else(|| Path::new(""))
-        .join("Ext")
-        .join(file_name)
+fn infer_object_module_body_path(xml: &Path, owner_family: &str, suffix: &str) -> PathBuf {
+    SourceAssetRegistry
+        .source_path_by_suffix(xml, owner_family, suffix)
+        .expect("module suffix is returned only for a registered route")
 }
 
 fn infer_configuration_ext_body_path(xml: &Path, file_name: &str) -> PathBuf {
@@ -6925,19 +6879,19 @@ fn infer_form_body_path(xml: &Path) -> PathBuf {
 }
 
 fn infer_form_module_body_path(xml: &Path) -> PathBuf {
-    infer_form_body_path(xml)
-        .with_extension("")
-        .join("Module.bsl")
+    SourceAssetRegistry
+        .source_path(xml, "Form", SourceAssetRole::FormModule)
+        .expect("form-module route is registered")
 }
 
 fn infer_role_rights_body_path(xml: &Path) -> PathBuf {
     xml.with_extension("").join("Ext").join("Rights.xml")
 }
 
-fn infer_command_interface_body_path(xml: &Path) -> PathBuf {
-    xml.with_extension("")
-        .join("Ext")
-        .join("CommandInterface.xml")
+fn infer_command_interface_body_path(xml: &Path, owner_family: &str) -> PathBuf {
+    SourceAssetRegistry
+        .source_path(xml, owner_family, SourceAssetRole::CommandInterface)
+        .expect("command-interface suffix is returned only for a registered route")
 }
 
 fn infer_additional_indexes_body_path(xml: &Path) -> PathBuf {
@@ -6959,12 +6913,9 @@ fn infer_business_process_flowchart_body_path(xml: &Path) -> PathBuf {
 }
 
 fn infer_xdto_package_body_path(xml: &Path) -> PathBuf {
-    let package_name = xml.file_stem().unwrap_or_default();
-    xml.parent()
-        .unwrap_or_else(|| Path::new(""))
-        .join(package_name)
-        .join("Ext")
-        .join("Package.bin")
+    SourceAssetRegistry
+        .source_path(xml, "XDTOPackage", SourceAssetRole::Package)
+        .expect("XDTO-package route is registered")
 }
 
 fn infer_ws_reference_definition_path(xml: &Path) -> PathBuf {
@@ -8305,7 +8256,7 @@ mod tests {
             std::path::PathBuf::from(r"CommonPictures\Address\Ext\Picture.xml")
         );
         assert_eq!(
-            super::infer_object_help_body_path(r"Catalogs\Products.xml".as_ref()),
+            super::infer_object_help_body_path(r"Catalogs\Products.xml".as_ref(), "Catalog"),
             std::path::PathBuf::from(r"Catalogs\Products\Ext\Help.xml")
         );
         assert_eq!(
@@ -8404,6 +8355,10 @@ mod tests {
             &[("1", "RecordSetModule.bsl"), ("2", "ManagerModule.bsl")]
         );
         assert_eq!(
+            super::object_module_body_suffixes("AccountingRegister"),
+            &[("6", "RecordSetModule.bsl"), ("7", "ManagerModule.bsl")]
+        );
+        assert_eq!(
             super::object_module_body_suffixes("Constant"),
             &[("0", "ValueManagerModule.bsl"), ("1", "ManagerModule.bsl")]
         );
@@ -8456,23 +8411,22 @@ mod tests {
     #[test]
     fn infers_object_module_body_paths() {
         assert_eq!(
-            super::infer_object_module_body_path(
-                r"Catalogs\Products.xml".as_ref(),
-                "ObjectModule.bsl"
-            ),
+            super::infer_object_module_body_path(r"Catalogs\Products.xml".as_ref(), "Catalog", "0"),
             std::path::PathBuf::from(r"Catalogs\Products\Ext\ObjectModule.bsl")
         );
         assert_eq!(
             super::infer_object_module_body_path(
                 r"InformationRegisters\Prices.xml".as_ref(),
-                "RecordSetModule.bsl"
+                "InformationRegister",
+                "1"
             ),
             std::path::PathBuf::from(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
         );
         assert_eq!(
-            super::infer_configuration_module_body_path(
+            super::infer_object_module_body_path(
                 r"Configuration.xml".as_ref(),
-                "ManagedApplicationModule.bsl"
+                "Configuration",
+                "6"
             ),
             std::path::PathBuf::from(r"Ext\ManagedApplicationModule.bsl")
         );
@@ -12355,7 +12309,7 @@ mod tests {
     #[test]
     fn infers_command_interface_body_path_and_suffix() {
         assert_eq!(
-            super::infer_command_interface_body_path(r"Subsystems\Admin.xml".as_ref()),
+            super::infer_command_interface_body_path(r"Subsystems\Admin.xml".as_ref(), "Subsystem"),
             std::path::PathBuf::from(r"Subsystems\Admin\Ext\CommandInterface.xml")
         );
         assert_eq!(

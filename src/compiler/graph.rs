@@ -329,6 +329,27 @@ impl BootstrapGraph {
         })
     }
 
+    /// Resolves one exact suffixed physical row owned by a top-level object.
+    ///
+    /// Source-asset compilers must use this lookup instead of constructing a
+    /// UUID-plus-suffix key. This keeps their targets inside the validated,
+    /// profile-selected inventory.
+    pub fn object_entry(
+        &self,
+        uuid: ObjectUuid,
+        suffix: &StorageSuffix,
+    ) -> Option<&BootstrapStorageIdentity> {
+        self.entries.iter().find(|entry| {
+            matches!(
+                entry.owner(),
+                BootstrapStorageOwner::Object {
+                    uuid: owner,
+                    suffix: Some(owner_suffix),
+                } if *owner == uuid && owner_suffix == suffix
+            )
+        })
+    }
+
     /// Resolves a generated type to its owning canonical object.
     pub fn generated_type_owner(&self, uuid: ObjectUuid) -> Option<ObjectUuid> {
         self.generated_types.get(&uuid).copied()
