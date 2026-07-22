@@ -74,6 +74,7 @@ impl Attribute {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XmlDocument {
+    utf8_bom: bool,
     declaration: Option<XmlDeclaration>,
     before_root: Vec<XmlNode>,
     root: XmlElement,
@@ -82,6 +83,7 @@ pub struct XmlDocument {
 impl XmlDocument {
     pub fn new(root: XmlElement) -> Self {
         Self {
+            utf8_bom: false,
             declaration: None,
             before_root: vec![],
             root,
@@ -90,6 +92,20 @@ impl XmlDocument {
     }
     pub fn root(&self) -> &XmlElement {
         &self.root
+    }
+    /// Whether the parsed source started with an UTF-8 byte-order mark.
+    pub const fn has_utf8_bom(&self) -> bool {
+        self.utf8_bom
+    }
+    /// Replaces only the root element while preserving the document shell.
+    pub fn with_root(&self, root: XmlElement) -> Self {
+        Self {
+            utf8_bom: self.utf8_bom,
+            declaration: self.declaration.clone(),
+            before_root: self.before_root.clone(),
+            root,
+            after_root: self.after_root.clone(),
+        }
     }
     pub fn declaration(&self) -> Option<&str> {
         self.declaration.as_ref().map(XmlDeclaration::value)
@@ -101,12 +117,14 @@ impl XmlDocument {
         &self.after_root
     }
     pub(crate) fn parsed(
+        utf8_bom: bool,
         declaration: Option<XmlDeclaration>,
         before_root: Vec<XmlNode>,
         root: XmlElement,
         after_root: Vec<XmlNode>,
     ) -> Self {
         Self {
+            utf8_bom,
             declaration,
             before_root,
             root,
@@ -169,6 +187,21 @@ impl XmlElement {
             attributes: self.attributes.clone(),
             children,
             raw_start: self.raw_start.clone(),
+            raw_end: self.raw_end.clone(),
+            empty: self.empty,
+        }
+    }
+    pub(crate) fn rewritten(
+        &self,
+        attributes: Vec<Attribute>,
+        children: Vec<XmlNode>,
+        raw_start: Option<String>,
+    ) -> Self {
+        Self {
+            name: self.name.clone(),
+            attributes,
+            children,
+            raw_start,
             raw_end: self.raw_end.clone(),
             empty: self.empty,
         }

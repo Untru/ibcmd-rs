@@ -30,9 +30,9 @@ const MAX_METADATA_BYTES: usize = 33_554_432;
 const MAX_METADATA_ATTRIBUTES: usize = 65_536;
 const MAX_METADATA_NAMESPACES: usize = 4_096;
 const MAX_METADATA_NAMESPACE_BYTES: usize = 1_048_576;
-const MD_NAMESPACE: &str = "http://v8.1c.ru/8.3/MDClasses";
-const V8_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
-const XR_NAMESPACE: &str = "http://v8.1c.ru/8.3/xcf/readable";
+pub(super) const MD_NAMESPACE: &str = "http://v8.1c.ru/8.3/MDClasses";
+pub(super) const V8_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
+pub(super) const XR_NAMESPACE: &str = "http://v8.1c.ru/8.3/xcf/readable";
 const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
 
@@ -274,6 +274,13 @@ pub enum MetadataDecodeError {
     ResourceLimit(&'static str),
     Core(String),
     Xml(String),
+    UnsupportedProfile {
+        object_path: ObjectPath,
+        profile: ProfileId,
+    },
+    ProfileVersionMismatch {
+        object_path: ObjectPath,
+    },
 }
 impl Display for MetadataDecodeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -965,7 +972,7 @@ fn uuid_attr(e: &XmlElement) -> Result<ObjectUuid, MetadataDecodeError> {
     let value = value.ok_or(MetadataDecodeError::Missing("uuid"))?;
     ObjectUuid::parse(value).map_err(|_| MetadataDecodeError::InvalidUuid(value.to_owned()))
 }
-fn element_text(e: &XmlElement) -> Result<Option<String>, MetadataDecodeError> {
+pub(super) fn element_text(e: &XmlElement) -> Result<Option<String>, MetadataDecodeError> {
     let mut value = String::new();
     let mut length = 0usize;
     for node in e.children() {
@@ -1198,10 +1205,13 @@ fn escaped_len(value: &str, attribute: bool) -> Result<usize, MetadataDecodeErro
     })
 }
 fn document_lexical_len(document: &XmlDocument) -> Result<usize, MetadataDecodeError> {
-    let mut total = document.declaration_raw().map_or_else(
-        || document.declaration().map_or(0, |value| value.len() + 4),
-        str::len,
-    );
+    let mut total = usize::from(document.has_utf8_bom()) * 3;
+    total = total
+        .checked_add(document.declaration_raw().map_or_else(
+            || document.declaration().map_or(0, |value| value.len() + 4),
+            str::len,
+        ))
+        .ok_or(MetadataDecodeError::ResourceLimit("bytes"))?;
     for node in document.before_root() {
         total = total
             .checked_add(node_lexical_len(node)?)
@@ -1275,16 +1285,16 @@ fn document_normalized_len(document: &XmlDocument) -> Result<usize, MetadataDeco
 }
 
 type NamespaceScope = BTreeMap<String, Rc<str>>;
-type ResolvedNamespaces = BTreeMap<usize, Option<Rc<str>>>;
+pub(super) type ResolvedNamespaces = BTreeMap<usize, Option<Rc<str>>>;
 
 fn element_key(element: &XmlElement) -> usize {
     element as *const XmlElement as usize
 }
-fn uri_of<'a>(element: &XmlElement, uris: &'a ResolvedNamespaces) -> Option<&'a str> {
+pub(super) fn uri_of<'a>(element: &XmlElement, uris: &'a ResolvedNamespaces) -> Option<&'a str> {
     uris.get(&element_key(element))
         .and_then(|value| value.as_deref())
 }
-fn typed(
+pub(super) fn typed(
     element: &XmlElement,
     local: &str,
     expected: Option<&str>,
@@ -1293,7 +1303,9 @@ fn typed(
     element.name().local() == local && uri_of(element, uris) == expected
 }
 
-fn resolve_namespaces(root: &XmlElement) -> Result<ResolvedNamespaces, MetadataDecodeError> {
+pub(super) fn resolve_namespaces(
+    root: &XmlElement,
+) -> Result<ResolvedNamespaces, MetadataDecodeError> {
     let mut scope = NamespaceScope::new();
     scope.insert("xml".to_owned(), Rc::from(XML_NAMESPACE));
     let mut uris = ResolvedNamespaces::new();
@@ -1417,6 +1429,9 @@ fn checked_add(
 }
 fn check_document(document: &XmlDocument) -> Result<(), MetadataDecodeError> {
     let mut budget = Budget::default();
+    if document.has_utf8_bom() {
+        checked_add(&mut budget.bytes, 3, MAX_METADATA_BYTES, "bytes")?;
+    }
     if let Some(value) = document
         .declaration_raw()
         .or_else(|| document.declaration())

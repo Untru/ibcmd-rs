@@ -8,6 +8,8 @@ use crate::node::{
     XmlNode, XmlRawNode, XmlText,
 };
 
+const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
+
 /// Reason a document could not be read.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XmlErrorCause {
@@ -75,11 +77,16 @@ impl XmlReader {
                 return Err(error(input, offset, XmlErrorCause::InvalidCharacter));
             }
         }
-        if input.starts_with(&[0xef, 0xbb, 0xbf]) {
+        let has_utf8_bom = input.starts_with(UTF8_BOM);
+        let bom_search_start = usize::from(has_utf8_bom) * UTF8_BOM.len();
+        if let Some(relative) = input[bom_search_start..]
+            .windows(UTF8_BOM.len())
+            .position(|window| window == UTF8_BOM)
+        {
             return Err(error(
                 input,
-                0,
-                XmlErrorCause::Parser("UTF-8 BOM is unsupported".into()),
+                bom_search_start + relative,
+                XmlErrorCause::Parser("UTF-8 BOM is only allowed once at the beginning".into()),
             ));
         }
         let mut reader = Reader::from_reader(input);
@@ -94,18 +101,18 @@ impl XmlReader {
         let mut root = None;
         let mut has_doctype = false;
         loop {
-            let start = reader.buffer_position() as usize;
+            let start = reader.buffer_position() as usize + bom_search_start;
             let event = match reader.read_event_into(&mut buf) {
                 Ok(e) => e.into_owned(),
                 Err(e) => {
                     return Err(error(
                         input,
-                        reader.error_position() as usize,
+                        reader.error_position() as usize + bom_search_start,
                         XmlErrorCause::Parser(e.to_string()),
                     ));
                 }
             };
-            let pos = reader.buffer_position() as usize;
+            let pos = reader.buffer_position() as usize + bom_search_start;
             match event {
                 Event::Eof => break,
                 Event::Decl(e) => {
@@ -263,7 +270,13 @@ impl XmlReader {
         let Some(root) = root else {
             return Err(error(input, input.len(), XmlErrorCause::MissingRoot));
         };
-        Ok(XmlDocument::parsed(declaration, before, root, after))
+        Ok(XmlDocument::parsed(
+            has_utf8_bom,
+            declaration,
+            before,
+            root,
+            after,
+        ))
     }
 }
 struct Bare {

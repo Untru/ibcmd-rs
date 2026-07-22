@@ -22,6 +22,7 @@ anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 flate2 = "1.1"
 ibcmd-core = { path = "crates/ibcmd-core" }
+ibcmd-xml = { path = "crates/ibcmd-xml" }
 quick-xml = "0.38"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

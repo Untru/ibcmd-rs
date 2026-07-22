@@ -103,8 +103,21 @@ impl MetadataRegistry {
 #[derive(Debug)]
 pub enum MetadataEncodeError {
     Opaque(OpaqueEmitError),
-    ModelChanged { object_path: ObjectPath },
+    ModelChanged {
+        object_path: ObjectPath,
+    },
     Xml(String),
+    UnsupportedProfile {
+        object_path: ObjectPath,
+        profile: ProfileId,
+    },
+    ProfileVersionMismatch {
+        object_path: ObjectPath,
+    },
+    InvalidModel {
+        object_path: ObjectPath,
+        field: &'static str,
+    },
 }
 impl From<FallbackEmitError> for MetadataEncodeError {
     fn from(value: FallbackEmitError) -> Self {

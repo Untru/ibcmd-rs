@@ -1,6 +1,8 @@
 use super::*;
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
+use ibcmd_core::semantic::semantic_digest;
+use ibcmd_core::validate::validate_configuration;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 
@@ -29312,6 +29314,171 @@ fn extracts_constant_xml_from_metadata_blob() {
     );
     assert!(v21_xml.contains(r#"version="2.21""#));
     assert!(!v21_xml.contains(r#"version="2.20""#));
+}
+
+fn constant_shadow_header() -> MetadataHeader {
+    MetadataHeader {
+        uuid: "dddddddd-dddd-4ddd-8ddd-dddddddddddd".to_string(),
+        name: "UseFeature".to_string(),
+        synonyms: vec![("en".to_string(), "Use feature".to_string())],
+        comment: "Feature flag".to_string(),
+        template_type_code: None,
+    }
+}
+
+fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperties {
+    ConstantProperties {
+        generated_types: vec![
+            GeneratedTypeEntry {
+                name: "ConstantManager.UseFeature".to_string(),
+                category: "Manager",
+                type_id: "11111111-1111-4111-8111-111111111111".to_string(),
+                value_id: "22222222-2222-4222-8222-222222222222".to_string(),
+            },
+            GeneratedTypeEntry {
+                name: "ConstantValueManager.UseFeature".to_string(),
+                category: "ValueManager",
+                type_id: "33333333-3333-4333-8333-333333333333".to_string(),
+                value_id: "44444444-4444-4444-8444-444444444444".to_string(),
+            },
+        ],
+        value_type,
+        tooltip: vec![("en".to_string(), "Use feature tip".to_string())],
+        extended_presentation: Vec::new(),
+        explanation: Vec::new(),
+        use_standard_commands: true,
+        default_form: None,
+        password_mode: false,
+        format: Vec::new(),
+        edit_format: Vec::new(),
+        mask: String::new(),
+        min_value: None,
+        max_value: None,
+        fill_checking: "ShowError",
+        choice_parameters: Vec::new(),
+        choice_history_on_input: "Auto",
+        data_lock_control_mode: "Managed",
+    }
+}
+
+fn decode_constant_shadow(
+    xml: &[u8],
+    source_version: InfobaseConfigSourceVersion,
+) -> ibcmd_xml::MetadataEnvelope {
+    bundled_metadata_registry()
+        .decode(
+            &FamilyId::parse("Constant").unwrap(),
+            &XmlReader::from_slice(xml).unwrap(),
+            ProfileId::parse(&format!("xml-{}", source_version.as_str())).unwrap(),
+            ObjectPath::root(),
+        )
+        .unwrap()
+}
+
+#[test]
+fn constant_canonical_shadow_matches_legacy_bytes_and_semantics() {
+    let header = constant_shadow_header();
+    let registry = bundled_metadata_registry();
+    for value_type in [
+        ConstantValueType::Boolean,
+        ConstantValueType::String {
+            length: Some(40),
+            allowed_length_flag: 0,
+        },
+        ConstantValueType::Number {
+            digits: 12,
+            fraction_digits: 3,
+            allowed_sign_flag: 1,
+        },
+        ConstantValueType::DateTime {
+            date_fractions: "DateTime",
+        },
+        ConstantValueType::Reference {
+            reference: "cfg:CatalogRef.Products".to_string(),
+        },
+        ConstantValueType::ReferenceTypeSet {
+            reference: "cfg:DefinedType.Custom".to_string(),
+        },
+    ] {
+        let constant = constant_shadow_properties(value_type);
+        let legacy_20 =
+            format_constant_source_xml(&header, &constant, InfobaseConfigSourceVersion::V2_20);
+        let legacy_21 =
+            format_constant_source_xml(&header, &constant, InfobaseConfigSourceVersion::V2_21);
+        assert!(legacy_20.as_bytes().starts_with(b"\xef\xbb\xbf"));
+        assert!(legacy_21.as_bytes().starts_with(b"\xef\xbb\xbf"));
+
+        assert_eq!(
+            route_constant_source_xml_through_canonical_ir(
+                &legacy_20,
+                InfobaseConfigSourceVersion::V2_20,
+            )
+            .unwrap(),
+            legacy_20.as_bytes()
+        );
+        assert_eq!(
+            route_constant_source_xml_through_canonical_ir(
+                &legacy_21,
+                InfobaseConfigSourceVersion::V2_21,
+            )
+            .unwrap(),
+            legacy_21.as_bytes()
+        );
+
+        let envelope_20 =
+            decode_constant_shadow(legacy_20.as_bytes(), InfobaseConfigSourceVersion::V2_20);
+        let envelope_21 =
+            decode_constant_shadow(legacy_21.as_bytes(), InfobaseConfigSourceVersion::V2_21);
+        assert_eq!(
+            registry
+                .encode(&envelope_20, &ProfileId::parse("xml-2.21").unwrap())
+                .unwrap(),
+            legacy_21.as_bytes()
+        );
+        assert_eq!(
+            registry
+                .encode(&envelope_21, &ProfileId::parse("xml-2.20").unwrap())
+                .unwrap(),
+            legacy_20.as_bytes()
+        );
+
+        let validated_20 = validate_configuration(&envelope_20.configuration().unwrap()).unwrap();
+        let validated_21 = validate_configuration(&envelope_21.configuration().unwrap()).unwrap();
+        assert_eq!(
+            semantic_digest(&validated_20),
+            semantic_digest(&validated_21)
+        );
+    }
+}
+
+#[test]
+fn constant_canonical_shadow_preserves_unknown_legacy_xml() {
+    let legacy = format_constant_source_xml(
+        &constant_shadow_header(),
+        &constant_shadow_properties(ConstantValueType::Boolean),
+        InfobaseConfigSourceVersion::V2_20,
+    );
+    let future = "\t\t\t<app:Future app:flag='yes'>opaque&amp;</app:Future>\r\n";
+    let legacy = legacy.replacen(
+        "\t\t</Properties>\r\n",
+        &format!("{future}\t\t</Properties>\r\n"),
+        1,
+    );
+    let envelope = decode_constant_shadow(legacy.as_bytes(), InfobaseConfigSourceVersion::V2_20);
+
+    assert_eq!(
+        bundled_metadata_registry()
+            .encode(&envelope, &ProfileId::parse("xml-2.20").unwrap())
+            .unwrap(),
+        legacy.as_bytes()
+    );
+    let cross = bundled_metadata_registry()
+        .encode(&envelope, &ProfileId::parse("xml-2.21").unwrap())
+        .unwrap();
+    let cross = std::str::from_utf8(&cross).unwrap();
+    assert!(cross.starts_with('\u{feff}'));
+    assert!(cross.contains(r#"version="2.21""#));
+    assert!(cross.contains(future));
 }
 
 #[test]

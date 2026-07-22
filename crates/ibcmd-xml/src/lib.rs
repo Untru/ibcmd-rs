@@ -18,8 +18,8 @@ pub use dialect::{
 };
 pub use metadata::{
     MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
-    MetadataRegistry, MetadataRegistryError, decode_metadata_envelope,
-    decode_metadata_envelope_with_dialect,
+    MetadataRegistry, MetadataRegistryError, bundled_metadata_registry, decode_metadata_envelope,
+    decode_metadata_envelope_with_dialect, register_constant_codec,
 };
 pub use node::{
     Attribute, AttributeKind, QName, XmlCData, XmlComment, XmlDocument, XmlElement, XmlNode,
@@ -54,6 +54,52 @@ mod tests {
         assert!(
             matches!(first.root().attributes()[0].kind(), AttributeKind::Namespace(Some(p)) if p == "p")
         );
+    }
+
+    #[test]
+    fn utf8_bom_round_trips_in_preserve_and_with_root_keeps_document_shell() {
+        let input = b"\xef\xbb\xbf<?xml version=\"1.0\" encoding=\"UTF-8\"?><!--before--><r a='1'>x</r><?after ok?>";
+        let document = XmlReader::from_slice(input).unwrap();
+        assert!(document.has_utf8_bom());
+        assert_eq!(
+            XmlWriter::to_vec(&document, LexicalPolicy::Preserve).unwrap(),
+            input
+        );
+        assert_eq!(
+            XmlWriter::to_vec(&document, LexicalPolicy::Normalized).unwrap(),
+            b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><!--before--><r a=\"1\">x</r><?after ok?>"
+        );
+
+        let replacement = XmlElement::with_parts(
+            QName::new("next").unwrap(),
+            Vec::new(),
+            vec![XmlNode::text("value")],
+        );
+        let replaced = document.with_root(replacement);
+        assert!(replaced.has_utf8_bom());
+        assert_eq!(replaced.declaration(), document.declaration());
+        assert_eq!(replaced.before_root(), document.before_root());
+        assert_eq!(replaced.after_root(), document.after_root());
+        assert_eq!(
+            XmlWriter::to_vec(&replaced, LexicalPolicy::Preserve).unwrap(),
+            b"\xef\xbb\xbf<?xml version=\"1.0\" encoding=\"UTF-8\"?><!--before--><next>value</next><?after ok?>"
+        );
+
+        assert!(!XmlDocument::new(XmlElement::new(QName::new("r").unwrap())).has_utf8_bom());
+    }
+
+    #[test]
+    fn reader_rejects_duplicate_and_misplaced_utf8_bom() {
+        for input in [
+            b"\xef\xbb\xbf\xef\xbb\xbf<r/>".as_slice(),
+            b" <r>\xef\xbb\xbf</r>".as_slice(),
+        ] {
+            assert!(matches!(
+                XmlReader::from_slice(input).unwrap_err().cause(),
+                XmlErrorCause::Parser(message)
+                    if message == "UTF-8 BOM is only allowed once at the beginning"
+            ));
+        }
     }
 
     #[test]

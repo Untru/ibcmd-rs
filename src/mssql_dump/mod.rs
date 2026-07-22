@@ -7,6 +7,10 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
+use ibcmd_core::artifact::ProfileId;
+use ibcmd_core::diagnostic::ObjectPath;
+use ibcmd_core::family::FamilyId;
+use ibcmd_xml::{XmlReader, bundled_metadata_registry};
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, Reader};
@@ -6319,7 +6323,8 @@ fn extract_metadata_source_xml_from_text_row(
         let relative_path = PathBuf::from("Constants")
             .join(sanitize_source_path_segment(&header.name))
             .with_extension("xml");
-        let xml = format_constant_source_xml(&header, &constant, source_version).into_bytes();
+        let legacy_xml = format_constant_source_xml(&header, &constant, source_version);
+        let xml = route_constant_source_xml_through_canonical_ir(&legacy_xml, source_version)?;
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
     if object_code == 3
@@ -6793,6 +6798,20 @@ fn extract_metadata_source_xml_from_text_row(
     }
 
     Some(ExtractedMetadataSourceXml { relative_path, xml })
+}
+
+fn route_constant_source_xml_through_canonical_ir(
+    legacy_xml: &str,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<Vec<u8>> {
+    let profile = ProfileId::parse(&format!("xml-{}", source_version.as_str())).ok()?;
+    let family = FamilyId::parse("Constant").ok()?;
+    let document = XmlReader::from_slice(legacy_xml.as_bytes()).ok()?;
+    let registry = bundled_metadata_registry();
+    let envelope = registry
+        .decode(&family, &document, profile.clone(), ObjectPath::root())
+        .ok()?;
+    registry.encode(&envelope, &profile).ok()
 }
 
 fn is_typed_metadata_source(kind: &str) -> bool {

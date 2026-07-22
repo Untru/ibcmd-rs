@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 const MAX_OUTPUT_BYTES: usize = 33_554_432;
+const UTF8_BOM: char = '\u{feff}';
 const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
 const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns/";
 
@@ -58,6 +59,9 @@ impl XmlWriter {
         debug_assert_eq!(scratch.len(), normalized_len);
         drop(scratch);
         let mut out = String::with_capacity(output_len);
+        if policy == LexicalPolicy::Preserve && document.has_utf8_bom() {
+            out.push(UTF8_BOM);
+        }
         if policy == LexicalPolicy::Preserve
             && let Some(raw) = document.declaration_raw()
         {
@@ -177,14 +181,22 @@ fn escaped_output_len(value: &str, attribute: bool) -> Result<usize, WriteError>
 }
 
 fn document_output_len(document: &XmlDocument, policy: LexicalPolicy) -> Result<usize, WriteError> {
-    let mut total = if policy == LexicalPolicy::Preserve {
-        document.declaration_raw().map_or_else(
-            || document.declaration().map_or(0, |value| value.len() + 4),
-            str::len,
-        )
+    let mut total = if policy == LexicalPolicy::Preserve && document.has_utf8_bom() {
+        UTF8_BOM.len_utf8()
     } else {
-        document.declaration().map_or(0, |value| value.len() + 4)
+        0
     };
+    add_output_len(
+        &mut total,
+        if policy == LexicalPolicy::Preserve {
+            document.declaration_raw().map_or_else(
+                || document.declaration().map_or(0, |value| value.len() + 4),
+                str::len,
+            )
+        } else {
+            document.declaration().map_or(0, |value| value.len() + 4)
+        },
+    )?;
     for node in document.before_root() {
         add_output_len(&mut total, node_output_len(node, policy)?)?;
     }
