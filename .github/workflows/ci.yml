@@ -62,6 +62,9 @@ jobs:
       - name: Test portable root smoke
         run: cargo test --locked -p ibcmd-rs --test portable_root_smoke
 
+      - name: Test XML dialect corpus
+        run: cargo test --locked -p ibcmd-rs --test xml_profiles
+
   legacy-windows:
     name: Legacy Root (Windows)
     runs-on: windows-latest

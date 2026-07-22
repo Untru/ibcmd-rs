@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "xml-2.17-catalog-products",
+      "path": "2.17/Catalogs/Products.xml",
+      "artifact_kind": "xcf-catalog-metadata",
+      "coordinates": {
+        "xml_dialect": "2.17",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "f6a4d9eb8f71dfea30ffcf1fea8d7e47bc43e206e08690a2932def49e7be4f17",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "nested-child-objects",
+        "opaque-future-siblings",
+        "ordered-preorder",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.17-common-module-metadata",
+      "path": "2.17/CommonModules/CorpusModule.xml",
+      "artifact_kind": "xcf-common-module-metadata",
+      "coordinates": {
+        "xml_dialect": "2.17",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "0b7951d7ab84efc7af0aec17bd21f161c018e001ad84d715597d301f12bc4150",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "common-module-metadata",
+        "opaque-future-siblings",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.17-common-module-source",
+      "path": "2.17/CommonModules/CorpusModule/Ext/Module.bsl",
+      "artifact_kind": "xcf-module-source",
+      "coordinates": {
+        "xml_dialect": "2.17",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "26b5f62b7028d094ff91ab27fc896d99557faa353ea89fa7e679d7db41c69b75",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "common-module-source"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.17-configuration",
+      "path": "2.17/Configuration.xml",
+      "artifact_kind": "xcf-configuration-metadata",
+      "coordinates": {
+        "xml_dialect": "2.17",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "dc0f5f55d3d46833de3393ae1f5ad78fefc82d3cc849a309759ef233443373fe",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "configuration-metadata",
+        "opaque-future-siblings",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.20-catalog-products",
+      "path": "2.20/Catalogs/Products.xml",
+      "artifact_kind": "xcf-catalog-metadata",
+      "coordinates": {
+        "xml_dialect": "2.20",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "0b670b7e44239a131e075ffe0c71e411e3bf560d71603cb1dbd2662d034ca384",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "nested-child-objects",
+        "opaque-future-siblings",
+        "ordered-preorder",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.20-common-module-metadata",
+      "path": "2.20/CommonModules/CorpusModule.xml",
+      "artifact_kind": "xcf-common-module-metadata",
+      "coordinates": {
+        "xml_dialect": "2.20",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "0f29baa4c3ceda413a2489d44dcfefaf93e3edf8241ddc9b8fcfeb9734dba1c0",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "common-module-metadata",
+        "opaque-future-siblings",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.20-common-module-source",
+      "path": "2.20/CommonModules/CorpusModule/Ext/Module.bsl",
+      "artifact_kind": "xcf-module-source",
+      "coordinates": {
+        "xml_dialect": "2.20",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "26b5f62b7028d094ff91ab27fc896d99557faa353ea89fa7e679d7db41c69b75",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "common-module-source"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.20-configuration",
+      "path": "2.20/Configuration.xml",
+      "artifact_kind": "xcf-configuration-metadata",
+      "coordinates": {
+        "xml_dialect": "2.20",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "c2cb4412288c2aa1528e5fffeedb18049d06902f2d35757b7ac7c6d747320a22",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "configuration-metadata",
+        "opaque-future-siblings",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.21-catalog-products",
+      "path": "2.21/Catalogs/Products.xml",
+      "artifact_kind": "xcf-catalog-metadata",
+      "coordinates": {
+        "xml_dialect": "2.21",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "667647d03a2a22ef02a0b3b456ece9b112b42921454685c96bf5413fe6ee3f5b",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "nested-child-objects",
+        "opaque-future-siblings",
+        "ordered-preorder",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.21-common-module-metadata",
+      "path": "2.21/CommonModules/CorpusModule.xml",
+      "artifact_kind": "xcf-common-module-metadata",
+      "coordinates": {
+        "xml_dialect": "2.21",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "1b97e7b6a0fbda1b606b3e032080f29b2d2f305ebfefbf8ce898081254e22b72",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "common-module-metadata",
+        "opaque-future-siblings",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.21-common-module-source",
+      "path": "2.21/CommonModules/CorpusModule/Ext/Module.bsl",
+      "artifact_kind": "xcf-module-source",
+      "coordinates": {
+        "xml_dialect": "2.21",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "26b5f62b7028d094ff91ab27fc896d99557faa353ea89fa7e679d7db41c69b75",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "common-module-source"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    },
+    {
+      "id": "xml-2.21-configuration",
+      "path": "2.21/Configuration.xml",
+      "artifact_kind": "xcf-configuration-metadata",
+      "coordinates": {
+        "xml_dialect": "2.21",
+        "platform_build": null,
+        "storage_version": null,
+        "container_revision": null
+      },
+      "sha256": "3d40818536732a84d6775c08ecc722de4fd4716f2d6081b99b92840578435ce1",
+      "provenance": {
+        "origin": "hand-authored-clean-room",
+        "issue": "XML-006",
+        "runtime_dependencies": []
+      },
+      "features": [
+        "configuration-metadata",
+        "opaque-future-siblings",
+        "palette-namespace",
+        "use-in-interface-compatibility-mode",
+        "utf8-bom"
+      ],
+      "expected": {
+        "outcome": "valid",
+        "losses": []
+      }
+    }
+  ]
+}
