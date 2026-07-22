@@ -19,12 +19,12 @@ pub use dialect::{
 pub use metadata::{
     MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
     MetadataRegistry, MetadataRegistryError, bundled_metadata_registry, decode_metadata_envelope,
-    decode_metadata_envelope_with_dialect, register_constant_codec, register_defined_type_codec,
-    register_event_subscription_codec, register_functional_option_codec,
-    register_functional_options_parameter_codec, register_http_service_codec,
-    register_integration_service_codec, register_language_codec, register_scheduled_job_codec,
-    register_session_parameter_codec, register_web_service_codec, register_ws_reference_codec,
-    register_xdto_package_codec,
+    decode_metadata_envelope_with_dialect, register_catalog_codec, register_constant_codec,
+    register_defined_type_codec, register_document_codec, register_event_subscription_codec,
+    register_functional_option_codec, register_functional_options_parameter_codec,
+    register_http_service_codec, register_integration_service_codec, register_language_codec,
+    register_scheduled_job_codec, register_session_parameter_codec, register_web_service_codec,
+    register_ws_reference_codec, register_xdto_package_codec,
 };
 pub use node::{
     Attribute, AttributeKind, QName, XmlCData, XmlComment, XmlDocument, XmlElement, XmlNode,

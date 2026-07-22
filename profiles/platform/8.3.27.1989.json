@@ -5,8 +5,10 @@
   "platform_build": "8.3.27.1989",
   "storage_profile": "storage:mssql-config-configsave",
   "constants": {
+    "bootstrap.metadata.catalog.layout": "catalog-v1-crlf-utf8-bom",
     "bootstrap.metadata.constant.layout": "constant-v1-crlf-utf8-bom",
     "bootstrap.metadata.defined_type.layout": "defined-type-v1-crlf-utf8-bom",
+    "bootstrap.metadata.document.layout": "document-v1-crlf-utf8-bom",
     "bootstrap.metadata.event_subscription.layout": "event-subscription-v1-crlf-utf8-bom",
     "bootstrap.metadata.functional_option.layout": "functional-option-v1-crlf-utf8-bom",
     "bootstrap.metadata.functional_options_parameter.layout": "functional-options-parameter-v1-crlf-utf8-bom",
@@ -26,6 +28,7 @@
   "evidence": [
     "docs/ssl-lab-2026-06-25.md",
     "docs/evidence/bootstrap-special-8.3.27.md",
+    "docs/evidence/business-objects-8.3.27.md",
     "docs/evidence/configuration-body-8.3.27-partial.md",
     "docs/evidence/service-event-subscription-8.3.27.md",
     "docs/evidence/service-http-service-8.3.27.md",

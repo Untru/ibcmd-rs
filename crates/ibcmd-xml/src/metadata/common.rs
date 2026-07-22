@@ -327,6 +327,23 @@ pub fn decode_metadata_envelope(
     source_profile: ProfileId,
     object_path: ObjectPath,
 ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    decode_metadata_envelope_with_child_references(document, source_profile, object_path, &[])
+}
+
+/// Decodes common XCF metadata while retaining selected name-only entries in
+/// `ChildObjects` as lossless reference projections.
+///
+/// Catalogs and documents use `<Form>Name</Form>` and
+/// `<Template>Name</Template>` beside UUID-bearing embedded objects.  These
+/// entries are references to separately stored metadata rows, not malformed
+/// child objects.  The generic public decoder remains strict; family codecs
+/// opt in to the exact reference element names they understand.
+pub(super) fn decode_metadata_envelope_with_child_references(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+    child_reference_kinds: &[&str],
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
     check_document(document)?;
     let uris = resolve_namespaces(document.root())?;
     let expected = uri_of(document.root(), &uris);
@@ -418,6 +435,7 @@ pub fn decode_metadata_envelope(
         initial_facets,
         &uris,
         expected,
+        child_reference_kinds,
     )?;
     MetadataEnvelope::from_parts_with_state(root, descendants, document.clone(), true)
 }
@@ -459,6 +477,7 @@ fn decode_object(
     initial_facets: Vec<OpaqueFacet>,
     uris: &ResolvedNamespaces,
     expected: Option<&str>,
+    child_reference_kinds: &[&str],
 ) -> Result<CanonicalObject, MetadataDecodeError> {
     let mut local_facets = FacetSet::child_with(parent_facets, initial_facets);
     let uuid = uuid_attr(e)?;
@@ -581,6 +600,7 @@ fn decode_object(
                     &mut local_facets,
                     uris,
                     expected,
+                    child_reference_kinds,
                 )?
             }
             _ => retain(node, ordinal, &profile, &path, &mut local_facets)?,
@@ -605,6 +625,7 @@ fn decode_children(
     facets: &mut FacetSet,
     uris: &ResolvedNamespaces,
     expected: Option<&str>,
+    child_reference_kinds: &[&str],
 ) -> Result<(), MetadataDecodeError> {
     let mut typed_index = 0u32;
     for (ordinal, node) in container.children().iter().enumerate() {
@@ -632,6 +653,28 @@ fn decode_children(
             )?;
             continue;
         }
+        let has_uuid = child.attributes().iter().any(|attribute| {
+            matches!(
+                attribute.kind(),
+                AttributeKind::Ordinary(name) if name.prefix().is_none() && name.local() == "uuid"
+            )
+        });
+        if !has_uuid
+            && child_reference_kinds
+                .iter()
+                .any(|candidate| *candidate == child.name().local())
+        {
+            retain_as(
+                node,
+                ordinal,
+                profile,
+                parent_path,
+                "child_objects",
+                "xml:child-object-reference",
+                facets,
+            )?;
+            continue;
+        }
         uuid_attr(child)?;
         let mut path = parent_path.clone();
         path.push(
@@ -654,6 +697,7 @@ fn decode_children(
             Vec::new(),
             uris,
             expected,
+            &[],
         )?;
         descendants.push(child_object);
         descendants.extend(nested);

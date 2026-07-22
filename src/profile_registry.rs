@@ -317,6 +317,14 @@ mod tests {
                     "event-subscription-v1-crlf-utf8-bom"
                 );
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.catalog.layout"].value,
+                    "catalog-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
+                    profile.constants["bootstrap.metadata.document.layout"].value,
+                    "document-v1-crlf-utf8-bom"
+                );
+                assert_eq!(
                     profile.storage_profile.as_ref().unwrap().value.as_str(),
                     "storage:mssql-config-configsave"
                 );

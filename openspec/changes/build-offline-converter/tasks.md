@@ -338,7 +338,7 @@
 
 ### BOOT-005 — Base-free codecs Catalog и Document
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-002, CORE-008
+- **Статус:** `[x]`; **зависимости:** BOOT-002, CORE-008
 - **Файлы:** создать `src/compiler/families/catalog.rs`, `document.rs`
 - **Действия:** roots, attributes, tabular sections, commands/forms/templates refs и generated types.
 - **Проверка:** minimal + child-rich fixtures на family; object graph и entry inventory exact, без base reads.

@@ -46,6 +46,10 @@ pub fn register_constant_codec(
 /// can choose their codec set without hidden global mutation.
 pub fn bundled_metadata_registry() -> MetadataRegistry {
     let mut registry = MetadataRegistry::default();
+    super::business_objects::register_catalog_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
+    super::business_objects::register_document_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
     register_constant_codec(&mut registry).expect("bundled families are unique and bounded");
     super::defined_type::register_defined_type_codec(&mut registry)
         .expect("bundled families are unique and bounded");

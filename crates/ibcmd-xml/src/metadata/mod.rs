@@ -1,5 +1,6 @@
 //! Canonical metadata-envelope mapping and lossless fallback support.
 
+mod business_objects;
 mod common;
 mod constant;
 mod defined_type;
@@ -11,6 +12,7 @@ mod registry;
 mod services;
 mod session_parameter;
 
+pub use business_objects::{register_catalog_codec, register_document_codec};
 pub use common::{
     MetadataDecodeError, MetadataEnvelope, decode_metadata_envelope,
     decode_metadata_envelope_with_dialect,
