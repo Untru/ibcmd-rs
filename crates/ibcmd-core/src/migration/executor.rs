@@ -24,7 +24,7 @@ use super::step::{
 };
 
 /// Stable diagnostic emitted when a step returns no value and no error.
-pub const APPLY_MISSING_VALUE_CODE: &str = "migration.apply-missing-value";
+pub const APPLY_MISSING_VALUE_CODE: &str = super::report::APPLY_MISSING_VALUE_DIAGNOSTIC_CODE;
 
 /// Immutable input for one transactional migration execution.
 #[derive(Clone, Copy, Debug)]
@@ -275,10 +275,11 @@ impl<'a> MigrationExecutor<'a> {
             }
 
             let Some(output) = output else {
-                budget.observe_diagnostics(1, step_id, MigrationPhase::Apply)?;
-                let diagnostic =
-                    missing_value_diagnostic(step_id, &source_profile.id, &target_profile.id)?;
-                apply_diagnostics.push(diagnostic);
+                if budget.try_observe_one_diagnostic() {
+                    let diagnostic =
+                        missing_value_diagnostic(step_id, &source_profile.id, &target_profile.id)?;
+                    apply_diagnostics.push(diagnostic);
+                }
                 let step_report = MigrationStepReport::failed(
                     step_id.clone(),
                     source_profile.id.clone(),
@@ -843,6 +844,17 @@ impl ExecutionReportBudget {
         Ok(())
     }
 
+    fn try_observe_one_diagnostic(&mut self) -> bool {
+        if self.step_diagnostics >= MAX_MIGRATION_STEP_DIAGNOSTICS
+            || self.report_diagnostics >= MAX_MIGRATION_REPORT_DIAGNOSTICS
+        {
+            return false;
+        }
+        self.step_diagnostics += 1;
+        self.report_diagnostics += 1;
+        true
+    }
+
     fn observe_losses(
         &mut self,
         incoming: usize,
@@ -1377,6 +1389,39 @@ mod tests {
         }
     }
 
+    struct MissingValueDiagnosticsStep {
+        descriptor: MigrationStepDescriptor,
+        apply_diagnostic_count: usize,
+        apply_calls: Arc<AtomicUsize>,
+    }
+
+    impl MigrationStep for MissingValueDiagnosticsStep {
+        fn descriptor(&self) -> &MigrationStepDescriptor {
+            &self.descriptor
+        }
+
+        fn analyze(
+            &self,
+            _request: MigrationAnalyzeRequest<'_>,
+        ) -> Result<MigrationAnalysis, DiagnosticBuildError> {
+            Ok(MigrationAnalysis::new(DiagnosticReport::new()))
+        }
+
+        fn apply(&self, request: MigrationApplyRequest<'_>) -> MigrationApplyOutcome {
+            self.apply_calls.fetch_add(1, Ordering::SeqCst);
+            let item = diagnostic(
+                "migration.test-missing-max",
+                Severity::Info,
+                &request.source_profile().id,
+                &request.target_profile().id,
+            );
+            AdapterOutcome::without_value(DiagnosticReport::from_diagnostics(vec![
+                item;
+                self.apply_diagnostic_count
+            ]))
+        }
+    }
+
     fn registry(ids: &[&str]) -> ProfileRegistry {
         let documents = ids.iter().map(|id| {
             parse_profile_source(
@@ -1619,6 +1664,61 @@ mod tests {
                 .as_str(),
             APPLY_MISSING_VALUE_CODE
         );
+    }
+
+    #[test]
+    fn exact_step_diagnostic_limit_still_returns_a_missing_value_report() {
+        let profiles = registry(&["profile:a", "profile:c"]);
+        let apply_calls = Arc::new(AtomicUsize::new(0));
+        let implementation: Arc<dyn MigrationStep> = Arc::new(MissingValueDiagnosticsStep {
+            descriptor: MigrationStepDescriptor::new(
+                step_id_for_test("migration:a-c-missing-max"),
+                ProfileConstraint::exact(ProfileId::parse("profile:a").unwrap()),
+                ProfileConstraint::exact(ProfileId::parse("profile:c").unwrap()),
+                Vec::new(),
+                Vec::new(),
+            )
+            .unwrap(),
+            apply_diagnostic_count: MAX_MIGRATION_STEP_DIAGNOSTICS,
+            apply_calls: Arc::clone(&apply_calls),
+        });
+        let source = configuration();
+        let snapshot = source.clone();
+
+        let error = execute_route(
+            &profiles,
+            vec![edge(implementation)],
+            &source,
+            LossPolicy::Error,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            MigrationExecutionError::ApplyMissingValue { .. }
+        ));
+        let report = error.report().unwrap();
+        let apply_diagnostics = report.steps()[0].apply_diagnostics().diagnostics();
+        assert_eq!(source, snapshot);
+        assert_eq!(apply_calls.load(Ordering::SeqCst), 1);
+        assert!(!report.is_complete());
+        assert_eq!(report.completed_step_count(), 0);
+        assert_eq!(apply_diagnostics.len(), MAX_MIGRATION_STEP_DIAGNOSTICS);
+        assert!(apply_diagnostics.iter().all(|diagnostic| {
+            diagnostic.code().as_str() == "migration.test-missing-max"
+                && diagnostic.severity() == Severity::Info
+        }));
+        assert_eq!(
+            report.steps()[0].failure().unwrap().code(),
+            MigrationFailureCode::ApplyMissingValue
+        );
+        assert_eq!(
+            report.terminal_failure().unwrap().code(),
+            MigrationFailureCode::ApplyMissingValue
+        );
+        let json = serde_json::to_string(report).unwrap();
+        let decoded = serde_json::from_str::<MigrationReport>(&json).unwrap();
+        assert_eq!(&decoded, report);
     }
 
     #[test]
@@ -2059,6 +2159,103 @@ mod tests {
             assert_eq!(calls.load(Ordering::SeqCst), 1);
         }
         assert_eq!(apply_calls[4].load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn exact_report_diagnostic_limit_still_returns_missing_value_and_stops_route() {
+        let profile_names = [
+            "profile:a",
+            "profile:b",
+            "profile:c",
+            "profile:d",
+            "profile:e",
+            "profile:f",
+            "profile:g",
+        ];
+        let profiles = registry(&profile_names);
+        let mut edges = Vec::new();
+        for index in 0..4 {
+            let implementation: Arc<dyn MigrationStep> = Arc::new(DiagnosticFloodStep {
+                descriptor: MigrationStepDescriptor::new(
+                    step_id_for_test(&format!("migration:full-budget-{index}")),
+                    ProfileConstraint::exact(ProfileId::parse(profile_names[index]).unwrap()),
+                    ProfileConstraint::exact(ProfileId::parse(profile_names[index + 1]).unwrap()),
+                    Vec::new(),
+                    Vec::new(),
+                )
+                .unwrap(),
+                analysis_count: MAX_MIGRATION_STEP_DIAGNOSTICS,
+                apply_calls: Arc::new(AtomicUsize::new(0)),
+            });
+            edges.push(edge(implementation));
+        }
+        let (missing, _, missing_apply_calls) = test_step(
+            "migration:e-f-missing",
+            "profile:e",
+            "profile:f",
+            Behavior::MissingValue,
+        );
+        let (next, next_analyze_calls, next_apply_calls) = test_step(
+            "migration:f-g-next",
+            "profile:f",
+            "profile:g",
+            Behavior::Success,
+        );
+        edges.push(edge(next));
+        edges.push(edge(missing));
+        let graph = MigrationGraph::new(&profiles, edges).unwrap();
+        let plan = graph
+            .plan(
+                profiles
+                    .get(&ProfileId::parse("profile:a").unwrap())
+                    .unwrap(),
+                profiles
+                    .get(&ProfileId::parse("profile:g").unwrap())
+                    .unwrap(),
+            )
+            .unwrap();
+        let source = configuration();
+        let snapshot = source.clone();
+
+        let error = MigrationExecutor::new(&graph)
+            .execute(MigrationExecutionRequest::new(
+                &plan,
+                &source,
+                LossPolicy::Error,
+            ))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            MigrationExecutionError::ApplyMissingValue { .. }
+        ));
+        let report = error.report().unwrap();
+        assert_eq!(source, snapshot);
+        assert_eq!(missing_apply_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(next_analyze_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(next_apply_calls.load(Ordering::SeqCst), 0);
+        assert!(!report.is_complete());
+        assert_eq!(report.completed_step_count(), 4);
+        assert_eq!(report.steps().len(), 5);
+        assert_eq!(report.terminal_failure().unwrap().step_index(), 4);
+        assert_eq!(
+            report.terminal_failure().unwrap().code(),
+            MigrationFailureCode::ApplyMissingValue
+        );
+        assert!(
+            report.steps()[4]
+                .apply_diagnostics()
+                .diagnostics()
+                .is_empty()
+        );
+        assert_eq!(
+            report
+                .steps()
+                .iter()
+                .map(MigrationStepReport::diagnostic_count)
+                .sum::<usize>(),
+            MAX_MIGRATION_REPORT_DIAGNOSTICS
+        );
     }
 
     fn step_id_for_test(value: &str) -> MigrationStepId {

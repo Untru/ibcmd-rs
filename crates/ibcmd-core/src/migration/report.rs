@@ -28,6 +28,7 @@ pub const MAX_MIGRATION_STEP_LOSS_EVIDENCE: usize = 1_024;
 pub const MAX_MIGRATION_REPORT_LOSS_EVIDENCE: usize = 4_096;
 /// Current stable JSON schema version for migration execution reports.
 pub const MIGRATION_REPORT_SCHEMA_VERSION: u32 = 1;
+pub(crate) const APPLY_MISSING_VALUE_DIAGNOSTIC_CODE: &str = "migration.apply-missing-value";
 
 /// Explicit terminal outcome of one migration operation.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -528,42 +529,56 @@ impl MigrationStepReport {
                 }
             }
         } else if let Some(value) = failure {
-            match value.stage() {
-                MigrationFailureStage::Analyze => {
-                    if !apply_diagnostics.diagnostics().is_empty()
-                        || !validation_diagnostics.diagnostics().is_empty()
-                        || !losses.is_empty()
-                    {
-                        return Err(MigrationReportError::FailurePhaseShapeMismatch {
-                            step_id,
-                            stage: value.stage(),
-                        });
-                    }
+            let analysis_is_empty = analysis_diagnostics.diagnostics().is_empty();
+            let apply_is_empty = apply_diagnostics.diagnostics().is_empty();
+            let validation_is_empty = validation_diagnostics.diagnostics().is_empty();
+            let loss_contract_shape = !analysis_diagnostics.has_errors()
+                && !apply_diagnostics.has_errors()
+                && validation_is_empty
+                && losses.is_empty();
+            let shape_is_valid = match value.code() {
+                MigrationFailureCode::AnalysisBuildFailed => {
+                    analysis_is_empty && apply_is_empty && validation_is_empty && losses.is_empty()
                 }
-                MigrationFailureStage::Apply => {
-                    if !validation_diagnostics.diagnostics().is_empty() || !losses.is_empty() {
-                        return Err(MigrationReportError::FailurePhaseShapeMismatch {
-                            step_id,
-                            stage: value.stage(),
-                        });
-                    }
+                MigrationFailureCode::AnalysisBlocked => {
+                    analysis_diagnostics.has_errors()
+                        && apply_is_empty
+                        && validation_is_empty
+                        && losses.is_empty()
                 }
-                MigrationFailureStage::LossContract => {
-                    if !validation_diagnostics.diagnostics().is_empty() {
-                        return Err(MigrationReportError::FailurePhaseShapeMismatch {
-                            step_id,
-                            stage: value.stage(),
-                        });
-                    }
+                MigrationFailureCode::ApplyBlocked => {
+                    !analysis_diagnostics.has_errors()
+                        && apply_diagnostics.has_errors()
+                        && validation_is_empty
+                        && losses.is_empty()
                 }
-                MigrationFailureStage::ResultValidation => {
-                    if !validation_diagnostics.has_errors() {
-                        return Err(MigrationReportError::FailurePhaseShapeMismatch {
-                            step_id,
-                            stage: value.stage(),
-                        });
-                    }
+                MigrationFailureCode::ApplyMissingValue => {
+                    !analysis_diagnostics.has_errors()
+                        && missing_value_apply_diagnostics_are_valid(&apply_diagnostics)
+                        && validation_is_empty
+                        && losses.is_empty()
                 }
+                MigrationFailureCode::UndeclaredAppliedLoss
+                | MigrationFailureCode::LossDiagnosticMissing
+                | MigrationFailureCode::LossPermissionDenied => loss_contract_shape,
+                MigrationFailureCode::LossDispositionMissing => {
+                    loss_contract_shape
+                        && apply_diagnostics
+                            .diagnostics()
+                            .iter()
+                            .any(|diagnostic| diagnostic.severity() == Severity::Warning)
+                }
+                MigrationFailureCode::ResultValidationFailed => {
+                    !analysis_diagnostics.has_errors()
+                        && !apply_diagnostics.has_errors()
+                        && validation_diagnostics.has_errors()
+                }
+            };
+            if !shape_is_valid {
+                return Err(MigrationReportError::FailurePhaseShapeMismatch {
+                    step_id,
+                    stage: value.stage(),
+                });
             }
         } else {
             return Err(MigrationReportError::StepOutcomeMismatch {
@@ -1587,6 +1602,20 @@ fn checked_diagnostic_count<const N: usize>(
     })
 }
 
+fn missing_value_apply_diagnostics_are_valid(report: &DiagnosticReport) -> bool {
+    let mut errors = report
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error);
+    match errors.next() {
+        None => true,
+        Some(diagnostic) => {
+            diagnostic.code().as_str() == APPLY_MISSING_VALUE_DIAGNOSTIC_CODE
+                && errors.next().is_none()
+        }
+    }
+}
+
 struct BoundedVec<T, const MAXIMUM: usize>(Vec<T>);
 
 impl<'de, T, const MAXIMUM: usize> Deserialize<'de> for BoundedVec<T, MAXIMUM>
@@ -1720,7 +1749,9 @@ impl<'de> Visitor<'de> for BoundedStepReportsVisitor {
 #[cfg(test)]
 mod tests {
     use crate::artifact::ProfileId;
-    use crate::diagnostic::DiagnosticReport;
+    use crate::diagnostic::{
+        Diagnostic, DiagnosticCode, DiagnosticReport, ObjectPath, PropertyPath, Severity,
+    };
 
     use super::*;
 
@@ -1759,6 +1790,54 @@ mod tests {
             DiagnosticReport::new(),
             DiagnosticReport::new(),
             Vec::new(),
+        )
+        .unwrap()
+    }
+
+    fn diagnostic_report(
+        code: &str,
+        severity: Severity,
+        source: &str,
+        target: &str,
+    ) -> DiagnosticReport {
+        let diagnostic = Diagnostic::new(
+            DiagnosticCode::parse(code).unwrap(),
+            severity,
+            ObjectPath::root(),
+            PropertyPath::root(),
+            "migration report invariant test diagnostic",
+        )
+        .unwrap()
+        .with_profiles(Some(profile(source)), Some(profile(target)));
+        DiagnosticReport::from_diagnostics(vec![diagnostic])
+    }
+
+    fn failed_report(
+        stage: MigrationFailureStage,
+        code: MigrationFailureCode,
+        analysis_diagnostics: DiagnosticReport,
+        apply_diagnostics: DiagnosticReport,
+        validation_diagnostics: DiagnosticReport,
+    ) -> MigrationReport {
+        let failure = MigrationStepFailure::new(stage, code).unwrap();
+        let step = MigrationStepReport::failed(
+            step_id("migration:a-b"),
+            profile("profile:a"),
+            profile("profile:b"),
+            failure,
+            analysis_diagnostics,
+            apply_diagnostics,
+            validation_diagnostics,
+            Vec::new(),
+        )
+        .unwrap();
+        MigrationReport::failed(
+            profile("profile:a"),
+            profile("profile:b"),
+            LossPolicy::Error,
+            vec![step_id("migration:a-b")],
+            vec![step],
+            MigrationTerminalFailure::new(stage, code, 0).unwrap(),
         )
         .unwrap()
     }
@@ -1843,6 +1922,119 @@ mod tests {
         value["completed_step_count"] = serde_json::json!(1);
         value["unknown"] = serde_json::json!(true);
         assert!(serde_json::from_value::<MigrationReport>(value).is_err());
+    }
+
+    #[test]
+    fn report_json_rejects_blocked_codes_without_their_phase_error() {
+        let analysis_blocked = failed_report(
+            MigrationFailureStage::Analyze,
+            MigrationFailureCode::AnalysisBlocked,
+            diagnostic_report(
+                "migration.test-analysis-blocked",
+                Severity::Error,
+                "profile:a",
+                "profile:b",
+            ),
+            DiagnosticReport::new(),
+            DiagnosticReport::new(),
+        );
+        let mut analysis_json = serde_json::to_value(analysis_blocked).unwrap();
+        analysis_json["steps"][0]["analysis_diagnostics"]["diagnostics"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<MigrationReport>(analysis_json).is_err());
+
+        let apply_blocked = failed_report(
+            MigrationFailureStage::Apply,
+            MigrationFailureCode::ApplyBlocked,
+            DiagnosticReport::new(),
+            diagnostic_report(
+                "migration.test-apply-blocked",
+                Severity::Error,
+                "profile:a",
+                "profile:b",
+            ),
+            DiagnosticReport::new(),
+        );
+        let mut apply_json = serde_json::to_value(apply_blocked).unwrap();
+        apply_json["steps"][0]["apply_diagnostics"]["diagnostics"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<MigrationReport>(apply_json).is_err());
+    }
+
+    #[test]
+    fn constructors_reject_code_specific_phase_contradictions() {
+        let cases = [
+            (
+                MigrationFailureStage::Analyze,
+                MigrationFailureCode::AnalysisBlocked,
+                DiagnosticReport::new(),
+                DiagnosticReport::new(),
+                DiagnosticReport::new(),
+            ),
+            (
+                MigrationFailureStage::Apply,
+                MigrationFailureCode::ApplyBlocked,
+                DiagnosticReport::new(),
+                DiagnosticReport::new(),
+                DiagnosticReport::new(),
+            ),
+            (
+                MigrationFailureStage::Apply,
+                MigrationFailureCode::ApplyMissingValue,
+                DiagnosticReport::new(),
+                diagnostic_report(
+                    "migration.test-arbitrary-apply-error",
+                    Severity::Error,
+                    "profile:a",
+                    "profile:b",
+                ),
+                DiagnosticReport::new(),
+            ),
+            (
+                MigrationFailureStage::LossContract,
+                MigrationFailureCode::LossDiagnosticMissing,
+                DiagnosticReport::new(),
+                diagnostic_report(
+                    "migration.test-loss-contract-error",
+                    Severity::Error,
+                    "profile:a",
+                    "profile:b",
+                ),
+                DiagnosticReport::new(),
+            ),
+            (
+                MigrationFailureStage::ResultValidation,
+                MigrationFailureCode::ResultValidationFailed,
+                diagnostic_report(
+                    "migration.test-early-error",
+                    Severity::Error,
+                    "profile:a",
+                    "profile:b",
+                ),
+                DiagnosticReport::new(),
+                diagnostic_report(
+                    "migration.test-validation-error",
+                    Severity::Error,
+                    "profile:a",
+                    "profile:b",
+                ),
+            ),
+        ];
+
+        for (stage, code, analysis, apply, validation) in cases {
+            let result = MigrationStepReport::failed(
+                step_id("migration:a-b"),
+                profile("profile:a"),
+                profile("profile:b"),
+                MigrationStepFailure::new(stage, code).unwrap(),
+                analysis,
+                apply,
+                validation,
+                Vec::new(),
+            );
+            assert!(matches!(
+                result,
+                Err(MigrationReportError::FailurePhaseShapeMismatch { .. })
+            ));
+        }
     }
 
     #[test]
