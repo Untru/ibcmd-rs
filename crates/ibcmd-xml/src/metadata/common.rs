@@ -907,15 +907,23 @@ fn decode_generated_types(
         }
         let mut type_id = None;
         let mut seen_type_id = false;
+        let mut value_id = None;
+        let mut seen_value_id = false;
         for node in child.children() {
-            if let XmlNode::Element(value) = node
-                && typed(value, "TypeId", expected_type_namespace, uris)
-            {
-                if seen_type_id {
-                    return Err(MetadataDecodeError::Duplicate("GeneratedType TypeId"));
+            if let XmlNode::Element(value) = node {
+                if typed(value, "TypeId", expected_type_namespace, uris) {
+                    if seen_type_id {
+                        return Err(MetadataDecodeError::Duplicate("GeneratedType TypeId"));
+                    }
+                    seen_type_id = true;
+                    type_id = element_text(value)?;
+                } else if typed(value, "ValueId", expected_type_namespace, uris) {
+                    if seen_value_id {
+                        return Err(MetadataDecodeError::Duplicate("GeneratedType ValueId"));
+                    }
+                    seen_value_id = true;
+                    value_id = element_text(value)?;
                 }
-                seen_type_id = true;
-                type_id = element_text(value)?;
             }
         }
         let type_id = type_id.ok_or(MetadataDecodeError::Missing("GeneratedType TypeId"))?;
@@ -949,14 +957,32 @@ fn decode_generated_types(
             )?;
             continue;
         }
+        let value_id = if seen_value_id {
+            let value_id =
+                value_id.ok_or(MetadataDecodeError::Missing("GeneratedType ValueId text"))?;
+            let value_id = ObjectUuid::parse(&value_id)
+                .map_err(|_| MetadataDecodeError::InvalidUuid(value_id))?;
+            if value_id.as_bytes().iter().all(|byte| *byte == 0) {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "GeneratedType ValueId cannot be nil",
+                ));
+            }
+            Some(value_id)
+        } else {
+            None
+        };
         if !generated.insert(uuid) {
             return Err(MetadataDecodeError::Duplicate("GeneratedType UUID"));
         }
-        out.push(GeneratedType::new(
+        let generated_type = GeneratedType::new(
             uuid,
             GeneratedTypeKind::new(category)
                 .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
-        ));
+        );
+        out.push(match value_id {
+            Some(value_id) => generated_type.with_value_id(value_id),
+            None => generated_type,
+        });
         any = true;
         retain_as(
             node,
@@ -2069,6 +2095,13 @@ mod tests {
         let doc = XmlReader::from_slice(b"<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' xmlns:xr='http://v8.1c.ru/8.3/xcf/readable'><X uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>X</Name></Properties><InternalInfo><xr:GeneratedType category='ref'><xr:TypeId>22222222-2222-4222-8222-222222222222</xr:TypeId><xr:ValueId>33333333-3333-4333-8333-333333333333</xr:ValueId></xr:GeneratedType></InternalInfo></X></MetaDataObject>").unwrap();
         let envelope = decode_metadata_envelope(&doc, profile(), path()).unwrap();
         assert_eq!(envelope.root().generated_types().len(), 1);
+        assert_eq!(
+            envelope.root().generated_types()[0]
+                .value_id()
+                .unwrap()
+                .to_string(),
+            "33333333-3333-4333-8333-333333333333"
+        );
         assert!(
             envelope
                 .root()
@@ -2086,6 +2119,22 @@ mod tests {
         assert!(matches!(
             decode_metadata_envelope(&doc, profile(), path()),
             Err(MetadataDecodeError::Duplicate("GeneratedType TypeId"))
+        ));
+    }
+
+    #[test]
+    fn duplicate_or_nil_generated_value_id_fails_closed() {
+        let duplicate = XmlReader::from_slice(b"<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' xmlns:xr='http://v8.1c.ru/8.3/xcf/readable'><X uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>X</Name></Properties><InternalInfo><xr:GeneratedType><xr:TypeId>22222222-2222-4222-8222-222222222222</xr:TypeId><xr:ValueId>33333333-3333-4333-8333-333333333333</xr:ValueId><xr:ValueId>44444444-4444-4444-8444-444444444444</xr:ValueId></xr:GeneratedType></InternalInfo></X></MetaDataObject>").unwrap();
+        assert!(matches!(
+            decode_metadata_envelope(&duplicate, profile(), path()),
+            Err(MetadataDecodeError::Duplicate("GeneratedType ValueId"))
+        ));
+        let nil = XmlReader::from_slice(b"<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' xmlns:xr='http://v8.1c.ru/8.3/xcf/readable'><X uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>X</Name></Properties><InternalInfo><xr:GeneratedType><xr:TypeId>22222222-2222-4222-8222-222222222222</xr:TypeId><xr:ValueId>00000000-0000-0000-0000-000000000000</xr:ValueId></xr:GeneratedType></InternalInfo></X></MetaDataObject>").unwrap();
+        assert!(matches!(
+            decode_metadata_envelope(&nil, profile(), path()),
+            Err(MetadataDecodeError::InvalidEnvelope(
+                "GeneratedType ValueId cannot be nil"
+            ))
         ));
     }
 

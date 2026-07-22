@@ -41,15 +41,17 @@ compiler work continues on separate roadmap lanes.
 BOOT-002 is paused only on the native `Configuration` body: the bounded
 identity/inventory graph and deterministic `root`, `version`, and `versions`
 codecs are implemented, while the unproven seven-section body remains
-fail-closed. BOOT-003 is in progress. Four complete vertical slices,
-`Language`, `SessionParameter`, `FunctionalOption`, and
+fail-closed. BOOT-003 is in progress. Five complete vertical slices,
+`Language`, `SessionParameter`, `DefinedType`, `FunctionalOption`, and
 `FunctionalOptionsParameter`, now support XML 2.20/2.21 -> typed IR ->
 deterministic base-free native row -> strict native IR/XML under independently
 selected 8.3.27 family layouts. Readable `Location`, `Content`, and `Use`
 references are resolved only through the validated canonical graph;
-`SessionParameter` `cfg:*` types resolve only through canonical generated
-TypeIds. The other two simple families remain unsupported until their own
-layouts and UUID/type inputs are proven. These partial results do not increment
+type-pattern `cfg:*` values resolve only through canonical generated TypeIds.
+The core now also retains generated `ValueId` as a typed optional identity
+(legacy canonical JSON remains readable; semantic digest domain v2). Only
+`Constant` remains unsupported in this issue until its complete generated-ID
+cohort and native layout are committed. These partial results do not increment
 the accepted-issue percentage above.
 
 | Phase | Completed | Progress |

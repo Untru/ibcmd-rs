@@ -9,12 +9,13 @@ use std::collections::BTreeSet;
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::diagnostic::ObjectPath;
 use ibcmd_core::family::FamilyId;
+use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::model::CanonicalObject;
 use ibcmd_core::value::{CanonicalInteger, CanonicalValue, EnumToken};
 
 use super::common::{
     MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces, V8_NAMESPACE,
-    element_text, resolve_namespaces, typed, uri_of,
+    XR_NAMESPACE, element_text, resolve_namespaces, typed, uri_of,
 };
 use super::decode_metadata_envelope;
 use super::language::{
@@ -27,7 +28,7 @@ use super::registry::{
 };
 use crate::{AttributeKind, LexicalPolicy, XmlDocument, XmlElement, XmlNode, XmlWriter};
 
-const FAMILY: &str = "SessionParameter";
+const SESSION_PARAMETER_FAMILY: &str = "SessionParameter";
 const CFG_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
 const XS_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 
@@ -36,7 +37,7 @@ pub fn register_session_parameter_codec(
     registry: &mut MetadataRegistry,
 ) -> Result<(), MetadataRegistryError> {
     registry.register(Box::new(SessionParameterCodec {
-        family: FamilyId::parse(FAMILY).expect("family id is stable"),
+        family: FamilyId::parse(SESSION_PARAMETER_FAMILY).expect("family id is stable"),
     }))
 }
 
@@ -91,27 +92,67 @@ struct Projection {
     types: Vec<SourceType>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TypePatternGeneratedPolicy {
+    Forbidden,
+    DefinedType,
+}
+
 fn decode_session_parameter(
     document: &XmlDocument,
     source: ProfileId,
     path: ObjectPath,
 ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    decode_type_pattern_family(
+        document,
+        source,
+        path,
+        SESSION_PARAMETER_FAMILY,
+        TypePatternGeneratedPolicy::Forbidden,
+    )
+}
+
+pub(super) fn decode_type_pattern_family(
+    document: &XmlDocument,
+    source: ProfileId,
+    path: ObjectPath,
+    family: &'static str,
+    generated_policy: TypePatternGeneratedPolicy,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
     validate_decode_profile(document, &source, &path)?;
-    let projection = project(document)?;
+    let projection = project(document, family, generated_policy)?;
     let generic = decode_metadata_envelope(document, source, path)?;
-    if generic.root().kind().as_str() != FAMILY {
+    if generic.root().kind().as_str() != family {
         return Err(MetadataDecodeError::InvalidEnvelope(
-            "session parameter codec requires its exact family",
+            "type-pattern codec requires its exact family",
         ));
     }
     if !generic.descendants().is_empty()
-        || !generic.root().generated_types().is_empty()
         || !generic.root().references().is_empty()
         || !generic.root().assets().is_empty()
     {
         return Err(MetadataDecodeError::InvalidEnvelope(
-            "SessionParameter cannot contain children, generated types, references, or assets",
+            "type-pattern metadata cannot contain children, references, or assets",
         ));
+    }
+    match generated_policy {
+        TypePatternGeneratedPolicy::Forbidden if !generic.root().generated_types().is_empty() => {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "SessionParameter cannot contain generated types",
+            ));
+        }
+        TypePatternGeneratedPolicy::DefinedType => {
+            let generated = generic.root().generated_types();
+            if generated.len() != 1
+                || generated[0].kind().as_str() != "DefinedType"
+                || generated[0].value_id().is_none()
+            {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "DefinedType requires one typed TypeId/ValueId pair",
+                ));
+            }
+        }
+        TypePatternGeneratedPolicy::Forbidden => {}
     }
     let mut parts = copy_object_parts(generic.root());
     parts.properties.push(canonical_field(
@@ -192,12 +233,16 @@ fn integer_value(value: u32) -> Result<CanonicalValue, MetadataDecodeError> {
         .map_err(|error| MetadataDecodeError::Core(error.to_string()))
 }
 
-fn project(document: &XmlDocument) -> Result<Projection, MetadataDecodeError> {
+fn project(
+    document: &XmlDocument,
+    family: &'static str,
+    generated_policy: TypePatternGeneratedPolicy,
+) -> Result<Projection, MetadataDecodeError> {
     let uris = resolve_namespaces(document.root())?;
     let expected = uri_of(document.root(), &uris);
     if !matches!(expected, None | Some(MD_NAMESPACE)) {
         return Err(MetadataDecodeError::InvalidEnvelope(
-            "session parameter root namespace",
+            "type-pattern metadata root namespace",
         ));
     }
     require_attributes(document.root(), &["version"])?;
@@ -208,16 +253,17 @@ fn project(document: &XmlDocument) -> Result<Projection, MetadataDecodeError> {
     ] {
         if !namespace_declared(document.root(), prefix, uri) {
             return Err(MetadataDecodeError::InvalidEnvelope(
-                "SessionParameter requires exact v8, cfg, and xs namespace bindings",
+                "type-pattern metadata requires exact v8, cfg, and xs namespace bindings",
             ));
         }
     }
-    let object = required_child(document.root(), FAMILY, expected, &uris)?;
+    let object = required_child(document.root(), family, expected, &uris)?;
     require_attributes(object, &["uuid"])?;
-    let properties = only_properties_child(object, expected, &uris)?;
+    let properties = only_properties_child(object, expected, &uris, generated_policy)?;
     require_attributes(properties, &[])?;
 
     let mut seen = BTreeSet::new();
+    let mut name = None;
     let mut comment = None;
     let mut types = None;
     for node in properties.children() {
@@ -229,7 +275,7 @@ fn project(document: &XmlDocument) -> Result<Projection, MetadataDecodeError> {
             || !typed(child, local, expected, &uris)
         {
             return Err(MetadataDecodeError::InvalidEnvelope(
-                "unknown SessionParameter property",
+                "unknown type-pattern metadata property",
             ));
         }
         if !seen.insert(local) {
@@ -244,9 +290,7 @@ fn project(document: &XmlDocument) -> Result<Projection, MetadataDecodeError> {
         match local {
             "Name" => {
                 require_attributes(child, &[])?;
-                if element_text(child)?.is_none() {
-                    return Err(MetadataDecodeError::Missing("Name text"));
-                }
+                name = Some(element_text(child)?.ok_or(MetadataDecodeError::Missing("Name text"))?);
             }
             "Synonym" => validate_synonym_attributes(child)?,
             "Comment" => {
@@ -266,6 +310,14 @@ fn project(document: &XmlDocument) -> Result<Projection, MetadataDecodeError> {
         if !seen.contains(required) {
             return Err(MetadataDecodeError::Missing(required));
         }
+    }
+    if generated_policy == TypePatternGeneratedPolicy::DefinedType {
+        validate_defined_type_internal_info(
+            object,
+            expected,
+            &uris,
+            name.as_deref().expect("presence checked"),
+        )?;
     }
     Ok(Projection {
         comment: comment.expect("presence checked"),
@@ -501,18 +553,109 @@ fn only_properties_child<'a>(
     object: &'a XmlElement,
     expected: Option<&str>,
     uris: &ResolvedNamespaces,
+    generated_policy: TypePatternGeneratedPolicy,
 ) -> Result<&'a XmlElement, MetadataDecodeError> {
     let properties = required_child(object, "Properties", expected, uris)?;
-    if object
+    let elements = object
         .children()
         .iter()
-        .any(|node| matches!(node, XmlNode::Element(child) if !std::ptr::eq(child, properties)))
-    {
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let valid = match generated_policy {
+        TypePatternGeneratedPolicy::Forbidden => {
+            elements.len() == 1 && std::ptr::eq(elements[0], properties)
+        }
+        TypePatternGeneratedPolicy::DefinedType => {
+            elements.len() == 2
+                && typed(elements[0], "InternalInfo", expected, uris)
+                && std::ptr::eq(elements[1], properties)
+        }
+    };
+    if !valid {
         return Err(MetadataDecodeError::InvalidEnvelope(
-            "unknown SessionParameter object child",
+            "type-pattern metadata object children or order are unsupported",
         ));
     }
     Ok(properties)
+}
+
+fn validate_defined_type_internal_info(
+    object: &XmlElement,
+    expected: Option<&str>,
+    uris: &ResolvedNamespaces,
+    name: &str,
+) -> Result<(), MetadataDecodeError> {
+    let internal = required_child(object, "InternalInfo", expected, uris)?;
+    require_attributes(internal, &[])?;
+    let generated = internal
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if generated.len() != 1 || !typed(generated[0], "GeneratedType", Some(XR_NAMESPACE), uris) {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "DefinedType InternalInfo must contain one xr:GeneratedType",
+        ));
+    }
+    let generated = generated[0];
+    require_attributes(generated, &["name", "category"])?;
+    let expected_name = format!("DefinedType.{name}");
+    if unprefixed_attribute(generated, "name") != Some(expected_name.as_str())
+        || unprefixed_attribute(generated, "category") != Some("DefinedType")
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "DefinedType generated type name or category is inconsistent",
+        ));
+    }
+    let values = generated
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(child) => Some(child),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if values.len() != 2
+        || !typed(values[0], "TypeId", Some(XR_NAMESPACE), uris)
+        || !typed(values[1], "ValueId", Some(XR_NAMESPACE), uris)
+    {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "DefinedType generated TypeId/ValueId fields or order are unsupported",
+        ));
+    }
+    for value in values {
+        require_attributes(value, &[])?;
+        let text = element_text(value)?.ok_or(MetadataDecodeError::InvalidEnvelope(
+            "DefinedType generated UUID must contain text only",
+        ))?;
+        let uuid = ObjectUuid::parse(text.trim())
+            .map_err(|_| MetadataDecodeError::InvalidUuid(text.clone()))?;
+        if uuid.as_bytes().iter().all(|byte| *byte == 0) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "DefinedType generated UUID cannot be nil",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn unprefixed_attribute<'a>(element: &'a XmlElement, local: &str) -> Option<&'a str> {
+    element.attributes().iter().find_map(|attribute| {
+        if let AttributeKind::Ordinary(name) = attribute.kind()
+            && name.prefix().is_none()
+            && name.local() == local
+        {
+            Some(attribute.value())
+        } else {
+            None
+        }
+    })
 }
 
 fn validate_synonym_attributes(element: &XmlElement) -> Result<(), MetadataDecodeError> {
@@ -538,7 +681,7 @@ fn require_attributes(element: &XmlElement, allowed: &[&str]) -> Result<(), Meta
                 if name.prefix().is_none() && allowed.contains(&name.local()) => {}
             AttributeKind::Ordinary(_) => {
                 return Err(MetadataDecodeError::InvalidEnvelope(
-                    "unknown SessionParameter semantic attribute",
+                    "unknown type-pattern metadata semantic attribute",
                 ));
             }
         }
@@ -557,24 +700,44 @@ fn encode_session_parameter(
     envelope: &MetadataEnvelope,
     target: &ProfileId,
 ) -> Result<Vec<u8>, MetadataEncodeError> {
+    encode_type_pattern_family(
+        envelope,
+        target,
+        SESSION_PARAMETER_FAMILY,
+        TypePatternGeneratedPolicy::Forbidden,
+    )
+}
+
+pub(super) fn encode_type_pattern_family(
+    envelope: &MetadataEnvelope,
+    target: &ProfileId,
+    family: &'static str,
+    generated_policy: TypePatternGeneratedPolicy,
+) -> Result<Vec<u8>, MetadataEncodeError> {
     let path = envelope.root().identity().path().clone();
     let target_version =
         profile_version(target).ok_or_else(|| MetadataEncodeError::UnsupportedProfile {
             object_path: path.clone(),
             profile: target.clone(),
         })?;
-    if envelope.root().kind().as_str() != FAMILY {
+    if envelope.root().kind().as_str() != family {
         return Err(invalid_model(&path, "kind"));
     }
     let source_profile = envelope.root().provenance().source_profile().clone();
     validate_decode_profile(envelope.source_document(), &source_profile, &path)
         .map_err(decode_to_encode)?;
-    let source = decode_session_parameter(envelope.source_document(), source_profile, path.clone())
-        .map_err(decode_to_encode)?;
+    let source = decode_type_pattern_family(
+        envelope.source_document(),
+        source_profile,
+        path.clone(),
+        family,
+        generated_policy,
+    )
+    .map_err(decode_to_encode)?;
     if source.root() != envelope.root() || source.descendants() != envelope.descendants() {
         return Err(invalid_model(
             &path,
-            "SessionParameter mutation is not implemented",
+            "type-pattern metadata mutation is not implemented",
         ));
     }
     let root = if root_version(envelope.source_document().root()).map_err(decode_to_encode)?
@@ -635,7 +798,7 @@ mod tests {
             register_session_parameter_codec(&mut registry).unwrap();
             let envelope = registry
                 .decode(
-                    &FamilyId::parse(FAMILY).unwrap(),
+                    &FamilyId::parse(SESSION_PARAMETER_FAMILY).unwrap(),
                     &document,
                     profile(version),
                     ObjectPath::root(),
@@ -652,7 +815,7 @@ mod tests {
             let reparsed = XmlReader::from_slice(&output).unwrap();
             registry
                 .decode(
-                    &FamilyId::parse(FAMILY).unwrap(),
+                    &FamilyId::parse(SESSION_PARAMETER_FAMILY).unwrap(),
                     &reparsed,
                     profile(target),
                     ObjectPath::root(),
@@ -674,7 +837,7 @@ mod tests {
         assert!(
             registry
                 .decode(
-                    &FamilyId::parse(FAMILY).unwrap(),
+                    &FamilyId::parse(SESSION_PARAMETER_FAMILY).unwrap(),
                     &mismatch,
                     profile("2.20"),
                     ObjectPath::root(),
@@ -690,7 +853,7 @@ mod tests {
         assert!(
             registry
                 .decode(
-                    &FamilyId::parse(FAMILY).unwrap(),
+                    &FamilyId::parse(SESSION_PARAMETER_FAMILY).unwrap(),
                     &unknown,
                     profile("2.20"),
                     ObjectPath::root(),

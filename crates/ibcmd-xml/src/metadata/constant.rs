@@ -47,6 +47,8 @@ pub fn register_constant_codec(
 pub fn bundled_metadata_registry() -> MetadataRegistry {
     let mut registry = MetadataRegistry::default();
     register_constant_codec(&mut registry).expect("bundled families are unique and bounded");
+    super::defined_type::register_defined_type_codec(&mut registry)
+        .expect("bundled families are unique and bounded");
     super::functional_option::register_functional_option_codec(&mut registry)
         .expect("bundled families are unique and bounded");
     super::functional_options_parameter::register_functional_options_parameter_codec(&mut registry)
@@ -1073,6 +1075,9 @@ fn patch_generated_type(
     if source == desired {
         return Ok(element.clone());
     }
+    if source.value_id() != desired.value_id() {
+        return Err(invalid_model(path, "GeneratedType ValueId mutation"));
+    }
     let mut seen_type_id = false;
     let children = element
         .children()
@@ -1537,6 +1542,13 @@ mod tests {
             envelope.root().generated_types()[0].kind().as_str(),
             "Manager"
         );
+        assert_eq!(
+            envelope.root().generated_types()[0]
+                .value_id()
+                .unwrap()
+                .to_string(),
+            VALUE_UUID
+        );
     }
 
     #[test]
@@ -1642,7 +1654,8 @@ mod tests {
         let changed_generated = GeneratedType::new(
             ObjectUuid::parse("44444444-4444-4444-8444-444444444444").unwrap(),
             GeneratedTypeKind::new("ValueManager").unwrap(),
-        );
+        )
+        .with_value_id(ObjectUuid::parse(VALUE_UUID).unwrap());
         let envelope = replace_fields(
             envelope,
             &[

@@ -305,6 +305,10 @@ mod tests {
             assert!(profile.compatibility_mode.is_none());
             if version == "8.3.27.1989" {
                 assert_eq!(
+                    profile.constants["bootstrap.metadata.defined_type.layout"].value,
+                    "defined-type-v1-crlf-no-bom"
+                );
+                assert_eq!(
                     profile.storage_profile.as_ref().unwrap().value.as_str(),
                     "storage:mssql-config-configsave"
                 );

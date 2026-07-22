@@ -19,7 +19,7 @@ use crate::opaque::OpaqueFacet;
 use crate::validate::ValidatedConfiguration;
 use crate::value::{CanonicalField, CanonicalValue, CanonicalValueKind};
 
-const SEMANTIC_DOMAIN_V1: &[u8] = b"ibcmd-canonical-semantic-v1\0";
+const SEMANTIC_DOMAIN_V2: &[u8] = b"ibcmd-canonical-semantic-v2\0";
 
 /// Cross-platform SHA-256 of the versioned canonical semantic encoding.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -81,7 +81,7 @@ struct SemanticEncoder {
 impl SemanticEncoder {
     fn new() -> Self {
         let mut hasher = Sha256::new();
-        hasher.update(SEMANTIC_DOMAIN_V1);
+        hasher.update(SEMANTIC_DOMAIN_V2);
         Self { hasher }
     }
 
@@ -169,6 +169,13 @@ fn encode_object(object: &CanonicalObject, encoder: &mut SemanticEncoder) {
     for generated_type in object.generated_types() {
         encoder.uuid(generated_type.uuid());
         encoder.string(generated_type.kind().as_str());
+        match generated_type.value_id() {
+            Some(value_id) => {
+                encoder.tag(1);
+                encoder.uuid(value_id);
+            }
+            None => encoder.tag(0),
+        }
     }
 
     encoder.count(object.assets().len());
@@ -460,7 +467,7 @@ mod tests {
         let digest = digest(golden_objects("profile:one", "line1\r\nline2", b"opaque"));
         assert_eq!(
             digest.to_string(),
-            "01d7eb3a3cf111c2d2ba32399852815d715c4849cd98aa6172e0f34408e3a1fc"
+            "e3638e0f512bf0112d9092ee4d7b4b8807a862ea7930f395439544addf719c3e"
         );
         assert_eq!(serde_json::to_string(&digest).unwrap().len(), 66);
     }
@@ -520,6 +527,24 @@ mod tests {
         parent.opaque_facets = changed_asset[0].opaque_facets().clone();
         changed_asset[0] = CanonicalObject::new(parent).unwrap();
         assert_ne!(digest(baseline), digest(changed_asset));
+    }
+
+    #[test]
+    fn generated_value_id_affects_digest() {
+        let baseline = golden_objects("profile:one", "text", b"opaque");
+        let mut changed = baseline.clone();
+        let mut parent = CanonicalObjectParts::new(
+            changed[0].identity().clone(),
+            changed[0].kind().clone(),
+            changed[0].provenance().clone(),
+        );
+        parent.properties = changed[0].properties().to_vec();
+        parent.generated_types = changed[0].generated_types().to_vec();
+        parent.generated_types[0] = parent.generated_types[0].clone().with_value_id(uuid(102));
+        parent.assets = changed[0].assets().to_vec();
+        parent.opaque_facets = changed[0].opaque_facets().clone();
+        changed[0] = CanonicalObject::new(parent).unwrap();
+        assert_ne!(digest(baseline), digest(changed));
     }
 
     #[test]

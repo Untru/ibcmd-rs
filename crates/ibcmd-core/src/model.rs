@@ -298,12 +298,28 @@ impl ObjectReference {
 pub struct GeneratedType {
     uuid: ObjectUuid,
     kind: GeneratedTypeKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    value_id: Option<ObjectUuid>,
 }
 
 impl GeneratedType {
-    /// Creates a generated type from an exact UUID and open role.
+    /// Creates a generated type from an exact TypeId UUID and open role.
+    ///
+    /// `ValueId` is optional because not every source family exposes one and
+    /// older canonical documents predate its typed representation.
     pub const fn new(uuid: ObjectUuid, kind: GeneratedTypeKind) -> Self {
-        Self { uuid, kind }
+        Self {
+            uuid,
+            kind,
+            value_id: None,
+        }
+    }
+
+    /// Attaches the exact generated ValueId required by native layouts that
+    /// distinguish type and value identities.
+    pub const fn with_value_id(mut self, value_id: ObjectUuid) -> Self {
+        self.value_id = Some(value_id);
+        self
     }
 
     /// Returns the exact globally indexed UUID.
@@ -314,6 +330,11 @@ impl GeneratedType {
     /// Returns the exact open generated-type role.
     pub const fn kind(&self) -> &GeneratedTypeKind {
         &self.kind
+    }
+
+    /// Returns the independently sourced generated ValueId, when declared.
+    pub const fn value_id(&self) -> Option<ObjectUuid> {
+        self.value_id
     }
 }
 
@@ -999,6 +1020,24 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<CanonicalConfiguration>(&json).unwrap(),
             configuration
+        );
+    }
+
+    #[test]
+    fn generated_value_id_is_typed_and_old_json_remains_valid() {
+        let type_id = uuid("11111111-1111-4111-8111-111111111111");
+        let value_id = uuid("22222222-2222-4222-8222-222222222222");
+        let legacy = GeneratedType::new(type_id, GeneratedTypeKind::new("Ref").unwrap());
+        assert_eq!(legacy.value_id(), None);
+        assert_eq!(
+            serde_json::to_string(&legacy).unwrap(),
+            r#"{"uuid":"11111111-1111-4111-8111-111111111111","kind":"Ref"}"#
+        );
+        let typed = legacy.with_value_id(value_id);
+        assert_eq!(typed.value_id(), Some(value_id));
+        assert_eq!(
+            serde_json::from_str::<GeneratedType>(&serde_json::to_string(&typed).unwrap()).unwrap(),
+            typed
         );
     }
 

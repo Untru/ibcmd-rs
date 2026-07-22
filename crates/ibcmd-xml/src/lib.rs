@@ -19,7 +19,7 @@ pub use dialect::{
 pub use metadata::{
     MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
     MetadataRegistry, MetadataRegistryError, bundled_metadata_registry, decode_metadata_envelope,
-    decode_metadata_envelope_with_dialect, register_constant_codec,
+    decode_metadata_envelope_with_dialect, register_constant_codec, register_defined_type_codec,
     register_functional_option_codec, register_functional_options_parameter_codec,
     register_language_codec, register_session_parameter_codec,
 };
