@@ -46,6 +46,8 @@ Describe "Parity protocol scripts" {
         $LASTEXITCODE | Should Not Be 0
         & powershell -NoProfile -ExecutionPolicy Bypass -File $runner -DbName test -LabRoot $lab -RunId valid_scoped -Scope scoped *> $null
         $LASTEXITCODE | Should Not Be 0
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $matrix -LabRoot $lab -RunId strict_scoped -Scope scoped -PathPrefix "Catalogs" -RequireCompleteRootMetadata *> $null
+        $LASTEXITCODE | Should Not Be 0
         (Test-Path $lab) | Should Be $false
     }
 

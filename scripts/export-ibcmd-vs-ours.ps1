@@ -9,7 +9,8 @@ param(
     [string]$IbcmdPath = "",
     [ValidateSet("2.20", "2.21")][string]$SourceVersion = "2.20",
     [ValidateSet("full", "scoped")][string]$Scope = "full",
-    [string[]]$PathPrefix = @()
+    [string[]]$PathPrefix = @(),
+    [switch]$RequireCompleteRootMetadata
 )
 
 Set-StrictMode -Version Latest
@@ -76,6 +77,9 @@ if ($Scope -eq "full" -and $PathPrefix.Count -ne 0) {
 if ($Scope -eq "scoped" -and $PathPrefix.Count -eq 0) {
     throw "Scope 'scoped' requires at least one PathPrefix."
 }
+if ($RequireCompleteRootMetadata -and $Scope -ne "full") {
+    throw "RequireCompleteRootMetadata is available only for Scope 'full'."
+}
 if ([string]::IsNullOrWhiteSpace($ExePath)) { $ExePath = Join-Path $repoRoot "target\release\ibcmd-rs.exe" }
 $ExePath = [IO.Path]::GetFullPath($ExePath)
 if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
@@ -126,7 +130,7 @@ try {
     Invoke-ParityStep -Name "native-export" -LogPath (Join-Path $logsRoot "native-export.log") -Steps $steps -Action { & $ExePath @nativeArgs }
 
     $candidateArgs = @($Cli.CandidateExport, "--database", $DbName, "--server", $DbServer, "--sql-user", $DbUser, "--sql-pwd-env", "IBCMD_DB_PSW", "-o", $candidateDumpRoot, "--overwrite", "--inflate", "--extract-module-text", "--extract-metadata-xml", "--source-version", $SourceVersion, "--no-binary-rows")
-    if ($Scope -eq "full") {
+    if ($RequireCompleteRootMetadata) {
         $candidateArgs += "--require-complete-root-metadata"
     }
     Invoke-ParityStep -Name "candidate-export" -LogPath (Join-Path $logsRoot "candidate-export.log") -Steps $steps -Action { & $ExePath @candidateArgs }

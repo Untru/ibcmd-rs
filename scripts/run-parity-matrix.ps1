@@ -10,7 +10,8 @@ param(
     [string]$IbcmdPath = "",
     [ValidateSet("2.20", "2.21")][string]$SourceVersion = "2.20",
     [ValidateSet("full", "scoped")][string]$Scope = "full",
-    [string[]]$PathPrefix = @()
+    [string[]]$PathPrefix = @(),
+    [switch]$RequireCompleteRootMetadata
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +29,9 @@ if ($Scope -eq "full" -and $PathPrefix.Count -ne 0) {
 }
 if ($Scope -eq "scoped" -and $PathPrefix.Count -eq 0) {
     throw "Scope 'scoped' requires at least one PathPrefix."
+}
+if ($RequireCompleteRootMetadata -and $Scope -ne "full") {
+    throw "RequireCompleteRootMetadata is available only for Scope 'full'."
 }
 if ([string]::IsNullOrWhiteSpace($ExePath)) {
     $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -50,6 +54,7 @@ foreach ($database in @(
         RunId=$childRunId; SourceVersion=$SourceVersion; Scope=$Scope; PathPrefix=$PathPrefix; ExePath=$ExePath
     }
     if ($IbcmdPath) { $params.IbcmdPath = $IbcmdPath }
+    if ($RequireCompleteRootMetadata) { $params.RequireCompleteRootMetadata = $true }
     & $runner @params
     if ($LASTEXITCODE -ne 0) { throw "Parity run failed for database '$($database.name)' with exit code $LASTEXITCODE" }
     $runDirectory = Join-Path $LabRoot ("{0}_{1}" -f ($database.name -replace '[^A-Za-z0-9_.-]', '_'), $childRunId)
