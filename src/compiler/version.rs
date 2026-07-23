@@ -11,11 +11,13 @@ use super::graph::{BootstrapGraph, SpecialEntryKind};
 use super::root::{SpecialEntryBuildError, compiled_special_entry, ensure_graph_profile};
 
 const ROOT_LAYOUT_KEY: &str = "bootstrap.root.layout";
+const CONFIGURATION_LAYOUT_KEY: &str = "bootstrap.configuration.layout";
 const VERSION_LAYOUT_KEY: &str = "bootstrap.version.layout";
 const VERSIONS_LAYOUT_KEY: &str = "bootstrap.versions.layout";
 const VERSION_COMPATIBILITY_KEY: &str = "bootstrap.version.compatibility";
 
 const ROOT_LAYOUT: &str = "root-v2-empty-tail";
+const CONFIGURATION_LAYOUT: &str = "configuration-v68-seven-sections-v1";
 const VERSION_LAYOUT: &str = "version-v216";
 const VERSIONS_LAYOUT: &str = "versions-v1";
 
@@ -91,6 +93,7 @@ impl SpecialEntryProfile {
         require_layout(profile, ROOT_LAYOUT_KEY, ROOT_LAYOUT)?;
         require_layout(profile, VERSION_LAYOUT_KEY, VERSION_LAYOUT)?;
         require_layout(profile, VERSIONS_LAYOUT_KEY, VERSIONS_LAYOUT)?;
+        require_layout(profile, CONFIGURATION_LAYOUT_KEY, CONFIGURATION_LAYOUT)?;
 
         let compatibility = required_constant(profile, VERSION_COMPATIBILITY_KEY)?;
         let parsed = compatibility.parse::<u32>().ok().filter(|value| *value > 0);
@@ -207,6 +210,7 @@ mod tests {
     fn valid_constants() -> &'static str {
         r#"{
             "bootstrap.root.layout": "root-v2-empty-tail",
+            "bootstrap.configuration.layout": "configuration-v68-seven-sections-v1",
             "bootstrap.version.layout": "version-v216",
             "bootstrap.versions.layout": "versions-v1",
             "bootstrap.version.compatibility": "80327"

@@ -53,6 +53,7 @@
     "bootstrap.body.support.layout": "opaque-exact-passthrough-v1",
     "bootstrap.body.template.layout": "template-kind-dispatch-v1",
     "bootstrap.root.layout": "root-v2-empty-tail",
+    "bootstrap.configuration.layout": "configuration-v68-seven-sections-v1",
     "bootstrap.version.layout": "version-v216",
     "bootstrap.versions.layout": "versions-v1",
     "bootstrap.version.compatibility": "80327"
@@ -67,7 +68,7 @@
     "docs/evidence/rights-predefined-support-8.3.27.md",
     "docs/evidence/registers-charts-8.3.27.md",
     "docs/evidence/utility-objects-8.3.27.md",
-    "docs/evidence/configuration-body-8.3.27-partial.md",
+    "docs/evidence/configuration-body-8.3.27.md",
     "docs/evidence/service-event-subscription-8.3.27.md",
     "docs/evidence/service-http-service-8.3.27.md",
     "docs/evidence/service-integration-service-8.3.27.md",

@@ -314,7 +314,7 @@
 
 ### BOOT-002 — Построить identity graph и special entries
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-001, CORE-008, CORE-004
+- **Статус:** `[x]`; **зависимости:** BOOT-001, CORE-008, CORE-004
 - **Файлы:** создать `src/compiler/identity.rs`, `graph.rs`, `root.rs`, `version.rs`, `versions.rs`
 - **Действия:** IDs, collections, generated types, suffixes, root/version/versions/configuration body без base.
 - **Проверка:** повторная сборка deterministic; все special-entry ссылки разрешаются и соответствуют storage inventory.

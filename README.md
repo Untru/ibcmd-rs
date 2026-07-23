@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=50 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=51 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 50 of 56 accepted leaf issues in the
+As of 2026-07-23, 51 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (89.3%). Live workflow statuses are tracked in
+are complete (91.1%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -193,10 +193,15 @@ buffers and commits its shared resource budget only after complete validation;
 synthetic corruption and decompression-bomb regressions run without 1C, EDT,
 or a JVM. See [bounded CF payload evidence](docs/evidence/cf-payload-limits.md).
 
-BOOT-002 is paused only on the native `Configuration` body: the bounded
-identity/inventory graph and deterministic `root`, `version`, and `versions`
-codecs are implemented, while the unproven seven-section body remains
-fail-closed. BOOT-003 is complete. Its six vertical slices, `Constant`,
+BOOT-002 is complete. The bounded identity/inventory graph and deterministic
+`root`, `version`, `versions`, and profile-gated seven-section `Configuration`
+body compile without a base artifact. The Configuration writer derives seven
+domain-separated UUIDv8 identities, routes 47 known top-level families through
+48 exact native slots, validates typed cross-object references, and rejects an
+unknown family or future layout before writing. The implementation and tests do
+not invoke 1C, EDT, a JVM, SQL Server, or any external process; see
+[Configuration-body evidence](docs/evidence/configuration-body-8.3.27.md).
+BOOT-003 is complete. Its six vertical slices, `Constant`,
 `Language`, `SessionParameter`, `DefinedType`, `FunctionalOption`, and
 `FunctionalOptionsParameter`, support XML 2.20/2.21 -> typed IR ->
 deterministic base-free native row -> strict native IR/XML under independently
@@ -343,10 +348,10 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 15/15 | 100% |
-| Phase 4 bootstrap | 11/13 | 84.6% |
+| Phase 4 bootstrap | 12/13 | 92.3% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **50/56** | **89.3%** |
+| **Overall** | **51/56** | **91.1%** |
 
 ## Export Compatibility Status
 
