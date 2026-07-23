@@ -350,6 +350,8 @@ if (Test-Path -LiteralPath $runRoot) { throw "Run directory already exists and i
 $nativeRoot = Join-Path $runRoot 'native'; $candidateDumpRoot = Join-Path $runRoot 'candidate_dump'; $candidateRoot = Join-Path $runRoot 'candidate'; $logsRoot = Join-Path $runRoot 'logs'
 New-Item -ItemType Directory -Path $runRoot, $logsRoot -ErrorAction Stop | Out-Null
 $steps = [System.Collections.ArrayList]::new(); $manifestPath = Join-Path $runRoot 'parity-manifest.json'
+$sqlcmdPath = $null
+$primaryFailure = $false
 $manifest = [ordered]@{
     protocol_version=2; run_id=$RunId; scope=$Scope; created_utc=(Get-UtcNow); status='initializing'; git_sha=$null; xml_version=$SourceVersion; source_version=$SourceVersion
     database=[ordered]@{ name=$DbName; server=$DbServer; auth_mode=$authMode; user=$manifestDbUser; password_source=$manifestPasswordSource }
@@ -375,6 +377,29 @@ try {
     $manifest.tools.native_ibcmd = [ordered]@{ path=$resolvedIbcmdFile.Source; version=(Get-CommandVersion $resolvedIbcmdFile.Source); sha256=$resolvedIbcmdHash }
     $resolvedIbcmd = $resolvedIbcmdFile.Source
     $sqlcmdPath = Get-ApplicationPath 'sqlcmd'
+    $beforeFingerprintCommand = Get-DatabaseFingerprintCommand -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
+    $manifest.database_fingerprint = [ordered]@{
+        before = [ordered]@{
+            status='running'
+            started_utc=(Get-UtcNow)
+            executable=$beforeFingerprintCommand.executable
+            arguments=(ConvertTo-SanitizedArguments $beforeFingerprintCommand.arguments)
+        }
+        after = $null
+        unchanged = $null
+    }
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+    try {
+        $beforeFingerprint = Get-DatabaseFingerprint -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
+        $manifest.database_fingerprint.before = $beforeFingerprint
+        $manifest.database_fingerprint.before.status = 'passed'
+    } catch {
+        $manifest.database_fingerprint.before.status = 'failed'
+        $manifest.database_fingerprint.before.ended_utc = Get-UtcNow
+        $manifest.database_fingerprint.before.exception = Protect-SensitiveText $_.Exception.Message
+    }
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+
     $bcpPath = Join-Path (Split-Path -Parent $sqlcmdPath) 'bcp.exe'
     if (-not (Test-Path -LiteralPath $bcpPath -PathType Leaf)) { $bcpPath = Get-ApplicationPath 'bcp' }
     $robocopyPath = Get-ApplicationPath 'robocopy'
@@ -393,31 +418,9 @@ try {
         version=(Get-CommandVersion $robocopyPath @('/?') @(16))
         sha256=(Get-FileSha256 -Path $robocopyPath)
     }
-    $beforeFingerprintCommand = Get-DatabaseFingerprintCommand -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
-    $manifest.database_fingerprint = [ordered]@{
-        before = [ordered]@{
-            status='running'
-            started_utc=(Get-UtcNow)
-            executable=$beforeFingerprintCommand.executable
-            arguments=(ConvertTo-SanitizedArguments $beforeFingerprintCommand.arguments)
-        }
-        after = $null
-        unchanged = $null
-    }
-    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
     foreach ($command in @($Cli.NativeExport, $Cli.CandidateExport, $Cli.Diff, $Cli.Signatures, $Cli.Matrix, $Cli.MatrixMerge)) {
         if (-not (Test-CliCommand -Exe $ExePath -Command $command)) { throw "Required command '$command' is unavailable in $ExePath. Build it with: cargo build --release --features platform-oracle" }
     }
-    try {
-        $beforeFingerprint = Get-DatabaseFingerprint -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
-        $manifest.database_fingerprint.before = $beforeFingerprint
-        $manifest.database_fingerprint.before.status = 'passed'
-    } catch {
-        $manifest.database_fingerprint.before.status = 'failed'
-        $manifest.database_fingerprint.before.ended_utc = Get-UtcNow
-        $manifest.database_fingerprint.before.exception = $_.Exception.Message
-    }
-    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
 
     $nativeArgs = @($Cli.NativeExport, '--dbms', 'MSSQLServer', '--db-server', $DbServer, '--db-name', $DbName, '-o', $nativeRoot, '--overwrite', '--ibcmd', $resolvedIbcmd)
     if (-not $IntegratedAuth) { $nativeArgs += @('--db-user', $DbUser, '--db-pwd-env', 'IBCMD_DB_PSW') }
@@ -449,27 +452,6 @@ try {
     $matrixPath = Join-Path $runRoot 'matrix.json'; $matrixMarkdownPath = Join-Path $runRoot 'matrix.md'; $matrixScopeArg = if ($Scope -eq 'full') { '--full' } else { '--scoped' }
     $matrixArgs = @($Cli.Matrix, $diffPath, '--database', $DbName, '--run-id', $RunId, '--git-sha', $manifest.git_sha, $matrixScopeArg, '--output', $matrixPath, '--markdown', $matrixMarkdownPath)
     Invoke-ParityStep -Name 'parity-matrix' -LogPath (Join-Path $logsRoot 'parity-matrix.log') -Arguments $matrixArgs -Artifacts @('matrix.json', 'matrix.md') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @matrixArgs }
-    $afterFingerprintCommand = Get-DatabaseFingerprintCommand -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
-    $manifest.database_fingerprint.after = [ordered]@{
-        status='running'
-        started_utc=(Get-UtcNow)
-        executable=$afterFingerprintCommand.executable
-        arguments=(ConvertTo-SanitizedArguments $afterFingerprintCommand.arguments)
-    }
-    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
-    try {
-        $afterFingerprint = Get-DatabaseFingerprint -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
-        $manifest.database_fingerprint.after = $afterFingerprint
-        $manifest.database_fingerprint.after.status = 'passed'
-    } catch {
-        $manifest.database_fingerprint.after.status = 'failed'
-        $manifest.database_fingerprint.after.ended_utc = Get-UtcNow
-        $manifest.database_fingerprint.after.exception = $_.Exception.Message
-        throw
-    }
-    if ($manifest.database_fingerprint.before.status -ne 'passed') { throw 'Database fingerprint before export is unavailable; run is invalid.' }
-    $manifest.database_fingerprint.unchanged = ($manifest.database_fingerprint.before.sha256 -eq $manifest.database_fingerprint.after.sha256)
-    if (-not $manifest.database_fingerprint.unchanged) { throw 'Database configuration storage changed during parity export.' }
     if ($Scope -eq 'full' -and $manifest.repository.status -ne 'clean') { throw 'Full release parity requires a clean Git repository.' }
     $manifest.artifacts = [ordered]@{ raw_diff='raw-diff.json'; signatures='signatures.json'; matrix='matrix.json'; markdown='matrix.md' }
     $manifest.artifact_sha256 = [ordered]@{
@@ -479,7 +461,51 @@ try {
         markdown=(Get-FileSha256 -Path $matrixMarkdownPath)
     }
     $manifest.status='passed'
-} catch { $manifest.status='failed'; $manifest.failure=(Protect-SensitiveText $_.Exception.Message); throw
-} finally { $manifest.finished_utc=Get-UtcNow; Write-ManifestAtomic -Path $manifestPath -Manifest $manifest }
+} catch {
+    $primaryFailure = $true
+    $manifest.status='failed'; $manifest.failure=(Protect-SensitiveText $_.Exception.Message); throw
+} finally {
+    # A failed export is still evidence about whether it changed the configuration
+    # storage.  This best-effort snapshot must never replace the original failure.
+    if ($manifest.Contains('database_fingerprint') -and -not [string]::IsNullOrWhiteSpace($sqlcmdPath)) {
+        $manifest.database_fingerprint.after = [ordered]@{
+            status='running'
+            started_utc=(Get-UtcNow)
+            executable=$sqlcmdPath
+            arguments=@()
+        }
+        try {
+            $afterFingerprintCommand = Get-DatabaseFingerprintCommand -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
+            $manifest.database_fingerprint.after.executable = $afterFingerprintCommand.executable
+            $manifest.database_fingerprint.after.arguments = ConvertTo-SanitizedArguments $afterFingerprintCommand.arguments
+            $afterFingerprint = Get-DatabaseFingerprint -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
+            $manifest.database_fingerprint.after = $afterFingerprint
+            $manifest.database_fingerprint.after.status = 'passed'
+        } catch {
+            $manifest.database_fingerprint.after.status = 'failed'
+            $manifest.database_fingerprint.after.ended_utc = Get-UtcNow
+            $manifest.database_fingerprint.after.exception = Protect-SensitiveText $_.Exception.Message
+        }
+    }
+
+    $integrityFailure = $null
+    if (-not $primaryFailure) {
+        if ($manifest.database_fingerprint.before.status -ne 'passed') {
+            $integrityFailure = 'Database fingerprint before export is unavailable; run is invalid.'
+        } elseif ($null -eq $manifest.database_fingerprint.after -or $manifest.database_fingerprint.after.status -ne 'passed') {
+            $integrityFailure = 'Database fingerprint after export is unavailable; run is invalid.'
+        } else {
+            $manifest.database_fingerprint.unchanged = ($manifest.database_fingerprint.before.sha256 -eq $manifest.database_fingerprint.after.sha256)
+            if (-not $manifest.database_fingerprint.unchanged) { $integrityFailure = 'Database configuration storage changed during parity export.' }
+        }
+        if ($null -ne $integrityFailure) {
+            $manifest.status = 'failed'
+            $manifest.failure = $integrityFailure
+        }
+    }
+    $manifest.finished_utc=Get-UtcNow
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+    if ($null -ne $integrityFailure) { throw $integrityFailure }
+}
 
 Write-Host "Parity run completed: $runRoot"

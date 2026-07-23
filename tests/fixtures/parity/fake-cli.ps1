@@ -32,8 +32,19 @@ if ($command -eq 'dump-sources') {
         $global:LASTEXITCODE = 23
         return
     }
+    if ($env:PARITY_FAKE_MODE -eq 'candidate-exit') {
+        Write-Output 'fake native export success'
+        $global:LASTEXITCODE = 0
+        return
+    }
     Write-Error 'fake native export failure' -ErrorAction Continue
     $global:LASTEXITCODE = 23
+    return
+}
+
+if ($command -eq 'mssql-dump-config' -and $env:PARITY_FAKE_MODE -eq 'candidate-exit') {
+    Write-Error 'fake candidate export failure' -ErrorAction Continue
+    $global:LASTEXITCODE = 29
     return
 }
 

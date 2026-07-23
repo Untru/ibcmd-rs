@@ -183,6 +183,63 @@ Describe "Parity protocol scripts" {
         $manifest.steps[0].exception | Should Match "fake terminating export failure"
     }
 
+    It "records an after fingerprint when candidate export fails" {
+        $lab = Join-Path $TestDrive "candidate-fingerprint"
+        $fixtureDir = Split-Path -Parent $fakeCli
+        $savedPath = $env:PATH
+        $savedMode = $env:PARITY_FAKE_MODE
+        try {
+            $env:PATH = "$fixtureDir;$savedPath"
+            $env:PARITY_FAKE_MODE = "candidate-exit"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $runner `
+                -DbName fingerprint_stub -IntegratedAuth -LabRoot $lab -RunId probe `
+                -ExePath $fakeCli -IbcmdPath $fakeCli *> $null
+            $LASTEXITCODE | Should Not Be 0
+        } finally {
+            $env:PATH = $savedPath
+            $env:PARITY_FAKE_MODE = $savedMode
+        }
+
+        $manifestPath = Join-Path $lab "fingerprint_stub_probe\parity-manifest.json"
+        $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+        $manifest.status | Should Be "failed"
+        @($manifest.steps).Count | Should Be 2
+        $manifest.steps[1].name | Should Be "candidate-export"
+        $manifest.steps[1].status | Should Be "failed"
+        $manifest.steps[1].exit_code | Should Be 29
+        $manifest.database_fingerprint.after.status | Should Be "passed"
+        $manifest.database_fingerprint.after.sha256 | Should Match "^[0-9a-f]{64}$"
+        $manifest.database_fingerprint.after.ended_utc | Should Not BeNullOrEmpty
+    }
+
+    It "records an after fingerprint when tool discovery fails after sqlcmd" {
+        $lab = Join-Path $TestDrive "early-tool-fingerprint"
+        $fixtureDir = Split-Path -Parent $fakeCli
+        $savedPath = $env:PATH
+        $savedBcpMode = $env:PARITY_FAKE_BCP_MODE
+        try {
+            $env:PATH = "$fixtureDir;$savedPath"
+            $env:PARITY_FAKE_BCP_MODE = "fail-version"
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $runner `
+                -DbName fingerprint_stub -IntegratedAuth -LabRoot $lab -RunId probe `
+                -ExePath $fakeCli -IbcmdPath $fakeCli *> $null
+            $LASTEXITCODE | Should Not Be 0
+        } finally {
+            $env:PATH = $savedPath
+            $env:PARITY_FAKE_BCP_MODE = $savedBcpMode
+        }
+
+        $manifestPath = Join-Path $lab "fingerprint_stub_probe\parity-manifest.json"
+        $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+        $manifest.status | Should Be "failed"
+        $manifest.failure | Should Match "Cannot read version"
+        @($manifest.steps).Count | Should Be 0
+        $manifest.database_fingerprint.before.status | Should Be "passed"
+        $manifest.database_fingerprint.after.status | Should Be "passed"
+        $manifest.database_fingerprint.after.sha256 | Should Match "^[0-9a-f]{64}$"
+        $manifest.database_fingerprint.after.ended_utc | Should Not BeNullOrEmpty
+    }
+
     It "redacts SQL-auth secret names and values from manifests and logs" {
         $lab = Join-Path $TestDrive "runtime-sql-redaction"
         $savedPassword = $env:IBCMD_DB_PSW
