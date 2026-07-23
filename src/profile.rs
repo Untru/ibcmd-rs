@@ -1,3 +1,6 @@
+#![cfg(feature = "platform-oracle")]
+//! Research-only external process profiler.
+
 use std::process::{Command, Stdio};
 use std::time::Instant;
 

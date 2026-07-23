@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use ibcmd_rs::cli::{Cli, Commands, InfobaseCommands, InfobaseConfigCommands};
+use ibcmd_rs::cli::{Cli, Commands};
+#[cfg(feature = "platform-oracle")]
+use ibcmd_rs::cli::{InfobaseCommands, InfobaseConfigCommands};
 use ibcmd_rs::plan::SourceDiffSignatureOptions;
 
 fn main() -> Result<()> {
@@ -42,6 +44,7 @@ fn main() -> Result<()> {
                 std::process::exit(2);
             }
         },
+        #[cfg(feature = "platform-oracle")]
         Commands::Infobase(args) => match args.command {
             InfobaseCommands::Config(config_args) => match config_args.command {
                 InfobaseConfigCommands::Export(args) => {
@@ -62,6 +65,7 @@ fn main() -> Result<()> {
                 }
             },
         },
+        #[cfg(feature = "platform-oracle")]
         Commands::Probe(args) => {
             let report = ibcmd_rs::probe::probe_environment(args);
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -199,10 +203,12 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        #[cfg(feature = "platform-oracle")]
         Commands::ProfileRun(args) => {
             let report = ibcmd_rs::profile::run_profiled(args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        #[cfg(feature = "platform-oracle")]
         Commands::DumpSources(args) => {
             let report = ibcmd_rs::dump_sources::dump_sources(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);

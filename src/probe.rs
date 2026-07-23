@@ -1,3 +1,6 @@
+#![cfg(feature = "platform-oracle")]
+//! Research-only discovery of installed 1C executables.
+
 use std::collections::BTreeSet;
 use std::env;
 use std::path::{Path, PathBuf};

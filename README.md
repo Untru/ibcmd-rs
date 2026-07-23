@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=54 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=55 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 54 of 56 accepted leaf issues in the
+As of 2026-07-23, 55 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (96.4%). Live workflow statuses are tracked in
+are complete (98.2%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -404,6 +404,14 @@ validates, and prints that same versioned document, whose public structural
 contract is `compatibility/matrix.schema.json`. See the
 [compatibility matrix evidence](docs/evidence/compatibility-matrix.md).
 
+APP-003 compile-time isolates the installed-platform oracle. Default and
+release-shaped builds do not contain the `probe`, `profile-run`,
+`dump-sources`, or `infobase` commands and do not compile their implementation
+modules. Legacy research workflows remain available only with the explicit
+non-default `platform-oracle` feature. Windows/Linux CI checks the default
+boundary, while the legacy Windows lane compiles the feature-enabled side. See
+[platform-oracle isolation evidence](docs/evidence/platform-oracle-isolation.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
@@ -412,8 +420,8 @@ contract is `compatibility/matrix.schema.json`. See the
 | Phase 3 CF | 15/15 | 100% |
 | Phase 4 bootstrap | 13/13 | 100% |
 | Phase 5a migrations | 4/4 | 100% |
-| Phase 5b app/release | 2/4 | 50% |
-| **Overall** | **54/56** | **96.4%** |
+| Phase 5b app/release | 3/4 | 75% |
+| **Overall** | **55/56** | **98.2%** |
 
 ## Export Compatibility Status
 
@@ -768,12 +776,12 @@ deeper root properties remain tracked under Issue #22.
 ## Commands
 
 ```powershell
-cargo run -- probe --deep
+cargo run --features platform-oracle -- probe --deep
 cargo run -- scan C:\path\to\xml-sources -o current-manifest.json
 cargo run -- plan current-manifest.json -b baseline-manifest.json -o load-plan.json
 cargo run -- source-diff C:\ibcmd-export C:\ibcmd-rs-dump --path-prefix Catalogs\Валюты -o source-diff.json
-cargo run -- profile-run --capture-output -- ibcmd infobase config load ...
-cargo run -- dump-sources --settings C:\repo\autumn-properties.json --extension EmergingTravelGroup -o C:\repo\src\cfe\EmergingTravelGroup --overwrite
+cargo run --features platform-oracle -- profile-run --capture-output -- ibcmd infobase config load ...
+cargo run --features platform-oracle -- dump-sources --settings C:\repo\autumn-properties.json --extension EmergingTravelGroup -o C:\repo\src\cfe\EmergingTravelGroup --overwrite
 cargo run -- mssql-dump-config --database MyInfobase -o C:\repo\db-dump --include-config-save --inflate --extract-module-text
 cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
@@ -838,7 +846,7 @@ cargo run -- mssql-storage-export --database import_only_db -o storage-bundle --
 6. Run the slow load through `profile-run`:
 
    ```powershell
-   cargo run -- profile-run --capture-output -- ibcmd ...
+   cargo run --features platform-oracle -- profile-run --capture-output -- ibcmd ...
    ```
 
 7. Stop the SQL trace and keep the `.xel`, 1C technical log, manifest and

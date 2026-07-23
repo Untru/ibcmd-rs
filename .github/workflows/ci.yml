@@ -53,6 +53,9 @@ jobs:
       - name: Check standalone workspace layers
         run: cargo check --locked --workspace --exclude ibcmd-rs --all-targets
 
+      - name: Check release-shaped root without platform oracle
+        run: cargo check --locked -p ibcmd-rs --all-targets --no-default-features
+
       - name: Clippy standalone workspace layers
         run: cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings
 
@@ -61,6 +64,9 @@ jobs:
 
       - name: Test portable root smoke
         run: cargo test --locked -p ibcmd-rs --test portable_root_smoke
+
+      - name: Audit release-shaped platform boundary
+        run: cargo test --locked -p ibcmd-rs --test platform_oracle_boundary --no-default-features
 
       - name: Test CF corruption and property corpus
         run: cargo test --locked -p ibcmd-rs --test cf_corruption
@@ -81,8 +87,8 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
 
-      - name: Check legacy root targets
-        run: cargo check --locked -p ibcmd-rs --all-targets
+      - name: Check legacy root targets with explicit platform oracle
+        run: cargo check --locked -p ibcmd-rs --all-targets --features platform-oracle
 
-      - name: Compile legacy root test harness
-        run: cargo test --locked -p ibcmd-rs --no-run
+      - name: Compile legacy root test harness with explicit platform oracle
+        run: cargo test --locked -p ibcmd-rs --no-run --features platform-oracle

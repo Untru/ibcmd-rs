@@ -1,3 +1,6 @@
+#![cfg(feature = "platform-oracle")]
+//! Research-only infobase orchestration with installed-platform oracle calls.
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

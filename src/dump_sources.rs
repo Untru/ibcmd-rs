@@ -1,3 +1,6 @@
+#![cfg(feature = "platform-oracle")]
+//! Research-only source export through an installed ibcmd executable.
+
 use std::env;
 use std::ffi::OsString;
 use std::fs;

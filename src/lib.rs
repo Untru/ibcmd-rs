@@ -4,9 +4,11 @@ pub mod commands;
 pub mod compatibility;
 pub mod compiler;
 pub mod conversion;
+#[cfg(feature = "platform-oracle")]
 pub mod dump_sources;
 pub mod form_matrix;
 pub(crate) mod form_schema;
+#[cfg(feature = "platform-oracle")]
 pub mod infobase;
 pub mod legacy_version;
 pub mod module_blob;
@@ -14,7 +16,9 @@ pub mod mssql;
 pub mod mssql_dump;
 pub mod parallel;
 pub mod plan;
+#[cfg(feature = "platform-oracle")]
 pub mod probe;
+#[cfg(feature = "platform-oracle")]
 pub mod profile;
 pub mod profile_registry;
 pub mod source;

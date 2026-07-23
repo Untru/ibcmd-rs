@@ -14,6 +14,9 @@ resolver = "3"
 
 [features]
 default = []
+# Research-only integrations that locate or execute an installed 1C platform.
+# This feature is intentionally excluded from default and release builds.
+platform-oracle = []
 mssql-live-tests = []
 research-corpus-tests = []
 

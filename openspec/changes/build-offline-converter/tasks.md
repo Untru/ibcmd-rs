@@ -460,7 +460,7 @@
 
 ### APP-003 — Изолировать platform-oracle code от default/release build
 
-- **Статус:** `[ ]`; **зависимости:** APP-001, CORE-010
+- **Статус:** `[x]`; **зависимости:** APP-001, CORE-010
 - **Файлы:** изменить `Cargo.toml`, `src/infobase.rs`, `src/dump_sources.rs`, `src/probe.rs`, CLI routing
 - **Действия:** legacy research calls только под non-default `platform-oracle`; release binary не содержит probe/run path.
 - **Проверка:** default binary builds/runs on Linux; binary/dependency audit не находит EDT/JNI/vendor executable payloads.

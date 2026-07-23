@@ -20,8 +20,10 @@ pub enum Commands {
     /// Inspect, verify, export, or overlay CF without an installed 1C platform.
     Cf(CfArgs),
     /// ibcmd-compatible infobase commands.
+    #[cfg(feature = "platform-oracle")]
     Infobase(InfobaseArgs),
     /// Locate installed 1C command-line tools and print environment details.
+    #[cfg(feature = "platform-oracle")]
     Probe(ProbeArgs),
     /// Scan a 1C XML source tree and produce a deterministic manifest.
     Scan(ScanArgs),
@@ -46,8 +48,10 @@ pub enum Commands {
     /// Print the current compatibility matrix for implemented operations.
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
+    #[cfg(feature = "platform-oracle")]
     ProfileRun(ProfileRunArgs),
     /// Export a 1C infobase configuration or extension to hierarchical XML sources.
+    #[cfg(feature = "platform-oracle")]
     DumpSources(DumpSourcesArgs),
     /// Dump Config/ConfigSave storage rows directly from SQL Server.
     MssqlDumpConfig(MssqlDumpConfigArgs),
@@ -414,24 +418,28 @@ pub struct CfBootstrapArgs {
     pub reserved: u32,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct InfobaseArgs {
     #[command(subcommand)]
     pub command: InfobaseCommands,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Subcommand)]
 pub enum InfobaseCommands {
     /// Configuration export/import commands.
     Config(InfobaseConfigArgs),
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct InfobaseConfigArgs {
     #[command(subcommand)]
     pub command: InfobaseConfigCommands,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Subcommand)]
 pub enum InfobaseConfigCommands {
     /// Export infobase configuration to source files.
@@ -444,6 +452,7 @@ pub enum InfobaseConfigCommands {
     Sweep(InfobaseConfigSweepArgs),
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum InfobaseConfigFormat {
     /// Hierarchical 1C XML source tree compatible with ibcmd config export/import.
@@ -451,6 +460,7 @@ pub enum InfobaseConfigFormat {
     Xml,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct InfobaseConfigExportArgs {
     /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
@@ -499,6 +509,7 @@ pub struct InfobaseConfigExportArgs {
     pub output_dir: PathBuf,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct InfobaseConfigImportArgs {
     /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
@@ -559,6 +570,7 @@ pub struct InfobaseConfigImportArgs {
     pub source_dir: PathBuf,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct InfobaseConfigRoundtripArgs {
     /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
@@ -638,6 +650,7 @@ pub struct InfobaseConfigRoundtripArgs {
     pub script_output: Option<PathBuf>,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args, Clone)]
 pub struct InfobaseConfigSweepArgs {
     /// Optional JSON settings file. Supports autumn-properties.json/vRunner DB keys and ibcmd-rs format keys.
@@ -726,6 +739,7 @@ pub struct InfobaseConfigSweepArgs {
     pub script_output: Option<PathBuf>,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct ProbeArgs {
     /// Also search common 1C installation folders under Program Files.
@@ -875,6 +889,7 @@ pub struct CompatibilityArgs {
     pub output: Option<PathBuf>,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct ProfileRunArgs {
     /// Keep full stdout/stderr in the JSON report.
@@ -885,6 +900,7 @@ pub struct ProfileRunArgs {
     pub command: Vec<String>,
 }
 
+#[cfg(feature = "platform-oracle")]
 #[derive(Debug, Args)]
 pub struct DumpSourcesArgs {
     /// Optional autumn-properties.json compatible settings file.
@@ -3726,6 +3742,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "platform-oracle")]
     #[test]
     fn parses_dump_sources_command() {
         let cli = Cli::parse_from([
@@ -3768,6 +3785,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "platform-oracle")]
     #[test]
     fn parses_infobase_config_export_command() {
         let cli = Cli::parse_from([
@@ -3815,6 +3833,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "platform-oracle")]
     #[test]
     fn parses_infobase_config_import_command() {
         let cli = Cli::parse_from([
@@ -3869,6 +3888,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "platform-oracle")]
     #[test]
     fn parses_infobase_config_roundtrip_command() {
         let cli = Cli::parse_from([
@@ -3938,6 +3958,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "platform-oracle")]
     #[test]
     fn parses_infobase_config_sweep_command() {
         let cli = Cli::parse_from([
