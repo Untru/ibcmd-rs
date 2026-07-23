@@ -248,7 +248,7 @@
 
 ### CF-009 — Отобразить CF archive в `StorageImage`
 
-- **Статус:** `[ ]`; **зависимости:** CORE-006, CF-004–CF-006
+- **Статус:** `[x]`; **зависимости:** CORE-006, CF-004–CF-006
 - **Файлы:** создать `crates/ibcmd-cf/src/archive.rs`
 - **Действия:** ordered logical entries, suffix/multipart identity, raw/packed payload and source profile; duplicate rejection.
 - **Проверка:** CF→StorageImage deterministic; expected root/version/versions and object entries доступны по logical keys.

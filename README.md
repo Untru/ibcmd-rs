@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=44 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=45 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 44 of 56 accepted leaf issues in the
+As of 2026-07-23, 45 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (78.6%). Live workflow statuses are tracked in
+are complete (80.4%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -94,6 +94,18 @@ envelope by extending only its final physical page. The clean-room Format16
 fixture rewrites byte-for-byte in preserve mode, while semantic regeneration
 also parses to the same ordered entries and payloads. See
 [Format16 writer evidence](docs/evidence/cf-format16-writer.md).
+
+CF-009 maps either container revision into the neutral ordered `StorageImage`.
+Each entry retains its exact native name/key (including dotted suffixes), raw
+logical header and address record, packed and unpacked payloads, explicit
+compression kind, source profile, and provenance. Dotted suffixes are never
+guessed into multipart parts; one CF TOC record is one single-part storage
+entry, and duplicate native names fail before payload decoding. A typed opaque
+CF attribute also preserves absent-data sentinel state separately from an
+explicit empty payload. The archive wrapper retains revision, base offset,
+preamble, file header, page/storage words, and exposes deterministic lookup for
+`root`, `version`, `versions`, and object keys. See
+[CF archive mapping evidence](docs/evidence/cf-storage-image.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -253,11 +265,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 9/15 | 60.0% |
+| Phase 3 CF | 10/15 | 66.7% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **44/56** | **78.6%** |
+| **Overall** | **45/56** | **80.4%** |
 
 ## Export Compatibility Status
 
