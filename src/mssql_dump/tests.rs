@@ -4147,6 +4147,51 @@ fn resolves_form_server_state_type_ids_through_dcs_metadata_index() {
 }
 
 #[test]
+fn normalizes_form_server_state_conditional_appearance_qnames() {
+    let xml = concat!(
+        r#"<UniversalListServerOnlyState "#,
+        r#"xmlns:core="http://v8.1c.ru/8.1/data-composition-system/core" "#,
+        r#"xmlns:settings="http://v8.1c.ru/8.1/data-composition-system/settings" "#,
+        r#"xmlns:ui="http://v8.1c.ru/8.1/data/ui" "#,
+        r#"xmlns:webColor="http://v8.1c.ru/8.1/data/ui/colors/web" "#,
+        r#"xmlns:foreign="urn:foreign" "#,
+        r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">"#,
+        "<foreign:conditionalAppearance><foreign:value>untouched</foreign:value>",
+        "</foreign:conditionalAppearance>",
+        "<ListSettings><settings:conditionalAppearance><settings:item>",
+        "<settings:selection/><settings:appearance>",
+        r#"<core:item xsi:type="settings:SettingsParameterValue">"#,
+        "<core:parameter>ЦветТекста</core:parameter>",
+        r#"<core:value xsi:type="ui:Color">webColor:FireBrick</core:value>"#,
+        "</core:item></settings:appearance></settings:item>",
+        "</settings:conditionalAppearance></ListSettings>",
+        "</UniversalListServerOnlyState>",
+    );
+
+    let inner = extract_form_server_state_inner_xml(xml).expect("server state inner xml");
+
+    assert!(
+        inner.contains(r#"<dcscor:item xsi:type="dcsset:SettingsParameterValue">"#),
+        "{inner}"
+    );
+    assert!(
+        inner.contains("<dcscor:parameter>ЦветТекста</dcscor:parameter>"),
+        "{inner}"
+    );
+    assert!(
+        inner.contains(r#"<dcscor:value xsi:type="v8ui:Color">web:FireBrick</dcscor:value>"#),
+        "{inner}"
+    );
+    assert!(!inner.contains("webColor:"), "{inner}");
+    assert!(
+        inner.contains(
+            "<foreign:conditionalAppearance><foreign:value>untouched</foreign:value></foreign:conditionalAppearance>"
+        ),
+        "{inner}"
+    );
+}
+
+#[test]
 fn normalizes_form_server_state_core_type_qnames_idempotently() {
     let native = concat!(
         "<dcssch:valueType><Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>",

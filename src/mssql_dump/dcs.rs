@@ -962,6 +962,135 @@ fn canonicalize_data_composition_settings_document(
     Some(indent_data_composition_settings(&settings))
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(crate) struct CanonicalFormServerStateFragment {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) xml: String,
+}
+
+pub(crate) fn canonicalize_form_server_state_conditional_appearances(
+    document: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<CanonicalFormServerStateFragment>> {
+    let mut reader = NsReader::from_str(document);
+    reader.config_mut().trim_text(false);
+    let mode = DataCompositionDocumentMode::FormServerStateFragment;
+    let mut writer = DataCompositionXmlWriter::new(object_refs);
+    let mut capture_depth = 0usize;
+    let mut capture_start = None::<usize>;
+    let mut captures = Vec::new();
+    loop {
+        let event_start = usize::try_from(reader.buffer_position()).ok()?;
+        let event = reader.read_event().ok()?;
+        let event_end = usize::try_from(reader.buffer_position()).ok()?;
+        match event {
+            Event::Start(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                if capture_depth == 0
+                    && !(namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
+                        && local.as_ref() == b"conditionalAppearance")
+                {
+                    continue;
+                }
+                if capture_depth == 0 {
+                    capture_start = Some(event_start);
+                }
+                let written_start = writer.write_start_tag(
+                    &reader,
+                    &event,
+                    namespace_ref(&namespace),
+                    local.as_ref(),
+                    false,
+                    &mode,
+                )?;
+                writer.element_stack.push(data_composition_element_frame(
+                    &reader,
+                    &event,
+                    namespace_ref(&namespace),
+                    local.as_ref(),
+                    written_start,
+                )?);
+                capture_depth = capture_depth.checked_add(1)?;
+            }
+            Event::Empty(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let starts_capture = capture_depth == 0
+                    && namespace_ref(&namespace) == Some(DCS_SETTINGS_NS)
+                    && local.as_ref() == b"conditionalAppearance";
+                if capture_depth > 0 || starts_capture {
+                    writer.write_start_tag(
+                        &reader,
+                        &event,
+                        namespace_ref(&namespace),
+                        local.as_ref(),
+                        true,
+                        &mode,
+                    )?;
+                    if starts_capture {
+                        captures.push(CanonicalFormServerStateFragment {
+                            start: event_start,
+                            end: event_end,
+                            xml: std::mem::take(&mut writer.output),
+                        });
+                    }
+                }
+            }
+            Event::End(event) => {
+                if capture_depth == 0 {
+                    continue;
+                }
+                let (namespace, local) = reader.resolve_element(event.name());
+                let frame = writer.element_stack.pop()?;
+                if frame.namespace.as_deref() != namespace_ref(&namespace)
+                    || frame.local.as_slice() != local.as_ref()
+                {
+                    return None;
+                }
+                writer.output.push_str("</");
+                writer.output.push_str(&frame.rendered_name);
+                writer.output.push('>');
+                capture_depth = capture_depth.checked_sub(1)?;
+                if capture_depth == 0 {
+                    captures.push(CanonicalFormServerStateFragment {
+                        start: capture_start.take()?,
+                        end: event_end,
+                        xml: std::mem::take(&mut writer.output),
+                    });
+                }
+            }
+            Event::Text(event) if capture_depth > 0 => {
+                writer.write_text(&reader, &event, &mode)?;
+            }
+            Event::CData(event) if capture_depth > 0 => {
+                writer.output.push_str("<![CDATA[");
+                writer
+                    .output
+                    .push_str(std::str::from_utf8(event.as_ref()).ok()?);
+                writer.output.push_str("]]>");
+            }
+            Event::Comment(event) if capture_depth > 0 => {
+                writer.output.push_str("<!--");
+                writer
+                    .output
+                    .push_str(std::str::from_utf8(event.as_ref()).ok()?);
+                writer.output.push_str("-->");
+            }
+            Event::GeneralRef(event) if capture_depth > 0 => {
+                writer.output.push('&');
+                writer
+                    .output
+                    .push_str(std::str::from_utf8(event.as_ref()).ok()?);
+                writer.output.push(';');
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    (capture_depth == 0 && capture_start.is_none() && writer.element_stack.is_empty())
+        .then_some(captures)
+}
+
 fn insert_data_composition_settings(xml: &mut String, settings: &[String]) -> Option<()> {
     let offsets = direct_settings_variant_offsets(xml)?;
     if offsets.len() != settings.len() {
@@ -1078,6 +1207,7 @@ fn indent_data_composition_settings(settings: &str) -> String {
 enum DataCompositionDocumentMode {
     Schema,
     Settings,
+    FormServerStateFragment,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1485,20 +1615,32 @@ impl<'a> DataCompositionXmlWriter<'a> {
                     .as_ref()
                     .is_some_and(|(namespace, _)| namespace.as_slice() == STYLE_NS);
             let qualified_canonical_value = (in_area_template || qualified_schema_style)
-                .then_some(qualified_value)
+                .then_some(qualified_value.clone())
                 .flatten();
+            let qualified_form_value =
+                (*mode == DataCompositionDocumentMode::FormServerStateFragment)
+                    .then_some(qualified_value)
+                    .flatten()
+                    .filter(|(namespace, _)| {
+                        canonical_form_data_ui_value_prefix(namespace).is_some()
+                    });
             if let Some((namespace, local)) = resolved_style_name
                 .map(|name| (STYLE_NS.to_vec(), name))
                 .or(qualified_canonical_value)
+                .or(qualified_form_value)
             {
                 let prefix = if in_area_template {
                     Some(self.scope_prefix(8))
                 } else if qualified_schema_style {
                     Some(self.schema_style_prefix())
+                } else if *mode == DataCompositionDocumentMode::FormServerStateFragment {
+                    canonical_form_data_ui_value_prefix(&namespace).map(str::to_string)
                 } else {
                     None
                 };
-                if let Some(prefix) = &prefix {
+                if let Some(prefix) = &prefix
+                    && *mode != DataCompositionDocumentMode::FormServerStateFragment
+                {
                     let output_namespace_offset =
                         self.element_stack.last()?.output_namespace_offset;
                     let namespace = std::str::from_utf8(&namespace).ok()?;
@@ -1952,6 +2094,17 @@ fn globally_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'stati
         DATA_UI_NS => Some("v8ui"),
         XSI_NS => Some("xsi"),
         XS_NS => Some("xs"),
+        _ => None,
+    }
+}
+
+fn canonical_form_data_ui_value_prefix(namespace: &[u8]) -> Option<&'static str> {
+    match namespace {
+        DATA_UI_NS => Some("v8ui"),
+        STYLE_NS => Some("style"),
+        SYS_NS => Some("sys"),
+        WEB_NS => Some("web"),
+        WIN_NS => Some("win"),
         _ => None,
     }
 }

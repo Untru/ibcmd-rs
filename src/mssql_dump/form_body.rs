@@ -2748,8 +2748,11 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
                 list_settings.items_user_setting_id = parse_form_setting_string(window[1])
             }
             "ServerState" => {
-                server_state_xml =
-                    parse_form_server_state_xml_with_dcs_type_index(window[1], dcs_type_index)
+                server_state_xml = parse_form_server_state_xml_with_indexes(
+                    window[1],
+                    dcs_type_index,
+                    object_refs,
+                )
             }
             _ => {}
         }
@@ -3434,18 +3437,31 @@ pub(super) fn normalize_form_conditional_appearance_text_segment(
 
 #[cfg(test)]
 pub(super) fn parse_form_server_state_xml(field: &str) -> Option<String> {
-    parse_form_server_state_xml_with_dcs_type_index(field, &DcsTypeIndex::new())
+    parse_form_server_state_xml_with_indexes(
+        field,
+        &DcsTypeIndex::new(),
+        &BTreeMap::new(),
+    )
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_server_state_xml_with_dcs_type_index(
     field: &str,
     dcs_type_index: &DcsTypeIndex,
+) -> Option<String> {
+    parse_form_server_state_xml_with_indexes(field, dcs_type_index, &BTreeMap::new())
+}
+
+fn parse_form_server_state_xml_with_indexes(
+    field: &str,
+    dcs_type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let payload = parse_form_setting_string(field)?;
     let encoded = decode_base64_mime(&payload)?;
     let xml = decode_form_server_state_chunks(&encoded)?;
     let xml = String::from_utf8(xml).ok()?;
-    extract_form_server_state_inner_xml_with_dcs_type_index(&xml, dcs_type_index)
+    extract_form_server_state_inner_xml_with_indexes(&xml, dcs_type_index, object_refs)
 }
 
 pub(super) fn decode_form_server_state_chunks(encoded: &[u8]) -> Option<Vec<u8>> {
@@ -3503,17 +3519,38 @@ pub(super) fn decode_form_server_state_chunks_with_limit(
 
 #[cfg(test)]
 pub(super) fn extract_form_server_state_inner_xml(xml: &str) -> Option<String> {
-    extract_form_server_state_inner_xml_with_dcs_type_index(xml, &DcsTypeIndex::new())
+    extract_form_server_state_inner_xml_with_indexes(
+        xml,
+        &DcsTypeIndex::new(),
+        &BTreeMap::new(),
+    )
 }
 
-fn extract_form_server_state_inner_xml_with_dcs_type_index(
+fn extract_form_server_state_inner_xml_with_indexes(
     xml: &str,
     dcs_type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
     let root_start = xml.find("<UniversalListServerOnlyState")?;
     let root_open_end = xml[root_start..].find('>')? + root_start + 1;
     let root_close_start = xml.rfind("</UniversalListServerOnlyState>")?;
-    let inner = xml[root_open_end..root_close_start].trim().replace(
+    let mut inner = xml[root_open_end..root_close_start].to_string();
+    if let Some(fragments) =
+        canonicalize_form_server_state_conditional_appearances(xml, object_refs)
+    {
+        let mut canonical = inner.clone();
+        if replace_form_server_state_fragments(
+            &mut canonical,
+            root_open_end,
+            root_close_start,
+            &fragments,
+        )
+        .is_some()
+        {
+            inner = canonical;
+        }
+    }
+    let inner = inner.trim().replace(
         r#" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema""#,
         "",
     );
@@ -3585,6 +3622,32 @@ fn normalize_form_server_state_inner_xml_with_dcs_type_index(
         .replace("</DateFractions>", "</v8:DateFractions>");
     rewrite_form_server_state_type_ids(&mut normalized, dcs_type_index);
     normalized
+}
+
+fn replace_form_server_state_fragments(
+    inner: &mut String,
+    inner_start: usize,
+    inner_end: usize,
+    fragments: &[CanonicalFormServerStateFragment],
+) -> Option<()> {
+    if inner_end.checked_sub(inner_start)? != inner.len() {
+        return None;
+    }
+    let mut next_start = inner_end;
+    for fragment in fragments.iter().rev() {
+        if fragment.start < inner_start
+            || fragment.start > fragment.end
+            || fragment.end > next_start
+        {
+            return None;
+        }
+        let start = fragment.start.checked_sub(inner_start)?;
+        let end = fragment.end.checked_sub(inner_start)?;
+        inner.get(start..end)?;
+        inner.replace_range(start..end, &fragment.xml);
+        next_start = fragment.start;
+    }
+    Some(())
 }
 
 fn rewrite_form_server_state_type_ids(xml: &mut String, dcs_type_index: &DcsTypeIndex) {
