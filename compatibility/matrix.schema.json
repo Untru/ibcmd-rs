@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Untru/ibcmd-rs/compatibility/matrix.schema.json",
+  "title": "ibcmd-rs evidence-derived compatibility matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_from", "evidence", "routes"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "generated_from": { "const": "repository_evidence" },
+    "evidence": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "routes": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/route" }
+    }
+  },
+  "$defs": {
+    "openId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "path", "state"],
+      "properties": {
+        "id": { "$ref": "#/$defs/openId" },
+        "kind": { "enum": ["cargo_test", "document"] },
+        "path": { "$ref": "#/$defs/relativePath" },
+        "case": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "state": { "enum": ["green", "context"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "cargo_test" } } },
+          "then": {
+            "required": ["case"],
+            "properties": { "state": { "const": "green" } }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "document" } } },
+          "then": {
+            "properties": { "state": { "const": "context" } },
+            "not": { "required": ["case"] }
+          }
+        }
+      ]
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "operation",
+        "source_artifact",
+        "target_artifact",
+        "source_profile",
+        "target_profile",
+        "family",
+        "support",
+        "status",
+        "preservation",
+        "evidence",
+        "detail"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/openId" },
+        "operation": { "$ref": "#/$defs/openId" },
+        "source_artifact": { "$ref": "#/$defs/openId" },
+        "target_artifact": { "$ref": "#/$defs/openId" },
+        "source_profile": { "$ref": "#/$defs/openId" },
+        "target_profile": { "$ref": "#/$defs/openId" },
+        "family": { "$ref": "#/$defs/openId" },
+        "support": { "enum": ["supported", "unsupported"] },
+        "status": { "enum": ["experimental", "verified"] },
+        "preservation": { "enum": ["none", "semantic"] },
+        "evidence": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/openId" }
+        },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

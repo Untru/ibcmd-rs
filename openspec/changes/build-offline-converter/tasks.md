@@ -452,7 +452,7 @@
 
 ### APP-002 — Генерировать compatibility matrix из evidence
 
-- **Статус:** `[ ]`; **зависимости:** CORE-003, CORE-009, APP-001
+- **Статус:** `[x]`; **зависимости:** CORE-003, CORE-009, APP-001
 - **Файлы:** создать `compatibility/matrix.json`, schema и `tests/compatibility_matrix.rs`; изменить `src/compatibility.rs`
 - **Действия:** operation×artifact×source×target×family×evidence; experimental/verified status.
 - **Проверка:** verified без green evidence невозможен; unknown profile unsupported; CLI читает тот же источник истины.

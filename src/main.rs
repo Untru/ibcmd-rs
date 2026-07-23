@@ -192,7 +192,7 @@ fn main() -> Result<()> {
             }
         }
         Commands::Compatibility(args) => {
-            let report = ibcmd_rs::compatibility::current_compatibility_report();
+            let report = ibcmd_rs::compatibility::current_compatibility_report()?;
             if let Some(output) = args.output {
                 ibcmd_rs::compatibility::write_compatibility_report(&report, &output)?;
             } else {

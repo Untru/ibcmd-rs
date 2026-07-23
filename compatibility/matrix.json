@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "generated_from": "repository_evidence",
+  "evidence": [
+    {
+      "id": "doc-migration-220-221",
+      "kind": "document",
+      "path": "docs/evidence/migration-xcf-2.20-to-2.21.md",
+      "state": "context"
+    },
+    {
+      "id": "doc-migration-221-220",
+      "kind": "document",
+      "path": "docs/evidence/migration-xcf-2.21-to-2.20.md",
+      "state": "context"
+    },
+    {
+      "id": "doc-offline-conversion",
+      "kind": "document",
+      "path": "docs/evidence/offline-conversion-service.md",
+      "state": "context"
+    },
+    {
+      "id": "test-cf-repack-roundtrip",
+      "kind": "cargo_test",
+      "path": "tests/cf_roundtrip.rs",
+      "case": "both_revisions_repack_semantically_and_deterministically",
+      "state": "green"
+    },
+    {
+      "id": "test-convert-xml-cf-xml",
+      "kind": "cargo_test",
+      "path": "tests/conversion_cli.rs",
+      "case": "xml_cf_xml_roundtrip_is_offline_and_atomic",
+      "state": "green"
+    },
+    {
+      "id": "test-convert-xml-migration",
+      "kind": "cargo_test",
+      "path": "tests/conversion_cli.rs",
+      "case": "xml_migration_dry_run_completes_preflight_without_output",
+      "state": "green"
+    },
+    {
+      "id": "test-migration-220-221",
+      "kind": "cargo_test",
+      "path": "tests/migration_2_20_to_2_21.rs",
+      "case": "evidenced_upgrade_fixtures_are_zero_loss_and_target_readable",
+      "state": "green"
+    },
+    {
+      "id": "test-migration-221-220",
+      "kind": "cargo_test",
+      "path": "tests/migration_2_21_to_2_20.rs",
+      "case": "portable_xml_fixtures_are_zero_loss_and_target_readable",
+      "state": "green"
+    }
+  ],
+  "routes": [
+    {
+      "id": "convert-cf-8327-to-cf-8327-all-entries",
+      "operation": "convert",
+      "source_artifact": "cf_archive",
+      "target_artifact": "cf_archive",
+      "source_profile": "platform-8.3.27.1989",
+      "target_profile": "platform-8.3.27.1989",
+      "family": "all_entries",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-offline-conversion",
+        "test-cf-repack-roundtrip",
+        "test-convert-xml-cf-xml"
+      ],
+      "detail": "Same-profile CF repack preserves archive semantics, entry order, packed payloads, and logical headers."
+    },
+    {
+      "id": "convert-cf-8327-to-xml-220-common-module",
+      "operation": "convert",
+      "source_artifact": "cf_archive",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "platform-8.3.27.1989",
+      "target_profile": "xml-2.20",
+      "family": "CommonModule",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-offline-conversion",
+        "test-convert-xml-cf-xml"
+      ],
+      "detail": "The clean-room CommonModule fixture exports through StorageImage and reparses as XCF 2.20."
+    },
+    {
+      "id": "convert-cf-8327-to-xml-220-configuration-root",
+      "operation": "convert",
+      "source_artifact": "cf_archive",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "platform-8.3.27.1989",
+      "target_profile": "xml-2.20",
+      "family": "ConfigurationRoot",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-offline-conversion",
+        "test-convert-xml-cf-xml"
+      ],
+      "detail": "The clean-room configuration root exports to XCF 2.20 while regenerated structural CF entries remain explicit."
+    },
+    {
+      "id": "convert-xml-217-to-xml-220-catalog",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "xml-2.17",
+      "target_profile": "xml-2.20",
+      "family": "Catalog",
+      "support": "unsupported",
+      "status": "experimental",
+      "preservation": "none",
+      "evidence": [
+        "doc-offline-conversion"
+      ],
+      "detail": "No explicit xml-2.17 to xml-2.20 migration edge has green evidence."
+    },
+    {
+      "id": "convert-xml-220-to-cf-8327-common-module",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "cf_archive",
+      "source_profile": "xml-2.20",
+      "target_profile": "platform-8.3.27.1989",
+      "family": "CommonModule",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-offline-conversion",
+        "test-convert-xml-cf-xml"
+      ],
+      "detail": "The clean-room CommonModule fixture compiles into a base-free Format16 CF and survives offline export."
+    },
+    {
+      "id": "convert-xml-220-to-cf-8327-configuration-root",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "cf_archive",
+      "source_profile": "xml-2.20",
+      "target_profile": "platform-8.3.27.1989",
+      "family": "ConfigurationRoot",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-offline-conversion",
+        "test-convert-xml-cf-xml"
+      ],
+      "detail": "The clean-room configuration root compiles with generated root, version, versions, and identity entries."
+    },
+    {
+      "id": "convert-xml-220-to-xml-221-catalog",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "xml-2.20",
+      "target_profile": "xml-2.21",
+      "family": "Catalog",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-migration-220-221",
+        "test-convert-xml-migration",
+        "test-migration-220-221"
+      ],
+      "detail": "The exact upgrade edge adds only the evidenced XCF 2.21 palette representation and preserves canonical semantics."
+    },
+    {
+      "id": "convert-xml-220-to-xml-221-constant",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "xml-2.20",
+      "target_profile": "xml-2.21",
+      "family": "Constant",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-migration-220-221",
+        "test-convert-xml-migration",
+        "test-migration-220-221"
+      ],
+      "detail": "The exact upgrade edge preserves the Constant semantic digest under the XCF 2.21 adapter."
+    },
+    {
+      "id": "convert-xml-221-to-cf-851-common-module",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "cf_archive",
+      "source_profile": "xml-2.21",
+      "target_profile": "platform-8.5.1.1150",
+      "family": "CommonModule",
+      "support": "unsupported",
+      "status": "experimental",
+      "preservation": "none",
+      "evidence": [
+        "doc-offline-conversion"
+      ],
+      "detail": "The platform profile exists, but no storage layout and bootstrap fixture evidence is registered for this target."
+    },
+    {
+      "id": "convert-xml-221-to-xml-220-catalog",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "xml-2.21",
+      "target_profile": "xml-2.20",
+      "family": "Catalog",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-migration-221-220",
+        "test-migration-221-220"
+      ],
+      "detail": "The exact downgrade edge removes the evidenced palette namespace while preserving canonical Catalog semantics."
+    },
+    {
+      "id": "convert-xml-221-to-xml-220-constant",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "xml-2.21",
+      "target_profile": "xml-2.20",
+      "family": "Constant",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-migration-221-220",
+        "test-migration-221-220"
+      ],
+      "detail": "The exact downgrade edge preserves the Constant semantic digest under the XCF 2.20 adapter."
+    }
+  ]
+}

@@ -80,14 +80,19 @@ fn scans_minimal_source_tree_without_external_tools() {
 }
 
 #[test]
-fn compatibility_report_exposes_platform_free_scan() {
-    let report = current_compatibility_report();
+fn compatibility_report_exposes_platform_free_conversion() {
+    let report = current_compatibility_report().unwrap();
 
     assert!(
         report
-            .supported_operations
+            .routes
             .iter()
-            .any(|operation| operation.name == "scan")
+            .any(|route| route.operation == "convert")
     );
-    assert!(report.supported_source_families.contains(&"CommonModules"));
+    assert!(
+        report
+            .routes
+            .iter()
+            .any(|route| route.family == "CommonModule")
+    );
 }

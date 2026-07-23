@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=53 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=54 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 53 of 56 accepted leaf issues in the
+As of 2026-07-23, 54 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (94.6%). Live workflow statuses are tracked in
+are complete (96.4%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -394,6 +394,16 @@ exact regenerated structural records `root`, `version`, and `versions`, while
 any other opaque record blocks publication. See the
 [offline conversion service evidence](docs/evidence/offline-conversion-service.md).
 
+APP-002 makes `compatibility/matrix.json` the evidence-derived source of truth
+for standalone routes. Each record keeps operation, source/target artifact,
+exact source/target profile, family, preservation claim, and repository
+evidence as separate coordinates. `verified` is rejected unless the supported
+route references a green Cargo test; unknown profiles and routes missing from
+the matrix return `unsupported` without version inference. The CLI embeds,
+validates, and prints that same versioned document, whose public structural
+contract is `compatibility/matrix.schema.json`. See the
+[compatibility matrix evidence](docs/evidence/compatibility-matrix.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
@@ -402,8 +412,8 @@ any other opaque record blocks publication. See the
 | Phase 3 CF | 15/15 | 100% |
 | Phase 4 bootstrap | 13/13 | 100% |
 | Phase 5a migrations | 4/4 | 100% |
-| Phase 5b app/release | 1/4 | 25% |
-| **Overall** | **53/56** | **94.6%** |
+| Phase 5b app/release | 2/4 | 50% |
+| **Overall** | **54/56** | **96.4%** |
 
 ## Export Compatibility Status
 
@@ -890,5 +900,6 @@ cargo run -- mssql-storage-export --database import_only_db -o storage-bundle --
    platform version.
 15. Writer hardening: keep destructive staging behind explicit confirmation
    flags and add more safety gates before non-lab use.
-16. Compatibility matrix: platform build, DBMS, compatibility mode, configuration
-   type and supported operation set.
+16. Compatibility matrix: standalone conversion routes are now derived from
+   exact profile/family test evidence; live DBMS research remains a separate
+   platform-oracle concern.
