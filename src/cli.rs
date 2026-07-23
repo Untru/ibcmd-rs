@@ -197,6 +197,8 @@ pub enum CfCommands {
     Inspect(CfInspectArgs),
     /// Verify CF structure, selected payloads, and optional SHA-256 expectations.
     Verify(CfVerifyArgs),
+    /// Export recognized CF storage records to hierarchical XML sources offline.
+    Export(CfExportArgs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -241,6 +243,26 @@ pub struct CfVerifyArgs {
     /// Require the selected element's unpacked SHA-256 (`NAME=64-lowercase-hex`).
     #[arg(long = "expect-sha256", value_name = "NAME=SHA256")]
     pub expected_sha256: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CfExportArgs {
+    /// CF archive to export.
+    pub input: PathBuf,
+    /// Output directory for hierarchical XML sources.
+    pub output_dir: PathBuf,
+    /// Stable source-storage profile recorded in the JSON report.
+    #[arg(long, default_value = "storage:cf-cli")]
+    pub profile: String,
+    /// Explicit payload representation; payload bytes are never guessed.
+    #[arg(long, value_enum, default_value_t = CfCompression::RawDeflate)]
+    pub compression: CfCompression,
+    /// Target source XML dialect.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    /// Replace files under the output directory.
+    #[arg(long, alias = "force")]
+    pub overwrite: bool,
 }
 
 #[derive(Debug, Args)]

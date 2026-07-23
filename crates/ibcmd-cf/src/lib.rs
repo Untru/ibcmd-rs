@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod archive;
+pub mod export;
 pub mod payload;
 pub mod preamble;
 pub mod tree;

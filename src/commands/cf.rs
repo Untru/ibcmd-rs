@@ -12,15 +12,25 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use ibcmd_cf::payload::{PayloadDecoder, PayloadEncoding};
-use ibcmd_core::{artifact::StorageProfileId, limits::ResourceLimits, storage::Sha256Digest};
+use ibcmd_cf::{
+    archive::decode_archive_uniform,
+    payload::{PayloadDecoder, PayloadEncoding},
+};
+use ibcmd_core::{
+    artifact::StorageProfileId,
+    limits::ResourceLimits,
+    storage::{Sha256Digest, StorageProvenance},
+};
 use ibcmd_v8::{
     format::Revision,
     reader::{ContainerIndex, EntryIndex, StreamingReader},
 };
 use serde::Serialize;
 
-use crate::cli::{CfArgs, CfCommands, CfCompression, CfInspectArgs, CfVerifyArgs};
+use crate::{
+    cli::{CfArgs, CfCommands, CfCompression, CfExportArgs, CfInspectArgs, CfVerifyArgs},
+    mssql_dump::{self, StorageImageSourceExportReport},
+};
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
 
@@ -37,6 +47,45 @@ pub struct CfReport {
     pub selection: Option<CfSelectionReport>,
     pub elements: Vec<CfElementReport>,
     pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CfExportReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub input: String,
+    pub output_dir: String,
+    pub source_version: &'static str,
+    pub profile: CfProfileReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export: Option<StorageImageSourceExportReport>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum CfCommandReport {
+    Archive(CfReport),
+    Export(CfExportReport),
+}
+
+impl CfCommandReport {
+    #[must_use]
+    pub const fn ok(&self) -> bool {
+        match self {
+            Self::Archive(report) => report.ok,
+            Self::Export(report) => report.ok,
+        }
+    }
+
+    #[must_use]
+    pub fn errors(&self) -> &[CfDiagnostic] {
+        match self {
+            Self::Archive(report) => &report.errors,
+            Self::Export(report) => &report.errors,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -103,19 +152,19 @@ pub struct CfDiagnostic {
 
 #[derive(Debug)]
 pub struct CfCommandError {
-    report: Box<CfReport>,
+    report: Box<CfCommandReport>,
 }
 
 impl CfCommandError {
     #[must_use]
-    pub const fn report(&self) -> &CfReport {
+    pub const fn report(&self) -> &CfCommandReport {
         &self.report
     }
 }
 
 impl fmt::Display for CfCommandError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.report.errors.first() {
+        match self.report.errors().first() {
             Some(error) => formatter.write_str(&error.message),
             None => formatter.write_str("CF command failed"),
         }
@@ -136,12 +185,107 @@ struct RunOptions {
 }
 
 /// Executes one offline CF command and returns a stable JSON-serializable report.
-pub fn run(args: CfArgs) -> Result<CfReport, CfCommandError> {
-    let options = match args.command {
-        CfCommands::Inspect(args) => inspect_options(args),
-        CfCommands::Verify(args) => verify_options(args),
+pub fn run(args: CfArgs) -> Result<CfCommandReport, CfCommandError> {
+    match args.command {
+        CfCommands::Inspect(args) => execute(inspect_options(args)).map(CfCommandReport::Archive),
+        CfCommands::Verify(args) => execute(verify_options(args)).map(CfCommandReport::Archive),
+        CfCommands::Export(args) => export(args),
+    }
+}
+
+fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
+    let profile = profile_report_values(&args.profile, args.compression);
+    let source_profile = StorageProfileId::parse(&args.profile).map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "invalid_profile",
+            format!("invalid storage profile `{}`: {source}", args.profile),
+        )
+    })?;
+    let source = File::open(&args.input).map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "open_failed",
+            format!("failed to open `{}`: {source}", args.input.display()),
+        )
+    })?;
+    let provenance = StorageProvenance::new("offline CF CLI export")
+        .expect("static CF export provenance is valid");
+    let archive = decode_archive_uniform(
+        source,
+        ResourceLimits::default(),
+        source_profile,
+        provenance,
+        payload_encoding(args.compression),
+    )
+    .map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "invalid_archive",
+            format!("failed to decode CF archive: {source}"),
+        )
+    })?;
+    let export = mssql_dump::export_storage_image_to_source(
+        archive.image(),
+        &args.output_dir,
+        args.overwrite,
+        args.source_version,
+    )
+    .map_err(|source| {
+        export_failure(
+            &args,
+            profile.clone(),
+            "export_failed",
+            format!("failed to export CF storage image: {source:#}"),
+        )
+    })?;
+
+    let failed = export.storage.failed;
+    let mut report = CfExportReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "export",
+        ok: failed == 0,
+        input: display_path(&args.input),
+        output_dir: display_path(&args.output_dir),
+        source_version: args.source_version.as_str(),
+        profile,
+        export: Some(export),
+        errors: Vec::new(),
     };
-    execute(options)
+    if failed > 0 {
+        report.errors.push(diagnostic(
+            "entry_export_failed",
+            format!("{failed} CF storage entries could not be exported"),
+        ));
+        return Err(CfCommandError {
+            report: Box::new(CfCommandReport::Export(report)),
+        });
+    }
+    Ok(CfCommandReport::Export(report))
+}
+
+fn export_failure(
+    args: &CfExportArgs,
+    profile: CfProfileReport,
+    code: &'static str,
+    message: String,
+) -> CfCommandError {
+    CfCommandError {
+        report: Box::new(CfCommandReport::Export(CfExportReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "export",
+            ok: false,
+            input: display_path(&args.input),
+            output_dir: display_path(&args.output_dir),
+            source_version: args.source_version.as_str(),
+            profile,
+            export: None,
+            errors: vec![diagnostic(code, message)],
+        })),
+    }
 }
 
 fn inspect_options(args: CfInspectArgs) -> RunOptions {
@@ -539,9 +683,13 @@ fn encoding_name(encoding: PayloadEncoding) -> &'static str {
 }
 
 fn profile_report(options: &RunOptions) -> CfProfileReport {
+    profile_report_values(&options.profile, options.compression)
+}
+
+fn profile_report_values(profile: &str, compression: CfCompression) -> CfProfileReport {
     CfProfileReport {
-        id: options.profile.clone(),
-        compression: encoding_name(payload_encoding(options.compression)),
+        id: profile.to_owned(),
+        compression: encoding_name(payload_encoding(compression)),
         compression_source: "explicit_cli_contract",
     }
 }
@@ -576,7 +724,7 @@ fn failure_many(
     errors: Vec<CfDiagnostic>,
 ) -> CfCommandError {
     CfCommandError {
-        report: Box::new(CfReport {
+        report: Box::new(CfCommandReport::Archive(CfReport {
             schema_version: REPORT_SCHEMA_VERSION,
             command: options.command,
             ok: false,
@@ -586,7 +734,7 @@ fn failure_many(
             selection,
             elements,
             errors,
-        }),
+        })),
     }
 }
 
@@ -651,6 +799,20 @@ mod tests {
         )
     }
 
+    fn archive_report(report: CfCommandReport) -> CfReport {
+        match report {
+            CfCommandReport::Archive(report) => report,
+            CfCommandReport::Export(_) => panic!("expected archive command report"),
+        }
+    }
+
+    fn archive_error(report: &CfCommandReport) -> &CfReport {
+        match report {
+            CfCommandReport::Archive(report) => report,
+            CfCommandReport::Export(_) => panic!("expected archive command error"),
+        }
+    }
+
     #[test]
     fn inspect_reports_layout_and_verified_payloads() {
         let (archive, _) = archive();
@@ -663,6 +825,7 @@ mod tests {
             }),
         })
         .unwrap();
+        let report = archive_report(report);
         assert!(report.ok);
         assert_eq!(report.layout.unwrap().revision, "format15");
         assert_eq!(report.elements.len(), 2);
@@ -684,6 +847,7 @@ mod tests {
             }),
         })
         .unwrap();
+        let report = archive_report(report);
         assert!(report.ok);
         assert_eq!(report.elements.len(), 1);
         assert_eq!(report.elements[0].name, "root");
@@ -703,8 +867,9 @@ mod tests {
             }),
         })
         .unwrap_err();
-        assert!(!error.report().ok);
-        assert_eq!(error.report().errors[0].code, "digest_mismatch");
+        let report = archive_error(error.report());
+        assert!(!report.ok);
+        assert_eq!(report.errors[0].code, "digest_mismatch");
     }
 
     #[test]
@@ -729,6 +894,7 @@ mod tests {
             }),
         })
         .unwrap();
+        let report = archive_report(report);
         assert!(report.ok);
         assert!(!report.elements[0].payload_verified);
         assert!(report.elements[0].unpacked_sha256.is_none());

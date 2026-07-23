@@ -8,3 +8,4 @@ publish = false
 flate2 = "1.1"
 ibcmd-core = { path = "../ibcmd-core" }
 ibcmd-v8 = { path = "../ibcmd-v8" }
+serde = { version = "1.0", features = ["derive"] }

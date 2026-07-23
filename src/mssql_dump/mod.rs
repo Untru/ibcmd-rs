@@ -7,15 +7,18 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
+use ibcmd_cf::export::{StorageExportEntryReport, StorageExportPlan, StorageExportReport};
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::diagnostic::ObjectPath;
 use ibcmd_core::family::FamilyId;
+use ibcmd_core::storage::StorageImage;
 use ibcmd_xml::{XmlReader, bundled_metadata_registry};
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, Reader};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use walkdir::WalkDir;
 
 use crate::adapters::mssql_legacy::MssqlLegacyAdapter;
 use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
@@ -219,6 +222,15 @@ pub struct MssqlDumpedTableReport {
     pub timings: MssqlDumpTimingReport,
 }
 
+/// Result of applying the existing source-family decoders to a neutral image.
+#[derive(Debug, Serialize)]
+pub struct StorageImageSourceExportReport {
+    pub output_dir: PathBuf,
+    pub source_version: String,
+    pub files_written: usize,
+    pub storage: StorageExportReport,
+}
+
 #[derive(Debug, Serialize)]
 struct MssqlDumpManifest {
     database: String,
@@ -334,6 +346,123 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     })
 }
 
+/// Exports a provider-neutral storage image through the same family decoders
+/// used by the direct MSSQL path. The input contains no SQL connection or
+/// process assumptions; callers may obtain it from CF or another adapter.
+pub fn export_storage_image_to_source(
+    image: &StorageImage,
+    output_dir: &Path,
+    overwrite: bool,
+    source_version: InfobaseConfigSourceVersion,
+) -> Result<StorageImageSourceExportReport> {
+    let plan = StorageExportPlan::from_image(image);
+    let mut rows = Vec::with_capacity(plan.records().len());
+    let mut decoder_names = BTreeSet::new();
+    for record in plan.records() {
+        if !decoder_names.insert(record.logical_name()) {
+            bail!(
+                "storage records with distinct keys reuse decoder name `{}`",
+                record.logical_name()
+            );
+        }
+        let payload = record.packed_payload().with_context(|| {
+            format!(
+                "failed to materialize storage record `{}`",
+                record.logical_key()
+            )
+        })?;
+        let data_size = i64::try_from(payload.len()).with_context(|| {
+            format!(
+                "storage record `{}` is too large for the legacy row boundary",
+                record.logical_key()
+            )
+        })?;
+        rows.push(ConfigRow {
+            file_name: record.logical_name().to_owned(),
+            part_no: 0,
+            data_size,
+            binary_hex: encode_hex_lower(payload.as_ref()),
+        });
+    }
+
+    prepare_output_dir(output_dir, overwrite)?;
+    let dumped = dump_table_rows_with_options_mode(
+        output_dir,
+        "Config",
+        rows,
+        false,
+        false,
+        true,
+        true,
+        source_version,
+        true,
+    )?;
+    let successful = dumped
+        .rows
+        .into_iter()
+        .map(|manifest| (manifest.file_name.clone(), manifest))
+        .collect::<BTreeMap<_, _>>();
+    let failed = dumped
+        .failed_rows
+        .into_iter()
+        .map(|failure| (failure.file_name, failure.message))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut entries = Vec::with_capacity(plan.records().len());
+    for record in plan.records() {
+        let packed_bytes = record.packed_bytes().with_context(|| {
+            format!(
+                "failed to measure storage record `{}`",
+                record.logical_key()
+            )
+        })?;
+        if let Some(message) = failed.get(record.logical_name()) {
+            entries.push(StorageExportEntryReport::failed(
+                record,
+                packed_bytes,
+                message.clone(),
+            ));
+            continue;
+        }
+
+        let outputs = successful
+            .get(record.logical_name())
+            .into_iter()
+            .flat_map(|manifest| {
+                [
+                    manifest.metadata_xml_path.as_ref(),
+                    manifest.module_text_path.as_ref(),
+                    manifest.source_asset_path.as_ref(),
+                ]
+            })
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        if outputs.is_empty() {
+            entries.push(StorageExportEntryReport::opaque(
+                record,
+                packed_bytes,
+                "no legacy family decoder recognized this storage entry",
+            ));
+        } else {
+            entries.push(StorageExportEntryReport::supported(
+                record,
+                packed_bytes,
+                outputs,
+            ));
+        }
+    }
+
+    let files_written = count_output_files(output_dir)?;
+
+    Ok(StorageImageSourceExportReport {
+        output_dir: output_dir.to_path_buf(),
+        source_version: source_version.as_str().to_owned(),
+        files_written,
+        storage: StorageExportReport::new(image, &plan, entries),
+    })
+}
+
 #[allow(dead_code)]
 fn dump_table_rows_eager(
     sqlcmd: &Path,
@@ -372,12 +501,18 @@ fn dump_table_rows_eager(
 
 struct DumpedTable {
     rows: Vec<MssqlDumpRowManifest>,
+    failed_rows: Vec<FailedDumpRow>,
     binary_bytes: usize,
     inflated_rows: usize,
     module_text_rows: usize,
     metadata_xml_rows: usize,
     source_asset_rows: usize,
     timings: MssqlDumpTimingReport,
+}
+
+struct FailedDumpRow {
+    file_name: String,
+    message: String,
 }
 
 struct DumpedRow {
@@ -479,6 +614,31 @@ fn dump_table_rows_with_options(
     extract_module_text: bool,
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
+) -> Result<DumpedTable> {
+    dump_table_rows_with_options_mode(
+        output_dir,
+        table,
+        rows,
+        write_binary_rows,
+        inflate,
+        extract_module_text,
+        extract_metadata_xml,
+        source_version,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dump_table_rows_with_options_mode(
+    output_dir: &Path,
+    table: &str,
+    rows: Vec<ConfigRow>,
+    write_binary_rows: bool,
+    inflate: bool,
+    extract_module_text: bool,
+    extract_metadata_xml: bool,
+    source_version: InfobaseConfigSourceVersion,
+    continue_on_row_error: bool,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
     if write_binary_rows {
@@ -750,8 +910,19 @@ fn dump_table_rows_with_options(
     let mut module_text_rows = 0;
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
-    for dumped in dumped_rows {
-        let dumped = dumped?;
+    let mut failed_rows = Vec::new();
+    for (row, dumped) in rows.iter().zip(dumped_rows) {
+        let dumped = match dumped {
+            Ok(dumped) => dumped,
+            Err(error) if continue_on_row_error => {
+                failed_rows.push(FailedDumpRow {
+                    file_name: row.file_name.clone(),
+                    message: format!("{error:#}"),
+                });
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         binary_bytes += dumped.binary_bytes;
         inflated_rows += dumped.inflated_rows;
         module_text_rows += dumped.module_text_rows;
@@ -762,6 +933,7 @@ fn dump_table_rows_with_options(
 
     Ok(DumpedTable {
         rows: manifests,
+        failed_rows,
         binary_bytes,
         inflated_rows,
         module_text_rows,
@@ -1707,6 +1879,7 @@ fn dump_table_rows_streamed(
 
     Ok(DumpedTable {
         rows: manifests,
+        failed_rows: Vec::new(),
         binary_bytes,
         inflated_rows,
         module_text_rows,
@@ -30105,6 +30278,15 @@ fn prepare_output_dir(path: &Path, overwrite: bool) -> Result<()> {
         fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))?;
     }
     Ok(())
+}
+
+fn count_output_files(path: &Path) -> Result<usize> {
+    WalkDir::new(path)
+        .into_iter()
+        .try_fold(0_usize, |count, entry| {
+            let entry = entry.with_context(|| format!("failed to walk {}", path.display()))?;
+            Ok(count + usize::from(entry.file_type().is_file()))
+        })
 }
 
 fn clear_directory(path: &Path) -> Result<()> {
