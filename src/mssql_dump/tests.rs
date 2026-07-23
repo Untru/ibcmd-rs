@@ -20551,11 +20551,36 @@ fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source
             },
         ],
         Some(1),
+        true,
     );
 
     assert_eq!(header_footer_format_index, Some(19));
-    assert_eq!(column_sets[0].default_format_index, Some(19));
+    assert_eq!(column_sets[0].default_format_index, None);
     assert_eq!(column_sets[1].default_format_index, Some(19));
+
+    for column_set in &mut column_sets {
+        column_set.default_format_index = None;
+    }
+    let header_footer_format_index = resolve_sparse_moxel_column_set_default_format_index(
+        &mut column_sets,
+        18,
+        &[
+            MoxelFormat::default(),
+            MoxelFormat {
+                width: Some(24),
+                ..MoxelFormat::default()
+            },
+        ],
+        Some(1),
+        false,
+    );
+
+    assert_eq!(header_footer_format_index, Some(19));
+    assert!(
+        column_sets
+            .iter()
+            .all(|column_set| column_set.default_format_index.is_none())
+    );
 }
 
 #[test]
@@ -20587,10 +20612,113 @@ fn formats_moxel_single_column_set_prefers_explicit_header_footer_source_ref() {
             },
         ],
         Some(1),
+        true,
     );
 
     assert_eq!(header_footer_format_index, Some(3));
     assert_eq!(column_sets[0].default_format_index, None);
+}
+
+#[test]
+fn formats_moxel_sparse_body_refs_skip_reserved_source_slots() {
+    let mut rows = vec![MoxelRow {
+        index: 0,
+        index_to: None,
+        format_index: 99,
+        source_format_index: Some(4),
+        columns_id: None,
+        cells: vec![MoxelCell {
+            column_index: 0,
+            format_index: 99,
+            source_format_index: Some(5),
+            text: None,
+            parameter: None,
+            detail_parameter: None,
+            note: None,
+            empty_text: true,
+        }],
+    }];
+    let source_column_format_refs = [10, 11];
+    let source_body_offset =
+        moxel_sparse_body_source_format_offset(&rows, &source_column_format_refs);
+
+    assert_eq!(source_body_offset, 2);
+    remap_moxel_row_and_cell_sparse_internal_format_indices(
+        &mut rows,
+        &source_column_format_refs,
+        2,
+        5,
+        source_body_offset,
+    );
+
+    assert_eq!(rows[0].format_index, 3);
+    assert_eq!(rows[0].cells[0].format_index, 4);
+}
+
+#[test]
+fn formats_moxel_sparse_font_order_skips_reserved_body_formats() {
+    assert_eq!(
+        moxel_sparse_source_font_format_indices(2, 7, 2),
+        Some(vec![5, 6, 7, 3, 4, 1, 2])
+    );
+    assert_eq!(moxel_sparse_source_font_format_indices(2, 3, 2), None);
+}
+
+#[test]
+fn formats_moxel_explicit_sparse_column_offset_preserves_internal_order() {
+    let spreadsheet = MoxelSpreadsheet {
+        column_count: 2,
+        column_sets: vec![MoxelColumnSet {
+            id: None,
+            default_format_index: Some(3),
+            source_default_format_index: None,
+            size: 2,
+            columns: vec![
+                MoxelColumn {
+                    index: 0,
+                    format_index: 1,
+                    source_format_index: Some(4),
+                },
+                MoxelColumn {
+                    index: 1,
+                    format_index: 2,
+                    source_format_index: Some(3),
+                },
+            ],
+        }],
+        column_formats: vec![MoxelFormat::default(), MoxelFormat::default()],
+        extra_formats: BTreeMap::new(),
+        default_format_width: None,
+        default_format: MoxelFormat::default(),
+        formats: vec![MoxelFormat::default(), MoxelFormat::default()],
+        rows: Vec::new(),
+        vertical_groups: Vec::new(),
+        merges: Vec::new(),
+        horizontal_unmerges: Vec::new(),
+        vertical_unmerges: Vec::new(),
+        named_items: Vec::new(),
+        areas: Vec::new(),
+        print_area: None,
+        print_settings: None,
+        lines: Vec::new(),
+        fonts: Vec::new(),
+        drawings: Vec::new(),
+        pictures: Vec::new(),
+        empty_headers_footers: false,
+        header_footer_format_index: Some(3),
+        default_format_index: Some(5),
+        source_format_map: None,
+        height: 1,
+    };
+
+    assert_eq!(
+        moxel_sparse_source_output_order(&spreadsheet),
+        Some(vec![3, 1, 2, 4, 5])
+    );
+    assert_eq!(
+        moxel_output_format_indices(&spreadsheet),
+        vec![1, 2, 3, 4, 5]
+    );
 }
 
 #[test]

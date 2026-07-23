@@ -118,7 +118,7 @@ struct MoxelSourceFontMap {
 }
 
 impl MoxelSourceFontMap {
-    fn try_new(spreadsheet: &MoxelSpreadsheet) -> Option<Self> {
+    fn try_new(spreadsheet: &MoxelSpreadsheet, source_body_offset: usize) -> Option<Self> {
         let font_count = spreadsheet.fonts.len();
         if font_count < 2
             || !spreadsheet.fonts.iter().all(|font| {
@@ -134,7 +134,16 @@ impl MoxelSourceFontMap {
 
         let mut seen = vec![false; font_count];
         let mut output_to_source = Vec::with_capacity(font_count);
-        for source_font_index in moxel_output_format_indices(spreadsheet)
+        let format_indices = if source_body_offset > 0 {
+            moxel_sparse_source_font_format_indices(
+                spreadsheet.column_formats.len(),
+                moxel_output_format_count(spreadsheet),
+                source_body_offset,
+            )?
+        } else {
+            moxel_output_format_indices(spreadsheet)
+        };
+        for source_font_index in format_indices
             .into_iter()
             .filter_map(|format_index| moxel_format_for_index(spreadsheet, format_index).font)
         {
@@ -676,8 +685,13 @@ pub(super) fn parse_moxel_spreadsheet_text(
         &vertical_unmerges,
     );
     compact_moxel_empty_row_ranges(&mut rows);
-    let (column_sets, row_column_ids, declared_sheet_height, source_column_format_order) =
-        parse_moxel_column_sets_with_source_format_order(&fields);
+    let (
+        column_sets,
+        row_column_ids,
+        declared_sheet_height,
+        source_column_format_order,
+        has_explicit_sparse_column_set_default,
+    ) = parse_moxel_column_sets_with_source_format_order(&fields);
     let fonts = parse_moxel_fonts(&fields);
     let pictures = parse_moxel_pictures(&fields, object_refs);
     let style_refs = parse_moxel_style_refs(&fields, object_refs);
@@ -765,6 +779,11 @@ pub(super) fn parse_moxel_spreadsheet_text(
         &default_format,
         default_format_width,
     );
+    let sparse_body_source_offset = if sparse_source_format_refs {
+        moxel_sparse_body_source_format_offset(&rows, &source_column_format_refs)
+    } else {
+        0
+    };
     if sparse_source_format_refs
         && has_high_source_column_format_refs
         && source_column_format_refs.len() > 1
@@ -869,6 +888,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
                     &source_column_format_refs,
                     column_formats.len(),
                     formats.len(),
+                    sparse_body_source_offset,
                 );
             }
         } else if column_formats.len() > source_column_format_refs.len()
@@ -909,6 +929,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
             column_formats.len(),
             &formats,
             header_footer_format_ref,
+            has_explicit_sparse_column_set_default,
         )
     } else {
         None
@@ -1047,7 +1068,8 @@ pub(super) fn parse_moxel_spreadsheet_text(
         height,
     };
     if sparse_source_format_refs
-        && let Some(source_font_map) = MoxelSourceFontMap::try_new(&spreadsheet)
+        && let Some(source_font_map) =
+            MoxelSourceFontMap::try_new(&spreadsheet, sparse_body_source_offset)
     {
         remap_moxel_source_fonts(&source_font_map, &mut spreadsheet);
     }
@@ -1109,7 +1131,7 @@ pub(super) fn default_moxel_column_sets(column_count: usize) -> Vec<MoxelColumnS
 pub(super) fn parse_moxel_column_sets(
     fields: &[&str],
 ) -> (Vec<MoxelColumnSet>, BTreeMap<usize, String>, Option<usize>) {
-    let (column_sets, row_column_ids, declared_sheet_height, _) =
+    let (column_sets, row_column_ids, declared_sheet_height, _, _) =
         parse_moxel_column_sets_with_source_format_order(fields);
     (column_sets, row_column_ids, declared_sheet_height)
 }
@@ -1121,6 +1143,7 @@ fn parse_moxel_column_sets_with_source_format_order(
     BTreeMap<usize, String>,
     Option<usize>,
     Vec<usize>,
+    bool,
 ) {
     for index in 0..fields.len() {
         let Some(default_set) = parse_moxel_column_set(fields[index]) else {
@@ -1180,14 +1203,19 @@ fn parse_moxel_column_sets_with_source_format_order(
             parse_moxel_row_column_set_ids(fields, cursor, &column_sets[1..]).unwrap_or_default();
         let source_format_order =
             moxel_source_column_format_refs_in_set_order(&column_sets, &raw_default_format_indices);
+        let has_explicit_sparse_column_set_default = raw_default_format_indices
+            .iter()
+            .skip(1)
+            .any(|format_index| *format_index == 1);
         return (
             column_sets,
             row_column_ids,
             Some(declared_sheet_height),
             source_format_order,
+            has_explicit_sparse_column_set_default,
         );
     }
-    (Vec::new(), BTreeMap::new(), None, Vec::new())
+    (Vec::new(), BTreeMap::new(), None, Vec::new(), false)
 }
 
 fn parse_moxel_column_set_raw_default_format_index(text: &str) -> Option<usize> {
@@ -1396,6 +1424,7 @@ pub(super) fn resolve_sparse_moxel_column_set_default_format_index(
     column_format_len: usize,
     formats: &[MoxelFormat],
     header_footer_format_ref: Option<usize>,
+    has_explicit_sparse_column_set_default: bool,
 ) -> Option<usize> {
     if column_sets.is_empty() {
         return None;
@@ -1414,7 +1443,7 @@ pub(super) fn resolve_sparse_moxel_column_set_default_format_index(
         is_sparse_moxel_column_set_default_format(format).then_some(column_format_len + index + 1)
     });
     if let Some(format_index) = sparse_default_format_index {
-        if column_sets.len() > 1 {
+        if has_explicit_sparse_column_set_default {
             for column_set in column_sets.iter_mut().skip(1) {
                 column_set.default_format_index = Some(format_index);
             }
@@ -1425,8 +1454,8 @@ pub(super) fn resolve_sparse_moxel_column_set_default_format_index(
     if let Some(format_index) = header_footer_format_index
         && format_index > column_format_len
     {
-        if column_sets.len() > 1 {
-            for column_set in column_sets.iter_mut() {
+        if has_explicit_sparse_column_set_default {
+            for column_set in column_sets.iter_mut().skip(1) {
                 column_set.default_format_index = Some(format_index);
             }
         }
@@ -1434,8 +1463,10 @@ pub(super) fn resolve_sparse_moxel_column_set_default_format_index(
     }
 
     let format_index = header_footer_format_index?;
-    for column_set in column_sets.iter_mut().skip(1) {
-        column_set.default_format_index = Some(format_index);
+    if has_explicit_sparse_column_set_default {
+        for column_set in column_sets.iter_mut().skip(1) {
+            column_set.default_format_index = Some(format_index);
+        }
     }
     Some(format_index)
 }
@@ -5757,10 +5788,13 @@ pub(super) fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec
     {
         return ordered;
     }
-    if let Some(ordered) = moxel_sparse_source_output_order(spreadsheet) {
+    let source_column_format_offset = moxel_source_column_format_offset(&spreadsheet.column_sets);
+    if (source_column_format_offset == 0 || spreadsheet.column_sets.len() > 1)
+        && let Some(ordered) = moxel_sparse_source_output_order(spreadsheet)
+    {
         return ordered;
     }
-    if moxel_source_column_format_offset(&spreadsheet.column_sets) > 0 {
+    if source_column_format_offset > 0 {
         let source_column_format_refs = moxel_source_column_format_refs(&spreadsheet.column_sets);
         if spreadsheet.column_formats.len() > source_column_format_refs.len() {
             let mut ordered = moxel_source_derived_internal_output_order(
@@ -6311,18 +6345,68 @@ pub(super) fn remap_moxel_row_and_cell_sparse_source_format_indices(
     }
 }
 
+pub(super) fn moxel_sparse_body_source_format_offset(
+    rows: &[MoxelRow],
+    source_column_format_refs: &[usize],
+) -> usize {
+    let first_body_source_slot = rows
+        .iter()
+        .flat_map(|row| {
+            row.source_format_index
+                .into_iter()
+                .chain(row.cells.iter().flat_map(|cell| {
+                    cell.source_format_index
+                        .into_iter()
+                        .chain(cell.note.as_ref().map(|note| note.source_format_index))
+                }))
+        })
+        .filter(|source_format_index| *source_format_index > 1)
+        .map(|source_format_index| source_format_index - 1)
+        .min()
+        .unwrap_or(1);
+    if first_body_source_slot <= 1
+        || source_column_format_refs
+            .iter()
+            .any(|source_format_index| *source_format_index <= first_body_source_slot)
+    {
+        return 0;
+    }
+    first_body_source_slot - 1
+}
+
+pub(super) fn moxel_sparse_source_font_format_indices(
+    column_format_count: usize,
+    format_count: usize,
+    source_body_offset: usize,
+) -> Option<Vec<usize>> {
+    let reserved_body_end = column_format_count.checked_add(source_body_offset)?;
+    if reserved_body_end > format_count {
+        return None;
+    }
+    let first_body_format = reserved_body_end.checked_add(1)?;
+    Some(
+        (first_body_format..=format_count)
+            .chain((column_format_count + 1)..first_body_format)
+            .chain(1..=column_format_count)
+            .collect(),
+    )
+}
+
 pub(super) fn remap_moxel_row_and_cell_sparse_internal_format_indices(
     rows: &mut [MoxelRow],
     source_column_format_refs: &[usize],
     column_format_len: usize,
     format_len: usize,
+    source_body_offset: usize,
 ) {
     for row in rows {
         if let Some(source_format_index) = row.source_format_index {
             if source_format_index <= 1 {
                 row.format_index = source_format_index;
             } else if let Some(format_index) = moxel_internal_format_index_for_sparse_source_index(
-                source_format_index - 1,
+                source_format_index
+                    .saturating_sub(1)
+                    .saturating_sub(source_body_offset),
                 source_column_format_refs,
                 column_format_len,
                 format_len,
@@ -6336,7 +6420,9 @@ pub(super) fn remap_moxel_row_and_cell_sparse_internal_format_indices(
                     cell.format_index = 0;
                 } else if let Some(format_index) =
                     moxel_internal_format_index_for_sparse_source_index(
-                        source_format_index - 1,
+                        source_format_index
+                            .saturating_sub(1)
+                            .saturating_sub(source_body_offset),
                         source_column_format_refs,
                         column_format_len,
                         format_len,
@@ -6350,7 +6436,9 @@ pub(super) fn remap_moxel_row_and_cell_sparse_internal_format_indices(
                     note.format_index = 0;
                 } else if let Some(format_index) =
                     moxel_internal_format_index_for_sparse_source_index(
-                        note.source_format_index - 1,
+                        note.source_format_index
+                            .saturating_sub(1)
+                            .saturating_sub(source_body_offset),
                         source_column_format_refs,
                         column_format_len,
                         format_len,
