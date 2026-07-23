@@ -331,13 +331,11 @@ fn payload_limits() -> ResourceLimits {
 }
 
 fn write_value(value: &NativeValue, output: &mut Vec<u8>, depth: usize) -> Result<(), NativeError> {
-    if depth > MAX_NATIVE_DEPTH {
-        return Err(NativeError::DepthExceeded);
-    }
+    ensure_write_depth(depth)?;
     match value {
         NativeValue::Token(value) => {
             if is_line_wrapped_base64_token(value.as_bytes()) {
-                output.extend_from_slice(value.as_bytes());
+                append_output(output, value.as_bytes())?;
             } else if value.is_empty()
                 || !value.is_ascii()
                 || value.bytes().any(|byte| {
@@ -346,10 +344,24 @@ fn write_value(value: &NativeValue, output: &mut Vec<u8>, depth: usize) -> Resul
             {
                 return Err(NativeError::InvalidToken);
             } else {
-                output.extend_from_slice(value.as_bytes());
+                append_output(output, value.as_bytes())?;
             }
         }
         NativeValue::Text(value) => {
+            let escaped_length = value
+                .as_bytes()
+                .iter()
+                .filter(|byte| **byte == b'"')
+                .count();
+            let additional = value
+                .len()
+                .checked_add(escaped_length)
+                .and_then(|length| length.checked_add(2))
+                .ok_or(NativeError::PlainPayloadTooLarge {
+                    maximum: MAX_PLAIN_BYTES,
+                    actual: usize::MAX,
+                })?;
+            checked_output_length(output.len(), additional)?;
             output.push(b'"');
             for byte in value.as_bytes() {
                 output.push(*byte);
@@ -365,32 +377,73 @@ fn write_value(value: &NativeValue, output: &mut Vec<u8>, depth: usize) -> Resul
             line_breaks,
             trailing_break,
         } => {
-            output.push(b'{');
+            append_output(output, b"{")?;
             if *leading_break && !values.is_empty() {
-                output.extend_from_slice(b"\r\n");
+                append_output(output, b"\r\n")?;
             }
             for (index, child) in values.iter().enumerate() {
                 if index != 0 {
-                    output.push(b',');
+                    append_output(output, b",")?;
                     if line_breaks.binary_search(&index).is_ok() {
-                        output.extend_from_slice(b"\r\n");
+                        append_output(output, b"\r\n")?;
                     }
                 }
-                write_value(child, output, depth + 1)?;
+                if matches!(child, NativeValue::Token(value) if value.is_empty()) {
+                    write_empty_list_atom(output, depth + 1, index, values.len())?;
+                } else {
+                    write_value(child, output, depth + 1)?;
+                }
             }
             if *trailing_break && !values.is_empty() {
-                output.extend_from_slice(b"\r\n");
+                append_output(output, b"\r\n")?;
             }
-            output.push(b'}');
+            append_output(output, b"}")?;
         }
     }
-    if output.len() > MAX_PLAIN_BYTES {
-        return Err(NativeError::PlainPayloadTooLarge {
-            maximum: MAX_PLAIN_BYTES,
-            actual: output.len(),
-        });
+    Ok(())
+}
+
+fn write_empty_list_atom(
+    output: &mut Vec<u8>,
+    depth: usize,
+    index: usize,
+    list_length: usize,
+) -> Result<(), NativeError> {
+    ensure_write_depth(depth)?;
+    if index == 0 || index + 1 == list_length {
+        return Err(NativeError::InvalidToken);
+    }
+    checked_output_length(output.len(), 0)?;
+    Ok(())
+}
+
+fn ensure_write_depth(depth: usize) -> Result<(), NativeError> {
+    if depth > MAX_NATIVE_DEPTH {
+        return Err(NativeError::DepthExceeded);
     }
     Ok(())
+}
+
+fn append_output(output: &mut Vec<u8>, bytes: &[u8]) -> Result<(), NativeError> {
+    checked_output_length(output.len(), bytes.len())?;
+    output.extend_from_slice(bytes);
+    Ok(())
+}
+
+fn checked_output_length(current: usize, additional: usize) -> Result<usize, NativeError> {
+    let actual = current
+        .checked_add(additional)
+        .ok_or(NativeError::PlainPayloadTooLarge {
+            maximum: MAX_PLAIN_BYTES,
+            actual: usize::MAX,
+        })?;
+    if actual > MAX_PLAIN_BYTES {
+        return Err(NativeError::PlainPayloadTooLarge {
+            maximum: MAX_PLAIN_BYTES,
+            actual,
+        });
+    }
+    Ok(actual)
 }
 
 struct NativeParser<'a> {
@@ -428,13 +481,7 @@ impl<'a> NativeParser<'a> {
     }
 
     fn value(&mut self, depth: usize) -> Result<NativeValue, NativeError> {
-        if depth > MAX_NATIVE_DEPTH {
-            return Err(NativeError::DepthExceeded);
-        }
-        self.nodes = self.nodes.checked_add(1).ok_or(NativeError::NodeOverflow)?;
-        if self.nodes > MAX_NATIVE_NODES {
-            return Err(NativeError::TooManyNodes);
-        }
+        self.bump_node(depth)?;
         self.whitespace();
         match self.input.get(self.offset) {
             Some(b'{') => self.list(depth),
@@ -442,6 +489,17 @@ impl<'a> NativeParser<'a> {
             Some(_) => self.token(),
             None => Err(NativeError::UnexpectedEnd),
         }
+    }
+
+    fn bump_node(&mut self, depth: usize) -> Result<(), NativeError> {
+        if depth > MAX_NATIVE_DEPTH {
+            return Err(NativeError::DepthExceeded);
+        }
+        self.nodes = self.nodes.checked_add(1).ok_or(NativeError::NodeOverflow)?;
+        if self.nodes > MAX_NATIVE_NODES {
+            return Err(NativeError::TooManyNodes);
+        }
+        Ok(())
     }
 
     fn list(&mut self, depth: usize) -> Result<NativeValue, NativeError> {
@@ -463,7 +521,12 @@ impl<'a> NativeParser<'a> {
         }
         let mut line_breaks = Vec::new();
         loop {
-            values.push(self.value(depth + 1)?);
+            if !values.is_empty() && self.input.get(self.offset) == Some(&b',') {
+                self.bump_node(depth + 1)?;
+                values.push(NativeValue::Token(String::new()));
+            } else {
+                values.push(self.value(depth + 1)?);
+            }
             let whitespace_start = self.offset;
             self.whitespace();
             let trailing_break = self.input[whitespace_start..self.offset]
@@ -714,5 +777,67 @@ mod tests {
                 Err(NativeError::InvalidToken | NativeError::ExpectedDelimiter)
             ));
         }
+    }
+
+    #[test]
+    fn parser_roundtrips_interior_empty_list_atoms() {
+        for input in [
+            b"\xef\xbb\xbf{1,,60}".as_slice(),
+            b"\xef\xbb\xbf{1,,,60}".as_slice(),
+            b"\xef\xbb\xbf{1,\r\n,\r\n60}".as_slice(),
+        ] {
+            let value = parse(input).unwrap();
+            assert_eq!(serialize(&value).unwrap(), input);
+        }
+
+        let value = parse(b"\xef\xbb\xbf{1,,,60}").unwrap();
+        let values = value.as_list().unwrap();
+        assert_eq!(values.len(), 4);
+        assert!(matches!(&values[1], NativeValue::Token(value) if value.is_empty()));
+        assert!(matches!(&values[2], NativeValue::Token(value) if value.is_empty()));
+
+        let constructed = inline_list(vec![token("1"), token(""), token(""), token("60")]);
+        assert_eq!(serialize(&constructed).unwrap(), b"\xef\xbb\xbf{1,,,60}");
+    }
+
+    #[test]
+    fn parser_rejects_empty_atoms_outside_list_interior() {
+        assert_eq!(parse(b"\xef\xbb\xbf{,1}"), Err(NativeError::InvalidToken));
+        assert_eq!(parse(b"\xef\xbb\xbf{1,}"), Err(NativeError::TrailingComma));
+        assert_eq!(parse(b"\xef\xbb\xbf{1,,}"), Err(NativeError::TrailingComma));
+        assert_eq!(parse(UTF8_BOM), Err(NativeError::UnexpectedEnd));
+
+        assert_eq!(serialize(&token("")), Err(NativeError::InvalidToken));
+        assert_eq!(
+            serialize(&inline_list(vec![token(""), token("1")])),
+            Err(NativeError::InvalidToken)
+        );
+        assert_eq!(
+            serialize(&inline_list(vec![token("1"), token("")])),
+            Err(NativeError::InvalidToken)
+        );
+    }
+
+    #[test]
+    fn empty_atom_writer_obeys_depth_and_output_limits() {
+        let mut output = Vec::new();
+        assert_eq!(
+            write_empty_list_atom(&mut output, MAX_NATIVE_DEPTH + 1, 1, 3),
+            Err(NativeError::DepthExceeded)
+        );
+        assert_eq!(
+            checked_output_length(MAX_PLAIN_BYTES, 1),
+            Err(NativeError::PlainPayloadTooLarge {
+                maximum: MAX_PLAIN_BYTES,
+                actual: MAX_PLAIN_BYTES + 1,
+            })
+        );
+        assert_eq!(
+            checked_output_length(usize::MAX, 1),
+            Err(NativeError::PlainPayloadTooLarge {
+                maximum: MAX_PLAIN_BYTES,
+                actual: usize::MAX,
+            })
+        );
     }
 }
