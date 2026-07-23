@@ -556,7 +556,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
     if fields.first()?.trim() != "8" {
         return None;
     }
-    let declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()? + 1;
+    let raw_declared_column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
     let mut rows = parse_moxel_rows(&fields);
     if rows.is_empty() {
         return None;
@@ -589,17 +589,64 @@ pub(super) fn parse_moxel_spreadsheet_text(
     let print_settings = parse_moxel_print_settings(&fields);
     let empty_headers_footers = parse_moxel_empty_headers_footers(&fields);
     let header_footer_format_ref = parse_moxel_uniform_header_footer_format_ref(&fields);
+    let drawings = parse_moxel_drawings(&fields);
+    let drawing_format_indices = drawings
+        .iter()
+        .map(|drawing| drawing.format_index)
+        .collect::<BTreeSet<_>>();
+    let zero_column_format_table_is_width_only = parse_moxel_format_table(
+        &fields,
+        0,
+        &style_refs,
+        &drawing_format_indices,
+        &[],
+    )
+    .is_some_and(|formats| {
+        formats.len() == 1 && formats.first().is_some_and(is_moxel_width_only_format)
+    });
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
         .max()
         .unwrap_or(0);
+    // MOXCEL normally stores the last zero-based column index, hence the
+    // usual `+ 1` above.  A structurally empty sheet is the one exception:
+    // its raw value is zero even though it has no columns at all.  Treating
+    // it as one implicit column manufactures an empty palette slot, shifts
+    // every format reference, and materialises a height on export.
+    let zero_column_width_only = raw_declared_column_count == 0
+        && observed_column_count == 0
+        && column_sets.is_empty()
+        && rows.iter().all(is_moxel_compactable_empty_row)
+        && parse_moxel_default_format_width(&fields, 0).is_some()
+        && zero_column_format_table_is_width_only
+        && default_format.is_empty()
+        && fonts.is_empty()
+        && pictures.is_empty()
+        && style_refs.iter().all(Option::is_none)
+        && declared_sheet_height.unwrap_or(0) == 0
+        && vertical_groups.is_empty()
+        && merges.is_empty()
+        && horizontal_unmerges.is_empty()
+        && vertical_unmerges.is_empty()
+        && named_items.is_empty()
+        && areas.is_empty()
+        && print_area.is_none()
+        && print_settings.is_none()
+        && !empty_headers_footers
+        && header_footer_format_ref.is_none()
+        && drawings.is_empty();
+    let declared_column_count = if zero_column_width_only {
+        0
+    } else {
+        raw_declared_column_count + 1
+    };
     let column_count = if observed_column_count > 0 {
         observed_column_count
     } else {
         declared_column_count
     };
-    let column_sets = if column_sets.is_empty() {
+    let mut column_sets = if column_sets.is_empty() {
         default_moxel_column_sets(column_count)
     } else {
         column_sets
@@ -614,7 +661,6 @@ pub(super) fn parse_moxel_spreadsheet_text(
         .any(|source_format_index| source_format_index > column_format_slots);
     let needs_sparse_column_set_default_format =
         source_column_format_offset > 0 && header_footer_format_ref.is_some();
-    let mut column_sets = column_sets;
     if source_column_format_offset == 0 && column_format_slots == 0 {
         normalize_moxel_zero_column_format_refs(&mut rows);
     }
@@ -639,6 +685,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
         default_format.font = Some(0);
         default_format.border_color = Some("style:BorderColor".to_string());
     }
+
     let format_offset = if sparse_source_format_refs || has_equal_width_only_format_table {
         0
     } else {
@@ -664,19 +711,18 @@ pub(super) fn parse_moxel_spreadsheet_text(
             }
         }
     }
-    let height = moxel_spreadsheet_height(
-        &rows,
-        &merges,
-        &horizontal_unmerges,
-        &vertical_unmerges,
-        &areas,
-    )
-    .max(declared_sheet_height.unwrap_or(0));
-    let drawings = parse_moxel_drawings(&fields);
-    let drawing_format_indices = drawings
-        .iter()
-        .map(|drawing| drawing.format_index)
-        .collect::<BTreeSet<_>>();
+    let height = if zero_column_width_only {
+        0
+    } else {
+        moxel_spreadsheet_height(
+            &rows,
+            &merges,
+            &horizontal_unmerges,
+            &vertical_unmerges,
+            &areas,
+        )
+        .max(declared_sheet_height.unwrap_or(0))
+    };
     let number_format_refs = parse_moxel_number_format_refs(
         &fields,
         column_format_slots,
@@ -4579,7 +4625,9 @@ pub(super) fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> St
             "\t<defaultFormatIndex>{default_format_index}</defaultFormatIndex>\r\n"
         ));
     }
-    xml.push_str(&format!("\t<height>{}</height>\r\n", spreadsheet.height));
+    if spreadsheet.height > 0 || spreadsheet.column_count > 0 {
+        xml.push_str(&format!("\t<height>{}</height>\r\n", spreadsheet.height));
+    }
     if !spreadsheet.vertical_groups.is_empty() {
         let vg_levels = spreadsheet
             .vertical_groups

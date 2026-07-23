@@ -17666,6 +17666,160 @@ fn formats_moxel_zero_column_slots_emit_first_row_format_index() {
     assert!(xml.contains(
         "<rowsItem>\r\n\t\t<index>0</index>\r\n\t\t<row>\r\n\t\t\t<formatIndex>1</formatIndex>\r\n"
     ));
+    assert!(xml.contains("<height>0</height>"));
+}
+
+#[test]
+fn moxel_zero_column_width_only_palette_roundtrips_without_synthetic_slots() {
+    // This is intentionally anonymous: a zero-column spreadsheet whose only
+    // palette slot is the default width.  Native ibcmd keeps slot 1, does not
+    // materialise a height, and reports zero vertical-group rows.
+    let original = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+        "\t<languageSettings>\r\n\t\t<currentLanguage>ru</currentLanguage>\r\n\t\t<defaultLanguage>ru</defaultLanguage>\r\n\t\t<languageInfo>\r\n\t\t\t<id>ru</id>\r\n\t\t\t<code>Русский</code>\r\n\t\t\t<description>Русский</description>\r\n\t\t</languageInfo>\r\n\t</languageSettings>\r\n",
+        "\t<columns>\r\n\t\t<size>0</size>\r\n\t</columns>\r\n",
+        "\t<rowsItem>\r\n\t\t<index>0</index>\r\n\t\t<row>\r\n\t\t\t<empty>true</empty>\r\n\t\t</row>\r\n\t</rowsItem>\r\n",
+        "\t<templateMode>true</templateMode>\r\n\t<defaultFormatIndex>1</defaultFormatIndex>\r\n\t<vgRows>0</vgRows>\r\n",
+        "\t<format>\r\n\t\t<width>72</width>\r\n\t</format>\r\n</document>"
+    );
+
+    let first = pack_moxel_spreadsheet_blob_from_xml(original.as_bytes()).unwrap();
+    let extracted = extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).unwrap();
+    let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+    let extracted_again = extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).unwrap();
+
+    assert_eq!(extracted, original);
+    assert_eq!(extracted_again, original);
+}
+
+#[test]
+fn moxel_palette_index_control_keeps_column_and_cell_references() {
+    let spreadsheet = MoxelSpreadsheet {
+        column_count: 2,
+        column_sets: default_moxel_column_sets(2),
+        column_formats: vec![
+            MoxelFormat {
+                width: Some(10),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                width: Some(20),
+                ..MoxelFormat::default()
+            },
+        ],
+        extra_formats: BTreeMap::new(),
+        default_format_width: None,
+        default_format: MoxelFormat::default(),
+        formats: Vec::new(),
+        rows: vec![MoxelRow {
+            index: 0,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 2,
+                source_format_index: None,
+                text: Some("x".to_string()),
+                parameter: None,
+                detail_parameter: None,
+                note: None,
+                empty_text: false,
+            }],
+        }],
+        vertical_groups: Vec::new(),
+        merges: Vec::new(),
+        horizontal_unmerges: Vec::new(),
+        vertical_unmerges: Vec::new(),
+        named_items: Vec::new(),
+        areas: Vec::new(),
+        print_area: None,
+        print_settings: None,
+        lines: Vec::new(),
+        fonts: Vec::new(),
+        drawings: Vec::new(),
+        pictures: Vec::new(),
+        empty_headers_footers: false,
+        header_footer_format_index: None,
+        default_format_index: Some(2),
+        source_format_map: None,
+        height: 1,
+    };
+    let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
+
+    assert!(extracted.contains("<formatIndex>1</formatIndex>"));
+    assert!(extracted.contains("<formatIndex>2</formatIndex>"));
+    assert!(extracted.contains("<f>2</f>"));
+}
+
+#[test]
+fn moxel_zero_column_semantic_height_and_vertical_group_are_not_suppressed() {
+    let spreadsheet = MoxelSpreadsheet {
+        column_count: 0,
+        column_sets: default_moxel_column_sets(0),
+        column_formats: Vec::new(),
+        extra_formats: BTreeMap::new(),
+        default_format_width: Some(72),
+        default_format: MoxelFormat::default(),
+        formats: vec![MoxelFormat {
+            width: Some(72),
+            ..MoxelFormat::default()
+        }],
+        rows: vec![MoxelRow {
+            index: 0,
+            index_to: None,
+            format_index: 0,
+            source_format_index: None,
+            columns_id: None,
+            cells: Vec::new(),
+        }],
+        vertical_groups: vec![MoxelVerticalGroup {
+            begin_row: 0,
+            end_row: 0,
+            level: 0,
+        }],
+        merges: Vec::new(),
+        horizontal_unmerges: Vec::new(),
+        vertical_unmerges: Vec::new(),
+        named_items: Vec::new(),
+        areas: Vec::new(),
+        print_area: None,
+        print_settings: None,
+        lines: Vec::new(),
+        fonts: Vec::new(),
+        drawings: Vec::new(),
+        pictures: Vec::new(),
+        empty_headers_footers: false,
+        header_footer_format_index: None,
+        default_format_index: Some(1),
+        source_format_map: None,
+        height: 1,
+    };
+
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+    assert!(xml.contains("<height>1</height>"));
+    assert!(xml.contains("<vgRows>1</vgRows>"));
+    assert!(xml.contains("<vgLevels>1</vgLevels>"));
+    assert!(xml.contains("<vg>\r\n\t\t<b>0</b>\r\n\t</vg>"));
+}
+
+#[test]
+fn moxel_raw_zero_column_with_declared_height_is_not_width_only_empty() {
+    let raw = concat!(
+        "{8,1,0,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},",
+        "{128,72},{0},0,0,0,{1,{128,72}},2,{0,1},",
+        "{0,1,00000000-0000-0000-0000-000000000000,0},1,0,0}"
+    );
+    let spreadsheet = parse_moxel_spreadsheet_text(raw, &BTreeMap::new()).unwrap();
+    let xml = format_moxel_spreadsheet_xml(&spreadsheet);
+
+    assert_eq!(spreadsheet.column_count, 1);
+    assert_eq!(spreadsheet.height, 1);
+    assert!(xml.contains("<height>1</height>"));
+    assert!(xml.contains("<vgRows>1</vgRows>"));
 }
 
 #[test]
