@@ -11230,6 +11230,18 @@ fn maps_formatted_document_search_command_alias() {
 }
 
 #[test]
+fn maps_document_journal_command_aliases() {
+    assert_eq!(
+        form_table_standard_command_suffix("b59f3c87-e213-4947-abae-9dbaffaef147"),
+        Some("CreateByParameter")
+    );
+    assert_eq!(
+        form_standard_command_name("9fea4ba9-7d33-47d4-a271-cb54df4a9b74"),
+        Some("Form.StandardCommand.ShowMultipleSelection")
+    );
+}
+
+#[test]
 fn extracts_dynamic_list_short_command_set_from_layout_field() {
     let fields = [
         r#"{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,0f8d6d98-2f8b-405a-b8b3-0538e9d95da5,182a793b-22a5-4625-b316-6a5be7f88078,33b7b9cd-6979-4435-8c58-d9bc8250edec,403bc6e6-b98e-4181-9f43-9c75cbbf82cf,8d772f97-c0ef-47c0-9cb0-efea28c61341,95b4bc12-2ece-4d7a-b3e2-6f9293620a06,b41f5bbc-ba5d-4888-8cd1-db246a371418}"#,

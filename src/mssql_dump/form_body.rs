@@ -11703,6 +11703,9 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         "a11fe36e-0b45-4c07-80b3-2346b660a51e" => Some("Form.StandardCommand.Print"),
         "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("Form.StandardCommand.SaveReportSettings"),
         "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("Form.StandardCommand.SaveVariant"),
+        "9fea4ba9-7d33-47d4-a271-cb54df4a9b74" => {
+            Some("Form.StandardCommand.ShowMultipleSelection")
+        }
         "9885f4b6-d830-435f-a0e3-6b70ffe0f85c" => Some("Form.StandardCommand.GetURL"),
         "a6d73055-3730-42e7-8934-3145ee987141" => Some("Form.StandardCommand.Save"),
         "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Form.StandardCommand.Yes"),
@@ -11964,6 +11967,7 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         "a5fdef31-bbf0-4a9d-98aa-fd5fd8f1344a" => Some("AddFilterItemGroup"),
         "b0016a68-ec64-4e6d-b905-c71fd62efc4c" => Some("Add"),
         "b41f5bbc-ba5d-4888-8cd1-db246a371418" => Some("Change"),
+        "b59f3c87-e213-4947-abae-9dbaffaef147" => Some("CreateByParameter"),
         "d673d512-f71a-48a6-ae5d-527a64ffd813" => Some("Print"),
         "d7e55d2e-bfea-4d80-b4ad-a1bb31ec2147" => Some("UseFieldAsValue"),
         "d82ca05c-2966-4d77-9a39-a1eea087bfa7" => Some("CreateFolder"),
