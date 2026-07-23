@@ -15,6 +15,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Convert complete configurations offline through explicit format and profile adapters.
+    Convert(ConvertArgs),
     /// Inspect, verify, export, or overlay CF without an installed 1C platform.
     Cf(CfArgs),
     /// ibcmd-compatible infobase commands.
@@ -183,6 +185,80 @@ pub enum Commands {
     MssqlStageCommonPictureObject(MssqlStageCommonPictureObjectArgs),
     /// Stage one common template object from XML.
     MssqlStageCommonTemplateObject(MssqlStageCommonTemplateObjectArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConversionFormat {
+    /// Hierarchical 1C XML source tree.
+    Xml,
+    /// Binary 1C CF configuration archive.
+    Cf,
+}
+
+impl ConversionFormat {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Xml => "xml",
+            Self::Cf => "cf",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ConversionLossPolicy {
+    /// Fail closed when a conversion would lose known information.
+    Error,
+    /// Retain a codec-declared loss as a warning when the codec permits it.
+    Warn,
+    /// Drop only an exact loss that its codec explicitly declares safe to drop.
+    Drop,
+}
+
+#[derive(Debug, Args)]
+pub struct ConvertArgs {
+    /// Source artifact: an XML source directory or a CF file.
+    pub input: PathBuf,
+    /// New destination artifact. Existing paths are never overwritten.
+    pub output: PathBuf,
+    /// Source artifact format, independent from its version profile.
+    #[arg(long, value_enum)]
+    pub source_format: ConversionFormat,
+    /// Target artifact format, independent from its version profile.
+    #[arg(long, value_enum)]
+    pub target_format: ConversionFormat,
+    /// Exact source profile ID, for example `xml-2.20` or `platform-8.3.27.1989`.
+    #[arg(long)]
+    pub source_profile: String,
+    /// Exact target profile ID, for example `xml-2.21` or `platform-8.3.27.1989`.
+    #[arg(long)]
+    pub target_profile: String,
+    /// Explicit policy for codec-declared losses.
+    #[arg(long, alias = "loss-policy", value_enum, default_value_t = ConversionLossPolicy::Error)]
+    pub loss: ConversionLossPolicy,
+    /// Complete decode, validation, planning, migration, and encode preflight without publication.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Also write the stable JSON report to this file.
+    #[arg(long)]
+    pub report: Option<PathBuf>,
+    /// Optional directory with additive experimental JSON profiles.
+    #[arg(long)]
+    pub profile_dir: Option<PathBuf>,
+    /// Explicit representation of present payloads in a source CF.
+    #[arg(long, value_enum, default_value_t = CfCompression::RawDeflate)]
+    pub source_compression: CfCompression,
+    /// Physical revision for a newly bootstrapped target CF.
+    #[arg(long, value_enum, default_value_t = CfRevision::Format16)]
+    pub target_revision: CfRevision,
+    /// Native storage-version header for a newly bootstrapped target CF.
+    #[arg(long, default_value_t = 5)]
+    pub target_storage_version: u32,
+    /// Optional physical page-size override for a newly bootstrapped target CF.
+    #[arg(long)]
+    pub target_page_size: Option<u32>,
+    /// Native reserved header word for a newly bootstrapped target CF.
+    #[arg(long, default_value_t = 0)]
+    pub target_reserved: u32,
 }
 
 #[derive(Debug, Args)]

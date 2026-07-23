@@ -444,7 +444,7 @@
 
 ### APP-001 — Добавить platform-independent conversion service и CLI
 
-- **Статус:** `[ ]`; **зависимости:** CORE-009, MIG-002, XML adapter, CF adapter
+- **Статус:** `[x]`; **зависимости:** CORE-009, MIG-002, XML adapter, CF adapter
 - **Файлы:** создать `src/conversion.rs`; изменить `src/cli.rs`, `src/main.rs`
 - **Действия:** `decode→validate→plan→migrate→preflight→atomic encode`; options formats/profiles/dry-run/loss/report.
 - **Проверка:** dry-run не пишет; format/version задаются раздельно; никакой subprocess 1С не запускается.

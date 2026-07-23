@@ -9,6 +9,30 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Convert(args) => {
+            let result = ibcmd_rs::conversion::convert(&args);
+            let report = match &result {
+                Ok(report) => report,
+                Err(error) => error.report(),
+            };
+            let rendered = serde_json::to_string_pretty(report)?;
+            let report_path_conflict = report
+                .errors
+                .iter()
+                .any(|error| error.code == "conversion.report-path-conflict");
+            if let Some(path) = &args.report
+                && !report_path_conflict
+            {
+                ibcmd_rs::conversion::write_report(report, path)?;
+            }
+            match result {
+                Ok(_) => println!("{rendered}"),
+                Err(_) => {
+                    eprintln!("{rendered}");
+                    std::process::exit(2);
+                }
+            }
+        }
         Commands::Cf(args) => match ibcmd_rs::commands::cf::run(args) {
             Ok(report) => println!("{}", serde_json::to_string_pretty(&report)?),
             Err(error) => {

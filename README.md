@@ -17,7 +17,7 @@ They are still intended only for throwaway test databases.
 
 ## Standalone Conversion Direction
 
-The planned XML/CF converter is a standalone Rust path with no production
+The XML/CF converter is a standalone Rust path with no production
 runtime dependency on `ibcmd`, `1cv8`/Designer, EDT, or a JVM. Its independent
 version axes, capability levels, opaque-data rules, and fail-closed loss policy
 are defined in the
@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=52 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=53 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 52 of 56 accepted leaf issues in the
+As of 2026-07-23, 53 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (92.9%). Live workflow statuses are tracked in
+are complete (94.6%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -364,6 +364,36 @@ only explicit `drop` removes it while recording an exact path and loss code in
 the migration report. Other values and unknown form content fail closed. See
 [guarded XCF 2.21 to 2.20 downgrade evidence](docs/evidence/migration-xcf-2.21-to-2.20.md).
 
+APP-001 adds the top-level `convert` service and CLI. Artifact format and exact
+version profile are separate required coordinates; no platform build is
+inferred from an XML version. Every supported route reports the same
+`decode -> validate -> migration_plan -> migrate -> encode_preflight ->
+atomic_encode` phases. `--dry-run` completes preflight without publishing the
+destination, `--loss error|warn|drop` is passed to the guarded migration core,
+and `--report` writes the same stable JSON emitted by the command. New outputs
+use no-clobber atomic publication:
+
+```powershell
+cargo run -- convert source configuration.cf `
+  --source-format xml --target-format cf `
+  --source-profile xml-2.20 --target-profile platform-8.3.27.1989
+
+cargo run -- convert configuration.cf restored `
+  --source-format cf --target-format xml `
+  --source-profile platform-8.3.27.1989 --target-profile xml-2.20
+
+cargo run -- convert source migrated `
+  --source-format xml --target-format xml `
+  --source-profile xml-2.20 --target-profile xml-2.21 `
+  --dry-run --report conversion-report.json
+```
+
+The service also exposes same-profile lossless CF repack. Cross-profile XML
+routes remain bounded to verified migration edges; CF export permits only the
+exact regenerated structural records `root`, `version`, and `versions`, while
+any other opaque record blocks publication. See the
+[offline conversion service evidence](docs/evidence/offline-conversion-service.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
@@ -372,8 +402,8 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 3 CF | 15/15 | 100% |
 | Phase 4 bootstrap | 13/13 | 100% |
 | Phase 5a migrations | 4/4 | 100% |
-| Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **52/56** | **92.9%** |
+| Phase 5b app/release | 1/4 | 25% |
+| **Overall** | **53/56** | **94.6%** |
 
 ## Export Compatibility Status
 
