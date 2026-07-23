@@ -23040,6 +23040,7 @@ fn common_command_standard_picture_name(uuid: &str) -> Option<&'static str> {
         "b5a0aaba-3a83-4a71-b6f9-24aae1574681" => Some("StdPicture.SaveReportSettings"),
         "be23a908-fe1b-44df-be94-d0f6e8353abe" => Some("StdPicture.SendMessage"),
         "03665ff1-3a05-41d1-96d3-04bda2d8ede3" => Some("StdPicture.SpreadsheetInsertComment"),
+        "aa96f4bb-cf28-4dad-bc42-5ed53de95c0c" => Some("StdPicture.SpreadsheetDeletePageBreak"),
         "2846af8d-af84-47e3-82b9-01b01f960426" => Some("StdPicture.SpreadsheetReadOnly"),
         "3bdc16c8-6a96-4467-9442-a8e4804b3fa2" => Some("StdPicture.SyncContents"),
         "8bdf1079-8fad-4d21-ad7f-4b2e4ecdce3d" => Some("StdPicture.DialogInformation"),

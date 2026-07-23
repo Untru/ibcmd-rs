@@ -12923,6 +12923,17 @@ fn parses_common_command_load_report_settings_picture() {
         common_command_standard_picture_name("a7707ed1-39b0-418f-974d-4d500d27a9c6"),
         Some("StdPicture.RestoreValues")
     );
+    let (delete_page_break_reference, delete_page_break_load_transparent) =
+        parse_common_command_picture_value(
+            r#"{4,1,{0,aa96f4bb-cf28-4dad-bc42-5ed53de95c0c},"",-1,-1,1,0,""}"#,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    assert_eq!(
+        delete_page_break_reference,
+        Some("StdPicture.SpreadsheetDeletePageBreak".to_string())
+    );
+    assert!(delete_page_break_load_transparent);
     let (show_data_reference, show_data_load_transparent) = parse_common_command_picture_value(
         r#"{4,1,{0,a064544f-6037-48ca-b19f-8ad63e43af23},"",-1,-1,1,0,""}"#,
         &BTreeMap::new(),
@@ -37942,7 +37953,7 @@ fn extracts_data_processor_child_command_properties_to_metadata_xml() {
 {{0,\r\n{{3,\r\n{{1,0,{data_processor_uuid}}},\"Loader\",{{1,\"en\",\"Loader\"}},\"\"}}\r\n}},\
 00000000-0000-0000-0000-000000000000,1,0,{manager_type_id},{manager_value_id},\
 00000000-0000-0000-0000-000000000000,{{0}},{{0}}}},\
-{{9,\r\n{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Load tip\"}},1,\r\n\
+{{9,\r\n{{4,1,{{0,aa96f4bb-cf28-4dad-bc42-5ed53de95c0c}},\"\",-1,-1,1,0,\"\"}},3,\r\n{{1,\"en\",\"Load tip\"}},1,\r\n\
 {{0,70,24}},0,\r\n{{1,aabb34e1-98c1-4bd0-bf7f-243f95437b44}},\r\n\
 {{\"Pattern\",{{\"#\",{catalog_type_uuid}}}}},\r\n\
 {{3,\r\n{{1,0,{command_uuid}}},\"Load\",{{1,\"en\",\"Load\"}},\"command comment\"}},1,0,0}}\r\n}}"
@@ -37983,7 +37994,9 @@ fn extracts_data_processor_child_command_properties_to_metadata_xml() {
     assert!(xml.contains("<Representation>Auto</Representation>"));
     assert!(xml.contains("<ToolTip>"));
     assert!(xml.contains("<v8:content>Load tip</v8:content>"));
-    assert!(xml.contains("<Picture/>"));
+    assert!(xml.contains("<Picture>"));
+    assert!(xml.contains("<xr:Ref>StdPicture.SpreadsheetDeletePageBreak</xr:Ref>"));
+    assert!(xml.contains("<xr:LoadTransparent>true</xr:LoadTransparent>"));
     assert!(xml.contains("<Shortcut>Ctrl+Alt+F</Shortcut>"));
     assert!(xml.contains("<OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>"));
     assert_eq!(xml.matches("<Command uuid=").count(), 1, "{xml}");
