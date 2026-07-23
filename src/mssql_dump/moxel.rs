@@ -4973,8 +4973,13 @@ pub(super) fn moxel_output_format_indices(spreadsheet: &MoxelSpreadsheet) -> Vec
     {
         push(header_footer_format_index);
     }
-    if prioritize_shared_sparse_defaults
-        && let Some(default_format_index) = spreadsheet.default_format_index
+    // The document-wide default format is a real reference, just like a row,
+    // cell, or drawing. Native emits a standalone default before formats that
+    // are only retained from the source palette. A default also used by the
+    // header/footer belongs to that shared sparse palette instead, and keeps
+    // its source position.
+    if let Some(default_format_index) = spreadsheet.default_format_index
+        && Some(default_format_index) != spreadsheet.header_footer_format_index
     {
         push(default_format_index);
     }
