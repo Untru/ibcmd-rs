@@ -336,15 +336,18 @@ fn write_value(value: &NativeValue, output: &mut Vec<u8>, depth: usize) -> Resul
     }
     match value {
         NativeValue::Token(value) => {
-            if value.is_empty()
+            if is_line_wrapped_base64_token(value.as_bytes()) {
+                output.extend_from_slice(value.as_bytes());
+            } else if value.is_empty()
                 || !value.is_ascii()
                 || value.bytes().any(|byte| {
                     byte.is_ascii_whitespace() || matches!(byte, b'{' | b'}' | b',' | b'"')
                 })
             {
                 return Err(NativeError::InvalidToken);
+            } else {
+                output.extend_from_slice(value.as_bytes());
             }
-            output.extend_from_slice(value.as_bytes());
         }
         NativeValue::Text(value) => {
             output.push(b'"');
@@ -520,6 +523,9 @@ impl<'a> NativeParser<'a> {
     }
 
     fn token(&mut self) -> Result<NativeValue, NativeError> {
+        if self.input[self.offset..].starts_with(b"#base64:") {
+            return self.line_wrapped_base64_token();
+        }
         let start = self.offset;
         while let Some(byte) = self.input.get(self.offset) {
             if byte.is_ascii_whitespace() || matches!(byte, b',' | b'}') {
@@ -538,6 +544,37 @@ impl<'a> NativeParser<'a> {
         Ok(NativeValue::Token(value.to_owned()))
     }
 
+    fn line_wrapped_base64_token(&mut self) -> Result<NativeValue, NativeError> {
+        let start = self.offset;
+        self.offset += b"#base64:".len();
+        let mut payload_len = 0usize;
+        let mut padding_len = 0usize;
+        while let Some(byte) = self.input.get(self.offset).copied() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' if padding_len == 0 => {
+                    payload_len += 1;
+                    self.offset += 1;
+                }
+                b'=' => {
+                    padding_len += 1;
+                    if padding_len > 2 {
+                        return Err(NativeError::InvalidToken);
+                    }
+                    self.offset += 1;
+                }
+                _ if byte.is_ascii_whitespace() => self.offset += 1,
+                b',' | b'}' => break,
+                _ => return Err(NativeError::InvalidToken),
+            }
+        }
+        if payload_len == 0 || (payload_len + padding_len) % 4 != 0 {
+            return Err(NativeError::InvalidToken);
+        }
+        let value = std::str::from_utf8(&self.input[start..self.offset])
+            .map_err(|_| NativeError::InvalidUtf8)?;
+        Ok(NativeValue::Token(value.to_owned()))
+    }
+
     fn whitespace(&mut self) {
         while self
             .input
@@ -547,6 +584,30 @@ impl<'a> NativeParser<'a> {
             self.offset += 1;
         }
     }
+}
+
+fn is_line_wrapped_base64_token(value: &[u8]) -> bool {
+    let Some(payload) = value.strip_prefix(b"#base64:") else {
+        return false;
+    };
+    let mut payload_len = 0usize;
+    let mut padding_len = 0usize;
+    for byte in payload {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' if padding_len == 0 => {
+                payload_len += 1;
+            }
+            b'=' => {
+                padding_len += 1;
+                if padding_len > 2 {
+                    return false;
+                }
+            }
+            _ if byte.is_ascii_whitespace() => {}
+            _ => return false,
+        }
+    }
+    payload_len > 0 && (payload_len + padding_len) % 4 == 0
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -622,5 +683,36 @@ mod tests {
         let mut input = UTF8_BOM.to_vec();
         input.extend_from_slice(b"{1}x");
         assert_eq!(parse(&input), Err(NativeError::TrailingBytes));
+    }
+
+    #[test]
+    fn parser_preserves_line_wrapped_base64_atom() {
+        let input = b"\xef\xbb\xbf{#base64:QUJD\r\nRA==}";
+        let value = parse(input).unwrap();
+        assert_eq!(
+            value,
+            NativeValue::List {
+                values: vec![NativeValue::Token("#base64:QUJD\r\nRA==".to_string())],
+                leading_break: false,
+                line_breaks: Vec::new(),
+                trailing_break: false,
+            }
+        );
+        assert_eq!(serialize(&value).unwrap(), input);
+    }
+
+    #[test]
+    fn parser_rejects_malformed_line_wrapped_base64_and_generic_wrapped_tokens() {
+        for input in [
+            b"\xef\xbb\xbf{#base64:QU?D}".as_slice(),
+            b"\xef\xbb\xbf{#base64:QUJD=}".as_slice(),
+            b"\xef\xbb\xbf{#base64:QUJD=AAA}".as_slice(),
+            b"\xef\xbb\xbf{ordinary\r\ntoken}".as_slice(),
+        ] {
+            assert!(matches!(
+                parse(input),
+                Err(NativeError::InvalidToken | NativeError::ExpectedDelimiter)
+            ));
+        }
     }
 }
