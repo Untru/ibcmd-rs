@@ -19,6 +19,8 @@ const DCS_SETTINGS_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/sett
 const DCS_AREA_TEMPLATE_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/area-template";
 const ENTERPRISE_URI: &str = "http://v8.1c.ru/8.1/data/enterprise";
 const CURRENT_CONFIG_URI: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
+const ANY_IB_REF_TYPE_ID: &str = "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63";
+const CFG_PREFIX: &str = "cfg:";
 const SETTINGS_ROOT_UI_NAMESPACES: &str = " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"";
 const DATA_COMPOSITION_SCHEMA_DOCUMENT_PREFIX: &str = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
@@ -64,8 +66,6 @@ pub(crate) fn normalize_data_composition_schema_template_xml(
 fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &DcsTypeIndex) {
     const OPEN: &str = "<v8:TypeId>";
     const CLOSE: &str = "</v8:TypeId>";
-    const ANY_IB_REF_TYPE_ID: &str = "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63";
-    const CFG_PREFIX: &str = "cfg:";
     let mut rewritten = String::with_capacity(xml.len());
     let mut cursor = 0usize;
     while let Some(relative_start) = xml[cursor..].find(OPEN) {
@@ -77,36 +77,8 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &DcsTypeIndex
         let value_end = value_start + relative_end;
         let type_id = xml[value_start..value_end].trim();
         let dcs_cfg_prefix = data_composition_current_config_prefix(xml, start);
-        let replacement = if type_id.eq_ignore_ascii_case(ANY_IB_REF_TYPE_ID) {
-            Some(format!(
-                "<v8:TypeSet xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:AnyIBRef</v8:TypeSet>"
-            ))
-        } else {
-            type_index
-                .get(&type_id.to_ascii_lowercase())
-                .and_then(|resolution| match resolution {
-                    DcsTypeResolution::KeepId => None,
-                    DcsTypeResolution::Type { qname } => {
-                        let reference = qname.strip_prefix(CFG_PREFIX)?;
-                        Some(format!(
-                            "<v8:Type xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:Type>",
-                            escape_xml_text(reference)
-                        ))
-                    }
-                    DcsTypeResolution::TypeSet { qname } => {
-                        let reference = qname.strip_prefix(CFG_PREFIX)?;
-                        let element = if reference.starts_with("Characteristic.") {
-                            "Type"
-                        } else {
-                            "TypeSet"
-                        };
-                        Some(format!(
-                            "<v8:{element} xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:{element}>",
-                            escape_xml_text(reference),
-                        ))
-                    }
-                })
-        };
+        let replacement =
+            data_composition_type_id_xml(type_id, type_index, &dcs_cfg_prefix, true, true);
         if let Some(replacement) = replacement {
             rewritten.push_str(&xml[cursor..start]);
             rewritten.push_str(&replacement);
@@ -121,6 +93,42 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &DcsTypeIndex
     }
     rewritten.push_str(&xml[cursor..]);
     *xml = rewritten;
+}
+
+pub(crate) fn data_composition_type_id_xml(
+    type_id: &str,
+    type_index: &DcsTypeIndex,
+    current_config_prefix: &str,
+    declare_current_config_namespace: bool,
+    characteristic_type_set_as_type: bool,
+) -> Option<String> {
+    let (element, qname) = if type_id.eq_ignore_ascii_case(ANY_IB_REF_TYPE_ID) {
+        ("TypeSet", "cfg:AnyIBRef")
+    } else {
+        match type_index.get(&type_id.to_ascii_lowercase())? {
+            DcsTypeResolution::KeepId => return None,
+            DcsTypeResolution::Type { qname } => ("Type", qname.as_str()),
+            DcsTypeResolution::TypeSet { qname } => {
+                let reference = qname.strip_prefix(CFG_PREFIX)?;
+                let element = if characteristic_type_set_as_type
+                    && reference.starts_with("Characteristic.")
+                {
+                    "Type"
+                } else {
+                    "TypeSet"
+                };
+                (element, qname.as_str())
+            }
+        }
+    };
+    let reference = qname.strip_prefix(CFG_PREFIX)?;
+    let namespace = declare_current_config_namespace
+        .then(|| format!(r#" xmlns:{current_config_prefix}="{CURRENT_CONFIG_URI}""#))
+        .unwrap_or_default();
+    Some(format!(
+        "<v8:{element}{namespace}>{current_config_prefix}:{}</v8:{element}>",
+        escape_xml_text(reference)
+    ))
 }
 
 #[derive(Debug)]

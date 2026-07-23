@@ -4081,6 +4081,64 @@ fn rejects_invalid_utf8_form_server_state_chunk_stream() {
 }
 
 #[test]
+fn resolves_form_server_state_type_ids_through_dcs_metadata_index() {
+    const TYPE_ID: &str = "0f3bc348-6fa3-4be5-aaf7-e9c9b60c370f";
+    const TYPE_SET_ID: &str = "11111111-1111-4111-8111-111111111111";
+    const CHARACTERISTIC_TYPE_SET_ID: &str = "91ded1d9-7d3a-4d96-a884-1aa1a880e152";
+    const KEEP_ID: &str = "22222222-2222-4222-8222-222222222222";
+    const UNKNOWN_ID: &str = "33333333-3333-4333-8333-333333333333";
+    let payload = format!(
+        concat!(
+            "\u{feff}<UniversalListServerOnlyState>",
+            "<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{}</TypeId></valueType>",
+            "<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{}</TypeId></valueType>",
+            "<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{}</TypeId></valueType>",
+            "<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{}</TypeId></valueType>",
+            "<valueType><TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">{}</TypeId></valueType>",
+            "</UniversalListServerOnlyState>"
+        ),
+        TYPE_ID, TYPE_SET_ID, CHARACTERISTIC_TYPE_SET_ID, KEEP_ID, UNKNOWN_ID,
+    );
+    let encoded = encode_form_server_state_chunks_for_test(&[payload.as_bytes()]);
+    let type_index = BTreeMap::from([
+        (
+            TYPE_ID.to_string(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.КлассификаторАлкогольнойПродукцииЕГАИС".to_string(),
+            },
+        ),
+        (
+            TYPE_SET_ID.to_string(),
+            DcsTypeResolution::TypeSet {
+                qname: "cfg:CatalogRef".to_string(),
+            },
+        ),
+        (
+            CHARACTERISTIC_TYPE_SET_ID.to_string(),
+            DcsTypeResolution::TypeSet {
+                qname: "cfg:Characteristic.СтатьиРасходов".to_string(),
+            },
+        ),
+        (KEEP_ID.to_string(), DcsTypeResolution::KeepId),
+    ]);
+
+    let inner = parse_form_server_state_xml_with_dcs_type_index(
+        &form_server_state_field_for_test(&encoded),
+        &type_index,
+    )
+    .expect("server state with metadata type index");
+
+    assert!(
+        inner.contains("<v8:Type>cfg:CatalogRef.КлассификаторАлкогольнойПродукцииЕГАИС</v8:Type>")
+    );
+    assert!(inner.contains("<v8:TypeSet>cfg:CatalogRef</v8:TypeSet>"));
+    assert!(inner.contains("<v8:TypeSet>cfg:Characteristic.СтатьиРасходов</v8:TypeSet>"));
+    assert!(inner.contains(&format!("<v8:TypeId>{KEEP_ID}</v8:TypeId>")));
+    assert!(inner.contains(&format!("<v8:TypeId>{UNKNOWN_ID}</v8:TypeId>")));
+    assert!(!inner.contains("xmlns:cfg="));
+}
+
+#[test]
 fn normalizes_form_server_state_core_type_qnames_idempotently() {
     let native = concat!(
         "<dcssch:valueType><Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>",

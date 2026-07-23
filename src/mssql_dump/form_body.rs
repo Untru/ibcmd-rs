@@ -85,6 +85,7 @@ pub(super) fn extract_form_body_xml_from_body(
     extract_form_body_xml_from_body_timed(
         body,
         type_index,
+        &DcsTypeIndex::new(),
         object_refs,
         &BTreeMap::new(),
         None,
@@ -95,6 +96,7 @@ pub(super) fn extract_form_body_xml_from_body(
 pub(super) fn extract_form_body_xml_from_body_timed(
     body: &ParsedFormBodyBlob,
     type_index: &BTreeMap<String, String>,
+    dcs_type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
     information_register_field_refs: &InformationRegisterFieldReferenceIndex,
     form_owner_reference: Option<&str>,
@@ -119,7 +121,12 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let mut attributes = extract_form_body_attributes(&body.trailing, type_index, object_refs);
+    let mut attributes = extract_form_body_attributes_with_dcs_type_index(
+        &body.trailing,
+        type_index,
+        dcs_type_index,
+        object_refs,
+    );
     let attribute_save_field_bindings =
         extract_form_body_attribute_save_field_bindings(&body.trailing, type_index, object_refs);
     if let Some(timings) = timings.as_deref_mut() {
@@ -1936,9 +1943,10 @@ pub(super) fn form_item_picture_file_name(property_name: &str, content: &[u8]) -
     format!("{property_name}.{extension}")
 }
 
-pub(super) fn extract_form_body_attributes(
+fn extract_form_body_attributes_with_dcs_type_index(
     trailing: &[String],
     type_index: &BTreeMap<String, String>,
+    dcs_type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<FormAttribute> {
     let Some(fields) = trailing
@@ -1958,7 +1966,9 @@ pub(super) fn extract_form_body_attributes(
         .iter()
         .skip(2)
         .take(attribute_count)
-        .filter_map(|field| parse_form_attribute(field, type_index, object_refs))
+        .filter_map(|field| {
+            parse_form_attribute_with_dcs_type_index(field, type_index, dcs_type_index, object_refs)
+        })
         .collect()
 }
 
@@ -2056,6 +2066,15 @@ pub(super) fn parse_form_attribute(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormAttribute> {
+    parse_form_attribute_with_dcs_type_index(field, type_index, &DcsTypeIndex::new(), object_refs)
+}
+
+fn parse_form_attribute_with_dcs_type_index(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    dcs_type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormAttribute> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.first().map(|value| value.trim()) != Some("9") {
         return None;
@@ -2093,9 +2112,9 @@ pub(super) fn parse_form_attribute(
         .get(15)
         .map(|field| parse_form_reference_list(field, object_refs))
         .unwrap_or_default();
-    let settings = fields
-        .get(14)
-        .and_then(|field| parse_form_dynamic_list_settings(field, object_refs));
+    let settings = fields.get(14).and_then(|field| {
+        parse_form_dynamic_list_settings_with_dcs_type_index(field, object_refs, dcs_type_index)
+    });
     let settings = settings.map(normalize_form_dynamic_list_settings);
     let spreadsheet_document_settings = fields.get(14).and_then(|field| {
         parse_form_spreadsheet_document_settings(field, &value_types, object_refs)
@@ -2647,9 +2666,18 @@ fn parse_form_attribute_column_builtin_type_pattern(field: &str) -> Option<Vec<C
     }])
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_dynamic_list_settings(
     field: &str,
     object_refs: &BTreeMap<String, String>,
+) -> Option<FormDynamicListSettings> {
+    parse_form_dynamic_list_settings_with_dcs_type_index(field, object_refs, &DcsTypeIndex::new())
+}
+
+fn parse_form_dynamic_list_settings_with_dcs_type_index(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    dcs_type_index: &DcsTypeIndex,
 ) -> Option<FormDynamicListSettings> {
     let settings_fields = split_1c_braced_fields(field.trim(), 0)?;
     let mut auto_save_user_settings = false;
@@ -2720,7 +2748,10 @@ pub(super) fn parse_form_dynamic_list_settings(
             "GroupSelectedSettingId" => {
                 list_settings.items_user_setting_id = parse_form_setting_string(window[1])
             }
-            "ServerState" => server_state_xml = parse_form_server_state_xml(window[1]),
+            "ServerState" => {
+                server_state_xml =
+                    parse_form_server_state_xml_with_dcs_type_index(window[1], dcs_type_index)
+            }
             _ => {}
         }
     }
@@ -3402,12 +3433,20 @@ pub(super) fn normalize_form_conditional_appearance_text_segment(
     normalized
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_server_state_xml(field: &str) -> Option<String> {
+    parse_form_server_state_xml_with_dcs_type_index(field, &DcsTypeIndex::new())
+}
+
+pub(super) fn parse_form_server_state_xml_with_dcs_type_index(
+    field: &str,
+    dcs_type_index: &DcsTypeIndex,
+) -> Option<String> {
     let payload = parse_form_setting_string(field)?;
     let encoded = decode_base64_mime(&payload)?;
     let xml = decode_form_server_state_chunks(&encoded)?;
     let xml = String::from_utf8(xml).ok()?;
-    extract_form_server_state_inner_xml(&xml)
+    extract_form_server_state_inner_xml_with_dcs_type_index(&xml, dcs_type_index)
 }
 
 pub(super) fn decode_form_server_state_chunks(encoded: &[u8]) -> Option<Vec<u8>> {
@@ -3463,7 +3502,15 @@ pub(super) fn decode_form_server_state_chunks_with_limit(
     }
 }
 
+#[cfg(test)]
 pub(super) fn extract_form_server_state_inner_xml(xml: &str) -> Option<String> {
+    extract_form_server_state_inner_xml_with_dcs_type_index(xml, &DcsTypeIndex::new())
+}
+
+fn extract_form_server_state_inner_xml_with_dcs_type_index(
+    xml: &str,
+    dcs_type_index: &DcsTypeIndex,
+) -> Option<String> {
     let root_start = xml.find("<UniversalListServerOnlyState")?;
     let root_open_end = xml[root_start..].find('>')? + root_start + 1;
     let root_close_start = xml.rfind("</UniversalListServerOnlyState>")?;
@@ -3471,62 +3518,106 @@ pub(super) fn extract_form_server_state_inner_xml(xml: &str) -> Option<String> {
         r#" xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema""#,
         "",
     );
-    (!inner.is_empty()).then(|| normalize_form_server_state_inner_xml(&inner))
+    (!inner.is_empty())
+        .then(|| normalize_form_server_state_inner_xml_with_dcs_type_index(&inner, dcs_type_index))
 }
 
+#[cfg(test)]
 pub(super) fn normalize_form_server_state_inner_xml(xml: &str) -> String {
-    xml.replace(
-        r#" xmlns:d3p1="http://v8.1c.ru/8.1/data/core" xsi:type="d3p1:LocalStringType""#,
-        r#" xsi:type="v8:LocalStringType""#,
-    )
-    .replace("<d3p1:item>", "<v8:item>")
-    .replace("</d3p1:item>", "</v8:item>")
-    .replace("<d3p1:lang>", "<v8:lang>")
-    .replace("</d3p1:lang>", "</v8:lang>")
-    .replace("<d3p1:content>", "<v8:content>")
-    .replace("</d3p1:content>", "</v8:content>")
-    .replace(r#"<Parameter xsi:type="dcssch:Parameter">"#, "<Parameter>")
-    .replace(
-        r#"<Type xmlns="http://v8.1c.ru/8.1/data/core">"#,
-        "<v8:Type>",
-    )
-    .replace("</Type>", "</v8:Type>")
-    // Dynamic-list ServerState uses the core namespace as the default on
-    // individual type nodes.  Native ibcmd renders these nodes with the
-    // document-level `v8` QName; without this normalization the same core
-    // TypeId was emitted as a plain `<TypeId xmlns=...>` node.
-    .replace(
-        r#"<TypeId xmlns="http://v8.1c.ru/8.1/data/core">"#,
-        "<v8:TypeId>",
-    )
-    .replace("</TypeId>", "</v8:TypeId>")
-    .replace(
-        r#"<DateQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
-        "<v8:DateQualifiers>",
-    )
-    .replace("</DateQualifiers>", "</v8:DateQualifiers>")
-    .replace(
-        r#"<NumberQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
-        "<v8:NumberQualifiers>",
-    )
-    .replace("</NumberQualifiers>", "</v8:NumberQualifiers>")
-    .replace("<Digits>", "<v8:Digits>")
-    .replace("</Digits>", "</v8:Digits>")
-    .replace("<FractionDigits>", "<v8:FractionDigits>")
-    .replace("</FractionDigits>", "</v8:FractionDigits>")
-    .replace("<AllowedSign>", "<v8:AllowedSign>")
-    .replace("</AllowedSign>", "</v8:AllowedSign>")
-    .replace(
-        r#"<StringQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
-        "<v8:StringQualifiers>",
-    )
-    .replace("</StringQualifiers>", "</v8:StringQualifiers>")
-    .replace("<Length>", "<v8:Length>")
-    .replace("</Length>", "</v8:Length>")
-    .replace("<AllowedLength>", "<v8:AllowedLength>")
-    .replace("</AllowedLength>", "</v8:AllowedLength>")
-    .replace("<DateFractions>", "<v8:DateFractions>")
-    .replace("</DateFractions>", "</v8:DateFractions>")
+    normalize_form_server_state_inner_xml_with_dcs_type_index(xml, &DcsTypeIndex::new())
+}
+
+fn normalize_form_server_state_inner_xml_with_dcs_type_index(
+    xml: &str,
+    dcs_type_index: &DcsTypeIndex,
+) -> String {
+    let mut normalized = xml
+        .replace(
+            r#" xmlns:d3p1="http://v8.1c.ru/8.1/data/core" xsi:type="d3p1:LocalStringType""#,
+            r#" xsi:type="v8:LocalStringType""#,
+        )
+        .replace("<d3p1:item>", "<v8:item>")
+        .replace("</d3p1:item>", "</v8:item>")
+        .replace("<d3p1:lang>", "<v8:lang>")
+        .replace("</d3p1:lang>", "</v8:lang>")
+        .replace("<d3p1:content>", "<v8:content>")
+        .replace("</d3p1:content>", "</v8:content>")
+        .replace(r#"<Parameter xsi:type="dcssch:Parameter">"#, "<Parameter>")
+        .replace(
+            r#"<Type xmlns="http://v8.1c.ru/8.1/data/core">"#,
+            "<v8:Type>",
+        )
+        .replace("</Type>", "</v8:Type>")
+        // Dynamic-list ServerState uses the core namespace as the default on
+        // individual type nodes.  Native ibcmd renders these nodes with the
+        // document-level `v8` QName; without this normalization the same core
+        // TypeId was emitted as a plain `<TypeId xmlns=...>` node.
+        .replace(
+            r#"<TypeId xmlns="http://v8.1c.ru/8.1/data/core">"#,
+            "<v8:TypeId>",
+        )
+        .replace("</TypeId>", "</v8:TypeId>")
+        .replace(
+            r#"<DateQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
+            "<v8:DateQualifiers>",
+        )
+        .replace("</DateQualifiers>", "</v8:DateQualifiers>")
+        .replace(
+            r#"<NumberQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
+            "<v8:NumberQualifiers>",
+        )
+        .replace("</NumberQualifiers>", "</v8:NumberQualifiers>")
+        .replace("<Digits>", "<v8:Digits>")
+        .replace("</Digits>", "</v8:Digits>")
+        .replace("<FractionDigits>", "<v8:FractionDigits>")
+        .replace("</FractionDigits>", "</v8:FractionDigits>")
+        .replace("<AllowedSign>", "<v8:AllowedSign>")
+        .replace("</AllowedSign>", "</v8:AllowedSign>")
+        .replace(
+            r#"<StringQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
+            "<v8:StringQualifiers>",
+        )
+        .replace("</StringQualifiers>", "</v8:StringQualifiers>")
+        .replace("<Length>", "<v8:Length>")
+        .replace("</Length>", "</v8:Length>")
+        .replace("<AllowedLength>", "<v8:AllowedLength>")
+        .replace("</AllowedLength>", "</v8:AllowedLength>")
+        .replace("<DateFractions>", "<v8:DateFractions>")
+        .replace("</DateFractions>", "</v8:DateFractions>");
+    rewrite_form_server_state_type_ids(&mut normalized, dcs_type_index);
+    normalized
+}
+
+fn rewrite_form_server_state_type_ids(xml: &mut String, dcs_type_index: &DcsTypeIndex) {
+    const OPEN: &str = "<v8:TypeId>";
+    const CLOSE: &str = "</v8:TypeId>";
+
+    let mut rewritten = String::with_capacity(xml.len());
+    let mut cursor = 0usize;
+    while let Some(relative_start) = xml[cursor..].find(OPEN) {
+        let start = cursor + relative_start;
+        let value_start = start + OPEN.len();
+        let Some(relative_end) = xml[value_start..].find(CLOSE) else {
+            break;
+        };
+        let value_end = value_start + relative_end;
+        let type_id = xml[value_start..value_end].trim();
+        let Some(replacement) =
+            data_composition_type_id_xml(type_id, dcs_type_index, "cfg", false, false)
+        else {
+            rewritten.push_str(&xml[cursor..value_end + CLOSE.len()]);
+            cursor = value_end + CLOSE.len();
+            continue;
+        };
+        rewritten.push_str(&xml[cursor..start]);
+        rewritten.push_str(&replacement);
+        cursor = value_end + CLOSE.len();
+    }
+    if cursor == 0 {
+        return;
+    }
+    rewritten.push_str(&xml[cursor..]);
+    *xml = rewritten;
 }
 
 pub(super) fn parse_form_list_settings_standard_section_xml(

@@ -1123,6 +1123,7 @@ pub(super) fn write_source_asset(
             let xml = extract_form_body_xml_from_body_timed(
                 body,
                 context.type_index,
+                context.dcs_type_index,
                 context.object_refs,
                 context.information_register_field_refs,
                 owner_reference.as_deref(),
