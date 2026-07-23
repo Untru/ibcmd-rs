@@ -3258,6 +3258,14 @@ pub(super) fn normalize_form_list_settings_section_xml(
     } else {
         xml
     };
+    if normalize_text_values {
+        let canonical =
+            canonicalize_form_data_composition_fragment(xml, root_name, object_refs)?;
+        let inner = extract_canonical_form_list_settings_inner(&canonical, root_name)?;
+        return Some(normalize_form_list_settings_raw_fragment(&format!(
+            "<dcsset:{emitted_name}>{inner}</dcsset:{emitted_name}>"
+        )));
+    }
     let root_start = xml.find(&format!("<{root_name}"))?;
     let closing_tag = format!("</{root_name}>");
     let root_open_end = xml[root_start..].find('>')? + root_start + 1;
@@ -3277,6 +3285,19 @@ pub(super) fn normalize_form_list_settings_section_xml(
     Some(normalize_form_list_settings_raw_fragment(&format!(
         "<dcsset:{emitted_name}>{inner}</dcsset:{emitted_name}>"
     )))
+}
+
+fn extract_canonical_form_list_settings_inner<'a>(
+    canonical: &'a str,
+    root_name: &str,
+) -> Option<&'a str> {
+    let opening = format!("<dcsset:{root_name}");
+    let root_start = canonical.find(&opening)?;
+    let root_open_end = canonical[root_start..].find('>')? + root_start + 1;
+    let closing = format!("</dcsset:{root_name}>");
+    let root_close_start = canonical.rfind(&closing)?;
+    (root_open_end <= root_close_start)
+        .then(|| canonical[root_open_end..root_close_start].trim())
 }
 
 pub(super) fn normalize_form_list_settings_raw_fragment(fragment: &str) -> String {

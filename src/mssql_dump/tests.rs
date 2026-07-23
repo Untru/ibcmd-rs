@@ -4696,6 +4696,72 @@ fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
 }
 
 #[test]
+fn canonicalizes_dynamic_list_appearance_nested_default_namespaces() {
+    let xml = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        r#"<ConditionalAppearance xmlns="http://v8.1c.ru/8.1/data-composition-system/settings" "#,
+        r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">"#,
+        r#"<item><appearance>"#,
+        r#"<item xmlns="http://v8.1c.ru/8.1/data-composition-system/core" "#,
+        r#"xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" "#,
+        r#"xsi:type="dcsset:SettingsParameterValue">"#,
+        "<parameter>ЦветТекста</parameter>",
+        r#"<value xmlns:d5p1="http://v8.1c.ru/8.1/data/ui" "#,
+        r#"xmlns:d5p2="http://v8.1c.ru/8.1/data/ui/colors/web" "#,
+        r#"xsi:type="d5p1:Color">d5p2:FireBrick</value>"#,
+        "</item></appearance></item>",
+        "</ConditionalAppearance>",
+    );
+
+    let normalized = normalize_form_list_settings_section_xml(
+        xml,
+        "ConditionalAppearance",
+        "conditionalAppearance",
+        &BTreeMap::new(),
+        true,
+    )
+    .expect("normalized conditional appearance");
+
+    assert!(
+        normalized.contains(r#"<dcscor:item xsi:type="dcsset:SettingsParameterValue">"#),
+        "{normalized}"
+    );
+    assert!(
+        normalized.contains("<dcscor:parameter>ЦветТекста</dcscor:parameter>"),
+        "{normalized}"
+    );
+    assert!(
+        normalized.contains(
+            r#"<dcscor:value xsi:type="v8ui:Color">web:FireBrick</dcscor:value>"#
+        ),
+        "{normalized}"
+    );
+    assert!(!normalized.contains("xmlns"), "{normalized}");
+    assert!(!normalized.contains("d5p"), "{normalized}");
+}
+
+#[test]
+fn rejects_non_dcs_or_malformed_dynamic_list_appearance() {
+    for xml in [
+        r#"<ConditionalAppearance xmlns="urn:foreign"><item/></ConditionalAppearance>"#,
+        r#"<ConditionalAppearance xmlns="http://v8.1c.ru/8.1/data-composition-system/settings"><item></ConditionalAppearance>"#,
+        r#"<ConditionalAppearance xmlns="http://v8.1c.ru/8.1/data-composition-system/settings" custom="value"><item/></ConditionalAppearance>"#,
+    ] {
+        assert!(
+            normalize_form_list_settings_section_xml(
+                xml,
+                "ConditionalAppearance",
+                "conditionalAppearance",
+                &BTreeMap::new(),
+                true,
+            )
+            .is_none(),
+            "{xml}"
+        );
+    }
+}
+
+#[test]
 fn formats_explicit_false_dynamic_data_read() {
     let xml = format_form_attributes_xml(&[FormAttribute {
         id: "2".to_string(),

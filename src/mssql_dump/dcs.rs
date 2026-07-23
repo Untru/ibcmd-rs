@@ -962,6 +962,72 @@ fn canonicalize_data_composition_settings_document(
     Some(indent_data_composition_settings(&settings))
 }
 
+pub(crate) fn canonicalize_form_data_composition_fragment(
+    document: &str,
+    expected_root_local: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut reader = NsReader::from_str(document);
+    reader.config_mut().trim_text(false);
+    let mut depth = 0usize;
+    let mut saw_root = false;
+    loop {
+        match reader.read_event().ok()? {
+            Event::Start(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                if depth == 0 {
+                    if saw_root
+                        || namespace_ref(&namespace) != Some(DCS_SETTINGS_NS)
+                        || local.as_ref() != expected_root_local.as_bytes()
+                        || !event
+                            .attributes()
+                            .with_checks(false)
+                            .all(|attribute| attribute
+                                .is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref())))
+                    {
+                        return None;
+                    }
+                    saw_root = true;
+                }
+                depth = depth.checked_add(1)?;
+            }
+            Event::Empty(event) if depth == 0 => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                if saw_root
+                    || namespace_ref(&namespace) != Some(DCS_SETTINGS_NS)
+                    || local.as_ref() != expected_root_local.as_bytes()
+                    || !event
+                        .attributes()
+                        .with_checks(false)
+                        .all(|attribute| attribute
+                            .is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref())))
+                {
+                    return None;
+                }
+                saw_root = true;
+            }
+            Event::End(_) => depth = depth.checked_sub(1)?,
+            Event::Text(event) if depth == 0 => {
+                if !is_xml_whitespace(std::str::from_utf8(event.as_ref()).ok()?) {
+                    return None;
+                }
+            }
+            Event::CData(_) | Event::GeneralRef(_) if depth == 0 => return None,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if !saw_root || depth != 0 {
+        return None;
+    }
+    let mut writer = DataCompositionXmlWriter::new(object_refs);
+    writer.write_document(
+        document,
+        DataCompositionDocumentMode::FormServerStateFragment,
+    )?;
+    writer.element_stack.is_empty().then_some(writer.output)
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) struct CanonicalFormServerStateFragment {
     pub(crate) start: usize,
