@@ -212,7 +212,8 @@ fn find_xml_tag_end(bytes: &[u8], mut cursor: usize, limit: usize) -> Option<usi
 }
 
 fn dcs_xml_tag_name(tag: &str) -> &str {
-    tag.split_whitespace().next().unwrap_or("")
+    let name = tag.split_whitespace().next().unwrap_or("");
+    name.strip_prefix("dcscor:").unwrap_or(name)
 }
 
 fn dcs_xml_attribute_value<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
@@ -2014,4 +2015,86 @@ fn is_dcs_settings_xsi_type(value: &str) -> bool {
             | "UserFieldCase"
             | "UserFieldExpression"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TYPE_ID: &str = "11111111-1111-1111-1111-111111111111";
+
+    fn rewritten_type(xml: &str) -> String {
+        let mut xml = xml.to_string();
+        let type_index = BTreeMap::from([(
+            TYPE_ID.to_string(),
+            DcsTypeResolution::Type {
+                qname: "cfg:Catalog.Test".to_string(),
+            },
+        )]);
+        rewrite_data_composition_type_ids(&mut xml, &type_index);
+        xml
+    }
+
+    #[test]
+    fn prefixed_core_item_uses_dataset_object_current_config_prefix() {
+        let xml = format!(
+            "<dcscor:item xsi:type=\"DataSetObject\"><v8:TypeId>{TYPE_ID}</v8:TypeId></dcscor:item>"
+        );
+
+        assert_eq!(
+            rewritten_type(&xml),
+            format!(
+                "<dcscor:item xsi:type=\"DataSetObject\"><v8:Type xmlns:d6p1=\"{CURRENT_CONFIG_URI}\">d6p1:Catalog.Test</v8:Type></dcscor:item>"
+            )
+        );
+    }
+
+    #[test]
+    fn parameter_and_calculated_field_keep_d4_current_config_prefix() {
+        for context in ["parameter", "calculatedField"] {
+            let xml = format!("<{context}><v8:TypeId>{TYPE_ID}</v8:TypeId></{context}>");
+
+            assert_eq!(
+                rewritten_type(&xml),
+                format!(
+                    "<{context}><v8:Type xmlns:d4p1=\"{CURRENT_CONFIG_URI}\">d4p1:Catalog.Test</v8:Type></{context}>"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn unprefixed_dataset_object_item_keeps_d6_current_config_prefix() {
+        let xml =
+            format!("<item xsi:type=\"DataSetObject\"><v8:TypeId>{TYPE_ID}</v8:TypeId></item>");
+
+        assert_eq!(
+            rewritten_type(&xml),
+            format!(
+                "<item xsi:type=\"DataSetObject\"><v8:Type xmlns:d6p1=\"{CURRENT_CONFIG_URI}\">d6p1:Catalog.Test</v8:Type></item>"
+            )
+        );
+    }
+
+    #[test]
+    fn foreign_prefixed_contexts_keep_default_current_config_prefix() {
+        for (xml, expected) in [
+            (
+                format!("<foreign:parameter><v8:TypeId>{TYPE_ID}</v8:TypeId></foreign:parameter>"),
+                format!(
+                    "<foreign:parameter><v8:Type xmlns:d5p1=\"{CURRENT_CONFIG_URI}\">d5p1:Catalog.Test</v8:Type></foreign:parameter>"
+                ),
+            ),
+            (
+                format!(
+                    "<foreign:item xsi:type=\"DataSetObject\"><v8:TypeId>{TYPE_ID}</v8:TypeId></foreign:item>"
+                ),
+                format!(
+                    "<foreign:item xsi:type=\"DataSetObject\"><v8:Type xmlns:d5p1=\"{CURRENT_CONFIG_URI}\">d5p1:Catalog.Test</v8:Type></foreign:item>"
+                ),
+            ),
+        ] {
+            assert_eq!(rewritten_type(&xml), expected);
+        }
+    }
 }
