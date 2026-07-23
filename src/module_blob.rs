@@ -2084,8 +2084,9 @@ struct SpreadsheetDocumentXmlPicture {
     ref_name: Option<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct SpreadsheetDocumentXmlDrawing {
+    id: usize,
     format_index: usize,
     begin_row: i32,
     begin_row_offset: i32,
@@ -2096,9 +2097,53 @@ struct SpreadsheetDocumentXmlDrawing {
     end_column: i32,
     end_column_offset: i32,
     auto_size: bool,
-    picture_size: String,
     z_order: usize,
-    picture_index: usize,
+    kind: SpreadsheetDocumentXmlDrawingKind,
+}
+
+impl Default for SpreadsheetDocumentXmlDrawing {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            format_index: 0,
+            begin_row: 0,
+            begin_row_offset: 0,
+            end_row: 0,
+            end_row_offset: 0,
+            begin_column: 0,
+            begin_column_offset: 0,
+            end_column: 0,
+            end_column_offset: 0,
+            auto_size: false,
+            z_order: 0,
+            kind: SpreadsheetDocumentXmlDrawingKind::Picture {
+                picture_size: String::new(),
+                picture_index: 0,
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+enum SpreadsheetDocumentXmlDrawingKind {
+    Picture {
+        picture_size: String,
+        picture_index: usize,
+    },
+    Chart(Option<SpreadsheetDocumentXmlChart>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SpreadsheetDocumentXmlChart {
+    object: SpreadsheetChartXmlNode,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SpreadsheetChartXmlNode {
+    name: String,
+    attributes: BTreeMap<String, String>,
+    text: String,
+    children: Vec<SpreadsheetChartXmlNode>,
 }
 
 fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
@@ -2410,8 +2455,207 @@ fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> 
     if document.rows.is_empty() {
         return Err(anyhow!("SpreadsheetDocument XML has no rowsItem entries"));
     }
+    attach_spreadsheet_chart_objects(xml, &mut document.drawings)?;
     document.rows.sort_by_key(|row| row.index);
     Ok(document)
+}
+
+const MAX_SPREADSHEET_CHART_XML_DEPTH: usize = 64;
+const MAX_SPREADSHEET_CHART_XML_NODES: usize = 16_384;
+const MAX_SPREADSHEET_CHART_XML_TEXT: usize = 1024 * 1024;
+
+fn attach_spreadsheet_chart_objects(
+    xml: &[u8],
+    drawings: &mut [SpreadsheetDocumentXmlDrawing],
+) -> Result<()> {
+    let expected = drawings
+        .iter()
+        .filter(|drawing| matches!(drawing.kind, SpreadsheetDocumentXmlDrawingKind::Chart(None)))
+        .count();
+    if expected == 0 {
+        return Ok(());
+    }
+    let objects = parse_spreadsheet_chart_objects(xml)?;
+    if objects.len() != expected {
+        return Err(anyhow!(
+            "SpreadsheetDocument Chart object count mismatch: expected {expected}, found {}",
+            objects.len()
+        ));
+    }
+    let mut objects = objects.into_iter();
+    for drawing in drawings {
+        if matches!(drawing.kind, SpreadsheetDocumentXmlDrawingKind::Chart(None)) {
+            drawing.kind = SpreadsheetDocumentXmlDrawingKind::Chart(objects.next());
+        }
+    }
+    Ok(())
+}
+
+fn parse_spreadsheet_chart_objects(xml: &[u8]) -> Result<Vec<SpreadsheetDocumentXmlChart>> {
+    let mut reader = Reader::from_reader(xml);
+    reader.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut objects = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buffer)? {
+            Event::Start(event) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "object"
+                    && path.last().is_some_and(|part| part == "drawing")
+                    && xml_attribute_value(&event, "type")?
+                        .is_some_and(|value| value.rsplit(':').next() == Some("Chart"))
+                {
+                    let object = read_spreadsheet_chart_xml_node(&mut reader, &event)?;
+                    objects.push(SpreadsheetDocumentXmlChart { object });
+                } else {
+                    path.push(local);
+                }
+            }
+            Event::End(_) => {
+                let _ = path.pop();
+            }
+            Event::Empty(event)
+                if xml_local_name(event.local_name().as_ref()) == "object"
+                    && path.last().is_some_and(|part| part == "drawing")
+                    && xml_attribute_value(&event, "type")?
+                        .is_some_and(|value| value.rsplit(':').next() == Some("Chart")) =>
+            {
+                objects.push(SpreadsheetDocumentXmlChart {
+                    object: spreadsheet_chart_xml_node_from_start(&event)?,
+                });
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buffer.clear();
+    }
+    Ok(objects)
+}
+
+fn read_spreadsheet_chart_xml_node(
+    reader: &mut Reader<&[u8]>,
+    root: &BytesStart<'_>,
+) -> Result<SpreadsheetChartXmlNode> {
+    let mut stack = vec![spreadsheet_chart_xml_node_from_start(root)?];
+    let mut buffer = Vec::new();
+    let mut node_count = 1usize;
+    let mut text_bytes = 0usize;
+    loop {
+        match reader.read_event_into(&mut buffer)? {
+            Event::Start(event) => {
+                node_count = node_count
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML node count overflow"))?;
+                if stack.len() >= MAX_SPREADSHEET_CHART_XML_DEPTH
+                    || node_count > MAX_SPREADSHEET_CHART_XML_NODES
+                {
+                    return Err(anyhow!("SpreadsheetDocument Chart XML limits exceeded"));
+                }
+                stack.push(spreadsheet_chart_xml_node_from_start(&event)?);
+            }
+            Event::Empty(event) => {
+                node_count = node_count
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML node count overflow"))?;
+                if node_count > MAX_SPREADSHEET_CHART_XML_NODES {
+                    return Err(anyhow!("SpreadsheetDocument Chart XML node limit exceeded"));
+                }
+                let node = spreadsheet_chart_xml_node_from_start(&event)?;
+                stack
+                    .last_mut()
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
+                    .children
+                    .push(node);
+            }
+            Event::Text(event) => {
+                let value = event.xml_content()?;
+                let value = unescape(value.as_ref())?;
+                text_bytes = text_bytes
+                    .checked_add(value.len())
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML text size overflow"))?;
+                if text_bytes > MAX_SPREADSHEET_CHART_XML_TEXT {
+                    return Err(anyhow!("SpreadsheetDocument Chart XML text limit exceeded"));
+                }
+                stack
+                    .last_mut()
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
+                    .text
+                    .push_str(value.as_ref());
+            }
+            Event::CData(event) => {
+                let value = event.xml_content()?;
+                text_bytes = text_bytes
+                    .checked_add(value.len())
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML text size overflow"))?;
+                if text_bytes > MAX_SPREADSHEET_CHART_XML_TEXT {
+                    return Err(anyhow!("SpreadsheetDocument Chart XML text limit exceeded"));
+                }
+                stack
+                    .last_mut()
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
+                    .text
+                    .push_str(value.as_ref());
+            }
+            Event::GeneralRef(reference) => {
+                let value = if let Some(ch) = reference.resolve_char_ref()? {
+                    ch.to_string()
+                } else {
+                    let entity = reference.decode()?;
+                    resolve_xml_entity(entity.as_ref())
+                        .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                        .to_string()
+                };
+                text_bytes = text_bytes
+                    .checked_add(value.len())
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML text size overflow"))?;
+                if text_bytes > MAX_SPREADSHEET_CHART_XML_TEXT {
+                    return Err(anyhow!("SpreadsheetDocument Chart XML text limit exceeded"));
+                }
+                stack
+                    .last_mut()
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
+                    .text
+                    .push_str(&value);
+            }
+            Event::End(_) => {
+                let node = stack
+                    .pop()
+                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack underflow"))?;
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else {
+                    return Ok(node);
+                }
+            }
+            Event::Eof => {
+                return Err(anyhow!(
+                    "unexpected EOF inside SpreadsheetDocument Chart object"
+                ));
+            }
+            _ => {}
+        }
+        buffer.clear();
+    }
+}
+
+fn spreadsheet_chart_xml_node_from_start(
+    event: &BytesStart<'_>,
+) -> Result<SpreadsheetChartXmlNode> {
+    let mut attributes = BTreeMap::new();
+    for attribute in event.attributes() {
+        let attribute = attribute?;
+        attributes.insert(
+            xml_local_name(attribute.key.local_name().as_ref()),
+            attribute.unescape_value()?.into_owned(),
+        );
+    }
+    Ok(SpreadsheetChartXmlNode {
+        name: xml_local_name(event.local_name().as_ref()),
+        attributes,
+        text: String::new(),
+        children: Vec::new(),
+    })
 }
 
 fn parse_spreadsheet_font_xml_attributes(
@@ -2535,6 +2779,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "w"
             | "name"
             | "type"
+            | "drawingType"
             | "beginRow"
             | "endRow"
             | "beginColumn"
@@ -2593,7 +2838,6 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "picHorizontalAlignment"
             | "picVerticalAlignment"
             | "style"
-            | "drawingType"
             | "beginRowOffset"
             | "endRowOffset"
             | "beginColumnOffset"
@@ -3092,6 +3336,20 @@ fn apply_spreadsheet_text_value(
                 format.pic_vertical_alignment = Some(parsed)
             });
         }
+        "drawingType" if path_ends_with(path, &["drawing", "drawingType"]) => {
+            if let Some(drawing) = drawing {
+                drawing.kind = match value {
+                    "Chart" => SpreadsheetDocumentXmlDrawingKind::Chart(None),
+                    _ => SpreadsheetDocumentXmlDrawingKind::Picture {
+                        picture_size: String::new(),
+                        picture_index: 0,
+                    },
+                };
+            }
+        }
+        "id" if path_ends_with(path, &["drawing", "id"]) => {
+            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| drawing.id = parsed);
+        }
         "beginRow" if path_ends_with(path, &["drawing", "beginRow"]) => {
             set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
                 drawing.begin_row = parsed
@@ -3136,8 +3394,12 @@ fn apply_spreadsheet_text_value(
             }
         }
         "pictureSize" if path_ends_with(path, &["drawing", "pictureSize"]) => {
-            if let Some(drawing) = drawing {
-                drawing.picture_size = text.to_string();
+            if let Some(SpreadsheetDocumentXmlDrawing {
+                kind: SpreadsheetDocumentXmlDrawingKind::Picture { picture_size, .. },
+                ..
+            }) = drawing
+            {
+                *picture_size = text.to_string();
             }
         }
         "zOrder" if path_ends_with(path, &["drawing", "zOrder"]) => {
@@ -3146,9 +3408,14 @@ fn apply_spreadsheet_text_value(
             });
         }
         "pictureIndex" if path_ends_with(path, &["drawing", "pictureIndex"]) => {
-            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| {
-                drawing.picture_index = parsed
-            });
+            if let Some(SpreadsheetDocumentXmlDrawing {
+                kind: SpreadsheetDocumentXmlDrawingKind::Picture { picture_index, .. },
+                ..
+            }) = drawing
+                && let Ok(parsed) = value.parse::<usize>()
+            {
+                *picture_index = parsed;
+            }
         }
         "style" if path_ends_with(path, &["line", "style"]) => {
             if let Some(line) = line {
@@ -4351,12 +4618,91 @@ fn format_spreadsheet_drawings_for_moxel(
 }
 
 fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing) -> Option<String> {
-    if drawing.picture_size != "Stretch" {
+    match &drawing.kind {
+        SpreadsheetDocumentXmlDrawingKind::Picture {
+            picture_size,
+            picture_index,
+        } => {
+            if picture_size != "Stretch" {
+                return None;
+            }
+            let auto_size = if drawing.auto_size { 0 } else { 1 };
+            Some(format!(
+                "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
+                drawing.format_index,
+                drawing.begin_column.max(0),
+                drawing.begin_row.max(0),
+                drawing.begin_column_offset.max(0),
+                drawing.begin_row_offset.max(0),
+                drawing.end_column.max(drawing.begin_column).max(0),
+                drawing.end_row.max(drawing.begin_row).max(0),
+                drawing.end_column_offset.max(0),
+                drawing.end_row_offset.max(0),
+                drawing.z_order,
+                picture_index
+            ))
+        }
+        SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) => {
+            format_spreadsheet_chart_drawing_for_moxel(drawing, chart)
+        }
+        SpreadsheetDocumentXmlDrawingKind::Chart(None) => None,
+    }
+}
+
+fn format_spreadsheet_chart_drawing_for_moxel(
+    drawing: &SpreadsheetDocumentXmlDrawing,
+    chart: &SpreadsheetDocumentXmlChart,
+) -> Option<String> {
+    const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
+
+    if drawing.auto_size
+        || chart.object.name != "object"
+        || chart
+            .object
+            .attributes
+            .get("type")
+            .is_none_or(|value| value.rsplit(':').next() != Some("Chart"))
+    {
         return None;
     }
-    let auto_size = if drawing.auto_size { 0 } else { 1 };
+    let series = spreadsheet_chart_children(&chart.object, "realSeriesData");
+    if series.len() != 1 {
+        return None;
+    }
+    validate_spreadsheet_chart_v74_xml(&chart.object)?;
+    let points = spreadsheet_chart_children(&chart.object, "realPointData");
+    if points.is_empty()
+        || points.len() > 1024
+        || spreadsheet_chart_usize(&chart.object, "realSeriesCount")? != series.len()
+        || spreadsheet_chart_usize(&chart.object, "realPointCount")? != points.len()
+    {
+        return None;
+    }
+    let extra_series = spreadsheet_chart_child(&chart.object, "realExSeriesData")?;
+    let mut data = vec![
+        "74".to_string(),
+        spreadsheet_chart_text(&chart.object, "seriesCurId")?.to_string(),
+        spreadsheet_chart_text(&chart.object, "pointsCurId")?.to_string(),
+        spreadsheet_chart_bool_code(&chart.object, "isSeriesDesign")?.to_string(),
+        series.len().to_string(),
+    ];
+    for item in &series {
+        data.extend(format_spreadsheet_chart_series_for_moxel(item)?);
+    }
+    data.extend(format_spreadsheet_chart_series_for_moxel(extra_series)?);
+    data.push(spreadsheet_chart_bool_code(&chart.object, "isPointsDesign")?.to_string());
+    data.push(points.len().to_string());
+    for item in &points {
+        data.extend(format_spreadsheet_chart_point_for_moxel(item)?);
+    }
+    data.extend(format_spreadsheet_chart_tail_for_moxel(
+        &chart.object,
+        &series,
+        &points,
+    )?);
+    let payload = format!("{{{{11}},{{{}}}}}", data.join(","));
     Some(format!(
-        "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
+        "{{{{0,{}}},10,{},{},{},{},{},{},{},{},{},{CHART_TYPE_UUID},{payload},0}}",
         drawing.format_index,
         drawing.begin_column.max(0),
         drawing.begin_row.max(0),
@@ -4366,9 +4712,812 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
         drawing.end_row.max(drawing.begin_row).max(0),
         drawing.end_column_offset.max(0),
         drawing.end_row_offset.max(0),
-        drawing.z_order,
-        drawing.picture_index
+        drawing.id
     ))
+}
+
+fn format_spreadsheet_chart_series_for_moxel(
+    node: &SpreadsheetChartXmlNode,
+) -> Option<Vec<String>> {
+    spreadsheet_chart_exact_child_names(
+        node,
+        &[
+            "id",
+            "color",
+            "line",
+            "marker",
+            "text",
+            "strIsChanged",
+            "isExpand",
+            "isIndicator",
+            "colorPriority",
+        ],
+    )?;
+    Some(vec![
+        spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(node, "color")?)?,
+        spreadsheet_chart_line_for_moxel(spreadsheet_chart_child(node, "line")?)?,
+        spreadsheet_chart_marker_code(spreadsheet_chart_text(node, "marker")?)?.to_string(),
+        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(node, "text")?)?,
+        spreadsheet_chart_bool_code(node, "strIsChanged")?.to_string(),
+        spreadsheet_chart_bool_code(node, "isExpand")?.to_string(),
+        spreadsheet_chart_bool_code(node, "isIndicator")?.to_string(),
+        spreadsheet_chart_usize(node, "id")?.to_string(),
+        r#"{"U"}"#.to_string(),
+        r#"{"U"}"#.to_string(),
+        spreadsheet_chart_bool_code(node, "colorPriority")?.to_string(),
+    ])
+}
+
+fn format_spreadsheet_chart_point_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<Vec<String>> {
+    spreadsheet_chart_exact_child_names(
+        node,
+        &[
+            "id",
+            "color",
+            "line",
+            "marker",
+            "text",
+            "strIsChanged",
+            "isExpand",
+            "isIndicator",
+            "colorPriority",
+        ],
+    )?;
+    Some(vec![
+        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(node, "text")?)?,
+        spreadsheet_chart_bool_code(node, "strIsChanged")?.to_string(),
+        spreadsheet_chart_usize(node, "id")?.to_string(),
+        spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(node, "color")?)?,
+        spreadsheet_chart_line_for_moxel(spreadsheet_chart_child(node, "line")?)?,
+        spreadsheet_chart_marker_code(spreadsheet_chart_text(node, "marker")?)?.to_string(),
+        spreadsheet_chart_bool_code(node, "isExpand")?.to_string(),
+        spreadsheet_chart_bool_code(node, "isIndicator")?.to_string(),
+        r#"{"U"}"#.to_string(),
+        r#"{"U"}"#.to_string(),
+        spreadsheet_chart_bool_code(node, "colorPriority")?.to_string(),
+    ])
+}
+
+fn format_spreadsheet_chart_tail_for_moxel(
+    chart: &SpreadsheetChartXmlNode,
+    series: &[&SpreadsheetChartXmlNode],
+    points: &[&SpreadsheetChartXmlNode],
+) -> Option<Vec<String>> {
+    let title =
+        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "title")?)?;
+    let value_format =
+        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "vsFormat")?)?;
+    let label_location = match spreadsheet_chart_text(chart, "labelsLocation")? {
+        "Edge" => 0,
+        "Auto" => 4,
+        _ => return None,
+    };
+    let gauge_bands = format_spreadsheet_chart_gauge_bands_for_moxel(spreadsheet_chart_child(
+        chart,
+        "gaugeQualityBands",
+    )?)?;
+    let mut tail = vec![
+        spreadsheet_chart_text(chart, "curSeries")?.to_string(),
+        spreadsheet_chart_text(chart, "curPoint")?.to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        format_1c_string(spreadsheet_chart_text(chart, "labelsDelimiter")?),
+        label_location.to_string(),
+        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "lbFormat")?)?,
+        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "lbpFormat")?)?,
+        "{3,3,{-3}}".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        title,
+        "0".to_string(),
+        "0".to_string(),
+        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
+        "{3,3,{-22}}".to_string(),
+        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
+        "{3,3,{-22}}".to_string(),
+        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
+        "{3,3,{-22}}".to_string(),
+        "0".to_string(),
+        "{3,3,{-1}}".to_string(),
+        "1".to_string(),
+        "{3,3,{-1}}".to_string(),
+        "1".to_string(),
+        "{3,3,{-1}}".to_string(),
+        "0".to_string(),
+        "{3,0,{16777215}}".to_string(),
+        "{3,3,{-3}}".to_string(),
+        "{3,3,{-3}}".to_string(),
+        "{3,3,{-3}}".to_string(),
+        "{7,2,0,{-20},1,100}".to_string(),
+        "{7,2,0,{-20},1,100}".to_string(),
+        "{7,2,0,{-20},1,100}".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        value_format.clone(),
+        "0".to_string(),
+        "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}".to_string(),
+        "{3,0,{11119017}}".to_string(),
+        spreadsheet_chart_bool_code(chart, "isAutoSeriesName")?.to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        spreadsheet_chart_text(chart, "maxSeries")?.to_string(),
+        "30".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        spreadsheet_chart_bool_code(chart, "isOutline")?.to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "2".to_string(),
+        "{1,0}".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "{3,0,{169}}".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        gauge_bands,
+        "0".to_string(),
+        "180".to_string(),
+        "2".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "5".to_string(),
+        "{3,0,{11119017}}".to_string(),
+        "1".to_string(),
+        spreadsheet_chart_number(chart, "userMaxValue")?,
+        "1".to_string(),
+        spreadsheet_chart_number(chart, "userMinValue")?,
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        "{3,3,{-22}}".to_string(),
+        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
+        format_1c_string(spreadsheet_chart_text(chart, "dataSourceDescription")?),
+        "0".to_string(),
+        "1".to_string(),
+    ];
+    if tail.len() != 100 {
+        return None;
+    }
+    let data_items = spreadsheet_chart_child(chart, "realDataItems")?;
+    let items = spreadsheet_chart_children(data_items, "item");
+    if items.len() != series.len().checked_mul(points.len())? {
+        return None;
+    }
+    for item in items {
+        spreadsheet_chart_exact_child_names(item, &["valData", "valInfo", "toolTip"])?;
+        let value = spreadsheet_chart_child(item, "valData")?;
+        if value
+            .attributes
+            .get("type")
+            .is_none_or(|value| value.rsplit(':').next() != Some("decimal"))
+            || spreadsheet_chart_child(item, "valInfo")?
+                .attributes
+                .get("nil")
+                .map(String::as_str)
+                != Some("true")
+        {
+            return None;
+        }
+        tail.push(format!(
+            "{{\"N\",{}}}",
+            spreadsheet_chart_node_number(value)?
+        ));
+        tail.push(r#"{"U"}"#.to_string());
+        tail.push(format_1c_string(
+            spreadsheet_chart_child(item, "toolTip")?.text.trim(),
+        ));
+    }
+    let mut post = vec![
+        "14".to_string(),
+        "2".to_string(),
+        "{7,3,0,1,100}".to_string(),
+        "1".to_string(),
+        "{3,4,{0}}".to_string(),
+        "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
+        "{3,4,{0}}".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "1".to_string(),
+        "0".to_string(),
+        spreadsheet_chart_number(chart, "translucencePercent")?,
+        spreadsheet_chart_text(chart, "splineStrain")?.to_string(),
+        spreadsheet_chart_percent_fraction(spreadsheet_chart_text(
+            chart,
+            "funnelNeckHeightPercent",
+        )?)?,
+        spreadsheet_chart_percent_fraction(spreadsheet_chart_text(
+            chart,
+            "funnelNeckWidthPercent",
+        )?)?,
+        spreadsheet_chart_percent_fraction(spreadsheet_chart_text(chart, "funnelGapSumPercent")?)?,
+        "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}".to_string(),
+        "{3,0,{0}}".to_string(),
+        "2".to_string(),
+        "255".to_string(),
+        "0".to_string(),
+        spreadsheet_chart_text(chart, "rebuildTime")?.to_string(),
+        "00000000-0000-0000-0000-000000000000".to_string(),
+        "2".to_string(),
+        "{0,1,0}".to_string(),
+        "{0,2,0}".to_string(),
+        "{0,0}".to_string(),
+        "{0,0}".to_string(),
+        "0".to_string(),
+        format_spreadsheet_chart_axis_for_moxel(spreadsheet_chart_child(chart, "valuesAxis")?)?,
+        format_spreadsheet_chart_axis_for_moxel(spreadsheet_chart_child(chart, "pointsAxis")?)?,
+        "0".to_string(),
+        "0".to_string(),
+        "2".to_string(),
+        "-2".to_string(),
+        "1".to_string(),
+        "10".to_string(),
+        "1".to_string(),
+        "20".to_string(),
+        "0".to_string(),
+        "0".to_string(),
+        spreadsheet_chart_scale_for_moxel("{1,0}"),
+        spreadsheet_chart_scale_for_moxel(&value_format),
+        spreadsheet_chart_scale_for_moxel("{1,0}"),
+        "0".to_string(),
+        "0".to_string(),
+        "{3,4,{0}}".to_string(),
+        "{3,4,{0}}".to_string(),
+        "0".to_string(),
+    ];
+    for point in points {
+        post.push(format!(
+            "{{{}}}",
+            spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(point, "color")?)?
+        ));
+    }
+    post.push(format_spreadsheet_chart_cache_for_moxel(
+        series.first().copied()?,
+    )?);
+    post.push(format_spreadsheet_chart_cache_for_moxel(
+        spreadsheet_chart_child(chart, "realExSeriesData")?,
+    )?);
+    post.extend(
+        [
+            "0", "0", "0", "0", "0", "0", "1", "1", "0", "0", "1", "1", "1", "6", "8",
+        ]
+        .into_iter()
+        .map(str::to_string),
+    );
+    post.extend(format_spreadsheet_chart_rectangle_for_moxel(
+        spreadsheet_chart_child(chart, "elementsChart")?,
+    )?);
+    post.extend(format_spreadsheet_chart_rectangle_for_moxel(
+        spreadsheet_chart_child(chart, "elementsLegend")?,
+    )?);
+    post.extend(format_spreadsheet_chart_rectangle_for_moxel(
+        spreadsheet_chart_child(chart, "elementsTitle")?,
+    )?);
+    post.extend(
+        [
+            "{0,0}",
+            "{0,0}",
+            "{0,0}",
+            "{0,0}",
+            "{0,14,{3,4,{0}},{3,4,{0}},0,0}",
+            "{0,14,{3,4,{0}},{3,4,{0}},0,0}",
+            "0",
+            "0",
+            "{0,0,0,0,0}",
+            "{0,0,0,0}",
+            "0",
+        ]
+        .into_iter()
+        .map(str::to_string),
+    );
+    for _ in points {
+        post.push("{{1,{1,0},0},0}".to_string());
+    }
+    post.push(String::new());
+    post.push("60".to_string());
+    post.push(spreadsheet_chart_scale_for_moxel("{1,0}"));
+    post.push("{0,0,{0,1,0,1,0},0,0}".to_string());
+    post.extend(std::iter::repeat_n("0".to_string(), 7));
+    if post.len() != 100 + points.len() * 2 {
+        return None;
+    }
+    tail.extend(post);
+    Some(tail)
+}
+
+fn validate_spreadsheet_chart_v74_xml(node: &SpreadsheetChartXmlNode) -> Option<()> {
+    let series_count = spreadsheet_chart_usize(node, "realSeriesCount")?;
+    let point_count = spreadsheet_chart_usize(node, "realPointCount")?;
+    let has_value_scale = spreadsheet_chart_children(node, "valuesScale").len() == 1;
+    let mut names = vec![
+        "seriesCurId",
+        "pointsCurId",
+        "isSeriesDesign",
+        "realSeriesCount",
+    ];
+    names.extend(std::iter::repeat_n("realSeriesData", series_count));
+    names.extend(["realExSeriesData", "isPointsDesign", "realPointCount"]);
+    names.extend(std::iter::repeat_n("realPointData", point_count));
+    names.extend([
+        "curSeries",
+        "curPoint",
+        "chartType",
+        "circleLabelType",
+        "labelsDelimiter",
+        "labelsLocation",
+        "lbFormat",
+        "lbpFormat",
+        "labelsColor",
+        "labelsFont",
+        "transparentLabelsBkg",
+        "labelsBkgColor",
+        "labelsBorder",
+        "labelsBorderColor",
+        "circleExpandMode",
+        "chart3Dcrd",
+        "title",
+        "isShowTitle",
+        "isShowLegend",
+        "ttlBorder",
+        "ttlBorderColor",
+        "lgBorder",
+        "lgBorderColor",
+        "chBorder",
+        "chBorderColor",
+        "transparent",
+        "bkgColor",
+        "isTrnspTtl",
+        "ttlColor",
+        "isTrnspLeg",
+        "legColor",
+        "isTrnspCh",
+        "chColor",
+        "ttlTxtColor",
+        "legTxtColor",
+        "chTxtColor",
+        "ttlFont",
+        "legFont",
+        "chFont",
+        "isShowScale",
+        "isShowScaleVL",
+        "isShowSeriesScale",
+        "isShowPointsScale",
+        "isShowValuesScale",
+        "vsFormat",
+        "xLabelsOrientation",
+        "scaleLine",
+        "scaleColor",
+        "isAutoSeriesName",
+        "isAutoPointName",
+        "maxMode",
+        "maxSeries",
+        "maxSeriesPrc",
+        "spaceMode",
+        "baseVal",
+        "isOutline",
+        "realPiePoint",
+        "realStockSeries",
+        "isLight",
+        "isGradient",
+        "isTransposition",
+        "hideBaseVal",
+        "dataTable",
+        "dtVerLines",
+        "dtHorLines",
+        "dtHAlign",
+        "dtFormat",
+        "dtKeys",
+        "paletteKind",
+        "animation",
+        "rebuildTime",
+        "isTransposed",
+        "autoTransposition",
+        "legendScrollEnable",
+        "surfaceColor",
+        "radarScaleType",
+        "gaugeValuesPresentation",
+        "gaugeQualityBands",
+        "beginGaugeAngle",
+        "endGaugeAngle",
+        "gaugeThickness",
+        "gaugeLabelsLocation",
+        "gaugeLabelsArcDirection",
+        "gaugeBushThickness",
+        "gaugeBushColor",
+        "autoMaxValue",
+        "userMaxValue",
+        "autoMinValue",
+        "userMinValue",
+        "elementsIsInit",
+        "titleIsInit",
+        "legendIsInit",
+        "chartIsInit",
+        "elementsChart",
+        "elementsLegend",
+        "elementsTitle",
+        "borderColor",
+        "border",
+        "dataSourceDescription",
+        "isDataSourceMode",
+        "isRandomizedNewValues",
+        "realDataItems",
+        "splineStrain",
+        "translucencePercent",
+        "funnelNeckHeightPercent",
+        "funnelNeckWidthPercent",
+        "funnelGapSumPercent",
+        "multiStageLinkLine",
+        "multiStageLinkColor",
+        "valuesAxis",
+        "pointsAxis",
+    ]);
+    if has_value_scale {
+        names.push("valuesScale");
+    }
+    names.extend(["legendPlacement", "plotAreaPlacement", "titleAreaPlacement"]);
+    spreadsheet_chart_exact_child_names(node, &names)?;
+    let fixed = [
+        ("chartType", "Line"),
+        ("circleLabelType", "None"),
+        ("labelsDelimiter", ", "),
+        ("labelsColor", "style:FormTextColor"),
+        ("transparentLabelsBkg", "true"),
+        ("labelsBkgColor", "auto"),
+        ("labelsBorderColor", "auto"),
+        ("circleExpandMode", "None"),
+        ("chart3Dcrd", "SouthWest"),
+        ("isShowTitle", "false"),
+        ("isShowLegend", "false"),
+        ("ttlBorderColor", "style:BorderColor"),
+        ("lgBorderColor", "style:BorderColor"),
+        ("chBorderColor", "style:BorderColor"),
+        ("transparent", "false"),
+        ("bkgColor", "style:FormBackColor"),
+        ("isTrnspTtl", "true"),
+        ("ttlColor", "style:FormBackColor"),
+        ("isTrnspLeg", "true"),
+        ("legColor", "style:FormBackColor"),
+        ("isTrnspCh", "false"),
+        ("chColor", "#FFFFFF"),
+        ("ttlTxtColor", "style:FormTextColor"),
+        ("legTxtColor", "style:FormTextColor"),
+        ("chTxtColor", "style:FormTextColor"),
+        ("isShowScale", "true"),
+        ("isShowScaleVL", "true"),
+        ("isShowSeriesScale", "true"),
+        ("isShowPointsScale", "true"),
+        ("isShowValuesScale", "true"),
+        ("xLabelsOrientation", "Auto"),
+        ("scaleColor", "#A9A9A9"),
+        ("isAutoPointName", "false"),
+        ("maxMode", "NotDefined"),
+        ("maxSeriesPrc", "30"),
+        ("spaceMode", "Half"),
+        ("baseVal", "0"),
+        ("realPiePoint", "0"),
+        ("realStockSeries", "0"),
+        ("isLight", "true"),
+        ("isGradient", "false"),
+        ("isTransposition", "false"),
+        ("hideBaseVal", "false"),
+        ("dataTable", "false"),
+        ("dtVerLines", "true"),
+        ("dtHorLines", "true"),
+        ("dtHAlign", "Right"),
+        ("dtKeys", "true"),
+        ("paletteKind", "Auto"),
+        ("animation", "Auto"),
+        ("isTransposed", "false"),
+        ("autoTransposition", "false"),
+        ("legendScrollEnable", "false"),
+        ("surfaceColor", "#A90000"),
+        ("radarScaleType", "Circle"),
+        ("gaugeValuesPresentation", "Needle"),
+        ("beginGaugeAngle", "0"),
+        ("endGaugeAngle", "180"),
+        ("gaugeThickness", "2"),
+        ("gaugeLabelsLocation", "InsideScale"),
+        ("gaugeLabelsArcDirection", "false"),
+        ("gaugeBushThickness", "5"),
+        ("gaugeBushColor", "#A9A9A9"),
+        ("autoMaxValue", "true"),
+        ("autoMinValue", "true"),
+        ("elementsIsInit", "true"),
+        ("titleIsInit", "true"),
+        ("legendIsInit", "true"),
+        ("chartIsInit", "true"),
+        ("borderColor", "style:BorderColor"),
+        ("isDataSourceMode", "false"),
+        ("isRandomizedNewValues", "true"),
+        ("multiStageLinkColor", "#000000"),
+        ("legendPlacement", "None"),
+        ("plotAreaPlacement", "UseCoordinates"),
+        ("titleAreaPlacement", "None"),
+    ];
+    fixed
+        .iter()
+        .all(|(tag, expected)| spreadsheet_chart_text(node, tag) == Some(*expected))
+        .then_some(())
+}
+
+fn format_spreadsheet_chart_gauge_bands_for_moxel(
+    node: &SpreadsheetChartXmlNode,
+) -> Option<String> {
+    if node.attributes.get("useTextStr").map(String::as_str) != Some("false")
+        || node.attributes.get("useTooltipStr").map(String::as_str) != Some("false")
+    {
+        return None;
+    }
+    let items = spreadsheet_chart_children(node, "item");
+    if items.len() > 1024 {
+        return None;
+    }
+    let mut fields = vec!["1".to_string(), items.len().to_string()];
+    for item in items {
+        spreadsheet_chart_exact_child_names(
+            item,
+            &["begin", "end", "backColor", "text", "tooltip"],
+        )?;
+        let begin = spreadsheet_chart_number(item, "begin")?;
+        let end = spreadsheet_chart_number(item, "end")?;
+        fields.push(format!(
+            "{{3,{begin},{end},{},{},{},\"\",0,\"\",0,{begin},{end}}}",
+            spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(item, "backColor")?)?,
+            format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(item, "text")?)?,
+            format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(
+                item, "tooltip"
+            )?)?
+        ));
+    }
+    fields.extend(["0".to_string(), "0".to_string()]);
+    Some(format!("{{{}}}", fields.join(",")))
+}
+
+fn format_spreadsheet_chart_axis_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
+    if node
+        .children
+        .iter()
+        .any(|child| !matches!(child.name.as_str(), "minValue" | "maxValue"))
+    {
+        return None;
+    }
+    let min =
+        spreadsheet_chart_optional_number(node, "minValue")?.unwrap_or_else(|| "0".to_string());
+    let max =
+        spreadsheet_chart_optional_number(node, "maxValue")?.unwrap_or_else(|| "0".to_string());
+    Some(format!("{{0,0,{{0,1,{min},1,{max}}},0,0}}"))
+}
+
+fn format_spreadsheet_chart_rectangle_for_moxel(
+    node: &SpreadsheetChartXmlNode,
+) -> Option<Vec<String>> {
+    spreadsheet_chart_exact_child_names(node, &["left", "right", "top", "bottom"])?;
+    Some(vec![
+        spreadsheet_chart_number(node, "left")?,
+        spreadsheet_chart_number(node, "top")?,
+        spreadsheet_chart_number(node, "right")?,
+        spreadsheet_chart_number(node, "bottom")?,
+    ])
+}
+
+fn format_spreadsheet_chart_cache_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
+    Some(
+        format!(
+            "{{{}, {},0,0,0,\"\",{{1,0}},{{1,0}},{{1,0}},0}}",
+            spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(node, "color")?)?,
+            spreadsheet_chart_marker_code(spreadsheet_chart_text(node, "marker")?)?
+        )
+        .replace(", ", ","),
+    )
+}
+
+fn spreadsheet_chart_scale_for_moxel(label_format: &str) -> String {
+    format!(
+        "{{2,0,0,2,{{1,0}},{{1,4,0.5,0.5,{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},1,{{3,0,{{0}},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},{{3,4,{{0}}}},4,2,0}},2,0,0,{{3,4,{{0}}}},{{7,3,0,1,100}},{{3,4,{{0}}}},2,{label_format},0,{{3,4,{{0}}}},0,0,0,0,0,0}}"
+    )
+}
+
+fn format_spreadsheet_chart_localized_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
+    if node.children.len() > 64 || node.children.iter().any(|child| child.name != "item") {
+        return None;
+    }
+    let mut values = Vec::with_capacity(node.children.len());
+    for item in &node.children {
+        spreadsheet_chart_exact_child_names(item, &["lang", "content"])?;
+        values.push(LocalizedString {
+            lang: spreadsheet_chart_text(item, "lang")?.to_string(),
+            content: spreadsheet_chart_text(item, "content")?.to_string(),
+        });
+    }
+    Some(format_spreadsheet_number_format_for_moxel(&values))
+}
+
+fn spreadsheet_chart_line_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
+    let width = node.attributes.get("width")?.parse::<usize>().ok()?;
+    if node.attributes.get("gap").map(String::as_str) != Some("false")
+        || node.children.len() != 1
+        || node.children.first()?.name != "style"
+        || node.children.first()?.text.trim() != "Solid"
+        || node
+            .children
+            .first()?
+            .attributes
+            .get("type")
+            .is_none_or(|value| value.rsplit(':').next() != Some("ChartLineType"))
+    {
+        return None;
+    }
+    Some(format!(
+        "{{4,0,{{0}},1,{width},0,e5cabe59-d992-4d31-8086-3116931aff81,0}}"
+    ))
+}
+
+fn spreadsheet_chart_color_for_moxel(value: &str) -> Option<String> {
+    match value {
+        "auto" => Some("{3,4,{0}}".to_string()),
+        "style:FormTextColor" => Some("{3,3,{-3}}".to_string()),
+        "style:FormBackColor" => Some("{3,3,{-1}}".to_string()),
+        "style:BorderColor" => {
+            Some("{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string())
+        }
+        _ => spreadsheet_direct_color_code(value).map(|color| format!("{{3,0,{{{color}}}}}")),
+    }
+}
+
+fn spreadsheet_chart_marker_code(value: &str) -> Option<usize> {
+    match value {
+        "None" => Some(0),
+        "Rect" => Some(1),
+        "Circle" => Some(2),
+        "Rhomb" => Some(3),
+        _ => None,
+    }
+}
+
+fn spreadsheet_chart_percent_fraction(value: &str) -> Option<String> {
+    let value = spreadsheet_chart_normalize_number(value)?;
+    let negative = value.starts_with('-');
+    let unsigned = value.trim_start_matches('-');
+    let (integer, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let digits = format!("{integer}{fraction}");
+    let decimal_position = isize::try_from(integer.len()).ok()?.checked_sub(2)?;
+    let mut result = if decimal_position <= 0 {
+        format!(
+            "0.{}{}",
+            "0".repeat(usize::try_from(-decimal_position).ok()?),
+            digits
+        )
+    } else {
+        let split = usize::try_from(decimal_position).ok()?;
+        format!("{}.{}", &digits[..split], &digits[split..])
+    };
+    while result.ends_with('0') {
+        result.pop();
+    }
+    if result.ends_with('.') {
+        result.pop();
+    }
+    if negative && result != "0" {
+        result.insert(0, '-');
+    }
+    Some(result)
+}
+
+fn spreadsheet_chart_number(node: &SpreadsheetChartXmlNode, name: &str) -> Option<String> {
+    spreadsheet_chart_text(node, name).and_then(spreadsheet_chart_normalize_number)
+}
+
+fn spreadsheet_chart_optional_number(
+    node: &SpreadsheetChartXmlNode,
+    name: &str,
+) -> Option<Option<String>> {
+    match spreadsheet_chart_children(node, name).as_slice() {
+        [] => Some(None),
+        [value] => Some(Some(spreadsheet_chart_node_number(value)?)),
+        _ => None,
+    }
+}
+
+fn spreadsheet_chart_node_number(node: &SpreadsheetChartXmlNode) -> Option<String> {
+    spreadsheet_chart_normalize_number(node.text.trim())
+}
+
+fn spreadsheet_chart_normalize_number(value: &str) -> Option<String> {
+    if value.is_empty()
+        || !value.chars().enumerate().all(|(index, ch)| {
+            ch.is_ascii_digit() || ch == '.' || (index == 0 && (ch == '-' || ch == '+'))
+        })
+        || value.chars().filter(|ch| *ch == '.').count() > 1
+    {
+        return None;
+    }
+    let value = value.strip_prefix('+').unwrap_or(value);
+    let negative = value.starts_with('-');
+    let unsigned = value.trim_start_matches('-');
+    let (integer, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let integer = integer.trim_start_matches('0');
+    let integer = if integer.is_empty() { "0" } else { integer };
+    let fraction = fraction.trim_end_matches('0');
+    let mut normalized = if fraction.is_empty() {
+        integer.to_string()
+    } else {
+        format!("{integer}.{fraction}")
+    };
+    if negative && normalized != "0" {
+        normalized.insert(0, '-');
+    }
+    Some(normalized)
+}
+
+fn spreadsheet_chart_bool_code(node: &SpreadsheetChartXmlNode, name: &str) -> Option<usize> {
+    match spreadsheet_chart_text(node, name)? {
+        "false" => Some(0),
+        "true" => Some(1),
+        _ => None,
+    }
+}
+
+fn spreadsheet_chart_usize(node: &SpreadsheetChartXmlNode, name: &str) -> Option<usize> {
+    spreadsheet_chart_text(node, name)?.parse::<usize>().ok()
+}
+
+fn spreadsheet_chart_text<'a>(node: &'a SpreadsheetChartXmlNode, name: &str) -> Option<&'a str> {
+    let child = spreadsheet_chart_child(node, name)?;
+    Some(child.text.as_str())
+}
+
+fn spreadsheet_chart_child<'a>(
+    node: &'a SpreadsheetChartXmlNode,
+    name: &str,
+) -> Option<&'a SpreadsheetChartXmlNode> {
+    let mut children = node.children.iter().filter(|child| child.name == name);
+    let child = children.next()?;
+    children.next().is_none().then_some(child)
+}
+
+fn spreadsheet_chart_children<'a>(
+    node: &'a SpreadsheetChartXmlNode,
+    name: &str,
+) -> Vec<&'a SpreadsheetChartXmlNode> {
+    node.children
+        .iter()
+        .filter(|child| child.name == name)
+        .collect()
+}
+
+fn spreadsheet_chart_exact_child_names(
+    node: &SpreadsheetChartXmlNode,
+    expected: &[&str],
+) -> Option<()> {
+    (node.children.len() == expected.len()
+        && node
+            .children
+            .iter()
+            .zip(expected)
+            .all(|(child, expected)| child.name == *expected))
+    .then_some(())
 }
 
 fn format_spreadsheet_pictures_for_moxel(
@@ -24721,6 +25870,90 @@ mod tests {
         parse_common_command_representation,
     };
     use crate::v8_container::{V8Element, make_v8_element_header, parse_v8_container};
+
+    #[test]
+    fn normalizes_chart_decimal_percentages_without_leading_zero_artifacts() {
+        assert_eq!(
+            super::spreadsheet_chart_percent_fraction("10"),
+            Some("0.1".to_string())
+        );
+        assert_eq!(
+            super::spreadsheet_chart_percent_fraction("3"),
+            Some("0.03".to_string())
+        );
+        assert_eq!(
+            super::spreadsheet_chart_percent_fraction("-300"),
+            Some("-3".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_chart_drawing_into_typed_ir() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <rowsItem><index>0</index></rowsItem>
+  <drawing>
+    <drawingType>Chart</drawingType>
+    <id>7</id>
+    <formatIndex>3</formatIndex>
+    <object xmlns:d3p1="http://v8.1c.ru/8.2/data/chart" xsi:type="d3p1:Chart"/>
+  </drawing>
+</document>"#;
+        let parsed = super::parse_spreadsheet_document_xml(xml)?;
+        assert_eq!(parsed.drawings.len(), 1);
+        assert_eq!(parsed.drawings[0].id, 7);
+        assert!(matches!(
+            parsed.drawings[0].kind,
+            super::SpreadsheetDocumentXmlDrawingKind::Chart(Some(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_chart_xml_beyond_depth_limit() {
+        let depth = super::MAX_SPREADSHEET_CHART_XML_DEPTH + 1;
+        let mut xml = String::from(
+            r#"<document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><drawing><object xsi:type="d3p1:Chart">"#,
+        );
+        xml.push_str(&"<x>".repeat(depth));
+        xml.push_str(&"</x>".repeat(depth));
+        xml.push_str("</object></drawing></document>");
+
+        assert!(super::parse_spreadsheet_chart_objects(xml.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_multi_series_spreadsheet_chart_without_partial_moxel() {
+        let series = || super::SpreadsheetChartXmlNode {
+            name: "realSeriesData".to_string(),
+            attributes: std::collections::BTreeMap::new(),
+            text: String::new(),
+            children: Vec::new(),
+        };
+        let chart = super::SpreadsheetDocumentXmlChart {
+            object: super::SpreadsheetChartXmlNode {
+                name: "object".to_string(),
+                attributes: std::collections::BTreeMap::from([(
+                    "type".to_string(),
+                    "d3p1:Chart".to_string(),
+                )]),
+                text: String::new(),
+                children: vec![series(), series()],
+            },
+        };
+        let drawing = super::SpreadsheetDocumentXmlDrawing {
+            kind: super::SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)),
+            ..Default::default()
+        };
+        let super::SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) = &drawing.kind else {
+            unreachable!();
+        };
+
+        assert!(
+            super::format_spreadsheet_chart_drawing_for_moxel(&drawing, chart).is_none(),
+            "unsupported multi-series charts must not produce partial MOXCEL"
+        );
+    }
 
     fn decode_base64_for_test(input: &str) -> anyhow::Result<Vec<u8>> {
         fn value(byte: u8) -> anyhow::Result<u8> {

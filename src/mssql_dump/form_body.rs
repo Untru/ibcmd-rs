@@ -2431,12 +2431,15 @@ pub(super) fn parse_form_attribute_additional_columns_group(
     attributes: &[FormAttribute],
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-    _child_item_indexes: &FormChildItemIndexes,
+    child_item_indexes: &FormChildItemIndexes,
 ) -> Option<ParsedFormAttributeAdditionalColumnsGroup> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let target = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let owner = split_1c_braced_fields(target.get(1)?.trim(), 0)?;
-    let binding = split_1c_braced_fields(target.get(2)?.trim(), 0)?;
+    let binding = match target.get(2) {
+        Some(binding) => split_1c_braced_fields(binding.trim(), 0)?,
+        None => Vec::new(),
+    };
     let schema = FormAttributeAdditionalColumnsGroupSchema::from_raw_layout(
         &fields, &target, &owner, &binding,
     )?;
@@ -2450,24 +2453,34 @@ pub(super) fn parse_form_attribute_additional_columns_group(
         .take(schema.column_count())
         .map(|field| parse_form_attribute_column(field, type_index, object_refs))
         .collect::<Option<Vec<_>>>()?;
-    let table = match schema.binding_kind() {
+    let (table, nested_binding_start) = match schema.binding_kind() {
+        FormAttributeAdditionalColumnsBindingKind::Attribute => (attribute.name.clone(), 2),
         FormAttributeAdditionalColumnsBindingKind::Numeric => {
             let column_id = binding.first()?.trim();
-            attribute
+            let table = attribute
                 .columns
                 .iter()
                 .find(|column| column.id == column_id)
-                .map(|column| format!("{}.{}", attribute.name, column.name))
+                .map(|column| format!("{}.{}", attribute.name, column.name))?;
+            (table, 3)
         }
         FormAttributeAdditionalColumnsBindingKind::MetadataReference => {
-            resolve_form_attribute_additional_columns_metadata_table_path(
+            let table = resolve_form_attribute_additional_columns_metadata_table_path(
                 &attribute_id,
                 binding.get(1)?.trim(),
+                target.get(2)?.trim(),
                 attributes,
                 object_refs,
-            )
+                child_item_indexes,
+            )?;
+            (table, 3)
         }
-    }?;
+    };
+    let table = resolve_form_attribute_nested_additional_columns_table_path(
+        attribute,
+        table,
+        target.get(nested_binding_start..)?,
+    )?;
     Some(ParsedFormAttributeAdditionalColumnsGroup {
         attribute_id,
         table,
@@ -2475,12 +2488,77 @@ pub(super) fn parse_form_attribute_additional_columns_group(
     })
 }
 
+const FORM_VALUE_TABLE_COLUMN_BINDING_UUID: &str = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+
+fn resolve_form_attribute_nested_additional_columns_table_path(
+    attribute: &FormAttribute,
+    mut table: String,
+    bindings: &[&str],
+) -> Option<String> {
+    for binding in bindings {
+        let binding = split_1c_braced_fields(binding.trim(), 0)?;
+        let [column_id, marker] = binding.as_slice() else {
+            return None;
+        };
+        if column_id.trim().parse::<u64>().is_err()
+            || !marker
+                .trim()
+                .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID)
+        {
+            return None;
+        }
+        let column_name =
+            resolve_form_attribute_additional_column_name(attribute, &table, column_id.trim())?;
+        table.push('.');
+        table.push_str(column_name);
+    }
+    Some(table)
+}
+
+fn resolve_form_attribute_additional_column_name<'a>(
+    attribute: &'a FormAttribute,
+    table: &str,
+    column_id: &str,
+) -> Option<&'a str> {
+    let mut name = None;
+    for candidate in attribute
+        .additional_columns
+        .iter()
+        .filter(|additional| additional.table == table)
+        .flat_map(|additional| additional.columns.iter())
+        .filter(|column| column.id == column_id)
+        .map(|column| column.name.as_str())
+    {
+        if name.is_some_and(|name| name != candidate) {
+            return None;
+        }
+        name = Some(candidate);
+    }
+    name
+}
+
 fn resolve_form_attribute_additional_columns_metadata_table_path(
     attribute_id: &str,
     type_id: &str,
+    binding: &str,
     attributes: &[FormAttribute],
     object_refs: &BTreeMap<String, String>,
+    child_item_indexes: &FormChildItemIndexes,
 ) -> Option<String> {
+    let binding_key = parse_form_binding_key(binding)?;
+    let scoped_key = FormBoundTableKey {
+        attribute_id: attribute_id.to_string(),
+        table_key: binding_key.clone(),
+    };
+    match child_item_indexes
+        .owner_scoped_bindings
+        .table_paths
+        .get(&scoped_key)
+    {
+        Some(Some(table)) => return Some(table.clone()),
+        Some(None) => return None,
+        None => {}
+    }
     let type_id = parse_non_zero_uuid(type_id)?;
     let reference = object_refs.get(&type_id)?;
     let (owner_base, relative_path) = form_attribute_additional_columns_metadata_route(reference)?;
@@ -4050,6 +4128,25 @@ pub(super) struct FormChildItemIndexes {
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
     bound_attribute_id_by_table_id: BTreeMap<String, String>,
     pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
+}
+
+#[cfg(test)]
+impl FormChildItemIndexes {
+    pub(super) fn insert_owner_scoped_table_path_for_test(
+        &mut self,
+        attribute_id: &str,
+        binding_key: &str,
+        table_path: &str,
+    ) {
+        insert_unambiguous_form_binding(
+            &mut self.owner_scoped_bindings.table_paths,
+            FormBoundTableKey {
+                attribute_id: attribute_id.to_string(),
+                table_key: binding_key.to_string(),
+            },
+            table_path.to_string(),
+        );
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]

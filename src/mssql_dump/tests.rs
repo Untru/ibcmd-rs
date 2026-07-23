@@ -5021,6 +5021,185 @@ fn extracts_form_attribute_additional_columns_from_body_tail() {
 }
 
 #[test]
+fn extracts_nested_value_table_additional_columns_from_body_tail() {
+    let value_table_uuid = "acf6192e-81ca-46ef-93a6-5a6968b78663";
+    let type_index = BTreeMap::from([(value_table_uuid.to_string(), "v8:ValueTable".to_string())]);
+    let mut attributes = vec![
+        parse_form_attribute(
+            r##"{9,{1},0,"СвУпПред",{1,0},{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,1,{5,2,0,"Пред",{1,1,{"ru","Пред"}},{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{0,0},{0,0}}"##,
+            &type_index,
+            &BTreeMap::new(),
+        )
+        .unwrap(),
+    ];
+    let fields = [
+        "4",
+        "1",
+        "attribute-placeholder",
+        "3",
+        r##"{0,{2,{1},{2}},1,{5,1,0,"СведОрг",{1,1,{"ru","Сведения об организации"}},{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"##,
+        r##"{0,{3,{1},{2},{1,5bdad865-f2c5-434b-8041-ba4aad3b6687}},1,{5,11,0,"Документы",{1,1,{"ru","Документы"}},{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"##,
+        r#"{0,{4,{1},{2},{1,5bdad865-f2c5-434b-8041-ba4aad3b6687},{11,5bdad865-f2c5-434b-8041-ba4aad3b6687}},1,{5,2,0,"Код",{1,1,{"ru","Код документа"}},{"Pattern",{"S",10,1}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"#,
+    ];
+
+    apply_form_attribute_additional_columns(
+        &mut attributes,
+        &fields,
+        3,
+        &type_index,
+        &BTreeMap::new(),
+        &FormChildItemIndexes::default(),
+    );
+
+    assert_eq!(
+        attributes[0]
+            .additional_columns
+            .iter()
+            .map(|group| group.table.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "СвУпПред.Пред",
+            "СвУпПред.Пред.СведОрг",
+            "СвУпПред.Пред.СведОрг.Документы",
+        ]
+    );
+    assert_eq!(
+        attributes[0].additional_columns[2].columns[0].title,
+        vec![("ru".to_string(), "Код документа".to_string())]
+    );
+    assert_eq!(
+        attributes[0].additional_columns[2].columns[0].value_types,
+        vec![ConstantValueType::String {
+            length: Some(10),
+            allowed_length_flag: 1,
+        }]
+    );
+
+    let xml = format_form_attributes_xml(&attributes);
+    assert!(xml.contains(r#"<AdditionalColumns table="СвУпПред.Пред.СведОрг.Документы">"#));
+    assert!(xml.contains("<v8:content>Код документа</v8:content>"));
+    assert!(xml.contains("<v8:Length>10</v8:Length>"));
+}
+
+#[test]
+fn extracts_empty_attribute_additional_columns_container() {
+    let mut attributes = vec![
+        parse_form_attribute(
+            r##"{9,{1},0,"ГрафикНачислений",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap(),
+    ];
+    let fields = ["4", "1", "attribute-placeholder", "1", r#"{0,{1,{1}},0}"#];
+
+    apply_form_attribute_additional_columns(
+        &mut attributes,
+        &fields,
+        3,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &FormChildItemIndexes::default(),
+    );
+
+    assert_eq!(
+        attributes[0].additional_columns,
+        vec![FormAttributeAdditionalColumns {
+            table: "ГрафикНачислений".to_string(),
+            columns: Vec::new(),
+        }]
+    );
+    let xml = format_form_attributes_xml(&attributes);
+    assert!(xml.contains(r#"<AdditionalColumns table="ГрафикНачислений"/>"#));
+
+    let nonempty_attribute_group = r#"{0,{1,{1}},1,{5,2,0,"Код",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}}"#;
+    assert!(
+        parse_form_attribute_additional_columns_group(
+            nonempty_attribute_group,
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &FormChildItemIndexes::default(),
+        )
+        .is_none(),
+        "attribute-level AdditionalColumns is only valid as an empty container"
+    );
+}
+
+#[test]
+fn rejects_malformed_nested_value_table_additional_columns_routes() {
+    let nested_binding_uuid = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let mut attribute = parse_form_attribute(
+            r##"{9,{1},0,"СвУпПред",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,1,{5,2,0,"Пред",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},{0,0},{0,0}}"##,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    attribute
+        .additional_columns
+        .push(FormAttributeAdditionalColumns {
+            table: "СвУпПред.Пред".to_string(),
+            columns: vec![FormAttributeColumn {
+                id: "1".to_string(),
+                name: "СведОрг".to_string(),
+                title: Vec::new(),
+                value_types: Vec::new(),
+                explicit_empty_type: false,
+                functional_options: Vec::new(),
+            }],
+        });
+    let attributes = vec![attribute];
+    let column =
+        r#"{5,2,0,"Код",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0}"#;
+    let malformed = [
+        format!("{{0,{{4,{{1}},{{2}},{{1,{nested_binding_uuid}}}}},1,{column}}}"),
+        format!("{{0,{{3,{{1}},{{2}},{{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa}}}},1,{column}}}"),
+        format!("{{0,{{3,{{1}},{{2}},{{99,{nested_binding_uuid}}}}},1,{column}}}"),
+    ];
+
+    for group in &malformed {
+        assert!(
+            parse_form_attribute_additional_columns_group(
+                group,
+                &attributes,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &FormChildItemIndexes::default(),
+            )
+            .is_none(),
+            "malformed nested route must be rejected: {group}"
+        );
+    }
+
+    let mut ambiguous_attributes = attributes.clone();
+    ambiguous_attributes[0]
+        .additional_columns
+        .push(FormAttributeAdditionalColumns {
+            table: "СвУпПред.Пред".to_string(),
+            columns: vec![FormAttributeColumn {
+                id: "1".to_string(),
+                name: "ДругаяКолонка".to_string(),
+                title: Vec::new(),
+                value_types: Vec::new(),
+                explicit_empty_type: false,
+                functional_options: Vec::new(),
+            }],
+        });
+    let valid_route = format!("{{0,{{3,{{1}},{{2}},{{1,{nested_binding_uuid}}}}},1,{column}}}");
+    assert!(
+        parse_form_attribute_additional_columns_group(
+            &valid_route,
+            &ambiguous_attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &FormChildItemIndexes::default(),
+        )
+        .is_none(),
+        "conflicting column names for one table/id route must remain ambiguous"
+    );
+}
+
+#[test]
 fn extracts_form_body_xml_uses_type_index_for_parameters_without_breaking_object_refs() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
@@ -7694,9 +7873,10 @@ fn extracts_nested_table_additional_columns_group() {
         type_description_settings: None,
     }];
     let mut indexes = FormChildItemIndexes::default();
-    indexes.bound_table_path_by_binding_key.insert(
-        "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
-        "Объект.Товары".to_string(),
+    indexes.insert_owner_scoped_table_path_for_test(
+        "1",
+        "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca",
+        "Объект.Товары",
     );
 
     let group = parse_form_attribute_additional_columns_group(
@@ -7743,9 +7923,10 @@ fn prefers_child_binding_path_for_additional_columns_group() {
         type_description_settings: None,
     }];
     let mut indexes = FormChildItemIndexes::default();
-    indexes.bound_table_path_by_binding_key.insert(
-        "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca".to_string(),
-        "Объект.ТаблицаПравилВыгрузки".to_string(),
+    indexes.insert_owner_scoped_table_path_for_test(
+        "1",
+        "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca",
+        "Объект.ТаблицаПравилВыгрузки",
     );
 
     let group = parse_form_attribute_additional_columns_group(
@@ -7758,6 +7939,112 @@ fn prefers_child_binding_path_for_additional_columns_group() {
         .unwrap();
 
     assert_eq!(group.table, "Объект.ТаблицаПравилВыгрузки");
+}
+
+#[test]
+fn resolves_additional_columns_binding_per_owner_and_rejects_collisions() {
+    let attribute = |id: &str, name: &str| FormAttribute {
+        id: id.to_string(),
+        name: name.to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    };
+    let attributes = vec![attribute("1", "ОбъектА"), attribute("2", "ОбъектБ")];
+    let binding_key = "0|b5f6377f-aec6-4864-9ae0-7e034769a4ca";
+    let group = |attribute_id: &str| {
+        format!(
+            r#"{{0,{{2,{{{attribute_id}}},{{0,b5f6377f-aec6-4864-9ae0-7e034769a4ca}}}},1,{{5,1,0,"Выбран",{{1,0}},{{"Pattern",{{"B"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},0}}}}"#
+        )
+    };
+
+    let mut indexes = FormChildItemIndexes::default();
+    indexes.bound_table_path_by_binding_key.insert(
+        binding_key.to_string(),
+        "ОбъектБ.ГлобальноПерезаписанныйПуть".to_string(),
+    );
+    indexes.insert_owner_scoped_table_path_for_test("1", binding_key, "ОбъектА.Товары");
+    indexes.insert_owner_scoped_table_path_for_test("2", binding_key, "ОбъектБ.Строки");
+
+    assert_eq!(
+        parse_form_attribute_additional_columns_group(
+            &group("1"),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .unwrap()
+        .table,
+        "ОбъектА.Товары"
+    );
+    assert_eq!(
+        parse_form_attribute_additional_columns_group(
+            &group("2"),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .unwrap()
+        .table,
+        "ОбъектБ.Строки"
+    );
+
+    let mut global_only = FormChildItemIndexes::default();
+    global_only.bound_table_path_by_binding_key.insert(
+        binding_key.to_string(),
+        "ОбъектА.НедоказанныйПуть".to_string(),
+    );
+    assert!(
+        parse_form_attribute_additional_columns_group(
+            &group("1"),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &global_only,
+        )
+        .is_none(),
+        "a global binding key must not prove ownership"
+    );
+
+    indexes.insert_owner_scoped_table_path_for_test("1", binding_key, "ОбъектА.ДругаяТаблица");
+    assert!(
+        parse_form_attribute_additional_columns_group(
+            &group("1"),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .is_none(),
+        "conflicting paths for the same owner/key must remain ambiguous"
+    );
+    assert_eq!(
+        parse_form_attribute_additional_columns_group(
+            &group("2"),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .unwrap()
+        .table,
+        "ОбъектБ.Строки",
+        "a collision for another owner must not poison this owner"
+    );
 }
 
 #[cfg(feature = "research-corpus-tests")]
@@ -16949,9 +17236,11 @@ fn formats_moxel_renumbers_formats_by_usage_order() {
             end_column: 0,
             end_column_offset: 0,
             auto_size: true,
-            picture_size: "Auto",
             z_order: 0,
-            picture_index: 0,
+            kind: MoxelDrawingKind::Picture {
+                picture_size: "Auto",
+                picture_index: 0,
+            },
         }],
         pictures: Vec::new(),
         empty_headers_footers: false,
@@ -19380,9 +19669,16 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
     assert_eq!(drawing.end_column, 1);
     assert_eq!(drawing.end_column_offset, 88);
     assert!(!drawing.auto_size);
-    assert_eq!(drawing.picture_size, "Stretch");
+    let MoxelDrawingKind::Picture {
+        picture_size,
+        picture_index,
+    } = &drawing.kind
+    else {
+        panic!("expected picture drawing");
+    };
+    assert_eq!(*picture_size, "Stretch");
     assert_eq!(drawing.z_order, 1);
-    assert_eq!(drawing.picture_index, 1);
+    assert_eq!(*picture_index, 1);
 
     let mut xml = String::new();
     push_moxel_drawing_xml(&mut xml, &drawing, &BTreeMap::new());
@@ -19402,23 +19698,38 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
 
     let real_size = parse_moxel_drawing("{{0,137},5,7,1,6,3,11,3,66,54,2,1,0,0}").unwrap();
     assert_eq!(real_size.id, 2);
-    assert_eq!(real_size.picture_size, "RealSize");
+    assert!(matches!(
+        real_size.kind,
+        MoxelDrawingKind::Picture {
+            picture_size: "RealSize",
+            picture_index: 1
+        }
+    ));
     assert_eq!(real_size.z_order, 1);
-    assert_eq!(real_size.picture_index, 1);
     assert!(!real_size.auto_size);
 
     let proportional = parse_moxel_drawing("{{0,77},5,1,9,21,9,6,14,12,66,10,1,2,0}").unwrap();
     assert_eq!(proportional.id, 10);
-    assert_eq!(proportional.picture_size, "Proportionally");
+    assert!(matches!(
+        proportional.kind,
+        MoxelDrawingKind::Picture {
+            picture_size: "Proportionally",
+            picture_index: 1
+        }
+    ));
     assert_eq!(proportional.z_order, 1);
-    assert_eq!(proportional.picture_index, 1);
     assert!(!proportional.auto_size);
 
     let auto_size = parse_moxel_drawing("{{0,44},5,5,26,27,30,37,26,15,720,1,1,4,0}").unwrap();
     assert_eq!(auto_size.id, 1);
-    assert_eq!(auto_size.picture_size, "AutoSize");
+    assert!(matches!(
+        auto_size.kind,
+        MoxelDrawingKind::Picture {
+            picture_size: "AutoSize",
+            picture_index: 1
+        }
+    ));
     assert_eq!(auto_size.z_order, 1);
-    assert_eq!(auto_size.picture_index, 1);
     assert!(!auto_size.auto_size);
 
     let pictures = parse_moxel_pictures(
@@ -19437,6 +19748,52 @@ fn formats_moxel_picture_drawing_and_normalized_picture_index() {
         pictures[0].ref_name.as_deref(),
         Some("v8ui:Предупреждение32")
     );
+}
+
+#[test]
+fn rejects_malformed_or_unbounded_moxel_chart_drawings() {
+    let chart_type = "a8b97779-1a4b-4059-b09c-807f86d2a461";
+    assert!(
+        parse_moxel_drawing(&format!(
+            "{{{{0,60}},10,1,4,9,15,1,12,759,33,1,{chart_type},{{{{11}},{{74}}}},0}}"
+        ))
+        .is_none()
+    );
+    let oversized = "0".repeat(1024 * 1024 + 1);
+    assert!(
+        parse_moxel_drawing(&format!(
+            "{{{{0,60}},10,1,4,9,15,1,12,759,33,1,{chart_type},{oversized},0}}"
+        ))
+        .is_none()
+    );
+}
+
+#[test]
+fn normalizes_moxel_chart_scientific_decimals_canonically() {
+    assert_eq!(
+        normalize_moxel_chart_decimal("2e3"),
+        Some("2000".to_string())
+    );
+    assert_eq!(
+        normalize_moxel_chart_decimal("1e-1"),
+        Some("0.1".to_string())
+    );
+    assert_eq!(
+        moxel_chart_fraction_to_percent("1e-1"),
+        Some("10".to_string())
+    );
+    assert_eq!(normalize_moxel_chart_decimal("1e2147483647"), None);
+    assert_eq!(normalize_moxel_chart_decimal("1e-2147483648"), None);
+    assert_eq!(
+        normalize_moxel_chart_decimal("1e999999999999999999999"),
+        None
+    );
+    assert_eq!(normalize_moxel_chart_decimal("1e4096"), None);
+    assert_eq!(normalize_moxel_chart_decimal("1e-4096"), None);
+    assert_eq!(normalize_moxel_chart_decimal("-1e4095"), None);
+    let largest_bounded = normalize_moxel_chart_decimal("1e4095")
+        .expect("bounded output at the maximum length must remain supported");
+    assert_eq!(largest_bounded.len(), 4096);
 }
 
 #[test]
@@ -20357,12 +20714,19 @@ fn debug_moxel_card_output_order() {
             [..60.min(moxel_output_format_indices(&spreadsheet).len())]
     );
     for drawing in &spreadsheet.drawings {
+        let (picture_index, picture_size) = match &drawing.kind {
+            MoxelDrawingKind::Picture {
+                picture_index,
+                picture_size,
+            } => (picture_index.to_string(), *picture_size),
+            MoxelDrawingKind::Chart(_) => ("-".to_string(), "Chart"),
+        };
         println!(
             "drawing id={} fmt={} pic={} size={} begin=({}, {}) end=({}, {})",
             drawing.id,
             drawing.format_index,
-            drawing.picture_index,
-            drawing.picture_size,
+            picture_index,
+            picture_size,
             drawing.begin_column,
             drawing.begin_column_offset,
             drawing.end_column,

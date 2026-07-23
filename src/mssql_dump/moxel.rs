@@ -348,9 +348,103 @@ pub(super) struct MoxelDrawing {
     pub(super) end_column: i32,
     pub(super) end_column_offset: i32,
     pub(super) auto_size: bool,
-    pub(super) picture_size: &'static str,
     pub(super) z_order: usize,
-    pub(super) picture_index: usize,
+    pub(super) kind: MoxelDrawingKind,
+}
+
+pub(super) enum MoxelDrawingKind {
+    Picture {
+        picture_size: &'static str,
+        picture_index: usize,
+    },
+    Chart(MoxelChart),
+}
+
+pub(super) struct MoxelChart {
+    series_cur_id: usize,
+    points_cur_id: usize,
+    is_series_design: bool,
+    real_series: Vec<MoxelChartSeries>,
+    real_extra_series: MoxelChartSeries,
+    is_points_design: bool,
+    real_points: Vec<MoxelChartPoint>,
+    cur_series: usize,
+    cur_point: usize,
+    labels_location: &'static str,
+    title: Vec<MoxelLocalizedValue>,
+    values_scale_format: Vec<MoxelLocalizedValue>,
+    is_auto_series_name: bool,
+    max_series: usize,
+    is_outline: bool,
+    rebuild_time: usize,
+    gauge_bands: Vec<MoxelChartGaugeBand>,
+    user_max_value: String,
+    user_min_value: String,
+    real_data_items: Vec<MoxelChartDataItem>,
+    spline_strain: usize,
+    translucence_percent: String,
+    funnel_neck_height_percent: String,
+    funnel_neck_width_percent: String,
+    funnel_gap_sum_percent: String,
+    elements_chart: MoxelChartRectangle,
+    elements_legend: MoxelChartRectangle,
+    elements_title: MoxelChartRectangle,
+    values_axis: MoxelChartAxis,
+    points_axis: MoxelChartAxis,
+}
+
+pub(super) struct MoxelChartSeries {
+    id: usize,
+    color: String,
+    line: MoxelChartLine,
+    marker: &'static str,
+    text: Vec<MoxelLocalizedValue>,
+    str_is_changed: bool,
+    is_expand: bool,
+    is_indicator: bool,
+    color_priority: bool,
+}
+
+pub(super) struct MoxelChartPoint {
+    id: usize,
+    color: String,
+    line: MoxelChartLine,
+    marker: &'static str,
+    text: Vec<MoxelLocalizedValue>,
+    str_is_changed: bool,
+    is_expand: bool,
+    is_indicator: bool,
+    color_priority: bool,
+}
+
+pub(super) struct MoxelChartLine {
+    width: usize,
+}
+
+pub(super) struct MoxelChartGaugeBand {
+    begin: String,
+    end: String,
+    back_color: String,
+    text: Vec<MoxelLocalizedValue>,
+    tooltip: Vec<MoxelLocalizedValue>,
+}
+
+pub(super) struct MoxelChartDataItem {
+    value: String,
+    tooltip: String,
+}
+
+pub(super) struct MoxelChartRectangle {
+    left: String,
+    right: String,
+    top: String,
+    bottom: String,
+}
+
+#[derive(Default)]
+pub(super) struct MoxelChartAxis {
+    min_value: Option<String>,
+    max_value: Option<String>,
 }
 
 pub(super) struct MoxelPicture {
@@ -2495,15 +2589,24 @@ pub(super) fn normalize_moxel_picture_payload(payload: &str) -> String {
 }
 
 pub(super) fn parse_moxel_drawings(fields: &[&str]) -> Vec<MoxelDrawing> {
-    fields
-        .iter()
-        .filter_map(|field| parse_moxel_drawing(field))
-        .collect()
+    let mut drawings = Vec::new();
+    for field in fields {
+        let Some(mut drawing) = parse_moxel_drawing(field) else {
+            continue;
+        };
+        if matches!(drawing.kind, MoxelDrawingKind::Chart(_)) {
+            drawing.z_order = drawings.len() + 1;
+        }
+        drawings.push(drawing);
+    }
+    drawings
 }
 
 pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
+    const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
+
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 14 || fields.get(1)?.trim() != "5" {
+    if fields.len() != 14 {
         return None;
     }
     let format_fields = split_1c_braced_fields(fields.first()?, 0)?;
@@ -2529,12 +2632,34 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
     {
         return None;
     }
-    let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
-    let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
-        0 => "RealSize",
-        1 => "Stretch",
-        2 => "Proportionally",
-        4 => "AutoSize",
+    let (kind, auto_size, z_order) = match fields.get(1)?.trim() {
+        "5" => {
+            let picture_index = fields.get(11)?.trim().parse::<usize>().ok()?;
+            let picture_size = match fields.get(12)?.trim().parse::<usize>().ok()? {
+                0 => "RealSize",
+                1 => "Stretch",
+                2 => "Proportionally",
+                4 => "AutoSize",
+                _ => return None,
+            };
+            (
+                MoxelDrawingKind::Picture {
+                    picture_size,
+                    picture_index,
+                },
+                fields.get(13)?.trim() != "0",
+                picture_index,
+            )
+        }
+        "10" if fields.get(11)?.trim().eq_ignore_ascii_case(CHART_TYPE_UUID)
+            && fields.get(13)?.trim() == "0" =>
+        {
+            (
+                MoxelDrawingKind::Chart(parse_moxel_chart(fields.get(12)?)?),
+                false,
+                0,
+            )
+        }
         _ => return None,
     };
     let id = fields.get(10)?.trim().parse::<usize>().ok()?;
@@ -2549,11 +2674,652 @@ pub(super) fn parse_moxel_drawing(text: &str) -> Option<MoxelDrawing> {
         begin_column_offset,
         end_column,
         end_column_offset,
-        auto_size: fields.get(13)?.trim() != "0",
-        picture_size,
-        z_order: picture_index,
-        picture_index,
+        auto_size,
+        z_order,
+        kind,
     })
+}
+
+const MAX_MOXEL_CHART_BYTES: usize = 1024 * 1024;
+const MAX_MOXEL_CHART_SERIES: usize = 64;
+const MAX_MOXEL_CHART_POINTS: usize = 1024;
+const MAX_MOXEL_CHART_LOCALIZED_VALUES: usize = 64;
+const MAX_MOXEL_CHART_DECIMAL_BYTES: usize = 4096;
+const MAX_MOXEL_CHART_DECIMAL_EXPONENT: u64 = 4096;
+
+fn parse_moxel_chart(text: &str) -> Option<MoxelChart> {
+    if text.len() > MAX_MOXEL_CHART_BYTES {
+        return None;
+    }
+    let payload = split_1c_braced_fields(text, 0)?;
+    if payload.len() != 2 || compact_moxel_chart_token(payload.first()?) != "{11}" {
+        return None;
+    }
+    let data = split_1c_braced_fields(payload.get(1)?, 0)?;
+    if data.first()?.trim() != "74" || data.len() > MAX_MOXEL_CHART_POINTS * 16 {
+        return None;
+    }
+    let series_cur_id = parse_moxel_chart_usize(data.get(1)?)?;
+    let points_cur_id = parse_moxel_chart_usize(data.get(2)?)?;
+    let is_series_design = parse_moxel_chart_bool(data.get(3)?)?;
+    let series_count = parse_moxel_chart_usize(data.get(4)?)?;
+    if series_count == 0 || series_count > MAX_MOXEL_CHART_SERIES {
+        return None;
+    }
+
+    let mut cursor = 5usize;
+    let mut real_series = Vec::with_capacity(series_count);
+    for _ in 0..series_count {
+        real_series.push(parse_moxel_chart_series(
+            data.get(cursor..cursor.checked_add(11)?)?,
+        )?);
+        cursor += 11;
+    }
+    let real_extra_series = parse_moxel_chart_series(data.get(cursor..cursor.checked_add(11)?)?)?;
+    cursor += 11;
+    let is_points_design = parse_moxel_chart_bool(data.get(cursor)?)?;
+    let point_count = parse_moxel_chart_usize(data.get(cursor + 1)?)?;
+    if point_count == 0 || point_count > MAX_MOXEL_CHART_POINTS {
+        return None;
+    }
+    cursor += 2;
+    let mut real_points = Vec::with_capacity(point_count);
+    for _ in 0..point_count {
+        real_points.push(parse_moxel_chart_point(
+            data.get(cursor..cursor.checked_add(11)?)?,
+        )?);
+        cursor += 11;
+    }
+    let tail = data.get(cursor..)?;
+    let real_data_count = series_count.checked_mul(point_count)?;
+    let real_data_slots = real_data_count.checked_mul(3)?;
+    let post_start = 100usize.checked_add(real_data_slots)?;
+    let expected_tail_len = 200usize.checked_add(point_count.checked_mul(5)?)?;
+    if series_count != 1 || tail.len() != expected_tail_len || post_start > tail.len() {
+        return None;
+    }
+
+    validate_moxel_chart_v74_front(tail)?;
+    let cur_series = parse_moxel_chart_usize(tail.first()?)?;
+    let cur_point = parse_moxel_chart_usize(tail.get(1)?)?;
+    let labels_location = match tail.get(5)?.trim() {
+        "0" => "Edge",
+        "4" => "Auto",
+        _ => return None,
+    };
+    let title = parse_moxel_chart_localized(tail.get(11)?)?;
+    let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
+    let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
+    let max_series = parse_moxel_chart_usize(tail.get(46)?)?;
+    let is_outline = parse_moxel_chart_bool(tail.get(50)?)?;
+    let gauge_bands = parse_moxel_chart_gauge_bands(tail.get(69)?)?;
+    let user_max_value = normalize_moxel_chart_decimal(tail.get(78)?)?;
+    let user_min_value = normalize_moxel_chart_decimal(tail.get(80)?)?;
+
+    let mut real_data_items = Vec::with_capacity(real_data_count);
+    for item_index in 0..real_data_count {
+        let item_start = 100 + item_index * 3;
+        real_data_items.push(parse_moxel_chart_data_item(
+            tail.get(item_start)?,
+            tail.get(item_start + 1)?,
+            tail.get(item_start + 2)?,
+        )?);
+    }
+
+    let post = tail.get(post_start..)?;
+    if post.len() != 100 + point_count * 2 {
+        return None;
+    }
+    validate_moxel_chart_v74_post(post, point_count)?;
+    let rebuild_time = parse_moxel_chart_usize(post.get(21)?)?;
+    let spline_strain = parse_moxel_chart_usize(post.get(12)?)?;
+    let translucence_percent = normalize_moxel_chart_decimal(post.get(11)?)?;
+    let funnel_neck_height_percent = moxel_chart_fraction_to_percent(post.get(13)?)?;
+    let funnel_neck_width_percent = moxel_chart_fraction_to_percent(post.get(14)?)?;
+    let funnel_gap_sum_percent = moxel_chart_fraction_to_percent(post.get(15)?)?;
+    let values_axis = parse_moxel_chart_axis(post.get(29)?)?;
+    let points_axis = parse_moxel_chart_axis(post.get(30)?)?;
+    let rectangle_start = 66usize.checked_add(point_count)?;
+    let elements_chart =
+        parse_moxel_chart_rectangle(post.get(rectangle_start..rectangle_start + 4)?)?;
+    let elements_legend =
+        parse_moxel_chart_rectangle(post.get(rectangle_start + 4..rectangle_start + 8)?)?;
+    let elements_title =
+        parse_moxel_chart_rectangle(post.get(rectangle_start + 8..rectangle_start + 12)?)?;
+
+    Some(MoxelChart {
+        series_cur_id,
+        points_cur_id,
+        is_series_design,
+        real_series,
+        real_extra_series,
+        is_points_design,
+        real_points,
+        cur_series,
+        cur_point,
+        labels_location,
+        title,
+        values_scale_format,
+        is_auto_series_name,
+        max_series,
+        is_outline,
+        rebuild_time,
+        gauge_bands,
+        user_max_value,
+        user_min_value,
+        real_data_items,
+        spline_strain,
+        translucence_percent,
+        funnel_neck_height_percent,
+        funnel_neck_width_percent,
+        funnel_gap_sum_percent,
+        elements_chart,
+        elements_legend,
+        elements_title,
+        values_axis,
+        points_axis,
+    })
+}
+
+fn parse_moxel_chart_series(fields: &[&str]) -> Option<MoxelChartSeries> {
+    if fields.len() != 11
+        || compact_moxel_chart_token(fields.get(8)?) != "{\"U\"}"
+        || compact_moxel_chart_token(fields.get(9)?) != "{\"U\"}"
+    {
+        return None;
+    }
+    Some(MoxelChartSeries {
+        id: parse_moxel_chart_usize(fields.get(7)?)?,
+        color: parse_moxel_chart_color(fields.first()?)?,
+        line: parse_moxel_chart_line(fields.get(1)?)?,
+        marker: moxel_chart_marker(fields.get(2)?)?,
+        text: parse_moxel_chart_localized(fields.get(3)?)?,
+        str_is_changed: parse_moxel_chart_bool(fields.get(4)?)?,
+        is_expand: parse_moxel_chart_bool(fields.get(5)?)?,
+        is_indicator: parse_moxel_chart_bool(fields.get(6)?)?,
+        color_priority: parse_moxel_chart_bool(fields.get(10)?)?,
+    })
+}
+
+fn parse_moxel_chart_point(fields: &[&str]) -> Option<MoxelChartPoint> {
+    if fields.len() != 11
+        || compact_moxel_chart_token(fields.get(8)?) != "{\"U\"}"
+        || compact_moxel_chart_token(fields.get(9)?) != "{\"U\"}"
+    {
+        return None;
+    }
+    let str_is_changed = parse_moxel_chart_bool(fields.get(1)?)?;
+    Some(MoxelChartPoint {
+        id: parse_moxel_chart_usize(fields.get(2)?)?,
+        color: if str_is_changed {
+            parse_moxel_chart_color(fields.get(3)?)?
+        } else {
+            "auto".to_string()
+        },
+        line: parse_moxel_chart_line(fields.get(4)?)?,
+        marker: moxel_chart_marker(fields.get(5)?)?,
+        text: parse_moxel_chart_localized(fields.first()?)?,
+        str_is_changed,
+        is_expand: parse_moxel_chart_bool(fields.get(6)?)?,
+        is_indicator: parse_moxel_chart_bool(fields.get(7)?)?,
+        color_priority: parse_moxel_chart_bool(fields.get(10)?)?,
+    })
+}
+
+fn parse_moxel_chart_localized(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
+    let values = parse_moxel_localized_values(text)?;
+    if values.len() > MAX_MOXEL_CHART_LOCALIZED_VALUES
+        || values
+            .iter()
+            .any(|value| value.lang.len() + value.content.len() > MAX_MOXEL_CHART_BYTES)
+    {
+        return None;
+    }
+    Some(values)
+}
+
+fn parse_moxel_chart_color(text: &str) -> Option<String> {
+    const BORDER_COLOR_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
+
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "3" {
+        return None;
+    }
+    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
+    match fields.get(1)?.trim() {
+        "4" if fields.len() == 3 && payload.as_slice() == ["0"] => Some("auto".to_string()),
+        "3" if fields.len() == 3 && payload.len() == 1 => match payload.first()?.trim() {
+            "-1" => Some("style:FormBackColor".to_string()),
+            "-3" => Some("style:FormTextColor".to_string()),
+            "-22" => Some("style:BorderColor".to_string()),
+            _ => None,
+        },
+        "0" if payload.len() == 1 => {
+            if fields.len() == 3 {
+                parse_moxel_direct_color(payload.first()?.trim())
+            } else if fields.len() == 7
+                && payload.first()?.trim() == "0"
+                && fields
+                    .get(6)?
+                    .trim()
+                    .eq_ignore_ascii_case(BORDER_COLOR_UUID)
+            {
+                Some("style:BorderColor".to_string())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_moxel_chart_line(text: &str) -> Option<MoxelChartLine> {
+    const SOLID_LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
+
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 8
+        || fields.first()?.trim() != "4"
+        || fields.get(1)?.trim() != "0"
+        || compact_moxel_chart_token(fields.get(2)?) != "{0}"
+        || fields.get(3)?.trim() != "1"
+        || fields.get(5)?.trim() != "0"
+        || !fields.get(6)?.trim().eq_ignore_ascii_case(SOLID_LINE_UUID)
+        || fields.get(7)?.trim() != "0"
+    {
+        return None;
+    }
+    Some(MoxelChartLine {
+        width: parse_moxel_chart_usize(fields.get(4)?)?,
+    })
+}
+
+fn moxel_chart_marker(text: &str) -> Option<&'static str> {
+    match text.trim() {
+        "0" => Some("None"),
+        "1" => Some("Rect"),
+        "2" => Some("Circle"),
+        "3" => Some("Rhomb"),
+        _ => None,
+    }
+}
+
+fn parse_moxel_chart_gauge_bands(text: &str) -> Option<Vec<MoxelChartGaugeBand>> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let count = parse_moxel_chart_usize(fields.get(1)?)?;
+    if count > MAX_MOXEL_CHART_POINTS
+        || fields.len() != count.checked_add(4)?
+        || fields.get(count + 2)?.trim() != "0"
+        || fields.get(count + 3)?.trim() != "0"
+    {
+        return None;
+    }
+    let mut bands = Vec::with_capacity(count);
+    for item in fields.iter().skip(2).take(count) {
+        let item = split_1c_braced_fields(item, 0)?;
+        if item.len() != 12
+            || item.first()?.trim() != "3"
+            || normalize_moxel_chart_decimal(item.get(1)?)?
+                != normalize_moxel_chart_decimal(item.get(10)?)?
+            || normalize_moxel_chart_decimal(item.get(2)?)?
+                != normalize_moxel_chart_decimal(item.get(11)?)?
+        {
+            return None;
+        }
+        bands.push(MoxelChartGaugeBand {
+            begin: normalize_moxel_chart_decimal(item.get(1)?)?,
+            end: normalize_moxel_chart_decimal(item.get(2)?)?,
+            back_color: parse_moxel_chart_color(item.get(3)?)?,
+            text: parse_moxel_chart_localized(item.get(4)?)?,
+            tooltip: parse_moxel_chart_localized(item.get(5)?)?,
+        });
+    }
+    Some(bands)
+}
+
+fn parse_moxel_chart_data_item(
+    value: &str,
+    value_info: &str,
+    tooltip: &str,
+) -> Option<MoxelChartDataItem> {
+    let typed = split_1c_braced_fields(value, 0)?;
+    if typed.len() != 2
+        || parse_1c_string(typed.first()?)? != "N"
+        || compact_moxel_chart_token(value_info) != "{\"U\"}"
+    {
+        return None;
+    }
+    Some(MoxelChartDataItem {
+        value: normalize_moxel_chart_decimal(typed.get(1)?)?,
+        tooltip: parse_1c_string(tooltip)?,
+    })
+}
+
+fn parse_moxel_chart_axis(text: &str) -> Option<MoxelChartAxis> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 5
+        || fields.first()?.trim() != "0"
+        || fields.get(1)?.trim() != "0"
+        || fields.get(3)?.trim() != "0"
+        || fields.get(4)?.trim() != "0"
+    {
+        return None;
+    }
+    let range = split_1c_braced_fields(fields.get(2)?, 0)?;
+    if range.len() != 5
+        || range.first()?.trim() != "0"
+        || range.get(1)?.trim() != "1"
+        || range.get(3)?.trim() != "1"
+    {
+        return None;
+    }
+    let min = normalize_moxel_chart_decimal(range.get(2)?)?;
+    let max = normalize_moxel_chart_decimal(range.get(4)?)?;
+    Some(MoxelChartAxis {
+        min_value: (min != "0").then_some(min),
+        max_value: (max != "0").then_some(max),
+    })
+}
+
+fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
+    if fields.len() != 4 {
+        return None;
+    }
+    Some(MoxelChartRectangle {
+        left: normalize_moxel_chart_decimal(fields.first()?)?,
+        right: normalize_moxel_chart_decimal(fields.get(2)?)?,
+        top: normalize_moxel_chart_decimal(fields.get(1)?)?,
+        bottom: normalize_moxel_chart_decimal(fields.get(3)?)?,
+    })
+}
+
+fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
+    let expected = [
+        (2, "0"),
+        (3, "0"),
+        (4, "\", \""),
+        (6, "{1,0}"),
+        (7, "{1,0}"),
+        (8, "{3,3,{-3}}"),
+        (9, "0"),
+        (10, "0"),
+        (12, "0"),
+        (13, "0"),
+        (14, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
+        (15, "{3,3,{-22}}"),
+        (16, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
+        (17, "{3,3,{-22}}"),
+        (18, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
+        (19, "{3,3,{-22}}"),
+        (20, "0"),
+        (21, "{3,3,{-1}}"),
+        (22, "1"),
+        (23, "{3,3,{-1}}"),
+        (24, "1"),
+        (25, "{3,3,{-1}}"),
+        (26, "0"),
+        (27, "{3,0,{16777215}}"),
+        (28, "{3,3,{-3}}"),
+        (29, "{3,3,{-3}}"),
+        (30, "{3,3,{-3}}"),
+        (31, "{7,2,0,{-20},1,100}"),
+        (32, "{7,2,0,{-20},1,100}"),
+        (33, "{7,2,0,{-20},1,100}"),
+        (34, "1"),
+        (35, "1"),
+        (36, "1"),
+        (37, "1"),
+        (38, "1"),
+        (40, "0"),
+        (41, "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"),
+        (42, "{3,0,{11119017}}"),
+        (44, "0"),
+        (45, "0"),
+        (47, "30"),
+        (48, "1"),
+        (49, "0"),
+        (51, "0"),
+        (52, "0"),
+        (53, "1"),
+        (54, "0"),
+        (55, "0"),
+        (56, "0"),
+        (57, "0"),
+        (58, "1"),
+        (59, "1"),
+        (60, "2"),
+        (61, "{1,0}"),
+        (62, "1"),
+        (63, "0"),
+        (64, "0"),
+        (65, "0"),
+        (66, "{3,0,{169}}"),
+        (67, "0"),
+        (68, "0"),
+        (70, "0"),
+        (71, "180"),
+        (72, "2"),
+        (73, "1"),
+        (74, "0"),
+        (75, "5"),
+        (76, "{3,0,{11119017}}"),
+        (77, "1"),
+        (79, "1"),
+        (81, "1"),
+        (82, "0"),
+        (83, "0"),
+        (84, "0"),
+        (85, "0"),
+        (86, "0"),
+        (87, "0"),
+        (88, "1"),
+        (89, "1"),
+        (90, "0"),
+        (91, "0"),
+        (92, "1"),
+        (93, "1"),
+        (94, "0"),
+        (95, "{3,3,{-22}}"),
+        (96, "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
+        (97, "\"\""),
+        (98, "0"),
+        (99, "1"),
+    ];
+    expected
+        .iter()
+        .all(|(index, value)| {
+            tail.get(*index)
+                .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+        })
+        .then_some(())
+}
+
+fn validate_moxel_chart_v74_post(post: &[&str], point_count: usize) -> Option<()> {
+    let expected = [
+        (0, "14"),
+        (1, "2"),
+        (2, "{7,3,0,1,100}"),
+        (3, "1"),
+        (4, "{3,4,{0}}"),
+        (5, "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}"),
+        (6, "{3,4,{0}}"),
+        (7, "1"),
+        (8, "1"),
+        (9, "1"),
+        (10, "0"),
+        (16, "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"),
+        (17, "{3,0,{0}}"),
+        (18, "2"),
+        (19, "255"),
+        (20, "0"),
+        (22, "00000000-0000-0000-0000-000000000000"),
+        (23, "2"),
+        (24, "{0,1,0}"),
+        (25, "{0,2,0}"),
+        (26, "{0,0}"),
+        (27, "{0,0}"),
+        (28, "0"),
+        (31, "0"),
+        (32, "0"),
+        (33, "2"),
+        (34, "-2"),
+        (35, "1"),
+        (36, "10"),
+        (37, "1"),
+        (38, "20"),
+        (39, "0"),
+        (40, "0"),
+        (44, "0"),
+        (45, "0"),
+        (46, "{3,4,{0}}"),
+        (47, "{3,4,{0}}"),
+        (48, "0"),
+    ];
+    if !expected.iter().all(|(index, value)| {
+        post.get(*index)
+            .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+    }) {
+        return None;
+    }
+    let rectangle_start = 66usize.checked_add(point_count)?;
+    [
+        (rectangle_start - 5, "1"),
+        (rectangle_start - 4, "1"),
+        (rectangle_start - 3, "1"),
+        (rectangle_start - 2, "6"),
+        (rectangle_start - 1, "8"),
+    ]
+    .iter()
+    .all(|(index, value)| {
+        post.get(*index)
+            .is_some_and(|slot| compact_moxel_chart_token(slot) == *value)
+    })
+    .then_some(())
+}
+
+fn parse_moxel_chart_bool(text: &str) -> Option<bool> {
+    match text.trim() {
+        "0" => Some(false),
+        "1" => Some(true),
+        _ => None,
+    }
+}
+
+fn parse_moxel_chart_usize(text: &str) -> Option<usize> {
+    text.trim().parse::<usize>().ok()
+}
+
+fn compact_moxel_chart_token(text: &str) -> String {
+    let mut compact = String::with_capacity(text.len());
+    let mut quoted = false;
+    let mut chars = text.trim().chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            compact.push(ch);
+            if quoted && chars.peek() == Some(&'"') {
+                compact.push(chars.next().unwrap_or('"'));
+            } else {
+                quoted = !quoted;
+            }
+        } else if quoted || !ch.is_whitespace() {
+            compact.push(ch);
+        }
+    }
+    compact
+}
+
+pub(super) fn normalize_moxel_chart_decimal(text: &str) -> Option<String> {
+    let value = text.trim();
+    if value.is_empty() || value.len() > MAX_MOXEL_CHART_DECIMAL_BYTES {
+        return None;
+    }
+    let (negative, unsigned) = value
+        .strip_prefix('-')
+        .map_or((false, value), |rest| (true, rest));
+    let (mantissa, exponent) = unsigned.split_once(['e', 'E']).map_or(
+        Some((unsigned, 0i64)),
+        |(mantissa, exponent)| {
+            let exponent = exponent.parse::<i64>().ok()?;
+            (exponent.unsigned_abs() <= MAX_MOXEL_CHART_DECIMAL_EXPONENT)
+                .then_some((mantissa, exponent))
+        },
+    )?;
+    let mut digits = String::new();
+    let mut fractional_digits = 0usize;
+    let mut decimal_seen = false;
+    for ch in mantissa.chars() {
+        if ch == '.' && !decimal_seen {
+            decimal_seen = true;
+        } else if ch.is_ascii_digit() {
+            digits.push(ch);
+            if decimal_seen {
+                fractional_digits += 1;
+            }
+        } else {
+            return None;
+        }
+    }
+    if digits.is_empty() {
+        return None;
+    }
+    let decimal_position = i64::try_from(digits.len())
+        .ok()?
+        .checked_sub(i64::try_from(fractional_digits).ok()?)?
+        .checked_add(exponent)?;
+    let unsigned_output_len = if decimal_position <= 0 {
+        2usize
+            .checked_add(usize::try_from(decimal_position.unsigned_abs()).ok()?)?
+            .checked_add(digits.len())?
+    } else {
+        let decimal_position = usize::try_from(decimal_position).ok()?;
+        if decimal_position >= digits.len() {
+            decimal_position
+        } else {
+            digits.len().checked_add(1)?
+        }
+    };
+    let output_len = unsigned_output_len.checked_add(usize::from(negative))?;
+    if output_len > MAX_MOXEL_CHART_DECIMAL_BYTES {
+        return None;
+    }
+    let mut normalized = if decimal_position <= 0 {
+        format!(
+            "0.{}{}",
+            "0".repeat(usize::try_from(decimal_position.unsigned_abs()).ok()?),
+            digits
+        )
+    } else if usize::try_from(decimal_position).ok()? >= digits.len() {
+        let zeros = usize::try_from(decimal_position).ok()? - digits.len();
+        format!("{digits}{}", "0".repeat(zeros))
+    } else {
+        let position = usize::try_from(decimal_position).ok()?;
+        format!("{}.{}", &digits[..position], &digits[position..])
+    };
+    if normalized.contains('.') {
+        while normalized.ends_with('0') {
+            normalized.pop();
+        }
+        if normalized.ends_with('.') {
+            normalized.pop();
+        }
+    }
+    while normalized.len() > 1
+        && normalized.starts_with('0')
+        && normalized.as_bytes().get(1) != Some(&b'.')
+    {
+        normalized.remove(0);
+    }
+    if negative && normalized != "0" {
+        normalized.insert(0, '-');
+    }
+    (normalized.len() <= MAX_MOXEL_CHART_DECIMAL_BYTES).then_some(normalized)
+}
+
+pub(super) fn moxel_chart_fraction_to_percent(text: &str) -> Option<String> {
+    let value = normalize_moxel_chart_decimal(text)?;
+    normalize_moxel_chart_decimal(&format!("{value}e2"))
 }
 
 pub(super) fn parse_moxel_default_format_width(
@@ -6036,7 +6802,13 @@ pub(super) fn push_moxel_drawing_xml(
     output_format_index_map: &BTreeMap<usize, usize>,
 ) {
     xml.push_str("\t<drawing>\r\n");
-    xml.push_str("\t\t<drawingType>Picture</drawingType>\r\n");
+    let drawing_type = match drawing.kind {
+        MoxelDrawingKind::Picture { .. } => "Picture",
+        MoxelDrawingKind::Chart(_) => "Chart",
+    };
+    xml.push_str(&format!(
+        "\t\t<drawingType>{drawing_type}</drawingType>\r\n"
+    ));
     xml.push_str(&format!("\t\t<id>{}</id>\r\n", drawing.id));
     let format_index = output_format_index_map
         .get(&drawing.format_index)
@@ -6079,16 +6851,404 @@ pub(super) fn push_moxel_drawing_xml(
         "\t\t<autoSize>{}</autoSize>\r\n",
         xml_bool(drawing.auto_size)
     ));
+    let picture_size = match &drawing.kind {
+        MoxelDrawingKind::Picture { picture_size, .. } => *picture_size,
+        MoxelDrawingKind::Chart(_) => "Stretch",
+    };
     xml.push_str(&format!(
-        "\t\t<pictureSize>{}</pictureSize>\r\n",
-        drawing.picture_size
+        "\t\t<pictureSize>{picture_size}</pictureSize>\r\n"
     ));
     xml.push_str(&format!("\t\t<zOrder>{}</zOrder>\r\n", drawing.z_order));
-    xml.push_str(&format!(
-        "\t\t<pictureIndex>{}</pictureIndex>\r\n",
-        drawing.picture_index
-    ));
+    match &drawing.kind {
+        MoxelDrawingKind::Picture { picture_index, .. } => {
+            xml.push_str(&format!(
+                "\t\t<pictureIndex>{picture_index}</pictureIndex>\r\n"
+            ));
+        }
+        MoxelDrawingKind::Chart(chart) => push_moxel_chart_xml(xml, chart),
+    }
     xml.push_str("\t</drawing>\r\n");
+}
+
+fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
+    xml.push_str(
+        "\t\t<object xmlns:d3p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d3p1:Chart\">\r\n",
+    );
+    push_moxel_chart_text(xml, "seriesCurId", chart.series_cur_id);
+    push_moxel_chart_text(xml, "pointsCurId", chart.points_cur_id);
+    push_moxel_chart_bool(xml, "isSeriesDesign", chart.is_series_design);
+    push_moxel_chart_text(xml, "realSeriesCount", chart.real_series.len());
+    for series in &chart.real_series {
+        push_moxel_chart_series_xml(xml, "realSeriesData", series);
+    }
+    push_moxel_chart_series_xml(xml, "realExSeriesData", &chart.real_extra_series);
+    push_moxel_chart_bool(xml, "isPointsDesign", chart.is_points_design);
+    push_moxel_chart_text(xml, "realPointCount", chart.real_points.len());
+    for point in &chart.real_points {
+        push_moxel_chart_point_xml(xml, point);
+    }
+    push_moxel_chart_text(xml, "curSeries", chart.cur_series);
+    push_moxel_chart_text(xml, "curPoint", chart.cur_point);
+    push_moxel_chart_literal(xml, "chartType", "Line");
+    push_moxel_chart_literal(xml, "circleLabelType", "None");
+    push_moxel_chart_literal(xml, "labelsDelimiter", ", ");
+    push_moxel_chart_literal(xml, "labelsLocation", chart.labels_location);
+    push_moxel_chart_empty(xml, "lbFormat");
+    push_moxel_chart_empty(xml, "lbpFormat");
+    push_moxel_chart_literal(xml, "labelsColor", "style:FormTextColor");
+    xml.push_str("\t\t\t<d3p1:labelsFont kind=\"AutoFont\"/>\r\n");
+    push_moxel_chart_bool(xml, "transparentLabelsBkg", true);
+    push_moxel_chart_literal(xml, "labelsBkgColor", "auto");
+    push_moxel_chart_border_xml(xml, "labelsBorder", 1, "Single");
+    push_moxel_chart_literal(xml, "labelsBorderColor", "auto");
+    push_moxel_chart_literal(xml, "circleExpandMode", "None");
+    push_moxel_chart_literal(xml, "chart3Dcrd", "SouthWest");
+    push_moxel_chart_localized_xml(xml, "title", &chart.title, 3);
+    push_moxel_chart_bool(xml, "isShowTitle", false);
+    push_moxel_chart_bool(xml, "isShowLegend", false);
+    push_moxel_chart_border_xml(xml, "ttlBorder", 0, "WithoutBorder");
+    push_moxel_chart_literal(xml, "ttlBorderColor", "style:BorderColor");
+    push_moxel_chart_border_xml(xml, "lgBorder", 0, "WithoutBorder");
+    push_moxel_chart_literal(xml, "lgBorderColor", "style:BorderColor");
+    push_moxel_chart_border_xml(xml, "chBorder", 0, "WithoutBorder");
+    push_moxel_chart_literal(xml, "chBorderColor", "style:BorderColor");
+    push_moxel_chart_bool(xml, "transparent", false);
+    push_moxel_chart_literal(xml, "bkgColor", "style:FormBackColor");
+    push_moxel_chart_bool(xml, "isTrnspTtl", true);
+    push_moxel_chart_literal(xml, "ttlColor", "style:FormBackColor");
+    push_moxel_chart_bool(xml, "isTrnspLeg", true);
+    push_moxel_chart_literal(xml, "legColor", "style:FormBackColor");
+    push_moxel_chart_bool(xml, "isTrnspCh", false);
+    push_moxel_chart_literal(xml, "chColor", "#FFFFFF");
+    push_moxel_chart_literal(xml, "ttlTxtColor", "style:FormTextColor");
+    push_moxel_chart_literal(xml, "legTxtColor", "style:FormTextColor");
+    push_moxel_chart_literal(xml, "chTxtColor", "style:FormTextColor");
+    push_moxel_chart_style_font(xml, "ttlFont");
+    push_moxel_chart_style_font(xml, "legFont");
+    push_moxel_chart_style_font(xml, "chFont");
+    push_moxel_chart_bool(xml, "isShowScale", true);
+    push_moxel_chart_bool(xml, "isShowScaleVL", true);
+    push_moxel_chart_bool(xml, "isShowSeriesScale", true);
+    push_moxel_chart_bool(xml, "isShowPointsScale", true);
+    push_moxel_chart_bool(xml, "isShowValuesScale", true);
+    push_moxel_chart_localized_xml(xml, "vsFormat", &chart.values_scale_format, 3);
+    push_moxel_chart_literal(xml, "xLabelsOrientation", "Auto");
+    push_moxel_chart_line_xml(xml, "scaleLine", &MoxelChartLine { width: 1 }, 3);
+    push_moxel_chart_literal(xml, "scaleColor", "#A9A9A9");
+    push_moxel_chart_bool(xml, "isAutoSeriesName", chart.is_auto_series_name);
+    push_moxel_chart_bool(xml, "isAutoPointName", false);
+    push_moxel_chart_literal(xml, "maxMode", "NotDefined");
+    push_moxel_chart_text(xml, "maxSeries", chart.max_series);
+    push_moxel_chart_text(xml, "maxSeriesPrc", 30);
+    push_moxel_chart_literal(xml, "spaceMode", "Half");
+    push_moxel_chart_text(xml, "baseVal", 0);
+    push_moxel_chart_bool(xml, "isOutline", chart.is_outline);
+    push_moxel_chart_text(xml, "realPiePoint", 0);
+    push_moxel_chart_text(xml, "realStockSeries", 0);
+    push_moxel_chart_bool(xml, "isLight", true);
+    push_moxel_chart_bool(xml, "isGradient", false);
+    push_moxel_chart_bool(xml, "isTransposition", false);
+    push_moxel_chart_bool(xml, "hideBaseVal", false);
+    push_moxel_chart_bool(xml, "dataTable", false);
+    push_moxel_chart_bool(xml, "dtVerLines", true);
+    push_moxel_chart_bool(xml, "dtHorLines", true);
+    push_moxel_chart_literal(xml, "dtHAlign", "Right");
+    push_moxel_chart_empty(xml, "dtFormat");
+    push_moxel_chart_bool(xml, "dtKeys", true);
+    push_moxel_chart_literal(xml, "paletteKind", "Auto");
+    push_moxel_chart_literal(xml, "animation", "Auto");
+    push_moxel_chart_text(xml, "rebuildTime", chart.rebuild_time);
+    push_moxel_chart_bool(xml, "isTransposed", false);
+    push_moxel_chart_bool(xml, "autoTransposition", false);
+    push_moxel_chart_bool(xml, "legendScrollEnable", false);
+    push_moxel_chart_literal(xml, "surfaceColor", "#A90000");
+    push_moxel_chart_literal(xml, "radarScaleType", "Circle");
+    push_moxel_chart_literal(xml, "gaugeValuesPresentation", "Needle");
+    push_moxel_chart_gauge_bands_xml(xml, &chart.gauge_bands);
+    push_moxel_chart_text(xml, "beginGaugeAngle", 0);
+    push_moxel_chart_text(xml, "endGaugeAngle", 180);
+    push_moxel_chart_text(xml, "gaugeThickness", 2);
+    push_moxel_chart_literal(xml, "gaugeLabelsLocation", "InsideScale");
+    push_moxel_chart_bool(xml, "gaugeLabelsArcDirection", false);
+    push_moxel_chart_text(xml, "gaugeBushThickness", 5);
+    push_moxel_chart_literal(xml, "gaugeBushColor", "#A9A9A9");
+    push_moxel_chart_bool(xml, "autoMaxValue", true);
+    push_moxel_chart_literal(xml, "userMaxValue", &chart.user_max_value);
+    push_moxel_chart_bool(xml, "autoMinValue", true);
+    push_moxel_chart_literal(xml, "userMinValue", &chart.user_min_value);
+    push_moxel_chart_bool(xml, "elementsIsInit", true);
+    push_moxel_chart_bool(xml, "titleIsInit", true);
+    push_moxel_chart_bool(xml, "legendIsInit", true);
+    push_moxel_chart_bool(xml, "chartIsInit", true);
+    push_moxel_chart_rectangle_xml(xml, "elementsChart", &chart.elements_chart);
+    push_moxel_chart_rectangle_xml(xml, "elementsLegend", &chart.elements_legend);
+    push_moxel_chart_rectangle_xml(xml, "elementsTitle", &chart.elements_title);
+    push_moxel_chart_literal(xml, "borderColor", "style:BorderColor");
+    push_moxel_chart_border_xml(xml, "border", 0, "WithoutBorder");
+    push_moxel_chart_empty(xml, "dataSourceDescription");
+    push_moxel_chart_bool(xml, "isDataSourceMode", false);
+    push_moxel_chart_bool(xml, "isRandomizedNewValues", true);
+    push_moxel_chart_data_items_xml(xml, &chart.real_data_items);
+    push_moxel_chart_text(xml, "splineStrain", chart.spline_strain);
+    push_moxel_chart_literal(xml, "translucencePercent", &chart.translucence_percent);
+    push_moxel_chart_literal(
+        xml,
+        "funnelNeckHeightPercent",
+        &chart.funnel_neck_height_percent,
+    );
+    push_moxel_chart_literal(
+        xml,
+        "funnelNeckWidthPercent",
+        &chart.funnel_neck_width_percent,
+    );
+    push_moxel_chart_literal(xml, "funnelGapSumPercent", &chart.funnel_gap_sum_percent);
+    push_moxel_chart_line_xml(xml, "multiStageLinkLine", &MoxelChartLine { width: 1 }, 3);
+    push_moxel_chart_literal(xml, "multiStageLinkColor", "#000000");
+    push_moxel_chart_axis_xml(xml, "valuesAxis", &chart.values_axis);
+    push_moxel_chart_axis_xml(xml, "pointsAxis", &chart.points_axis);
+    if !chart.values_scale_format.is_empty() {
+        xml.push_str("\t\t\t<d3p1:valuesScale>\r\n");
+        xml.push_str("\t\t\t\t<d3p1:titleArea>\r\n");
+        xml.push_str("\t\t\t\t\t<d3p1:font kind=\"AutoFont\"/>\r\n");
+        xml.push_str("\t\t\t\t\t<d3p1:textColor>auto</d3p1:textColor>\r\n");
+        xml.push_str("\t\t\t\t\t<d3p1:backColor>auto</d3p1:backColor>\r\n");
+        xml.push_str("\t\t\t\t\t<d3p1:border width=\"1\">\r\n");
+        xml.push_str(
+            "\t\t\t\t\t\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">WithoutBorder</v8ui:style>\r\n",
+        );
+        xml.push_str("\t\t\t\t\t</d3p1:border>\r\n");
+        xml.push_str("\t\t\t\t\t<d3p1:borderColor>auto</d3p1:borderColor>\r\n");
+        xml.push_str("\t\t\t\t</d3p1:titleArea>\r\n");
+        push_moxel_chart_localized_xml(xml, "labelFormat", &chart.values_scale_format, 4);
+        xml.push_str("\t\t\t</d3p1:valuesScale>\r\n");
+    }
+    push_moxel_chart_literal(xml, "legendPlacement", "None");
+    push_moxel_chart_literal(xml, "plotAreaPlacement", "UseCoordinates");
+    push_moxel_chart_literal(xml, "titleAreaPlacement", "None");
+    xml.push_str("\t\t</object>\r\n");
+}
+
+fn push_moxel_chart_series_xml(xml: &mut String, tag: &str, series: &MoxelChartSeries) {
+    xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
+    push_moxel_chart_text_indented(xml, "id", series.id, 4);
+    push_moxel_chart_literal_indented(xml, "color", &series.color, 4);
+    push_moxel_chart_line_xml(xml, "line", &series.line, 4);
+    push_moxel_chart_literal_indented(xml, "marker", series.marker, 4);
+    push_moxel_chart_localized_xml(xml, "text", &series.text, 4);
+    push_moxel_chart_bool_indented(xml, "strIsChanged", series.str_is_changed, 4);
+    push_moxel_chart_bool_indented(xml, "isExpand", series.is_expand, 4);
+    push_moxel_chart_bool_indented(xml, "isIndicator", series.is_indicator, 4);
+    push_moxel_chart_bool_indented(xml, "colorPriority", series.color_priority, 4);
+    xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_point_xml(xml: &mut String, point: &MoxelChartPoint) {
+    xml.push_str("\t\t\t<d3p1:realPointData>\r\n");
+    push_moxel_chart_text_indented(xml, "id", point.id, 4);
+    push_moxel_chart_literal_indented(xml, "color", &point.color, 4);
+    push_moxel_chart_line_xml(xml, "line", &point.line, 4);
+    push_moxel_chart_literal_indented(xml, "marker", point.marker, 4);
+    push_moxel_chart_localized_xml(xml, "text", &point.text, 4);
+    push_moxel_chart_bool_indented(xml, "strIsChanged", point.str_is_changed, 4);
+    push_moxel_chart_bool_indented(xml, "isExpand", point.is_expand, 4);
+    push_moxel_chart_bool_indented(xml, "isIndicator", point.is_indicator, 4);
+    push_moxel_chart_bool_indented(xml, "colorPriority", point.color_priority, 4);
+    xml.push_str("\t\t\t</d3p1:realPointData>\r\n");
+}
+
+fn push_moxel_chart_line_xml(xml: &mut String, tag: &str, line: &MoxelChartLine, indent: usize) {
+    let tabs = "\t".repeat(indent);
+    xml.push_str(&format!(
+        "{tabs}<d3p1:{tag} width=\"{}\" gap=\"false\">\r\n",
+        line.width
+    ));
+    xml.push_str(&format!(
+        "{tabs}\t<v8ui:style xsi:type=\"v8ui:ChartLineType\">Solid</v8ui:style>\r\n"
+    ));
+    xml.push_str(&format!("{tabs}</d3p1:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_border_xml(xml: &mut String, tag: &str, width: usize, style: &str) {
+    xml.push_str(&format!("\t\t\t<d3p1:{tag} width=\"{width}\">\r\n"));
+    xml.push_str(&format!(
+        "\t\t\t\t<v8ui:style xsi:type=\"v8ui:ControlBorderType\">{style}</v8ui:style>\r\n"
+    ));
+    xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_style_font(xml: &mut String, tag: &str) {
+    xml.push_str(&format!(
+        "\t\t\t<d3p1:{tag} ref=\"style:TextFont\" kind=\"StyleItem\"/>\r\n"
+    ));
+}
+
+fn push_moxel_chart_localized_xml(
+    xml: &mut String,
+    tag: &str,
+    values: &[MoxelLocalizedValue],
+    indent: usize,
+) {
+    let tabs = "\t".repeat(indent);
+    if values.is_empty() {
+        xml.push_str(&format!("{tabs}<d3p1:{tag}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("{tabs}<d3p1:{tag}>\r\n"));
+    for value in values {
+        xml.push_str(&format!("{tabs}\t<v8:item>\r\n"));
+        xml.push_str(&format!(
+            "{tabs}\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(&value.lang)
+        ));
+        xml.push_str(&format!(
+            "{tabs}\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&value.content)
+        ));
+        xml.push_str(&format!("{tabs}\t</v8:item>\r\n"));
+    }
+    xml.push_str(&format!("{tabs}</d3p1:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_gauge_bands_xml(xml: &mut String, bands: &[MoxelChartGaugeBand]) {
+    xml.push_str("\t\t\t<d3p1:gaugeQualityBands useTextStr=\"false\" useTooltipStr=\"false\">\r\n");
+    for band in bands {
+        xml.push_str("\t\t\t\t<v8ui:item>\r\n");
+        push_moxel_chart_plain_literal(xml, "v8ui", "begin", &band.begin, 5);
+        push_moxel_chart_plain_literal(xml, "v8ui", "end", &band.end, 5);
+        push_moxel_chart_plain_literal(xml, "v8ui", "backColor", &band.back_color, 5);
+        push_moxel_chart_namespaced_localized_xml(xml, "v8ui", "text", &band.text, 5);
+        push_moxel_chart_namespaced_localized_xml(xml, "v8ui", "tooltip", &band.tooltip, 5);
+        xml.push_str("\t\t\t\t</v8ui:item>\r\n");
+    }
+    xml.push_str("\t\t\t</d3p1:gaugeQualityBands>\r\n");
+}
+
+fn push_moxel_chart_namespaced_localized_xml(
+    xml: &mut String,
+    prefix: &str,
+    tag: &str,
+    values: &[MoxelLocalizedValue],
+    indent: usize,
+) {
+    let tabs = "\t".repeat(indent);
+    if values.is_empty() {
+        xml.push_str(&format!("{tabs}<{prefix}:{tag}/>\r\n"));
+        return;
+    }
+    xml.push_str(&format!("{tabs}<{prefix}:{tag}>\r\n"));
+    for value in values {
+        xml.push_str(&format!("{tabs}\t<v8:item>\r\n"));
+        xml.push_str(&format!(
+            "{tabs}\t\t<v8:lang>{}</v8:lang>\r\n",
+            escape_xml_element_text(&value.lang)
+        ));
+        xml.push_str(&format!(
+            "{tabs}\t\t<v8:content>{}</v8:content>\r\n",
+            escape_xml_element_text(&value.content)
+        ));
+        xml.push_str(&format!("{tabs}\t</v8:item>\r\n"));
+    }
+    xml.push_str(&format!("{tabs}</{prefix}:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_data_items_xml(xml: &mut String, items: &[MoxelChartDataItem]) {
+    xml.push_str("\t\t\t<d3p1:realDataItems>\r\n");
+    for item in items {
+        xml.push_str("\t\t\t\t<d3p1:item>\r\n");
+        xml.push_str(&format!(
+            "\t\t\t\t\t<d3p1:valData xsi:type=\"xs:decimal\">{}</d3p1:valData>\r\n",
+            escape_xml_element_text(&item.value)
+        ));
+        xml.push_str("\t\t\t\t\t<d3p1:valInfo xsi:nil=\"true\"/>\r\n");
+        if item.tooltip.is_empty() {
+            xml.push_str("\t\t\t\t\t<d3p1:toolTip/>\r\n");
+        } else {
+            xml.push_str(&format!(
+                "\t\t\t\t\t<d3p1:toolTip>{}</d3p1:toolTip>\r\n",
+                escape_xml_element_text(&item.tooltip)
+            ));
+        }
+        xml.push_str("\t\t\t\t</d3p1:item>\r\n");
+    }
+    xml.push_str("\t\t\t</d3p1:realDataItems>\r\n");
+}
+
+fn push_moxel_chart_rectangle_xml(xml: &mut String, tag: &str, rect: &MoxelChartRectangle) {
+    xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
+    push_moxel_chart_literal_indented(xml, "left", &rect.left, 4);
+    push_moxel_chart_literal_indented(xml, "right", &rect.right, 4);
+    push_moxel_chart_literal_indented(xml, "top", &rect.top, 4);
+    push_moxel_chart_literal_indented(xml, "bottom", &rect.bottom, 4);
+    xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_axis_xml(xml: &mut String, tag: &str, axis: &MoxelChartAxis) {
+    if axis.min_value.is_none() && axis.max_value.is_none() {
+        push_moxel_chart_empty(xml, tag);
+        return;
+    }
+    xml.push_str(&format!("\t\t\t<d3p1:{tag}>\r\n"));
+    if let Some(value) = &axis.min_value {
+        xml.push_str(&format!(
+            "\t\t\t\t<d3p1:minValue xsi:type=\"xs:decimal\">{}</d3p1:minValue>\r\n",
+            escape_xml_element_text(value)
+        ));
+    }
+    if let Some(value) = &axis.max_value {
+        xml.push_str(&format!(
+            "\t\t\t\t<d3p1:maxValue xsi:type=\"xs:decimal\">{}</d3p1:maxValue>\r\n",
+            escape_xml_element_text(value)
+        ));
+    }
+    xml.push_str(&format!("\t\t\t</d3p1:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_text(xml: &mut String, tag: &str, value: impl std::fmt::Display) {
+    push_moxel_chart_text_indented(xml, tag, value, 3);
+}
+
+fn push_moxel_chart_text_indented(
+    xml: &mut String,
+    tag: &str,
+    value: impl std::fmt::Display,
+    indent: usize,
+) {
+    let tabs = "\t".repeat(indent);
+    xml.push_str(&format!("{tabs}<d3p1:{tag}>{value}</d3p1:{tag}>\r\n"));
+}
+
+fn push_moxel_chart_bool(xml: &mut String, tag: &str, value: bool) {
+    push_moxel_chart_bool_indented(xml, tag, value, 3);
+}
+
+fn push_moxel_chart_bool_indented(xml: &mut String, tag: &str, value: bool, indent: usize) {
+    push_moxel_chart_text_indented(xml, tag, xml_bool(value), indent);
+}
+
+fn push_moxel_chart_literal(xml: &mut String, tag: &str, value: &str) {
+    push_moxel_chart_literal_indented(xml, tag, value, 3);
+}
+
+fn push_moxel_chart_literal_indented(xml: &mut String, tag: &str, value: &str, indent: usize) {
+    push_moxel_chart_plain_literal(xml, "d3p1", tag, value, indent);
+}
+
+fn push_moxel_chart_plain_literal(
+    xml: &mut String,
+    prefix: &str,
+    tag: &str,
+    value: &str,
+    indent: usize,
+) {
+    let tabs = "\t".repeat(indent);
+    xml.push_str(&format!(
+        "{tabs}<{prefix}:{tag}>{}</{prefix}:{tag}>\r\n",
+        escape_xml_element_text(value)
+    ));
+}
+
+fn push_moxel_chart_empty(xml: &mut String, tag: &str) {
+    xml.push_str(&format!("\t\t\t<d3p1:{tag}/>\r\n"));
 }
 
 pub(super) fn push_moxel_merge_xml(xml: &mut String, merge: &MoxelMerge) {

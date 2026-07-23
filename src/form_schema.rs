@@ -52,6 +52,7 @@ pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Opt
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) enum FormAttributeAdditionalColumnsBindingKind {
+    Attribute,
     Numeric,
     MetadataReference,
 }
@@ -70,23 +71,33 @@ impl FormAttributeAdditionalColumnsGroupSchema {
         binding: &[&str],
     ) -> Option<Self> {
         let column_count = fields.get(2)?.trim().parse::<usize>().ok()?;
-        if fields.len() != 3 + column_count
+        let expected_field_count = column_count.checked_add(3)?;
+        let target_arity = target.first()?.trim().parse::<usize>().ok()?;
+        let expected_target_len = target_arity.checked_add(1)?;
+        if fields.len() != expected_field_count
             || fields.first().map(|field| field.trim()) != Some("0")
-            || target.len() != 3
-            || target.first().map(|field| field.trim()) != Some("2")
+            || target_arity < 1
+            || target.len() != expected_target_len
             || owner.len() != 1
             || owner.first()?.trim().is_empty()
         {
             return None;
         }
-        let binding_kind = match binding {
-            [number] if number.trim().parse::<u64>().is_ok() => {
-                FormAttributeAdditionalColumnsBindingKind::Numeric
+        let binding_kind = if target_arity == 1 {
+            if column_count != 0 || !binding.is_empty() {
+                return None;
             }
-            [prefix, uuid] if prefix.trim() == "0" && !uuid.trim().is_empty() => {
-                FormAttributeAdditionalColumnsBindingKind::MetadataReference
+            FormAttributeAdditionalColumnsBindingKind::Attribute
+        } else {
+            match binding {
+                [number] if number.trim().parse::<u64>().is_ok() => {
+                    FormAttributeAdditionalColumnsBindingKind::Numeric
+                }
+                [prefix, uuid] if prefix.trim() == "0" && !uuid.trim().is_empty() => {
+                    FormAttributeAdditionalColumnsBindingKind::MetadataReference
+                }
+                _ => return None,
             }
-            _ => return None,
         };
         Some(Self {
             column_count,
