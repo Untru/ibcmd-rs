@@ -2019,6 +2019,8 @@ struct SpreadsheetDocumentXmlFormat {
     horizontal_alignment: Option<String>,
     vertical_alignment: Option<String>,
     back_color: Option<String>,
+    pattern_color: Option<String>,
+    pattern: Option<String>,
     text_color: Option<String>,
     text_placement: Option<String>,
     text_orientation: Option<usize>,
@@ -2572,6 +2574,8 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "horizontalAlignment"
             | "verticalAlignment"
             | "backColor"
+            | "patternColor"
+            | "pattern"
             | "textColor"
             | "textPlacement"
             | "textOrientation"
@@ -2996,6 +3000,16 @@ fn apply_spreadsheet_text_value(
         "backColor" if path_ends_with(path, &["format", "backColor"]) => {
             set_spreadsheet_format_string(format, text, |format, parsed| {
                 format.back_color = Some(parsed)
+            });
+        }
+        "patternColor" if path_ends_with(path, &["format", "patternColor"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.pattern_color = Some(parsed)
+            });
+        }
+        "pattern" if path_ends_with(path, &["format", "pattern"]) => {
+            set_spreadsheet_format_string(format, text, |format, parsed| {
+                format.pattern = Some(parsed)
             });
         }
         "textColor" if path_ends_with(path, &["format", "textColor"]) => {
@@ -3967,13 +3981,29 @@ fn format_spreadsheet_format_for_moxel(
     );
     push_spreadsheet_format_value(
         &mut values,
+        12,
+        format.pattern.as_deref().and_then(spreadsheet_pattern_code),
+    );
+    push_spreadsheet_format_value(
+        &mut values,
         14,
         format
             .text_placement
             .as_deref()
             .and_then(spreadsheet_text_placement_code),
     );
-    push_spreadsheet_format_value(&mut values, 13, format.text_orientation);
+    if drawing_slot {
+        push_spreadsheet_format_value(
+            &mut values,
+            13,
+            format
+                .pattern_color
+                .as_deref()
+                .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
+        );
+    } else {
+        push_spreadsheet_format_value(&mut values, 13, format.text_orientation);
+    }
     push_spreadsheet_format_value(
         &mut values,
         15,
@@ -4242,6 +4272,20 @@ fn spreadsheet_text_placement_code(value: &str) -> Option<usize> {
         "Wrap" => Some(3),
         _ => None,
     }
+}
+
+fn spreadsheet_pattern_code(value: &str) -> Option<usize> {
+    if value == "WithoutPattern" {
+        return Some(255);
+    }
+    if value == "Solid" {
+        return Some(0);
+    }
+    value
+        .strip_prefix("Pattern")?
+        .parse::<usize>()
+        .ok()
+        .filter(|value| (1..=18).contains(value))
 }
 
 fn spreadsheet_fill_type_code(value: &str) -> Option<usize> {
@@ -27503,10 +27547,83 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
 
         assert!(text.contains(r#"{2,{24576,900,3},{128,72}}"#));
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
+        assert!(extracted.contains("<textOrientation>900</textOrientation>"));
+        assert!(!extracted.contains("<patternColor>"));
         assert_eq!(packed.plain_bytes, text.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn packs_drawing_pattern_and_color_without_text_orientation() -> anyhow::Result<()> {
+        assert_eq!(super::spreadsheet_pattern_code("Solid"), Some(0));
+        assert_eq!(super::spreadsheet_pattern_code("Pattern14"), Some(14));
+        assert_eq!(super::spreadsheet_pattern_code("Pattern19"), None);
+
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<empty>true</empty>
+		</row>
+	</rowsItem>
+	<drawing>
+		<drawingType>Picture</drawingType>
+		<id>1</id>
+		<formatIndex>2</formatIndex>
+		<beginRow>0</beginRow>
+		<beginRowOffset>0</beginRowOffset>
+		<endRow>1</endRow>
+		<endRowOffset>0</endRowOffset>
+		<beginColumn>0</beginColumn>
+		<beginColumnOffset>0</beginColumnOffset>
+		<endColumn>1</endColumn>
+		<endColumnOffset>0</endColumnOffset>
+		<autoSize>true</autoSize>
+		<pictureSize>Stretch</pictureSize>
+		<zOrder>1</zOrder>
+		<pictureIndex>0</pictureIndex>
+	</drawing>
+	<picture>
+		<index>0</index>
+		<picture/>
+	</picture>
+	<format>
+		<width>72</width>
+	</format>
+	<format>
+		<drawingBorder>0</drawingBorder>
+		<backColor>style:FormBackColor</backColor>
+		<patternColor>style:FormBackColor</patternColor>
+		<pattern>WithoutPattern</pattern>
+	</format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+
+        assert!(text.contains("{14338,0,0,255,0}"));
+        assert!(extracted.contains("<patternColor>style:FormBackColor</patternColor>"));
+        assert!(extracted.contains("<pattern>WithoutPattern</pattern>"));
+        assert!(!extracted.contains("<textOrientation>"));
 
         Ok(())
     }
@@ -27673,6 +27790,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
                     || format.horizontal_alignment.is_some()
                     || format.vertical_alignment.is_some()
                     || format.back_color.is_some()
+                    || format.pattern_color.is_some()
+                    || format.pattern.is_some()
                     || format.text_color.is_some()
                     || format.text_placement.is_some()
                     || format.text_orientation.is_some()

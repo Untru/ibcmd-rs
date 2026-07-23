@@ -398,6 +398,7 @@ pub(super) struct MoxelFormat {
     pub(super) horizontal_alignment: Option<&'static str>,
     pub(super) vertical_alignment: Option<&'static str>,
     pub(super) back_color: Option<String>,
+    pub(super) pattern_color: Option<String>,
     pub(super) pattern: Option<&'static str>,
     pub(super) text_color: Option<String>,
     pub(super) text_placement: Option<&'static str>,
@@ -446,6 +447,7 @@ impl MoxelFormat {
             && self.horizontal_alignment.is_none()
             && self.vertical_alignment.is_none()
             && self.back_color.is_none()
+            && self.pattern_color.is_none()
             && self.pattern.is_none()
             && self.text_color.is_none()
             && self.text_placement.is_none()
@@ -732,16 +734,17 @@ pub(super) fn parse_moxel_spreadsheet_text(
             default_format = leading_default_format;
         }
     }
-    let (column_formats, formats, source_format_map) = parse_moxel_formats_with_source_map(
-        &fields,
-        column_format_slots,
-        sparse_source_format_refs,
-        &source_column_format_refs,
-        &source_column_format_order,
-        &style_refs,
-        &drawing_format_indices,
-        &number_format_refs,
-    );
+    let (column_formats, formats, source_format_map, leading_source_column_formats) =
+        parse_moxel_formats_with_source_map(
+            &fields,
+            column_format_slots,
+            sparse_source_format_refs,
+            &source_column_format_refs,
+            &source_column_format_order,
+            &style_refs,
+            &drawing_format_indices,
+            &number_format_refs,
+        );
     let (column_formats, mut formats) = (column_formats, formats);
     let source_format_map = source_format_map.filter(|source_format_map| {
         moxel_source_format_refs_are_complete(
@@ -799,6 +802,8 @@ pub(super) fn parse_moxel_spreadsheet_text(
             );
             remap_moxel_row_and_cell_output_format_indices(&mut rows, &source_column_format_refs);
         }
+    } else if leading_source_column_formats {
+        remap_moxel_leading_source_column_format_indices(&mut rows);
     } else if sparse_source_format_refs && !source_column_format_refs.is_empty() {
         remap_moxel_column_set_output_format_indices(&mut column_sets, &source_column_format_refs);
         remap_moxel_row_and_cell_output_format_indices(&mut rows, &source_column_format_refs);
@@ -2057,11 +2062,30 @@ pub(super) fn parse_moxel_lines(
         return Vec::new();
     }
     let uses_drawing_line = formats.iter().any(|format| format.drawing_border.is_some());
+    let uses_cell_line = formats.iter().any(|format| {
+        format.border.is_some()
+            || format.left_border.is_some()
+            || format.top_border.is_some()
+            || format.right_border.is_some()
+            || format.bottom_border.is_some()
+    });
     let has_thin_dashed_default_line_palette = has_moxel_thin_dashed_default_line_palette(fields);
     let mut lines = fields
         .iter()
         .filter_map(|field| parse_moxel_line(field))
         .collect::<Vec<_>>();
+    if uses_drawing_line
+        && !uses_cell_line
+        && used_indexes.len() == 1
+        && let Some(source_index) = used_indexes.iter().next().copied()
+        && let Some(source) = lines.get(source_index)
+    {
+        return vec![MoxelLine {
+            style: source.style,
+            line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+            width: source.width,
+        }];
+    }
     if lines.len() > 3
         && lines.first().is_some_and(|line| line.style == "None")
         && lines.get(1).is_some_and(|line| line.style == "Solid")
@@ -2821,6 +2845,7 @@ fn parse_moxel_formats_with_source_map(
     Vec<MoxelFormat>,
     Vec<MoxelFormat>,
     Option<MoxelSourceFormatMap>,
+    bool,
 ) {
     if sparse_source_format_refs
         && !source_column_format_refs.is_empty()
@@ -2840,10 +2865,10 @@ fn parse_moxel_formats_with_source_map(
         );
         let (column_formats, formats) =
             split_moxel_formats_by_source_refs(formats, source_column_format_refs);
-        return (column_formats, formats, source_format_map);
+        return (column_formats, formats, source_format_map, false);
     }
 
-    let (column_formats, formats) = parse_moxel_formats(
+    let (column_formats, formats, leading_source_column_formats) = parse_moxel_formats_with_layout(
         fields,
         column_count,
         sparse_source_format_refs,
@@ -2852,9 +2877,10 @@ fn parse_moxel_formats_with_source_map(
         drawing_format_indices,
         number_format_refs,
     );
-    (column_formats, formats, None)
+    (column_formats, formats, None, leading_source_column_formats)
 }
 
+#[cfg(test)]
 pub(super) fn parse_moxel_formats(
     fields: &[&str],
     column_count: usize,
@@ -2864,6 +2890,27 @@ pub(super) fn parse_moxel_formats(
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> (Vec<MoxelFormat>, Vec<MoxelFormat>) {
+    let (column_formats, formats, _) = parse_moxel_formats_with_layout(
+        fields,
+        column_count,
+        sparse_source_format_refs,
+        source_column_format_refs,
+        style_refs,
+        drawing_format_indices,
+        number_format_refs,
+    );
+    (column_formats, formats)
+}
+
+fn parse_moxel_formats_with_layout(
+    fields: &[&str],
+    column_count: usize,
+    sparse_source_format_refs: bool,
+    source_column_format_refs: &[usize],
+    style_refs: &[Option<String>],
+    drawing_format_indices: &BTreeSet<usize>,
+    number_format_refs: &[Vec<MoxelLocalizedValue>],
+) -> (Vec<MoxelFormat>, Vec<MoxelFormat>, bool) {
     let all_formats = parse_moxel_format_table(
         fields,
         column_count,
@@ -2873,17 +2920,22 @@ pub(super) fn parse_moxel_formats(
     );
     if let Some(formats) = all_formats {
         if sparse_source_format_refs && !source_column_format_refs.is_empty() {
-            return split_moxel_formats_by_source_refs(formats, source_column_format_refs);
+            let (column_formats, formats) =
+                split_moxel_formats_by_source_refs(formats, source_column_format_refs);
+            return (column_formats, formats, false);
         }
         if prefers_moxel_leading_source_column_formats(&formats, source_column_format_refs) {
-            return split_moxel_formats_by_source_refs(formats, source_column_format_refs);
+            let (column_formats, formats) =
+                split_moxel_formats_by_source_refs(formats, source_column_format_refs);
+            return (column_formats, formats, true);
         }
-        return split_moxel_formats_for_output(
+        let (column_formats, formats) = split_moxel_formats_for_output(
             formats,
             column_count,
             sparse_source_format_refs,
             drawing_format_indices,
         );
+        return (column_formats, formats, false);
     }
     if let Some((_, slots)) = parse_moxel_equal_width_only_format_table(fields, column_count) {
         let formats = slots
@@ -2893,14 +2945,15 @@ pub(super) fn parse_moxel_formats(
                 ..MoxelFormat::default()
             })
             .collect::<Vec<_>>();
-        return split_moxel_formats_for_output(
+        let (column_formats, formats) = split_moxel_formats_for_output(
             formats,
             column_count,
             sparse_source_format_refs,
             drawing_format_indices,
         );
+        return (column_formats, formats, false);
     }
-    (Vec::new(), Vec::new())
+    (Vec::new(), Vec::new(), false)
 }
 
 pub(super) fn parse_moxel_format_table(
@@ -2936,7 +2989,8 @@ pub(super) fn parse_moxel_format_table(
                 break;
             };
             if drawing_format_indices.contains(&(format_offset + 1)) {
-                normalize_moxel_drawing_format(&mut format);
+                let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
+                normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
             }
             formats.push(format);
         }
@@ -3005,16 +3059,36 @@ pub(super) fn parse_moxel_nested_format_table(
             return None;
         };
         if drawing_format_indices.contains(&(format_offset + 1)) {
-            normalize_moxel_drawing_format(&mut format);
+            let pattern_color = parse_moxel_drawing_pattern_color(field, style_refs);
+            normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
         }
         formats.push(format);
     }
     Some(formats)
 }
 
+fn parse_moxel_drawing_pattern_color(text: &str, style_refs: &[Option<String>]) -> Option<String> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    let flags = fields.first()?.trim().parse::<u64>().ok()?;
+    let values = moxel_format_values(flags, &fields)?;
+    parse_moxel_format_style_ref(&values, 13, style_refs)
+}
+
+#[cfg(test)]
 pub(super) fn normalize_moxel_drawing_format(format: &mut MoxelFormat) {
+    normalize_moxel_drawing_format_with_pattern_color(format, None);
+}
+
+fn normalize_moxel_drawing_format_with_pattern_color(
+    format: &mut MoxelFormat,
+    pattern_color: Option<String>,
+) {
     format.drawing_border = format.left_border;
     format.left_border = None;
+    if pattern_color.is_some() {
+        format.text_orientation = None;
+        format.pattern_color = pattern_color;
+    }
     if format.back_color.is_none() {
         match format.border_color.as_deref() {
             Some("style:ToolTipBackColor") => {
@@ -3140,6 +3214,7 @@ pub(super) fn is_moxel_width_only_format(format: &MoxelFormat) -> bool {
         && format.vertical_alignment.is_none()
         && format.text_color.is_none()
         && format.back_color.is_none()
+        && format.pattern_color.is_none()
         && format.pattern.is_none()
         && format.text_placement.is_none()
         && format.text_orientation.is_none()
@@ -3614,6 +3689,7 @@ pub(super) fn parse_moxel_format(
             .and_then(moxel_horizontal_alignment),
         vertical_alignment: parse_moxel_format_usize(&values, 9).and_then(moxel_vertical_alignment),
         back_color: parse_moxel_format_style_ref(&values, 11, style_refs),
+        pattern_color: None,
         pattern: parse_moxel_format_usize(&values, 12).and_then(moxel_format_pattern),
         text_color: parse_moxel_format_style_ref(&values, 10, style_refs),
         text_placement: parse_moxel_format_usize(&values, 14).and_then(moxel_text_placement),
@@ -4273,9 +4349,31 @@ pub(super) fn moxel_text_placement(value: usize) -> Option<&'static str> {
 }
 
 pub(super) fn moxel_format_pattern(value: usize) -> Option<&'static str> {
-    match value {
-        255 => Some("WithoutPattern"),
-        _ => None,
+    const PATTERNS: [&str; 19] = [
+        "Solid",
+        "Pattern1",
+        "Pattern2",
+        "Pattern3",
+        "Pattern4",
+        "Pattern5",
+        "Pattern6",
+        "Pattern7",
+        "Pattern8",
+        "Pattern9",
+        "Pattern10",
+        "Pattern11",
+        "Pattern12",
+        "Pattern13",
+        "Pattern14",
+        "Pattern15",
+        "Pattern16",
+        "Pattern17",
+        "Pattern18",
+    ];
+    if value == 255 {
+        Some("WithoutPattern")
+    } else {
+        PATTERNS.get(value).copied()
     }
 }
 
@@ -5530,6 +5628,26 @@ pub(super) fn remap_moxel_row_and_cell_output_format_indices(
     }
 }
 
+fn remap_moxel_leading_source_column_format_indices(rows: &mut [MoxelRow]) {
+    for row in rows {
+        if let Some(source_format_index) = row.source_format_index {
+            row.format_index = if source_format_index <= 1 {
+                source_format_index
+            } else {
+                source_format_index - 1
+            };
+        }
+        for cell in &mut row.cells {
+            if let Some(source_format_index) = cell.source_format_index {
+                cell.format_index = source_format_index.saturating_sub(1);
+            }
+            if let Some(note) = &mut cell.note {
+                note.format_index = note.source_format_index.saturating_sub(1);
+            }
+        }
+    }
+}
+
 pub(super) fn normalize_moxel_zero_column_format_refs(rows: &mut [MoxelRow]) {
     for row in rows {
         if row.format_index > 0 {
@@ -5687,15 +5805,16 @@ pub(super) fn push_moxel_format_xml(
         push_moxel_format_usize(xml, "rightBorder", format.right_border);
         push_moxel_format_usize(xml, "bottomBorder", format.bottom_border);
     }
+    push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     push_moxel_format_i32(xml, "height", format.height);
     push_moxel_format_color(xml, "borderColor", format.border_color.as_deref());
     push_moxel_format_usize(xml, "width", format.width);
     push_moxel_format_usize(xml, "widthWeightFactor", format.width_weight_factor);
-    push_moxel_format_usize(xml, "drawingBorder", format.drawing_border);
     push_moxel_format_text(xml, "horizontalAlignment", format.horizontal_alignment);
     push_moxel_format_text(xml, "verticalAlignment", format.vertical_alignment);
     push_moxel_format_color(xml, "textColor", format.text_color.as_deref());
     push_moxel_format_color(xml, "backColor", format.back_color.as_deref());
+    push_moxel_format_color(xml, "patternColor", format.pattern_color.as_deref());
     push_moxel_format_text(xml, "pattern", format.pattern);
     push_moxel_format_text(xml, "textPlacement", format.text_placement);
     push_moxel_format_text(xml, "fillType", format.fill_type);
@@ -6305,6 +6424,103 @@ fn push_moxel_note_xml(
 #[cfg(test)]
 mod moxel_exact_parity_tests {
     use super::*;
+
+    #[test]
+    fn remaps_leading_source_column_format_row_and_cell_refs() {
+        let mut rows = vec![MoxelRow {
+            index: 0,
+            index_to: None,
+            format_index: 5,
+            source_format_index: Some(4),
+            columns_id: None,
+            cells: vec![MoxelCell {
+                column_index: 0,
+                format_index: 3,
+                source_format_index: Some(2),
+                text: None,
+                parameter: None,
+                detail_parameter: None,
+                note: None,
+                empty_text: false,
+            }],
+        }];
+
+        remap_moxel_leading_source_column_format_indices(&mut rows);
+
+        assert_eq!(rows[0].format_index, 3);
+        assert_eq!(rows[0].cells[0].format_index, 1);
+    }
+
+    #[test]
+    fn drawing_pattern_color_uses_slot_thirteen_and_native_order() {
+        let style_refs = vec![
+            Some("style:FormBackColor".to_string()),
+            Some("style:FormTextColor".to_string()),
+            None,
+            Some("style:ИтогиФонГруппы".to_string()),
+        ];
+        let raw = "{14370,0,3,0,255,0}";
+        let mut format = parse_moxel_format(raw, &style_refs, &[]).unwrap();
+        let pattern_color = parse_moxel_drawing_pattern_color(raw, &style_refs);
+        normalize_moxel_drawing_format_with_pattern_color(&mut format, pattern_color);
+        let spreadsheet = MoxelSpreadsheet {
+            column_count: 0,
+            column_sets: Vec::new(),
+            column_formats: Vec::new(),
+            extra_formats: BTreeMap::new(),
+            default_format_width: None,
+            default_format: MoxelFormat::default(),
+            formats: vec![format],
+            rows: Vec::new(),
+            vertical_groups: Vec::new(),
+            merges: Vec::new(),
+            horizontal_unmerges: Vec::new(),
+            vertical_unmerges: Vec::new(),
+            named_items: Vec::new(),
+            areas: Vec::new(),
+            print_area: None,
+            print_settings: None,
+            lines: Vec::new(),
+            fonts: Vec::new(),
+            drawings: Vec::new(),
+            pictures: Vec::new(),
+            empty_headers_footers: false,
+            header_footer_format_index: None,
+            default_format_index: None,
+            source_format_map: None,
+            height: 0,
+        };
+        let mut xml = String::new();
+        push_moxel_format_xml(&mut xml, &spreadsheet, 1);
+
+        assert_eq!(
+            xml,
+            "\t<format>\r\n\
+\t\t<drawingBorder>0</drawingBorder>\r\n\
+\t\t<borderColor>style:ИтогиФонГруппы</borderColor>\r\n\
+\t\t<backColor>style:FormBackColor</backColor>\r\n\
+\t\t<patternColor>style:FormBackColor</patternColor>\r\n\
+\t\t<pattern>WithoutPattern</pattern>\r\n\
+\t</format>\r\n"
+        );
+    }
+
+    #[test]
+    fn drawing_only_line_palette_does_not_emit_cell_lines() {
+        let formats = vec![MoxelFormat {
+            drawing_border: Some(0),
+            ..MoxelFormat::default()
+        }];
+        let lines = parse_moxel_lines(&["{3,3,{-1}}", "{3,3,{-3}}"], &formats, true);
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].style, "None");
+        assert_eq!(
+            lines[0].line_type,
+            "v8ui:SpreadsheetDocumentDrawingLineType"
+        );
+        assert_eq!(lines[0].width, 1);
+    }
 
     #[test]
     fn preserves_thin_dashed_default_palette_with_drawing_line() {
