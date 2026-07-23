@@ -2030,6 +2030,7 @@ struct SpreadsheetDocumentXmlFormat {
     drawing_border: Option<usize>,
     by_selected_columns: Option<bool>,
     details_use: Option<String>,
+    mark_negatives: Option<bool>,
     hyper_link: Option<bool>,
     protection: Option<bool>,
     indent: Option<usize>,
@@ -2827,6 +2828,7 @@ fn spreadsheet_text_element(local: &str) -> bool {
             | "fillType"
             | "drawingBorder"
             | "bySelectedColumns"
+            | "markNegatives"
             | "detailsUse"
             | "hyperLink"
             | "protection"
@@ -3284,6 +3286,11 @@ fn apply_spreadsheet_text_value(
         "bySelectedColumns" if path_ends_with(path, &["format", "bySelectedColumns"]) => {
             set_spreadsheet_format_bool(format, value, |format, parsed| {
                 format.by_selected_columns = Some(parsed)
+            });
+        }
+        "markNegatives" if path_ends_with(path, &["format", "markNegatives"]) => {
+            set_spreadsheet_format_bool(format, value, |format, parsed| {
+                format.mark_negatives = Some(parsed)
             });
         }
         "detailsUse" if path_ends_with(path, &["format", "detailsUse"]) => {
@@ -4317,6 +4324,7 @@ fn format_spreadsheet_format_for_moxel(
         20,
         format.by_selected_columns.map(bool_to_usize),
     );
+    push_spreadsheet_format_value(&mut values, 21, format.mark_negatives.map(bool_to_usize));
     push_spreadsheet_format_value(&mut values, 26, format.hyper_link.map(bool_to_usize));
     push_spreadsheet_format_value(&mut values, 30, format.indent);
     push_spreadsheet_format_value(&mut values, 31, format.auto_indent);
@@ -28394,6 +28402,30 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
         assert_eq!(packed.plain_bytes, text.len());
 
+        Ok(())
+    }
+
+    #[test]
+    fn packs_spreadsheet_mark_negatives_format() -> anyhow::Result<()> {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns><size>1</size></columns>
+	<rowsItem><index>0</index><row><formatIndex>2</formatIndex><empty>true</empty></row></rowsItem>
+	<format/><format><markNegatives>true</markNegatives></format>
+</document>
+"#;
+
+        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
+        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("extract");
+
+        assert!(
+            extracted.contains("<markNegatives>true</markNegatives>"),
+            "{extracted}"
+        );
         Ok(())
     }
 

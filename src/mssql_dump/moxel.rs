@@ -4476,7 +4476,7 @@ pub(super) fn parse_moxel_format(
         by_selected_columns: parse_moxel_format_usize(&values, 20)
             .and_then(moxel_by_selected_columns),
         details_use: parse_moxel_format_usize(&values, 19).and_then(moxel_details_use),
-        mark_negatives: parse_moxel_format_usize(&values, 21).and_then(moxel_false_only),
+        mark_negatives: parse_moxel_format_usize(&values, 21).and_then(moxel_bool_value),
         hyper_link: parse_moxel_format_usize(&values, 26).and_then(moxel_hyper_link),
         auto_mark_incomplete: parse_moxel_format_usize(&values, 28).and_then(moxel_bool_value),
         mark_incomplete: parse_moxel_format_usize(&values, 29).and_then(moxel_false_only),
