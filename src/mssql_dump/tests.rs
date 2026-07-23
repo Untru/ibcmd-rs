@@ -3259,6 +3259,18 @@ fn extracts_form_command_set_single_excluded_command() {
 }
 
 #[test]
+fn extracts_root_command_set_table_and_new_window_commands() {
+    let mut fields = vec![""; 21];
+    fields[18] = "0";
+    fields[20] = "{4,8969c93a-23e5-4bef-941d-aaef315858d2,daa306cd-a78a-4e74-a14c-739daba624cb,d8e20c4d-3519-49aa-80e5-d6d66fee741a,03df6ee5-883c-4cc6-b319-d886d1a9b2c8}";
+
+    assert_eq!(
+        extract_form_command_set_excluded_commands(&fields, None),
+        vec!["Choose", "NewWindow", "Save", "SetDateInterval"]
+    );
+}
+
+#[test]
 fn extracts_form_command_set_multiple_excluded_commands() {
     let form_body = deflate_for_test(
             r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1,{"N",0},{0,1,0},{3,342c531d-dc73-458a-8ac4-6a746916a33b,4f834c38-add1-45e4-a9f3-cefe3efac5c9,6886601d-276c-4d3f-af0a-05c586025608},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
@@ -13005,8 +13017,14 @@ fn parses_common_command_input_field_pictures_and_shortcut() {
 #[test]
 fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
     for (raw, expected) in [
+        ("{0,8,0}", "BackSpace"),
+        ("{0,13,8}", "Ctrl+Enter"),
+        ("{0,49,8}", "Ctrl+1"),
         ("{0,65,0}", "A"),
         ("{0,90,0}", "Z"),
+        ("{0,96,0}", "Num 0"),
+        ("{0,105,16}", "Alt+Num 9"),
+        ("{0,110,0}", "Num ."),
         ("{0,112,0}", "F1"),
         ("{0,123,0}", "F12"),
         ("{0,83,4}", "Shift+S"),
@@ -13027,7 +13045,12 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
         "{0,0,0}",
         "{0,0,8}",
         "{0,64,0}",
+        "{0,47,0}",
+        "{0,58,0}",
         "{0,91,0}",
+        "{0,95,0}",
+        "{0,106,0}",
+        "{0,109,0}",
         "{0,111,0}",
         "{0,124,0}",
         "{0,70,1}",
@@ -13038,6 +13061,24 @@ fn parses_common_command_shortcut_key_and_modifier_matrix_strictly() {
     ] {
         assert_eq!(parse_common_command_shortcut_value(raw), None, "{raw}");
     }
+}
+
+#[test]
+fn preserves_fixed_allowed_length_in_form_type_xml() {
+    let value_types = normalize_form_type_pattern(vec![ConstantValueType::String {
+        length: Some(12),
+        allowed_length_flag: 0,
+    }]);
+
+    let xml = format_form_metadata_types_xml(&value_types);
+    assert!(
+        xml.contains("<v8:AllowedLength>Fixed</v8:AllowedLength>"),
+        "{xml}"
+    );
+    assert!(
+        !xml.contains("<v8:AllowedLength>Variable</v8:AllowedLength>"),
+        "{xml}"
+    );
 }
 
 #[test]

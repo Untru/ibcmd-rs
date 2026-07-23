@@ -22948,7 +22948,12 @@ fn parse_common_command_shortcut_value(value: &str) -> Option<String> {
         return None;
     }
     let key = match key_code {
+        8 => "BackSpace".to_string(),
+        13 => "Enter".to_string(),
+        48..=57 => char::from_u32(u32::from(key_code))?.to_string(),
         65..=90 => char::from_u32(u32::from(key_code))?.to_string(),
+        96..=105 => format!("Num {}", key_code - 96),
+        110 => "Num .".to_string(),
         112..=123 => format!("F{}", key_code - 111),
         _ => return None,
     };

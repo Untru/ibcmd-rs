@@ -920,7 +920,24 @@ pub(super) fn extract_form_command_set_excluded_commands(
     });
     map_known_form_excluded_commands(&command_set, |uuid| {
         form_standard_excluded_command_name(uuid, business_process_or_task)
+            .or_else(|| form_root_table_excluded_command_name(uuid))
+            // NewWindow is a form-standard command, but is not part of the
+            // older excluded-command table above.
+            .or_else(|| {
+                (form_standard_command_name(uuid) == Some("Form.StandardCommand.NewWindow"))
+                    .then_some("NewWindow")
+            })
     })
+}
+
+fn form_root_table_excluded_command_name(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        // These table command UUIDs are evidenced in root Form/CommandSet lists.
+        "8969c93a-23e5-4bef-941d-aaef315858d2"
+        | "daa306cd-a78a-4e74-a14c-739daba624cb"
+        | "d8e20c4d-3519-49aa-80e5-d6d66fee741a" => form_table_standard_command_suffix(uuid),
+        _ => None,
+    }
 }
 
 pub(super) fn extract_form_auto_time(fields: &[&str]) -> Option<&'static str> {
@@ -3778,16 +3795,6 @@ pub(super) fn normalize_form_type_pattern(
             {
                 ConstantValueType::ReferenceTypeSet { reference }
             }
-            ConstantValueType::String {
-                length,
-                allowed_length_flag,
-            } => ConstantValueType::String {
-                length,
-                allowed_length_flag: match allowed_length_flag {
-                    0 => 1,
-                    other => other,
-                },
-            },
             other => other,
         })
         .collect::<Vec<_>>();
