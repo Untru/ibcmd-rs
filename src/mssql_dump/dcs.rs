@@ -185,6 +185,10 @@ fn data_composition_current_config_prefix(xml: &str, position: usize) -> String 
         .any(|entry| matches!(entry.name, "parameter" | "calculatedField"))
     {
         4
+    } else if stack.windows(3).any(|entries| {
+        entries[0].name == "dataSet" && entries[1].name == "item" && entries[2].name == "field"
+    }) {
+        6
     } else if stack
         .iter()
         .any(|entry| entry.name == "item" && entry.xsi_type == Some("DataSetObject"))
@@ -1455,19 +1459,37 @@ impl<'a> DataCompositionXmlWriter<'a> {
                 frame.namespace.as_deref() == Some(DCS_AREA_TEMPLATE_NS)
                     && frame.local.as_slice() == b"appearance"
             });
+            let in_schema_appearance = self.element_stack.iter().any(|frame| {
+                frame.namespace.as_deref() == Some(DCS_SCHEMA_NS)
+                    && frame.local.as_slice() == b"appearance"
+            });
             let resolved_style_name = data_composition_style_item_name(text, self.object_refs);
-            let qualified_area_value = (in_area_template && value.contains(':'))
+            let qualified_value = value
+                .contains(':')
                 .then(|| resolve_data_composition_qname(reader, value))
                 .flatten()
                 .and_then(|expanded| {
                     let namespace = expanded.namespace?;
                     Some((namespace, expanded.local))
                 });
+            let qualified_schema_style = in_schema_appearance
+                && qualified_value
+                    .as_ref()
+                    .is_some_and(|(namespace, _)| namespace.as_slice() == STYLE_NS);
+            let qualified_canonical_value = (in_area_template || qualified_schema_style)
+                .then_some(qualified_value)
+                .flatten();
             if let Some((namespace, local)) = resolved_style_name
                 .map(|name| (STYLE_NS.to_vec(), name))
-                .or(qualified_area_value)
+                .or(qualified_canonical_value)
             {
-                let prefix = in_area_template.then(|| self.scope_prefix(8));
+                let prefix = if in_area_template {
+                    Some(self.scope_prefix(8))
+                } else if qualified_schema_style {
+                    Some(self.schema_style_prefix())
+                } else {
+                    None
+                };
                 if let Some(prefix) = &prefix {
                     let output_namespace_offset =
                         self.element_stack.last()?.output_namespace_offset;
@@ -1758,6 +1780,8 @@ impl<'a> DataCompositionXmlWriter<'a> {
     fn current_config_prefix(&self) -> String {
         let base = if self.has_parameter_ancestor() {
             4
+        } else if self.has_data_set_item_field_ancestor() {
+            6
         } else if self.element_stack.iter().any(|frame| {
             frame.local.as_slice() == b"item"
                 && frame.xsi_type_local.as_deref() == Some("DataSetObject")
@@ -1765,6 +1789,22 @@ impl<'a> DataCompositionXmlWriter<'a> {
             6
         } else {
             5
+        };
+        self.scope_prefix(base)
+    }
+
+    fn schema_style_prefix(&self) -> String {
+        let base = if self.has_parameter_ancestor() {
+            5
+        } else if self.has_data_set_item_field_ancestor()
+            || self.element_stack.iter().any(|frame| {
+                frame.local.as_slice() == b"item"
+                    && frame.xsi_type_local.as_deref() == Some("DataSetObject")
+            })
+        {
+            7
+        } else {
+            6
         };
         self.scope_prefix(base)
     }
@@ -1784,6 +1824,17 @@ impl<'a> DataCompositionXmlWriter<'a> {
         self.element_stack.iter().any(|frame| {
             frame.namespace.as_deref() == Some(DCS_SCHEMA_NS)
                 && matches!(frame.local.as_slice(), b"parameter" | b"calculatedField")
+        })
+    }
+
+    fn has_data_set_item_field_ancestor(&self) -> bool {
+        self.element_stack.windows(3).any(|frames| {
+            frames
+                .iter()
+                .all(|frame| frame.namespace.as_deref() == Some(DCS_SCHEMA_NS))
+                && frames[0].local.as_slice() == b"dataSet"
+                && frames[1].local.as_slice() == b"item"
+                && frames[2].local.as_slice() == b"field"
         })
     }
 
@@ -2087,6 +2138,39 @@ mod tests {
     }
 
     #[test]
+    fn dataset_item_fields_use_d6_while_direct_fields_keep_d5() {
+        const ANY_IB_REF_TYPE_ID: &str = "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63";
+        let direct = format!(
+            "<dataSet><field><valueType><v8:TypeId>{TYPE_ID}</v8:TypeId></valueType></field></dataSet>"
+        );
+        let nested = format!(
+            "<dataSet><item><field><valueType><v8:TypeId>{TYPE_ID}</v8:TypeId><v8:TypeId>{ANY_IB_REF_TYPE_ID}</v8:TypeId></valueType></field></item></dataSet>"
+        );
+        let nested_schema = format!(
+            "<nestedSchema><schema><dataSet><item><field><valueType><v8:TypeId>{TYPE_ID}</v8:TypeId></valueType></field></item></dataSet></schema></nestedSchema>"
+        );
+
+        assert_eq!(
+            rewritten_type(&direct),
+            format!(
+                "<dataSet><field><valueType><v8:Type xmlns:d5p1=\"{CURRENT_CONFIG_URI}\">d5p1:Catalog.Test</v8:Type></valueType></field></dataSet>"
+            )
+        );
+        assert_eq!(
+            rewritten_type(&nested),
+            format!(
+                "<dataSet><item><field><valueType><v8:Type xmlns:d6p1=\"{CURRENT_CONFIG_URI}\">d6p1:Catalog.Test</v8:Type><v8:TypeSet xmlns:d6p1=\"{CURRENT_CONFIG_URI}\">d6p1:AnyIBRef</v8:TypeSet></valueType></field></item></dataSet>"
+            )
+        );
+        assert_eq!(
+            rewritten_type(&nested_schema),
+            format!(
+                "<nestedSchema><schema><dataSet><item><field><valueType><v8:Type xmlns:d8p1=\"{CURRENT_CONFIG_URI}\">d8p1:Catalog.Test</v8:Type></valueType></field></item></dataSet></schema></nestedSchema>"
+            )
+        );
+    }
+
+    #[test]
     fn unprefixed_dataset_object_item_keeps_d6_current_config_prefix() {
         let xml =
             format!("<item xsi:type=\"DataSetObject\"><v8:TypeId>{TYPE_ID}</v8:TypeId></item>");
@@ -2119,6 +2203,67 @@ mod tests {
         ] {
             assert_eq!(rewritten_type(&xml), expected);
         }
+    }
+
+    #[test]
+    fn canonical_qnames_follow_direct_and_dataset_item_field_prefixes() {
+        let document = format!(
+            concat!(
+                "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+                "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">",
+                "<dataSet>",
+                "<field><valueType>",
+                "<Type xmlns=\"http://v8.1c.ru/8.1/data/core\" xmlns:cfg=\"{0}\">cfg:Catalog.Direct</Type>",
+                "</valueType></field>",
+                "<item><field><valueType>",
+                "<Type xmlns=\"http://v8.1c.ru/8.1/data/core\" xmlns:cfg=\"{0}\">cfg:Catalog.Nested</Type>",
+                "<TypeSet xmlns=\"http://v8.1c.ru/8.1/data/core\" xmlns:cfg=\"{0}\">cfg:DocumentRef</TypeSet>",
+                "</valueType></field></item>",
+                "</dataSet>",
+                "</dataCompositionSchema></SchemaFile>"
+            ),
+            CURRENT_CONFIG_URI
+        );
+
+        let xml =
+            canonicalize_data_composition_schema_document(&document, &BTreeMap::new()).unwrap();
+
+        assert!(xml.contains(&format!(
+            "<v8:Type xmlns:d5p1=\"{CURRENT_CONFIG_URI}\">d5p1:Catalog.Direct</v8:Type>"
+        )));
+        assert!(xml.contains(&format!(
+            "<v8:Type xmlns:d6p1=\"{CURRENT_CONFIG_URI}\">d6p1:Catalog.Nested</v8:Type>"
+        )));
+        assert!(xml.contains(&format!(
+            "<v8:TypeSet xmlns:d6p1=\"{CURRENT_CONFIG_URI}\">d6p1:DocumentRef</v8:TypeSet>"
+        )));
+    }
+
+    #[test]
+    fn schema_field_style_qname_uses_native_dynamic_prefix() {
+        let document = concat!(
+            "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">",
+            "<dataSet><field><appearance>",
+            "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+            "xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xsi:type=\"dcsset:SettingsParameterValue\">",
+            "<parameter>ЦветТекста</parameter>",
+            "<value xmlns:rawui=\"http://v8.1c.ru/8.1/data/ui\" ",
+            "xmlns:rawstyle=\"http://v8.1c.ru/8.1/data/ui/style\" ",
+            "xsi:type=\"rawui:Color\">rawstyle:NegativeTextColor</value>",
+            "</item></appearance></field></dataSet>",
+            "</dataCompositionSchema></SchemaFile>"
+        );
+
+        let xml =
+            canonicalize_data_composition_schema_document(document, &BTreeMap::new()).unwrap();
+
+        assert!(xml.contains(&format!(
+            "<dcscor:value xmlns:d6p1=\"{}\" xsi:type=\"v8ui:Color\">d6p1:NegativeTextColor</dcscor:value>",
+            std::str::from_utf8(STYLE_NS).unwrap()
+        )));
+        assert!(!xml.contains("rawstyle:NegativeTextColor"));
     }
 
     #[test]
