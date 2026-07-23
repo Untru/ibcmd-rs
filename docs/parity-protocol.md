@@ -12,8 +12,11 @@
   cargo build --release --features platform-oracle
   ```
 
-- `IBCMD_DB_PSW` задаётся в окружении текущего процесса. Пароль не попадает в
-  аргументы, журналы или `parity-manifest.json`.
+- Для SQL-аутентификации `IBCMD_DB_PSW` задаётся в окружении текущего процесса.
+  Пароль и имя переменной не попадают в журналы или `parity-manifest.json`.
+- Для Windows-аутентификации используйте `-IntegratedAuth` (либо пустой
+  `-DbUser`). В этом режиме скрипт не передаёт SQL-реквизиты и на время
+  нативной выгрузки изолирует унаследованные `IBCMD_DB_USR`/`IBCMD_DB_PSW`.
 - Доступны нативный `ibcmd`, `sqlcmd`/`bcp` и тестовая база. Используйте только
   одноразовые тестовые копии.
 
@@ -32,6 +35,14 @@ powershell -ExecutionPolicy Bypass -File scripts\export-ibcmd-vs-ours.ps1 `
   -RunId 20260723_ut_full -LabRoot E:\ibcmd_lab\parity
 ```
 
+Вариант с интегрированной аутентификацией:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\export-ibcmd-vs-ours.ps1 `
+  -DbName ut_ibcmd -DbServer localhost -IntegratedAuth `
+  -RunId 20260723_ut_full -LabRoot E:\ibcmd_lab\parity
+```
+
 Каталог `E:\ibcmd_lab\parity\ut_ibcmd_20260723_ut_full` создаётся ровно один
 раз; повторное использование идентификатора — ошибка. Внутри всегда находятся:
 
@@ -41,9 +52,16 @@ powershell -ExecutionPolicy Bypass -File scripts\export-ibcmd-vs-ours.ps1 `
 - `raw-diff.json`, `signatures.json`, `matrix.json` и `matrix.md`;
 - `logs/` и `parity-manifest.json` со статусами, временем и кодами завершения.
 
-В манифесте сохраняются SHA Git, версия формата, режим, обезличенный источник
-пароля и точные имена CLI-команд. Значения паролей и переменная окружения целиком
-не сериализуются.
+Манифест создаётся до первого внешнего процесса и атомарно обновляется до и
+после каждого шага. В нём сохраняются SHA и clean/dirty-состояние Git, SHA-256
+бинарников, версии `ibcmd-rs`, `ibcmd`, `sqlcmd`, `bcp` и `robocopy`, версия
+XML, точные обезличенные аргументы, журналы и выходные артефакты. Отдельно
+фиксируются точные отпечатки таблиц `Config`/`ConfigSave` до и после выгрузки,
+а также детерминированные SHA-256 нативного и кандидатного деревьев.
+
+Полный прогон не может завершиться со статусом `passed`, если репозиторий
+грязный, отпечаток БД отсутствует или изменился во время работы. Значения
+паролей и имя парольной переменной не сериализуются.
 
 ## Матрица УТ + БСП
 
@@ -56,6 +74,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run-parity-matrix.ps1 `
 `source-diff-matrix-merge` объединяет полные матрицы в
 `matrix_<RunId>\parity-matrix.json` и `parity-matrix.md`. Имена баз и сервер
 передаются явно; скрипт не ищет и не выбирает рабочие базы автоматически.
+До объединения он машинно проверяет одинаковые Git SHA, версии XML и фактически
+разрешённые версии нативного `ibcmd`. Дочерние прогоны и merge журналируются как
+отдельные шаги верхнего манифеста.
 
 `RunId` должен начинаться с буквы или цифры, состоять не более чем из 128
 символов `[A-Za-z0-9._-]` и не содержать `..` либо разделителей пути. Проверка
@@ -71,7 +92,9 @@ powershell -ExecutionPolicy Bypass -File scripts\run-parity-matrix.ps1 `
 корневого XML прервёт прогон. Этот переключатель несовместим с `-Scope scoped`.
 `-Scope scoped` требует хотя бы один `-PathPrefix` и нужен для исследования
 одного семейства файлов; его результат всегда диагностический и не изменяет
-общий процент готовности.
+общий процент готовности. Оркестратор поддерживает объединение scoped-матриц,
+но помечает результат `result_class=diagnostic` и
+`release_eligible=false`.
 
 Старые `01-export-ibcmd.bat`, `02-export-ibcmd-rs.bat` и
 `03-diff-ibcmd-vs-ibcmd-rs.bat` намеренно отключены: они позволяли записывать в

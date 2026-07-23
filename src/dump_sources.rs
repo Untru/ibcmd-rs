@@ -23,7 +23,7 @@ pub struct DumpSourcesReport {
     pub dbms: String,
     pub db_server: String,
     pub db_name: String,
-    pub db_user: String,
+    pub db_user: Option<String>,
     pub password_source: String,
     pub infobase_user: Option<String>,
     pub infobase_password_source: Option<String>,
@@ -43,7 +43,7 @@ struct DumpConfig {
     dbms: String,
     db_server: String,
     db_name: String,
-    db_user: String,
+    db_user: Option<String>,
     db_pwd: String,
     password_source: String,
     infobase_user: Option<String>,
@@ -69,9 +69,12 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
         .arg(format!("--dbms={}", config.dbms))
         .arg(format!("--db-server={}", config.db_server))
         .arg(format!("--db-name={}", config.db_name))
-        .arg(format!("--db-user={}", config.db_user))
-        .arg(format!("--db-pwd={}", config.db_pwd))
         .arg(format!("--data={}", config.data_dir.display()));
+    if let Some(db_user) = &config.db_user {
+        command
+            .arg(format!("--db-user={db_user}"))
+            .arg(format!("--db-pwd={}", config.db_pwd));
+    }
 
     if let Some(user) = &config.infobase_user {
         command.arg(format!("--user={user}"));
@@ -166,21 +169,24 @@ fn resolve_config(args: &DumpSourcesArgs) -> Result<DumpConfig> {
         args.db_user.as_deref(),
         settings_value(&settings, "dbms-user"),
     )
-    .or_else(|| env::var("IBCMD_DB_USR").ok())
-    .ok_or_else(|| anyhow!("database user is required: pass --db-user or --settings"))?;
+    .or_else(|| env::var("IBCMD_DB_USR").ok());
 
-    let (db_pwd, password_source) = match &args.db_pwd {
-        Some(value) => (value.clone(), "--db-pwd".to_string()),
-        None => {
-            if let Ok(value) = env::var(&args.db_pwd_env) {
-                (value, format!("env:{}", args.db_pwd_env))
-            } else if let Some(value) = settings_value(&settings, "dbms-pwd") {
-                (value, "settings".to_string())
-            } else {
-                bail!(
-                    "database password is required: pass --db-pwd, set {}, or use --settings",
-                    args.db_pwd_env
-                );
+    let (db_pwd, password_source) = if db_user.is_none() {
+        (String::new(), "integrated".to_string())
+    } else {
+        match &args.db_pwd {
+            Some(value) => (value.clone(), "--db-pwd".to_string()),
+            None => {
+                if let Ok(value) = env::var(&args.db_pwd_env) {
+                    (value, "environment (redacted)".to_string())
+                } else if let Some(value) = settings_value(&settings, "dbms-pwd") {
+                    (value, "settings".to_string())
+                } else {
+                    bail!(
+                        "database password is required when --db-user is set: pass --db-pwd, set {}, or use --settings",
+                        args.db_pwd_env
+                    );
+                }
             }
         }
     };
@@ -269,7 +275,7 @@ fn resolve_optional_infobase_password(
         return Ok((Some(value.to_string()), Some("--password".to_string())));
     }
     if let Ok(value) = env::var(password_env) {
-        return Ok((Some(value), Some(format!("env:{password_env}"))));
+        return Ok((Some(value), Some("environment (redacted)".to_string())));
     }
     if let Some(value) = settings_value_any(settings, &["ib-pwd", "password", "pwd"]) {
         return Ok((Some(value), Some("settings".to_string())));
