@@ -17151,6 +17151,18 @@ struct CatalogTabularSectionLayout {
     attribute_uuids: Vec<String>,
 }
 
+fn is_catalog_tabular_section_wrapper(wrapper: &[&str]) -> bool {
+    let is_legacy_wrapper = wrapper.len() == 3
+        && wrapper.first().map(|value| value.trim()) == Some("1")
+        && matches!(wrapper.get(2).map(|value| value.trim()), Some("0" | "2"));
+    // The extended catalog tabular-section envelope keeps the payload unchanged.
+    let is_extended_wrapper = wrapper.len() == 4
+        && wrapper.first().map(|value| value.trim()) == Some("2")
+        && wrapper.get(2).map(|value| value.trim()) == Some("0")
+        && wrapper.get(3).map(|value| value.trim()) == Some("5");
+    is_legacy_wrapper || is_extended_wrapper
+}
+
 fn parse_catalog_tabular_sections(
     items: &[&str],
     owner_name: &str,
@@ -17167,10 +17179,7 @@ fn parse_catalog_tabular_sections(
                 return None;
             }
             let wrapper = split_information_register_braced_fields(item.first()?)?;
-            if wrapper.len() != 3
-                || wrapper.first()?.trim() != "1"
-                || !matches!(wrapper.get(2)?.trim(), "0" | "2")
-            {
+            if !is_catalog_tabular_section_wrapper(&wrapper) {
                 return None;
             }
             let payload = split_information_register_braced_fields(wrapper.get(1)?)?;
@@ -30849,6 +30858,29 @@ fn safe_storage_file_name(file_name: &str, part_no: i32) -> String {
         safe.push_str("row");
     }
     format!("{safe}__part{part_no}")
+}
+
+#[cfg(test)]
+mod catalog_tabular_section_wrapper_tests {
+    use super::is_catalog_tabular_section_wrapper;
+
+    #[test]
+    fn accepts_legacy_and_extended_catalog_tabular_section_envelopes() {
+        assert!(is_catalog_tabular_section_wrapper(&["1", "{payload}", "0"]));
+        assert!(is_catalog_tabular_section_wrapper(&["1", "{payload}", "2"]));
+        assert!(is_catalog_tabular_section_wrapper(&[
+            "2",
+            "{payload}",
+            "0",
+            "5"
+        ]));
+        assert!(!is_catalog_tabular_section_wrapper(&[
+            "2",
+            "{payload}",
+            "0",
+            "4"
+        ]));
+    }
 }
 
 #[cfg(test)]
