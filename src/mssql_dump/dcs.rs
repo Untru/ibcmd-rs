@@ -95,9 +95,14 @@ fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &DcsTypeIndex
                     }
                     DcsTypeResolution::TypeSet { qname } => {
                         let reference = qname.strip_prefix(CFG_PREFIX)?;
+                        let element = if reference.starts_with("Characteristic.") {
+                            "Type"
+                        } else {
+                            "TypeSet"
+                        };
                         Some(format!(
-                            "<v8:TypeSet xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:TypeSet>",
-                            escape_xml_text(reference)
+                            "<v8:{element} xmlns:{dcs_cfg_prefix}=\"{CURRENT_CONFIG_URI}\">{dcs_cfg_prefix}:{}</v8:{element}>",
+                            escape_xml_text(reference),
                         ))
                     }
                 })
@@ -950,7 +955,10 @@ fn insert_data_composition_settings(xml: &mut String, settings: &[String]) -> Op
     if offsets.len() != settings.len() {
         return None;
     }
-    for (offsets, settings_block) in offsets.into_iter().zip(settings.iter()).rev() {
+    if let (Some(offsets), Some(settings_block)) = (offsets.first(), settings.first()) {
+        // Native source export associates the external Settings documents with
+        // direct settingsVariant elements positionally, but materializes only
+        // the primary (first) variant's settings in Template.xml.
         xml.insert_str(offsets.closing, settings_block);
     }
     Some(())
@@ -1645,6 +1653,14 @@ impl<'a> DataCompositionXmlWriter<'a> {
     ) -> Option<DcsRenderedQName> {
         if value.contains(':') {
             let expanded = resolve_data_composition_qname(reader, value)?;
+            if mode == DataCompositionDocumentMode::Schema
+                && expanded.namespace.as_deref() == Some(ENTERPRISE_NS)
+            {
+                return Some(DcsRenderedQName {
+                    value: value.to_string(),
+                    declaration: None,
+                });
+            }
             if let Some(rendered) = self.render_expanded_qname(expanded.clone(), element_local) {
                 return Some(rendered);
             }
@@ -2096,5 +2112,125 @@ mod tests {
         ] {
             assert_eq!(rewritten_type(&xml), expected);
         }
+    }
+
+    #[test]
+    fn multiple_external_settings_materialize_only_the_primary_variant() {
+        let schema = concat!(
+            "\0\0\0\0\0\0\0\0",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+            "\t\t<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">First</name></settingsVariant>\r\n",
+            "\t\t<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Second</name></settingsVariant>\r\n",
+            "\t\t<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Third</name></settingsVariant>\r\n",
+            "\t</dataCompositionSchema>\r\n",
+            "</SchemaFile>"
+        );
+        let settings = |marker| {
+            format!(
+                concat!(
+                    "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+                    "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+                    "xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+                    "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+                    "<selection><item xsi:type=\"SelectedItemField\"><field>{marker}</field></item></selection>",
+                    "</Settings>"
+                ),
+                marker = marker
+            )
+        };
+        let raw = format!(
+            "{schema}{}{}{}",
+            settings("PrimaryMarker"),
+            settings("SecondaryMarker"),
+            settings("TertiaryMarker")
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(
+                raw.as_bytes(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(xml.matches("<settingsVariant>").count(), 3);
+        assert_eq!(xml.matches("<dcsset:settings").count(), 1);
+        assert!(xml.contains("<dcsset:field>PrimaryMarker</dcsset:field>"));
+        assert!(!xml.contains("SecondaryMarker"));
+        assert!(!xml.contains("TertiaryMarker"));
+        assert!(
+            xml.find("<dcsset:settings").unwrap()
+                < xml.find("<dcsset:name>Second</dcsset:name>").unwrap()
+        );
+    }
+
+    #[test]
+    fn schema_enterprise_xsi_type_keeps_native_lexical_prefix_without_declaration() {
+        let raw = concat!(
+            "\0\0\0\0\0\0\0\0",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">",
+            "<parameter><inputParameters>",
+            "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">",
+            "<value xmlns:d7p1=\"http://v8.1c.ru/8.1/data/enterprise\" ",
+            "xsi:type=\"d7p1:FoldersAndItemsUse\">Items</value>",
+            "</item></inputParameters></parameter>",
+            "<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Default</name></settingsVariant>",
+            "</dataCompositionSchema></SchemaFile>",
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>"
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(
+                raw.as_bytes(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(
+            xml.contains("<dcscor:value xsi:type=\"d7p1:FoldersAndItemsUse\">Items</dcscor:value>")
+        );
+        assert!(!xml.contains(ENTERPRISE_URI));
+    }
+
+    #[test]
+    fn characteristic_resolution_uses_native_type_while_reference_family_stays_type_set() {
+        let characteristic_id = "22222222-2222-2222-2222-222222222222";
+        let reference_family_id = "33333333-3333-3333-3333-333333333333";
+        let mut xml = format!(
+            "<parameter><valueType><v8:TypeId>{characteristic_id}</v8:TypeId><v8:TypeId>{reference_family_id}</v8:TypeId></valueType></parameter>"
+        );
+        let type_index = BTreeMap::from([
+            (
+                characteristic_id.to_string(),
+                DcsTypeResolution::TypeSet {
+                    qname: "cfg:Characteristic.Custom".to_string(),
+                },
+            ),
+            (
+                reference_family_id.to_string(),
+                DcsTypeResolution::TypeSet {
+                    qname: "cfg:CatalogRef".to_string(),
+                },
+            ),
+        ]);
+
+        rewrite_data_composition_type_ids(&mut xml, &type_index);
+
+        assert!(xml.contains(
+            "<v8:Type xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">d4p1:Characteristic.Custom</v8:Type>"
+        ));
+        assert!(xml.contains(
+            "<v8:TypeSet xmlns:d4p1=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">d4p1:CatalogRef</v8:TypeSet>"
+        ));
     }
 }
