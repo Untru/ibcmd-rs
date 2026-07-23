@@ -3363,6 +3363,39 @@ fn extracts_root_command_set_table_and_form_standard_commands() {
 }
 
 #[test]
+fn extracts_root_command_set_corpus_aliases() {
+    let mut fields = vec![""; 21];
+    fields[18] = "0";
+    fields[20] = "{8,0ce53bd5-a3c5-43e0-b051-54c835a87be5,0ea1a92b-3477-44dd-b152-ea7d411f1c5d,441362c1-0c86-4f73-bf50-6e1048a2db73,4c569466-1af5-4fc1-9b63-7bf6493097bf,573e81b7-57eb-45f0-ba4d-ada7c2537a2d,9885f4b6-d830-435f-a0e3-6b70ffe0f85c,a6d73055-3730-42e7-8934-3145ee987141,fd8f031f-c168-4e1b-8b0c-15eb3057e688}";
+
+    assert_eq!(
+        extract_form_command_set_excluded_commands(&fields, None),
+        vec![
+            "CreateByParameter",
+            "GetURL",
+            "OpenFromMainServer",
+            "OpenFromStandaloneServer",
+            "Post",
+            "Refresh",
+            "Save",
+            "UndoPosting",
+        ]
+    );
+}
+
+#[test]
+fn maps_single_server_open_alias_to_standalone_variant() {
+    let mut fields = vec![""; 21];
+    fields[18] = "0";
+    fields[20] = "{1,0ea1a92b-3477-44dd-b152-ea7d411f1c5d}";
+
+    assert_eq!(
+        extract_form_command_set_excluded_commands(&fields, None),
+        vec!["OpenFromStandaloneServer"]
+    );
+}
+
+#[test]
 fn extracts_form_command_set_multiple_excluded_commands() {
     let form_body = deflate_for_test(
             r##"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1,{"N",0},{0,1,0},{3,342c531d-dc73-458a-8ac4-6a746916a33b,4f834c38-add1-45e4-a9f3-cefe3efac5c9,6886601d-276c-4d3f-af0a-05c586025608},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}},"",{0}}"##.as_bytes(),
@@ -11036,6 +11069,27 @@ fn extracts_dynamic_list_command_set_from_layout_field() {
             "ShowMultipleSelection",
             "UndoPosting",
         ]
+    );
+}
+
+#[test]
+fn extracts_settings_order_table_command_aliases() {
+    let fields = [
+        r#"{4,1f1e900a-8488-4159-81be-9704eb96906d,48e12019-0fd6-46eb-aab6-2acba716a623,9ef79140-3de6-436a-8dda-610bb963f5db,fc120c02-7f39-469b-b357-b2dd8d4b0765}"#,
+    ];
+
+    assert_eq!(
+        parse_form_table_command_set_excluded_commands(&fields),
+        vec![
+            "AddAutoOrderItem",
+            "EndEdit",
+            "Expand",
+            "UserSettingItemProperties",
+        ]
+    );
+    assert_eq!(
+        form_table_standard_command_suffix("62ff963c-9426-43af-bb23-1d2ef3a9a0c1"),
+        Some("AddOrderItem")
     );
 }
 

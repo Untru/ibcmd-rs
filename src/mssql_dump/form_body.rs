@@ -936,7 +936,7 @@ pub(super) fn extract_form_command_set_excluded_commands(
             Some("BusinessProcess" | "Task")
         )
     });
-    map_known_form_excluded_commands(&command_set, |uuid| {
+    let mut commands = map_known_form_excluded_commands(&command_set, |uuid| {
         form_standard_excluded_command_name(uuid, business_process_or_task)
             .or_else(|| form_root_table_excluded_command_name(uuid))
             // The older excluded-command table predates several root form
@@ -944,7 +944,17 @@ pub(super) fn extract_form_command_set_excluded_commands(
             // from the shared Form.StandardCommand table, so retain its
             // suffix rather than handling individual UUIDs here.
             .or_else(|| form_standard_command_name(uuid)?.strip_prefix("Form.StandardCommand."))
-    })
+    });
+    extend_joint_form_excluded_commands(
+        &mut commands,
+        &command_set,
+        (
+            "441362c1-0c86-4f73-bf50-6e1048a2db73",
+            "4c569466-1af5-4fc1-9b63-7bf6493097bf",
+        ),
+        ("Post", "UndoPosting"),
+    );
+    commands
 }
 
 fn form_root_table_excluded_command_name(uuid: &str) -> Option<&'static str> {
@@ -1329,7 +1339,7 @@ pub(super) fn form_standard_excluded_command_name(
     match uuid {
         "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("No"),
         "0b83270d-7f95-4cdd-93c3-342d7991fed5" => Some("Tree"),
-        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromMainServer"),
+        "0ea1a92b-3477-44dd-b152-ea7d411f1c5d" => Some("OpenFromStandaloneServer"),
         "0fb774df-ec1c-4e23-9ed1-e089974f74bf" => Some("ReportSettings"),
         "174e58ce-82ad-4787-b956-9367937f7971" => Some("ChangeHistory"),
         "198ea630-fda2-4cda-8a23-f999f4c67ee6" => Some("CustomizeForm"),
@@ -1353,7 +1363,7 @@ pub(super) fn form_standard_excluded_command_name(
         "3f01ed62-97f8-465b-b4f7-6517ac2bc994" => Some("Abort"),
         "4f834c38-add1-45e4-a9f3-cefe3efac5c9" => Some("Create"),
         "5174ad3f-0569-42fd-8adf-011d8206db6c" => Some("Retry"),
-        "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromStandaloneServer"),
+        "573e81b7-57eb-45f0-ba4d-ada7c2537a2d" => Some("OpenFromMainServer"),
         "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Yes"),
         "679b62d9-ff72-4329-bf3a-c0c32b311dd2" => Some("Cancel"),
         "6886601d-276c-4d3f-af0a-05c586025608" => Some("Change"),
@@ -9532,8 +9542,32 @@ fn map_known_form_excluded_commands(
     commands
 }
 
+fn extend_joint_form_excluded_commands(
+    commands: &mut Vec<&'static str>,
+    uuids: &[&str],
+    uuid_pair: (&str, &str),
+    command_pair: (&'static str, &'static str),
+) {
+    if uuids.contains(&uuid_pair.0) && uuids.contains(&uuid_pair.1) {
+        commands.extend([command_pair.0, command_pair.1]);
+        commands.sort_unstable();
+        commands.dedup();
+    }
+}
+
 fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> Vec<&'static str> {
-    map_known_form_excluded_commands(uuids, |uuid| form_table_excluded_command_name(schema, uuid))
+    let mut commands =
+        map_known_form_excluded_commands(uuids, |uuid| form_table_excluded_command_name(schema, uuid));
+    extend_joint_form_excluded_commands(
+        &mut commands,
+        uuids,
+        (
+            "48e12019-0fd6-46eb-aab6-2acba716a623",
+            "fc120c02-7f39-469b-b357-b2dd8d4b0765",
+        ),
+        ("AddAutoOrderItem", "Expand"),
+    );
+    commands
 }
 
 fn parse_form_table_command_set_excluded_commands_for_table(
@@ -11634,6 +11668,9 @@ pub(super) fn parse_form_button_command_name(
 pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
         FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
+        "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => {
+            Some("Form.StandardCommand.CreateByParameter")
+        }
         "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Form.StandardCommand.Refresh"),
         "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Form.StandardCommand.Delete"),
         "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Form.StandardCommand.Delete"),
@@ -11657,6 +11694,8 @@ pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
         "a11fe36e-0b45-4c07-80b3-2346b660a51e" => Some("Form.StandardCommand.Print"),
         "7910bb04-ddcc-4e5d-89f0-104c6ad0f187" => Some("Form.StandardCommand.SaveReportSettings"),
         "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29" => Some("Form.StandardCommand.SaveVariant"),
+        "9885f4b6-d830-435f-a0e3-6b70ffe0f85c" => Some("Form.StandardCommand.GetURL"),
+        "a6d73055-3730-42e7-8934-3145ee987141" => Some("Form.StandardCommand.Save"),
         "5d41082e-9619-42ec-b96f-98b082b3a2f0" => Some("Form.StandardCommand.Yes"),
         "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d" => Some("Form.StandardCommand.No"),
         "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988" => Some("Form.StandardCommand.Copy"),
@@ -11875,6 +11914,7 @@ pub(super) fn form_spreadsheet_document_standard_command_suffix(
 
 pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
+        "04ac7211-e74f-4776-9749-35a9282b1d52" => Some("UndoPosting"),
         "01833a5a-6553-4c49-b445-095018107bb5" => Some("HierarchicalList"),
         "05468165-f954-45a5-84f2-6641c51f9f23" => Some("Tree"),
         "0d0249a4-2b2f-4fc0-a66f-b36f9494b3cc" => Some("List"),
@@ -11891,6 +11931,7 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         "2bbe4e12-06d2-409b-a972-eea585125d83" => Some("SortListAsc"),
         "33b7b9cd-6979-4435-8c58-d9bc8250edec" => Some("DynamicListStandardSettings"),
         "403bc6e6-b98e-4181-9f43-9c75cbbf82cf" => Some("Refresh"),
+        "62ff963c-9426-43af-bb23-1d2ef3a9a0c1" => Some("AddOrderItem"),
         "4a817da0-5797-4e16-906f-02fb869e1873" => Some("GroupFilterItems"),
         "51c99108-107c-43e1-8918-e48835bf2495" => Some("SelectAll"),
         "c0519548-2a9a-44de-a25e-faf01e089d4d" => Some("Find"),
@@ -11917,6 +11958,7 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         "d7e55d2e-bfea-4d80-b4ad-a1bb31ec2147" => Some("UseFieldAsValue"),
         "d82ca05c-2966-4d77-9a39-a1eea087bfa7" => Some("CreateFolder"),
         "d8e20c4d-3519-49aa-80e5-d6d66fee741a" => Some("Save"),
+        "e3dd8850-fc3c-41b1-bbb3-7c66af082608" => Some("Post"),
         "daa306cd-a78a-4e74-a14c-739daba624cb" => Some("SetDateInterval"),
         "dc118d99-b351-4e30-9310-e864f2e53ec0" => Some("LevelDown"),
         "e7216412-03ac-4a81-99c2-1d7c28e88e31" => Some("ShowMultipleSelection"),
