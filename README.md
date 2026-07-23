@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=46 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=47 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 46 of 56 accepted leaf issues in the
+As of 2026-07-23, 47 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (82.1%). Live workflow statuses are tracked in
+are complete (83.9%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -123,6 +123,17 @@ cargo run -- cf verify configuration.cf --element versions --list-only
 ```
 
 See [offline CF CLI evidence](docs/evidence/cf-cli.md).
+
+CF-011 adds deterministic lossless repack for both container revisions. Before
+writing, every CF entry is checked for single-part physical identity, exact
+raw-header name, typed absent/present state, supported compression, and
+packed-to-unpacked consistency. Repack retains source order, raw logical
+headers, Format15/16 layout words, the exact Format16 preamble, and unchanged
+packed bytes. Atomic create-new publication uses a same-directory temporary
+file, flush/sync, reopen validation of every entry, and a race-safe no-clobber
+publish; failures remove staging output and never intentionally replace an
+existing destination. See
+[lossless CF repack evidence](docs/evidence/cf-lossless-repack.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -282,11 +293,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 11/15 | 73.3% |
+| Phase 3 CF | 12/15 | 80.0% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **46/56** | **82.1%** |
+| **Overall** | **47/56** | **83.9%** |
 
 ## Export Compatibility Status
 

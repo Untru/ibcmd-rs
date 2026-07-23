@@ -10,6 +10,7 @@ pub mod archive;
 pub mod payload;
 pub mod preamble;
 pub mod tree;
+pub mod writer;
 
 #[cfg(test)]
 mod tests {
