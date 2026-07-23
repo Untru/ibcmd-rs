@@ -15,6 +15,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Inspect or verify a CF archive without an installed 1C platform.
+    Cf(CfArgs),
     /// ibcmd-compatible infobase commands.
     Infobase(InfobaseArgs),
     /// Locate installed 1C command-line tools and print environment details.
@@ -181,6 +183,64 @@ pub enum Commands {
     MssqlStageCommonPictureObject(MssqlStageCommonPictureObjectArgs),
     /// Stage one common template object from XML.
     MssqlStageCommonTemplateObject(MssqlStageCommonTemplateObjectArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct CfArgs {
+    #[command(subcommand)]
+    pub command: CfCommands,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CfCommands {
+    /// Print a bounded JSON inventory of a CF archive.
+    Inspect(CfInspectArgs),
+    /// Verify CF structure, selected payloads, and optional SHA-256 expectations.
+    Verify(CfVerifyArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CfCompression {
+    /// Treat present payloads as complete raw RFC 1951 DEFLATE streams.
+    RawDeflate,
+    /// Treat present payloads as stored verbatim.
+    Stored,
+}
+
+#[derive(Debug, Args)]
+pub struct CfInspectArgs {
+    /// CF archive to inspect.
+    pub input: PathBuf,
+    /// Stable source-storage profile recorded in the JSON report.
+    #[arg(long, default_value = "storage:cf-cli")]
+    pub profile: String,
+    /// Explicit payload representation; payload bytes are never guessed.
+    #[arg(long, value_enum, default_value_t = CfCompression::RawDeflate)]
+    pub compression: CfCompression,
+    /// Inspect only this exact top-level element name; may be repeated.
+    #[arg(long = "element")]
+    pub elements: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CfVerifyArgs {
+    /// CF archive to verify.
+    pub input: PathBuf,
+    /// Stable source-storage profile recorded in the JSON report.
+    #[arg(long, default_value = "storage:cf-cli")]
+    pub profile: String,
+    /// Explicit payload representation; payload bytes are never guessed.
+    #[arg(long, value_enum, default_value_t = CfCompression::RawDeflate)]
+    pub compression: CfCompression,
+    /// Verify only this exact top-level element name; may be repeated.
+    #[arg(long = "element")]
+    pub elements: Vec<String>,
+    /// List and structurally index selected entries without reading payload bytes.
+    #[arg(long)]
+    pub list_only: bool,
+    /// Require the selected element's unpacked SHA-256 (`NAME=64-lowercase-hex`).
+    #[arg(long = "expect-sha256", value_name = "NAME=SHA256")]
+    pub expected_sha256: Vec<String>,
 }
 
 #[derive(Debug, Args)]

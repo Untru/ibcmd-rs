@@ -1,5 +1,6 @@
 pub mod adapters;
 pub mod cli;
+pub mod commands;
 pub mod compatibility;
 pub mod compiler;
 pub mod dump_sources;

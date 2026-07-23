@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=45 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=46 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 45 of 56 accepted leaf issues in the
+As of 2026-07-23, 46 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (80.4%). Live workflow statuses are tracked in
+are complete (82.1%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -106,6 +106,23 @@ explicit empty payload. The archive wrapper retains revision, base offset,
 preamble, file header, page/storage words, and exposes deterministic lookup for
 `root`, `version`, `versions`, and object keys. See
 [CF archive mapping evidence](docs/evidence/cf-storage-image.md).
+
+CF-010 exposes that reader through offline `cf inspect` and `cf verify`
+commands. Both emit versioned JSON with the detected layout, explicit storage
+profile/compression contract, selected element inventory, sizes, and SHA-256
+digests. `verify` supports repeated exact `--element` selectors,
+`--list-only`, and repeated `--expect-sha256 NAME=HASH` assertions. It decodes
+only selected payloads under the shared resource budget; compression is never
+inferred. Failures use a stable JSON diagnostic schema on `stderr` and exit
+nonzero, including with an empty `PATH`:
+
+```powershell
+cargo run -- cf inspect configuration.cf
+cargo run -- cf verify configuration.cf --element root --expect-sha256 root=<sha256>
+cargo run -- cf verify configuration.cf --element versions --list-only
+```
+
+See [offline CF CLI evidence](docs/evidence/cf-cli.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -265,11 +282,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 10/15 | 66.7% |
+| Phase 3 CF | 11/15 | 73.3% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **45/56** | **80.4%** |
+| **Overall** | **46/56** | **82.1%** |
 
 ## Export Compatibility Status
 

@@ -9,6 +9,15 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Cf(args) => match ibcmd_rs::commands::cf::run(args) {
+            Ok(report) => println!("{}", serde_json::to_string_pretty(&report)?),
+            Err(error) => {
+                let rendered = serde_json::to_string_pretty(error.report())
+                    .unwrap_or_else(|_| "{\"schema_version\":1,\"command\":\"cf\",\"ok\":false,\"errors\":[{\"code\":\"report_serialization_failed\",\"message\":\"failed to serialize CF error report\"}]}".to_owned());
+                eprintln!("{rendered}");
+                std::process::exit(2);
+            }
+        },
         Commands::Infobase(args) => match args.command {
             InfobaseCommands::Config(config_args) => match config_args.command {
                 InfobaseConfigCommands::Export(args) => {
