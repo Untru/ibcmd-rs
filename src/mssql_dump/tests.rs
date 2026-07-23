@@ -4944,24 +4944,56 @@ fn extracts_form_body_xml_uses_type_index_for_parameters_without_breaking_object
 }
 
 #[test]
-fn extracts_form_command_modifies_saved_data() {
-    let form_body = deflate_for_test(
-            r#"{4,{59,0,0,0,0,1},"",{0},{0,0},{0,1,{11,{1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},"ЗаписатьИЗакрыть",{1,0},{1,0},0,0,0,"ЗаписатьИЗакрытьВыполнить",3,1,0,{0,0},1,0,1,0,0,1}},{0}}"#
-                .as_bytes(),
-        );
-
-    let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
+fn formatter_emits_form_command_children_in_native_order() {
+    let commands = [FormCommand {
+        id: "1".to_string(),
+        reference_uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+        name: "ЗаписатьИЗакрыть".to_string(),
+        title: Vec::new(),
+        tooltip: Vec::new(),
+        picture_ref: None,
+        picture_load_transparent: false,
+        shortcut: None,
+        action: "ЗаписатьИЗакрытьВыполнить".to_string(),
+        representation: None,
+        functional_options: vec!["FunctionalOption.ИспользоватьФункцию".to_string()],
+        modifies_saved_data: Some(true),
+        current_row_use: Some(FormCommandCurrentRowProperties {
+            value: Some(crate::form_schema::FormCommandCurrentRowUse::DontUse),
+            associated_table_element_id: None,
+        }),
+    }];
+    let form_xml = format_form_body_xml(
+        &FormBodyProperties::default(),
+        None,
+        &[],
+        &[],
+        &[],
+        &FormAttributesSection::default(),
+        &[],
+        &commands,
+        &None,
+    );
 
     assert!(form_xml.contains(r#"<Command name="ЗаписатьИЗакрыть" id="1">"#));
-    assert!(form_xml.contains("<Action>ЗаписатьИЗакрытьВыполнить</Action>"));
-    assert!(form_xml.contains("<ModifiesSavedData>true</ModifiesSavedData>"));
+    let action = form_xml
+        .find("<Action>ЗаписатьИЗакрытьВыполнить</Action>")
+        .unwrap();
+    let functional_options = form_xml.find("<FunctionalOptions>").unwrap();
+    let functional_options_end = form_xml.find("</FunctionalOptions>").unwrap();
+    assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
+    let modifies_saved_data = form_xml
+        .find("<ModifiesSavedData>true</ModifiesSavedData>")
+        .unwrap();
+    let current_row_use = form_xml
+        .find("<CurrentRowUse>DontUse</CurrentRowUse>")
+        .unwrap();
     assert!(
-        form_xml
-            .find("<ModifiesSavedData>true</ModifiesSavedData>")
-            .unwrap()
-            < form_xml
-                .find("<CurrentRowUse>DontUse</CurrentRowUse>")
-                .unwrap()
+        action < functional_options
+            && functional_options < functional_options_end
+            && functional_options_end < modifies_saved_data
+            && modifies_saved_data < current_row_use,
+        "unexpected command child order: {form_xml}"
     );
 }
 

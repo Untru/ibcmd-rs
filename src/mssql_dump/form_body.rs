@@ -12420,9 +12420,6 @@ pub(super) fn format_form_body_xml(
                     escape_xml_text(representation)
                 ));
             }
-            if command.modifies_saved_data == Some(true) {
-                xml.push_str("\t\t\t<ModifiesSavedData>true</ModifiesSavedData>\r\n");
-            }
             if !command.functional_options.is_empty() {
                 xml.push_str("\t\t\t<FunctionalOptions>\r\n");
                 for item in &command.functional_options {
@@ -12432,6 +12429,9 @@ pub(super) fn format_form_body_xml(
                     ));
                 }
                 xml.push_str("\t\t\t</FunctionalOptions>\r\n");
+            }
+            if command.modifies_saved_data == Some(true) {
+                xml.push_str("\t\t\t<ModifiesSavedData>true</ModifiesSavedData>\r\n");
             }
             if let Some(current_row_properties) = command.current_row_use.as_ref() {
                 if let Some(current_row_use) = current_row_properties.value {
