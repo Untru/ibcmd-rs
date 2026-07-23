@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=48 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=49 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 48 of 56 accepted leaf issues in the
+As of 2026-07-23, 49 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (85.7%). Live workflow statuses are tracked in
+are complete (87.5%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -150,6 +150,28 @@ cargo run -- cf export configuration.cf source --source-version 2.20
 ```
 
 See [offline CF export evidence](docs/evidence/cf-offline-export.md).
+
+CF-014 adds same-profile XML/source overlay on a base CF. `ibcmd-cf` performs a
+complete storage-target preflight, replaces compiled entries in place, resolves
+`NeedsBase` only through an explicit caller codec, rejects every `Unsupported`
+outcome, and retains the order, headers, attributes and exact packed bytes of
+unknown/untouched entries. The root adapter supplies the existing Rust
+metadata codecs and patches the native `versions` map for every changed key.
+Publication reuses the no-clobber same-directory temporary write, reopen and
+full validation path from CF-011. Modules, raw assets and base-dependent
+CommandInterface XML pass an end-to-end binary test with an empty `PATH`:
+
+```powershell
+cargo run -- cf overlay base.cf changed.cf `
+  --module '<storage-key>=CommonModules/Demo/Ext/Module.bsl' `
+  --raw-asset '<storage-key>=CommonPictures/Logo/Ext/Picture.bin' `
+  --command-interface '<storage-key>=Subsystems/Main/Ext/CommandInterface.xml' `
+  --source-version 2.20
+```
+
+The repeatable source selectors also include `--metadata-xml` and
+`--common-module-xml`. Storage keys stay explicit: neither file names nor UUID
+suffixes are guessed. See [offline CF overlay evidence](docs/evidence/cf-overlay.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -309,11 +331,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 13/15 | 86.7% |
+| Phase 3 CF | 14/15 | 93.3% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **48/56** | **85.7%** |
+| **Overall** | **49/56** | **87.5%** |
 
 ## Export Compatibility Status
 

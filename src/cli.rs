@@ -15,7 +15,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Inspect or verify a CF archive without an installed 1C platform.
+    /// Inspect, verify, export, or overlay CF without an installed 1C platform.
     Cf(CfArgs),
     /// ibcmd-compatible infobase commands.
     Infobase(InfobaseArgs),
@@ -199,6 +199,8 @@ pub enum CfCommands {
     Verify(CfVerifyArgs),
     /// Export recognized CF storage records to hierarchical XML sources offline.
     Export(CfExportArgs),
+    /// Apply selected source files to a base CF and publish a new CF offline.
+    Overlay(CfOverlayArgs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -263,6 +265,38 @@ pub struct CfExportArgs {
     /// Replace files under the output directory.
     #[arg(long, alias = "force")]
     pub overwrite: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct CfOverlayArgs {
+    /// Base CF whose physical layout and untouched entries must be retained.
+    pub base: PathBuf,
+    /// New CF destination. Existing files are never overwritten.
+    pub output: PathBuf,
+    /// Exact storage profile used by the legacy source compiler.
+    #[arg(long, default_value = "storage:mssql-config-configsave")]
+    pub profile: String,
+    /// Explicit representation of every present top-level CF payload.
+    #[arg(long, value_enum, default_value_t = CfCompression::RawDeflate)]
+    pub compression: CfCompression,
+    /// Source XML dialect; it is independent from the CF container revision.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    /// Replace a native module row from BSL text (`STORAGE_KEY=FILE`); repeatable.
+    #[arg(long = "module", value_name = "KEY=FILE")]
+    pub modules: Vec<String>,
+    /// Replace a raw-deflated asset from exact source bytes (`STORAGE_KEY=FILE`); repeatable.
+    #[arg(long = "raw-asset", value_name = "KEY=FILE")]
+    pub raw_assets: Vec<String>,
+    /// Patch a metadata row using its base row and source XML (`STORAGE_KEY=FILE`); repeatable.
+    #[arg(long = "metadata-xml", value_name = "KEY=FILE")]
+    pub metadata_xml: Vec<String>,
+    /// Patch CommonModule metadata using its base row (`STORAGE_KEY=FILE`); repeatable.
+    #[arg(long = "common-module-xml", value_name = "KEY=FILE")]
+    pub common_module_xml: Vec<String>,
+    /// Patch CommandInterface using its base row when necessary (`STORAGE_KEY=FILE`); repeatable.
+    #[arg(long = "command-interface", value_name = "KEY=FILE")]
+    pub command_interfaces: Vec<String>,
 }
 
 #[derive(Debug, Args)]

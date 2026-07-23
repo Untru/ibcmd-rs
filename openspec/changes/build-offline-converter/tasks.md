@@ -256,7 +256,7 @@
 
 ### CF-010 — Добавить offline `cf inspect` и `cf verify`
 
-- **Статус:** `[ ]`; **зависимости:** CF-009
+- **Статус:** `[x]`; **зависимости:** CF-009
 - **Файлы:** изменить `src/cli.rs`, `src/main.rs`; создать `src/commands/cf.rs`
 - **Действия:** JSON layout/profile/elements/compression/errors; selective hash/list verification.
 - **Проверка:** команды работают при пустом PATH; corrupt fixture возвращает non-zero и machine-readable error.
@@ -264,7 +264,7 @@
 
 ### CF-011 — Реализовать lossless CF repack и atomic output
 
-- **Статус:** `[ ]`; **зависимости:** CF-007–CF-009
+- **Статус:** `[x]`; **зависимости:** CF-007–CF-009
 - **Файлы:** создать `crates/ibcmd-cf/src/writer.rs`, `tests/cf_roundtrip.rs`
 - **Действия:** preserve order/header/unpacked bytes/compression; temporary file, re-open validation, atomic publish.
 - **Проверка:** parse(write(parse(cf))) semantic-equal; unchanged entries byte-preserved; два outputs одинаковы.
@@ -272,7 +272,7 @@
 
 ### CF-012 — Подключить автономный CF → XML export
 
-- **Статус:** `[ ]`; **зависимости:** CF-009, CORE-010, XML-004
+- **Статус:** `[x]`; **зависимости:** CF-009, CORE-010, XML-004
 - **Файлы:** создать `crates/ibcmd-cf/src/export.rs`; изменить `src/mssql_dump/mod.rs`, `src/cli.rs`
 - **Действия:** source exporter принимает `StorageImage`, SQL становится отдельным provider; report supported/opaque/failed.
 - **Проверка:** CF fixture экспортируется теми же family decoders без subprocess; MSSQL parity не ухудшается.
@@ -288,7 +288,7 @@
 
 ### CF-014 — Реализовать XML overlay поверх base CF
 
-- **Статус:** `[ ]`; **зависимости:** CF-011, CF-013, XML-002
+- **Статус:** `[x]`; **зависимости:** CF-011, CF-013, XML-002
 - **Файлы:** создать `crates/ibcmd-cf/src/overlay.rs`; изменить CLI command layer
 - **Действия:** replace compiled entries, update versions, preserve unknown entries, atomic write.
 - **Проверка:** module и raw asset smoke; only intended entries change; NeedsBase uses base, Unsupported blocks operation.
