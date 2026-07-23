@@ -2057,6 +2057,7 @@ pub(super) fn parse_moxel_lines(
         return Vec::new();
     }
     let uses_drawing_line = formats.iter().any(|format| format.drawing_border.is_some());
+    let has_thin_dashed_default_line_palette = has_moxel_thin_dashed_default_line_palette(fields);
     let mut lines = fields
         .iter()
         .filter_map(|field| parse_moxel_line(field))
@@ -2122,6 +2123,30 @@ pub(super) fn parse_moxel_lines(
         && used_indexes.contains(&2)
         && used_indexes.contains(&3)
     {
+        if has_thin_dashed_default_line_palette {
+            return vec![
+                MoxelLine {
+                    style: "ThinDashed",
+                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                    width: 1,
+                },
+                MoxelLine {
+                    style: "None",
+                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                    width: 0,
+                },
+                MoxelLine {
+                    style: "Solid",
+                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                    width: 2,
+                },
+                MoxelLine {
+                    style: "None",
+                    line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+                    width: 1,
+                },
+            ];
+        }
         return vec![
             MoxelLine {
                 style: "Solid",
@@ -2287,6 +2312,32 @@ pub(super) fn parse_moxel_lines(
     }]
 }
 
+/// The platform serializes the line palette as a count-prefixed table. This
+/// four-slot variant contains three style identifiers and the Gray web color.
+/// The count prefix is significant because the same style identifiers can
+/// occur as unrelated top-level style references.
+fn has_moxel_thin_dashed_default_line_palette(fields: &[&str]) -> bool {
+    fields.windows(5).any(|window| {
+        window[0].trim() == "4"
+            && moxel_style_slot_marker(window[1]) == Some(("3", "-1"))
+            && moxel_style_slot_marker(window[2]) == Some(("3", "-3"))
+            && moxel_style_slot_marker(window[3]) == Some(("2", "52"))
+            && moxel_style_slot_marker(window[4]) == Some(("3", "-10"))
+    })
+}
+
+fn moxel_style_slot_marker(text: &str) -> Option<(&str, &str)> {
+    let fields = split_1c_braced_fields(text, 0)?;
+    if fields.len() != 3 || fields.first()?.trim() != "3" {
+        return None;
+    }
+    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
+    if payload.len() != 1 {
+        return None;
+    }
+    Some((fields.get(1)?.trim(), payload.first()?.trim()))
+}
+
 pub(super) fn expected_moxel_line_slots(
     used_indexes: &BTreeSet<usize>,
     uses_drawing_line: bool,
@@ -2406,12 +2457,17 @@ pub(super) fn parse_moxel_picture(
 }
 
 pub(super) fn normalize_moxel_picture_payload(payload: &str) -> String {
-    payload
+    let has_trailing_line_break = payload.ends_with('\n') || payload.ends_with('\r');
+    let mut normalized = payload
         .lines()
         .map(str::trim_end)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
-        .join("\r\n")
+        .join("\r\n");
+    if has_trailing_line_break && !normalized.is_empty() {
+        normalized.push_str("\r\n");
+    }
+    normalized
 }
 
 pub(super) fn parse_moxel_drawings(fields: &[&str]) -> Vec<MoxelDrawing> {
@@ -6239,4 +6295,104 @@ fn push_moxel_note_xml(
     ));
     xml.push_str("\t\t\t\t\t\t<pictureSize>Stretch</pictureSize>\r\n");
     xml.push_str("\t\t\t\t\t</note>\r\n");
+}
+
+#[cfg(test)]
+mod moxel_exact_parity_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_thin_dashed_default_palette_with_drawing_line() {
+        let formats = vec![
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(1),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(2),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                drawing_border: Some(3),
+                ..MoxelFormat::default()
+            },
+        ];
+        let lines = parse_moxel_lines(
+            &["4", "{3,3,{-1}}", "{3,3,{-3}}", "{3,2,{52}}", "{3,3,{-10}}"],
+            &formats,
+            true,
+        );
+
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| (line.style, line.line_type, line.width))
+                .collect::<Vec<_>>(),
+            vec![
+                ("ThinDashed", "v8ui:SpreadsheetDocumentCellLineType", 1),
+                ("None", "v8ui:SpreadsheetDocumentCellLineType", 0),
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 2),
+                ("None", "v8ui:SpreadsheetDocumentDrawingLineType", 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_same_palette_sequence_outside_count_prefixed_table() {
+        let formats = vec![
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(1),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                bottom_border: Some(2),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                drawing_border: Some(3),
+                ..MoxelFormat::default()
+            },
+        ];
+        let lines = parse_moxel_lines(
+            &["0", "{3,3,{-1}}", "{3,3,{-3}}", "{3,2,{52}}", "{3,3,{-10}}"],
+            &formats,
+            true,
+        );
+
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| (line.style, line.line_type, line.width))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 1),
+                ("None", "v8ui:SpreadsheetDocumentCellLineType", 1),
+                ("Solid", "v8ui:SpreadsheetDocumentCellLineType", 2),
+                ("None", "v8ui:SpreadsheetDocumentDrawingLineType", 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn preserves_explicit_terminal_picture_line_break() {
+        assert_eq!(
+            normalize_moxel_picture_payload("YWJj\r\ndef\r\n"),
+            "YWJj\r\ndef\r\n"
+        );
+        assert_eq!(
+            normalize_moxel_picture_payload("YWJj\r\r\ndef\r\r\n"),
+            "YWJj\r\ndef\r\n"
+        );
+        assert_eq!(normalize_moxel_picture_payload("YWJj"), "YWJj");
+        assert_eq!(normalize_moxel_picture_payload(""), "");
+        assert_eq!(normalize_moxel_picture_payload("\r\n"), "");
+    }
 }
