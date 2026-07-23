@@ -939,12 +939,11 @@ pub(super) fn extract_form_command_set_excluded_commands(
     map_known_form_excluded_commands(&command_set, |uuid| {
         form_standard_excluded_command_name(uuid, business_process_or_task)
             .or_else(|| form_root_table_excluded_command_name(uuid))
-            // NewWindow is a form-standard command, but is not part of the
-            // older excluded-command table above.
-            .or_else(|| {
-                (form_standard_command_name(uuid) == Some("Form.StandardCommand.NewWindow"))
-                    .then_some("NewWindow")
-            })
+            // The older excluded-command table predates several root form
+            // standard commands.  The canonical command name is available
+            // from the shared Form.StandardCommand table, so retain its
+            // suffix rather than handling individual UUIDs here.
+            .or_else(|| form_standard_command_name(uuid)?.strip_prefix("Form.StandardCommand."))
     })
 }
 
@@ -9445,6 +9444,7 @@ fn map_known_form_excluded_commands(
 ) -> Vec<&'static str> {
     let mut commands: Vec<_> = uuids.iter().filter_map(|uuid| mapper(uuid)).collect();
     commands.sort_unstable();
+    commands.dedup();
     commands
 }
 

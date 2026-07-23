@@ -3343,14 +3343,22 @@ fn does_not_extract_legacy_form_command_set_with_malformed_child_owner_tail() {
 }
 
 #[test]
-fn extracts_root_command_set_table_and_new_window_commands() {
+fn extracts_root_command_set_table_and_form_standard_commands() {
     let mut fields = vec![""; 21];
     fields[18] = "0";
-    fields[20] = "{4,8969c93a-23e5-4bef-941d-aaef315858d2,daa306cd-a78a-4e74-a14c-739daba624cb,d8e20c4d-3519-49aa-80e5-d6d66fee741a,03df6ee5-883c-4cc6-b319-d886d1a9b2c8}";
+    fields[20] = "{9,8969c93a-23e5-4bef-941d-aaef315858d2,daa306cd-a78a-4e74-a14c-739daba624cb,d8e20c4d-3519-49aa-80e5-d6d66fee741a,03df6ee5-883c-4cc6-b319-d886d1a9b2c8,8e2b82cf-d1ea-46b2-afdf-a8d64e66ea2b,eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111,a11fe36e-0b45-4c07-80b3-2346b660a51e,3b8cedbc-8e74-4017-b901-d14b09f32f7a,389ef1f1-97ce-4326-adf5-886b2dead75c}";
 
     assert_eq!(
         extract_form_command_set_excluded_commands(&fields, None),
-        vec!["Choose", "NewWindow", "Save", "SetDateInterval"]
+        vec![
+            "Choose",
+            "NewWindow",
+            "Post",
+            "Print",
+            "Save",
+            "SetDateInterval",
+            "UndoPosting",
+        ]
     );
 }
 
