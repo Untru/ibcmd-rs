@@ -9567,6 +9567,15 @@ fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> 
         ),
         ("AddAutoOrderItem", "Expand"),
     );
+    extend_joint_form_excluded_commands(
+        &mut commands,
+        uuids,
+        (
+            "15664824-eedc-4a92-9f6b-c89a2dead157",
+            "d77e5787-b130-4355-8f8f-01ecec82f843",
+        ),
+        ("Choose", "ChooseAll"),
+    );
     commands
 }
 
@@ -11766,6 +11775,7 @@ pub(super) fn form_formatted_document_standard_command_suffix(uuid: &str) -> Opt
         "4ca32834-6f9f-4dfb-89ce-6db36931c89b" => Some("Preview"),
         "56ae90b6-588f-406e-919c-cc5cc7f86297" => Some("AlignJustify"),
         "5a331cec-bf93-4af5-8f51-80fd7118db47" => Some("SaveAs"),
+        "6e2f7ea0-a346-4c78-96d9-a0f512000910" => Some("SearchEverywhere"),
         "6d83186a-5838-40a5-95e7-8990193adf0a" => Some("Hyperlink"),
         "6f1ea963-0807-4de8-b544-b5666f500b05" => Some("Redo"),
         "71007f7d-1995-44aa-9125-9926e70a35b5" => Some("TextColor"),

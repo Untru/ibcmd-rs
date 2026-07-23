@@ -11208,6 +11208,28 @@ fn extracts_settings_order_table_command_aliases() {
 }
 
 #[test]
+fn extracts_available_fields_table_command_aliases() {
+    let fields = [
+        r#"{4,01833a5a-6553-4c49-b445-095018107bb5,05468165-f954-45a5-84f2-6641c51f9f23,15664824-eedc-4a92-9f6b-c89a2dead157,d77e5787-b130-4355-8f8f-01ecec82f843}"#,
+    ];
+
+    assert_eq!(
+        parse_form_table_command_set_excluded_commands(&fields),
+        vec!["Choose", "ChooseAll", "HierarchicalList", "Tree"]
+    );
+}
+
+#[test]
+fn maps_formatted_document_search_command_alias() {
+    assert_eq!(
+        form_formatted_document_standard_command_suffix(
+            "6e2f7ea0-a346-4c78-96d9-a0f512000910"
+        ),
+        Some("SearchEverywhere")
+    );
+}
+
+#[test]
 fn extracts_dynamic_list_short_command_set_from_layout_field() {
     let fields = [
         r#"{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,0f8d6d98-2f8b-405a-b8b3-0538e9d95da5,182a793b-22a5-4625-b316-6a5be7f88078,33b7b9cd-6979-4435-8c58-d9bc8250edec,403bc6e6-b98e-4181-9f43-9c75cbbf82cf,8d772f97-c0ef-47c0-9cb0-efea28c61341,95b4bc12-2ece-4d7a-b3e2-6f9293620a06,b41f5bbc-ba5d-4888-8cd1-db246a371418}"#,
