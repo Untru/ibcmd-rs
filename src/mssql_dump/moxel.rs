@@ -36,7 +36,7 @@ pub(super) struct MoxelSourceFormatMap {
 }
 
 impl MoxelSourceFormatMap {
-    fn try_new(
+    pub(super) fn try_new(
         format_count: usize,
         internal_column_sources: &[usize],
         output_column_sources: &[usize],
@@ -929,6 +929,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
             column_formats.len(),
             &formats,
             header_footer_format_ref,
+            source_format_map.as_ref(),
             has_explicit_sparse_column_set_default,
         )
     } else {
@@ -1424,17 +1425,22 @@ pub(super) fn resolve_sparse_moxel_column_set_default_format_index(
     column_format_len: usize,
     formats: &[MoxelFormat],
     header_footer_format_ref: Option<usize>,
+    source_format_map: Option<&MoxelSourceFormatMap>,
     has_explicit_sparse_column_set_default: bool,
 ) -> Option<usize> {
     if column_sets.is_empty() {
         return None;
     }
     let header_footer_format_index = header_footer_format_ref.and_then(|source_format_index| {
-        moxel_internal_format_index_for_source_index(
-            source_format_index,
-            column_format_len,
-            formats.len(),
-        )
+        source_format_map
+            .and_then(|map| map.internal_for_source(source_format_index))
+            .or_else(|| {
+                moxel_internal_format_index_for_source_index(
+                    source_format_index,
+                    column_format_len,
+                    formats.len(),
+                )
+            })
     });
     if column_sets.len() <= 1 {
         return header_footer_format_index;
@@ -6189,7 +6195,7 @@ fn moxel_source_format_refs_are_complete(
     column_sets: &[MoxelColumnSet],
     rows: &[MoxelRow],
     drawings: &[MoxelDrawing],
-    header_footer_format_ref: Option<usize>,
+    _header_footer_format_ref: Option<usize>,
 ) -> bool {
     let direct_ref_is_valid = |source_format_index: usize| {
         source_format_index == 0
@@ -6232,7 +6238,7 @@ fn moxel_source_format_refs_are_complete(
         drawing.format_index == 0
             || source_format_map.internal_for_source(drawing.format_index)
                 == Some(drawing.format_index)
-    }) && header_footer_format_ref.is_none()
+    })
 }
 
 fn remap_moxel_column_set_source_format_indices(

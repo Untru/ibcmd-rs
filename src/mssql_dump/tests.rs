@@ -20753,6 +20753,7 @@ fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source
             },
         ],
         Some(1),
+        None,
         true,
     );
 
@@ -20774,6 +20775,7 @@ fn formats_moxel_sparse_column_set_default_prefers_external_header_footer_source
             },
         ],
         Some(1),
+        None,
         false,
     );
 
@@ -20814,11 +20816,36 @@ fn formats_moxel_single_column_set_prefers_explicit_header_footer_source_ref() {
             },
         ],
         Some(1),
+        None,
         true,
     );
 
     assert_eq!(header_footer_format_index, Some(3));
     assert_eq!(column_sets[0].default_format_index, None);
+}
+
+#[test]
+fn formats_moxel_sparse_header_footer_ref_uses_non_identity_source_map() {
+    let source_map = MoxelSourceFormatMap::try_new(3, &[3, 1, 2], &[2, 3, 1]).unwrap();
+    let mut column_sets = vec![MoxelColumnSet {
+        id: None,
+        default_format_index: None,
+        source_default_format_index: None,
+        size: 1,
+        columns: Vec::new(),
+    }];
+
+    // Source slot 2 is internal slot 3 in this sparse palette.  It must be
+    // converted before the final output-format map is applied by the writer.
+    let index = resolve_sparse_moxel_column_set_default_format_index(
+        &mut column_sets,
+        1,
+        &[MoxelFormat::default(), MoxelFormat::default()],
+        Some(2),
+        Some(&source_map),
+        true,
+    );
+    assert_eq!(index, Some(3));
 }
 
 #[test]
