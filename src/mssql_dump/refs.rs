@@ -1231,6 +1231,7 @@ pub(super) fn build_metadata_field_reference_index_from_texts(
 pub(super) fn build_information_register_field_reference_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,
+    defined_type_value_owner_refs: &DefinedTypeValueOwnerReferenceIndex,
 ) -> InformationRegisterFieldReferenceIndex {
     let mut fields_by_register = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
     for row in rows {
@@ -1256,15 +1257,10 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
             ) else {
                 continue;
             };
-            let value_owner_references = value_types
-                .iter()
-                .filter_map(|value_type| match value_type {
-                    ConstantValueType::Reference { reference } => {
-                        metadata_reference_type_owner_reference(reference)
-                    }
-                    _ => None,
-                })
-                .collect::<BTreeSet<_>>();
+            let value_owner_references = information_register_value_owner_references(
+                &value_types,
+                defined_type_value_owner_refs,
+            );
             if value_owner_references.is_empty() {
                 continue;
             }
@@ -1294,6 +1290,55 @@ pub(super) fn build_information_register_field_reference_index_from_texts(
                     })
                     .collect(),
             )
+        })
+        .collect()
+}
+
+pub(super) fn build_defined_type_value_owner_reference_index_from_texts(
+    rows: &[MetadataTextRow],
+    type_index: &BTreeMap<String, String>,
+) -> DefinedTypeValueOwnerReferenceIndex {
+    rows.iter()
+        .filter_map(|row| {
+            let (Some("DefinedType"), Some(header)) = (row.kind.as_deref(), row.header.as_ref())
+            else {
+                return None;
+            };
+            let properties =
+                parse_defined_type_properties_from_text(&row.text, &header.uuid, type_index)?;
+            let owners = properties
+                .value_types
+                .iter()
+                .filter_map(|value_type| match value_type {
+                    ConstantValueType::Reference { reference } => {
+                        metadata_reference_type_owner_reference(reference)
+                    }
+                    ConstantValueType::ReferenceTypeSet { .. } => None,
+                    _ => None,
+                })
+                .collect::<BTreeSet<_>>();
+            (!owners.is_empty()).then(|| (format!("cfg:DefinedType.{}", header.name), owners))
+        })
+        .collect()
+}
+
+pub(super) fn information_register_value_owner_references(
+    value_types: &[ConstantValueType],
+    defined_type_value_owner_refs: &DefinedTypeValueOwnerReferenceIndex,
+) -> BTreeSet<String> {
+    value_types
+        .iter()
+        .flat_map(|value_type| match value_type {
+            ConstantValueType::Reference { reference } => {
+                metadata_reference_type_owner_reference(reference)
+                    .into_iter()
+                    .collect::<BTreeSet<_>>()
+            }
+            ConstantValueType::ReferenceTypeSet { reference } => defined_type_value_owner_refs
+                .get(reference)
+                .cloned()
+                .unwrap_or_default(),
+            _ => BTreeSet::new(),
         })
         .collect()
 }

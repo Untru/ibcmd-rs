@@ -13,6 +13,120 @@ use crate::module_blob::{
 };
 
 #[test]
+fn form_navigation_panel_kinds_3_4_and_5_resolve_register_open_by_value() {
+    let register_uuid = "11111111-1111-4111-8111-111111111111".to_string();
+    let object_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        "InformationRegister.RegisterProbe".to_string(),
+    )]);
+    let field_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        vec![InformationRegisterFieldReference {
+            field_reference: "InformationRegister.RegisterProbe.Dimension.Owner".to_string(),
+            value_owner_references: BTreeSet::from(["Catalog.Products".to_string()]),
+        }],
+    )]);
+    let expected =
+        Some("InformationRegister.RegisterProbe.StandardCommand.OpenByValue.Owner".to_string());
+
+    for kind in ["3", "4", "5"] {
+        assert_eq!(
+            form_body::parse_form_command_interface_command_for_test(
+                &format!("{{{kind},{register_uuid}}}"),
+                &object_refs,
+                &field_refs,
+                "Catalog.Products",
+            ),
+            expected,
+            "kind {kind}"
+        );
+    }
+}
+
+#[test]
+fn form_navigation_panel_register_open_by_value_is_fail_closed_on_ambiguity() {
+    let register_uuid = "22222222-2222-4222-8222-222222222222".to_string();
+    let object_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        "InformationRegister.RegisterProbe".to_string(),
+    )]);
+    let field_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        ["First", "Second"]
+            .into_iter()
+            .map(|name| InformationRegisterFieldReference {
+                field_reference: format!("InformationRegister.RegisterProbe.Dimension.{name}"),
+                value_owner_references: BTreeSet::from(["Catalog.Products".to_string()]),
+            })
+            .collect(),
+    )]);
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{5,{register_uuid}}}"),
+            &object_refs,
+            &field_refs,
+            "Catalog.Products",
+        ),
+        None
+    );
+}
+
+#[test]
+fn form_navigation_panel_kind_3_keeps_external_command_fallback() {
+    let command_uuid = "33333333-3333-4333-8333-333333333333".to_string();
+    let object_refs = BTreeMap::from([(
+        command_uuid.clone(),
+        "CommonCommand.OpenProductCard".to_string(),
+    )]);
+
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{3,{command_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Catalog.Products",
+        ),
+        Some("CommonCommand.OpenProductCard".to_string())
+    );
+}
+
+#[test]
+fn form_navigation_panel_kind_4_keeps_catalog_precedence() {
+    let catalog_uuid = "44444444-4444-4444-8444-444444444444".to_string();
+    let object_refs = BTreeMap::from([(
+        catalog_uuid.clone(),
+        "Catalog.Products".to_string(),
+    )]);
+
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{4,{catalog_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Catalog.Products",
+        ),
+        Some("Catalog.Products.StandardCommand.OpenByValue".to_string())
+    );
+}
+
+#[test]
+fn information_register_type_set_uses_defined_type_owner_index() {
+    let value_types = [ConstantValueType::ReferenceTypeSet {
+        reference: "cfg:DefinedType.ProductOwner".to_string(),
+    }];
+    let defined_types = BTreeMap::from([(
+        "cfg:DefinedType.ProductOwner".to_string(),
+        BTreeSet::from(["Catalog.Products".to_string()]),
+    )]);
+
+    assert_eq!(
+        information_register_value_owner_references(&value_types, &defined_types),
+        BTreeSet::from(["Catalog.Products".to_string()])
+    );
+    assert!(information_register_value_owner_references(&value_types, &BTreeMap::new()).is_empty());
+}
+
+#[test]
 fn decodes_plain_hex_and_sql_hex() {
     assert_eq!(decode_hex("efbbbf").unwrap(), vec![0xef, 0xbb, 0xbf]);
     assert_eq!(decode_hex("0x0102ff").unwrap(), vec![1, 2, 255]);

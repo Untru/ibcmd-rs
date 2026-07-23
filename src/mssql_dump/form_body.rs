@@ -12379,35 +12379,61 @@ pub(super) fn parse_form_command_interface_command(
                 .get(&uuid)
                 .map(|reference| format!("{reference}.StandardCommand.CreateBasedOn"))
         }
-        "3" => {
+        "3" => resolve_information_register_open_by_value_command(target?, context).or_else(|| {
             let uuid = parse_non_zero_uuid(target?)?;
             let reference = context.object_refs.get(&uuid)?;
-            form_information_register_open_by_value_reference(reference)
-                .or_else(|| {
-                    let form_owner_reference = context.form_owner_reference?;
-                    let field_reference = resolve_information_register_field_reference(
-                        context.information_register_field_refs,
-                        &uuid,
-                        form_owner_reference,
-                    )?;
-                    field_reference
-                        .strip_prefix(reference)
-                        .filter(|suffix| suffix.starts_with('.'))?;
-                    form_information_register_open_by_value_reference(field_reference)
-                })
-                .or_else(|| {
-                    (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
-                        .then(|| reference.clone())
-                })
-        }
+            (reference.starts_with("CommonCommand.") || reference.contains(".Command."))
+                .then(|| reference.clone())
+        }),
         "4" => {
             let uuid = parse_non_zero_uuid(target?)?;
             let reference = context.object_refs.get(&uuid)?;
             (reference.starts_with("Catalog.") && reference.matches('.').count() == 1)
                 .then(|| format!("{reference}.StandardCommand.OpenByValue"))
+                .or_else(|| resolve_information_register_open_by_value_command(target?, context))
         }
+        "5" => resolve_information_register_open_by_value_command(target?, context),
         _ => None,
     }
+}
+
+#[cfg(test)]
+pub(super) fn parse_form_command_interface_command_for_test(
+    field: &str,
+    object_refs: &BTreeMap<String, String>,
+    information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    form_owner_reference: &str,
+) -> Option<String> {
+    let attribute_names_by_id = BTreeMap::new();
+    let child_item_indexes = FormChildItemIndexes::default();
+    parse_form_command_interface_command(
+        field,
+        &FormCommandInterfaceParseContext {
+            commands: &[],
+            object_refs,
+            information_register_field_refs,
+            form_owner_reference: Some(form_owner_reference),
+            attribute_names_by_id: &attribute_names_by_id,
+            child_item_indexes: &child_item_indexes,
+        },
+    )
+}
+
+fn resolve_information_register_open_by_value_command(
+    target: &str,
+    context: &FormCommandInterfaceParseContext<'_>,
+) -> Option<String> {
+    let uuid = parse_non_zero_uuid(target)?;
+    let reference = context.object_refs.get(&uuid)?;
+    form_information_register_open_by_value_reference(reference).or_else(|| {
+        let form_owner_reference = context.form_owner_reference?;
+        let field_reference = resolve_information_register_field_reference(
+            context.information_register_field_refs,
+            &uuid,
+            form_owner_reference,
+        )?;
+        form_information_register_open_by_value_reference(field_reference)
+    })
 }
 
 pub(super) fn resolve_information_register_field_reference<'a>(

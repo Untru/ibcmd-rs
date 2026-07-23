@@ -995,7 +995,13 @@ fn dump_table_rows_with_options_mode(
         BTreeMap::new()
     };
     let information_register_field_refs = if extract_metadata_xml {
-        build_information_register_field_reference_index_from_texts(&metadata_texts, &type_index)
+        let defined_type_value_owner_refs =
+            build_defined_type_value_owner_reference_index_from_texts(&metadata_texts, &type_index);
+        build_information_register_field_reference_index_from_texts(
+            &metadata_texts,
+            &type_index,
+            &defined_type_value_owner_refs,
+        )
     } else {
         BTreeMap::new()
     };
@@ -1823,9 +1829,15 @@ fn dump_table_rows_streamed(
     };
     let information_register_field_refs =
         if extract_metadata_xml && source_reference_needs.field_refs {
+            let defined_type_value_owner_refs =
+                build_defined_type_value_owner_reference_index_from_texts(
+                    &index_metadata_texts,
+                    &type_index,
+                );
             build_information_register_field_reference_index_from_texts(
                 &index_metadata_texts,
                 &type_index,
+                &defined_type_value_owner_refs,
             )
         } else {
             BTreeMap::new()
@@ -4585,6 +4597,8 @@ struct InformationRegisterFieldReference {
 
 type InformationRegisterFieldReferenceIndex =
     BTreeMap<String, Vec<InformationRegisterFieldReference>>;
+
+type DefinedTypeValueOwnerReferenceIndex = BTreeMap<String, BTreeSet<String>>;
 
 struct TemplateSourceReference {
     relative_path: PathBuf,
