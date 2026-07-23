@@ -1,5 +1,53 @@
 use super::*;
 
+/// Why a Config row could not be promoted to a metadata XML candidate.
+///
+/// This is deliberately an audit classification rather than an extraction
+/// error: legacy callers may still ignore rows they cannot decode, while a
+/// full-export gate can report every omission deterministically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataExtractionMissReason {
+    Inflate,
+    Utf8,
+    ObjectCode,
+    Fields,
+    Header,
+    Family,
+    Formatter,
+}
+
+impl MetadataExtractionMissReason {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Inflate => "inflate",
+            Self::Utf8 => "utf8",
+            Self::ObjectCode => "object_code",
+            Self::Fields => "fields",
+            Self::Header => "header",
+            Self::Family => "family",
+            Self::Formatter => "formatter",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetadataExtractionMiss {
+    pub file_name: String,
+    pub reason: MetadataExtractionMissReason,
+}
+
+/// Result of classifying one raw metadata row without silently discarding the
+/// reason for a failed candidate.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(super) enum MetadataTextRowAudit {
+    Extracted(MetadataTextRow),
+    ExtractedWithWarning(MetadataTextRow, MetadataExtractionMiss),
+    Miss(MetadataExtractionMiss),
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct MetadataTextRow {
     pub(super) file_name: String,
     pub(super) text: String,
@@ -10,17 +58,49 @@ pub(super) struct MetadataTextRow {
 }
 
 pub(super) fn metadata_text_row_from_blob(file_name: &str, blob: &[u8]) -> Option<MetadataTextRow> {
-    let inflated = inflate_raw_deflate(blob).ok()?;
-    let text = String::from_utf8(inflated).ok()?;
-    let text = text.trim_start_matches('\u{feff}').to_string();
-    metadata_text_row_from_text(file_name, text)
+    match metadata_text_row_audit_from_blob(file_name, blob) {
+        MetadataTextRowAudit::Extracted(row) => Some(row),
+        MetadataTextRowAudit::ExtractedWithWarning(row, _) => Some(row),
+        MetadataTextRowAudit::Miss(_) => None,
+    }
+}
+
+pub(super) fn metadata_text_row_audit_from_blob(
+    file_name: &str,
+    blob: &[u8],
+) -> MetadataTextRowAudit {
+    let inflated = match inflate_raw_deflate(blob) {
+        Ok(value) => value,
+        Err(_) => return metadata_text_row_miss(file_name, MetadataExtractionMissReason::Inflate),
+    };
+    let text = match String::from_utf8(inflated) {
+        Ok(value) => value,
+        Err(_) => return metadata_text_row_miss(file_name, MetadataExtractionMissReason::Utf8),
+    };
+    metadata_text_row_audit_from_text(file_name, text.trim_start_matches('\u{feff}').to_string())
 }
 
 pub(super) fn metadata_text_row_from_text(
     file_name: &str,
     text: String,
 ) -> Option<MetadataTextRow> {
+    match metadata_text_row_audit_from_text(file_name, text) {
+        MetadataTextRowAudit::Extracted(row) => Some(row),
+        MetadataTextRowAudit::ExtractedWithWarning(row, _) => Some(row),
+        MetadataTextRowAudit::Miss(_) => None,
+    }
+}
+
+pub(super) fn metadata_text_row_audit_from_text(
+    file_name: &str,
+    text: String,
+) -> MetadataTextRowAudit {
+    // Keep the legacy row builder deliberately permissive. Index consumers
+    // have historically received textual rows even when their structure was
+    // only partially understood; the audit path records that loss of
+    // confidence without changing those successful callers.
     let object_code = parse_metadata_object_code(&text);
+    let fields_missing = metadata_object_fields(&text).is_none();
     let header = parse_metadata_header_from_text(&text, file_name);
     let (kind, folder) = match object_code {
         Some(12) => (Some("CommonModule".to_string()), Some("CommonModules")),
@@ -29,13 +109,45 @@ pub(super) fn metadata_text_row_from_text(
             .unwrap_or((None, None)),
         None => (None, None),
     };
-    Some(MetadataTextRow {
+    let row = MetadataTextRow {
         file_name: file_name.to_string(),
         text,
         object_code,
         header,
         kind,
         folder,
+    };
+    let reason = if object_code.is_none() {
+        Some(MetadataExtractionMissReason::ObjectCode)
+    } else if fields_missing {
+        Some(MetadataExtractionMissReason::Fields)
+    } else if row.header.is_none() {
+        Some(MetadataExtractionMissReason::Header)
+    } else if row.folder.is_none() {
+        Some(MetadataExtractionMissReason::Family)
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        MetadataTextRowAudit::ExtractedWithWarning(
+            row,
+            MetadataExtractionMiss {
+                file_name: file_name.to_string(),
+                reason,
+            },
+        )
+    } else {
+        MetadataTextRowAudit::Extracted(row)
+    }
+}
+
+fn metadata_text_row_miss(
+    file_name: &str,
+    reason: MetadataExtractionMissReason,
+) -> MetadataTextRowAudit {
+    MetadataTextRowAudit::Miss(MetadataExtractionMiss {
+        file_name: file_name.to_string(),
+        reason,
     })
 }
 

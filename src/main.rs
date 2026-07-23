@@ -195,6 +195,61 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::SourceDiffMatrix(args) => {
+            if !args.full && !args.scoped {
+                return Err(anyhow!(
+                    "pass exactly one of --full or --scoped for source-diff-matrix"
+                ));
+            }
+            let diff = ibcmd_rs::plan::read_source_diff(&args.diff)?;
+            let matrix = ibcmd_rs::plan::build_parity_matrix(
+                &diff,
+                args.database,
+                args.run_id,
+                args.git_sha,
+                args.full,
+            )?;
+            ibcmd_rs::plan::write_parity_artifacts(
+                &matrix,
+                &args.output,
+                args.markdown.as_deref(),
+                args.overwrite,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": matrix.schema_version,
+                    "runs": &matrix.runs,
+                    "rows": matrix.rows.len(),
+                    "json": &args.output,
+                    "markdown": &args.markdown,
+                }))?
+            );
+        }
+        Commands::SourceDiffMatrixMerge(args) => {
+            let matrices = args
+                .matrices
+                .iter()
+                .map(|path| ibcmd_rs::plan::read_parity_matrix(path))
+                .collect::<Result<Vec<_>>>()?;
+            let matrix = ibcmd_rs::plan::merge_parity_matrices(&matrices)?;
+            ibcmd_rs::plan::write_parity_artifacts(
+                &matrix,
+                &args.output,
+                args.markdown.as_deref(),
+                args.overwrite,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": matrix.schema_version,
+                    "runs": &matrix.runs,
+                    "rows": matrix.rows.len(),
+                    "json": &args.output,
+                    "markdown": &args.markdown,
+                }))?
+            );
+        }
         Commands::Compatibility(args) => {
             let report = ibcmd_rs::compatibility::current_compatibility_report()?;
             if let Some(output) = args.output {

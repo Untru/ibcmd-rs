@@ -45,6 +45,10 @@ pub enum Commands {
     SourceDiffExplain(SourceDiffExplainArgs),
     /// Summarize repeated XML diff signatures from a source-diff JSON report.
     SourceDiffSignatures(SourceDiffSignaturesArgs),
+    /// Build a versioned per-file raw parity matrix from a source-diff JSON report.
+    SourceDiffMatrix(SourceDiffMatrixArgs),
+    /// Merge independently produced parity matrices without collapsing database results.
+    SourceDiffMatrixMerge(SourceDiffMatrixMergeArgs),
     /// Print the current compatibility matrix for implemented operations.
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
@@ -883,6 +887,52 @@ pub struct SourceDiffSignaturesArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct SourceDiffMatrixArgs {
+    /// Source-diff JSON produced by `source-diff`.
+    pub diff: PathBuf,
+    /// Stable database label, for example `ut_ibcmd` or `bsp`.
+    #[arg(long)]
+    pub database: String,
+    /// Immutable run label unique within the database.
+    #[arg(long)]
+    pub run_id: String,
+    /// Git commit that produced the candidate export.
+    #[arg(long)]
+    pub git_sha: String,
+    /// Mark this as a full export; only full runs may report readiness percent.
+    #[arg(long, conflicts_with = "scoped")]
+    pub full: bool,
+    /// Mark this as a scoped export; its readiness percent is intentionally withheld.
+    #[arg(long)]
+    pub scoped: bool,
+    /// JSON destination for the matrix.
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Optional Markdown destination for a deterministic human report.
+    #[arg(long)]
+    pub markdown: Option<PathBuf>,
+    /// Replace a pre-existing output only when explicitly requested.
+    #[arg(long)]
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SourceDiffMatrixMergeArgs {
+    /// Input parity matrix JSON files.
+    #[arg(required = true)]
+    pub matrices: Vec<PathBuf>,
+    /// JSON destination for the merged matrix.
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// Optional Markdown destination for a deterministic human report.
+    #[arg(long)]
+    pub markdown: Option<PathBuf>,
+    /// Replace a pre-existing output only when explicitly requested.
+    #[arg(long)]
+    pub overwrite: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct CompatibilityArgs {
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
@@ -1000,6 +1050,13 @@ pub struct MssqlDumpConfigArgs {
     /// Try to reconstruct minimal source XML for recognized metadata blobs.
     #[arg(long)]
     pub extract_metadata_xml: bool,
+    /// Fail a full Config export when any expected root metadata XML is absent.
+    #[arg(
+        long,
+        requires = "extract_metadata_xml",
+        conflicts_with_all = ["file_names", "file_name_lists"]
+    )]
+    pub require_complete_root_metadata: bool,
     /// Source XML version for reconstructed source files.
     #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
     pub source_version: InfobaseConfigSourceVersion,
@@ -4094,6 +4151,78 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_strict_full_mssql_dump_config_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-config",
+            "--database",
+            "TestDb",
+            "-o",
+            r"C:\dump",
+            "--extract-metadata-xml",
+            "--require-complete-root-metadata",
+            "--include-config-save",
+        ]);
+
+        match cli.command {
+            Commands::MssqlDumpConfig(args) => {
+                assert!(args.extract_metadata_xml);
+                assert!(args.require_complete_root_metadata);
+                // ConfigSave may be staged in the same run, but the strict
+                // inventory gate is applied only to the committed Config table.
+                assert!(args.include_config_save);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_strict_mssql_dump_config_combinations() {
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--require-complete-root-metadata",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--extract-metadata-xml",
+                "--require-complete-root-metadata",
+                "--file-name",
+                "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--extract-metadata-xml",
+                "--require-complete-root-metadata",
+                "--file-name-list",
+                r"C:\dump\selected.txt",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

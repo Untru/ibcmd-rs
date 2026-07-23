@@ -918,15 +918,9 @@ pub(super) fn extract_form_command_set_excluded_commands(
             Some("BusinessProcess" | "Task")
         )
     });
-    let Some(mut commands) = command_set
-        .iter()
-        .map(|uuid| form_standard_excluded_command_name(uuid, business_process_or_task))
-        .collect::<Option<Vec<_>>>()
-    else {
-        return Vec::new();
-    };
-    commands.sort_unstable();
-    commands
+    map_known_form_excluded_commands(&command_set, |uuid| {
+        form_standard_excluded_command_name(uuid, business_process_or_task)
+    })
 }
 
 pub(super) fn extract_form_auto_time(fields: &[&str]) -> Option<&'static str> {
@@ -9170,16 +9164,17 @@ fn form_table_child_owner_section_starts_at(fields: &[&str], index: usize) -> bo
             == Some(true)
 }
 
-fn map_form_table_excluded_commands(
-    schema: FormTableSchema,
+fn map_known_form_excluded_commands(
     uuids: &[&str],
-) -> Option<Vec<&'static str>> {
-    let mut commands: Vec<_> = uuids
-        .iter()
-        .map(|uuid| form_table_excluded_command_name(schema, uuid))
-        .collect::<Option<_>>()?;
+    mapper: impl Fn(&str) -> Option<&'static str>,
+) -> Vec<&'static str> {
+    let mut commands: Vec<_> = uuids.iter().filter_map(|uuid| mapper(uuid)).collect();
     commands.sort_unstable();
-    Some(commands)
+    commands
+}
+
+fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> Vec<&'static str> {
+    map_known_form_excluded_commands(uuids, |uuid| form_table_excluded_command_name(schema, uuid))
 }
 
 fn parse_form_table_command_set_excluded_commands_for_table(
@@ -9228,7 +9223,7 @@ fn parse_form_table_command_set_excluded_commands_for_table(
     if !form_table_child_owner_section_starts_at(fields, command_slot + 1) {
         return Vec::new();
     }
-    map_form_table_excluded_commands(schema, &uuids).unwrap_or_default()
+    map_form_table_excluded_commands(schema, &uuids)
 }
 
 fn parse_form_field_command_set_excluded_commands(
@@ -9253,20 +9248,13 @@ fn parse_form_field_command_set_excluded_commands(
             }
             _ => return Vec::new(),
         };
-    let Some(mut commands) = fields
+    let Some(uuids) = fields
         .get(48)
         .and_then(|field| parse_form_table_counted_uuid_list(field))
-        .and_then(|uuids| {
-            uuids
-                .iter()
-                .map(|uuid| mapper(uuid))
-                .collect::<Option<Vec<_>>>()
-        })
     else {
         return Vec::new();
     };
-    commands.sort_unstable();
-    commands
+    map_known_form_excluded_commands(&uuids, mapper)
 }
 
 #[cfg(test)]
@@ -9278,11 +9266,21 @@ pub(super) fn parse_form_table_command_set_excluded_commands(fields: &[&str]) ->
         if uuids.is_empty() {
             continue;
         }
-        if let Some(commands) = map_form_table_excluded_commands(FormTableSchema, &uuids) {
+        let commands = map_form_table_excluded_commands(FormTableSchema, &uuids);
+        if !commands.is_empty() {
             return commands;
         }
     }
     Vec::new()
+}
+
+#[cfg(test)]
+pub(super) fn parse_form_standard_command_set_excluded_commands(
+    uuids: &[&str],
+) -> Vec<&'static str> {
+    map_known_form_excluded_commands(uuids, |uuid| {
+        form_standard_excluded_command_name(uuid, false)
+    })
 }
 
 fn parse_form_conditional_user_visible_common(field: &str) -> Option<bool> {

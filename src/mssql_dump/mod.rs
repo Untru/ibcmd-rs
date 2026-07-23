@@ -56,6 +56,8 @@ use role_rights::*;
 use selected::*;
 use source_assets::*;
 
+pub use metadata::MetadataExtractionMissReason;
+
 pub(crate) fn resolve_form_item_picture_owner(
     text: &str,
     marker_start: usize,
@@ -219,7 +221,186 @@ pub struct MssqlDumpedTableReport {
     pub module_text_rows: usize,
     pub metadata_xml_rows: usize,
     pub source_asset_rows: usize,
+    #[serde(default)]
+    pub metadata_root_inventory: RootMetadataInventoryReport,
     pub timings: MssqlDumpTimingReport,
+}
+
+/// Scope of a root-metadata inventory. A scoped export is informative only;
+/// it must not be used as evidence that every root object was emitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootMetadataInventoryScope {
+    Full,
+    Scoped,
+}
+
+impl Default for RootMetadataInventoryScope {
+    fn default() -> Self {
+        Self::Scoped
+    }
+}
+
+/// One expected root source XML, keyed by its metadata row UUID rather than a
+/// configuration-specific object name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootMetadataInventoryEntry {
+    pub uuid: String,
+    pub family: String,
+    pub expected_path: String,
+    pub emitted_path: Option<String>,
+    pub reason: Option<MetadataExtractionMissReason>,
+}
+
+/// Serializable audit result for the root metadata XML contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootMetadataInventoryReport {
+    pub scope: RootMetadataInventoryScope,
+    /// Whether the Configuration root supplied an unambiguous top-level UUID
+    /// set. Strict full-export checks fail closed when this is false.
+    #[serde(default)]
+    pub candidate_set_complete: bool,
+    pub expected: usize,
+    pub emitted: usize,
+    pub missing: usize,
+    pub misses_by_reason: BTreeMap<String, usize>,
+    pub entries: Vec<RootMetadataInventoryEntry>,
+}
+
+impl Default for RootMetadataInventoryReport {
+    fn default() -> Self {
+        Self {
+            scope: RootMetadataInventoryScope::Scoped,
+            candidate_set_complete: false,
+            expected: 0,
+            emitted: 0,
+            missing: 0,
+            misses_by_reason: BTreeMap::new(),
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl RootMetadataInventoryReport {
+    /// Reject an incomplete inventory only when the caller explicitly marks
+    /// this as a strict full export. Scoped and legacy exports stay
+    /// observational, so existing selected probes keep their semantics.
+    pub fn ensure_complete(&self, strict_full_export: bool) -> Result<()> {
+        if !strict_full_export || self.scope != RootMetadataInventoryScope::Full {
+            return Ok(());
+        }
+        if !self.candidate_set_complete {
+            bail!("root metadata inventory candidate set is incomplete");
+        }
+        if self.missing != 0 {
+            let first = self
+                .entries
+                .iter()
+                .find(|entry| entry.emitted_path.is_none())
+                .map(|entry| {
+                    let reason = entry
+                        .reason
+                        .map(MetadataExtractionMissReason::as_str)
+                        .unwrap_or("unknown");
+                    format!("{} ({}, reason={reason})", entry.uuid, entry.family)
+                })
+                .unwrap_or_else(|| "<unknown>".to_string());
+            bail!(
+                "root metadata inventory is incomplete: {} of {} missing; first missing {first}",
+                self.missing,
+                self.expected
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Build a deterministic root-metadata audit from the selected top-level
+/// candidate set and the row manifest emitted by the exporter.
+fn audit_root_metadata_inventory(
+    candidates: &BTreeSet<String>,
+    metadata: &MetadataTextRowsAudit,
+    manifests: &[MssqlDumpRowManifest],
+    scope: RootMetadataInventoryScope,
+    candidate_set_complete: bool,
+) -> RootMetadataInventoryReport {
+    let emitted_by_uuid = manifests
+        .iter()
+        .filter_map(|row| {
+            row.metadata_xml_path
+                .as_ref()
+                .map(|path| (row.file_name.as_str(), path.as_str()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let rows_by_uuid = metadata
+        .rows
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let mut misses_by_reason = BTreeMap::new();
+    let mut entries = candidates
+        .iter()
+        .map(|uuid| {
+            let row = rows_by_uuid.get(uuid.as_str()).copied();
+            let is_configuration = row.is_some_and(|row| is_configuration_metadata_row(row));
+            let expected_path = if is_configuration {
+                "Configuration.xml".to_string()
+            } else {
+                row.and_then(|row| row.header.as_ref().zip(row.folder))
+                    .map(|(header, folder)| {
+                        PathBuf::from(folder)
+                            .join(sanitize_source_path_segment(&header.name))
+                            .with_extension("xml")
+                            .to_string_lossy()
+                            .replace('\\', "/")
+                    })
+                    .unwrap_or_default()
+            };
+            let emitted_path = emitted_by_uuid
+                .get(uuid.as_str())
+                .map(|path| (*path).to_owned());
+            let reason = emitted_path.is_none().then(|| {
+                metadata
+                    .misses
+                    .get(uuid)
+                    .copied()
+                    .unwrap_or(MetadataExtractionMissReason::Formatter)
+            });
+            if let Some(reason) = reason {
+                *misses_by_reason
+                    .entry(reason.as_str().to_string())
+                    .or_default() += 1;
+            }
+            RootMetadataInventoryEntry {
+                uuid: uuid.clone(),
+                family: if is_configuration {
+                    "Configuration".to_string()
+                } else {
+                    row.and_then(|row| row.kind.clone())
+                        .unwrap_or_else(|| "unknown".to_string())
+                },
+                expected_path,
+                reason,
+                emitted_path,
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.uuid.cmp(&right.uuid));
+    let expected = entries.len();
+    let emitted = entries
+        .iter()
+        .filter(|entry| entry.emitted_path.is_some())
+        .count();
+    let missing = expected.saturating_sub(emitted);
+    RootMetadataInventoryReport {
+        scope,
+        candidate_set_complete,
+        expected,
+        emitted,
+        missing,
+        misses_by_reason,
+        entries,
+    }
 }
 
 /// Result of applying the existing source-family decoders to a neutral image.
@@ -264,6 +445,13 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             legacy_adapter.xml_dialect()
         )
     })?;
+    let selected_file_names =
+        selected_file_names_from_args(&args.file_names, &args.file_name_lists)?;
+    validate_root_metadata_gate_options(
+        args.require_complete_root_metadata,
+        args.extract_metadata_xml,
+        &selected_file_names,
+    )?;
     prepare_output_dir(&args.output_dir, args.overwrite)?;
 
     let mut table_names = vec!["Config"];
@@ -274,8 +462,6 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     let mut reports = Vec::new();
     let mut manifest_tables = Vec::new();
     let mut total_timings = MssqlDumpTimingReport::default();
-    let selected_file_names =
-        selected_file_names_from_args(&args.file_names, &args.file_name_lists)?;
     let write_binary_rows = args.write_binary_rows && !args.no_binary_rows;
     for table in table_names {
         let dumped = dump_table_rows_streamed(
@@ -299,6 +485,12 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             args.extract_metadata_xml,
             source_version,
         )?;
+        if table == "Config" && args.require_complete_root_metadata {
+            dumped
+                .metadata_root_inventory
+                .ensure_complete(true)
+                .context("strict full Config root metadata check failed")?;
+        }
         reports.push(MssqlDumpedTableReport {
             table: table.to_string(),
             rows: dumped.rows.len(),
@@ -307,6 +499,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             module_text_rows: dumped.module_text_rows,
             metadata_xml_rows: dumped.metadata_xml_rows,
             source_asset_rows: dumped.source_asset_rows,
+            metadata_root_inventory: dumped.metadata_root_inventory.clone(),
             timings: dumped.timings.clone(),
         });
         total_timings.add_assign(&dumped.timings);
@@ -344,6 +537,37 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
         timings: total_timings,
         tables: reports,
     })
+}
+
+fn validate_root_metadata_gate_options(
+    require_complete_root_metadata: bool,
+    extract_metadata_xml: bool,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<()> {
+    if !require_complete_root_metadata {
+        return Ok(());
+    }
+    if !extract_metadata_xml {
+        bail!("--require-complete-root-metadata requires --extract-metadata-xml");
+    }
+    if !selected_file_names.is_empty() {
+        bail!(
+            "--require-complete-root-metadata requires a full Config export without --file-name or --file-name-list"
+        );
+    }
+    Ok(())
+}
+
+fn root_metadata_inventory_scope(
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    extract_metadata_xml: bool,
+) -> RootMetadataInventoryScope {
+    if table == "Config" && selected_file_names.is_empty() && extract_metadata_xml {
+        RootMetadataInventoryScope::Full
+    } else {
+        RootMetadataInventoryScope::Scoped
+    }
 }
 
 /// Exports a provider-neutral storage image through the same family decoders
@@ -395,6 +619,7 @@ pub fn export_storage_image_to_source(
         true,
         true,
         source_version,
+        RootMetadataInventoryScope::Scoped,
         true,
     )?;
     let successful = dumped
@@ -487,7 +712,9 @@ fn dump_table_rows_eager(
         table,
         selected_file_names,
     )?;
-    dump_table_rows_with_options(
+    let inventory_scope =
+        root_metadata_inventory_scope(table, selected_file_names, extract_metadata_xml);
+    dump_table_rows_with_options_mode(
         output_dir,
         table,
         rows,
@@ -496,6 +723,8 @@ fn dump_table_rows_eager(
         extract_module_text,
         extract_metadata_xml,
         InfobaseConfigSourceVersion::V2_20,
+        inventory_scope,
+        false,
     )
 }
 
@@ -507,6 +736,7 @@ struct DumpedTable {
     module_text_rows: usize,
     metadata_xml_rows: usize,
     source_asset_rows: usize,
+    metadata_root_inventory: RootMetadataInventoryReport,
     timings: MssqlDumpTimingReport,
 }
 
@@ -624,6 +854,7 @@ fn dump_table_rows_with_options(
         extract_module_text,
         extract_metadata_xml,
         source_version,
+        RootMetadataInventoryScope::Scoped,
         false,
     )
 }
@@ -638,6 +869,7 @@ fn dump_table_rows_with_options_mode(
     extract_module_text: bool,
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
+    inventory_scope: RootMetadataInventoryScope,
     continue_on_row_error: bool,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
@@ -667,15 +899,16 @@ fn dump_table_rows_with_options_mode(
     } else {
         BTreeSet::new()
     };
-    let metadata_texts = if extract_metadata_xml
+    let metadata_audit = if extract_metadata_xml
         || extract_module_text
         || needs_standalone_refs
         || needs_source_layout_refs
     {
-        build_metadata_text_rows(&rows)
+        build_metadata_text_rows_audited(&rows)
     } else {
-        Vec::new()
+        MetadataTextRowsAudit::default()
     };
+    let metadata_texts = &metadata_audit.rows;
     let metadata_texts_by_file_name = metadata_texts
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -931,6 +1164,24 @@ fn dump_table_rows_with_options_mode(
         manifests.push(dumped.manifest);
     }
 
+    let metadata_root_inventory = if extract_metadata_xml {
+        let indexed_roots = configuration_root_metadata_file_names_from_texts(&metadata_audit.rows);
+        let (candidates, candidate_set_complete) = selected_root_metadata_candidates(
+            &metadata_audit,
+            &file_names_owned,
+            inventory_scope,
+            indexed_roots.as_ref(),
+        );
+        audit_root_metadata_inventory(
+            &candidates,
+            &metadata_audit,
+            &manifests,
+            inventory_scope,
+            candidate_set_complete,
+        )
+    } else {
+        RootMetadataInventoryReport::default()
+    };
     Ok(DumpedTable {
         rows: manifests,
         failed_rows,
@@ -939,6 +1190,7 @@ fn dump_table_rows_with_options_mode(
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        metadata_root_inventory,
         timings: MssqlDumpTimingReport::default(),
     })
 }
@@ -1084,15 +1336,16 @@ fn dump_table_rows_streamed(
         Vec::new()
     };
     let metadata_texts_started = Instant::now();
-    let selected_metadata_texts = if extract_metadata_xml
+    let selected_metadata_audit = if extract_metadata_xml
         || extract_module_text
         || needs_standalone_refs
         || needs_source_layout_refs
     {
-        build_metadata_text_rows(&selected_metadata_rows)
+        build_metadata_text_rows_audited(&selected_metadata_rows)
     } else {
-        Vec::new()
+        MetadataTextRowsAudit::default()
     };
+    let selected_metadata_texts = &selected_metadata_audit.rows;
     timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
     let selected_configuration_index_needs =
         selected_configuration_source_asset_index_needs_with_metadata(
@@ -1877,6 +2130,27 @@ fn dump_table_rows_streamed(
         timings.source_asset_config_dump_info_cpu_ms += elapsed_ms(started);
     }
 
+    let inventory_scope =
+        root_metadata_inventory_scope(table, selected_file_names, extract_metadata_xml);
+    let metadata_root_inventory = if extract_metadata_xml {
+        let indexed_roots =
+            configuration_root_metadata_file_names_from_texts(&index_metadata_texts);
+        let (candidates, candidate_set_complete) = selected_root_metadata_candidates(
+            &selected_metadata_audit,
+            &metadata_file_names,
+            inventory_scope,
+            indexed_roots.as_ref(),
+        );
+        audit_root_metadata_inventory(
+            &candidates,
+            &selected_metadata_audit,
+            &manifests,
+            inventory_scope,
+            candidate_set_complete,
+        )
+    } else {
+        RootMetadataInventoryReport::default()
+    };
     Ok(DumpedTable {
         rows: manifests,
         failed_rows: Vec::new(),
@@ -1885,6 +2159,7 @@ fn dump_table_rows_streamed(
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        metadata_root_inventory,
         timings,
     })
 }
@@ -1955,19 +2230,101 @@ fn rows_for_source_indexes(
     rows
 }
 
-fn build_metadata_text_rows(rows: &[ConfigRow]) -> Vec<MetadataTextRow> {
-    rows.iter()
-        .filter(|row| !row.file_name.contains('.'))
-        .filter_map(|row| {
-            let bytes = decode_hex(&row.binary_hex).ok()?;
-            let mut metadata = metadata_text_row_from_blob(&row.file_name, &bytes)?;
-            if is_direct_code14_form_metadata_text(&metadata.text, &metadata.file_name) {
-                metadata.kind = Some("Form".to_string());
-                metadata.folder = None;
+#[derive(Default)]
+struct MetadataTextRowsAudit {
+    rows: Vec<MetadataTextRow>,
+    misses: BTreeMap<String, MetadataExtractionMissReason>,
+}
+
+fn build_metadata_text_rows_audited(rows: &[ConfigRow]) -> MetadataTextRowsAudit {
+    let mut audit = MetadataTextRowsAudit::default();
+    for row in rows.iter().filter(|row| !row.file_name.contains('.')) {
+        let row_audit = match decode_hex(&row.binary_hex) {
+            Ok(bytes) => metadata_text_row_audit_from_blob(&row.file_name, &bytes),
+            Err(_) => MetadataTextRowAudit::Miss(MetadataExtractionMiss {
+                file_name: row.file_name.clone(),
+                reason: MetadataExtractionMissReason::Inflate,
+            }),
+        };
+        match row_audit {
+            MetadataTextRowAudit::Extracted(mut metadata) => {
+                normalize_direct_form_metadata(&mut metadata);
+                audit.rows.push(metadata);
             }
-            Some(metadata)
-        })
-        .collect()
+            MetadataTextRowAudit::ExtractedWithWarning(mut metadata, miss) => {
+                let recognized_configuration = is_configuration_metadata_row(&metadata);
+                let recognized_direct_form = normalize_direct_form_metadata(&mut metadata);
+                if !recognized_configuration
+                    && !(recognized_direct_form
+                        && miss.reason == MetadataExtractionMissReason::Family)
+                {
+                    audit.misses.entry(miss.file_name).or_insert(miss.reason);
+                }
+                audit.rows.push(metadata);
+            }
+            MetadataTextRowAudit::Miss(miss) => {
+                audit.misses.entry(miss.file_name).or_insert(miss.reason);
+            }
+        }
+    }
+    audit
+}
+
+fn normalize_direct_form_metadata(metadata: &mut MetadataTextRow) -> bool {
+    if !is_direct_code14_form_metadata_text(&metadata.text, &metadata.file_name) {
+        return false;
+    }
+    metadata.kind = Some("Form".to_string());
+    metadata.folder = None;
+    true
+}
+
+fn is_configuration_metadata_row(metadata: &MetadataTextRow) -> bool {
+    parse_configuration_reference_text(&metadata.text).is_some()
+}
+
+fn build_metadata_text_rows(rows: &[ConfigRow]) -> Vec<MetadataTextRow> {
+    build_metadata_text_rows_audited(rows).rows
+}
+
+fn selected_root_metadata_candidates(
+    metadata: &MetadataTextRowsAudit,
+    selected_file_names: &BTreeSet<String>,
+    scope: RootMetadataInventoryScope,
+    indexed_root_file_names: Option<&BTreeSet<String>>,
+) -> (BTreeSet<String>, bool) {
+    let decoded_roots = metadata
+        .rows
+        .iter()
+        .filter(|row| row.folder.is_some() || is_configuration_metadata_row(row))
+        .map(|row| row.file_name.clone())
+        .collect::<BTreeSet<_>>();
+    if scope == RootMetadataInventoryScope::Full {
+        return indexed_root_file_names
+            .cloned()
+            .map(|candidates| (candidates, true))
+            .unwrap_or((decoded_roots, false));
+    }
+
+    if let Some(indexed) = indexed_root_file_names {
+        let candidates = selected_file_names
+            .intersection(indexed)
+            .filter(|file_name| is_uuid_text(file_name))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        return (candidates, true);
+    }
+
+    let candidates = decoded_roots
+        .into_iter()
+        .filter(|file_name| selected_file_names.contains(file_name))
+        .collect::<BTreeSet<_>>();
+    let has_ambiguous_miss = metadata.misses.keys().any(|file_name| {
+        selected_file_names.contains(file_name)
+            && is_uuid_text(file_name)
+            && !candidates.contains(file_name)
+    });
+    (candidates, !has_ambiguous_miss)
 }
 
 fn form_metadata_file_names(rows: &[ConfigRow]) -> BTreeSet<String> {

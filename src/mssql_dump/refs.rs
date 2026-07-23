@@ -323,6 +323,35 @@ pub(super) fn build_metadata_order_index_from_texts(
     index
 }
 
+/// Returns the exact top-level metadata UUID inventory embedded in the
+/// Configuration root row. Unlike the broad reference indexes, this list does
+/// not contain forms, templates, or other dependency rows owned by a selected
+/// object.
+pub(super) fn configuration_root_metadata_file_names_from_texts(
+    rows: &[MetadataTextRow],
+) -> Option<BTreeSet<String>> {
+    let mut roots = None::<BTreeSet<String>>;
+    for row in rows {
+        let Some(layout) = parse_configuration_root_layout(&row.text, &row.file_name) else {
+            continue;
+        };
+        if roots.is_some() {
+            // A Config table has one Configuration root. Refuse to turn an
+            // ambiguous index into evidence for a complete export.
+            return None;
+        }
+        let mut current = BTreeSet::from([row.file_name.clone()]);
+        current.extend(
+            layout
+                .child_families
+                .iter()
+                .flat_map(|family| family.iter().cloned()),
+        );
+        roots = Some(current);
+    }
+    roots
+}
+
 pub(super) fn parse_configuration_header_uuid(text: &str) -> Option<String> {
     if !text.trim_start().starts_with("{2,") {
         return None;

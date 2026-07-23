@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use quick_xml::Reader;
@@ -38,7 +41,7 @@ pub struct SourceDiffReport {
     pub differences: Vec<SourceDiffEntry>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq)]
 pub struct SourceDiffSummary {
     pub left_only: usize,
     pub right_only: usize,
@@ -153,6 +156,332 @@ pub struct SourceDiffSignatureOptions {
     pub examples_per_signature: usize,
 }
 
+/// Versioned, per-file evidence for a native-versus-candidate source export.
+/// Raw SHA-256 status is intentionally retained even when XML analysis succeeds.
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct ParityRun {
+    pub database: String,
+    pub run_id: String,
+    pub git_sha: String,
+    pub full: bool,
+    pub left_root: String,
+    pub right_root: String,
+    pub raw_summary: SourceDiffSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct ParityRow {
+    pub database: String,
+    pub run_id: String,
+    pub path: String,
+    pub family: String,
+    pub artifact_class: String,
+    pub raw_status: SourceDiffStatus,
+    pub left_sha256: Option<String>,
+    pub right_sha256: Option<String>,
+    pub left_size_bytes: Option<u64>,
+    pub right_size_bytes: Option<u64>,
+    pub kind: Option<SourceKind>,
+    pub object_hint: Option<String>,
+    pub xml_signatures: Vec<SourceDiffSignature>,
+    pub xml_signature_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+pub struct ParityAggregate {
+    pub database: String,
+    pub run_id: String,
+    pub family: String,
+    pub artifact_class: String,
+    pub raw_status: SourceDiffStatus,
+    pub files: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct ParityMatrix {
+    pub schema_version: u32,
+    pub runs: Vec<ParityRun>,
+    pub rows: Vec<ParityRow>,
+    pub aggregates: Vec<ParityAggregate>,
+}
+
+pub const PARITY_MATRIX_SCHEMA_VERSION: u32 = 1;
+
+/// Builds one matrix from an unmodified raw source diff. A scoped run is
+/// deliberately represented, but can never report an exact readiness percent.
+pub fn build_parity_matrix(
+    diff: &SourceDiffReport,
+    database: String,
+    run_id: String,
+    git_sha: String,
+    full: bool,
+) -> Result<ParityMatrix> {
+    let run = ParityRun {
+        database: database.clone(),
+        run_id: run_id.clone(),
+        git_sha,
+        full,
+        left_root: diff.left_root.clone(),
+        right_root: diff.right_root.clone(),
+        raw_summary: diff.summary.clone(),
+    };
+    let mut rows = diff
+        .differences
+        .iter()
+        .map(|entry| parity_row_from_diff_entry(diff, entry, &database, &run_id))
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        left.database
+            .cmp(&right.database)
+            .then_with(|| left.run_id.cmp(&right.run_id))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let mut matrix = ParityMatrix {
+        schema_version: PARITY_MATRIX_SCHEMA_VERSION,
+        runs: vec![run],
+        rows,
+        aggregates: Vec::new(),
+    };
+    matrix.aggregates = parity_aggregates(&matrix.rows);
+    validate_parity_matrix(&matrix)?;
+    Ok(matrix)
+}
+
+pub fn merge_parity_matrices(matrices: &[ParityMatrix]) -> Result<ParityMatrix> {
+    let mut runs = Vec::new();
+    let mut rows = Vec::new();
+    let mut run_keys = BTreeSet::new();
+    for matrix in matrices {
+        if matrix.schema_version != PARITY_MATRIX_SCHEMA_VERSION {
+            return Err(anyhow!(
+                "unsupported parity matrix schema version {}",
+                matrix.schema_version
+            ));
+        }
+        validate_parity_matrix(matrix)?;
+        for run in &matrix.runs {
+            let key = (run.database.clone(), run.run_id.clone());
+            if !run_keys.insert(key) {
+                return Err(anyhow!("duplicate parity matrix database/run-id"));
+            }
+            runs.push(run.clone());
+        }
+        rows.extend(matrix.rows.iter().cloned());
+    }
+    runs.sort_by(|left, right| {
+        left.database
+            .cmp(&right.database)
+            .then_with(|| left.run_id.cmp(&right.run_id))
+    });
+    rows.sort_by(|left, right| {
+        left.database
+            .cmp(&right.database)
+            .then_with(|| left.run_id.cmp(&right.run_id))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let matrix = ParityMatrix {
+        schema_version: PARITY_MATRIX_SCHEMA_VERSION,
+        aggregates: parity_aggregates(&rows),
+        runs,
+        rows,
+    };
+    validate_parity_matrix(&matrix)?;
+    Ok(matrix)
+}
+
+pub fn parity_exact_percent(run: &ParityRun) -> Option<f64> {
+    if !run.full {
+        return None;
+    }
+    let total = source_diff_total(&run.raw_summary);
+    (total != 0).then_some(run.raw_summary.unchanged as f64 * 100.0 / total as f64)
+}
+
+pub fn validate_parity_matrix(matrix: &ParityMatrix) -> Result<()> {
+    if matrix.schema_version != PARITY_MATRIX_SCHEMA_VERSION {
+        return Err(anyhow!(
+            "unsupported parity matrix schema version {}",
+            matrix.schema_version
+        ));
+    }
+    let mut run_keys = BTreeSet::new();
+    for run in &matrix.runs {
+        if run.database.trim().is_empty() || run.run_id.trim().is_empty() {
+            return Err(anyhow!(
+                "parity matrix run database and run_id must not be empty"
+            ));
+        }
+        if !run_keys.insert((run.database.clone(), run.run_id.clone())) {
+            return Err(anyhow!("duplicate parity matrix database/run-id"));
+        }
+    }
+    let mut rows_by_run = BTreeMap::<(String, String), SourceDiffSummary>::new();
+    let mut row_paths = BTreeSet::new();
+    for row in &matrix.rows {
+        let key = (row.database.clone(), row.run_id.clone());
+        if !run_keys.contains(&key) {
+            return Err(anyhow!("parity matrix row references an unknown run"));
+        }
+        if !row_paths.insert((row.database.clone(), row.run_id.clone(), row.path.clone())) {
+            return Err(anyhow!(
+                "duplicate parity matrix path for {}/{}: {}",
+                row.database,
+                row.run_id,
+                row.path
+            ));
+        }
+        let summary = rows_by_run.entry(key).or_default();
+        increment_source_diff_summary(summary, &row.raw_status);
+    }
+    for run in &matrix.runs {
+        let actual = rows_by_run
+            .remove(&(run.database.clone(), run.run_id.clone()))
+            .unwrap_or_default();
+        if actual != run.raw_summary {
+            return Err(anyhow!(
+                "parity matrix rows do not match raw source-diff summary for {}/{}",
+                run.database,
+                run.run_id
+            ));
+        }
+    }
+    let expected = parity_aggregates(&matrix.rows);
+    if expected != matrix.aggregates {
+        return Err(anyhow!("parity matrix aggregates do not match rows"));
+    }
+    Ok(())
+}
+
+pub fn write_parity_matrix(matrix: &ParityMatrix, output: &Path, overwrite: bool) -> Result<()> {
+    write_parity_artifacts(matrix, output, None, overwrite)
+}
+
+pub fn read_parity_matrix(path: &Path) -> Result<ParityMatrix> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("failed to read parity matrix {}", path.display()))?;
+    let matrix = serde_json::from_str::<ParityMatrix>(&text)
+        .with_context(|| format!("failed to parse parity matrix {}", path.display()))?;
+    validate_parity_matrix(&matrix)?;
+    Ok(matrix)
+}
+
+pub fn render_parity_matrix_markdown(matrix: &ParityMatrix) -> Result<String> {
+    validate_parity_matrix(matrix)?;
+    let mut markdown = String::from("# Матрица побайтовой совместимости\n\n");
+    markdown.push_str(
+        "| База | Запуск | Охват | Совпало | Всего | Готовность |\n|---|---|---|---:|---:|---:|\n",
+    );
+    for run in &matrix.runs {
+        let total = source_diff_total(&run.raw_summary);
+        let readiness = parity_exact_percent(run)
+            .map(|value| format!("{value:.4}%"))
+            .unwrap_or_else(|| "н/д (выборка)".to_string());
+        let scope = if run.full {
+            "полный"
+        } else {
+            "выборочный"
+        };
+        markdown.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} |\n",
+            markdown_escape(&run.database),
+            markdown_escape(&run.run_id),
+            scope,
+            run.raw_summary.unchanged,
+            total,
+            readiness
+        ));
+    }
+    markdown.push_str(
+        "\n## Итоги по семействам\n\n| База | Запуск | Семейство | Совпало | Изменено | Только слева | Только справа | Всего |\n|---|---|---|---:|---:|---:|---:|---:|\n",
+    );
+    let mut family_summaries = BTreeMap::<(String, String, String), SourceDiffSummary>::new();
+    for row in &matrix.rows {
+        increment_source_diff_summary(
+            family_summaries
+                .entry((row.database.clone(), row.run_id.clone(), row.family.clone()))
+                .or_default(),
+            &row.raw_status,
+        );
+    }
+    for ((database, run_id, family), summary) in family_summaries {
+        markdown.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            markdown_escape(&database),
+            markdown_escape(&run_id),
+            markdown_escape(&family),
+            summary.unchanged,
+            summary.different,
+            summary.left_only,
+            summary.right_only,
+            source_diff_total(&summary)
+        ));
+    }
+    markdown.push_str(
+        "\n## Расхождения\n\n| База | Запуск | Семейство | Класс | Статус | Путь |\n|---|---|---|---|---|---|\n",
+    );
+    for row in matrix
+        .rows
+        .iter()
+        .filter(|row| row.raw_status != SourceDiffStatus::Unchanged)
+    {
+        markdown.push_str(&format!(
+            "| {} | {} | {} | {} | {:?} | {} |\n",
+            markdown_escape(&row.database),
+            markdown_escape(&row.run_id),
+            markdown_escape(&row.family),
+            markdown_escape(&row.artifact_class),
+            row.raw_status,
+            markdown_escape(&row.path)
+        ));
+    }
+    Ok(markdown)
+}
+
+pub fn write_parity_matrix_markdown(
+    matrix: &ParityMatrix,
+    output: &Path,
+    overwrite: bool,
+) -> Result<()> {
+    validate_parity_matrix(matrix)?;
+    let markdown = render_parity_matrix_markdown(matrix)?;
+    publish_artifact_set(
+        vec![ArtifactBytes {
+            target: output,
+            bytes: markdown.as_bytes(),
+            validate_json: false,
+        }],
+        overwrite,
+    )
+}
+
+/// Validates and stages the JSON and optional Markdown before either target is
+/// published. On an ordinary I/O error, both old targets are restored.
+pub fn write_parity_artifacts(
+    matrix: &ParityMatrix,
+    json_output: &Path,
+    markdown_output: Option<&Path>,
+    overwrite: bool,
+) -> Result<()> {
+    validate_parity_matrix(matrix)?;
+    let json = serde_json::to_string_pretty(matrix)?;
+    let markdown = markdown_output
+        .map(|_| render_parity_matrix_markdown(matrix))
+        .transpose()?;
+    let mut artifacts = vec![ArtifactBytes {
+        target: json_output,
+        bytes: json.as_bytes(),
+        validate_json: true,
+    }];
+    if let (Some(target), Some(bytes)) = (markdown_output, markdown.as_deref()) {
+        artifacts.push(ArtifactBytes {
+            target,
+            bytes: bytes.as_bytes(),
+            validate_json: false,
+        });
+    }
+    publish_artifact_set(artifacts, overwrite)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionKind {
@@ -161,7 +490,7 @@ pub enum ActionKind {
     Unchanged,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceDiffStatus {
     LeftOnly,
@@ -583,6 +912,408 @@ fn source_kind_name(kind: &SourceKind) -> &'static str {
         SourceKind::OtherXml => "other_xml",
         SourceKind::Other => "other",
     }
+}
+
+fn parity_row_from_diff_entry(
+    diff: &SourceDiffReport,
+    entry: &SourceDiffEntry,
+    database: &str,
+    run_id: &str,
+) -> ParityRow {
+    let (family, artifact_class) = classify_parity_path(&entry.path, entry.kind.as_ref());
+    let (xml_signatures, xml_signature_error) = match xml_signatures_for_diff_entry(diff, entry) {
+        Ok(signatures) => (signatures, None),
+        Err(error) => (Vec::new(), Some(error.to_string())),
+    };
+    ParityRow {
+        database: database.to_string(),
+        run_id: run_id.to_string(),
+        path: entry.path.clone(),
+        family,
+        artifact_class,
+        raw_status: entry.status.clone(),
+        left_sha256: entry.left_sha256.clone(),
+        right_sha256: entry.right_sha256.clone(),
+        left_size_bytes: entry.left_size_bytes,
+        right_size_bytes: entry.right_size_bytes,
+        kind: entry.kind.clone(),
+        object_hint: entry.object_hint.clone(),
+        xml_signatures,
+        xml_signature_error,
+    }
+}
+
+/// Stable path classification used only for reporting; it never changes raw diff status.
+pub fn classify_parity_path(path: &str, kind: Option<&SourceKind>) -> (String, String) {
+    let normalized = path.replace('\\', "/");
+    let components = normalized
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let ext_index = components
+        .iter()
+        .position(|part| part.eq_ignore_ascii_case("Ext"));
+    let family = match components.first() {
+        Some(part) if part.eq_ignore_ascii_case("Ext") => "Configuration".to_string(),
+        Some(part) => (*part).to_string(),
+        None => "Unknown".to_string(),
+    };
+    let direct_ext_name = ext_index
+        .filter(|index| index + 2 == components.len())
+        .and_then(|index| components.get(index + 1));
+    let artifact_class =
+        if direct_ext_name.is_some_and(|name| name.eq_ignore_ascii_case("Form.xml")) {
+            "form_body"
+        } else if direct_ext_name.is_some_and(|name| name.eq_ignore_ascii_case("Template.xml")) {
+            "template_body"
+        } else if ext_index.is_some() {
+            "ext_asset"
+        } else if components
+            .last()
+            .is_some_and(|name| name.to_ascii_lowercase().ends_with(".xml"))
+        {
+            match kind {
+                Some(SourceKind::ConfigurationRoot) => "configuration_root",
+                Some(SourceKind::MetadataXml) | None => "metadata_xml",
+                Some(SourceKind::OtherXml) => "other_xml",
+                _ => "xml",
+            }
+        } else {
+            match kind {
+                Some(SourceKind::Module) => "module",
+                Some(SourceKind::Binary) => "binary",
+                Some(SourceKind::Other) | None => "other",
+                _ => "other",
+            }
+        };
+    (family, artifact_class.to_string())
+}
+
+/// Returns per-file XML signatures without changing the existing aggregate
+/// `source-diff-signatures` wire format.
+pub fn xml_signatures_for_diff_entry(
+    diff: &SourceDiffReport,
+    entry: &SourceDiffEntry,
+) -> Result<Vec<SourceDiffSignature>> {
+    let Some(kind) = entry.kind.as_ref() else {
+        return Ok(Vec::new());
+    };
+    if entry.status != SourceDiffStatus::Different || !is_xml_source_kind(kind) {
+        return Ok(Vec::new());
+    }
+    let left_shape =
+        read_xml_path_shape(&source_tree_path(Path::new(&diff.left_root), &entry.path))?;
+    let right_shape =
+        read_xml_path_shape(&source_tree_path(Path::new(&diff.right_root), &entry.path))?;
+    let mut accumulators = BTreeMap::<SignatureKey, SignatureAccumulator>::new();
+    let kind_name = source_kind_name(kind);
+    accumulate_xml_shape_diff(
+        kind_name,
+        &entry.path,
+        &left_shape,
+        &right_shape,
+        1,
+        &mut accumulators,
+    );
+    let mut signatures = accumulators
+        .into_iter()
+        .map(|(key, value)| SourceDiffSignature {
+            kind: key.kind,
+            signature: key.signature,
+            path: key.path,
+            count: value.count,
+            files: value.files.len(),
+            examples: value.examples,
+        })
+        .collect::<Vec<_>>();
+    signatures.sort_by(|left, right| {
+        left.signature
+            .cmp(&right.signature)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    Ok(signatures)
+}
+
+fn parity_aggregates(rows: &[ParityRow]) -> Vec<ParityAggregate> {
+    let mut counts = BTreeMap::<(String, String, String, String, SourceDiffStatus), usize>::new();
+    for row in rows {
+        *counts
+            .entry((
+                row.database.clone(),
+                row.run_id.clone(),
+                row.family.clone(),
+                row.artifact_class.clone(),
+                row.raw_status.clone(),
+            ))
+            .or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .map(
+            |((database, run_id, family, artifact_class, raw_status), files)| ParityAggregate {
+                database,
+                run_id,
+                family,
+                artifact_class,
+                raw_status,
+                files,
+            },
+        )
+        .collect()
+}
+
+fn increment_source_diff_summary(summary: &mut SourceDiffSummary, status: &SourceDiffStatus) {
+    match status {
+        SourceDiffStatus::LeftOnly => summary.left_only += 1,
+        SourceDiffStatus::RightOnly => summary.right_only += 1,
+        SourceDiffStatus::Different => summary.different += 1,
+        SourceDiffStatus::Unchanged => summary.unchanged += 1,
+    }
+}
+
+fn source_diff_total(summary: &SourceDiffSummary) -> usize {
+    summary.left_only + summary.right_only + summary.different + summary.unchanged
+}
+
+struct ArtifactBytes<'a> {
+    target: &'a Path,
+    bytes: &'a [u8],
+    validate_json: bool,
+}
+
+struct StagedArtifact {
+    target: std::path::PathBuf,
+    temporary: std::path::PathBuf,
+}
+
+static ARTIFACT_NONCE: AtomicU64 = AtomicU64::new(0);
+
+fn publish_artifact_set(artifacts: Vec<ArtifactBytes<'_>>, overwrite: bool) -> Result<()> {
+    preflight_artifact_set(&artifacts, overwrite)?;
+    let mut staged = Vec::with_capacity(artifacts.len());
+    for artifact in artifacts {
+        match stage_artifact(artifact) {
+            Ok(value) => staged.push(value),
+            Err(error) => {
+                cleanup_staged_artifacts(&staged);
+                return Err(error);
+            }
+        }
+    }
+    let result = if overwrite {
+        publish_staged_with_backups(&mut staged)
+    } else {
+        publish_staged_without_overwrite(&mut staged)
+    };
+    cleanup_staged_artifacts(&staged);
+    result
+}
+
+fn preflight_artifact_set(artifacts: &[ArtifactBytes<'_>], overwrite: bool) -> Result<()> {
+    let mut targets = BTreeSet::new();
+    for artifact in artifacts {
+        let identity = publication_path_identity(artifact.target)?;
+        if !targets.insert(identity) {
+            return Err(anyhow!(
+                "parity artifact outputs must be different paths: {}",
+                artifact.target.display()
+            ));
+        }
+        if artifact.target.is_dir() {
+            return Err(anyhow!(
+                "parity artifact target is a directory: {}",
+                artifact.target.display()
+            ));
+        }
+        if !overwrite && artifact.target.try_exists()? {
+            return Err(anyhow!(
+                "refusing to overwrite existing parity artifact {}",
+                artifact.target.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn publication_path_identity(path: &Path) -> Result<String> {
+    let absolute = std::path::absolute(path)
+        .with_context(|| format!("failed to resolve output path {}", path.display()))?;
+    let identity = absolute.to_string_lossy().replace('\\', "/");
+    #[cfg(windows)]
+    let identity = identity.to_ascii_lowercase();
+    Ok(identity)
+}
+
+fn stage_artifact(artifact: ArtifactBytes<'_>) -> Result<StagedArtifact> {
+    let parent = artifact.target.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+    let temporary = create_unique_sibling(artifact.target, "tmp")?;
+    let write_result = (|| -> Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .with_context(|| format!("failed to create {}", temporary.display()))?;
+        file.write_all(artifact.bytes)
+            .with_context(|| format!("failed to write {}", temporary.display()))?;
+        file.sync_all()
+            .with_context(|| format!("failed to flush {}", temporary.display()))?;
+        drop(file);
+        if artifact.validate_json {
+            let staged = read_parity_matrix(&temporary)?;
+            let expected: ParityMatrix = serde_json::from_slice(artifact.bytes)?;
+            if staged != expected {
+                return Err(anyhow!("staged parity matrix did not round-trip exactly"));
+            }
+        } else if fs::read(&temporary)? != artifact.bytes {
+            return Err(anyhow!("staged parity artifact did not round-trip exactly"));
+        }
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(StagedArtifact {
+        target: artifact.target.to_path_buf(),
+        temporary,
+    })
+}
+
+fn create_unique_sibling(target: &Path, suffix: &str) -> Result<std::path::PathBuf> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let name = target
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("parity-artifact");
+    for _ in 0..32 {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let nonce = ARTIFACT_NONCE.fetch_add(1, Ordering::Relaxed);
+        let candidate = parent.join(format!(
+            ".{name}.{}.{}.{}.{}",
+            std::process::id(),
+            timestamp,
+            nonce,
+            suffix
+        ));
+        if !candidate.try_exists()? {
+            return Ok(candidate);
+        }
+    }
+    Err(anyhow!(
+        "failed to allocate a unique sibling for {}",
+        target.display()
+    ))
+}
+
+fn publish_staged_without_overwrite(staged: &mut [StagedArtifact]) -> Result<()> {
+    let mut published = Vec::new();
+    for artifact in staged.iter() {
+        if let Err(error) = fs::hard_link(&artifact.temporary, &artifact.target) {
+            for target in published.iter().rev() {
+                let _ = fs::remove_file(target);
+            }
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to publish parity artifact without overwrite {}",
+                    artifact.target.display()
+                )
+            });
+        }
+        published.push(artifact.target.clone());
+    }
+    for artifact in staged.iter() {
+        fs::remove_file(&artifact.temporary)
+            .with_context(|| format!("failed to remove {}", artifact.temporary.display()))?;
+    }
+    Ok(())
+}
+
+fn publish_staged_with_backups(staged: &mut [StagedArtifact]) -> Result<()> {
+    let mut backups = Vec::<(std::path::PathBuf, std::path::PathBuf)>::new();
+    for artifact in staged.iter() {
+        let target_exists = match artifact.target.try_exists() {
+            Ok(value) => value,
+            Err(error) => {
+                restore_backups(&backups)?;
+                return Err(error)
+                    .with_context(|| format!("failed to inspect {}", artifact.target.display()));
+            }
+        };
+        if target_exists {
+            let backup = match create_unique_sibling(&artifact.target, "backup") {
+                Ok(value) => value,
+                Err(error) => {
+                    restore_backups(&backups)?;
+                    return Err(error);
+                }
+            };
+            if let Err(error) = fs::rename(&artifact.target, &backup) {
+                restore_backups(&backups)?;
+                return Err(error)
+                    .with_context(|| format!("failed to preserve {}", artifact.target.display()));
+            }
+            backups.push((artifact.target.clone(), backup));
+        }
+    }
+
+    let mut published = Vec::new();
+    for artifact in staged.iter() {
+        if let Err(error) = fs::hard_link(&artifact.temporary, &artifact.target) {
+            for target in published.iter().rev() {
+                let _ = fs::remove_file(target);
+            }
+            restore_backups(&backups)?;
+            return Err(error)
+                .with_context(|| format!("failed to publish {}", artifact.target.display()));
+        }
+        published.push(artifact.target.clone());
+    }
+    for artifact in staged.iter() {
+        fs::remove_file(&artifact.temporary)
+            .with_context(|| format!("failed to remove {}", artifact.temporary.display()))?;
+    }
+    for (_, backup) in backups {
+        fs::remove_file(&backup)
+            .with_context(|| format!("failed to remove backup {}", backup.display()))?;
+    }
+    Ok(())
+}
+
+fn restore_backups(backups: &[(std::path::PathBuf, std::path::PathBuf)]) -> Result<()> {
+    let mut first_error = None;
+    for (target, backup) in backups.iter().rev() {
+        if let Err(error) = fs::rename(backup, target)
+            && first_error.is_none()
+        {
+            first_error = Some(anyhow!(error).context(format!(
+                "failed to restore preserved artifact {}",
+                target.display()
+            )));
+        }
+    }
+    if let Some(error) = first_error {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+fn cleanup_staged_artifacts(staged: &[StagedArtifact]) {
+    for artifact in staged {
+        let _ = fs::remove_file(&artifact.temporary);
+    }
+}
+
+fn markdown_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace('\n', "<br>")
+        .replace('\r', "")
 }
 
 fn sample_limit_for_kind(kind: &str, options: &SourceDiffSignatureOptions) -> Option<usize> {

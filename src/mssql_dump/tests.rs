@@ -201,6 +201,15 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
             module_text_rows: 0,
             metadata_xml_rows: 0,
             source_asset_rows: 8,
+            metadata_root_inventory: RootMetadataInventoryReport {
+                scope: RootMetadataInventoryScope::Scoped,
+                candidate_set_complete: true,
+                expected: 0,
+                emitted: 0,
+                missing: 0,
+                misses_by_reason: BTreeMap::new(),
+                entries: Vec::new(),
+            },
             timings: MssqlDumpTimingReport {
                 prepare_indexes_ms: 40,
                 prepare_metadata_fetch_ms: 11,
@@ -300,6 +309,11 @@ fn dump_timing_summary_defaults_missing_new_timing_fields() {
             "timings": {"fetch_rows_ms": 5}
         }"#;
 
+    let legacy_report: MssqlDumpConfigReport = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        legacy_report.tables[0].metadata_root_inventory,
+        RootMetadataInventoryReport::default()
+    );
     let summary = parse_dump_timing_summary(json, None).unwrap();
 
     assert_eq!(summary.fetch_rows_ms, 5);
@@ -690,6 +704,316 @@ fn maps_additional_object_family_module_suffixes_to_source_layout() {
             Some(expected)
         );
     }
+}
+
+#[test]
+fn metadata_text_audit_classifies_decode_and_structure_misses() {
+    let uuid = "11111111-1111-4111-8111-111111111111";
+    let reason = |audit: MetadataTextRowAudit| match audit {
+        MetadataTextRowAudit::Miss(miss) => miss.reason,
+        MetadataTextRowAudit::ExtractedWithWarning(_, miss) => miss.reason,
+        MetadataTextRowAudit::Extracted(_) => panic!("expected metadata extraction miss"),
+    };
+
+    assert_eq!(
+        reason(metadata_text_row_audit_from_blob(uuid, b"not-deflate")),
+        MetadataExtractionMissReason::Inflate
+    );
+    assert_eq!(
+        reason(metadata_text_row_audit_from_blob(
+            uuid,
+            &deflate_for_test(&[0xff, 0xfe, 0xfd])
+        )),
+        MetadataExtractionMissReason::Utf8
+    );
+    assert_eq!(
+        reason(metadata_text_row_audit_from_text(
+            uuid,
+            "not metadata".to_string()
+        )),
+        MetadataExtractionMissReason::ObjectCode
+    );
+    assert_eq!(
+        reason(metadata_text_row_audit_from_text(
+            uuid,
+            "{1,{16".to_string()
+        )),
+        MetadataExtractionMissReason::Fields
+    );
+    assert_eq!(
+        reason(metadata_text_row_audit_from_text(
+            uuid,
+            "{1,{16,{0}}}".to_string()
+        )),
+        MetadataExtractionMissReason::Header
+    );
+
+    let unknown_family = format!(
+        "{{1,\r\n{{99,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"Unknown\",{{1,\"en\",\"Unknown\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}}}},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-3333-333333333333,44444444-4444-4444-8444-444444444444}}\r\n}},0}}"
+    );
+    match metadata_text_row_audit_from_text(uuid, unknown_family) {
+        MetadataTextRowAudit::ExtractedWithWarning(_, miss) => {
+            assert_eq!(miss.reason, MetadataExtractionMissReason::Family);
+        }
+        _ => panic!("expected an unknown-family warning"),
+    }
+}
+
+#[test]
+fn root_metadata_inventory_reports_formatter_miss_and_strict_gate() {
+    let uuid = "22222222-2222-4222-8222-222222222222";
+    let row = MetadataTextRow {
+        file_name: uuid.to_string(),
+        text: String::new(),
+        object_code: Some(56),
+        header: Some(MetadataHeader {
+            uuid: uuid.to_string(),
+            name: "Products".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("Catalog".to_string()),
+        folder: Some("Catalogs"),
+    };
+    let metadata = MetadataTextRowsAudit {
+        rows: vec![row],
+        misses: BTreeMap::new(),
+    };
+    let candidates = BTreeSet::from([uuid.to_string()]);
+    let full = audit_root_metadata_inventory(
+        &candidates,
+        &metadata,
+        &[],
+        RootMetadataInventoryScope::Full,
+        true,
+    );
+    assert_eq!(full.expected, 1);
+    assert_eq!(full.emitted, 0);
+    assert_eq!(full.missing, 1);
+    assert_eq!(
+        full.entries[0].reason,
+        Some(MetadataExtractionMissReason::Formatter)
+    );
+    assert!(full.ensure_complete(false).is_ok());
+    assert!(full.ensure_complete(true).is_err());
+
+    let scoped = RootMetadataInventoryReport {
+        scope: RootMetadataInventoryScope::Scoped,
+        ..full
+    };
+    assert!(scoped.ensure_complete(true).is_ok());
+}
+
+#[test]
+fn audited_runtime_builder_preserves_structural_miss_causes() {
+    let uuids = [
+        "10000000-0000-4000-8000-000000000001",
+        "10000000-0000-4000-8000-000000000002",
+        "10000000-0000-4000-8000-000000000003",
+        "10000000-0000-4000-8000-000000000004",
+        "10000000-0000-4000-8000-000000000005",
+        "10000000-0000-4000-8000-000000000006",
+    ];
+    let unknown_family = format!(
+        "{{1,\r\n{{99,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{}}},\"Unknown\",{{1,\"en\",\"Unknown\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},{{\"Pattern\",{{\"B\"}}}}\r\n}}}},11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444}}\r\n}},0}}",
+        uuids[5]
+    );
+    let blobs = [
+        b"not-deflate".to_vec(),
+        deflate_for_test(&[0xff, 0xfe, 0xfd]),
+        deflate_for_test(b"not metadata"),
+        deflate_for_test(b"{1,{16"),
+        deflate_for_test(b"{1,{16,{0}}}"),
+        deflate_for_test(unknown_family.as_bytes()),
+    ];
+    let rows = uuids
+        .iter()
+        .zip(blobs)
+        .map(|(file_name, blob)| ConfigRow {
+            file_name: (*file_name).to_string(),
+            part_no: 0,
+            data_size: blob.len() as i64,
+            binary_hex: encode_hex_for_test(&blob),
+        })
+        .collect::<Vec<_>>();
+
+    let audit = build_metadata_text_rows_audited(&rows);
+    assert_eq!(
+        audit.misses.values().copied().collect::<Vec<_>>(),
+        vec![
+            MetadataExtractionMissReason::Inflate,
+            MetadataExtractionMissReason::Utf8,
+            MetadataExtractionMissReason::ObjectCode,
+            MetadataExtractionMissReason::Fields,
+            MetadataExtractionMissReason::Header,
+            MetadataExtractionMissReason::Family,
+        ]
+    );
+    assert_eq!(audit.rows.len(), 4);
+    assert!(metadata_text_row_from_text(uuids[2], "not metadata".to_string()).is_some());
+}
+
+#[test]
+fn root_inventory_serializes_exact_extraction_causes() {
+    let inflate_uuid = "20000000-0000-4000-8000-000000000001";
+    let header_uuid = "20000000-0000-4000-8000-000000000002";
+    let metadata = MetadataTextRowsAudit {
+        rows: Vec::new(),
+        misses: BTreeMap::from([
+            (
+                inflate_uuid.to_string(),
+                MetadataExtractionMissReason::Inflate,
+            ),
+            (
+                header_uuid.to_string(),
+                MetadataExtractionMissReason::Header,
+            ),
+        ]),
+    };
+    let candidates = BTreeSet::from([inflate_uuid.to_string(), header_uuid.to_string()]);
+    let report = audit_root_metadata_inventory(
+        &candidates,
+        &metadata,
+        &[],
+        RootMetadataInventoryScope::Full,
+        true,
+    );
+
+    assert_eq!(report.missing, 2);
+    assert_eq!(report.misses_by_reason.get("inflate"), Some(&1));
+    assert_eq!(report.misses_by_reason.get("header"), Some(&1));
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(json["entries"][0]["reason"], "inflate");
+    assert_eq!(json["entries"][1]["reason"], "header");
+    assert!(report.ensure_complete(true).is_err());
+}
+
+#[test]
+fn scoped_inventory_ignores_broad_dependency_rows() {
+    let selected_uuid = "30000000-0000-4000-8000-000000000001";
+    let dependency_uuid = "30000000-0000-4000-8000-000000000002";
+    let make_row = |uuid: &str, name: &str| MetadataTextRow {
+        file_name: uuid.to_string(),
+        text: String::new(),
+        object_code: Some(56),
+        header: Some(MetadataHeader {
+            uuid: uuid.to_string(),
+            name: name.to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("Catalog".to_string()),
+        folder: Some("Catalogs"),
+    };
+    let metadata = MetadataTextRowsAudit {
+        rows: vec![
+            make_row(selected_uuid, "Selected"),
+            make_row(dependency_uuid, "Dependency"),
+        ],
+        misses: BTreeMap::from([(
+            dependency_uuid.to_string(),
+            MetadataExtractionMissReason::Formatter,
+        )]),
+    };
+    let selected = BTreeSet::from([selected_uuid.to_string(), dependency_uuid.to_string()]);
+    let indexed_roots = BTreeSet::from([selected_uuid.to_string()]);
+    let (candidates, complete) = selected_root_metadata_candidates(
+        &metadata,
+        &selected,
+        RootMetadataInventoryScope::Scoped,
+        Some(&indexed_roots),
+    );
+
+    assert!(complete);
+    assert_eq!(candidates, indexed_roots);
+}
+
+#[test]
+fn scoped_inventory_does_not_guess_an_ambiguous_uuid_miss() {
+    let selected_uuid = "31000000-0000-4000-8000-000000000001";
+    let metadata = MetadataTextRowsAudit {
+        rows: Vec::new(),
+        misses: BTreeMap::from([(
+            selected_uuid.to_string(),
+            MetadataExtractionMissReason::Inflate,
+        )]),
+    };
+    let selected = BTreeSet::from([selected_uuid.to_string()]);
+    let (candidates, complete) = selected_root_metadata_candidates(
+        &metadata,
+        &selected,
+        RootMetadataInventoryScope::Scoped,
+        None,
+    );
+
+    assert!(candidates.is_empty());
+    assert!(!complete);
+}
+
+#[test]
+fn strict_gate_options_and_inventory_scope_fail_closed() {
+    let empty = BTreeSet::new();
+    let selected = BTreeSet::from(["selected".to_string()]);
+    assert!(validate_root_metadata_gate_options(true, false, &empty).is_err());
+    assert!(validate_root_metadata_gate_options(true, true, &selected).is_err());
+    assert!(validate_root_metadata_gate_options(true, true, &empty).is_ok());
+
+    assert_eq!(
+        root_metadata_inventory_scope("Config", &empty, true),
+        RootMetadataInventoryScope::Full
+    );
+    assert_eq!(
+        root_metadata_inventory_scope("Config", &selected, true),
+        RootMetadataInventoryScope::Scoped
+    );
+    assert_eq!(
+        root_metadata_inventory_scope("ConfigSave", &empty, true),
+        RootMetadataInventoryScope::Scoped
+    );
+    assert_eq!(
+        root_metadata_inventory_scope("Config", &empty, false),
+        RootMetadataInventoryScope::Scoped
+    );
+
+    let undiscovered = RootMetadataInventoryReport {
+        scope: RootMetadataInventoryScope::Full,
+        candidate_set_complete: false,
+        ..RootMetadataInventoryReport::default()
+    };
+    assert!(undiscovered.ensure_complete(true).is_err());
+}
+
+#[test]
+fn metadata_inventory_is_empty_when_xml_extraction_is_disabled() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-metadata-inventory-disabled-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    let payload = b"opaque";
+    let dumped = dump_table_rows_with_options(
+        &root,
+        "Config",
+        vec![ConfigRow {
+            file_name: "root".to_string(),
+            part_no: 0,
+            data_size: payload.len() as i64,
+            binary_hex: encode_hex_for_test(payload),
+        }],
+        true,
+        false,
+        false,
+        false,
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+
+    assert_eq!(
+        dumped.metadata_root_inventory,
+        RootMetadataInventoryReport::default()
+    );
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -9617,6 +9941,30 @@ fn extracts_table_command_set_from_layout_field() {
             "SortListAsc",
             "SortListDesc",
         ]
+    );
+}
+
+#[test]
+fn preserves_known_excluded_commands_when_a_command_id_is_unknown() {
+    let commands = parse_form_standard_command_set_excluded_commands(&[
+        "342c531d-dc73-458a-8ac4-6a746916a33b",
+        "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+        "6886601d-276c-4d3f-af0a-05c586025608",
+    ]);
+
+    assert_eq!(commands, vec!["Change", "Copy"]);
+    assert!(!commands.iter().any(|command| command.contains("aaaa")));
+}
+
+#[test]
+fn preserves_known_table_excluded_commands_when_a_command_id_is_unknown() {
+    let fields = [
+        r#"{3,0ae4bea5-23be-42a7-b69e-97b11b29c453,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,2bbe4e12-06d2-409b-a972-eea585125d83}"#,
+    ];
+
+    assert_eq!(
+        parse_form_table_command_set_excluded_commands(&fields),
+        vec!["Copy", "SortListAsc"]
     );
 }
 

@@ -222,6 +222,7 @@ fn export_config_report(
         inflate: false,
         extract_module_text: true,
         extract_metadata_xml: true,
+        require_complete_root_metadata: false,
         no_binary_rows: true,
         write_binary_rows: false,
         write_manifest: false,
