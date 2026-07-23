@@ -1,0 +1,193 @@
+name: Standalone Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version from Cargo.toml, with optional v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  OPENSPEC_TELEMETRY: "0"
+  RUST_VERSION: "1.95.0"
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verify requested version
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          $requested = $env:REQUESTED_VERSION
+          if ($requested.StartsWith("v")) { $requested = $requested.Substring(1) }
+          $manifest = python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['package']['version'])"
+          if ($requested -ne $manifest) { throw "Release version $requested does not match Cargo.toml $manifest" }
+
+      - name: Validate the accepted design and specifications
+        env:
+          CI: "true"
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+        run: npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint standalone workspace crates offline
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings
+
+      - name: Test standalone workspace crates offline
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo test --locked --workspace --exclude ibcmd-rs
+
+      - name: Test all root integration suites offline
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo test --locked -p ibcmd-rs --test '*' --no-default-features
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: ibcmd-rs
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: ibcmd-rs.exe
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Rust target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Resolve deterministic release coordinates
+        shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          $requested = $env:REQUESTED_VERSION
+          if ($requested.StartsWith("v")) { $requested = $requested.Substring(1) }
+          $manifest = python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['package']['version'])"
+          if ($requested -ne $manifest) { throw "Release version $requested does not match Cargo.toml $manifest" }
+          "RELEASE_VERSION=$manifest" >> $env:GITHUB_ENV
+          $epoch = git log -1 --format=%ct
+          "SOURCE_DATE_EPOCH=$epoch" >> $env:GITHUB_ENV
+
+      - name: Fetch locked target dependencies
+        run: cargo fetch --locked --target ${{ matrix.target }}
+
+      - name: Build standalone binary offline
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo build --locked --release --no-default-features --target ${{ matrix.target }}
+
+      - name: Generate, package, and audit release
+        shell: pwsh
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          $directory = "target/release-artifacts"
+          $binary = "target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          $stem = "ibcmd-rs-$($env:RELEASE_VERSION)-${{ matrix.target }}"
+          $sbom = "$directory/$stem.sbom.cdx.json"
+          $archive = "$directory/$stem.zip"
+          python scripts/generate_sbom.py --manifest-path Cargo.toml --output $sbom --target ${{ matrix.target }}
+          python scripts/package_release.py --binary $binary --sbom $sbom --output $archive --version $env:RELEASE_VERSION --target ${{ matrix.target }} --repository-root .
+          python scripts/audit_release.py --binary $binary --sbom $sbom --archive $archive --checksum "$archive.sha256"
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-${{ matrix.target }}
+          path: target/release-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download audited artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: standalone-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "ibcmd-rs $GITHUB_REF_NAME"
+          fi

@@ -468,7 +468,7 @@
 
 ### APP-004 — Добавить offline E2E, readiness gate и reproducible release
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-013, MIG-004, APP-002, APP-003, CF-015
+- **Статус:** `[x]`; **зависимости:** BOOT-013, MIG-004, APP-002, APP-003, CF-015
 - **Файлы:** создать `tests/offline_conversion_matrix.rs`, `.github/workflows/offline-e2e.yml`, `.github/workflows/release.yml`, `docs/release-criteria.md`
 - **Действия:** XML↔CF, same/cross-profile, malformed, clean environment; SHA-256/SBOM/release smoke.
 - **Проверка:** merge/release запрещены при missing evidence/unexpected loss; release archive не содержит компонентов 1С/EDT; финальная валидация всех требований design/specs.

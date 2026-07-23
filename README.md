@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=55 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=56 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 55 of 56 accepted leaf issues in the
+As of 2026-07-23, all 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (98.2%). Live workflow statuses are tracked in
+are complete (100%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -412,6 +412,15 @@ non-default `platform-oracle` feature. Windows/Linux CI checks the default
 boundary, while the legacy Windows lane compiles the feature-enabled side. See
 [platform-oracle isolation evidence](docs/evidence/platform-oracle-isolation.md).
 
+APP-004 completes the standalone release gate. Windows and Linux run the full
+offline integration matrix after a locked dependency fetch, including XML/CF
+round trips, both CF revisions, guarded cross-profile migrations, malformed
+inputs, evidence validation, and clean-environment binary auditing. Tag builds
+use pinned Rust, disabled default features, deterministic ZIP packaging,
+CycloneDX SBOMs, and verified SHA-256 sidecars. The archive has an exact
+allowlist and cannot include 1C, EDT/JVM, or platform-oracle payloads. See the
+[standalone release criteria](docs/release-criteria.md).
+
 | Phase | Completed | Progress |
 |---|---:|---:|
 | Phase 0 baseline/boundaries | 4/4 | 100% |
@@ -420,8 +429,8 @@ boundary, while the legacy Windows lane compiles the feature-enabled side. See
 | Phase 3 CF | 15/15 | 100% |
 | Phase 4 bootstrap | 13/13 | 100% |
 | Phase 5a migrations | 4/4 | 100% |
-| Phase 5b app/release | 3/4 | 75% |
-| **Overall** | **55/56** | **98.2%** |
+| Phase 5b app/release | 4/4 | 100% |
+| **Overall** | **56/56** | **100%** |
 
 ## Export Compatibility Status
 
