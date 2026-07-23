@@ -594,16 +594,11 @@ pub(super) fn parse_moxel_spreadsheet_text(
         .iter()
         .map(|drawing| drawing.format_index)
         .collect::<BTreeSet<_>>();
-    let zero_column_format_table_is_width_only = parse_moxel_format_table(
-        &fields,
-        0,
-        &style_refs,
-        &drawing_format_indices,
-        &[],
-    )
-    .is_some_and(|formats| {
-        formats.len() == 1 && formats.first().is_some_and(is_moxel_width_only_format)
-    });
+    let zero_column_format_table_is_width_only =
+        parse_moxel_format_table(&fields, 0, &style_refs, &drawing_format_indices, &[])
+            .is_some_and(|formats| {
+                formats.len() == 1 && formats.first().is_some_and(is_moxel_width_only_format)
+            });
     let observed_column_count = rows
         .iter()
         .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
