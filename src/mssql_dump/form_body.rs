@@ -1666,6 +1666,8 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "390d5e4b-e732-4c88-8748-9e211a416984" => Some("OnReadAtServer"),
         "3c3da18f-fc18-4f77-8c2d-96c25bec40a5" => Some("Selection"),
         "40925042-2517-455b-a600-d68282829334" => Some("BeforeLoadUserSettingsAtServer"),
+        // Platform event identifier, not an infobase metadata object identifier.
+        "c41e7b98-098c-433e-8ac3-56ec2a2c49e2" => Some("BeforeLoadUserSettingsAtServer"),
         "499bb7af-6262-4de4-819f-ef264d1a20ec" => Some("OnSaveVariantAtServer"),
         "4d88756d-bad4-4fde-92e1-c1f1402ac6b2" => Some("BeforeEditEnd"),
         "53325f0c-b112-4c44-ab12-5d1ee0b1f07b" => Some("DocumentComplete"),
@@ -3543,6 +3545,11 @@ pub(super) fn normalize_form_main_table_category(
 ) -> Option<String> {
     let main_table = main_table?;
     match (main_table.as_str(), category) {
+        (value, Some("3"))
+            if value.starts_with("AccumulationRegister.") && !value.ends_with(".Balance") =>
+        {
+            Some(format!("{value}.Balance"))
+        }
         (value, Some("3"))
             if value.starts_with("AccountingRegister.")
                 && !value.ends_with(".RecordsWithExtDimensions") =>

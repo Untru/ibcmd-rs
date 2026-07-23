@@ -2909,8 +2909,31 @@ fn maps_form_event_uuid_aliases_to_names() {
 }
 
 #[test]
+fn maps_platform_before_load_user_settings_event_identifier() {
+    const PLATFORM_EVENT_ID: &str = "c41e7b98-098c-433e-8ac3-56ec2a2c49e2";
+
+    assert_eq!(
+        form_event_name_from_identifier(PLATFORM_EVENT_ID),
+        Some("BeforeLoadUserSettingsAtServer")
+    );
+}
+
+#[test]
+fn parses_platform_before_load_user_settings_event_identifier() {
+    const PLATFORM_EVENT_ID: &str = "c41e7b98-098c-433e-8ac3-56ec2a2c49e2";
+
+    assert_eq!(
+        parse_form_body_event_pair(PLATFORM_EVENT_ID, r#""HandlerA""#),
+        Some(FormBodyEvent {
+            name: "BeforeLoadUserSettingsAtServer".to_string(),
+            handler: "HandlerA".to_string(),
+        })
+    );
+}
+
+#[test]
 fn extracts_form_uuid_events_and_auto_command_bar_to_body_xml() {
-    let unknown_event_uuid = "213d1900-dcad-4616-9f20-3f077156a40f";
+    let unknown_event_uuid = "11111111-2222-4333-8444-555555555555";
     let form_body = deflate_for_test(
             format!(r#"{{4,{{59,{{3,1d632984-de3c-4b4b-ad9f-d69682a10182,"ОбработкаВыбора",3699f6a3-9a2a-4c82-a775-6ff4824a08ca,"ОбработкаОповещения",9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,"ПриСозданииНаСервере",{unknown_event_uuid},"ПослеЗаписиНаСервере",1,0,1d632984-de3c-4b4b-ad9f-d69682a10182,0,1,3699f6a3-9a2a-4c82-a775-6ff4824a08ca,0,1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}},{{22,{{-1,02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,9,"ФормаКоманднаяПанель",{{1,0}}}}}},"",{{0}}}}"#).as_bytes(),
         );
@@ -4052,6 +4075,66 @@ fn derives_default_list_settings_from_auto_save_for_renamed_attribute() {
         Some("Normal")
     );
     assert!(settings.list_settings.items_user_setting_id.is_some());
+}
+
+#[test]
+fn restores_accumulation_register_balance_main_table_from_raw_category() {
+    const MAIN_TABLE_TYPE_ID: &str = "fc01b5df-97fe-449b-83d4-218a090e681e";
+    const REGISTER_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+    fn parse_main_table(
+        main_table_type_id: &str,
+        register_id: &str,
+        main_table: &str,
+        category: &str,
+    ) -> String {
+        let object_refs = BTreeMap::from([(register_id.to_string(), main_table.to_string())]);
+        let raw_attribute = format!(
+            r##"{{9,{{17}},0,"ListA",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,2,"MainTable",{{"#",{main_table_type_id},{register_id}}},"MainTableCategory",{{"N",{category}}}}},{{0,0}}}}"##
+        );
+        parse_form_attribute(&raw_attribute, &BTreeMap::new(), &object_refs)
+            .expect("dynamic-list attribute")
+            .settings
+            .expect("dynamic-list settings")
+            .main_table
+            .expect("main table")
+    }
+
+    assert_eq!(
+        parse_main_table(
+            MAIN_TABLE_TYPE_ID,
+            REGISTER_ID,
+            "AccumulationRegister.RegisterA",
+            "3",
+        ),
+        "AccumulationRegister.RegisterA.Balance"
+    );
+    assert_eq!(
+        parse_main_table(
+            MAIN_TABLE_TYPE_ID,
+            REGISTER_ID,
+            "AccumulationRegister.RegisterA",
+            "1",
+        ),
+        "AccumulationRegister.RegisterA"
+    );
+    assert_eq!(
+        parse_main_table(
+            MAIN_TABLE_TYPE_ID,
+            REGISTER_ID,
+            "AccumulationRegister.RegisterA.Balance",
+            "3",
+        ),
+        "AccumulationRegister.RegisterA.Balance"
+    );
+    assert_eq!(
+        normalize_form_main_table_category(
+            Some("AccountingRegister.RegisterB".to_string()),
+            Some("3"),
+        )
+        .as_deref(),
+        Some("AccountingRegister.RegisterB.RecordsWithExtDimensions")
+    );
 }
 
 #[test]
