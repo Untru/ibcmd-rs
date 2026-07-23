@@ -179,7 +179,13 @@ fn decode_raw_deflate(
         let before_in = inflater.total_in();
         let before_out = inflater.total_out();
         let status = inflater
-            .decompress(&input[input_offset..], &mut buffer, FlushDecompress::Finish)
+            // `Finish` asks zlib to complete the stream within this output
+            // buffer. For a valid stream whose expanded data crosses our
+            // bounded buffer, that can make zlib reject the next chunk before
+            // it reaches StreamEnd. `None` preserves streaming semantics; the
+            // explicit StreamEnd and full-input checks below remain the strict
+            // completion gate.
+            .decompress(&input[input_offset..], &mut buffer, FlushDecompress::None)
             .map_err(|error| PayloadDecodeError::InvalidDeflate(error.to_string()))?;
         let consumed = usize::try_from(inflater.total_in() - before_in)
             .map_err(|_| PayloadDecodeError::CounterOverflow)?;
@@ -356,6 +362,28 @@ mod tests {
             assert_eq!(decoded.encoding(), encoding);
             assert_eq!(decoded.bytes(), input);
         }
+    }
+
+    #[test]
+    fn raw_deflate_stream_larger_than_codec_buffer_reaches_stream_end() {
+        // Deterministic high-entropy bytes force several 16 KiB output-buffer
+        // iterations without embedding any application payload.
+        let mut state = 0x1234_5678_u32;
+        let input: Vec<u8> = (0..(CODEC_BUFFER_BYTES * 3 + 17))
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 24) as u8
+            })
+            .collect();
+        let encoded =
+            encode_payload(PayloadEncoding::RawDeflate, &input, limits(128 * 1024, 200)).unwrap();
+        let decoded = decode_payload(
+            PayloadEncoding::RawDeflate,
+            &encoded,
+            limits(128 * 1024, 200),
+        )
+        .unwrap();
+        assert_eq!(decoded.bytes(), input);
     }
 
     #[test]
