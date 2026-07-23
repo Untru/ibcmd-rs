@@ -11908,9 +11908,6 @@ fn parse_exact_catalog_tabular_section_use(
         let Some(fields) = split_information_register_braced_fields(&text[start..end]) else {
             continue;
         };
-        if fields.len() != 3 || fields.first().map(|field| field.trim()) != Some("1") {
-            continue;
-        }
         let Some(section) = split_information_register_braced_fields(fields.get(1)?) else {
             continue;
         };
@@ -11920,10 +11917,19 @@ fn parse_exact_catalog_tabular_section_use(
         {
             continue;
         }
-        let use_mode = match fields.get(2)?.trim() {
-            "0" => "ForItem",
-            "2" => "ForFolderAndItem",
-            _ => return None,
+        let use_mode = match fields.as_slice() {
+            [kind, _, mode] if kind.trim() == "1" => match mode.trim() {
+                "0" => "ForItem",
+                "2" => "ForFolderAndItem",
+                _ => return None,
+            },
+            [kind, _, mode, tail] if kind.trim() == "2" && tail.trim() == "5" => {
+                match mode.trim() {
+                    "0" => "ForItem",
+                    _ => return None,
+                }
+            }
+            _ => continue,
         };
         matches.push((end.saturating_sub(start), use_mode));
     }
