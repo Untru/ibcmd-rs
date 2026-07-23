@@ -19,6 +19,71 @@ fn decodes_plain_hex_and_sql_hex() {
 }
 
 #[test]
+fn parses_accumulation_register_code4_attribute_defaults() {
+    let attribute_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let text = format!(
+        r#"{{4,{{27,{{2,{{3,{{1,0,{attribute_uuid}}},"PaymentRequest",{{1,"ru","Payment request"}},"",0,0,{zero_uuid},0}},{{"Pattern",{{"B"}}}}}},0,{{0}},{{1,"ru","Request tooltip"}},0,"",0,{{"U"}},{{"U"}},0,{zero_uuid},2,0,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},{{"S",""}},0,0,0}},0,1,0,{{1,{zero_uuid}}}}}"#
+    );
+    let header = MetadataHeader {
+        uuid: attribute_uuid.to_string(),
+        name: "PaymentRequest".to_string(),
+        synonyms: vec![("ru".to_string(), "Payment request".to_string())],
+        comment: String::new(),
+        template_type_code: None,
+    };
+    let marker_start = text.find(attribute_uuid).unwrap();
+    let (value_types, properties) = parse_accumulation_register_attribute_payload(
+        "AccumulationRegister",
+        "Attribute",
+        &text,
+        marker_start,
+        &header,
+        "Settlements",
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        false,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        value_types.as_slice(),
+        [ConstantValueType::Boolean]
+    ));
+    assert!(!properties.emit_fill_from_filling_value);
+    assert!(!properties.emit_fill_value);
+    assert_eq!(properties.full_text_search, Some("Use"));
+
+    let child = MetadataChildObject {
+        tag: "Attribute",
+        header,
+        generated_types: Vec::new(),
+        value_types,
+        emit_empty_type: false,
+        properties: Some(properties),
+        register_properties: None,
+        tabular_section_properties: None,
+        child_objects: Vec::new(),
+    };
+    let mut xml = String::new();
+    push_metadata_child_object_xml(&mut xml, &child);
+    for expected in [
+        "<PasswordMode>false</PasswordMode>",
+        "<ToolTip>",
+        "<v8:content>Request tooltip</v8:content>",
+        "<ChoiceFoldersAndItems>Items</ChoiceFoldersAndItems>",
+        "<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>",
+        "<Indexing>DontIndex</Indexing>",
+        "<FullTextSearch>Use</FullTextSearch>",
+    ] {
+        assert!(xml.contains(expected), "{xml}");
+    }
+    assert!(!xml.contains("<FillFromFillingValue>"), "{xml}");
+    assert!(!xml.contains("<FillValue"), "{xml}");
+}
+
+#[test]
 fn rejects_odd_hex_length() {
     assert!(decode_hex("abc").is_err());
 }

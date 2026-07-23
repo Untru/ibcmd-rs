@@ -9652,6 +9652,21 @@ fn parse_register_properties_from_text(
                     Some(payload.register_properties),
                     false,
                 )
+            } else if let Some((value_types, properties)) =
+                parse_accumulation_register_attribute_payload(
+                    kind,
+                    tag,
+                    text,
+                    marker_start,
+                    &header,
+                    &owner_name,
+                    type_index,
+                    object_refs,
+                    form_refs,
+                    source_version == InfobaseConfigSourceVersion::V2_21,
+                )
+            {
+                (value_types, Some(properties), None, false)
             } else {
                 let value_types =
                     parse_metadata_child_value_types(text, marker_start, &header.uuid, type_index);
@@ -11986,6 +12001,75 @@ struct AccumulationCalculationRegisterChildPayload {
     value_types: Vec<ConstantValueType>,
     properties: MetadataChildProperties,
     register_properties: RegisterMetadataChildProperties,
+}
+
+/// Parses the code-4 wrapper used for accumulation-register attributes.
+///
+/// Unlike dimensions and resources, these attributes have no register-specific
+/// tail.  Their common code-27 payload is nevertheless complete and native
+/// `ibcmd` writes its attribute defaults from it.  Keeping the outer wrapper
+/// exact prevents applying those defaults to arbitrary code-27 children.
+fn parse_accumulation_register_attribute_payload(
+    owner_kind: &str,
+    tag: &str,
+    text: &str,
+    marker_start: usize,
+    child_header: &MetadataHeader,
+    owner_name: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> Option<(Vec<ConstantValueType>, MetadataChildProperties)> {
+    if owner_kind != "AccumulationRegister" || tag != "Attribute" {
+        return None;
+    }
+    let mut parsed =
+        metadata_object_field_candidates_around_header(text, marker_start, &child_header.uuid)
+            .into_iter()
+            .filter_map(|fields| {
+                if fields.len() != 6 || fields.first().map(|field| field.trim()) != Some("4") {
+                    return None;
+                }
+                let indexing = metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
+                let full_text_search = register_child_full_text_search_xml(fields.get(3)?.trim())?;
+                if fields.get(4).map(|field| field.trim()) != Some("0") {
+                    return None;
+                }
+                let data_history = split_1c_braced_fields(fields.get(5)?.trim(), 0)?;
+                if data_history.len() != 2
+                    || data_history.first().map(|field| field.trim()) != Some("1")
+                    || !information_register_uuid_is_zero(&parse_uuid_field(
+                        data_history.get(1)?.trim(),
+                    )?)
+                {
+                    return None;
+                }
+                let common_fields = split_1c_braced_fields(fields.get(1)?, 0)?;
+                let value_types = parse_register_common_child_value_types(
+                    &common_fields,
+                    child_header,
+                    type_index,
+                )?;
+                let mut properties = parse_information_register_common_child_properties(
+                    &common_fields,
+                    owner_kind,
+                    owner_name,
+                    type_index,
+                    object_refs,
+                    form_refs,
+                    preserve_raw_data_paths,
+                )?;
+                // This wrapper has neither FillFromFillingValue nor FillValue in its
+                // XCF property sequence; native emits the remaining common defaults.
+                properties.emit_fill_from_filling_value = false;
+                properties.emit_fill_value = false;
+                properties.indexing = Some(indexing);
+                properties.full_text_search = Some(full_text_search);
+                Some((value_types, properties))
+            });
+    let payload = parsed.next()?;
+    parsed.next().is_none().then_some(payload)
 }
 
 fn parse_accumulation_calculation_register_child_tag(
