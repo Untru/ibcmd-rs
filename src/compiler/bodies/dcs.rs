@@ -216,41 +216,82 @@ fn decode_schema_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
             "DCS schema header is truncated".to_string(),
         ));
     }
-    if read_u32(&plain, 0)? != 0 || read_u32(&plain, 4)? != 1 {
+    if read_u32(&plain, 0)? != 0 {
         return Err(DcsCodecError::UnsupportedLayout(
             "unknown DCS schema header version".to_string(),
         ));
     }
-    let first_len = read_len(&plain, 8, "first DCS XML document")?;
-    let second_len = read_len(&plain, 16, "second DCS XML document")?;
-    let second_start = DCS_HEADER_BYTES
-        .checked_add(first_len)
-        .ok_or(DcsCodecError::LimitExceeded("DCS document offset"))?;
-    let third_start = second_start
-        .checked_add(second_len)
-        .ok_or(DcsCodecError::LimitExceeded("DCS document offset"))?;
-    if first_len == 0 || second_len == 0 || third_start >= plain.len() {
+    let settings_count = usize::try_from(read_u32(&plain, 4)?)
+        .map_err(|_| DcsCodecError::LimitExceeded("DCS settings document count"))?;
+    if settings_count == 0 {
         return Err(DcsCodecError::UnsupportedLayout(
-            "DCS schema document lengths are invalid".to_string(),
+            "DCS schema has no settings documents".to_string(),
         ));
     }
-    let first = &plain[DCS_HEADER_BYTES..second_start];
-    let second = &plain[second_start..third_start];
-    let third = &plain[third_start..];
-    for (index, document) in [first, second, third].iter().enumerate() {
+    let stored_length_count = settings_count
+        .checked_add(1)
+        .ok_or(DcsCodecError::LimitExceeded("DCS document count"))?;
+    let header_len = stored_length_count
+        .checked_mul(std::mem::size_of::<u64>())
+        .and_then(|lengths| 8usize.checked_add(lengths))
+        .ok_or(DcsCodecError::LimitExceeded("DCS schema header"))?;
+    if header_len >= plain.len() {
+        return Err(DcsCodecError::UnsupportedLayout(
+            "DCS schema header is truncated".to_string(),
+        ));
+    }
+
+    let document_count = settings_count
+        .checked_add(2)
+        .ok_or(DcsCodecError::LimitExceeded("DCS document count"))?;
+    let mut document_start = header_len;
+    for index in 0..stored_length_count {
+        let length_offset = index
+            .checked_mul(std::mem::size_of::<u64>())
+            .and_then(|offset| 8usize.checked_add(offset))
+            .ok_or(DcsCodecError::LimitExceeded("DCS document length offset"))?;
+        let length = read_len(&plain, length_offset, "DCS XML document")?;
+        let document_end = document_start
+            .checked_add(length)
+            .ok_or(DcsCodecError::LimitExceeded("DCS document offset"))?;
+        if length == 0 || document_end > plain.len() {
+            return Err(DcsCodecError::UnsupportedLayout(
+                "DCS schema document lengths are invalid".to_string(),
+            ));
+        }
+        let document = &plain[document_start..document_end];
         if !document.starts_with(UTF8_BOM) {
             return Err(DcsCodecError::UnsupportedLayout(format!(
                 "DCS XML document {} has no UTF-8 BOM",
                 index + 1
             )));
         }
+        if index == 0 {
+            validate_xml_document(document, "SchemaFile", None)?;
+            if !contains_bytes(document, b"<dataCompositionSchema") {
+                return Err(DcsCodecError::UnsupportedLayout(
+                    "DCS SchemaFile document has no dataCompositionSchema root".to_string(),
+                ));
+            }
+        } else {
+            validate_xml_document(document, "Settings", Some(SETTINGS_NS))?;
+        }
+        document_start = document_end;
     }
-    validate_xml_document(first, "SchemaFile", None)?;
-    validate_xml_document(second, "Settings", Some(SETTINGS_NS))?;
-    validate_xml_document(third, "SchemaFile", None)?;
-    if !contains_bytes(first, b"<dataCompositionSchema")
-        || !contains_bytes(third, b"<dataCompositionSchema")
-    {
+    if document_start >= plain.len() {
+        return Err(DcsCodecError::UnsupportedLayout(
+            "DCS schema document lengths are invalid".to_string(),
+        ));
+    }
+    let last = &plain[document_start..];
+    if !last.starts_with(UTF8_BOM) {
+        return Err(DcsCodecError::UnsupportedLayout(format!(
+            "DCS XML document {} has no UTF-8 BOM",
+            document_count
+        )));
+    }
+    validate_xml_document(last, "SchemaFile", None)?;
+    if !contains_bytes(last, b"<dataCompositionSchema") {
         return Err(DcsCodecError::UnsupportedLayout(
             "DCS SchemaFile document has no dataCompositionSchema root".to_string(),
         ));
@@ -259,7 +300,7 @@ fn decode_schema_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
         kind: DcsTemplateKind::Schema,
         layout: DcsBodyLayout::NativeThreeDocument,
         plain,
-        document_count: 3,
+        document_count,
     })
 }
 
@@ -588,6 +629,34 @@ mod tests {
     const SIMPLE_APPEARANCE: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 <AppearanceTemplate xmlns="http://v8.1c.ru/8.1/data-composition-system/appearance-template"/>"#;
 
+    fn synthetic_schema_document() -> Vec<u8> {
+        xml_document(&format!(
+            "{SCHEMA_FILE_OPEN}\r\n\t<dataCompositionSchema xmlns=\"{}\"/>\r\n</SchemaFile>",
+            std::str::from_utf8(SCHEMA_NS).unwrap()
+        ))
+    }
+
+    fn synthetic_schema_plain(settings: &[Vec<u8>]) -> Vec<u8> {
+        assert!(!settings.is_empty());
+        let schema = synthetic_schema_document();
+        let trailing_schema = schema.clone();
+        let mut documents = Vec::with_capacity(settings.len() + 2);
+        documents.push(schema);
+        documents.extend(settings.iter().cloned());
+        documents.push(trailing_schema);
+
+        let mut plain = Vec::new();
+        plain.extend_from_slice(&0u32.to_le_bytes());
+        plain.extend_from_slice(&(settings.len() as u32).to_le_bytes());
+        for document in &documents[..documents.len() - 1] {
+            plain.extend_from_slice(&(document.len() as u64).to_le_bytes());
+        }
+        for document in documents {
+            plain.extend_from_slice(&document);
+        }
+        plain
+    }
+
     #[test]
     fn schema_compiles_to_evidenced_three_document_container() {
         let profile = DcsCodecProfile::fixture();
@@ -608,6 +677,94 @@ mod tests {
         assert!(exported.contains("<DataCompositionSchema "));
         assert!(exported.contains("<name>Source1</name>"));
         assert!(exported.contains("<dataSourceType>Local</dataSourceType>"));
+    }
+
+    #[test]
+    fn schema_decoder_accepts_multiple_settings_documents() {
+        let settings = xml_document(EMPTY_SETTINGS);
+        let plain = synthetic_schema_plain(&[settings.clone(), settings]);
+        let blob = deflate_bytes(&plain).unwrap();
+        let decoded = decode_compatible_dcs(DcsTemplateKind::Schema, &blob).unwrap();
+        assert_eq!(decoded.layout(), DcsBodyLayout::NativeThreeDocument);
+        assert_eq!(decoded.document_count(), 4);
+        assert_eq!(decoded.plaintext(), plain);
+    }
+
+    #[test]
+    fn schema_decoder_rejects_zero_settings_count() {
+        let mut plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS)]);
+        plain[4..8].copy_from_slice(&0u32.to_le_bytes());
+
+        assert!(matches!(
+            decode_schema_plain(plain),
+            Err(DcsCodecError::UnsupportedLayout(reason))
+                if reason == "DCS schema has no settings documents"
+        ));
+    }
+
+    #[test]
+    fn schema_decoder_rejects_huge_settings_count_before_document_iteration() {
+        let mut plain = vec![0u8; DCS_HEADER_BYTES];
+        plain[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        assert!(matches!(
+            decode_schema_plain(plain),
+            Err(DcsCodecError::UnsupportedLayout(reason))
+                if reason == "DCS schema header is truncated"
+        ));
+    }
+
+    #[test]
+    fn schema_decoder_rejects_zero_stored_document_length() {
+        let mut plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS)]);
+        plain[8..16].copy_from_slice(&0u64.to_le_bytes());
+
+        assert!(matches!(
+            decode_schema_plain(plain),
+            Err(DcsCodecError::UnsupportedLayout(reason))
+                if reason == "DCS schema document lengths are invalid"
+        ));
+    }
+
+    #[test]
+    fn schema_decoder_rejects_stored_document_length_past_payload() {
+        let mut plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS)]);
+        let past_payload = u64::try_from(plain.len()).unwrap();
+        plain[8..16].copy_from_slice(&past_payload.to_le_bytes());
+
+        assert!(matches!(
+            decode_schema_plain(plain),
+            Err(DcsCodecError::UnsupportedLayout(reason))
+                if reason == "DCS schema document lengths are invalid"
+        ));
+    }
+
+    #[test]
+    fn schema_decoder_rejects_missing_trailing_schema_document() {
+        let mut plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS)]);
+        let first_len = read_len(&plain, 8, "first document").unwrap();
+        let settings_len = read_len(&plain, 16, "settings document").unwrap();
+        plain.truncate(DCS_HEADER_BYTES + first_len + settings_len);
+
+        assert!(matches!(
+            decode_schema_plain(plain),
+            Err(DcsCodecError::UnsupportedLayout(reason))
+                if reason == "DCS schema document lengths are invalid"
+        ));
+    }
+
+    #[test]
+    fn schema_decoder_rejects_malformed_second_settings_document() {
+        let malformed = xml_document(&format!(
+            "<Settings xmlns=\"{}\"><broken></Settings>",
+            std::str::from_utf8(SETTINGS_NS).unwrap()
+        ));
+        let plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS), malformed]);
+
+        assert!(matches!(
+            decode_schema_plain(plain),
+            Err(DcsCodecError::InvalidXml(_))
+        ));
     }
 
     #[test]
