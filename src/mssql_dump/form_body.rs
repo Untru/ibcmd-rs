@@ -66,6 +66,8 @@ const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
     ("ТипЗначения", "ValueType"),
 ];
 
+const MAX_FORM_SERVER_STATE_XML_BYTES: usize = 64 * 1_048_576;
+
 #[allow(dead_code)]
 pub(crate) fn extract_form_body_xml(
     bytes: &[u8],
@@ -3402,10 +3404,63 @@ pub(super) fn normalize_form_conditional_appearance_text_segment(
 
 pub(super) fn parse_form_server_state_xml(field: &str) -> Option<String> {
     let payload = parse_form_setting_string(field)?;
-    let xml = decode_base64_mime(&payload)?;
-    let xml_start = xml.iter().position(|byte| *byte == b'<')?;
-    let xml = String::from_utf8_lossy(&xml[xml_start..]).to_string();
+    let encoded = decode_base64_mime(&payload)?;
+    let xml = decode_form_server_state_chunks(&encoded)?;
+    let xml = String::from_utf8(xml).ok()?;
     extract_form_server_state_inner_xml(&xml)
+}
+
+pub(super) fn decode_form_server_state_chunks(encoded: &[u8]) -> Option<Vec<u8>> {
+    decode_form_server_state_chunks_with_limit(encoded, MAX_FORM_SERVER_STATE_XML_BYTES)
+}
+
+pub(super) fn decode_form_server_state_chunks_with_limit(
+    encoded: &[u8],
+    max_output_bytes: usize,
+) -> Option<Vec<u8>> {
+    const MAGIC: &[u8] = &[0x41, 0xC1];
+    const TERMINATOR: &[u8] = b"  ";
+
+    if !encoded.starts_with(MAGIC) {
+        return None;
+    }
+
+    let mut cursor = MAGIC.len();
+    let mut output = Vec::new();
+    loop {
+        let remaining = encoded.get(cursor..)?;
+        if remaining == TERMINATOR {
+            return Some(output);
+        }
+
+        let tag = *remaining.first()?;
+        cursor = cursor.checked_add(1)?;
+        let chunk_len = match tag {
+            0x9A => {
+                let len = *encoded.get(cursor)?;
+                cursor = cursor.checked_add(1)?;
+                usize::from(len)
+            }
+            0x9B => {
+                let length_bytes: [u8; 2] = encoded
+                    .get(cursor..cursor.checked_add(2)?)?
+                    .try_into()
+                    .ok()?;
+                cursor = cursor.checked_add(2)?;
+                usize::from(u16::from_le_bytes(length_bytes))
+            }
+            _ => return None,
+        };
+
+        let chunk_end = cursor.checked_add(chunk_len)?;
+        let chunk = encoded.get(cursor..chunk_end)?;
+        let output_len = output.len().checked_add(chunk_len)?;
+        if output_len > max_output_bytes {
+            return None;
+        }
+        output.extend_from_slice(chunk);
+        cursor = chunk_end;
+    }
 }
 
 pub(super) fn extract_form_server_state_inner_xml(xml: &str) -> Option<String> {

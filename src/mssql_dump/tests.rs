@@ -3934,6 +3934,108 @@ fn extracts_form_server_state_inner_xml() {
     assert!(!inner.contains("<TypeId xmlns="), "{inner}");
 }
 
+fn encode_form_server_state_chunks_for_test(chunks: &[&[u8]]) -> Vec<u8> {
+    let mut encoded = vec![0x41, 0xC1];
+    for chunk in chunks {
+        if chunk.len() <= usize::from(u8::MAX) {
+            encoded.extend_from_slice(&[0x9A, chunk.len() as u8]);
+        } else {
+            let chunk_len = u16::try_from(chunk.len()).expect("test chunk fits u16");
+            encoded.push(0x9B);
+            encoded.extend_from_slice(&chunk_len.to_le_bytes());
+        }
+        encoded.extend_from_slice(chunk);
+    }
+    encoded.extend_from_slice(b"  ");
+    encoded
+}
+
+fn form_server_state_field_for_test(encoded: &[u8]) -> String {
+    format!(r#"{{"S","{}"}}"#, encode_base64_for_test(encoded))
+}
+
+#[test]
+fn decodes_and_extracts_short_form_server_state_chunk_stream() {
+    let payload = concat!(
+        "\u{feff}<UniversalListServerOnlyState>",
+        "<Field><dcssch:dataPath>Дата</dcssch:dataPath></Field>",
+        "</UniversalListServerOnlyState>"
+    )
+    .as_bytes();
+    let encoded = encode_form_server_state_chunks_for_test(&[&payload[..2], &payload[2..]]);
+
+    assert_eq!(
+        decode_form_server_state_chunks(&encoded).as_deref(),
+        Some(payload)
+    );
+    let inner = parse_form_server_state_xml(&form_server_state_field_for_test(&encoded))
+        .expect("server state inner xml");
+    assert!(
+        inner.contains("<dcssch:dataPath>Дата</dcssch:dataPath>"),
+        "{inner}"
+    );
+}
+
+#[test]
+fn decodes_form_server_state_chunks_split_inside_utf8_character() {
+    let mut payload = b"\xEF\xBB\xBF<UniversalListServerOnlyState xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\"><Field><dcssch:dataPath>".to_vec();
+    let split_at = 2 + 32_768;
+    let multibyte_start = split_at - 1;
+    payload.resize(multibyte_start, b'a');
+    payload.extend_from_slice("Ж".as_bytes());
+    payload.extend_from_slice(b"</dcssch:dataPath></Field></UniversalListServerOnlyState>");
+    assert_eq!(payload[multibyte_start], 0xD0);
+    assert_eq!(payload[split_at], 0x96);
+
+    let encoded = encode_form_server_state_chunks_for_test(&[
+        &payload[..2],
+        &payload[2..split_at],
+        &payload[split_at..],
+    ]);
+
+    assert_eq!(
+        decode_form_server_state_chunks(&encoded).as_deref(),
+        Some(payload.as_slice())
+    );
+    let inner = parse_form_server_state_xml(&form_server_state_field_for_test(&encoded))
+        .expect("UTF-8 is decoded after joining chunks");
+    assert!(inner.contains("Ж</dcssch:dataPath>"), "{inner}");
+}
+
+#[test]
+fn rejects_malformed_form_server_state_chunk_streams() {
+    let malformed = [
+        ("bad magic", vec![0x41, 0xC0, 0x20, 0x20]),
+        ("missing terminator", vec![0x41, 0xC1]),
+        (
+            "unknown 9c tag",
+            vec![0x41, 0xC1, 0x9C, 0, 0, 0, 0, 0x20, 0x20],
+        ),
+        ("truncated 9b length", vec![0x41, 0xC1, 0x9B, 1]),
+        ("truncated chunk", vec![0x41, 0xC1, 0x9A, 3, b'a']),
+        ("trailing byte", vec![0x41, 0xC1, 0x20, 0x20, 0]),
+    ];
+    for (case, encoded) in malformed {
+        assert!(
+            decode_form_server_state_chunks(&encoded).is_none(),
+            "{case}"
+        );
+    }
+
+    let oversized = encode_form_server_state_chunks_for_test(&[b"abc".as_slice()]);
+    assert!(
+        decode_form_server_state_chunks_with_limit(&oversized, 2).is_none(),
+        "bounded decoder must reject output over its limit"
+    );
+}
+
+#[test]
+fn rejects_invalid_utf8_form_server_state_chunk_stream() {
+    let encoded = encode_form_server_state_chunks_for_test(&[&[0xFF]]);
+    assert_eq!(decode_form_server_state_chunks(&encoded), Some(vec![0xFF]));
+    assert!(parse_form_server_state_xml(&form_server_state_field_for_test(&encoded)).is_none());
+}
+
 #[test]
 fn normalizes_form_server_state_core_type_qnames_idempotently() {
     let native = concat!(
