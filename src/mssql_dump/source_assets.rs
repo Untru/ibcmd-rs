@@ -1512,10 +1512,16 @@ pub(super) struct FormItemAsset {
 pub(super) struct PredefinedItem {
     pub(super) id: String,
     pub(super) name: String,
-    pub(super) code: String,
+    pub(super) code: PredefinedItemCode,
     pub(super) description: String,
     pub(super) data: PredefinedItemData,
     pub(super) children: Vec<PredefinedItem>,
+}
+
+#[derive(Clone)]
+pub(super) enum PredefinedItemCode {
+    Text(String),
+    Decimal(String),
 }
 
 #[derive(Clone)]
@@ -2322,7 +2328,7 @@ fn parse_account_predefined_item(
     let (fields, child_list) = parse_predefined_item_fields(value)?;
     let id = parse_predefined_uuid_value(predefined_rowset_item_value(&fields, schema, 0)?)?;
     let name = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 1)?)?;
-    let code = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 2)?)?;
+    let code = parse_predefined_code_value(predefined_rowset_item_value(&fields, schema, 2)?)?;
     let description =
         parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 3)?)?;
     let account_type =
@@ -2447,7 +2453,7 @@ fn parse_calculation_predefined_item(
     }
     let id = parse_predefined_uuid_value(predefined_rowset_item_value(&fields, schema, 1)?)?;
     let name = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 2)?)?;
-    let code = parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 3)?)?;
+    let code = parse_predefined_code_value(predefined_rowset_item_value(&fields, schema, 3)?)?;
     let description =
         parse_predefined_string_value(predefined_rowset_item_value(&fields, schema, 4)?)?;
     let action_period_is_base =
@@ -2559,8 +2565,8 @@ pub(super) fn parse_predefined_item(
         .and_then(|field| parse_predefined_string_value(field))?;
     let code = fields
         .get(name_offset + 1)
-        .and_then(|field| parse_predefined_string_value(field))
-        .unwrap_or_default();
+        .and_then(|field| parse_predefined_code_value(field))
+        .unwrap_or_else(|| PredefinedItemCode::Text(String::new()));
     let description = fields
         .get(name_offset + 2)
         .and_then(|field| parse_predefined_string_value(field))
@@ -2651,6 +2657,129 @@ pub(super) fn parse_predefined_number_value(value: &str) -> Option<i64> {
         return None;
     }
     fields.get(1)?.trim().parse().ok()
+}
+
+fn parse_predefined_code_value(value: &str) -> Option<PredefinedItemCode> {
+    if let Some(value) = parse_predefined_string_value(value) {
+        return Some(PredefinedItemCode::Text(value));
+    }
+
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.len() != 2 || fields.first()?.trim() != r#""N""# {
+        return None;
+    }
+    let value = fields.get(1)?.trim();
+    is_xml_schema_decimal(value).then(|| PredefinedItemCode::Decimal(value.to_string()))
+}
+
+fn is_xml_schema_decimal(value: &str) -> bool {
+    let value = value
+        .strip_prefix('+')
+        .or_else(|| value.strip_prefix('-'))
+        .unwrap_or(value);
+    let Some((integer, fraction)) = value.split_once('.') else {
+        return !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit());
+    };
+    (!integer.is_empty() || !fraction.is_empty())
+        && integer.bytes().all(|byte| byte.is_ascii_digit())
+        && fraction.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod predefined_code_tests {
+    use super::*;
+
+    fn format_item_code(kind: &str, code: PredefinedItemCode) -> String {
+        let data = match kind {
+            "Catalog" => PredefinedItemData::Generic {
+                value_types: Vec::new(),
+                is_folder: false,
+            },
+            "ChartOfAccounts" => PredefinedItemData::Account {
+                account_type: PredefinedAccountType::Active,
+                off_balance: false,
+                order: String::new(),
+                accounting_flags: Vec::new(),
+                ext_dimension_types: Vec::new(),
+            },
+            "ChartOfCalculationTypes" => PredefinedItemData::Calculation {
+                action_period_is_base: false,
+                displaced: Vec::new(),
+                base: Vec::new(),
+                leading: Vec::new(),
+            },
+            _ => unreachable!(),
+        };
+        let item = PredefinedItem {
+            id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_string(),
+            name: "Item".to_string(),
+            code,
+            description: String::new(),
+            data,
+            children: Vec::new(),
+        };
+        format_predefined_data_xml(
+            predefined_data_source_model(kind).unwrap(),
+            &[item],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn numeric_catalog_code_is_emitted_as_xs_decimal() {
+        let type_uuid = "ae135932-4f94-44df-92c1-c91f15a92848";
+        let item_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        let value = format!(
+            "{{2,1,7,{{\"#\",{type_uuid},{{1,{item_uuid}}}}},{{\"B\",0}},\
+             {{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},\
+             {{\"S\",\"Item\"}},{{\"N\",17}},{{\"S\",\"Description\"}},{{\"N\",0}},0}}"
+        );
+        let item = parse_predefined_item(&value, &BTreeMap::new()).unwrap();
+        let xml = format_predefined_data_xml(
+            predefined_data_source_model("Catalog").unwrap(),
+            &[item],
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert!(xml.contains(r#"<Code xsi:type="xs:decimal">17</Code>"#));
+    }
+
+    #[test]
+    fn all_predefined_layouts_preserve_numeric_and_text_code_representation() {
+        for kind in ["Catalog", "ChartOfAccounts", "ChartOfCalculationTypes"] {
+            let numeric = format_item_code(
+                kind,
+                parse_predefined_code_value(r#"{"N",0}"#).unwrap(),
+            );
+            assert!(
+                numeric.contains(r#"<Code xsi:type="xs:decimal">0</Code>"#),
+                "{kind}: {numeric}"
+            );
+
+            let text = format_item_code(
+                kind,
+                parse_predefined_code_value(r#"{"S","A01"}"#).unwrap(),
+            );
+            assert!(text.contains("<Code>A01</Code>"), "{kind}: {text}");
+            assert!(!text.contains(r#"<Code xsi:type="#), "{kind}: {text}");
+        }
+    }
+
+    #[test]
+    fn rejects_non_decimal_numeric_catalog_code() {
+        for value in [
+            r#"{"N",""}"#,
+            r#"{"N",1e2}"#,
+            r#"{"N",1.2.3}"#,
+            r#"{"N",1,0}"#,
+        ] {
+            assert!(parse_predefined_code_value(value).is_none(), "{value}");
+        }
+    }
 }
 
 pub(super) fn parse_predefined_string_value(value: &str) -> Option<String> {
@@ -2906,7 +3035,17 @@ pub(super) fn push_predefined_item_xml(
         escape_xml_text(&item.id),
         escape_xml_element_text(&item.name),
     ));
-    push_predefined_text_element(xml, &tab, "Code", &item.code);
+    match &item.code {
+        PredefinedItemCode::Text(value) => {
+            push_predefined_text_element(xml, &tab, "Code", value);
+        }
+        PredefinedItemCode::Decimal(value) => {
+            xml.push_str(&format!(
+                "{tab}\t<Code xsi:type=\"xs:decimal\">{}</Code>\r\n",
+                escape_xml_element_text(value)
+            ));
+        }
+    }
     push_predefined_text_element(xml, &tab, "Description", &item.description);
 
     match (&item.data, layout) {

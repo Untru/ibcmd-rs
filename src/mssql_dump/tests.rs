@@ -35489,7 +35489,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
     let first_item = PredefinedItem {
         id: shared_value_uuid.to_string(),
         name: "BankAccounts".to_string(),
-        code: String::new(),
+        code: PredefinedItemCode::Text(String::new()),
         description: String::new(),
         data: PredefinedItemData::Generic {
             value_types: Vec::new(),
@@ -35498,7 +35498,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
         children: vec![PredefinedItem {
             id: unique_value_uuid.to_string(),
             name: "Unique".to_string(),
-            code: String::new(),
+            code: PredefinedItemCode::Text(String::new()),
             description: String::new(),
             data: PredefinedItemData::Generic {
                 value_types: Vec::new(),
@@ -35510,7 +35510,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
     let second_item = PredefinedItem {
         id: shared_value_uuid.to_string(),
         name: "BankAccounts".to_string(),
-        code: String::new(),
+        code: PredefinedItemCode::Text(String::new()),
         description: String::new(),
         data: PredefinedItemData::Generic {
             value_types: Vec::new(),
@@ -35717,7 +35717,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
     let divergent = PredefinedItem {
         id: shared_value_uuid.to_string(),
         name: "OtherItem".to_string(),
-        code: String::new(),
+        code: PredefinedItemCode::Text(String::new()),
         description: String::new(),
         data: PredefinedItemData::Generic {
             value_types: Vec::new(),
