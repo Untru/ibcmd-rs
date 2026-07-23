@@ -11917,19 +11917,8 @@ fn parse_exact_catalog_tabular_section_use(
         {
             continue;
         }
-        let use_mode = match fields.as_slice() {
-            [kind, _, mode] if kind.trim() == "1" => match mode.trim() {
-                "0" => "ForItem",
-                "2" => "ForFolderAndItem",
-                _ => return None,
-            },
-            [kind, _, mode, tail] if kind.trim() == "2" && tail.trim() == "5" => {
-                match mode.trim() {
-                    "0" => "ForItem",
-                    _ => return None,
-                }
-            }
-            _ => continue,
+        let Some(use_mode) = catalog_tabular_section_use_from_envelope(&fields) else {
+            continue;
         };
         matches.push((end.saturating_sub(start), use_mode));
     }
@@ -11938,6 +11927,21 @@ fn parse_exact_catalog_tabular_section_use(
         [(_, use_mode)] => Some(*use_mode),
         _ => None,
     }
+}
+
+fn catalog_tabular_section_use_from_envelope(fields: &[&str]) -> Option<&'static str> {
+    Some(match fields {
+        [kind, _, mode] if kind.trim() == "1" => match mode.trim() {
+            "0" => "ForItem",
+            "2" => "ForFolderAndItem",
+            _ => return None,
+        },
+        [kind, _, mode, tail] if kind.trim() == "2" && tail.trim() == "5" => match mode.trim() {
+            "0" => "ForItem",
+            _ => return None,
+        },
+        _ => return None,
+    })
 }
 
 fn parse_data_processor_tabular_section_generated_types(
@@ -30886,6 +30890,22 @@ mod catalog_tabular_section_wrapper_tests {
             "0",
             "4"
         ]));
+    }
+
+    #[test]
+    fn parses_use_from_extended_catalog_tabular_section_envelope() {
+        assert_eq!(
+            super::catalog_tabular_section_use_from_envelope(&["2", "{section}", "0", "5"]),
+            Some("ForItem")
+        );
+        assert_eq!(
+            super::catalog_tabular_section_use_from_envelope(&["2", "{section}", "0", "4"]),
+            None
+        );
+        assert_eq!(
+            super::catalog_tabular_section_use_from_envelope(&["2", "{section}", "2", "5"]),
+            None
+        );
     }
 }
 
