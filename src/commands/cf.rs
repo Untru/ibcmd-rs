@@ -14,11 +14,12 @@ use std::{
 
 use ibcmd_cf::{
     archive::decode_archive_uniform,
+    bootstrap::{BootstrapCfProfile, publish_bootstrap_patch_new},
     overlay::{OverlayCodec, OverlayReport, publish_overlay_new},
     payload::{PayloadDecoder, PayloadEncoding},
 };
 use ibcmd_core::{
-    artifact::StorageProfileId,
+    artifact::{ProfileId, StorageProfileId},
     limits::ResourceLimits,
     storage::{
         MultipartIdentity, Sha256Digest, StorageEntry, StorageKey, StoragePatchTarget,
@@ -34,14 +35,19 @@ use serde::Serialize;
 
 use crate::{
     cli::{
-        CfArgs, CfCommands, CfCompression, CfExportArgs, CfInspectArgs, CfOverlayArgs, CfVerifyArgs,
+        CfArgs, CfBootstrapArgs, CfCommands, CfCompression, CfExportArgs, CfInspectArgs,
+        CfOverlayArgs, CfRevision, CfVerifyArgs,
     },
-    compiler::{CompileAxes, CompileRequest, SourcePayload, compile_overlay},
+    compiler::{
+        CompileAxes, CompileRequest, SourcePayload, bootstrap::compile_bootstrap_source_tree,
+        compile_overlay,
+    },
     module_blob::{
         pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
         pack_simple_metadata_blob_from_xml, patch_versions_blob_bytes_allowing_additions,
     },
     mssql_dump::{self, StorageImageSourceExportReport},
+    profile_registry::{BUNDLED_PROFILES, ProfileRegistryLimits, load_profile_registry},
 };
 
 const REPORT_SCHEMA_VERSION: u32 = 1;
@@ -100,9 +106,39 @@ pub struct CfOverlayPublicationReport {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CfBootstrapReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub source_dir: String,
+    pub output: String,
+    pub source_version: &'static str,
+    pub target_profile: String,
+    pub revision: &'static str,
+    pub storage_version: u32,
+    pub page_size: Option<u32>,
+    pub reserved: u32,
+    pub source_files: usize,
+    pub metadata_files: usize,
+    pub asset_files: usize,
+    pub storage_entries: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publication: Option<CfBootstrapPublicationReport>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfBootstrapPublicationReport {
+    pub bytes_written: u64,
+    pub entries_written: usize,
+    pub entries_validated: usize,
+}
+
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum CfCommandReport {
     Archive(CfReport),
+    Bootstrap(CfBootstrapReport),
     Export(CfExportReport),
     Overlay(CfOverlayReport),
 }
@@ -112,6 +148,7 @@ impl CfCommandReport {
     pub const fn ok(&self) -> bool {
         match self {
             Self::Archive(report) => report.ok,
+            Self::Bootstrap(report) => report.ok,
             Self::Export(report) => report.ok,
             Self::Overlay(report) => report.ok,
         }
@@ -121,6 +158,7 @@ impl CfCommandReport {
     pub fn errors(&self) -> &[CfDiagnostic] {
         match self {
             Self::Archive(report) => &report.errors,
+            Self::Bootstrap(report) => &report.errors,
             Self::Export(report) => &report.errors,
             Self::Overlay(report) => &report.errors,
         }
@@ -230,6 +268,141 @@ pub fn run(args: CfArgs) -> Result<CfCommandReport, CfCommandError> {
         CfCommands::Verify(args) => execute(verify_options(args)).map(CfCommandReport::Archive),
         CfCommands::Export(args) => export(args),
         CfCommands::Overlay(args) => overlay(args),
+        CfCommands::Bootstrap(args) => bootstrap(args),
+    }
+}
+
+fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
+    let profiles = load_profile_registry(
+        BUNDLED_PROFILES,
+        args.profile_dir.as_deref(),
+        ProfileRegistryLimits::default(),
+    )
+    .map_err(|source| {
+        bootstrap_failure(
+            &args,
+            "profile_registry_failed",
+            format!("failed to load target profiles: {source:#}"),
+        )
+    })?;
+    let profile_id = ProfileId::parse(&args.target_profile).map_err(|source| {
+        bootstrap_failure(
+            &args,
+            "invalid_target_profile",
+            format!("invalid target profile `{}`: {source}", args.target_profile),
+        )
+    })?;
+    let target = profiles.get(&profile_id).ok_or_else(|| {
+        bootstrap_failure(
+            &args,
+            "target_profile_not_found",
+            format!("target profile `{profile_id}` was not found"),
+        )
+    })?;
+    let tree = ibcmd_xml::source_tree::read_source_tree(&args.source_dir).map_err(|source| {
+        bootstrap_failure(
+            &args,
+            "source_tree_invalid",
+            format!(
+                "failed to read source tree `{}`: {source}",
+                args.source_dir.display()
+            ),
+        )
+    })?;
+    let axes = args.source_version.version_axes();
+    let compilation = compile_bootstrap_source_tree(&tree, axes.xml_dialect().clone(), target)
+        .map_err(|source| {
+            bootstrap_failure(
+                &args,
+                "bootstrap_compile_failed",
+                format!("source tree cannot be bootstrapped: {source}"),
+            )
+        })?;
+    let source_files = compilation.source_files();
+    let metadata_files = compilation.metadata_files();
+    let asset_files = compilation.asset_files();
+    let storage_entries = compilation.patch().len();
+    let revision = match args.revision {
+        CfRevision::Format15 => Revision::Format15,
+        CfRevision::Format16 => Revision::Format16,
+    };
+    let mut cf_profile = BootstrapCfProfile::new(
+        revision,
+        args.storage_version,
+        compilation.storage_profile().clone(),
+    )
+    .with_reserved(args.reserved);
+    if let Some(page_size) = args.page_size {
+        cf_profile = cf_profile.with_page_size(page_size);
+    }
+    let publication = publish_bootstrap_patch_new(
+        compilation.into_patch(),
+        cf_profile,
+        &args.output,
+        ResourceLimits::default(),
+    )
+    .map_err(|source| {
+        bootstrap_failure(
+            &args,
+            "bootstrap_publish_failed",
+            format!("failed to publish bootstrap CF: {source}"),
+        )
+    })?;
+
+    Ok(CfCommandReport::Bootstrap(CfBootstrapReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "bootstrap",
+        ok: true,
+        source_dir: display_path(&args.source_dir),
+        output: display_path(&args.output),
+        source_version: args.source_version.as_str(),
+        target_profile: args.target_profile,
+        revision: revision_name(revision),
+        storage_version: args.storage_version,
+        page_size: args.page_size,
+        reserved: args.reserved,
+        source_files,
+        metadata_files,
+        asset_files,
+        storage_entries,
+        publication: Some(CfBootstrapPublicationReport {
+            bytes_written: publication.write.bytes_written,
+            entries_written: publication.write.entries_written,
+            entries_validated: publication.validation.entries_validated,
+        }),
+        errors: Vec::new(),
+    }))
+}
+
+fn bootstrap_failure(
+    args: &CfBootstrapArgs,
+    code: &'static str,
+    message: String,
+) -> CfCommandError {
+    let revision = match args.revision {
+        CfRevision::Format15 => Revision::Format15,
+        CfRevision::Format16 => Revision::Format16,
+    };
+    CfCommandError {
+        report: Box::new(CfCommandReport::Bootstrap(CfBootstrapReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "bootstrap",
+            ok: false,
+            source_dir: display_path(&args.source_dir),
+            output: display_path(&args.output),
+            source_version: args.source_version.as_str(),
+            target_profile: args.target_profile.clone(),
+            revision: revision_name(revision),
+            storage_version: args.storage_version,
+            page_size: args.page_size,
+            reserved: args.reserved,
+            source_files: 0,
+            metadata_files: 0,
+            asset_files: 0,
+            storage_entries: 0,
+            publication: None,
+            errors: vec![diagnostic(code, message)],
+        })),
     }
 }
 
@@ -1025,6 +1198,13 @@ fn encoding_name(encoding: PayloadEncoding) -> &'static str {
     }
 }
 
+fn revision_name(revision: Revision) -> &'static str {
+    match revision {
+        Revision::Format15 => "format15",
+        Revision::Format16 => "format16",
+    }
+}
+
 fn profile_report(options: &RunOptions) -> CfProfileReport {
     profile_report_values(&options.profile, options.compression)
 }
@@ -1120,6 +1300,44 @@ mod tests {
         }
     }
 
+    struct TempDirectory(PathBuf);
+
+    impl TempDirectory {
+        fn new(label: &str) -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "ibcmd-rs-cf-command-{label}-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn source_tree(&self) -> PathBuf {
+            const CONFIGURATION: &str = r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20"><Configuration uuid="10000000-0000-4000-8000-000000000001"><Properties><Name>CliBootstrap</Name><Synonym/><Comment/><DefaultRunMode>ManagedApplication</DefaultRunMode><ScriptVariant>English</ScriptVariant><CompatibilityMode>Version8_3_24</CompatibilityMode></Properties><ChildObjects><CommonModule>Portable</CommonModule></ChildObjects></Configuration></MetaDataObject>"#;
+            const MODULE: &str = r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20"><CommonModule uuid="20000000-0000-4000-8000-000000000001"><Properties><Name>Portable</Name><Synonym/><Comment/><Global>false</Global><ClientManagedApplication>false</ClientManagedApplication><Server>true</Server><ExternalConnection>false</ExternalConnection><ClientOrdinaryApplication>false</ClientOrdinaryApplication><ServerCall>false</ServerCall><Privileged>false</Privileged><ReturnValuesReuse>DontUse</ReturnValuesReuse></Properties></CommonModule></MetaDataObject>"#;
+            let source = self.0.join("source");
+            fs::create_dir_all(source.join("CommonModules/Portable/Ext")).unwrap();
+            fs::write(source.join("Configuration.xml"), CONFIGURATION).unwrap();
+            fs::write(source.join("CommonModules/Portable.xml"), MODULE).unwrap();
+            fs::write(
+                source.join("CommonModules/Portable/Ext/Module.bsl"),
+                "Procedure Smoke() Export\nEndProcedure",
+            )
+            .unwrap();
+            source
+        }
+    }
+
+    impl Drop for TempDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     fn archive() -> (TempFile, String) {
         let unpacked = b"offline payload";
         let packed = encode_payload(
@@ -1145,7 +1363,9 @@ mod tests {
     fn archive_report(report: CfCommandReport) -> CfReport {
         match report {
             CfCommandReport::Archive(report) => report,
-            CfCommandReport::Export(_) | CfCommandReport::Overlay(_) => {
+            CfCommandReport::Bootstrap(_)
+            | CfCommandReport::Export(_)
+            | CfCommandReport::Overlay(_) => {
                 panic!("expected archive command report")
             }
         }
@@ -1154,9 +1374,18 @@ mod tests {
     fn archive_error(report: &CfCommandReport) -> &CfReport {
         match report {
             CfCommandReport::Archive(report) => report,
-            CfCommandReport::Export(_) | CfCommandReport::Overlay(_) => {
+            CfCommandReport::Bootstrap(_)
+            | CfCommandReport::Export(_)
+            | CfCommandReport::Overlay(_) => {
                 panic!("expected archive command error")
             }
+        }
+    }
+
+    fn bootstrap_report(report: CfCommandReport) -> CfBootstrapReport {
+        match report {
+            CfCommandReport::Bootstrap(report) => report,
+            _ => panic!("expected bootstrap command report"),
         }
     }
 
@@ -1245,5 +1474,55 @@ mod tests {
         assert!(report.ok);
         assert!(!report.elements[0].payload_verified);
         assert!(report.elements[0].unpacked_sha256.is_none());
+    }
+
+    #[test]
+    fn bootstrap_command_builds_without_base_and_blocks_unconsumed_sources() {
+        let temp = TempDirectory::new("bootstrap");
+        let source = temp.source_tree();
+        let output = temp.0.join("configuration.cf");
+        let args = || CfBootstrapArgs {
+            source_dir: source.clone(),
+            output: output.clone(),
+            source_version: crate::legacy_version::InfobaseConfigSourceVersion::V2_20,
+            target_profile: "platform-8.3.27.1989".to_owned(),
+            profile_dir: None,
+            revision: CfRevision::Format16,
+            storage_version: 5,
+            page_size: None,
+            reserved: 0,
+        };
+        let report = bootstrap_report(
+            run(CfArgs {
+                command: CfCommands::Bootstrap(args()),
+            })
+            .unwrap(),
+        );
+        assert!(report.ok);
+        assert_eq!(report.source_files, 3);
+        assert_eq!(report.storage_entries, 6);
+        assert_eq!(
+            report.publication.as_ref().unwrap().entries_validated,
+            report.storage_entries
+        );
+        assert!(output.is_file());
+        let index =
+            StreamingReader::open(File::open(&output).unwrap(), ResourceLimits::default()).unwrap();
+        assert_eq!(index.index().revision, Revision::Format16);
+        assert_eq!(index.index().entries.len(), 6);
+
+        let blocked_output = temp.0.join("blocked.cf");
+        fs::write(source.join("unknown.dat"), b"must not disappear").unwrap();
+        let mut blocked_args = args();
+        blocked_args.output = blocked_output.clone();
+        let error = run(CfArgs {
+            command: CfCommands::Bootstrap(blocked_args),
+        })
+        .unwrap_err();
+        let CfCommandReport::Bootstrap(report) = error.report() else {
+            panic!("expected bootstrap error report");
+        };
+        assert_eq!(report.errors[0].code, "bootstrap_compile_failed");
+        assert!(!blocked_output.exists());
     }
 }

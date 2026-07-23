@@ -102,6 +102,11 @@ pub fn current_compatibility_report() -> CompatibilityReport {
                 detail: "Common-module, generic metadata, explicit family wrappers, and source-root auto-stage helpers, including combined source-tree staging, are implemented for the supported surface; deeper blob-model work and parity experiments remain under research.",
             },
             OperationSupport {
+                name: "cf-bootstrap",
+                status: SupportStatus::Partial,
+                detail: "Builds a new Format15 or Format16 CF without a base file or installed 1C/EDT runtime for the exact profile/family/asset routes accepted by the fail-closed compiler; unsupported source files prevent publication.",
+            },
+            OperationSupport {
                 name: "ibcmd comparison matrix",
                 status: SupportStatus::Planned,
                 detail: "Run the four disposable-database experiments and compare against ibcmd timings and SQL traces.",
@@ -254,6 +259,9 @@ mod tests {
                 .iter()
                 .any(|item| item.detail.contains("stage roles"))
         );
+        assert!(report.supported_operations.iter().any(|item| {
+            item.name == "cf-bootstrap" && matches!(item.status, SupportStatus::Partial)
+        }));
         assert!(
             report
                 .supported_operations

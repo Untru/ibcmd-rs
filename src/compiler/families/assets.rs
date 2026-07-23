@@ -532,6 +532,29 @@ const ROUTES: &[SourceAssetRoute] = &[
 pub struct SourceAssetRegistry;
 
 impl SourceAssetRegistry {
+    /// Enumerates every evidence-backed route for one exact owner family in
+    /// stable registry order.  Bootstrap source-tree planning uses this to
+    /// consume files by explicit relative path instead of filename heuristics.
+    pub fn routes_for_family(
+        self,
+        owner_family: &str,
+    ) -> impl Iterator<Item = &'static SourceAssetRoute> {
+        ROUTES
+            .iter()
+            .filter(move |route| route.owner_family == owner_family)
+    }
+
+    /// Resolves an exact owner-relative source path for one family.
+    pub fn route_by_relative_path(
+        self,
+        owner_family: &str,
+        relative_path: &str,
+    ) -> Option<&'static SourceAssetRoute> {
+        ROUTES.iter().find(|route| {
+            route.owner_family == owner_family && route.relative_path == relative_path
+        })
+    }
+
     pub fn route(
         self,
         owner_family: &str,

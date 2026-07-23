@@ -330,6 +330,79 @@ pub fn decode_metadata_envelope(
     decode_metadata_envelope_with_child_references(document, source_profile, object_path, &[])
 }
 
+/// Decodes the root `Configuration` object while treating its named
+/// `ChildObjects` entries as references to sibling source files.
+///
+/// Unlike embedded metadata children, configuration collection members do
+/// not carry UUIDs in `Configuration.xml`; their identity is supplied by the
+/// corresponding family XML file.  Keeping this distinction in the XML
+/// adapter prevents the bootstrap planner from guessing ownership.
+pub fn decode_configuration_envelope(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    if inspect_metadata_family(document)?.as_str() != "Configuration" {
+        return Err(MetadataDecodeError::InvalidEnvelope(
+            "metadata object is not Configuration",
+        ));
+    }
+    decode_metadata_envelope_with_child_references(
+        document,
+        source_profile,
+        object_path,
+        &[
+            "Role",
+            "CommonTemplate",
+            "CommonModule",
+            "HTTPService",
+            "ScheduledJob",
+            "CommonAttribute",
+            "SessionParameter",
+            "FunctionalOptionsParameter",
+            "Subsystem",
+            "Interface",
+            "Style",
+            "FilterCriterion",
+            "SettingsStorage",
+            "EventSubscription",
+            "StyleItem",
+            "Bot",
+            "CommonPicture",
+            "ExchangePlan",
+            "WebService",
+            "Language",
+            "FunctionalOption",
+            "DefinedType",
+            "XDTOPackage",
+            "WSReference",
+            "Constant",
+            "Document",
+            "CommonForm",
+            "InformationRegister",
+            "CommandGroup",
+            "CommonCommand",
+            "DocumentNumerator",
+            "DocumentJournal",
+            "Report",
+            "ChartOfCharacteristicTypes",
+            "AccumulationRegister",
+            "Sequence",
+            "DataProcessor",
+            "Catalog",
+            "Enum",
+            "ChartOfAccounts",
+            "AccountingRegister",
+            "ChartOfCalculationTypes",
+            "CalculationRegister",
+            "Task",
+            "BusinessProcess",
+            "ExternalDataSource",
+            "IntegrationService",
+        ],
+    )
+}
+
 /// Decodes common XCF metadata while retaining selected name-only entries in
 /// `ChildObjects` as lossless reference projections.
 ///

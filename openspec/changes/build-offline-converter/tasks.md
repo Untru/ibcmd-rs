@@ -402,7 +402,7 @@
 
 ### BOOT-013 — Собрать новый CF из полного XML tree
 
-- **Статус:** `[ ]`; **зависимости:** BOOT-001–BOOT-012, CF-008, CF-011
+- **Статус:** `[x]`; **зависимости:** BOOT-001–BOOT-012, CF-008, CF-011
 - **Файлы:** создать `crates/ibcmd-cf/src/bootstrap.rs`; изменить CLI command layer
 - **Действия:** source tree→IR→complete StorageImage→Format15/16; enforce readiness and atomic validation.
 - **Проверка:** без `--base`; all entries reachable from root/versions; CF→XML не имеет missing/extra для verified corpus; unsupported feature prevents output.

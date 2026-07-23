@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=51 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=52 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 51 of 56 accepted leaf issues in the
+As of 2026-07-23, 52 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (91.1%). Live workflow statuses are tracked in
+are complete (92.9%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -323,6 +323,28 @@ templates and future profiles fail closed. The legacy export bridge delegates
 MXL/DCS framing to the same bounded readers. See
 [Template body evidence](docs/evidence/template-bodies-8.3.27.md).
 
+BOOT-013 connects the bounded source-tree reader, canonical model, validated
+identity graph, profile-selected family/asset codecs and special-entry
+compilers to a complete new `StorageImage`. The public command writes either
+Format15 or Format16 without `--base`, 1C, EDT or a JVM, then flushes, reopens
+and checks every packed and unpacked entry before a race-safe no-clobber
+publish. Every input file must match one exact compiler route; unsupported,
+ambiguous or unreferenced input prevents creation of the destination. The
+checked-in 8.3.27.1989/XCF 2.20 clean-room corpus proves XML -> CF -> XML with
+no missing or extra source files while the process runs with an empty `PATH`:
+
+```powershell
+cargo run -- cf bootstrap source configuration.cf `
+  --source-version 2.20 `
+  --target-profile platform-8.3.27.1989 `
+  --revision format16
+```
+
+Bootstrap compatibility remains explicitly bounded to routes accepted by the
+selected profile; it is not a claim that an arbitrary third-party
+configuration is supported. See
+[standalone CF bootstrap evidence](docs/evidence/cf-bootstrap.md).
+
 MIG-003 is complete for the verified XCF `xml-2.20` to `xml-2.21` upgrade
 edge. The migration core accepts only exact 2.20 provenance and the evidenced
 `Constant`/`Catalog` cohort, produces a complete zero-loss report, and blocks
@@ -348,10 +370,10 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
 | Phase 3 CF | 15/15 | 100% |
-| Phase 4 bootstrap | 12/13 | 92.3% |
+| Phase 4 bootstrap | 13/13 | 100% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **51/56** | **91.1%** |
+| **Overall** | **52/56** | **92.9%** |
 
 ## Export Compatibility Status
 

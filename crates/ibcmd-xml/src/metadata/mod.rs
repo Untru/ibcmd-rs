@@ -18,7 +18,7 @@ mod utility_objects;
 
 pub use business_objects::{register_catalog_codec, register_document_codec};
 pub use common::{
-    MetadataDecodeError, MetadataEnvelope, decode_metadata_envelope,
+    MetadataDecodeError, MetadataEnvelope, decode_configuration_envelope, decode_metadata_envelope,
     decode_metadata_envelope_with_dialect,
 };
 pub use common_objects::{

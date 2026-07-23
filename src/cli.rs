@@ -201,6 +201,8 @@ pub enum CfCommands {
     Export(CfExportArgs),
     /// Apply selected source files to a base CF and publish a new CF offline.
     Overlay(CfOverlayArgs),
+    /// Build a new CF from a complete XML source tree without a base or 1C platform.
+    Bootstrap(CfBootstrapArgs),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -209,6 +211,14 @@ pub enum CfCompression {
     RawDeflate,
     /// Treat present payloads as stored verbatim.
     Stored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CfRevision {
+    /// 32-bit V8 container layout.
+    Format15,
+    /// 64-bit V8 container layout with a semantic Format15 preamble.
+    Format16,
 }
 
 #[derive(Debug, Args)]
@@ -297,6 +307,35 @@ pub struct CfOverlayArgs {
     /// Patch CommandInterface using its base row when necessary (`STORAGE_KEY=FILE`); repeatable.
     #[arg(long = "command-interface", value_name = "KEY=FILE")]
     pub command_interfaces: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CfBootstrapArgs {
+    /// Complete hierarchical XML source directory.
+    pub source_dir: PathBuf,
+    /// New CF destination. Existing files are never overwritten.
+    pub output: PathBuf,
+    /// Source XML dialect; independent from platform and container revision.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    /// Exact target platform profile selecting native family layouts.
+    #[arg(long, default_value = "platform-8.3.27.1989")]
+    pub target_profile: String,
+    /// Optional directory with additive experimental JSON profiles.
+    #[arg(long)]
+    pub profile_dir: Option<PathBuf>,
+    /// Independent physical CF container revision.
+    #[arg(long, value_enum, default_value_t = CfRevision::Format16)]
+    pub revision: CfRevision,
+    /// Native CF storage-version header word.
+    #[arg(long, default_value_t = 5)]
+    pub storage_version: u32,
+    /// Optional physical page-size override for the selected revision.
+    #[arg(long)]
+    pub page_size: Option<u32>,
+    /// Native CF reserved header word.
+    #[arg(long, default_value_t = 0)]
+    pub reserved: u32,
 }
 
 #[derive(Debug, Args)]
@@ -4557,5 +4596,46 @@ mod tests {
             }
             other => panic!("unexpected command: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_base_free_cf_bootstrap_with_independent_axes() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "cf",
+            "bootstrap",
+            "source-tree",
+            "configuration.cf",
+            "--source-version",
+            "2.21",
+            "--target-profile",
+            "platform-next",
+            "--profile-dir",
+            "profiles-local",
+            "--revision",
+            "format15",
+            "--storage-version",
+            "7",
+            "--page-size",
+            "1024",
+            "--reserved",
+            "3",
+        ]);
+
+        let Commands::Cf(CfArgs {
+            command: CfCommands::Bootstrap(args),
+        }) = cli.command
+        else {
+            panic!("expected cf bootstrap command");
+        };
+        assert_eq!(args.source_dir, PathBuf::from("source-tree"));
+        assert_eq!(args.output, PathBuf::from("configuration.cf"));
+        assert_eq!(args.source_version, InfobaseConfigSourceVersion::V2_21);
+        assert_eq!(args.target_profile, "platform-next");
+        assert_eq!(args.profile_dir, Some(PathBuf::from("profiles-local")));
+        assert_eq!(args.revision, CfRevision::Format15);
+        assert_eq!(args.storage_version, 7);
+        assert_eq!(args.page_size, Some(1024));
+        assert_eq!(args.reserved, 3);
     }
 }

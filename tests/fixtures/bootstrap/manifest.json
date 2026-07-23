@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "minimal-common-module-8.3.27.1989-xcf-2.20",
+      "path": "8.3.27.1989/xcf-2.20/minimal",
+      "platform_profile": "platform-8.3.27.1989",
+      "xml_dialect": "2.20",
+      "provenance": "hand-authored-clean-room",
+      "contains_application_code": false,
+      "expected_source_files": [
+        "CommonModules/Portable.xml",
+        "CommonModules/Portable/Ext/Module.bsl",
+        "Configuration.xml"
+      ],
+      "expected_storage_entries": [
+        "10000000-0000-4000-8000-000000000001",
+        "20000000-0000-4000-8000-000000000001",
+        "20000000-0000-4000-8000-000000000001.0",
+        "root",
+        "version",
+        "versions"
+      ]
+    }
+  ]
+}
