@@ -296,7 +296,7 @@
 
 ### CF-015 — Добавить corruption/property/fuzz suite контейнера
 
-- **Статус:** `[ ]`; **зависимости:** CF-005–CF-011
+- **Статус:** `[x]`; **зависимости:** CF-005–CF-011
 - **Файлы:** создать `tests/fixtures/malformed/cf/`, `tests/cf_corruption.rs`, `fuzz/fuzz_targets/cf_parse.rs`
 - **Действия:** headers/hex/offsets/chains/UTF-16/DEFLATE/nesting corpus; parse(build(x)) properties.
 - **Проверка:** arbitrary input не panic/OOM/hang; regression seeds сохраняются; valid generated trees roundtrip.

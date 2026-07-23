@@ -1,0 +1,2 @@
+# Three bytes cannot contain either container signature.
+ff ff ff

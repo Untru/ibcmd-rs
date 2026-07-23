@@ -25,11 +25,11 @@ are defined in the
 
 ### Standalone Converter Roadmap Progress
 
-<!-- offline-converter-progress: completed=49 total=56 updated=2026-07-23 -->
+<!-- offline-converter-progress: completed=50 total=56 updated=2026-07-23 -->
 
-As of 2026-07-23, 49 of 56 accepted leaf issues in the
+As of 2026-07-23, 50 of 56 accepted leaf issues in the
 [standalone converter epic #178](https://github.com/Untru/ibcmd-rs/issues/178)
-are complete (87.5%). Live workflow statuses are tracked in
+are complete (89.3%). Live workflow statuses are tracked in
 [GitHub Project #5](https://github.com/users/Untru/projects/5). This is
 issue-count roadmap progress, not codec or compatibility coverage, and it is
 separate from the export parity metrics below.
@@ -172,6 +172,17 @@ cargo run -- cf overlay base.cf changed.cf `
 The repeatable source selectors also include `--metadata-xml` and
 `--common-module-xml`. Storage keys stay explicit: neither file names nor UUID
 suffixes are guessed. See [offline CF overlay evidence](docs/evidence/cf-overlay.md).
+
+CF-015 hardens the complete container boundary with a checked-in clean-room
+malformed corpus for headers, hexadecimal fields, offsets, page chains,
+UTF-16 names, DEFLATE payloads and nested archives. Deterministic property
+tests generate both Format15 and Format16 documents around page boundaries,
+preserve absent versus empty payloads, and traverse nested stored trees. A
+separate `cargo-fuzz` target feeds bounded arbitrary bytes through unified
+indexing, selected reads, payload decoding and nested traversal; it is an
+opt-in developer workspace and is not a production dependency. The ordinary
+Linux/Windows CI lane always runs the deterministic corruption/property suite.
+See [CF container hardening evidence](docs/evidence/cf-container-hardening.md).
 
 CF-005 is complete independently of those unavailable golden containers. The
 CF payload layer now distinguishes `Stored` from a single complete raw-DEFLATE
@@ -331,11 +342,11 @@ the migration report. Other values and unknown form content fail closed. See
 | Phase 0 baseline/boundaries | 4/4 | 100% |
 | Phase 1 version profiles/core models | 10/10 | 100% |
 | Phase 2 XCF | 6/6 | 100% |
-| Phase 3 CF | 14/15 | 93.3% |
+| Phase 3 CF | 15/15 | 100% |
 | Phase 4 bootstrap | 11/13 | 84.6% |
 | Phase 5a migrations | 4/4 | 100% |
 | Phase 5b app/release | 0/4 | 0% |
-| **Overall** | **49/56** | **87.5%** |
+| **Overall** | **50/56** | **89.3%** |
 
 ## Export Compatibility Status
 
