@@ -10,9 +10,8 @@ use ibcmd_core::profile::EffectiveProfile;
 
 use super::{BodyProfileError, SelectedBodyProfile};
 use crate::compiler::families::native::{
-    NativeError, NativeValue, exact_list, exact_token, inflate, inflate_and_parse, inline_list,
-    parse_without_bom, raw_deflate, required_list, required_text, required_token, serialize, text,
-    token,
+    NativeError, NativeValue, exact_list, exact_token, inflate_and_parse, inline_list, raw_deflate,
+    required_list, required_text, required_token, serialize, text, token,
 };
 
 const LAYOUT_KEY: &str = "bootstrap.body.command_interface.layout";
@@ -128,20 +127,6 @@ pub fn decode_command_interface(
     body_from_native(native)
 }
 
-/// Compatibility reader for legacy unit fixtures that omitted the UTF-8 BOM.
-/// Profile-selected standalone compilation and decoding remain strict.
-pub(crate) fn decode_compatible_command_interface(
-    blob: &[u8],
-) -> Result<CommandInterfaceBody, CommandInterfaceCodecError> {
-    let plain = inflate(blob)?;
-    let native = if plain.starts_with(b"\xef\xbb\xbf") {
-        crate::compiler::families::native::parse(&plain)?
-    } else {
-        parse_without_bom(&plain)?
-    };
-    body_from_native(native)
-}
-
 fn body_from_native(
     native: NativeValue,
 ) -> Result<CommandInterfaceBody, CommandInterfaceCodecError> {
@@ -247,7 +232,7 @@ fn model_from_native(
     for _ in 0..placement_count {
         let command = parse_command_reference(field(fields, index, "placement command")?, false)?;
         index += 1;
-        let command_group = parse_uuid(
+        let command_group = parse_uuid_allow_nil(
             field(fields, index, "placement command group")?,
             "placement command group",
         )?;
@@ -269,7 +254,7 @@ fn model_from_native(
     let order_count = section_count(fields, &mut index, "command order")?;
     let mut commands_order = Vec::with_capacity(order_count);
     for _ in 0..order_count {
-        let command_group = parse_uuid(
+        let command_group = parse_uuid_allow_nil(
             field(fields, index, "order command group")?,
             "order command group",
         )?;
@@ -381,12 +366,19 @@ fn parse_uuid(
     value: &NativeValue,
     field: &'static str,
 ) -> Result<ObjectUuid, CommandInterfaceCodecError> {
+    if required_token(value, field)? == NIL_UUID {
+        return Err(CommandInterfaceCodecError::InvalidShape(field));
+    }
+    parse_uuid_allow_nil(value, field)
+}
+
+fn parse_uuid_allow_nil(
+    value: &NativeValue,
+    field: &'static str,
+) -> Result<ObjectUuid, CommandInterfaceCodecError> {
     let value = required_token(value, field)?;
     let uuid = ObjectUuid::parse(value)
         .map_err(|_| CommandInterfaceCodecError::InvalidUuid(value.to_owned()))?;
-    if value == NIL_UUID {
-        return Err(CommandInterfaceCodecError::InvalidShape(field));
-    }
     Ok(uuid)
 }
 
@@ -587,12 +579,34 @@ mod tests {
     }
 
     #[test]
-    fn malformed_tail_duplicate_and_legacy_no_bom_are_bounded() {
+    fn nil_command_group_is_preserved_in_placement_and_order() {
+        let profile = CommandInterfaceCodecProfile::fixture();
+        let plain = format!(
+            "\u{feff}{{7,0,1,1,{{0,{COMMAND_A}}},{NIL_UUID},1,1,1,{NIL_UUID},{{0,{COMMAND_A}}},0,0,0}}"
+        );
+        let blob = deflate_bytes(plain.as_bytes()).unwrap();
+
+        let decoded = decode_command_interface(&profile, &blob).unwrap();
+
+        assert_eq!(
+            decoded.model().commands_placement[0]
+                .command_group
+                .to_string(),
+            NIL_UUID
+        );
+        assert_eq!(
+            decoded.model().commands_order[0].command_group.to_string(),
+            NIL_UUID
+        );
+        assert_eq!(decoded.plaintext().unwrap(), plain.as_bytes());
+    }
+
+    #[test]
+    fn missing_bom_and_duplicate_are_rejected() {
         let profile = CommandInterfaceCodecProfile::fixture();
         let no_bom = format!("{{7,1,1,{{0,{COMMAND_A}}},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}}");
         let blob = deflate_bytes(no_bom.as_bytes()).unwrap();
         assert!(decode_command_interface(&profile, &blob).is_err());
-        assert!(decode_compatible_command_interface(&blob).is_ok());
 
         let mut model = fixture_model();
         model

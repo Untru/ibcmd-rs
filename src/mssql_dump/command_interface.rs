@@ -1,5 +1,9 @@
 use super::*;
 
+const MAX_COMMAND_INTERFACE_SECTION_ITEMS: usize = 100_000;
+const MAX_COMMAND_INTERFACE_ROOT_FIELDS: usize =
+    12 + 9 * MAX_COMMAND_INTERFACE_SECTION_ITEMS;
+
 pub(super) struct CommandInterface {
     pub(super) commands_order: Vec<CommandInterfaceOrderEntry>,
     pub(super) commands_placement: Vec<CommandInterfacePlacementEntry>,
@@ -71,13 +75,13 @@ pub(super) fn parse_command_interface_blob_with_subsystem_refs(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
 ) -> Option<CommandInterface> {
-    let inflated =
-        crate::compiler::bodies::command_interface::decode_compatible_command_interface(bytes)
-            .ok()?
-            .plaintext()
-            .ok()?;
+    let inflated = crate::compiler::families::native::inflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
-    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    let fields = split_1c_braced_fields_bounded(
+        text.trim_start_matches('\u{feff}'),
+        0,
+        MAX_COMMAND_INTERFACE_ROOT_FIELDS,
+    )?;
     if fields.first()?.trim() != "7" {
         return None;
     }
@@ -194,7 +198,7 @@ pub(super) fn parse_command_interface_section_count(
         "1" => {
             let count = fields.get(*index)?.trim().parse::<usize>().ok()?;
             *index += 1;
-            Some(count)
+            (count <= MAX_COMMAND_INTERFACE_SECTION_ITEMS).then_some(count)
         }
         _ => None,
     }
@@ -206,7 +210,7 @@ pub(super) fn parse_command_interface_command_name_field(
     metadata_refs: &BTreeMap<String, MetadataCommandReference>,
     allow_bare_zero: bool,
 ) -> Option<String> {
-    let command_ref = split_1c_braced_fields(field, 0)?;
+    let command_ref = split_1c_braced_fields_bounded(field, 0, 2)?;
     let code = command_ref.first()?.trim();
     if !code.chars().all(|ch| ch.is_ascii_digit()) {
         return None;

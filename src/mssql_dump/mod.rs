@@ -24195,6 +24195,14 @@ fn platform_reference_family_type_reference(type_id: &str) -> Option<&'static st
 }
 
 fn split_1c_braced_fields(text: &str, start: usize) -> Option<Vec<&str>> {
+    split_1c_braced_fields_bounded(text, start, usize::MAX)
+}
+
+fn split_1c_braced_fields_bounded(
+    text: &str,
+    start: usize,
+    max_fields: usize,
+) -> Option<Vec<&str>> {
     let end = scan_1c_braced_value(text, start)?;
     let inner_start = start + text[start..].chars().next()?.len_utf8();
     let inner_end = end.checked_sub(1)?;
@@ -24222,11 +24230,17 @@ fn split_1c_braced_fields(text: &str, start: usize) -> Option<Vec<&str>> {
             '{' => depth += 1,
             '}' => depth = depth.checked_sub(1)?,
             ',' if depth == 0 => {
+                if fields.len() >= max_fields {
+                    return None;
+                }
                 fields.push(inner[field_start..index].trim());
                 field_start = index + ch.len_utf8();
             }
             _ => {}
         }
+    }
+    if fields.len() >= max_fields {
+        return None;
     }
     fields.push(inner[field_start..].trim());
     Some(fields)

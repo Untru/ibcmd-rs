@@ -1431,6 +1431,50 @@ fn writes_binary_data_processor_object_module_body_to_source_layout() {
 }
 
 #[test]
+fn parses_legacy_command_interface_visibility_wrapper_for_source_export() {
+    let blob = deflate_for_test(
+        b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
+    );
+
+    assert!(parse_command_interface_blob(&blob, &BTreeMap::new(), &BTreeMap::new()).is_some());
+
+    let oversized = deflate_for_test(b"{7,1,100001,0,0,0,0,0}");
+    assert!(
+        parse_command_interface_blob(&oversized, &BTreeMap::new(), &BTreeMap::new()).is_none()
+    );
+
+    let oversized_command_reference = deflate_for_test(
+        b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,unexpected},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
+    );
+    assert!(
+        parse_command_interface_blob(
+            &oversized_command_reference,
+            &BTreeMap::new(),
+            &BTreeMap::new()
+        )
+        .is_none()
+    );
+
+    assert!(split_1c_braced_fields_bounded("{7,0,0}", 0, 2).is_none());
+
+    let nil_group = deflate_for_test(
+        b"{7,0,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},00000000-0000-0000-0000-000000000000,1,1,1,00000000-0000-0000-0000-000000000000,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},0,0,0}",
+    );
+    let parsed =
+        parse_command_interface_blob(&nil_group, &BTreeMap::new(), &BTreeMap::new()).unwrap();
+    let xml = format_command_interface_xml(&parsed);
+    assert_eq!(
+        xml.matches(
+            "<CommandGroup>00000000-0000-0000-0000-000000000000</CommandGroup>"
+        )
+        .count(),
+        2
+    );
+    assert!(xml.contains("<CommandsPlacement>"));
+    assert!(xml.contains("<CommandsOrder>"));
+}
+
+#[test]
 fn writes_configuration_module_text_to_source_layout_without_metadata_row() {
     let root = std::env::temp_dir().join(format!(
         "ibcmd-rs-mssql-dump-test-{}",
@@ -1481,10 +1525,10 @@ fn writes_configuration_module_text_to_source_layout_without_metadata_row() {
     let mobile_signature = b"\xEF\xBB\xBF{2,\"\",\"\",{0},0}".to_vec();
     let mobile_signature_blob = deflate_for_test(&mobile_signature);
     let main_section_command_interface = deflate_for_test(
-        b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
+        b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
     );
     let command_interface = deflate_for_test(
-        b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0}",
+        b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
     );
     let client_application_interface = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n\
