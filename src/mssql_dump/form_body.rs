@@ -894,23 +894,32 @@ pub(super) fn extract_form_command_set_excluded_commands(
     fields: &[&str],
     form_owner_reference: Option<&str>,
 ) -> Vec<&'static str> {
-    let Some(property_count) = fields
+    let property_bag_command_set = fields
         .get(18)
         .and_then(|value| value.trim().parse::<usize>().ok())
-    else {
-        return Vec::new();
-    };
-    let Some(command_slot) = property_count
-        .checked_mul(2)
-        .and_then(|offset| 20usize.checked_add(offset))
-    else {
-        return Vec::new();
-    };
-    let Some(command_set) = fields
-        .get(command_slot)
-        .and_then(|field| parse_form_table_counted_uuid_list(field))
-    else {
-        return Vec::new();
+        .and_then(|property_count| {
+            property_count
+                .checked_mul(2)
+                .and_then(|offset| 20usize.checked_add(offset))
+        })
+        .and_then(|command_slot| fields.get(command_slot))
+        .and_then(|field| parse_form_table_counted_uuid_list(field));
+    let command_set = if let Some(command_set) = property_bag_command_set {
+        command_set
+    } else {
+        if fields.len() != 22
+            || fields.get(18).map(|field| field.trim()) != Some("{0}")
+            || !form_table_child_owner_section_starts_at(fields, 20)
+        {
+            return Vec::new();
+        }
+        let Some(command_set) = fields
+            .get(19)
+            .and_then(|field| parse_form_table_counted_uuid_list(field))
+        else {
+            return Vec::new();
+        };
+        command_set
     };
     let business_process_or_task = form_owner_reference.is_some_and(|owner| {
         matches!(
@@ -9247,6 +9256,13 @@ fn parse_form_table_command_set_excluded_commands_for_table(
         return Vec::new();
     }
     map_form_table_excluded_commands(schema, &uuids)
+}
+
+#[cfg(test)]
+pub(super) fn parse_form_table_command_set_excluded_commands_for_table_test(
+    fields: &[&str],
+) -> Vec<&'static str> {
+    parse_form_table_command_set_excluded_commands_for_table(FormTableSchema, fields)
 }
 
 fn parse_form_field_command_set_excluded_commands(

@@ -3259,6 +3259,46 @@ fn extracts_form_command_set_single_excluded_command() {
 }
 
 #[test]
+fn does_not_extract_legacy_form_command_set_with_malformed_event_collection() {
+    let mut fields = vec![""; 22];
+    fields[18] = "{0,unexpected}";
+    fields[19] = "{1,198ea630-fda2-4cda-8a23-f999f4c67ee6}";
+    fields[20] = "1";
+    fields[21] =
+        r#"{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}"#;
+
+    assert!(
+        extract_form_command_set_excluded_commands(&fields, None).is_empty(),
+        "malformed event collection must not enable the legacy fallback"
+    );
+}
+
+#[test]
+fn does_not_extract_legacy_form_command_set_with_malformed_child_owner_tail() {
+    for (child_count, owner) in [
+        (
+            "0",
+            r#"{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}"#,
+        ),
+        (
+            "1",
+            r#"{21,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"ФормаКоманднаяПанель",{1,0}}"#,
+        ),
+    ] {
+        let mut fields = vec![""; 22];
+        fields[18] = "{0}";
+        fields[19] = "{1,198ea630-fda2-4cda-8a23-f999f4c67ee6}";
+        fields[20] = child_count;
+        fields[21] = owner;
+
+        assert!(
+            extract_form_command_set_excluded_commands(&fields, None).is_empty(),
+            "malformed child-owner tail must not enable the legacy fallback"
+        );
+    }
+}
+
+#[test]
 fn extracts_root_command_set_table_and_new_window_commands() {
     let mut fields = vec![""; 21];
     fields[18] = "0";
@@ -10164,6 +10204,24 @@ fn extracts_table_command_set_from_layout_field() {
             "SortListDesc",
         ]
     );
+}
+
+#[test]
+fn does_not_extract_table_command_set_after_compact_root_event_collection() {
+    for event_collection in ["{0}", "{0}garbage"] {
+        let mut fields = vec![""; 59];
+        fields[54] = "0";
+        fields[55] = event_collection;
+        fields[56] = "{1,0ae4bea5-23be-42a7-b69e-97b11b29c453}";
+        fields[57] = "1";
+        fields[58] =
+            r#"{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"TableCommandBar",{1,0}}"#;
+
+        assert!(
+            parse_form_table_command_set_excluded_commands_for_table_test(&fields).is_empty(),
+            "compact root event collection must not satisfy the table layout: {event_collection}"
+        );
+    }
 }
 
 #[test]
