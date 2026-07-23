@@ -20,6 +20,21 @@ $ErrorActionPreference = 'Stop'
 
 function Get-UtcNow { (Get-Date).ToUniversalTime().ToString('o') }
 
+function Get-FileSha256 {
+    param([string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return (($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '')
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Protect-SensitiveText {
     param([AllowNull()]$Value)
     $text = [string]$Value
@@ -290,14 +305,14 @@ try {
         $matrixManifest.result_class = if ($matrixManifest.release_eligible) { 'release' } else { 'diagnostic' }
         $resultClass = $matrixManifest.result_class
         $matrixManifest.artifact_sha256 = [ordered]@{
-            matrix = (Get-FileHash -LiteralPath $matrixJson -Algorithm SHA256).Hash.ToLowerInvariant()
-            markdown = (Get-FileHash -LiteralPath $matrixMarkdown -Algorithm SHA256).Hash.ToLowerInvariant()
-            merge_log = (Get-FileHash -LiteralPath $mergeLog -Algorithm SHA256).Hash.ToLowerInvariant()
+            matrix = (Get-FileSha256 -Path $matrixJson)
+            markdown = (Get-FileSha256 -Path $matrixMarkdown)
+            merge_log = (Get-FileSha256 -Path $mergeLog)
             child_manifests = @($children | ForEach-Object {
                 [ordered]@{
                     database = $_.database
-                    manifest = (Get-FileHash -LiteralPath $_.manifest -Algorithm SHA256).Hash.ToLowerInvariant()
-                    log = (Get-FileHash -LiteralPath $_.child_log -Algorithm SHA256).Hash.ToLowerInvariant()
+                    manifest = (Get-FileSha256 -Path $_.manifest)
+                    log = (Get-FileSha256 -Path $_.child_log)
                 }
             })
         }

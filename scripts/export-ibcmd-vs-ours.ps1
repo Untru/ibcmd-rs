@@ -125,6 +125,21 @@ function Get-Sha256Text {
     }
 }
 
+function Get-FileSha256 {
+    param([string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return (($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '')
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Get-RepositoryState {
     param([string]$RepoRoot)
     $lines = @(& git -C $RepoRoot status --porcelain=v1 --untracked-files=all)
@@ -350,13 +365,13 @@ try {
     $manifest.tools.git = [ordered]@{
         path=$gitPath
         version=((& $gitPath --version).Trim())
-        sha256=(Get-FileHash -LiteralPath $gitPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256=(Get-FileSha256 -Path $gitPath)
     }
     $manifest.repository = Get-RepositoryState -RepoRoot $repoRoot
-    $manifest.tools.candidate = [ordered]@{ path=$ExePath; version=(Get-CommandVersion $ExePath); sha256=(Get-FileHash -LiteralPath $ExePath -Algorithm SHA256).Hash.ToLowerInvariant() }
+    $manifest.tools.candidate = [ordered]@{ path=$ExePath; version=(Get-CommandVersion $ExePath); sha256=(Get-FileSha256 -Path $ExePath) }
     $resolvedIbcmd = Get-ResolvedIbcmdPath $IbcmdPath
     $resolvedIbcmdFile = Get-Command -Name $resolvedIbcmd -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
-    $resolvedIbcmdHash = if (Test-Path -LiteralPath $resolvedIbcmdFile.Source -PathType Leaf) { (Get-FileHash -LiteralPath $resolvedIbcmdFile.Source -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
+    $resolvedIbcmdHash = if (Test-Path -LiteralPath $resolvedIbcmdFile.Source -PathType Leaf) { Get-FileSha256 -Path $resolvedIbcmdFile.Source } else { $null }
     $manifest.tools.native_ibcmd = [ordered]@{ path=$resolvedIbcmdFile.Source; version=(Get-CommandVersion $resolvedIbcmdFile.Source); sha256=$resolvedIbcmdHash }
     $resolvedIbcmd = $resolvedIbcmdFile.Source
     $sqlcmdPath = Get-ApplicationPath 'sqlcmd'
@@ -366,17 +381,17 @@ try {
     $manifest.tools.sqlcmd = [ordered]@{
         path=$sqlcmdPath
         version=(Get-CommandVersion $sqlcmdPath @('-?'))
-        sha256=(Get-FileHash -LiteralPath $sqlcmdPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256=(Get-FileSha256 -Path $sqlcmdPath)
     }
     $manifest.tools.bcp = [ordered]@{
         path=$bcpPath
         version=(Get-CommandVersion $bcpPath @('-v'))
-        sha256=(Get-FileHash -LiteralPath $bcpPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256=(Get-FileSha256 -Path $bcpPath)
     }
     $manifest.tools.robocopy = [ordered]@{
         path=$robocopyPath
         version=(Get-CommandVersion $robocopyPath @('/?') @(16))
-        sha256=(Get-FileHash -LiteralPath $robocopyPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256=(Get-FileSha256 -Path $robocopyPath)
     }
     $beforeFingerprintCommand = Get-DatabaseFingerprintCommand -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
     $manifest.database_fingerprint = [ordered]@{
@@ -458,10 +473,10 @@ try {
     if ($Scope -eq 'full' -and $manifest.repository.status -ne 'clean') { throw 'Full release parity requires a clean Git repository.' }
     $manifest.artifacts = [ordered]@{ raw_diff='raw-diff.json'; signatures='signatures.json'; matrix='matrix.json'; markdown='matrix.md' }
     $manifest.artifact_sha256 = [ordered]@{
-        raw_diff=(Get-FileHash -LiteralPath $diffPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        signatures=(Get-FileHash -LiteralPath $signaturesPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        matrix=(Get-FileHash -LiteralPath $matrixPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        markdown=(Get-FileHash -LiteralPath $matrixMarkdownPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        raw_diff=(Get-FileSha256 -Path $diffPath)
+        signatures=(Get-FileSha256 -Path $signaturesPath)
+        matrix=(Get-FileSha256 -Path $matrixPath)
+        markdown=(Get-FileSha256 -Path $matrixMarkdownPath)
     }
     $manifest.status='passed'
 } catch { $manifest.status='failed'; $manifest.failure=(Protect-SensitiveText $_.Exception.Message); throw

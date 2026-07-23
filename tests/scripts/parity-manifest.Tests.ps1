@@ -44,6 +44,9 @@ Describe "Parity protocol scripts" {
         foreach ($tool in @('git', 'candidate', 'native_ibcmd', 'sqlcmd', 'bcp', 'robocopy')) {
             ($source -match "(?s)tools\.${tool}.*?sha256") | Should Be $true
         }
+        ($source -match 'function Get-FileSha256') | Should Be $true
+        ($source -match 'Get-FileHash') | Should Be $false
+        ((Get-Content -Raw $matrix) -match 'Get-FileHash') | Should Be $false
         ($source -match "@\('-U', \`$SqlUser, '-P'") | Should Be $false
         ($source -match "SetEnvironmentVariable\('SQLCMDPASSWORD'") | Should Be $true
     }
