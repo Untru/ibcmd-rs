@@ -955,10 +955,10 @@ fn insert_data_composition_settings(xml: &mut String, settings: &[String]) -> Op
     if offsets.len() != settings.len() {
         return None;
     }
-    if let (Some(offsets), Some(settings_block)) = (offsets.first(), settings.first()) {
-        // Native source export associates the external Settings documents with
-        // direct settingsVariant elements positionally, but materializes only
-        // the primary (first) variant's settings in Template.xml.
+    // Native source export associates external Settings documents with direct
+    // settingsVariant elements positionally. Insert from the end so the byte
+    // offsets collected from the unchanged schema remain valid.
+    for (offsets, settings_block) in offsets.iter().zip(settings).rev() {
         xml.insert_str(offsets.closing, settings_block);
     }
     Some(())
@@ -1005,11 +1005,18 @@ fn direct_settings_variant_offsets(xml: &str) -> Option<Vec<DirectSettingsVarian
                     && namespace_ref(&namespace) == Some(DCS_SCHEMA_NS)
                     && local.as_ref() == b"settingsVariant"
                 {
-                    let end_tag_len = event.name().as_ref().len() + 3;
                     let position = usize::try_from(reader.buffer_position()).ok()?;
+                    let event_name = event.name();
+                    let lexical_name = std::str::from_utf8(event_name.as_ref()).ok()?;
+                    let end_tag = format!("</{lexical_name}>");
+                    let search_end = position.checked_add(end_tag.len())?.min(xml.len());
+                    let closing = xml.get(..search_end)?.rfind(&end_tag)?;
+                    if closing < stack.last()?.2 {
+                        return None;
+                    }
                     offsets.push(DirectSettingsVariantOffsets {
                         opening: stack.last()?.2,
-                        closing: position.checked_sub(end_tag_len)?,
+                        closing,
                     });
                 }
                 let (open_namespace, open_local, _) = stack.pop()?;
@@ -2115,7 +2122,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_external_settings_materialize_only_the_primary_variant() {
+    fn multiple_external_settings_materialize_every_variant_positionally() {
         let schema = concat!(
             "\0\0\0\0\0\0\0\0",
             "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
@@ -2127,24 +2134,29 @@ mod tests {
             "\t</dataCompositionSchema>\r\n",
             "</SchemaFile>"
         );
-        let settings = |marker| {
+        let settings = |marker: Option<&str>| {
+            let selection = marker
+                .map(|marker| {
+                    format!(
+                        "<selection><item xsi:type=\"SelectedItemField\"><field>{marker}</field></item></selection>"
+                    )
+                })
+                .unwrap_or_default();
             format!(
                 concat!(
                     "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
                     "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
                     "xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
-                    "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
-                    "<selection><item xsi:type=\"SelectedItemField\"><field>{marker}</field></item></selection>",
-                    "</Settings>"
+                    "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">{selection}</Settings>"
                 ),
-                marker = marker
+                selection = selection
             )
         };
         let raw = format!(
             "{schema}{}{}{}",
-            settings("PrimaryMarker"),
-            settings("SecondaryMarker"),
-            settings("TertiaryMarker")
+            settings(Some("PrimaryMarker")),
+            settings(None),
+            settings(Some("TertiaryMarker"))
         );
 
         let xml = String::from_utf8(
@@ -2158,14 +2170,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(xml.matches("<settingsVariant>").count(), 3);
-        assert_eq!(xml.matches("<dcsset:settings").count(), 1);
-        assert!(xml.contains("<dcsset:field>PrimaryMarker</dcsset:field>"));
-        assert!(!xml.contains("SecondaryMarker"));
-        assert!(!xml.contains("TertiaryMarker"));
-        assert!(
-            xml.find("<dcsset:settings").unwrap()
-                < xml.find("<dcsset:name>Second</dcsset:name>").unwrap()
-        );
+        assert_eq!(xml.matches("<dcsset:settings").count(), 3);
+        let variants = direct_settings_variant_offsets(&xml)
+            .unwrap_or_else(|| panic!("failed to locate normalized variants:\n{xml}"));
+        assert_eq!(variants.len(), 3);
+        let variant_bodies = variants
+            .iter()
+            .map(|offsets| &xml[offsets.opening..offsets.closing])
+            .collect::<Vec<_>>();
+        assert_eq!(variant_bodies[0].matches("<dcsset:settings").count(), 1);
+        assert!(variant_bodies[0].contains("<dcsset:field>PrimaryMarker</dcsset:field>"));
+        assert!(!variant_bodies[0].contains("TertiaryMarker"));
+        assert_eq!(variant_bodies[1].matches("<dcsset:settings").count(), 1);
+        assert!(!variant_bodies[1].contains("Marker"));
+        assert_eq!(variant_bodies[2].matches("<dcsset:settings").count(), 1);
+        assert!(variant_bodies[2].contains("<dcsset:field>TertiaryMarker</dcsset:field>"));
+        assert!(!variant_bodies[2].contains("PrimaryMarker"));
     }
 
     #[test]
