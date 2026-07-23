@@ -3330,6 +3330,15 @@ pub(super) fn normalize_form_server_state_inner_xml(xml: &str) -> String {
         "<v8:Type>",
     )
     .replace("</Type>", "</v8:Type>")
+    // Dynamic-list ServerState uses the core namespace as the default on
+    // individual type nodes.  Native ibcmd renders these nodes with the
+    // document-level `v8` QName; without this normalization the same core
+    // TypeId was emitted as a plain `<TypeId xmlns=...>` node.
+    .replace(
+        r#"<TypeId xmlns="http://v8.1c.ru/8.1/data/core">"#,
+        "<v8:TypeId>",
+    )
+    .replace("</TypeId>", "</v8:TypeId>")
     .replace(
         r#"<DateQualifiers xmlns="http://v8.1c.ru/8.1/data/core">"#,
         "<v8:DateQualifiers>",

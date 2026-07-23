@@ -3772,14 +3772,44 @@ fn extracts_form_server_state_inner_xml() {
 	<Parameter xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xsi:type="dcssch:Parameter">
 		<dcssch:name>ДатаАктуальности</dcssch:name>
 	</Parameter>
+	<Field xmlns:dcssch="http://v8.1c.ru/8.1/data-composition-system/schema" xsi:type="dcssch:DataSetFieldField">
+		<dcssch:valueType>
+			<Type xmlns="http://v8.1c.ru/8.1/data/core">xs:string</Type>
+			<TypeId xmlns="http://v8.1c.ru/8.1/data/core">11111111-1111-4111-8111-111111111111</TypeId>
+		</dcssch:valueType>
+	</Field>
 </UniversalListServerOnlyState>"#;
 
     let inner = extract_form_server_state_inner_xml(xml).expect("server state inner xml");
 
     assert!(inner.contains(r#"<Field xsi:type="dcssch:DataSetFieldField">"#));
     assert!(inner.contains("<dcssch:dataPath>Дата</dcssch:dataPath>"));
-    assert!(inner.contains(r#"<Parameter xsi:type="dcssch:Parameter">"#));
+    assert!(inner.contains("<Parameter>"), "{inner}");
     assert!(inner.contains("<dcssch:name>ДатаАктуальности</dcssch:name>"));
+    assert!(inner.contains("<v8:Type>xs:string</v8:Type>"), "{inner}");
+    assert!(
+        inner.contains("<v8:TypeId>11111111-1111-4111-8111-111111111111</v8:TypeId>"),
+        "{inner}"
+    );
+    assert!(!inner.contains("<TypeId xmlns="), "{inner}");
+}
+
+#[test]
+fn normalizes_form_server_state_core_type_qnames_idempotently() {
+    let native = concat!(
+        "<dcssch:valueType><Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>",
+        "<TypeId xmlns=\"http://v8.1c.ru/8.1/data/core\">22222222-2222-4222-8222-222222222222</TypeId>",
+        "</dcssch:valueType>"
+    );
+    let expected = concat!(
+        "<dcssch:valueType><v8:Type>xs:string</v8:Type>",
+        "<v8:TypeId>22222222-2222-4222-8222-222222222222</v8:TypeId>",
+        "</dcssch:valueType>"
+    );
+
+    let normalized = normalize_form_server_state_inner_xml(native);
+    assert_eq!(normalized, expected);
+    assert_eq!(normalize_form_server_state_inner_xml(&normalized), expected);
 }
 
 #[test]
