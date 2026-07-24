@@ -7954,6 +7954,131 @@ mod moxel_exact_parity_tests {
     }
 
     #[test]
+    fn ukd_default_palette_shift_preserves_provenance_through_report_header_normalizer() {
+        // This is the two-entry palette used by UKD report headers: the raw
+        // None/Solid palette is shifted into the final cell-line slots.
+        let formats = vec![
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                right_border: Some(1),
+                ..MoxelFormat::default()
+            },
+        ];
+        let mut lines = parse_moxel_lines(&["{3,3,{-1}}", "{3,3,{-3}}"], &formats, true);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].style, "Solid");
+        assert_eq!(lines[0].line_type, "v8ui:SpreadsheetDocumentCellLineType");
+        assert_eq!(lines[0].width, 1);
+        assert_eq!(
+            lines[0].raw_parents,
+            vec![MoxelRawLineParent {
+                raw_entry_index: 0,
+                line_entry_index: 0,
+            }]
+        );
+        assert_eq!(
+            lines[0].transformations,
+            vec![MoxelLineTransformation::DefaultShift {
+                reason: "two-line default shift",
+            }]
+        );
+        assert_eq!(
+            lines[0].format_support,
+            vec![MoxelLineFormatSupport {
+                format_index: 0,
+                border_slot: MoxelLineBorderSlot::Border,
+            }]
+        );
+
+        assert_eq!(lines[1].style, "Dotted");
+        assert_eq!(lines[1].line_type, "v8ui:SpreadsheetDocumentCellLineType");
+        assert_eq!(lines[1].width, 1);
+        assert_eq!(
+            lines[1].raw_parents,
+            vec![MoxelRawLineParent {
+                raw_entry_index: 1,
+                line_entry_index: 1,
+            }]
+        );
+        assert_eq!(
+            lines[1].transformations,
+            vec![MoxelLineTransformation::DefaultShift {
+                reason: "two-line default shift",
+            }]
+        );
+        assert_eq!(
+            lines[1].format_support,
+            vec![MoxelLineFormatSupport {
+                format_index: 1,
+                border_slot: MoxelLineBorderSlot::Right,
+            }]
+        );
+
+        let column_sets = vec![MoxelColumnSet {
+            id: None,
+            default_format_index: None,
+            source_default_format_index: None,
+            size: 0,
+            columns: Vec::new(),
+        }];
+        let column_formats = vec![MoxelFormat::default(); 8];
+        let style_refs = vec![
+            None,
+            None,
+            Some("style:ReportHeaderBackColor".to_string()),
+            Some("style:ReportHeaderBackColor".to_string()),
+            Some("style:ReportHeaderBackColor".to_string()),
+        ];
+        normalize_moxel_single_set_report_header_tail(
+            &column_sets,
+            &column_formats,
+            &style_refs,
+            &mut lines,
+            &mut [],
+        );
+
+        assert_eq!(lines[0].style, "Solid");
+        assert_eq!(lines[0].width, 1);
+        assert_eq!(
+            lines[0].transformations,
+            vec![MoxelLineTransformation::DefaultShift {
+                reason: "two-line default shift",
+            }]
+        );
+        assert_eq!(lines[1].style, "Solid");
+        assert_eq!(lines[1].width, 2);
+        assert_eq!(
+            lines[1].raw_parents,
+            vec![MoxelRawLineParent {
+                raw_entry_index: 1,
+                line_entry_index: 1,
+            }]
+        );
+        assert_eq!(
+            lines[1].format_support,
+            vec![MoxelLineFormatSupport {
+                format_index: 1,
+                border_slot: MoxelLineBorderSlot::Right,
+            }]
+        );
+        assert_eq!(
+            lines[1].transformations,
+            vec![
+                MoxelLineTransformation::DefaultShift {
+                    reason: "two-line default shift",
+                },
+                MoxelLineTransformation::PostNormalizer {
+                    reason: "Dotted/1 to Solid/2",
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn duplicate_raw_lines_stay_distinct_without_value_matching() {
         let formats = vec![
             MoxelFormat { border: Some(0), ..MoxelFormat::default() },
