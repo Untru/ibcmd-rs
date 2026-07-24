@@ -250,6 +250,7 @@ impl From<NativeError> for MxlCodecError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::io::Read;
 
     use super::*;
     use crate::compiler::families::native::deflate_bytes;
@@ -299,5 +300,28 @@ mod tests {
         )
         .unwrap();
         assert!(decode_mxl(&profile, &unknown_root).is_err());
+    }
+
+    #[test]
+    fn inflated_mxl_requires_exact_header_bom_and_complete_root() {
+        let packed =
+            compile_mxl(&MxlCodecProfile::fixture(), SIMPLE_SPREADSHEET, None, None).unwrap();
+        let mut plain = Vec::new();
+        flate2::read::DeflateDecoder::new(packed.as_slice())
+            .read_to_end(&mut plain)
+            .unwrap();
+        assert!(decode_inflated_compatible_mxl(&plain).is_ok());
+
+        let mut bad_header = plain.clone();
+        bad_header[7] ^= 1;
+        assert!(decode_inflated_compatible_mxl(&bad_header).is_err());
+
+        let mut bad_bom = plain.clone();
+        bad_bom[MOXCEL_HEADER.len()] = b'x';
+        assert!(decode_inflated_compatible_mxl(&bad_bom).is_err());
+
+        let mut trailing = plain;
+        trailing.extend_from_slice(b"junk");
+        assert!(decode_inflated_compatible_mxl(&trailing).is_err());
     }
 }

@@ -411,6 +411,12 @@ pub(super) enum MoxelLineTransformation {
 /// this event when a caller opts in, so ordinary extraction retains its former
 /// output-only path.
 pub(crate) trait MoxelLineTraceSink {
+    /// Reserves space before an owned trace event is materialized.  A false
+    /// result is terminal for the current trace pass.
+    fn try_reserve_event(&self) -> bool {
+        true
+    }
+
     fn record_moxel_line(&self, event: MoxelLineTraceEvent);
 }
 
@@ -504,6 +510,9 @@ fn trace_final_moxel_lines(
         return;
     };
     for (output_line_index, resolved) in lines.iter().enumerate() {
+        if !trace_sink.try_reserve_event() {
+            break;
+        }
         let mut event = MoxelLineTraceEvent::from(resolved);
         event.output_line_index = output_line_index;
         trace_sink.record_moxel_line(event);
@@ -8258,6 +8267,7 @@ mod moxel_exact_parity_tests {
         assert_eq!(events[1].format_support[0].border_slot, "right");
         assert_eq!(events[1].final_style, "Solid");
         assert_eq!(events[1].final_width, 2);
+        assert!(events.iter().all(|event| !event.final_gap));
         assert_eq!(
             events[1]
                 .transformations
@@ -8275,12 +8285,63 @@ mod moxel_exact_parity_tests {
             MoxelFormat { border: Some(0), ..MoxelFormat::default() },
             MoxelFormat { border: Some(1), ..MoxelFormat::default() },
         ];
-        let lines = parse_moxel_lines(&["{3,3,{-3}}", "{3,3,{-3}}"], &formats, false);
+        let source = "{8,{3,3,{-3}},{3,3,{-3}}}";
+        let raw_spans = split_1c_braced_fields_with_spans(source, 0).unwrap();
+        let fields = raw_spans.iter().map(|(value, _, _)| *value).collect::<Vec<_>>();
+        let lines = parse_moxel_lines_with_raw_spans(&fields, &raw_spans, &formats, false);
 
         assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].raw_parents[0].raw_entry_index, 1);
         assert_eq!(lines[0].raw_parents[0].line_entry_index, 0);
+        assert_eq!(lines[0].raw_parents[0].span_start, 3);
+        assert_eq!(lines[0].raw_parents[0].span_end, 13);
+        assert_eq!(lines[1].raw_parents[0].raw_entry_index, 2);
         assert_eq!(lines[1].raw_parents[0].line_entry_index, 1);
+        assert_eq!(lines[1].raw_parents[0].span_start, 14);
+        assert_eq!(lines[1].raw_parents[0].span_end, 24);
         assert!(!lines[0].ambiguous && !lines[1].ambiguous);
+    }
+
+    #[test]
+    fn trace_reserves_before_materializing_and_stops_at_first_overflow() {
+        use std::cell::{Cell, RefCell};
+
+        struct BoundedSink {
+            remaining: Cell<usize>,
+            reserve_calls: Cell<usize>,
+            events: RefCell<Vec<MoxelLineTraceEvent>>,
+        }
+        impl MoxelLineTraceSink for BoundedSink {
+            fn try_reserve_event(&self) -> bool {
+                self.reserve_calls.set(self.reserve_calls.get() + 1);
+                let remaining = self.remaining.get();
+                if remaining == 0 {
+                    false
+                } else {
+                    self.remaining.set(remaining - 1);
+                    true
+                }
+            }
+
+            fn record_moxel_line(&self, event: MoxelLineTraceEvent) {
+                self.events.borrow_mut().push(event);
+            }
+        }
+
+        let line = ResolvedMoxelLine {
+            line: MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
+            // Large evidence would be cloned by `MoxelLineTraceEvent::from`;
+            // it must remain untouched for entries after the rejected reserve.
+            raw_parents: vec![MoxelRawLineParent { raw_entry_index: 0, line_entry_index: 0, span_start: 0, span_end: 1_000_000 }],
+            transformations: Vec::new(), format_support: Vec::new(), ambiguous: false, fail_closed: false,
+        };
+        let sink = BoundedSink { remaining: Cell::new(1), reserve_calls: Cell::new(0), events: RefCell::new(Vec::new()) };
+        trace_final_moxel_lines(&[line.clone(), line, ResolvedMoxelLine {
+            line: MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
+            raw_parents: Vec::new(), transformations: Vec::new(), format_support: Vec::new(), ambiguous: false, fail_closed: false,
+        }], Some(&sink));
+        assert_eq!(sink.reserve_calls.get(), 2);
+        assert_eq!(sink.events.borrow().len(), 1);
     }
 
     #[test]
