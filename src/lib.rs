@@ -7,6 +7,7 @@ pub mod conversion;
 #[cfg(feature = "platform-oracle")]
 pub mod dump_sources;
 pub mod form_matrix;
+pub mod form_provenance;
 pub(crate) mod form_schema;
 #[cfg(feature = "platform-oracle")]
 pub mod infobase;

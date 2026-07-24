@@ -35,6 +35,8 @@ pub enum Commands {
     AuditFormSources(AuditFormSourcesArgs),
     /// Compare two Form.xml/blob pairs and suggest XML path -> layout path mappings.
     FormDiffCandidates(FormDiffCandidatesArgs),
+    /// Correlate production Form-layout item traces with native and candidate Form.xml corpora.
+    FormProvenanceCorpus(FormProvenanceCorpusArgs),
     /// Audit source-tree files that current SQL loader can or cannot consume.
     AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Build a load plan by comparing manifests.
@@ -804,6 +806,22 @@ pub struct FormDiffCandidatesArgs {
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct FormProvenanceCorpusArgs {
+    /// Parity run root containing candidate_dump, native, and candidate directories.
+    #[arg(long)]
+    pub run_root: PathBuf,
+    /// Deterministic JSONL output path (outside the repository is recommended).
+    #[arg(long)]
+    pub output: PathBuf,
+    /// Form property to include. Repeatable; defaults to AutoMaxWidth, AutoAddIncomplete, DataPath, TitleDataPath.
+    #[arg(long = "property")]
+    pub property: Vec<String>,
+    /// Source commit recorded in output metadata.
+    #[arg(long)]
+    pub source_commit: Option<String>,
 }
 
 #[derive(Debug, Args)]

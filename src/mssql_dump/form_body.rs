@@ -79,27 +79,27 @@ pub(super) struct FormParseContext<'a> {
     trace_sink: Option<&'a dyn FormItemTraceSink>,
 }
 
-pub(super) trait FormItemTraceSink {
+pub(crate) trait FormItemTraceSink {
     fn record(&self, event: FormItemTraceEvent);
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormItemTraceEvent {
-    pub(super) id: String,
-    pub(super) tag: String,
-    pub(super) name: String,
-    pub(super) wrapper: String,
-    pub(super) raw_field_count: usize,
-    pub(super) normalized_field_count: usize,
-    pub(super) owner_chain: Vec<String>,
-    pub(super) top_level_scalars: Vec<FormItemTraceScalar>,
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct FormItemTraceEvent {
+    pub(crate) id: String,
+    pub(crate) tag: String,
+    pub(crate) name: String,
+    pub(crate) wrapper: String,
+    pub(crate) raw_field_count: usize,
+    pub(crate) normalized_field_count: usize,
+    pub(crate) owner_chain: Vec<String>,
+    pub(crate) top_level_scalars: Vec<FormItemTraceScalar>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormItemTraceScalar {
-    pub(super) index: usize,
-    pub(super) value: Option<String>,
-    pub(super) nested: bool,
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct FormItemTraceScalar {
+    pub(crate) index: usize,
+    pub(crate) value: Option<String>,
+    pub(crate) nested: bool,
 }
 
 impl<'a> FormParseContext<'a> {
@@ -184,12 +184,16 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         context.dcs_type_index,
         context.object_refs,
     );
-    let attribute_save_field_bindings =
-        extract_form_body_attribute_save_field_bindings(&body.trailing, context.type_index, context.object_refs);
+    let attribute_save_field_bindings = extract_form_body_attribute_save_field_bindings(
+        &body.trailing,
+        context.type_index,
+        context.object_refs,
+    );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_attributes_cpu_ms += elapsed_ms(started);
     }
-    let attributes_section = extract_form_body_attributes_section(&body.trailing, context.object_refs);
+    let attributes_section =
+        extract_form_body_attributes_section(&body.trailing, context.object_refs);
 
     let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
@@ -1814,9 +1818,7 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1" => Some("Opening"),
         // Platform event identifiers, not infobase metadata object identifiers.
         "3b644f4f-055f-4808-bdc6-a50ce895e4d9" => Some("NewWriteProcessing"),
-        "e91128e6-621d-4dc8-b12e-bd65aeb37e2d" => {
-            Some("OnUpdateUserSettingSetAtServer")
-        }
+        "e91128e6-621d-4dc8-b12e-bd65aeb37e2d" => Some("OnUpdateUserSettingSetAtServer"),
         "fe115cc8-9e33-4684-a166-bd5136fe7a9f" => Some("OnChange"),
         _ => None,
     }
@@ -2824,11 +2826,8 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
                 list_settings.items_user_setting_id = parse_form_setting_string(window[1])
             }
             "ServerState" => {
-                server_state_xml = parse_form_server_state_xml_with_indexes(
-                    window[1],
-                    dcs_type_index,
-                    object_refs,
-                )
+                server_state_xml =
+                    parse_form_server_state_xml_with_indexes(window[1], dcs_type_index, object_refs)
             }
             _ => {}
         }
@@ -3335,8 +3334,7 @@ pub(super) fn normalize_form_list_settings_section_xml(
         xml
     };
     if normalize_text_values {
-        let canonical =
-            canonicalize_form_data_composition_fragment(xml, root_name, object_refs)?;
+        let canonical = canonicalize_form_data_composition_fragment(xml, root_name, object_refs)?;
         let inner = extract_canonical_form_list_settings_inner(&canonical, root_name)?;
         return Some(normalize_form_list_settings_raw_fragment(&format!(
             "<dcsset:{emitted_name}>{inner}</dcsset:{emitted_name}>"
@@ -3372,8 +3370,7 @@ fn extract_canonical_form_list_settings_inner<'a>(
     let root_open_end = canonical[root_start..].find('>')? + root_start + 1;
     let closing = format!("</dcsset:{root_name}>");
     let root_close_start = canonical.rfind(&closing)?;
-    (root_open_end <= root_close_start)
-        .then(|| canonical[root_open_end..root_close_start].trim())
+    (root_open_end <= root_close_start).then(|| canonical[root_open_end..root_close_start].trim())
 }
 
 pub(super) fn normalize_form_list_settings_raw_fragment(fragment: &str) -> String {
@@ -3534,11 +3531,7 @@ pub(super) fn normalize_form_conditional_appearance_text_segment(
 
 #[cfg(test)]
 pub(super) fn parse_form_server_state_xml(field: &str) -> Option<String> {
-    parse_form_server_state_xml_with_indexes(
-        field,
-        &DcsTypeIndex::new(),
-        &BTreeMap::new(),
-    )
+    parse_form_server_state_xml_with_indexes(field, &DcsTypeIndex::new(), &BTreeMap::new())
 }
 
 #[cfg(test)]
@@ -3616,11 +3609,7 @@ pub(super) fn decode_form_server_state_chunks_with_limit(
 
 #[cfg(test)]
 pub(super) fn extract_form_server_state_inner_xml(xml: &str) -> Option<String> {
-    extract_form_server_state_inner_xml_with_indexes(
-        xml,
-        &DcsTypeIndex::new(),
-        &BTreeMap::new(),
-    )
+    extract_form_server_state_inner_xml_with_indexes(xml, &DcsTypeIndex::new(), &BTreeMap::new())
 }
 
 fn extract_form_server_state_inner_xml_with_indexes(
@@ -4569,6 +4558,18 @@ pub(super) fn collect_form_child_item_indexes(
     collect_form_child_item_indexes_with_object_refs(fields, attributes, &BTreeMap::new(), None)
 }
 
+pub(crate) fn trace_form_body_items(body: &str, trace_sink: &dyn FormItemTraceSink) -> Result<()> {
+    let fields = split_1c_braced_fields(body.trim(), 0)
+        .ok_or_else(|| anyhow!("Form layout is not a complete braced field list"))?;
+    collect_form_child_item_indexes_with_object_refs(
+        &fields,
+        &[],
+        &BTreeMap::new(),
+        Some(trace_sink),
+    );
+    Ok(())
+}
+
 fn collect_form_child_item_indexes_with_object_refs(
     fields: &[&str],
     attributes: &[FormAttribute],
@@ -4759,9 +4760,7 @@ fn collect_form_child_item_indexes_from_field_traced(
     let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
     let structural_identity = wrapper
         .and_then(|wrapper| form_child_item_tag(wrapper, &fields).map(|tag| (wrapper, tag)))
-        .and_then(|(wrapper, tag)| {
-            form_child_item_id(&fields).map(|id| (wrapper, tag, id))
-        })
+        .and_then(|(wrapper, tag)| form_child_item_id(&fields).map(|id| (wrapper, tag, id)))
         .and_then(|(wrapper, tag, id)| {
             parse_form_child_item_name(wrapper, &fields).map(|name| (wrapper, tag, id, name))
         });
@@ -9720,8 +9719,9 @@ fn extend_joint_form_excluded_commands(
 }
 
 fn map_form_table_excluded_commands(schema: FormTableSchema, uuids: &[&str]) -> Vec<&'static str> {
-    let mut commands =
-        map_known_form_excluded_commands(uuids, |uuid| form_table_excluded_command_name(schema, uuid));
+    let mut commands = map_known_form_excluded_commands(uuids, |uuid| {
+        form_table_excluded_command_name(schema, uuid)
+    });
     extend_joint_form_excluded_commands(
         &mut commands,
         uuids,
@@ -11841,9 +11841,7 @@ pub(super) fn parse_form_button_command_name(
 pub(super) fn form_standard_command_name(uuid: &str) -> Option<&'static str> {
     match uuid {
         FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("Form.StandardCommand.CustomizeForm"),
-        "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => {
-            Some("Form.StandardCommand.CreateByParameter")
-        }
+        "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => Some("Form.StandardCommand.CreateByParameter"),
         "fd8f031f-c168-4e1b-8b0c-15eb3057e688" => Some("Form.StandardCommand.Refresh"),
         "c32d43de-b820-49d0-bf7a-d70829f48f40" => Some("Form.StandardCommand.Delete"),
         "3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2" => Some("Form.StandardCommand.Delete"),

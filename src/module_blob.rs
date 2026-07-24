@@ -19611,6 +19611,10 @@ fn replace_braced_field(text: &mut String, index: usize, value: &str) -> Result<
 pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
     let inflated = inflate_raw(blob).context("failed to inflate Form body blob")?;
     let plain = String::from_utf8(inflated).context("Form body blob is not valid UTF-8")?;
+    parse_form_body_plain(&plain)
+}
+
+pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
     let container = FormBodyContainer::parse(&plain)?;
     let layout = plain[container.layout_range.clone()].trim().to_string();
     let module_text = parse_1c_quoted_string(plain[container.module_range.clone()].trim())

@@ -113,6 +113,10 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::FormProvenanceCorpus(args) => {
+            let report = ibcmd_rs::form_provenance::run_form_provenance_corpus(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::AuditSourceLoadCoverage(args) => {
             let report = ibcmd_rs::source_audit::audit_source_load_coverage(&args.root)?;
             if let Some(output) = args.output {
