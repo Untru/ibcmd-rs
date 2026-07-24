@@ -33,6 +33,7 @@ pub struct OfflineFormContextSummary {
     pub(crate) information_register_field_ref_entries: usize,
     pub(crate) form_owner_entries: usize,
     pub(crate) type_collisions: usize,
+    pub(crate) warnings: Vec<String>,
     pub(crate) errors: Vec<String>,
     pub(crate) sha256: String,
 }
@@ -48,6 +49,9 @@ impl OfflineFormContextFactory {
                 let path = Path::new(inflated);
                 if path.is_absolute() || path.components().any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_))) { bail!("unsafe inflated path: {inflated}"); }
                 if !inflated.starts_with("Config_inflated/") && !inflated.starts_with("Config_inflated\\") { bail!("unexpected inflated path: {inflated}"); }
+                // Production metadata indexers intentionally ignore dotted body/module rows.
+                // Do this before UTF-8 decoding: those rows may be binary blobs.
+                if file_name.contains('.') { continue; }
                 rows.push((file_name.to_string(), fs::read_to_string(run_root.join("candidate_dump").join(path)).with_context(|| format!("read inflated {inflated}"))?));
             }
         }
@@ -64,6 +68,7 @@ impl OfflineFormContextFactory {
         }
         let mut metadata = Vec::new();
         let errors = Vec::new();
+        let mut warnings = Vec::new();
         for (file_name, text) in &rows {
             if file_name.contains('.') { continue; }
             match metadata_text_row_audit_from_text(file_name, text.trim_start_matches('\u{feff}').to_string()) {
@@ -71,7 +76,12 @@ impl OfflineFormContextFactory {
                     normalize_direct_form_metadata(&mut row);
                     metadata.push(row);
                 }
-                MetadataTextRowAudit::ExtractedWithWarning(_, miss) | MetadataTextRowAudit::Miss(miss) => {
+                MetadataTextRowAudit::ExtractedWithWarning(mut row, miss) => {
+                    warnings.push(format!("{}:{}", miss.file_name, miss.reason.as_str()));
+                    normalize_direct_form_metadata(&mut row);
+                    metadata.push(row);
+                }
+                MetadataTextRowAudit::Miss(miss) => {
                     bail!("offline context incomplete at {}:{}", miss.file_name, miss.reason.as_str());
                 }
             }
@@ -102,6 +112,7 @@ impl OfflineFormContextFactory {
             fields.sort();
             for field in fields { canonical.push(format!("ir\0{register}\0{field}")); }
         }
+        for warning in &warnings { canonical.push(format!("warning\0{warning}")); }
         for error in &errors { canonical.push(format!("error\0{error}")); }
         canonical.sort();
         let mut hasher = Sha256::new();
@@ -113,7 +124,7 @@ impl OfflineFormContextFactory {
             input_rows: rows.len(), metadata_rows: metadata.len(),
             type_index_entries: type_index.len(), dcs_type_index_entries: dcs_type_index.len(),
             object_ref_entries: object_refs.len(), information_register_field_ref_entries: information_register_field_refs.len(),
-            form_owner_entries: form_owner_references.len(), type_collisions: 0, errors,
+            form_owner_entries: form_owner_references.len(), type_collisions: 0, warnings, errors,
             sha256: format!("{:x}", hasher.finalize()),
         };
         Ok(OfflineFormContext { type_index, dcs_type_index, object_refs, information_register_field_refs, form_owner_references, summary })
