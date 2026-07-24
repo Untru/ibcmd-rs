@@ -206,6 +206,17 @@ pub fn run_form_provenance_corpus(
             args.source_commit.clone(),
         ));
     }
+    let text = serialize_records(rows, errors)?;
+    fs::write(&args.output, text).with_context(|| format!("write {}", args.output.display()))?;
+    s.denominator = s.raw_events;
+    s.rate_percent = if s.denominator == 0 {
+        0.
+    } else {
+        s.matched_both as f64 * 100. / s.denominator as f64
+    };
+    Ok(s)
+}
+fn serialize_records(mut rows: Vec<Record>, mut errors: Vec<ErrorRecord>) -> Result<String> {
     rows.sort_by(|a, b| {
         (&a.path, &a.key, a.occurrence, &a.state).cmp(&(&b.path, &b.key, b.occurrence, &b.state))
     });
@@ -219,14 +230,7 @@ pub fn run_form_provenance_corpus(
         text.push_str(&serde_json::to_string(&e)?);
         text.push('\n');
     }
-    fs::write(&args.output, text).with_context(|| format!("write {}", args.output.display()))?;
-    s.denominator = s.raw_events;
-    s.rate_percent = if s.denominator == 0 {
-        0.
-    } else {
-        s.matched_both as f64 * 100. / s.denominator as f64
-    };
-    Ok(s)
+    Ok(text)
 }
 fn err(
     s: &mut FormProvenanceSummary,
@@ -575,7 +579,7 @@ fn correlate(
 mod tests {
     use super::*;
     fn temp(xml: &str) -> PathBuf {
-        let p = std::env::temp_dir().join("ibcmd-provenance-xml-test.xml");
+        let p = std::env::temp_dir().join(format!("ibcmd-provenance-{}.xml", uuid::Uuid::new_v4()));
         fs::write(&p, xml).unwrap();
         p
     }
@@ -630,7 +634,7 @@ mod tests {
     #[test]
     fn xml_direct_properties_capture_text_empty_nil_cdata_and_order() {
         let p = temp(
-            r#"<Form><Table id="1" name="T"><X/><DataPath>a<![CDATA[b]]></DataPath><AutoMaxWidth xsi:nil="true" xmlns:xsi="x"/><Holder><DataPath>bad</DataPath></Holder><TitleDataPath/></Table></Form>"#,
+            r#"<Form><Table id="1" name="T"><X/><DataPath>a<![CDATA[b]]></DataPath><AutoMaxWidth xsi:nil="true" xmlns:xsi="x"/><Holder><DataPath>bad</DataPath></Holder><TitleDataPath/><Button id="2" name="B"><DataPath>nested</DataPath></Button><Button id="3" name="E"/></Table></Form>"#,
         );
         let x = parse_xml_items(
             &p,
@@ -640,12 +644,20 @@ mod tests {
                 .collect::<Vec<_>>(),
         )
         .unwrap();
-        let q = &x[0].properties;
+        let outer = x.iter().find(|item| item.id == "1").unwrap();
+        let q = &outer.properties;
         assert_eq!(q["DataPath"].value.as_deref(), Some("ab"));
         assert_eq!(q["DataPath"].order, 1);
         assert!(q["AutoMaxWidth"].nil);
         assert!(q["TitleDataPath"].empty);
         assert!(!q.contains_key("bad"));
+        let nested = x.iter().find(|item| item.id == "2").unwrap();
+        assert_eq!(nested.tag, "Button");
+        assert_eq!(nested.owner_chain, vec!["Table:1"]);
+        assert_eq!(nested.properties["DataPath"].order, 0);
+        let empty = x.iter().find(|item| item.id == "3").unwrap();
+        assert_eq!(empty.tag, "Button");
+        assert_eq!(empty.owner_chain, vec!["Table:1"]);
         let _ = fs::remove_file(p);
     }
     #[test]
@@ -690,6 +702,8 @@ mod tests {
         assert!(safe("Catalogs/Тест/Forms/F/Ext/Form.xml"));
         assert!(!safe("../x"));
         assert!(!safe("C:/x"));
+        assert!(manifest_rows(&serde_json::json!({})).is_err());
+        assert!(manifest_rows(&serde_json::json!({"tables":[{}]})).is_err());
         let v: Value = serde_json::json!({"tables":[{"rows":[{"source_asset_path":"Catalogs/Тест/Forms/F/Ext/Form.xml","inflated_path":"Config_inflated/a.txt"}]}]});
         assert_eq!(
             manifest_rows(&v).unwrap()[0].0,
@@ -705,14 +719,22 @@ mod tests {
             "r",
             None,
         );
-        let mut lines = r
-            .into_iter()
-            .map(|x| serde_json::to_string(&x).unwrap())
-            .collect::<Vec<_>>();
-        lines.sort();
-        assert_eq!(lines, lines.clone());
+        let one = serialize_records(r.clone(), Vec::new()).unwrap();
+        let mut permuted = r;
+        permuted.reverse();
+        let two = serialize_records(permuted, Vec::new()).unwrap();
+        assert_eq!(one, two);
         let mut e = Vec::new();
         err(&mut s, &mut e, "z", "raw_trace", "bad");
+        assert_eq!(e[0].schema_version, 1);
+        assert_eq!(e[0].source_commit, None);
+        assert_eq!(e[0].run_id, "t");
+        assert_eq!(e[0].path, "z");
+        assert_eq!(e[0].reason, "raw_trace");
+        assert_eq!(e[0].message, "bad");
+        let malformed = temp("<Form><Table id=\"1\" name=\"T\"></Form>");
+        assert!(parse_xml_items(&malformed, &[]).is_err());
+        let _ = fs::remove_file(malformed);
         assert_eq!(e[0].stage, "raw_trace");
     }
 }
