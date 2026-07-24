@@ -17905,7 +17905,7 @@ fn parse_document_properties_from_text(
     }
 
     let direct_attribute_uuids =
-        parse_document_attribute_collection(&collections.get(2)?.items, 5)?;
+        parse_document_direct_attribute_collection(&collections.get(2)?.items)?;
     let tabular_sections =
         parse_document_tabular_sections(&collections.get(0)?.items, &header.name, object_refs)?;
     let child_metadata_objects = parse_attribute_tabular_section_child_objects(
@@ -18256,6 +18256,30 @@ fn parse_document_attribute_collection(items: &[&str], code: u32) -> Option<Vec<
         .collect()
 }
 
+fn parse_document_direct_attribute_collection(items: &[&str]) -> Option<Vec<String>> {
+    let mut wrapper_code = None;
+    let mut seen = BTreeSet::new();
+    items
+        .iter()
+        .map(|item| {
+            let item = split_information_register_braced_fields(item)?;
+            if item.len() != 2 || item.get(1)?.trim() != "0" {
+                return None;
+            }
+            let wrapper = split_information_register_braced_fields(item.first()?)?;
+            let (_, _, code, child_uuid) = parse_document_attribute_wrapper_fields(&wrapper, None)?;
+            if !matches!(code, 5 | 6)
+                || wrapper_code.is_some_and(|expected| expected != code)
+                || !seen.insert(child_uuid.to_ascii_lowercase())
+            {
+                return None;
+            }
+            wrapper_code = Some(code);
+            Some(child_uuid)
+        })
+        .collect()
+}
+
 struct DocumentTabularSectionLayout {
     uuid: String,
     attribute_uuids: Vec<String>,
@@ -18275,11 +18299,13 @@ fn parse_document_tabular_sections(
             if item.len() != 3 || item.get(1)?.trim() != "1" {
                 return None;
             }
-            let wrapper = split_information_register_braced_fields(item.first()?)?;
-            if wrapper.len() != 2 || wrapper.first()?.trim() != "1" {
-                return None;
-            }
-            let fields = split_information_register_braced_fields(wrapper.get(1)?)?;
+            let envelope = split_information_register_braced_fields(item.first()?)?;
+            let payload = match envelope.as_slice() {
+                [code, payload] if code.trim() == "1" => *payload,
+                [code, payload, tail] if code.trim() == "2" && tail.trim() == "5" => *payload,
+                _ => return None,
+            };
+            let fields = split_information_register_braced_fields(payload)?;
             if fields.len() != 9 || fields.first()?.trim() != "11" {
                 return None;
             }

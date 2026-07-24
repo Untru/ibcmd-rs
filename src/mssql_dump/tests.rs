@@ -32533,6 +32533,96 @@ fn resolves_non_dataprocessor_tabular_section_attribute_reference_from_attribute
 }
 
 #[test]
+fn metadata_reference_index_maps_extended_catalog_tabular_attribute() {
+    let catalog_uuid = "11111111-1111-4111-8111-111111111111";
+    let tabular_uuid = "22222222-2222-4222-8222-222222222222";
+    let attribute_uuid = "33333333-3333-4333-8333-333333333333";
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let tabular_payload = r#"{11,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-8ccc-cccccccccccc,dddddddd-dddd-4ddd-8ddd-dddddddddddd,{0,{3,{1,0,$TABULAR},"AdditionalAttributes",{0},"",0,0,$ZERO,0}},0,0,0}"#
+        .replace("$TABULAR", tabular_uuid)
+        .replace("$ZERO", zero_uuid);
+    let attribute_wrapper = document_attribute_wrapper_for_test(
+        6,
+        attribute_uuid,
+        r#"{"Pattern",{"B"}}"#,
+        r#"{"U"}"#,
+        "0",
+        "0",
+    );
+    let text = format!(
+        "{{2,{tabular_payload},5}},{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,{{{attribute_wrapper}}}}}"
+    );
+    let rows = vec![MetadataTextRow {
+        file_name: catalog_uuid.to_string(),
+        text,
+        object_code: Some(1),
+        header: Some(MetadataHeader {
+            uuid: catalog_uuid.to_string(),
+            name: "AdditionalProperties".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("Catalog".to_string()),
+        folder: Some("Catalogs"),
+    }];
+
+    let marker_start = rows[0]
+        .text
+        .find(&format!("{{1,0,{attribute_uuid}}}"))
+        .unwrap();
+    assert!(is_offset_inside_metadata_object_code(
+        &rows[0].text,
+        marker_start,
+        6
+    ));
+    assert!(is_offset_inside_tabular_section_attribute_list(
+        &rows[0].text,
+        marker_start
+    ));
+    assert_eq!(
+        preceding_metadata_header_for_code(&rows[0].text, marker_start, 11)
+            .map(|header| header.uuid),
+        Some(tabular_uuid.to_string())
+    );
+    assert_eq!(
+        nested_headers_with_offsets_from_text(&rows[0].text, catalog_uuid, |_| true)
+            .into_iter()
+            .map(|(header, _)| header.uuid)
+            .collect::<Vec<_>>(),
+        vec![tabular_uuid.to_string(), attribute_uuid.to_string()]
+    );
+    assert_eq!(
+        standalone_child_reference(
+            "Catalog",
+            "AdditionalProperties",
+            catalog_uuid,
+            &rows[0].text,
+            marker_start,
+            &MetadataHeader {
+                uuid: attribute_uuid.to_string(),
+                name: "Value".to_string(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            },
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Some(
+            "Catalog.AdditionalProperties.TabularSection.AdditionalAttributes.Attribute.Value"
+                .to_string()
+        )
+    );
+
+    let refs = build_metadata_object_reference_index_from_texts(&rows);
+    assert_eq!(
+        refs.get(attribute_uuid).map(String::as_str),
+        Some("Catalog.AdditionalProperties.TabularSection.AdditionalAttributes.Attribute.TrackChanges")
+    );
+}
+
+#[test]
 fn functional_option_refs_prefer_nested_subsystem_reference() {
     let option_uuid = "11111111-1111-4111-8111-111111111111";
     let subsystem_uuid = "22222222-2222-4222-8222-222222222222";
@@ -42316,6 +42406,22 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         first_uuid,
         6
     ));
+    assert_eq!(
+        parse_document_direct_attribute_collection(
+            &split_1c_braced_fields(&direct_collection, 0).unwrap()[2..]
+        ),
+        Some(vec![first_uuid.to_string()])
+    );
+    let legacy_direct_collection = document_attribute_collection_for_test(
+        DOCUMENT_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&direct5),
+    );
+    assert_eq!(
+        parse_document_direct_attribute_collection(
+            &split_1c_braced_fields(&legacy_direct_collection, 0).unwrap()[2..]
+        ),
+        Some(vec![first_uuid.to_string()])
+    );
     let wrong_marker = document_attribute_collection_for_test(
         DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
         std::slice::from_ref(&direct6),
@@ -42349,6 +42455,12 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         first_uuid,
         6
     ));
+    assert!(
+        parse_document_direct_attribute_collection(
+            &split_1c_braced_fields(&mixed, 0).unwrap()[2..]
+        )
+        .is_none()
+    );
     let duplicate = document_attribute_collection_for_test(
         DOCUMENT_ATTRIBUTE_GROUP_UUID,
         &[direct6.clone(), direct6.clone()],
@@ -42483,6 +42595,47 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         )
         .is_none()
     );
+}
+
+#[test]
+fn document_tabular_sections_accept_legacy_and_extended_envelopes_only() {
+    let tabular_uuid = "11111111-1111-4111-8111-111111111111";
+    let attribute_uuid = "22222222-2222-4222-8222-222222222222";
+    let nested = document_attribute_wrapper_for_test(
+        8,
+        attribute_uuid,
+        r#"{"Pattern",{"B"}}"#,
+        r#"{"S",""}"#,
+        "0",
+        "1",
+    );
+    let attributes = document_attribute_collection_for_test(
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&nested),
+    );
+    let payload = format!(
+        "{{11,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-8ccc-cccccccccccc,dddddddd-dddd-4ddd-8ddd-dddddddddddd,{{0,{{3,{{1,0,{tabular_uuid}}},\"Lines\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}},0,0,0}}"
+    );
+    let parse = |envelope: String| {
+        let item = format!("{{{envelope},1,{attributes}}}");
+        parse_document_tabular_sections(
+            &[item.as_str()],
+            "Invoice",
+            &BTreeMap::from([(
+                tabular_uuid.to_string(),
+                "Document.Invoice.TabularSection.Lines".to_string(),
+            )]),
+        )
+    };
+
+    for envelope in [format!("{{1,{payload}}}"), format!("{{2,{payload},5}}")] {
+        assert_eq!(
+            parse(envelope).map(|sections| sections[0].attribute_uuids.clone()),
+            Some(vec![attribute_uuid.to_string()])
+        );
+    }
+    assert!(parse(format!("{{2,{payload},4}}")).is_none());
+    assert!(parse(format!("{{2,{payload},5,0}}")).is_none());
 }
 
 #[test]

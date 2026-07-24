@@ -962,6 +962,16 @@ pub(super) fn standalone_child_reference(
                 tabular_section.name, child.name
             ));
         }
+        if is_offset_inside_tabular_section_attribute_list(text, marker_start)
+            && let Some(tabular_section) =
+                preceding_metadata_header_for_code(text, marker_start, 11)
+            && tabular_section.uuid != child.uuid
+        {
+            return Some(format!(
+                "{owner_kind}.{owner_name}.TabularSection.{}.Attribute.{}",
+                tabular_section.name, child.name
+            ));
+        }
         return Some(format!(
             "{owner_kind}.{owner_name}.Attribute.{}",
             child.name
@@ -1834,7 +1844,8 @@ pub(super) fn parse_configuration_reference_blob(blob: &[u8]) -> Option<String> 
 }
 
 pub(super) fn parse_configuration_reference_text(text: &str) -> Option<String> {
-    if !text.trim_start().starts_with("{2,") {
+    let root = split_1c_braced_fields(text.trim_start(), 0)?;
+    if root.len() != 2 || root.first()?.trim() != "2" {
         return None;
     }
     let marker = "{1,0,";
