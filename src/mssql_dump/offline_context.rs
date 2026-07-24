@@ -1,0 +1,128 @@
+use super::*;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+
+pub(crate) const OFFLINE_FORM_CONTEXT_SCHEMA_VERSION: u32 = 1;
+
+/// Reuses the production metadata-text builders for a saved `Config_inflated`
+/// corpus. It intentionally accepts only already-inflated UTF-8 text rows.
+pub(crate) struct OfflineFormContextFactory;
+
+#[derive(Debug)]
+pub(crate) struct OfflineFormContext {
+    pub(crate) type_index: BTreeMap<String, String>,
+    pub(crate) dcs_type_index: DcsTypeIndex,
+    pub(crate) object_refs: BTreeMap<String, String>,
+    pub(crate) information_register_field_refs: InformationRegisterFieldReferenceIndex,
+    pub(crate) form_owner_references: BTreeMap<String, String>,
+    pub(crate) summary: OfflineFormContextSummary,
+}
+
+#[derive(Debug, Clone, Serialize, Eq, PartialEq)]
+pub(crate) struct OfflineFormContextSummary {
+    pub(crate) schema_version: u32,
+    pub(crate) source_commit: Option<String>,
+    pub(crate) input_rows: usize,
+    pub(crate) metadata_rows: usize,
+    pub(crate) type_index_entries: usize,
+    pub(crate) dcs_type_index_entries: usize,
+    pub(crate) object_ref_entries: usize,
+    pub(crate) information_register_field_ref_entries: usize,
+    pub(crate) form_owner_entries: usize,
+    pub(crate) type_collisions: usize,
+    pub(crate) errors: Vec<String>,
+    pub(crate) sha256: String,
+}
+
+impl OfflineFormContextFactory {
+    pub(crate) fn from_plain_rows(
+        rows: impl IntoIterator<Item = (String, String)>,
+        source_commit: Option<String>,
+    ) -> Result<OfflineFormContext> {
+        let mut rows = rows.into_iter().collect::<Vec<_>>();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        if rows.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            bail!("offline context has duplicate Config row file names");
+        }
+        let mut metadata = Vec::new();
+        let mut errors = Vec::new();
+        for (file_name, text) in &rows {
+            if file_name.contains('.') { continue; }
+            match metadata_text_row_audit_from_text(file_name, text.trim_start_matches('\u{feff}').to_string()) {
+                MetadataTextRowAudit::Extracted(mut row) | MetadataTextRowAudit::ExtractedWithWarning(mut row, _) => {
+                    normalize_direct_form_metadata(&mut row);
+                    metadata.push(row);
+                }
+                MetadataTextRowAudit::Miss(miss) => errors.push(format!("{}:{}", miss.file_name, miss.reason.as_str())),
+            }
+        }
+        let indexes = build_metadata_type_indexes_from_texts(&metadata);
+        if !indexes.reference_collisions.is_empty() {
+            bail!("offline context has {} type-index collisions", indexes.reference_collisions.len());
+        }
+        let type_index = indexes.references;
+        let object_refs = build_metadata_object_reference_index_from_texts(&metadata);
+        let defined = build_defined_type_value_owner_reference_index_from_texts(&metadata, &type_index);
+        let information_register_field_refs = build_information_register_field_reference_index_from_texts(&metadata, &type_index, &defined);
+        let form_owner_references = build_complete_form_source_reference_index(&metadata)
+            .into_iter()
+            .filter_map(|(id, reference)| form_owner_reference_name(&reference).map(|owner| (id, owner)))
+            .collect::<BTreeMap<_, _>>();
+        let dcs_type_index = indexes.dcs;
+        let mut canonical = Vec::new();
+        for (key, value) in &type_index { canonical.push(format!("type\0{key}\0{value}")); }
+        for (key, value) in &object_refs { canonical.push(format!("object\0{key}\0{value}")); }
+        for (key, value) in &form_owner_references { canonical.push(format!("owner\0{key}\0{value}")); }
+        canonical.sort();
+        let mut hasher = Sha256::new();
+        hasher.update(format!("offline-form-context/v{}\0", OFFLINE_FORM_CONTEXT_SCHEMA_VERSION));
+        for line in canonical { hasher.update(line.as_bytes()); hasher.update(b"\n"); }
+        let summary = OfflineFormContextSummary {
+            schema_version: OFFLINE_FORM_CONTEXT_SCHEMA_VERSION,
+            source_commit,
+            input_rows: rows.len(), metadata_rows: metadata.len(),
+            type_index_entries: type_index.len(), dcs_type_index_entries: dcs_type_index.len(),
+            object_ref_entries: object_refs.len(), information_register_field_ref_entries: information_register_field_refs.len(),
+            form_owner_entries: form_owner_references.len(), type_collisions: 0, errors,
+            sha256: format!("{:x}", hasher.finalize()),
+        };
+        Ok(OfflineFormContext { type_index, dcs_type_index, object_refs, information_register_field_refs, form_owner_references, summary })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn offline_context_matches_empty_production_builders_and_is_deterministic() {
+        let first = OfflineFormContextFactory::from_plain_rows(
+            vec![("not-metadata".to_string(), "broken".to_string())],
+            Some("abc".to_string()),
+        )
+        .unwrap();
+        let second = OfflineFormContextFactory::from_plain_rows(
+            vec![("not-metadata".to_string(), "broken".to_string())],
+            Some("abc".to_string()),
+        )
+        .unwrap();
+        let direct = build_metadata_type_indexes_from_texts(&[]);
+        assert_eq!(first.type_index, direct.references);
+        assert_eq!(first.dcs_type_index, direct.dcs);
+        assert_eq!(first.object_refs, build_metadata_object_reference_index_from_texts(&[]));
+        assert_eq!(first.summary, second.summary);
+    }
+
+    #[test]
+    fn offline_context_rejects_duplicate_file_name_fail_closed() {
+        let error = OfflineFormContextFactory::from_plain_rows(
+            vec![
+                ("same".to_string(), "x".to_string()),
+                ("same".to_string(), "y".to_string()),
+            ],
+            None,
+        )
+        .expect_err("duplicate rows must not choose an arbitrary context");
+        assert!(error.to_string().contains("duplicate"));
+    }
+}

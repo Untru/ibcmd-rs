@@ -36,6 +36,7 @@ mod form_body;
 mod forms;
 mod metadata;
 mod moxel;
+pub(crate) mod offline_context;
 mod refs;
 mod role_rights;
 mod selected;
@@ -4591,12 +4592,12 @@ struct FormSourceReference {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct InformationRegisterFieldReference {
+pub(crate) struct InformationRegisterFieldReference {
     field_reference: String,
     value_owner_references: BTreeSet<String>,
 }
 
-type InformationRegisterFieldReferenceIndex =
+pub(crate) type InformationRegisterFieldReferenceIndex =
     BTreeMap<String, Vec<InformationRegisterFieldReference>>;
 
 type DefinedTypeValueOwnerReferenceIndex = BTreeMap<String, BTreeSet<String>>;
