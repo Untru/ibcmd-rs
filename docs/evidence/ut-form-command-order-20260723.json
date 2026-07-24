@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "analysis": "form_command_functional_options_representation_order",
+  "source": {
+    "run_id": "ut_full_87c8dc3_20260723_195521",
+    "canonical_diff": "E:\\ibcmd_lab\\ut_full_87c8dc3_20260723_195521_canonical_diff.json",
+    "native_root": "\\\\?\\E:\\ibcmd_lab\\parity\\ut_ibcmd_full_cfef6ee7_20260723_121002_ut\\native",
+    "candidate_root": "\\\\?\\E:\\ibcmd_lab\\ut_full_87c8dc3_20260723_195521",
+    "candidate_commit": "87c8dc30b2600cd9ac69d096edd1d3b75fe65f0a",
+    "analysis_parent_commit": "98a353206cc4d96abb5e984c9b0693be3db206a8"
+  },
+  "files": {
+    "listed_form_xml": 5020,
+    "analyzed": 5020
+  },
+  "native": {
+    "commands_total": 21215,
+    "functional_options_before_representation": 168,
+    "other": 0,
+    "representation_before_functional_options": 0,
+    "with_both": 168
+  },
+  "candidate": {
+    "commands_total": 20900,
+    "functional_options_before_representation": 0,
+    "other": 0,
+    "representation_before_functional_options": 168,
+    "with_both": 168
+  },
+  "matched_pairs": {
+    "candidate_only_with_both": 0,
+    "expected_native_vs_candidate_reverse": 168,
+    "native_only_with_both": 0,
+    "shared_with_both": 168
+  },
+  "claim_contradictions": 0
+}
