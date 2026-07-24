@@ -117,6 +117,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::form_provenance::run_form_provenance_corpus(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MxlLineProvenanceCorpus(args) => {
+            let report = ibcmd_rs::mxl_line_provenance::run_mxl_line_provenance_corpus(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::FormContextSummary(args) => {
             let context = ibcmd_rs::mssql_dump::offline_context::OfflineFormContextFactory::from_run_root(&args.run_root, args.source_commit)?;
             println!("{}", serde_json::to_string_pretty(&context.summary)?);

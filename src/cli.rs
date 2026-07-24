@@ -37,6 +37,8 @@ pub enum Commands {
     FormDiffCandidates(FormDiffCandidatesArgs),
     /// Correlate production Form-layout item traces with native and candidate Form.xml corpora.
     FormProvenanceCorpus(FormProvenanceCorpusArgs),
+    /// Trace final MXL palette lines from raw candidate_dump assets.
+    MxlLineProvenanceCorpus(MxlLineProvenanceCorpusArgs),
     /// Build and summarize offline semantic indexes from a saved Config dump.
     FormContextSummary(FormContextSummaryArgs),
     /// Audit source-tree files that current SQL loader can or cannot consume.
@@ -824,6 +826,19 @@ pub struct FormProvenanceCorpusArgs {
     /// Source commit recorded in output metadata.
     #[arg(long)]
     pub source_commit: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct MxlLineProvenanceCorpusArgs {
+    /// Parity run root containing candidate_dump.
+    #[arg(long)]
+    pub run_root: PathBuf,
+    /// Deterministic JSONL output path (outside the repository is recommended).
+    #[arg(long)]
+    pub output: PathBuf,
+    /// Raw asset path relative to candidate_dump. Repeat to avoid scanning a whole corpus.
+    #[arg(long = "asset")]
+    pub asset: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]

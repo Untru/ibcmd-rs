@@ -101,6 +101,13 @@ pub(crate) fn decode_compatible_mxl(blob: &[u8]) -> Result<MxlBody, MxlCodecErro
     decode(blob, false)
 }
 
+/// Decode a retained `Config_inflated` MOXCEL payload.  It shares the exact
+/// signature, framing and body-shape checks of the compatible blob decoder;
+/// only the outer deflate layer has already been removed by the dump reader.
+pub(crate) fn decode_inflated_compatible_mxl(plain: &[u8]) -> Result<MxlBody, MxlCodecError> {
+    decode_plain(plain.to_vec(), false, true)
+}
+
 fn decode_strict(blob: &[u8]) -> Result<MxlBody, MxlCodecError> {
     decode(blob, true)
 }
@@ -111,13 +118,17 @@ pub(crate) fn decode_evidenced_mxl(blob: &[u8]) -> Result<MxlBody, MxlCodecError
 
 fn decode(blob: &[u8], strict: bool) -> Result<MxlBody, MxlCodecError> {
     let plain = inflate(blob)?;
+    decode_plain(plain, strict, false)
+}
+
+fn decode_plain(plain: Vec<u8>, strict: bool, exact_inflated_framing: bool) -> Result<MxlBody, MxlCodecError> {
     if !plain.starts_with(b"MOXCEL") {
         return Err(MxlCodecError::UnsupportedLayout(
             "missing MOXCEL signature".to_string(),
         ));
     }
 
-    let body_start = if strict {
+    let body_start = if strict || exact_inflated_framing {
         if !plain.starts_with(MOXCEL_HEADER) {
             return Err(MxlCodecError::UnsupportedLayout(
                 "unknown MOXCEL binary header".to_string(),

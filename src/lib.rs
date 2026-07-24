@@ -15,6 +15,7 @@ pub mod legacy_version;
 pub mod module_blob;
 pub mod mssql;
 pub mod mssql_dump;
+pub mod mxl_line_provenance;
 pub mod parallel;
 pub mod plan;
 #[cfg(feature = "platform-oracle")]

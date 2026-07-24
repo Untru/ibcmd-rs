@@ -346,8 +346,7 @@ pub(super) struct MoxelLine {
     pub(super) width: usize,
 }
 
-/// Internal provenance carried until the final `MoxelLine` projection.  It is
-/// deliberately not serialized yet: the trace sink is added by a later step.
+/// Internal provenance carried until the final `MoxelLine` projection.
 #[derive(Clone)]
 pub(super) struct ResolvedMoxelLine {
     pub(super) line: MoxelLine,
@@ -378,6 +377,9 @@ pub(super) struct MoxelRawLineParent {
     pub(super) raw_entry_index: usize,
     /// Entry in the raw line table after non-line payload fields are removed.
     pub(super) line_entry_index: usize,
+    /// Exact UTF-8 byte span of the raw field in the native `{8,...}` body.
+    pub(super) span_start: usize,
+    pub(super) span_end: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -403,6 +405,109 @@ pub(super) enum MoxelLineTransformation {
     DefaultShift { reason: &'static str },
     Synthesized { reason: &'static str },
     PostNormalizer { reason: &'static str },
+}
+
+/// Receives one owned, final-palette line event.  The parser only materializes
+/// this event when a caller opts in, so ordinary extraction retains its former
+/// output-only path.
+pub(crate) trait MoxelLineTraceSink {
+    fn record_moxel_line(&self, event: MoxelLineTraceEvent);
+}
+
+/// Additive, stable JSONL payload for a resolved MXL palette line.  Every
+/// field comes from the carried `ResolvedMoxelLine`; it deliberately performs
+/// no post-hoc XML/raw matching.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct MoxelLineTraceEvent {
+    pub output_line_index: usize,
+    pub raw_parents: Vec<MoxelRawLineParentTrace>,
+    pub transformations: Vec<MoxelLineTransformationTrace>,
+    pub format_support: Vec<MoxelLineFormatSupportTrace>,
+    pub final_style: &'static str,
+    pub final_type: &'static str,
+    pub final_width: usize,
+    pub final_gap: bool,
+    pub ambiguous: bool,
+    pub fail_closed: bool,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct MoxelRawLineParentTrace {
+    pub raw_entry_index: usize,
+    pub line_entry_index: usize,
+    pub span_start: usize,
+    pub span_end: usize,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct MoxelLineFormatSupportTrace {
+    pub format_index: usize,
+    pub border_slot: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub(crate) struct MoxelLineTransformationTrace {
+    pub kind: &'static str,
+    pub reason: Option<&'static str>,
+    pub source_index: Option<usize>,
+}
+
+impl From<&ResolvedMoxelLine> for MoxelLineTraceEvent {
+    fn from(line: &ResolvedMoxelLine) -> Self {
+        Self {
+            output_line_index: 0,
+            raw_parents: line.raw_parents.iter().map(|parent| MoxelRawLineParentTrace {
+                raw_entry_index: parent.raw_entry_index,
+                line_entry_index: parent.line_entry_index,
+                span_start: parent.span_start,
+                span_end: parent.span_end,
+            }).collect(),
+            transformations: line.transformations.iter().map(MoxelLineTransformationTrace::from).collect(),
+            format_support: line.format_support.iter().map(|support| MoxelLineFormatSupportTrace {
+                format_index: support.format_index,
+                border_slot: match support.border_slot {
+                    MoxelLineBorderSlot::Border => "border",
+                    MoxelLineBorderSlot::Left => "left",
+                    MoxelLineBorderSlot::Top => "top",
+                    MoxelLineBorderSlot::Right => "right",
+                    MoxelLineBorderSlot::Bottom => "bottom",
+                    MoxelLineBorderSlot::Drawing => "drawing",
+                },
+            }).collect(),
+            final_style: line.style,
+            final_type: line.line_type,
+            final_width: line.width,
+            final_gap: false,
+            ambiguous: line.ambiguous,
+            fail_closed: line.fail_closed,
+        }
+    }
+}
+
+impl From<&MoxelLineTransformation> for MoxelLineTransformationTrace {
+    fn from(transformation: &MoxelLineTransformation) -> Self {
+        match transformation {
+            MoxelLineTransformation::Truncated { reason } => Self { kind: "truncated", reason: Some(reason), source_index: None },
+            MoxelLineTransformation::DrawingOnlySelectedSource { source_index } => Self { kind: "drawing_only_selected_source", reason: None, source_index: Some(*source_index) },
+            MoxelLineTransformation::DefaultShift { reason } => Self { kind: "default_shift", reason: Some(reason), source_index: None },
+            MoxelLineTransformation::Synthesized { reason } => Self { kind: "synthesized", reason: Some(reason), source_index: None },
+            MoxelLineTransformation::PostNormalizer { reason } => Self { kind: "post_normalizer", reason: Some(reason), source_index: None },
+        }
+    }
+}
+
+fn trace_final_moxel_lines(
+    lines: &[ResolvedMoxelLine],
+    trace_sink: Option<&dyn MoxelLineTraceSink>,
+) {
+    let Some(trace_sink) = trace_sink else {
+        return;
+    };
+    for (output_line_index, resolved) in lines.iter().enumerate() {
+        let mut event = MoxelLineTraceEvent::from(resolved);
+        event.output_line_index = output_line_index;
+        trace_sink.record_moxel_line(event);
+    }
 }
 
 pub(super) struct MoxelDrawing {
@@ -708,8 +813,36 @@ pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
+    extract_moxel_spreadsheet_xml_with_line_trace(bytes, object_refs, None)
+}
+
+pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    trace_sink: Option<&dyn MoxelLineTraceSink>,
+) -> Option<String> {
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
-    let spreadsheet = parse_moxel_spreadsheet_text(body.native_body_text(), object_refs)?;
+    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(
+        body.native_body_text(),
+        object_refs,
+        trace_sink,
+    )?;
+    Some(format_moxel_spreadsheet_xml(&spreadsheet))
+}
+
+/// Trace an already-inflated native MXL body retained by an offline dump.
+/// Its MOXCEL framing is validated by the same codec routine as packed blobs.
+pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    trace_sink: Option<&dyn MoxelLineTraceSink>,
+) -> Option<String> {
+    let body = crate::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
+    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(
+        body.native_body_text(),
+        object_refs,
+        trace_sink,
+    )?;
     Some(format_moxel_spreadsheet_xml(&spreadsheet))
 }
 
@@ -717,7 +850,17 @@ pub(super) fn parse_moxel_spreadsheet_text(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<MoxelSpreadsheet> {
-    let fields = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)?;
+    parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, None)
+}
+
+fn parse_moxel_spreadsheet_text_with_line_trace(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    trace_sink: Option<&dyn MoxelLineTraceSink>,
+) -> Option<MoxelSpreadsheet> {
+    let body = text.trim_start_matches('\u{feff}');
+    let spanned_fields = split_1c_braced_fields_with_spans(body, 0)?;
+    let fields = spanned_fields.iter().map(|(value, _, _)| *value).collect::<Vec<_>>();
     if fields.first()?.trim() != "8" {
         return None;
     }
@@ -1005,7 +1148,7 @@ pub(super) fn parse_moxel_spreadsheet_text(
     let has_sparse_column_sets = column_sets
         .iter()
         .any(|column_set| column_set.columns.len() != column_set.size);
-    let mut resolved_lines = parse_moxel_lines(&fields, &all_formats, has_sparse_column_sets);
+    let mut resolved_lines = parse_moxel_lines_with_raw_spans(&fields, &spanned_fields, &all_formats, has_sparse_column_sets);
     normalize_moxel_single_set_report_header_tail(
         &column_sets,
         &column_formats,
@@ -1013,14 +1156,12 @@ pub(super) fn parse_moxel_spreadsheet_text(
         &mut resolved_lines,
         &mut formats,
     );
-    // Provenance is intentionally internal until the trace sink is enabled.
-    // XML keeps consuming the same projected palette as before.
+    // XML keeps consuming the same projected palette as before.  The optional
+    // sink sees exactly this final carried state, before it is projected away.
+    trace_final_moxel_lines(&resolved_lines, trace_sink);
     let lines = resolved_lines
         .into_iter()
-        .map(|resolved| {
-            let _trace_status = (resolved.ambiguous, resolved.fail_closed);
-            resolved.line
-        })
+        .map(|resolved| resolved.line)
         .collect::<Vec<_>>();
     let drawing_max_format_index = drawings
         .iter()
@@ -2286,8 +2427,18 @@ fn finalize_moxel_line_slots(
     lines
 }
 
+#[cfg(test)]
 pub(super) fn parse_moxel_lines(
     fields: &[&str],
+    formats: &[MoxelFormat],
+    shift_default_line_styles: bool,
+) -> Vec<ResolvedMoxelLine> {
+    parse_moxel_lines_with_raw_spans(fields, &[], formats, shift_default_line_styles)
+}
+
+fn parse_moxel_lines_with_raw_spans(
+    fields: &[&str],
+    raw_spans: &[(&str, usize, usize)],
     formats: &[MoxelFormat],
     shift_default_line_styles: bool,
 ) -> Vec<ResolvedMoxelLine> {
@@ -2307,13 +2458,15 @@ pub(super) fn parse_moxel_lines(
     let mut lines = fields
         .iter()
         .enumerate()
-        .filter_map(|(raw_entry_index, field)| parse_moxel_line(field).map(|line| (raw_entry_index, line)))
+        .filter_map(|(raw_entry_index, field)| parse_moxel_line(field).map(|line| (raw_entry_index, field.len(), line)))
         .enumerate()
-        .map(|(line_entry_index, (raw_entry_index, line))| ResolvedMoxelLine {
+        .map(|(line_entry_index, (raw_entry_index, raw_len, line))| ResolvedMoxelLine {
             line,
             raw_parents: vec![MoxelRawLineParent {
                 raw_entry_index,
                 line_entry_index,
+                span_start: raw_spans.get(raw_entry_index).map(|(_, start, _)| *start).unwrap_or(0),
+                span_end: raw_spans.get(raw_entry_index).map(|(_, _, end)| *end).unwrap_or(raw_len),
             }],
             transformations: Vec::new(),
             format_support: Vec::new(),
@@ -7931,13 +8084,13 @@ mod moxel_exact_parity_tests {
         let mut lines = vec![
             ResolvedMoxelLine {
                 line: MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
-                raw_parents: vec![MoxelRawLineParent { raw_entry_index: 1, line_entry_index: 0 }],
+                raw_parents: vec![MoxelRawLineParent { raw_entry_index: 1, line_entry_index: 0, span_start: 0, span_end: 0 }],
                 transformations: vec![MoxelLineTransformation::DefaultShift { reason: "fixture" }],
                 format_support: Vec::new(), ambiguous: false, fail_closed: false,
             },
             ResolvedMoxelLine {
                 line: MoxelLine { style: "Dotted", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
-                raw_parents: vec![MoxelRawLineParent { raw_entry_index: 2, line_entry_index: 1 }],
+                raw_parents: vec![MoxelRawLineParent { raw_entry_index: 2, line_entry_index: 1, span_start: 0, span_end: 0 }],
                 transformations: vec![MoxelLineTransformation::DefaultShift { reason: "fixture" }],
                 format_support: Vec::new(), ambiguous: false, fail_closed: false,
             },
@@ -7978,6 +8131,8 @@ mod moxel_exact_parity_tests {
             vec![MoxelRawLineParent {
                 raw_entry_index: 0,
                 line_entry_index: 0,
+                span_start: 0,
+                span_end: "{3,3,{-1}}".len(),
             }]
         );
         assert_eq!(
@@ -8002,6 +8157,8 @@ mod moxel_exact_parity_tests {
             vec![MoxelRawLineParent {
                 raw_entry_index: 1,
                 line_entry_index: 1,
+                span_start: 0,
+                span_end: "{3,3,{-3}}".len(),
             }]
         );
         assert_eq!(
@@ -8056,6 +8213,8 @@ mod moxel_exact_parity_tests {
             vec![MoxelRawLineParent {
                 raw_entry_index: 1,
                 line_entry_index: 1,
+                span_start: 0,
+                span_end: "{3,3,{-3}}".len(),
             }]
         );
         assert_eq!(
@@ -8076,6 +8235,38 @@ mod moxel_exact_parity_tests {
                 },
             ]
         );
+
+        struct Sink(std::cell::RefCell<Vec<MoxelLineTraceEvent>>);
+        impl MoxelLineTraceSink for Sink {
+            fn record_moxel_line(&self, event: MoxelLineTraceEvent) {
+                self.0.borrow_mut().push(event);
+            }
+        }
+        let sink = Sink(std::cell::RefCell::new(Vec::new()));
+        trace_final_moxel_lines(&lines, Some(&sink));
+        let events = sink.0.into_inner();
+
+        // The event is a direct projection of the final carried state: no
+        // value-based raw matching is permitted between these assertions.
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].output_line_index, 0);
+        assert_eq!(events[0].raw_parents[0].raw_entry_index, 0);
+        assert_eq!(events[0].format_support[0].border_slot, "border");
+        assert_eq!(events[1].output_line_index, 1);
+        assert_eq!(events[1].raw_parents[0].raw_entry_index, 1);
+        assert_eq!(events[1].format_support[0].format_index, 1);
+        assert_eq!(events[1].format_support[0].border_slot, "right");
+        assert_eq!(events[1].final_style, "Solid");
+        assert_eq!(events[1].final_width, 2);
+        assert_eq!(
+            events[1]
+                .transformations
+                .iter()
+                .map(|transformation| transformation.kind)
+                .collect::<Vec<_>>(),
+            vec!["default_shift", "post_normalizer"]
+        );
+        assert!(events.iter().all(|event| !event.ambiguous && !event.fail_closed));
     }
 
     #[test]

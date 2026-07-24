@@ -99,3 +99,26 @@ powershell -ExecutionPolicy Bypass -File scripts\run-parity-matrix.ps1 `
 Старые `01-export-ibcmd.bat`, `02-export-ibcmd-rs.bat` и
 `03-diff-ibcmd-vs-ibcmd-rs.bat` намеренно отключены: они позволяли записывать в
 известный каталог и тем самым смешивать baseline и candidate.
+
+## Трасса линий MXL
+
+Для исследования итоговой палитры линий в уже сохранённом прогоне используйте
+только его неизменяемый `candidate_dump`:
+
+```powershell
+cargo run -- mxl-line-provenance-corpus --run-root <run-root> --output <trace.jsonl>
+```
+
+Для одного сохранённого сырого asset (обычный режим для UKD) укажите его
+относительно `candidate_dump`, не передавая абсолютный путь:
+
+```powershell
+cargo run -- mxl-line-provenance-corpus --run-root <run-root> --asset <asset-relative-to-candidate_dump> --output <trace.jsonl>
+```
+
+Команда прогоняет каждый сырой asset через обычный compatible-MXL extractor и
+записывает ровно одно JSONL-событие на каждую финальную line slot. Событие не
+содержит runtime-имён, UUID или путей: в нём есть только raw entry/line spans,
+упорядоченная цепочка преобразований, format index/border slot и финальные
+style/type/width с флагами `ambiguous` и `fail_closed`. Нераспознанные assets
+пропускаются; команда не изменяет дерево прогона.
