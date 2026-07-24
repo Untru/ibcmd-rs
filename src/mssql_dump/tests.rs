@@ -18207,6 +18207,10 @@ fn spreadsheet_pack_extract_roundtrip_preserves_row_columns_id() {
     assert_eq!(extracted, extracted_again);
     assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
     assert!(!extracted.contains("<defaultFormatIndex>"));
+    assert_eq!(extracted.matches("\n\t<format").count(), 5);
+    assert!(!extracted.contains("\t<format/>\r\n"));
+    assert!(extracted.contains("<formatIndex>4</formatIndex>"));
+    assert!(extracted.contains("<f>5</f>"));
 }
 
 #[test]
@@ -18268,6 +18272,9 @@ fn spreadsheet_pack_extract_roundtrip_preserves_row_zero_columns_id() {
     assert_eq!(extracted, extracted_again);
     assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
     assert!(!extracted.contains("<defaultFormatIndex>"));
+    assert_eq!(extracted.matches("\n\t<format").count(), 2);
+    assert!(!extracted.contains("\t<format/>\r\n"));
+    assert!(extracted.contains("<f>2</f>"));
 }
 
 #[test]
@@ -18357,6 +18364,65 @@ fn spreadsheet_pack_extract_roundtrip_preserves_multiple_row_columns_id_from_zer
     assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
     assert!(extracted.contains("<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>"));
     assert!(!extracted.contains("<defaultFormatIndex>"));
+    assert_eq!(extracted.matches("\n\t<format").count(), 2);
+    assert!(!extracted.contains("\t<format/>\r\n"));
+    assert_eq!(extracted.matches("<f>2</f>").count(), 2);
+}
+
+#[test]
+fn spreadsheet_pack_extract_preserves_global_default_for_multiple_column_sets() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
+	<columns>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<columns>
+		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
+		<size>1</size>
+		<columnsItem>
+			<index>0</index>
+			<column>
+				<formatIndex>1</formatIndex>
+			</column>
+		</columnsItem>
+	</columns>
+	<rowsItem>
+		<index>0</index>
+		<row>
+			<c>
+				<c>
+					<f>2</f>
+				</c>
+			</c>
+		</row>
+	</rowsItem>
+	<defaultFormatIndex>2</defaultFormatIndex>
+	<format>
+		<width>10</width>
+	</format>
+	<format>
+		<width>20</width>
+	</format>
+</document>
+"#;
+
+    let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
+    let extracted =
+        extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
+    let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
+    let extracted_again =
+        extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
+
+    assert_eq!(extracted, extracted_again);
+    assert!(extracted.contains("<defaultFormatIndex>2</defaultFormatIndex>"));
+    assert_eq!(extracted.matches("\n\t<format").count(), 2);
+    assert!(!extracted.contains("\t<format/>\r\n"));
 }
 
 #[test]
