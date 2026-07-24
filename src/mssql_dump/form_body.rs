@@ -303,6 +303,19 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     Some(xml)
 }
 
+pub(crate) fn trace_form_body_with_context(
+    body: &ParsedFormBodyBlob,
+    type_index: &BTreeMap<String, String>,
+    dcs_type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
+    information_register_field_refs: &InformationRegisterFieldReferenceIndex,
+    form_owner_reference: Option<&str>,
+    trace_sink: &dyn FormItemTraceSink,
+) -> Option<()> {
+    let context = FormParseContext::new(type_index, dcs_type_index, object_refs, information_register_field_refs, form_owner_reference).with_trace_sink(trace_sink);
+    extract_form_body_xml_from_body_timed(body, &context, None).map(|_| ())
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct FormBodyProperties {
     pub(super) title: Vec<(String, String)>,
@@ -4558,6 +4571,7 @@ pub(super) fn collect_form_child_item_indexes(
     collect_form_child_item_indexes_with_object_refs(fields, attributes, &BTreeMap::new(), None)
 }
 
+#[allow(dead_code)]
 pub(crate) fn trace_form_body_items(body: &str, trace_sink: &dyn FormItemTraceSink) -> Result<()> {
     let fields = split_1c_braced_fields(body.trim(), 0)
         .ok_or_else(|| anyhow!("Form layout is not a complete braced field list"))?;

@@ -1,7 +1,8 @@
 //! Deterministic offline form/raw/XML correlation for a saved parity corpus.
 use crate::cli::FormProvenanceCorpusArgs;
 use crate::module_blob::parse_form_body_plain;
-use crate::mssql_dump::{trace_form_body_items, FormItemTraceEvent, FormItemTraceSink};
+use crate::mssql_dump::{trace_form_body_with_context, FormItemTraceEvent, FormItemTraceSink};
+use crate::mssql_dump::offline_context::OfflineFormContextFactory;
 use anyhow::{anyhow, Context, Result};
 use quick_xml::{
     events::{BytesStart, Event},
@@ -112,6 +113,7 @@ pub fn run_form_provenance_corpus(
     args: &FormProvenanceCorpusArgs,
 ) -> Result<FormProvenanceSummary> {
     let properties = filters(&args.property)?;
+    let context = OfflineFormContextFactory::from_run_root(&args.run_root, args.source_commit.clone())?;
     let manifest_path = args.run_root.join("candidate_dump/manifest.json");
     let manifest: Value = serde_json::from_slice(
         &fs::read(&manifest_path).with_context(|| format!("read {}", manifest_path.display()))?,
@@ -153,7 +155,7 @@ pub fn run_form_provenance_corpus(
     let mut rows = Vec::new();
     let mut errors = Vec::new();
     for (path, inflated) in forms {
-        let raw_path = args.run_root.join("candidate_dump").join(inflated);
+        let raw_path = args.run_root.join("candidate_dump").join(&inflated);
         let plain = match fs::read_to_string(&raw_path) {
             Ok(x) => {
                 s.read_forms += 1;
@@ -175,8 +177,10 @@ pub fn run_form_provenance_corpus(
             }
         };
         let sink = Sink::new();
-        if let Err(e) = trace_form_body_items(&body.layout, &sink) {
-            err(&mut s, &mut errors, &path, "raw_trace", e);
+        let form_id = Path::new(&inflated).file_name().and_then(|x| x.to_str()).and_then(|x| x.split("__part").next()).and_then(|x| x.strip_suffix(".txt"));
+        let owner = form_id.and_then(|id| context.form_owner_references.get(id)).map(String::as_str);
+        if trace_form_body_with_context(&body, &context.type_index, &context.dcs_type_index, &context.object_refs, &context.information_register_field_refs, owner, &sink).is_none() {
+            err(&mut s, &mut errors, &path, "raw_trace", "production context extraction failed");
             continue;
         };
         let raw = sink.take();

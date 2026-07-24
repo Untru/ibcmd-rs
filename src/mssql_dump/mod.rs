@@ -66,7 +66,7 @@ pub(crate) fn resolve_form_item_picture_owner(
     form_body::form_item_picture_owner_at(text, marker_start)
 }
 
-pub(crate) use form_body::{FormItemTraceEvent, FormItemTraceSink, trace_form_body_items};
+pub(crate) use form_body::{FormItemTraceEvent, FormItemTraceSink, trace_form_body_with_context};
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
 pub(crate) use moxel::extract_moxel_spreadsheet_xml;
 #[cfg(all(test, feature = "mssql-live-tests"))]
