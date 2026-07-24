@@ -9,6 +9,7 @@ param(
     [string]$RunId = (Get-Date -Format 'yyyyMMdd_HHmmss'),
     [string]$ExePath = '',
     [string]$IbcmdPath = '',
+    [ValidateRange(1, 86400)][int]$NativeTimeoutSec = 900,
     [ValidateSet('2.20', '2.21')][string]$SourceVersion = '2.20',
     [ValidateSet('full', 'scoped')][string]$Scope = 'full',
     [string[]]$PathPrefix = @(),
@@ -203,6 +204,7 @@ try {
             Scope=$Scope
             PathPrefix=$PathPrefix
             ExePath=$ExePath
+            NativeTimeoutSec=$NativeTimeoutSec
         }
         if ($IntegratedAuth -or [string]::IsNullOrWhiteSpace($DbUser)) { $params.IntegratedAuth = $true }
         if ($IbcmdPath) { $params.IbcmdPath = $IbcmdPath }

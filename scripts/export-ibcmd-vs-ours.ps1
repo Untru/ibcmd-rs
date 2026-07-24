@@ -8,6 +8,7 @@ param(
     [string]$RunId = (Get-Date -Format "yyyyMMdd_HHmmss"),
     [string]$ExePath = "",
     [string]$IbcmdPath = "",
+    [ValidateRange(1, 86400)][int]$NativeTimeoutSec = 900,
     [ValidateSet("2.20", "2.21")][string]$SourceVersion = "2.20",
     [ValidateSet("full", "scoped")][string]$Scope = "full",
     [string[]]$PathPrefix = @(),
@@ -422,7 +423,7 @@ try {
         if (-not (Test-CliCommand -Exe $ExePath -Command $command)) { throw "Required command '$command' is unavailable in $ExePath. Build it with: cargo build --release --features platform-oracle" }
     }
 
-    $nativeArgs = @($Cli.NativeExport, '--dbms', 'MSSQLServer', '--db-server', $DbServer, '--db-name', $DbName, '-o', $nativeRoot, '--overwrite', '--ibcmd', $resolvedIbcmd)
+    $nativeArgs = @($Cli.NativeExport, '--dbms', 'MSSQLServer', '--db-server', $DbServer, '--db-name', $DbName, '-o', $nativeRoot, '--overwrite', '--ibcmd', $resolvedIbcmd, '--timeout-sec', [string]$NativeTimeoutSec)
     if (-not $IntegratedAuth) { $nativeArgs += @('--db-user', $DbUser, '--db-pwd-env', 'IBCMD_DB_PSW') }
     $nativeAction = { & $ExePath @nativeArgs }
     if ($IntegratedAuth) {

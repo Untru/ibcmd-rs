@@ -112,9 +112,12 @@ Describe "Parity protocol scripts" {
         ($source.Contains('auth_mode=$authMode')) | Should Be $true
         ($source.Contains("if (-not `$IntegratedAuth) { `$nativeArgs += @('--db-user', `$DbUser, '--db-pwd-env', 'IBCMD_DB_PSW') }")) | Should Be $true
         ($source.Contains("if (-not `$IntegratedAuth) { `$candidateArgs += @('--sql-user', `$DbUser, '--sql-pwd-env', 'IBCMD_DB_PSW') }")) | Should Be $true
+        ($source.Contains("[ValidateRange(1, 86400)][int]`$NativeTimeoutSec = 900")) | Should Be $true
+        ($source.Contains("'--timeout-sec', [string]`$NativeTimeoutSec")) | Should Be $true
         $matrixSource = Get-Content -Raw $matrix
         ($matrixSource.Contains('[switch]$IntegratedAuth')) | Should Be $true
         ($matrixSource.Contains('$params.IntegratedAuth = $true')) | Should Be $true
+        ($matrixSource.Contains('NativeTimeoutSec=$NativeTimeoutSec')) | Should Be $true
     }
 
     It "persists a failed native step and clears inherited SQL credentials" {
