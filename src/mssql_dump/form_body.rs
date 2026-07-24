@@ -1751,6 +1751,11 @@ pub(super) fn form_event_name_from_identifier(identifier: &str) -> Option<&'stat
         "e773807c-0c0c-4689-a093-231ddcd6409f" => Some("BeforeLoadDataFromSettingsAtServer"),
         "5426e344-5740-4f23-99c1-99179a200dc5" => Some("ExternalEvent"),
         "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1" => Some("Opening"),
+        // Platform event identifiers, not infobase metadata object identifiers.
+        "3b644f4f-055f-4808-bdc6-a50ce895e4d9" => Some("NewWriteProcessing"),
+        "e91128e6-621d-4dc8-b12e-bd65aeb37e2d" => {
+            Some("OnUpdateUserSettingSetAtServer")
+        }
         "fe115cc8-9e33-4684-a166-bd5136fe7a9f" => Some("OnChange"),
         _ => None,
     }
@@ -3898,6 +3903,16 @@ pub(super) fn normalize_form_main_table_category(
                 && !value.ends_with(".RecordsWithExtDimensions") =>
         {
             Some(format!("{value}.RecordsWithExtDimensions"))
+        }
+        (value, Some("3"))
+            if value.starts_with("InformationRegister.") && !value.ends_with(".SliceLast") =>
+        {
+            Some(format!("{value}.SliceLast"))
+        }
+        (value, Some("3"))
+            if value.starts_with("Task.") && !value.ends_with(".TasksByExecutive") =>
+        {
+            Some(format!("{value}.TasksByExecutive"))
         }
         _ => Some(main_table),
     }

@@ -3100,6 +3100,15 @@ fn maps_form_event_uuid_aliases_to_names() {
     ] {
         assert_eq!(form_event_name_from_identifier(uuid), Some(name));
     }
+    for (uuid, name) in [
+        ("3b644f4f-055f-4808-bdc6-a50ce895e4d9", "NewWriteProcessing"),
+        (
+            "e91128e6-621d-4dc8-b12e-bd65aeb37e2d",
+            "OnUpdateUserSettingSetAtServer",
+        ),
+    ] {
+        assert_eq!(form_event_name_from_identifier(uuid), Some(name));
+    }
     assert_eq!(
         parse_form_child_item_event_identifier("fe115cc8-9e33-4684-a166-bd5136fe7a9f").as_deref(),
         Some("OnChange")
@@ -3152,6 +3161,38 @@ fn parses_platform_before_load_user_settings_event_identifier() {
             handler: "HandlerA".to_string(),
         })
     );
+}
+
+#[test]
+fn parses_platform_update_user_settings_event_for_root_and_table_records() {
+    const EVENT_ID: &str = "e91128e6-621d-4dc8-b12e-bd65aeb37e2d";
+
+    assert_eq!(
+        parse_form_body_event_pair(EVENT_ID, r#""RootHandler""#),
+        Some(FormBodyEvent {
+            name: "OnUpdateUserSettingSetAtServer".to_string(),
+            handler: "RootHandler".to_string(),
+        })
+    );
+    let table_raw = format!(r#"{{1,{EVENT_ID},"TableHandler"}}"#);
+    let table_record = split_1c_braced_fields(&table_raw, 0)
+        .expect("well-formed table event record");
+    assert_eq!(
+        parse_form_child_item_event_record(&table_record),
+        vec![FormBodyEvent {
+            name: "OnUpdateUserSettingSetAtServer".to_string(),
+            handler: "TableHandler".to_string(),
+        }]
+    );
+    assert_eq!(
+        parse_form_nested_child_item_event_records(&["36", table_raw.as_str()]),
+        vec![FormBodyEvent {
+            name: "OnUpdateUserSettingSetAtServer".to_string(),
+            handler: "TableHandler".to_string(),
+        }]
+    );
+    assert!(parse_form_body_event_pair(EVENT_ID, r#"""#).is_none());
+    assert!(parse_form_body_event_pair(EVENT_ID, r#""bad handler""#).is_none());
 }
 
 #[test]
@@ -4655,6 +4696,41 @@ fn restores_accumulation_register_balance_main_table_from_raw_category() {
         )
         .as_deref(),
         Some("AccountingRegister.RegisterB.RecordsWithExtDimensions")
+    );
+    assert_eq!(
+        parse_main_table(
+            MAIN_TABLE_TYPE_ID,
+            REGISTER_ID,
+            "InformationRegister.RegisterC",
+            "3",
+        ),
+        "InformationRegister.RegisterC.SliceLast"
+    );
+    assert_eq!(
+        parse_main_table(MAIN_TABLE_TYPE_ID, REGISTER_ID, "Task.TaskD", "3"),
+        "Task.TaskD.TasksByExecutive"
+    );
+    assert_eq!(
+        parse_main_table(
+            MAIN_TABLE_TYPE_ID,
+            REGISTER_ID,
+            "InformationRegister.RegisterC",
+            "1",
+        ),
+        "InformationRegister.RegisterC"
+    );
+    assert_eq!(
+        normalize_form_main_table_category(
+            Some("InformationRegister.RegisterC.SliceLast".to_string()),
+            Some("3"),
+        )
+        .as_deref(),
+        Some("InformationRegister.RegisterC.SliceLast")
+    );
+    assert_eq!(
+        normalize_form_main_table_category(Some("Task.TaskD".to_string()), Some("invalid"))
+            .as_deref(),
+        Some("Task.TaskD")
     );
 }
 
