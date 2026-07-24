@@ -4982,17 +4982,17 @@ fn collect_form_child_item_indexes_from_field_traced(
                 auto_max_width_raw,
                 auxiliary_raw,
                 effective,
-            ) = if ordinary_table_variant {
-                let raw = fields.get(53).map(|field| field.trim().to_string());
-                let auxiliary = fields.get(54).map(|field| field.trim().to_string());
-                let effective = (raw.as_deref() == Some("0") && auxiliary.as_deref() == Some("2"))
-                    .then_some(false);
+            ) = if let Some(schema) = FormTableSchema::from_raw_layout(wrapper, tag, fields) {
+                let slot = schema.auto_max_width_slot(fields);
+                let raw = slot
+                    .and_then(|slot| fields.get(slot))
+                    .map(|field| field.trim().to_string());
                 (
-                    "slot_53_with_slot_54_discriminator",
-                    Some(53),
+                    "fixed_tail_reverse_15",
+                    slot,
                     raw,
-                    auxiliary,
-                    effective,
+                    None,
+                    schema.auto_max_width(fields),
                 )
             } else {
                 ("none", None, None, None, None)
@@ -7046,11 +7046,8 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|properties| properties.auto_max_width())
         } else if let Some((schema, options)) = special_field_layout.as_ref() {
             schema.auto_max_width(options)
-        } else if ordinary_table_layout {
-            match fields.get(53).map(|field| field.trim()) {
-                Some("0") if fields.get(54).map(|field| field.trim()) == Some("2") => Some(false),
-                _ => None,
-            }
+        } else if let Some(schema) = table_schema {
+            schema.auto_max_width(&fields)
         } else {
             None
         },

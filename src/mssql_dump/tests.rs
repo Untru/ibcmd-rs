@@ -7914,6 +7914,125 @@ fn extracts_business_network_table_flags_from_ordinary_wrapper55() {
 }
 
 #[test]
+fn table_auto_max_width_uses_validated_fixed_tail_scalar() {
+    // Slot 53 is EnableDrag and slot 54 is the counted property-bag length.
+    // The native property instead lives at the fixed reverse-tail offset.
+    for field_count in [99, 105, 125] {
+        let mut owned = vec!["0".to_string(); field_count];
+        owned[0] = "55".to_string();
+        let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+        let schema = crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &fields)
+            .expect("valid variable-arity table layout");
+        let slot = schema.auto_max_width_slot(&fields).unwrap();
+        assert_eq!(slot, fields.len() - 15);
+        assert_eq!(schema.auto_max_width(&fields), Some(false));
+    }
+
+    let mut default_fields = vec!["0".to_string(); 125];
+    default_fields[0] = "55".to_string();
+    let slot = default_fields.len() - 15;
+    default_fields[slot] = "1".to_string();
+    let default_refs = default_fields.iter().map(String::as_str).collect::<Vec<_>>();
+    let default_schema = crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &default_refs)
+        .expect("default scalar remains a valid table layout");
+    assert_eq!(default_schema.auto_max_width(&default_refs), None);
+
+    let mut malformed_fields = default_fields;
+    malformed_fields[slot] = "2".to_string();
+    let malformed_refs = malformed_fields.iter().map(String::as_str).collect::<Vec<_>>();
+    assert!(crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed_refs).is_none());
+}
+
+#[test]
+fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
+    #[derive(Default)]
+    struct Sink {
+        schema: std::cell::RefCell<Vec<FormItemSchemaTraceEvent>>,
+    }
+    impl FormItemTraceSink for Sink {
+        fn record(&self, _event: FormItemTraceEvent) {}
+
+        fn record_schema(&self, event: FormItemSchemaTraceEvent) {
+            self.schema.borrow_mut().push(event);
+        }
+    }
+
+    // A saved real wrapper-55 layout with a nonempty counted property bag.
+    // Cases below mutate only the independently validated scalars under test.
+    const TABLE: &str = include_str!("../../.tmp_zhurnal_spisokdokumentov_table_raw.txt");
+
+    fn run(table: String) -> (FormChildItem, FormItemSchemaTraceEvent) {
+        let layout = format!(
+            "{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}"
+        );
+        let fields = split_1c_braced_fields(&layout, 0).unwrap();
+        let sink = Sink::default();
+        let (items, _) =
+            form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &sink);
+        let trace = sink
+            .schema
+            .borrow()
+            .iter()
+            .find(|event| !event.evidence_complete)
+            .cloned()
+            .expect("structural Table trace");
+        (
+            items
+                .into_iter()
+                .find(|item| item.tag == "Table")
+                .expect("Table item"),
+            trace,
+        )
+    }
+
+    // Case A: the deprecated (53, 54) discriminator is false, but the fixed
+    // reverse-tail slot is 0 and must still emit AutoMaxWidth=false.
+    let mut a = split_1c_braced_fields(TABLE, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    a[53] = "1".to_string();
+    assert_ne!((&a[53], &a[54]), (&"0".to_string(), &"2".to_string()));
+    let a_slot = a.len() - 15;
+    a[a_slot] = "0".to_string();
+    let (mut a_item, a_trace) = run(format!("{{{}}}", a.join(",")));
+    assert!(a_trace.strict_table_schema);
+    assert_eq!(a_trace.auto_max_width_source, "fixed_tail_reverse_15");
+    assert_eq!(a_trace.auto_max_width_slot, Some(a_slot));
+    assert_eq!(a_trace.auto_max_width_raw.as_deref(), Some("0"));
+    assert_eq!(a_trace.effective_auto_max_width, Some(false));
+    assert_eq!(a_item.auto_max_width, Some(false));
+    a_item.top_level_parent_nil = None;
+    a_item.show_root = None;
+    a_item.allow_root_choice = None;
+    assert!(format_form_child_items_xml(&[a_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+
+    // Case B has exactly the old false-positive pair (53, 54) = (0, 2),
+    // while reverse-15=1 means the XML must omit it.
+    let mut b = split_1c_braced_fields(TABLE, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    b[53] = "0".to_string();
+    b[54] = "2".to_string();
+    let b_slot = b.len() - 15;
+    b[b_slot] = "1".to_string();
+    let (mut b_item, b_trace) = run(format!("{{{}}}", b.join(",")));
+    assert_eq!(b_item.auto_max_width, None);
+    b_item.top_level_parent_nil = None;
+    b_item.show_root = None;
+    b_item.allow_root_choice = None;
+    assert!(!format_form_child_items_xml(&[b_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    assert!(b_trace.strict_table_schema);
+    assert_eq!(b_trace.auto_max_width_source, "fixed_tail_reverse_15");
+    assert_eq!(b_trace.auto_max_width_slot, Some(b_slot));
+    assert_eq!(b_trace.auto_max_width_raw.as_deref(), Some("1"));
+    assert_eq!(b_trace.effective_auto_max_width, None);
+}
+
+#[test]
 fn formats_hierarchical_table_properties_in_schema_order() {
     let mut item = parse_form_child_item(
             r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,2,13,{"U"},19,{"S",""}}"#,

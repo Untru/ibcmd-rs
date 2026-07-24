@@ -4471,6 +4471,9 @@ impl FormTableSchema {
     const SEARCH_CONTROL_LOCATION_REVERSE_OFFSET: usize = 23;
     const TOOLTIP_REPRESENTATION_REVERSE_OFFSET: usize = 28;
     const CURRENT_ROW_USE_REVERSE_OFFSET: usize = 5;
+    // This scalar is part of the fixed tail, not the counted property bag.
+    // Native ibcmd emits AutoMaxWidth=false only for raw code 0 here.
+    const AUTO_MAX_WIDTH_REVERSE_OFFSET: usize = 15;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -4515,6 +4518,12 @@ impl FormTableSchema {
         if !matches!(
             Self::reverse_field(fields, Self::CURRENT_ROW_USE_REVERSE_OFFSET)?.trim(),
             "0" | "1" | "2" | "3"
+        ) {
+            return None;
+        }
+        if !matches!(
+            Self::reverse_field(fields, Self::AUTO_MAX_WIDTH_REVERSE_OFFSET)?.trim(),
+            "0" | "1"
         ) {
             return None;
         }
@@ -4674,6 +4683,17 @@ impl FormTableSchema {
             "3" => Some(FormTableCurrentRowUse::SelectionPresentationAndChoice),
             _ => None,
         }
+    }
+
+    pub(crate) fn auto_max_width_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::AUTO_MAX_WIDTH_REVERSE_OFFSET)?;
+        matches!(fields.get(slot)?.trim(), "0" | "1").then_some(slot)
+    }
+
+    pub(crate) fn auto_max_width(self, fields: &[&str]) -> Option<bool> {
+        (fields.get(self.auto_max_width_slot(fields)?)?.trim() == "0").then_some(false)
     }
 
     pub(crate) fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
