@@ -1,8 +1,8 @@
 //! Deterministic offline form/raw/XML correlation for a saved parity corpus.
 use crate::cli::FormProvenanceCorpusArgs;
 use crate::module_blob::parse_form_body_plain;
-use crate::mssql_dump::{trace_form_body_with_context, FormItemTraceEvent, FormItemTraceSink};
 use crate::mssql_dump::offline_context::OfflineFormContextFactory;
+use crate::mssql_dump::{trace_form_body_with_context, FormItemTraceEvent, FormItemTraceSink};
 use anyhow::{anyhow, Context, Result};
 use quick_xml::{
     events::{BytesStart, Event},
@@ -113,7 +113,8 @@ pub fn run_form_provenance_corpus(
     args: &FormProvenanceCorpusArgs,
 ) -> Result<FormProvenanceSummary> {
     let properties = filters(&args.property)?;
-    let context = OfflineFormContextFactory::from_run_root(&args.run_root, args.source_commit.clone())?;
+    let context =
+        OfflineFormContextFactory::from_run_root(&args.run_root, args.source_commit.clone())?;
     let manifest_path = args.run_root.join("candidate_dump/manifest.json");
     let manifest: Value = serde_json::from_slice(
         &fs::read(&manifest_path).with_context(|| format!("read {}", manifest_path.display()))?,
@@ -154,7 +155,7 @@ pub fn run_form_provenance_corpus(
     };
     let mut rows = Vec::new();
     let mut errors = Vec::new();
-    for (path, inflated) in forms {
+    for (path, inflated, file_name) in forms {
         let raw_path = args.run_root.join("candidate_dump").join(&inflated);
         let plain = match fs::read_to_string(&raw_path) {
             Ok(x) => {
@@ -177,10 +178,39 @@ pub fn run_form_provenance_corpus(
             }
         };
         let sink = Sink::new();
-        let form_id = Path::new(&inflated).file_name().and_then(|x| x.to_str()).and_then(|x| x.split("__part").next()).and_then(|x| x.strip_suffix(".txt"));
-        let owner = form_id.and_then(|id| context.form_owner_references.get(id)).map(String::as_str);
-        if trace_form_body_with_context(&body, &context.type_index, &context.dcs_type_index, &context.object_refs, &context.information_register_field_refs, owner, &sink).is_none() {
-            err(&mut s, &mut errors, &path, "raw_trace", "production context extraction failed");
+        let form_id = match form_id_from_manifest_file_name(&file_name) {
+            Ok(id) => id,
+            Err(e) => {
+                err(&mut s, &mut errors, &path, "context_owner", e);
+                continue;
+            }
+        };
+        let owner =
+            match form_owner_for_manifest_path(&path, form_id, &context.form_owner_references) {
+                Ok(owner) => owner,
+                Err(e) => {
+                    err(&mut s, &mut errors, &path, "context_owner", e);
+                    continue;
+                }
+            };
+        if trace_form_body_with_context(
+            &body,
+            &context.type_index,
+            &context.dcs_type_index,
+            &context.object_refs,
+            &context.information_register_field_refs,
+            owner,
+            &sink,
+        )
+        .is_none()
+        {
+            err(
+                &mut s,
+                &mut errors,
+                &path,
+                "raw_trace",
+                "production context extraction failed",
+            );
             continue;
         };
         let raw = sink.take();
@@ -272,7 +302,7 @@ fn safe(p: &str) -> bool {
     let q = Path::new(p);
     !q.is_absolute() && q.components().all(|c| matches!(c, Component::Normal(_)))
 }
-fn manifest_rows(v: &Value) -> Result<Vec<(String, PathBuf)>> {
+fn manifest_rows(v: &Value) -> Result<Vec<(String, PathBuf, String)>> {
     let mut r = Vec::new();
     for t in v
         .get("tables")
@@ -284,21 +314,53 @@ fn manifest_rows(v: &Value) -> Result<Vec<(String, PathBuf)>> {
             .and_then(Value::as_array)
             .ok_or_else(|| anyhow!("manifest rows missing"))?
         {
-            let (a, b) = (
+            let (a, b, file_name) = (
                 x.get("source_asset_path").and_then(Value::as_str),
                 x.get("inflated_path").and_then(Value::as_str),
+                x.get("file_name").and_then(Value::as_str),
             );
-            if let (Some(a), Some(b)) = (a, b) {
+            if let Some(a) = a {
                 if a.ends_with("/Ext/Form.xml") {
-                    if !safe(a) || !safe(b) {
+                    let (b, file_name) = (b, file_name);
+                    let b = b.ok_or_else(|| anyhow!("manifest inflated_path missing for {a}"))?;
+                    let file_name =
+                        file_name.ok_or_else(|| anyhow!("manifest file_name missing for {a}"))?;
+                    if !safe(a) || !safe(b) || !safe(file_name) {
                         return Err(anyhow!("unsafe manifest path"));
                     }
-                    r.push((a.into(), PathBuf::from(b)))
+                    r.push((a.into(), PathBuf::from(b), file_name.into()));
                 }
             }
         }
     }
     Ok(r)
+}
+fn form_id_from_manifest_file_name(file_name: &str) -> Result<&str> {
+    if !safe(file_name)
+        || Path::new(file_name).file_name().and_then(|x| x.to_str()) != Some(file_name)
+    {
+        return Err(anyhow!("unsafe manifest file_name: {file_name}"));
+    }
+    let id = file_name.strip_suffix(".0").ok_or_else(|| {
+        anyhow!("unexpected form manifest file_name (expected UUID.0): {file_name}")
+    })?;
+    uuid::Uuid::parse_str(id)
+        .with_context(|| format!("invalid form UUID in manifest file_name: {file_name}"))?;
+    Ok(id)
+}
+fn form_owner_for_manifest_path<'a>(
+    source_asset_path: &str,
+    form_id: &str,
+    owner_references: &'a BTreeMap<String, String>,
+) -> Result<Option<&'a str>> {
+    if source_asset_path.starts_with("CommonForms/") {
+        return Ok(None);
+    }
+    owner_references
+        .get(form_id)
+        .map(String::as_str)
+        .map(Some)
+        .ok_or_else(|| anyhow!("missing owner reference for form {form_id} ({source_asset_path})"))
 }
 fn attrs(
     e: &BytesStart<'_>,
@@ -758,10 +820,15 @@ mod tests {
         assert!(!safe("C:/x"));
         assert!(manifest_rows(&serde_json::json!({})).is_err());
         assert!(manifest_rows(&serde_json::json!({"tables":[{}]})).is_err());
-        let v: Value = serde_json::json!({"tables":[{"rows":[{"source_asset_path":"Catalogs/Тест/Forms/F/Ext/Form.xml","inflated_path":"Config_inflated/a.txt"}]}]});
+        assert!(manifest_rows(&serde_json::json!({"tables":[{"rows":[{"source_asset_path":"Catalogs/X/Forms/F/Ext/Form.xml","inflated_path":"Config_inflated/a.txt"}]}]})).is_err());
+        let v: Value = serde_json::json!({"tables":[{"rows":[{"source_asset_path":"Catalogs/Тест/Forms/F/Ext/Form.xml","inflated_path":"Config_inflated/a.txt","file_name":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0"}]}]});
         assert_eq!(
             manifest_rows(&v).unwrap()[0].0,
             "Catalogs/Тест/Forms/F/Ext/Form.xml"
+        );
+        assert_eq!(
+            manifest_rows(&v).unwrap()[0].2,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0"
         );
         let mut s = summary();
         let r = correlate(
@@ -790,5 +857,46 @@ mod tests {
         assert!(parse_xml_items(&malformed, &[]).is_err());
         let _ = fs::remove_file(malformed);
         assert_eq!(e[0].stage, "raw_trace");
+    }
+    #[test]
+    fn manifest_form_id_is_taken_exactly_from_file_name() {
+        assert_eq!(
+            form_id_from_manifest_file_name("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0").unwrap(),
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        );
+        for file_name in [
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.1",
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0__part0.txt",
+            "../aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0",
+            "not-a-uuid.0",
+        ] {
+            assert!(
+                form_id_from_manifest_file_name(file_name).is_err(),
+                "{file_name}"
+            );
+        }
+    }
+    #[test]
+    fn manifest_owner_is_required_except_for_common_forms() {
+        let id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        let mut owners = BTreeMap::new();
+        owners.insert(id.into(), "Catalog.Test".into());
+        assert_eq!(
+            form_owner_for_manifest_path("Catalogs/Test/Forms/F/Ext/Form.xml", id, &owners)
+                .unwrap(),
+            Some("Catalog.Test")
+        );
+        assert_eq!(
+            form_owner_for_manifest_path("CommonForms/F/Ext/Form.xml", id, &BTreeMap::new())
+                .unwrap(),
+            None
+        );
+        let missing = form_owner_for_manifest_path(
+            "Catalogs/Test/Forms/F/Ext/Form.xml",
+            id,
+            &BTreeMap::new(),
+        )
+        .unwrap_err();
+        assert!(missing.to_string().contains("missing owner reference"));
     }
 }
