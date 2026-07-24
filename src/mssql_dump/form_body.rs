@@ -4305,24 +4305,33 @@ fn record_complete_table_schema_events(
         .iter()
         .map(|attribute| (attribute.id.as_str(), attribute))
         .collect::<BTreeMap<_, _>>();
-    let mut consumed = BTreeMap::<(String, String, String), usize>::new();
+    let mut final_counts = BTreeMap::<(String, String, String), usize>::new();
+    fn count_tables(items: &[FormChildItem], counts: &mut BTreeMap<(String, String, String), usize>) {
+        for item in items {
+            if item.tag == "Table" {
+                *counts.entry((item.id.clone(), item.tag.to_string(), item.name.clone())).or_default() += 1;
+            }
+            count_tables(&item.child_items, counts);
+        }
+    }
+    count_tables(items, &mut final_counts);
     fn visit(
         items: &[FormChildItem],
         attributes: &BTreeMap<&str, &FormAttribute>,
         indexes: &FormChildItemIndexes,
-        consumed: &mut BTreeMap<(String, String, String), usize>,
+        final_counts: &BTreeMap<(String, String, String), usize>,
         sink: &dyn FormItemTraceSink,
     ) {
         for item in items {
             if item.tag == "Table" {
                 let key = (item.id.clone(), item.tag.to_string(), item.name.clone());
-                let seen = consumed.entry(key.clone()).or_default();
                 let occurrence = indexes
                     .trace_table_occurrences
                     .get(&key)
-                    .and_then(|occurrences| occurrences.get(*seen))
+                    .filter(|occurrences| occurrences.len() == 1)
+                    .filter(|_| final_counts.get(&key) == Some(&1))
+                    .and_then(|occurrences| occurrences.first())
                     .copied();
-                *seen += 1;
                 if let Some(occurrence) = occurrence {
                     let attribute = indexes
                         .bound_attribute_id_by_table_id
@@ -4348,10 +4357,10 @@ fn record_complete_table_schema_events(
                     });
                 }
             }
-            visit(&item.child_items, attributes, indexes, consumed, sink);
+            visit(&item.child_items, attributes, indexes, final_counts, sink);
         }
     }
-    visit(items, &attributes_by_id, indexes, &mut consumed, trace_sink);
+    visit(items, &attributes_by_id, indexes, &final_counts, trace_sink);
 }
 
 fn form_attribute_metadata_owners_by_id(
