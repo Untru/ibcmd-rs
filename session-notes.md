@@ -31,3 +31,14 @@ Continue from `src/mssql_dump/form_body.rs`: inspect the next native-vs-generate
 - `src/mssql_dump/mod.rs`
 - `src/mssql_dump/tests.rs`
 - `session-notes.md`
+
+## Retrospective — 2026-07-24
+
+- Симптомный цикл «XML diff → соседний raw slot → локальный патч» оказался неверным: рост exact-файлов не доказывал правильность декодера.
+- Конкретная корневая ошибка: `Table.AutoMaxWidth` читался из slot 53, хотя строгая схема уже определяет его как `EnableDrag`; slot 54 — размер property bag.
+- Полный production-backed provenance corpus окупился: 5 020 форм и 4 372 Table теперь проверяются повторным запросом за секунды, а не ручными выборками.
+- Обязательный gate для нового правила: ноль смешанных native policies на полном УТ и сохранённом БСП; до этого production export не менять.
+- Stale binary и debug corpus без промежуточного checkpoint дважды потратили время; дальше запускать release binary и проверять embedded/source commit до долгого прогона.
+- Результаты субагентов нельзя принимать по заявлению: нужны независимое ревью, baseline-сравнение падений и воспроизводимые команды.
+- README-процент отражает только полный parity run, а не покрытие тестами, корреляцию corpus или оценку закрываемого кластера.
+- Универсальное правило для проекта: schema-owned field names и bounds должны быть единственным источником slot semantics; числовые индексы в production parser запрещены без accessor и fixture evidence.
