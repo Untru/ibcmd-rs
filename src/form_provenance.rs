@@ -1,11 +1,11 @@
 //! Deterministic offline form/raw/XML correlation for a saved parity corpus.
 use crate::cli::FormProvenanceCorpusArgs;
 use crate::module_blob::parse_form_body_plain;
-use crate::mssql_dump::{FormItemTraceEvent, FormItemTraceSink, trace_form_body_items};
-use anyhow::{Context, Result, anyhow};
+use crate::mssql_dump::{trace_form_body_items, FormItemTraceEvent, FormItemTraceSink};
+use anyhow::{anyhow, Context, Result};
 use quick_xml::{
-    Reader,
     events::{BytesStart, Event},
+    Reader,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -649,8 +649,10 @@ mod tests {
         assert_eq!(q["DataPath"].value.as_deref(), Some("ab"));
         assert_eq!(q["DataPath"].order, 1);
         assert!(q["AutoMaxWidth"].nil);
+        assert_eq!(q["AutoMaxWidth"].order, 2);
         assert!(q["TitleDataPath"].empty);
-        assert!(!q.contains_key("bad"));
+        assert_eq!(q["TitleDataPath"].order, 4);
+        assert_ne!(q["DataPath"].value.as_deref(), Some("bad"));
         let nested = x.iter().find(|item| item.id == "2").unwrap();
         assert_eq!(nested.tag, "Button");
         assert_eq!(nested.owner_chain, vec!["Table:1"]);
@@ -666,20 +668,57 @@ mod tests {
         let a = correlate(
             "p",
             vec![raw("1", "A"), raw("1", "A")],
-            vec![xml("1", "A")],
-            vec![xml("1", "A")],
+            vec![xml("1", "A"), xml("1", "A")],
+            vec![xml("1", "A"), xml("1", "A")],
             &mut s,
             "r",
             None,
         );
         assert!(a.iter().all(|x| x.state.starts_with("collision_")));
+        assert!(a.iter().all(|x| {
+            usize::from(x.raw.is_some())
+                + usize::from(x.native.is_some())
+                + usize::from(x.candidate.is_some())
+                == 1
+        }));
+        assert_eq!(a.iter().filter(|x| x.state == "collision_raw").count(), 2);
+        assert_eq!(
+            a.iter().filter(|x| x.state == "collision_native").count(),
+            2
+        );
+        assert_eq!(
+            a.iter()
+                .filter(|x| x.state == "collision_candidate")
+                .count(),
+            2
+        );
         assert_eq!(s.matched_both, 0);
+        assert_eq!(s.raw_collisions, 1);
+        assert_eq!(s.xml_collisions, 2);
         let mut s = summary();
         let r = correlate(
             "p",
-            vec![raw("1", "A"), raw("2", "B"), raw("3", "C"), raw("4", "D")],
-            vec![xml("1", "A"), xml("2", "B"), xml("4", "D"), xml("5", "E")],
-            vec![xml("1", "A"), xml("3", "C"), xml("5", "E"), xml("4", "X")],
+            vec![
+                raw("1", "A"),
+                raw("2", "B"),
+                raw("3", "C"),
+                raw("4", "D"),
+                raw("6", "F"),
+            ],
+            vec![
+                xml("1", "A"),
+                xml("2", "B"),
+                xml("4", "D"),
+                xml("5", "E"),
+                xml("7", "G"),
+            ],
+            vec![
+                xml("1", "A"),
+                xml("3", "C"),
+                xml("5", "E"),
+                xml("4", "X"),
+                xml("8", "H"),
+            ],
             &mut s,
             "r",
             None,
@@ -691,9 +730,20 @@ mod tests {
             "missing_native",
             "name_mismatch",
             "xml_only_both",
+            "raw_only",
+            "native_only",
+            "candidate_only",
         ] {
             assert!(states.contains(x), "{x}")
         }
+        assert_eq!(s.matched_both, 1);
+        assert_eq!(s.missing_candidate, 1);
+        assert_eq!(s.missing_native, 1);
+        assert_eq!(s.name_mismatch, 1);
+        assert_eq!(s.xml_only_both, 1);
+        assert_eq!(s.missing_both, 1);
+        assert_eq!(s.native_only, 1);
+        assert_eq!(s.candidate_only, 1);
     }
     #[test]
     fn manifest_filters_are_safe_unicode_and_deterministic() {
