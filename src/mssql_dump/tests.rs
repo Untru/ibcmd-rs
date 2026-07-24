@@ -5745,17 +5745,21 @@ fn form_item_trace_records_nested_and_duplicate_identities_without_deduplication
     let events = sink.0.borrow();
     assert_eq!(events.len(), 4);
     assert_eq!(events[0].id, "1");
+    assert_eq!(events[0].occurrence, 0);
     assert_eq!(events[0].tag, "Button");
     assert_eq!(events[0].name, "Parent");
     assert_eq!(events[0].wrapper, "31");
     assert_eq!(events[0].raw_field_count, 8);
     assert_eq!(events[0].owner_chain, Vec::<String>::new());
     assert_eq!(events[1].id, "2");
+    assert_eq!(events[1].occurrence, 1);
     assert_eq!(events[1].owner_chain, vec!["Button:1"]);
     assert_eq!(events[2].id, "3");
     assert_eq!(events[2].name, "ChildThroughContainer");
     assert_eq!(events[2].owner_chain, vec!["Button:1"]);
     assert_eq!(events[3].id, "1");
+    // A separate trace traversal restarts its ordinal; within one traversal it is unique.
+    assert_eq!(events[3].occurrence, 0);
     assert_eq!(events[3].name, "Duplicate");
     assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 0 && scalar.value.as_deref() == Some("31")));
     assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 1 && scalar.nested));

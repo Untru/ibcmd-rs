@@ -81,6 +81,7 @@ pub(super) struct FormParseContext<'a> {
 
 pub(crate) trait FormItemTraceSink {
     fn record(&self, event: FormItemTraceEvent);
+    fn record_schema(&self, _event: FormItemSchemaTraceEvent) {}
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
@@ -88,6 +89,7 @@ pub(crate) struct FormItemTraceEvent {
     pub(crate) id: String,
     pub(crate) tag: String,
     pub(crate) name: String,
+    pub(crate) occurrence: usize,
     pub(crate) wrapper: String,
     pub(crate) raw_field_count: usize,
     pub(crate) normalized_field_count: usize,
@@ -303,6 +305,32 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     Some(xml)
 }
 
+/// Table-specific evidence captured alongside the production layout selection.
+/// It is intentionally emitted only when a trace sink is present.
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct FormItemSchemaTraceEvent {
+    pub(crate) id: String,
+    pub(crate) tag: String,
+    pub(crate) name: String,
+    pub(crate) occurrence: usize,
+    pub(crate) wrapper: String,
+    pub(crate) raw_field_count: usize,
+    pub(crate) normalized_field_count: usize,
+    pub(crate) strict_table_schema: bool,
+    pub(crate) ordinary_table_variant: bool,
+    pub(crate) ordinary_discriminator: Option<String>,
+    pub(crate) auto_max_width_source: &'static str,
+    pub(crate) auto_max_width_slot: Option<usize>,
+    pub(crate) auto_max_width_raw: Option<String>,
+    pub(crate) auto_max_width_auxiliary_raw: Option<String>,
+    pub(crate) effective_auto_max_width: Option<bool>,
+    pub(crate) evidence_complete: bool,
+    pub(crate) evidence_stage: &'static str,
+    pub(crate) hierarchical_suppressed: Option<bool>,
+    pub(crate) emitted_auto_max_width: Option<bool>,
+    pub(crate) auto_max_width_xml_order: Option<usize>,
+}
+
 pub(crate) fn trace_form_body_with_context(
     body: &ParsedFormBodyBlob,
     type_index: &BTreeMap<String, String>,
@@ -312,7 +340,14 @@ pub(crate) fn trace_form_body_with_context(
     form_owner_reference: Option<&str>,
     trace_sink: &dyn FormItemTraceSink,
 ) -> Option<()> {
-    let context = FormParseContext::new(type_index, dcs_type_index, object_refs, information_register_field_refs, form_owner_reference).with_trace_sink(trace_sink);
+    let context = FormParseContext::new(
+        type_index,
+        dcs_type_index,
+        object_refs,
+        information_register_field_refs,
+        form_owner_reference,
+    )
+    .with_trace_sink(trace_sink);
     extract_form_body_xml_from_body_timed(body, &context, None).map(|_| ())
 }
 
@@ -4596,6 +4631,7 @@ fn collect_form_child_item_indexes_with_object_refs(
         .map(|attribute| (attribute.id.clone(), attribute.name.clone()))
         .collect::<BTreeMap<_, _>>();
     let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
+    let mut trace_occurrence = 0;
     for field in fields {
         collect_form_child_item_indexes_from_field_traced(
             field,
@@ -4605,6 +4641,7 @@ fn collect_form_child_item_indexes_with_object_refs(
             &mut indexes,
             trace_sink,
             &[],
+            &mut trace_occurrence,
         );
     }
     let unresolved_binding_paths = indexes
@@ -4725,6 +4762,7 @@ pub(super) fn collect_form_child_item_indexes_from_field(
     object_refs: &BTreeMap<String, String>,
     indexes: &mut FormChildItemIndexes,
 ) {
+    let mut trace_occurrence = 0;
     collect_form_child_item_indexes_from_field_traced(
         field,
         attribute_names_by_id,
@@ -4733,11 +4771,13 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         indexes,
         None,
         &[],
+        &mut trace_occurrence,
     );
 }
 
 #[cfg(test)]
 pub(super) fn trace_form_item_indexes_for_test(field: &str, trace_sink: &dyn FormItemTraceSink) {
+    let mut trace_occurrence = 0;
     collect_form_child_item_indexes_from_field_traced(
         field,
         &BTreeMap::new(),
@@ -4746,6 +4786,7 @@ pub(super) fn trace_form_item_indexes_for_test(field: &str, trace_sink: &dyn For
         &mut FormChildItemIndexes::default(),
         Some(trace_sink),
         &[],
+        &mut trace_occurrence,
     );
 }
 
@@ -4757,6 +4798,7 @@ fn collect_form_child_item_indexes_from_field_traced(
     indexes: &mut FormChildItemIndexes,
     trace_sink: Option<&dyn FormItemTraceSink>,
     owner_chain: &[String],
+    trace_occurrence: &mut usize,
 ) {
     let Some(raw_fields) = split_1c_braced_fields(field.trim(), 0) else {
         return;
@@ -4779,10 +4821,13 @@ fn collect_form_child_item_indexes_from_field_traced(
             parse_form_child_item_name(wrapper, &fields).map(|name| (wrapper, tag, id, name))
         });
     if let (Some(trace_sink), Some((wrapper, tag, id, name))) = (trace_sink, &structural_identity) {
+        let occurrence = *trace_occurrence;
+        *trace_occurrence += 1;
         trace_sink.record(FormItemTraceEvent {
             id: (*id).to_string(),
             tag: (*tag).to_string(),
             name: name.clone(),
+            occurrence,
             wrapper: (*wrapper).to_string(),
             raw_field_count: raw_fields.len(),
             normalized_field_count: fields.len(),
@@ -4797,6 +4842,56 @@ fn collect_form_child_item_indexes_from_field_traced(
                 })
                 .collect(),
         });
+        if *tag == "Table" {
+            let strict_table_schema =
+                FormTableSchema::from_raw_layout(wrapper, tag, fields).is_some();
+            let ordinary_table_variant = form_table_ordinary_layout_variant(fields);
+            let (
+                auto_max_width_source,
+                auto_max_width_slot,
+                auto_max_width_raw,
+                auxiliary_raw,
+                effective,
+            ) = if ordinary_table_variant {
+                let raw = fields.get(53).map(|field| field.trim().to_string());
+                let auxiliary = fields.get(54).map(|field| field.trim().to_string());
+                let effective = (raw.as_deref() == Some("0") && auxiliary.as_deref() == Some("2"))
+                    .then_some(false);
+                (
+                    "slot_53_with_slot_54_discriminator",
+                    Some(53),
+                    raw,
+                    auxiliary,
+                    effective,
+                )
+            } else {
+                ("none", None, None, None, None)
+            };
+            trace_sink.record_schema(FormItemSchemaTraceEvent {
+                id: (*id).to_string(),
+                tag: (*tag).to_string(),
+                name: name.clone(),
+                occurrence,
+                wrapper: (*wrapper).to_string(),
+                raw_field_count: raw_fields.len(),
+                normalized_field_count: fields.len(),
+                strict_table_schema,
+                ordinary_table_variant,
+                ordinary_discriminator: fields.get(43).map(|field| field.trim().to_string()),
+                auto_max_width_source,
+                auto_max_width_slot,
+                auto_max_width_raw,
+                auto_max_width_auxiliary_raw: auxiliary_raw,
+                effective_auto_max_width: effective,
+                // Emission is deliberately not inferred here: it depends on the later renderer's
+                // hierarchical-navigation decision.
+                evidence_complete: false,
+                evidence_stage: "selection_and_extraction_only",
+                hierarchical_suppressed: None,
+                emitted_auto_max_width: None,
+                auto_max_width_xml_order: Some(12),
+            });
+        }
     }
     if let Some(wrapper) = wrapper
         && form_spreadsheet_document_field_layout(wrapper, &fields)
@@ -5002,6 +5097,7 @@ fn collect_form_child_item_indexes_from_field_traced(
                     indexes,
                     Some(trace_sink),
                     &child_owner_chain,
+                    trace_occurrence,
                 );
             }
         }
@@ -5016,6 +5112,7 @@ fn collect_form_child_item_indexes_from_field_traced(
                     indexes,
                     None,
                     owner_chain,
+                    trace_occurrence,
                 );
             }
         }

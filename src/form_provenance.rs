@@ -2,11 +2,13 @@
 use crate::cli::FormProvenanceCorpusArgs;
 use crate::module_blob::parse_form_body_plain;
 use crate::mssql_dump::offline_context::OfflineFormContextFactory;
-use crate::mssql_dump::{trace_form_body_with_context, FormItemTraceEvent, FormItemTraceSink};
-use anyhow::{anyhow, Context, Result};
+use crate::mssql_dump::{
+    FormItemSchemaTraceEvent, FormItemTraceEvent, FormItemTraceSink, trace_form_body_with_context,
+};
+use anyhow::{Context, Result, anyhow};
 use quick_xml::{
-    events::{BytesStart, Event},
     Reader,
+    events::{BytesStart, Event},
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -57,6 +59,7 @@ struct Record {
     key: String,
     occurrence: usize,
     raw: Option<FormItemTraceEvent>,
+    schema: Option<FormItemSchemaTraceEvent>,
     native: Option<XmlItem>,
     candidate: Option<XmlItem>,
     state: String,
@@ -94,18 +97,27 @@ struct Node {
     text: String,
     nil: bool,
 }
-struct Sink(RefCell<Vec<FormItemTraceEvent>>);
+struct Sink {
+    raw: RefCell<Vec<FormItemTraceEvent>>,
+    schema: RefCell<Vec<FormItemSchemaTraceEvent>>,
+}
 impl Sink {
     fn new() -> Self {
-        Self(RefCell::new(Vec::new()))
+        Self {
+            raw: RefCell::new(Vec::new()),
+            schema: RefCell::new(Vec::new()),
+        }
     }
-    fn take(self) -> Vec<FormItemTraceEvent> {
-        self.0.into_inner()
+    fn take(self) -> (Vec<FormItemTraceEvent>, Vec<FormItemSchemaTraceEvent>) {
+        (self.raw.into_inner(), self.schema.into_inner())
     }
 }
 impl FormItemTraceSink for Sink {
     fn record(&self, e: FormItemTraceEvent) {
-        self.0.borrow_mut().push(e)
+        self.raw.borrow_mut().push(e)
+    }
+    fn record_schema(&self, e: FormItemSchemaTraceEvent) {
+        self.schema.borrow_mut().push(e)
     }
 }
 
@@ -213,7 +225,7 @@ pub fn run_form_provenance_corpus(
             );
             continue;
         };
-        let raw = sink.take();
+        let (raw, schema) = sink.take();
         s.raw_events += raw.len();
         let native = match parse_xml_items(&args.run_root.join("native").join(&path), &properties) {
             Ok(x) => x,
@@ -233,6 +245,7 @@ pub fn run_form_provenance_corpus(
         rows.extend(correlate(
             &path,
             raw,
+            schema,
             native,
             candidate,
             &mut s,
@@ -504,12 +517,25 @@ fn key(id: &str, tag: &str) -> String {
 fn correlate(
     path: &str,
     raw: Vec<FormItemTraceEvent>,
+    schema: Vec<FormItemSchemaTraceEvent>,
     native: Vec<XmlItem>,
     candidate: Vec<XmlItem>,
     s: &mut FormProvenanceSummary,
     run: &str,
     commit: Option<String>,
 ) -> Vec<Record> {
+    let mut schema_by_identity = BTreeMap::new();
+    for event in schema {
+        schema_by_identity.insert(
+            (
+                event.id.clone(),
+                event.tag.clone(),
+                event.name.clone(),
+                event.occurrence,
+            ),
+            event,
+        );
+    }
     let (mut r, mut n, mut c) = (
         BTreeMap::<String, Vec<_>>::new(),
         BTreeMap::<String, Vec<_>>::new(),
@@ -554,6 +580,7 @@ fn correlate(
                     key: k.clone(),
                     occurrence: i,
                     raw: Some(x),
+                    schema: None,
                     native: None,
                     candidate: None,
                     state: "collision_raw".into(),
@@ -568,6 +595,7 @@ fn correlate(
                     key: k.clone(),
                     occurrence: i,
                     raw: None,
+                    schema: None,
                     native: Some(x),
                     candidate: None,
                     state: "collision_native".into(),
@@ -582,6 +610,7 @@ fn correlate(
                     key: k.clone(),
                     occurrence: i,
                     raw: None,
+                    schema: None,
                     native: None,
                     candidate: Some(x),
                     state: "collision_candidate".into(),
@@ -625,6 +654,14 @@ fn correlate(
             }
             _ => "collision",
         };
+        let schema = a.and_then(|event| {
+            schema_by_identity.remove(&(
+                event.id.clone(),
+                event.tag.clone(),
+                event.name.clone(),
+                event.occurrence,
+            ))
+        });
         out.push(Record {
             schema_version: 1,
             source_commit: commit.clone(),
@@ -633,6 +670,7 @@ fn correlate(
             key: k,
             occurrence: 0,
             raw: a.cloned(),
+            schema,
             native: b.cloned(),
             candidate: d.cloned(),
             state: state.into(),
@@ -681,6 +719,7 @@ mod tests {
             id: id.into(),
             tag: "Table".into(),
             name: name.into(),
+            occurrence: 0,
             wrapper: "55".into(),
             raw_field_count: 1,
             normalized_field_count: 1,
@@ -734,6 +773,7 @@ mod tests {
         let a = correlate(
             "p",
             vec![raw("1", "A"), raw("1", "A")],
+            vec![],
             vec![xml("1", "A"), xml("1", "A")],
             vec![xml("1", "A"), xml("1", "A")],
             &mut s,
@@ -771,6 +811,7 @@ mod tests {
                 raw("4", "D"),
                 raw("6", "F"),
             ],
+            vec![],
             vec![
                 xml("1", "A"),
                 xml("2", "B"),
@@ -834,6 +875,7 @@ mod tests {
         let r = correlate(
             "z",
             vec![raw("2", "B"), raw("1", "A")],
+            vec![],
             vec![],
             vec![],
             &mut s,
