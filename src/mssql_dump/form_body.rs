@@ -4328,16 +4328,15 @@ fn record_complete_table_schema_events(
                 let occurrence = indexes
                     .trace_table_occurrences
                     .get(&key)
-                    .filter(|occurrences| occurrences.len() == 1)
-                    .filter(|_| final_counts.get(&key) == Some(&1))
-                    .and_then(|occurrences| occurrences.first())
-                    .copied();
+                    .and_then(|occurrences| unique_table_trace_occurrence(occurrences, final_counts.get(&key).copied()));
                 if let Some(occurrence) = occurrence {
                     let attribute = indexes
                         .bound_attribute_id_by_table_id
                         .get(&item.id)
                         .and_then(|id| attributes.get(id.as_str()).map(|attribute| (id, *attribute)));
                     let hierarchical = form_table_has_hierarchical_navigation(item);
+                    let (hierarchical_suppressed, emitted_auto_max_width) =
+                        table_auto_max_width_emission(item.auto_max_width, hierarchical);
                     sink.record_schema(FormItemSchemaTraceEvent {
                         id: item.id.clone(), tag: item.tag.to_string(), name: item.name.clone(), occurrence,
                         wrapper: String::new(), raw_field_count: 0, normalized_field_count: 0,
@@ -4346,14 +4345,14 @@ fn record_complete_table_schema_events(
                         auto_max_width_raw: None, auto_max_width_auxiliary_raw: None,
                         effective_auto_max_width: item.auto_max_width,
                         evidence_complete: true, evidence_stage: "final_item_and_renderer_predicate",
-                        hierarchical_suppressed: (item.auto_max_width == Some(false) && hierarchical).then_some(true),
-                        emitted_auto_max_width: (item.auto_max_width == Some(false) && !hierarchical).then_some(false),
+                        hierarchical_suppressed,
+                        emitted_auto_max_width,
                         auto_max_width_xml_order: Some(12),
                         resolved_data_path: item.data_path.clone(),
                         data_path_provenance: item.data_path_provenance.map(|p| match p { FormChildItemDataPathProvenance::DirectRawSlot => "direct_raw_slot", FormChildItemDataPathProvenance::InferredFallback => "inferred_fallback" }),
                         root_attribute_id: attribute.map(|(id, _)| id.clone()),
                         root_attribute_name: attribute.map(|(_, attribute)| attribute.name.clone()),
-                        root_attribute_dynamic_list: attribute.map(|(_, attribute)| attribute.settings.is_some()),
+                        root_attribute_dynamic_list: root_attribute_dynamic_list_status(attribute.map(|(_, attribute)| attribute)),
                     });
                 }
             }
@@ -4361,6 +4360,29 @@ fn record_complete_table_schema_events(
         }
     }
     visit(items, &attributes_by_id, indexes, &final_counts, trace_sink);
+}
+
+pub(super) fn unique_table_trace_occurrence(occurrences: &[usize], final_count: Option<usize>) -> Option<usize> {
+    (occurrences.len() == 1 && final_count == Some(1)).then(|| occurrences[0])
+}
+
+fn root_attribute_dynamic_list_status(attribute: Option<&FormAttribute>) -> Option<bool> {
+    attribute_dynamic_list_status(attribute.map(|attribute| attribute.settings.is_some()))
+}
+
+pub(super) fn attribute_dynamic_list_status(has_settings: Option<bool>) -> Option<bool> {
+    has_settings
+}
+
+pub(super) fn table_auto_max_width_emission(
+    effective_auto_max_width: Option<bool>,
+    hierarchical: bool,
+) -> (Option<bool>, Option<bool>) {
+    match effective_auto_max_width {
+        Some(false) if hierarchical => (Some(true), None),
+        Some(false) => (None, Some(false)),
+        _ => (None, None),
+    }
 }
 
 fn form_attribute_metadata_owners_by_id(

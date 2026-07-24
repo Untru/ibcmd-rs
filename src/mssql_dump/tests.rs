@@ -5766,6 +5766,25 @@ fn form_item_trace_records_nested_and_duplicate_identities_without_deduplication
 }
 
 #[test]
+fn table_schema_trace_completion_helpers_are_fail_closed_and_semantic() {
+    // A unique prepass/final identity completes; any duplicate or missing final identity does not.
+    assert_eq!(unique_table_trace_occurrence(&[7], Some(1)), Some(7));
+    assert_eq!(unique_table_trace_occurrence(&[7, 8], Some(2)), None);
+    assert_eq!(unique_table_trace_occurrence(&[7], Some(2)), None);
+    assert_eq!(unique_table_trace_occurrence(&[7], None), None);
+
+    // The value is sourced from the bound root attribute's DynamicList settings, not its name.
+    assert_eq!(attribute_dynamic_list_status(Some(true)), Some(true));
+    assert_eq!(attribute_dynamic_list_status(Some(false)), Some(false));
+    assert_eq!(attribute_dynamic_list_status(None), None);
+
+    // These are the same predicates used by the Table renderer.
+    assert_eq!(table_auto_max_width_emission(Some(false), true), (Some(true), None));
+    assert_eq!(table_auto_max_width_emission(Some(false), false), (None, Some(false)));
+    assert_eq!(table_auto_max_width_emission(None, false), (None, None));
+}
+
+#[test]
 fn extracts_nested_value_table_additional_columns_from_body_tail() {
     let value_table_uuid = "acf6192e-81ca-46ef-93a6-5a6968b78663";
     let type_index = BTreeMap::from([(value_table_uuid.to_string(), "v8:ValueTable".to_string())]);
