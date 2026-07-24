@@ -2292,7 +2292,7 @@ fn normalize_direct_form_metadata(metadata: &mut MetadataTextRow) -> bool {
 }
 
 fn is_configuration_metadata_row(metadata: &MetadataTextRow) -> bool {
-    parse_configuration_reference_text(&metadata.text).is_some()
+    parse_configuration_reference_text_for_row(&metadata.text, &metadata.file_name).is_some()
 }
 
 fn build_metadata_text_rows(rows: &[ConfigRow]) -> Vec<MetadataTextRow> {

@@ -44,7 +44,9 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
     let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
     let recalculation_refs = build_calculation_recalculation_reference_index(rows);
     for row in rows {
-        if let Some(name) = parse_configuration_reference_text(&row.text) {
+        if let Some(name) =
+            parse_configuration_reference_text_for_row(&row.text, &row.file_name)
+        {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
             continue;
         }
@@ -468,7 +470,9 @@ pub(super) fn build_standalone_object_reference_index_from_texts(
 
     for row in rows {
         if required_refs.contains(&row.file_name) {
-            if let Some(name) = parse_configuration_reference_text(&row.text) {
+            if let Some(name) =
+                parse_configuration_reference_text_for_row(&row.text, &row.file_name)
+            {
                 index.insert(row.file_name.clone(), format!("Configuration.{name}"));
                 continue;
             }
@@ -1844,8 +1848,31 @@ pub(super) fn parse_configuration_reference_blob(blob: &[u8]) -> Option<String> 
 }
 
 pub(super) fn parse_configuration_reference_text(text: &str) -> Option<String> {
+    parse_configuration_reference_text_with_identity(text).map(|(_, name)| name)
+}
+
+pub(super) fn parse_configuration_reference_text_for_row(
+    text: &str,
+    expected_identity: &str,
+) -> Option<String> {
+    let (identity, name) = parse_configuration_reference_text_with_identity(text)?;
+    identity
+        .eq_ignore_ascii_case(expected_identity)
+        .then_some(name)
+}
+
+fn parse_configuration_reference_text_with_identity(text: &str) -> Option<(String, String)> {
     let root = split_1c_braced_fields(text.trim_start(), 0)?;
-    if root.len() != 2 || root.first()?.trim() != "2" {
+    if root.first()?.trim() != "2" {
+        return None;
+    }
+    let identity = split_1c_braced_fields(root.get(1)?.trim(), 0)?;
+    if identity.len() != 1 {
+        return None;
+    }
+    let identity = parse_non_zero_uuid(identity.first()?.trim())?;
+    let child_count = root.get(2)?.trim().parse::<usize>().ok()?;
+    if child_count.checked_add(4)? != root.len() {
         return None;
     }
     let marker = "{1,0,";
@@ -1856,7 +1883,7 @@ pub(super) fn parse_configuration_reference_text(text: &str) -> Option<String> {
     if !is_uuid_text(uuid) || !is_metadata_header_marker(text, uuid_end) {
         return None;
     }
-    parse_metadata_header_from_text(text, uuid).map(|header| header.name)
+    parse_metadata_header_from_text(text, uuid).map(|header| (identity, header.name))
 }
 
 pub(super) fn extract_configuration_source_xml(

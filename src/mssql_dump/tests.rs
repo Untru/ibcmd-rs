@@ -29382,6 +29382,50 @@ fn flat_configuration_fixture() -> (String, String, BTreeMap<String, String>) {
     (uuid.to_string(), text, object_refs)
 }
 
+#[test]
+fn configuration_reference_requires_identity_and_exact_root_slots() {
+    let identity = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let object_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let child = r#"{cccccccc-cccc-4ccc-8ccc-cccccccccccc,{0,{3,{1,0,$OBJECT},"DemoApp",{0},"",0,0,$ZERO,0}}}"#
+        .replace("$OBJECT", object_uuid)
+        .replace("$ZERO", zero_uuid);
+    let configuration = format!(r#"{{2,{{{identity}}},1,{child},{{{{0,"",""}}}}}}"#);
+
+    assert_eq!(
+        parse_configuration_reference_text(&configuration),
+        Some("DemoApp".to_string())
+    );
+    assert_eq!(
+        parse_configuration_reference_text_for_row(&configuration, identity),
+        Some("DemoApp".to_string())
+    );
+    assert!(
+        parse_configuration_reference_text_for_row(
+            &configuration,
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        )
+        .is_none()
+    );
+
+    let extended_catalog = r#"{2,{11,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,{0,{3,{1,0,$OBJECT},"Lines",{0},"",0,0,$ZERO,0}},0,0,0},5}"#
+        .replace("$OBJECT", object_uuid)
+        .replace("$ZERO", zero_uuid);
+    assert!(parse_configuration_reference_text(&extended_catalog).is_none());
+    assert!(
+        parse_configuration_reference_text_for_row(&extended_catalog, identity).is_none()
+    );
+
+    let missing_tail = format!("{{2,{{{identity}}},1,{child}}}");
+    let wrong_count = format!(r#"{{2,{{{identity}}},2,{child},{{{{0,"",""}}}}}}"#);
+    let mixed_identity = format!(
+        r#"{{2,{{{identity},dddddddd-dddd-4ddd-8ddd-dddddddddddd}},1,{child},{{{{0,"",""}}}}}}"#
+    );
+    for malformed in [missing_tail, wrong_count, mixed_identity] {
+        assert!(parse_configuration_reference_text(&malformed).is_none());
+    }
+}
+
 fn configuration_mobile_functionality_ids(count: usize) -> Vec<u32> {
     let mut ids = (0..=27).collect::<Vec<_>>();
     ids.extend(32..=if count == 37 { 40 } else { 41 });
