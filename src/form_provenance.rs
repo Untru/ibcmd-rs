@@ -524,17 +524,28 @@ fn correlate(
     run: &str,
     commit: Option<String>,
 ) -> Vec<Record> {
-    let mut schema_by_identity = BTreeMap::new();
+    let mut schema_by_identity: BTreeMap<
+        (String, String, String, usize),
+        FormItemSchemaTraceEvent,
+    > = BTreeMap::new();
     for event in schema {
-        schema_by_identity.insert(
-            (
-                event.id.clone(),
-                event.tag.clone(),
-                event.name.clone(),
-                event.occurrence,
-            ),
-            event,
-        );
+        let key = (event.id.clone(), event.tag.clone(), event.name.clone(), event.occurrence);
+        if event.evidence_complete {
+            if let Some(previous) = schema_by_identity.get_mut(&key) {
+                previous.evidence_complete = true;
+                previous.evidence_stage = event.evidence_stage;
+                previous.effective_auto_max_width = event.effective_auto_max_width;
+                previous.hierarchical_suppressed = event.hierarchical_suppressed;
+                previous.emitted_auto_max_width = event.emitted_auto_max_width;
+                previous.resolved_data_path = event.resolved_data_path;
+                previous.data_path_provenance = event.data_path_provenance;
+                previous.root_attribute_id = event.root_attribute_id;
+                previous.root_attribute_name = event.root_attribute_name;
+                previous.root_attribute_dynamic_list = event.root_attribute_dynamic_list;
+                continue;
+            }
+        }
+        schema_by_identity.insert(key, event);
     }
     let (mut r, mut n, mut c) = (
         BTreeMap::<String, Vec<_>>::new(),

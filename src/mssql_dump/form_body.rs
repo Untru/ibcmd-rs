@@ -266,6 +266,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &commands,
         context.object_refs,
         &child_item_indexes,
+        context.trace_sink,
     );
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_child_items_cpu_ms +=
@@ -329,6 +330,11 @@ pub(crate) struct FormItemSchemaTraceEvent {
     pub(crate) hierarchical_suppressed: Option<bool>,
     pub(crate) emitted_auto_max_width: Option<bool>,
     pub(crate) auto_max_width_xml_order: Option<usize>,
+    pub(crate) resolved_data_path: Option<String>,
+    pub(crate) data_path_provenance: Option<&'static str>,
+    pub(crate) root_attribute_id: Option<String>,
+    pub(crate) root_attribute_name: Option<String>,
+    pub(crate) root_attribute_dynamic_list: Option<bool>,
 }
 
 pub(crate) fn trace_form_body_with_context(
@@ -4250,6 +4256,7 @@ pub(super) fn extract_form_child_items(
     commands: &[FormCommand],
     object_refs: &BTreeMap<String, String>,
     indexes: &FormChildItemIndexes,
+    trace_sink: Option<&dyn FormItemTraceSink>,
 ) -> Vec<FormChildItem> {
     let main_data_path = attributes
         .iter()
@@ -4282,7 +4289,69 @@ pub(super) fn extract_form_child_items(
     )
     .unwrap_or_default();
     apply_form_table_user_settings_groups(&mut items, &indexes.user_settings_group_by_table_id);
+    if let Some(trace_sink) = trace_sink {
+        record_complete_table_schema_events(&items, attributes, indexes, trace_sink);
+    }
     items
+}
+
+fn record_complete_table_schema_events(
+    items: &[FormChildItem],
+    attributes: &[FormAttribute],
+    indexes: &FormChildItemIndexes,
+    trace_sink: &dyn FormItemTraceSink,
+) {
+    let attributes_by_id = attributes
+        .iter()
+        .map(|attribute| (attribute.id.as_str(), attribute))
+        .collect::<BTreeMap<_, _>>();
+    let mut consumed = BTreeMap::<(String, String, String), usize>::new();
+    fn visit(
+        items: &[FormChildItem],
+        attributes: &BTreeMap<&str, &FormAttribute>,
+        indexes: &FormChildItemIndexes,
+        consumed: &mut BTreeMap<(String, String, String), usize>,
+        sink: &dyn FormItemTraceSink,
+    ) {
+        for item in items {
+            if item.tag == "Table" {
+                let key = (item.id.clone(), item.tag.to_string(), item.name.clone());
+                let seen = consumed.entry(key.clone()).or_default();
+                let occurrence = indexes
+                    .trace_table_occurrences
+                    .get(&key)
+                    .and_then(|occurrences| occurrences.get(*seen))
+                    .copied();
+                *seen += 1;
+                if let Some(occurrence) = occurrence {
+                    let attribute = indexes
+                        .bound_attribute_id_by_table_id
+                        .get(&item.id)
+                        .and_then(|id| attributes.get(id.as_str()).map(|attribute| (id, *attribute)));
+                    let hierarchical = form_table_has_hierarchical_navigation(item);
+                    sink.record_schema(FormItemSchemaTraceEvent {
+                        id: item.id.clone(), tag: item.tag.to_string(), name: item.name.clone(), occurrence,
+                        wrapper: String::new(), raw_field_count: 0, normalized_field_count: 0,
+                        strict_table_schema: false, ordinary_table_variant: false, ordinary_discriminator: None,
+                        auto_max_width_source: "final_item", auto_max_width_slot: None,
+                        auto_max_width_raw: None, auto_max_width_auxiliary_raw: None,
+                        effective_auto_max_width: item.auto_max_width,
+                        evidence_complete: true, evidence_stage: "final_item_and_renderer_predicate",
+                        hierarchical_suppressed: (item.auto_max_width == Some(false) && hierarchical).then_some(true),
+                        emitted_auto_max_width: (item.auto_max_width == Some(false) && !hierarchical).then_some(false),
+                        auto_max_width_xml_order: Some(12),
+                        resolved_data_path: item.data_path.clone(),
+                        data_path_provenance: item.data_path_provenance.map(|p| match p { FormChildItemDataPathProvenance::DirectRawSlot => "direct_raw_slot", FormChildItemDataPathProvenance::InferredFallback => "inferred_fallback" }),
+                        root_attribute_id: attribute.map(|(id, _)| id.clone()),
+                        root_attribute_name: attribute.map(|(_, attribute)| attribute.name.clone()),
+                        root_attribute_dynamic_list: attribute.map(|(_, attribute)| attribute.settings.is_some()),
+                    });
+                }
+            }
+            visit(&item.child_items, attributes, indexes, consumed, sink);
+        }
+    }
+    visit(items, &attributes_by_id, indexes, &mut consumed, trace_sink);
 }
 
 fn form_attribute_metadata_owners_by_id(
@@ -4480,6 +4549,7 @@ pub(super) struct FormChildItemIndexes {
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
     bound_attribute_id_by_table_id: BTreeMap<String, String>,
     pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
+    trace_table_occurrences: BTreeMap<(String, String, String), Vec<usize>>,
 }
 
 #[cfg(test)]
@@ -4843,6 +4913,11 @@ fn collect_form_child_item_indexes_from_field_traced(
                 .collect(),
         });
         if *tag == "Table" {
+            indexes
+                .trace_table_occurrences
+                .entry(((*id).to_string(), (*tag).to_string(), name.clone()))
+                .or_default()
+                .push(occurrence);
             let strict_table_schema =
                 FormTableSchema::from_raw_layout(wrapper, tag, fields).is_some();
             let ordinary_table_variant = form_table_ordinary_layout_variant(fields);
@@ -4890,6 +4965,11 @@ fn collect_form_child_item_indexes_from_field_traced(
                 hierarchical_suppressed: None,
                 emitted_auto_max_width: None,
                 auto_max_width_xml_order: Some(12),
+                resolved_data_path: None,
+                data_path_provenance: None,
+                root_attribute_id: None,
+                root_attribute_name: None,
+                root_attribute_dynamic_list: None,
             });
         }
     }

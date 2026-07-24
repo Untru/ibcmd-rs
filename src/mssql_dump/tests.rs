@@ -6164,7 +6164,7 @@ fn extracts_form_child_items_from_layout_pairs() {
     )]);
 
     let indexes = collect_form_child_item_indexes(&layout_fields, &attributes);
-    let items = extract_form_child_items(&layout_fields, &attributes, &[], &object_refs, &indexes);
+    let items = extract_form_child_items(&layout_fields, &attributes, &[], &object_refs, &indexes, None);
     let xml = format_form_child_items_xml(&items, 1);
 
     assert!(xml.contains(r#"<CommandBar name="Панель" id="64">"#));
@@ -7398,7 +7398,7 @@ fn extracts_wrapper55_table_user_settings_group() {
     let fields = split_1c_braced_fields(&layout, 0).unwrap();
 
     let indexes = collect_form_child_item_indexes(&fields, &attributes);
-    let items = extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new(), &indexes);
+    let items = extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new(), &indexes, None);
 
     let table = items.iter().find(|item| item.tag == "Table").unwrap();
     assert_eq!(table.user_settings_group.as_deref(), Some("SettingsGroup"));
