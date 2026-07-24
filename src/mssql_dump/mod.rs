@@ -36,7 +36,7 @@ mod form_body;
 mod forms;
 mod metadata;
 mod moxel;
-pub(crate) mod offline_context;
+pub mod offline_context;
 mod refs;
 mod role_rights;
 mod selected;
@@ -4593,8 +4593,8 @@ struct FormSourceReference {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct InformationRegisterFieldReference {
-    field_reference: String,
-    value_owner_references: BTreeSet<String>,
+    pub(crate) field_reference: String,
+    pub(crate) value_owner_references: BTreeSet<String>,
 }
 
 pub(crate) type InformationRegisterFieldReferenceIndex =

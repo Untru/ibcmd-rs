@@ -1,25 +1,28 @@
 use super::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::{fs, path::{Component, Path}};
+use serde_json::Value;
 
 pub(crate) const OFFLINE_FORM_CONTEXT_SCHEMA_VERSION: u32 = 1;
 
 /// Reuses the production metadata-text builders for a saved `Config_inflated`
 /// corpus. It intentionally accepts only already-inflated UTF-8 text rows.
-pub(crate) struct OfflineFormContextFactory;
+pub struct OfflineFormContextFactory;
 
+#[allow(dead_code)]
 #[derive(Debug)]
-pub(crate) struct OfflineFormContext {
+pub struct OfflineFormContext {
     pub(crate) type_index: BTreeMap<String, String>,
     pub(crate) dcs_type_index: DcsTypeIndex,
     pub(crate) object_refs: BTreeMap<String, String>,
     pub(crate) information_register_field_refs: InformationRegisterFieldReferenceIndex,
     pub(crate) form_owner_references: BTreeMap<String, String>,
-    pub(crate) summary: OfflineFormContextSummary,
+    pub summary: OfflineFormContextSummary,
 }
 
 #[derive(Debug, Clone, Serialize, Eq, PartialEq)]
-pub(crate) struct OfflineFormContextSummary {
+pub struct OfflineFormContextSummary {
     pub(crate) schema_version: u32,
     pub(crate) source_commit: Option<String>,
     pub(crate) input_rows: usize,
@@ -35,6 +38,21 @@ pub(crate) struct OfflineFormContextSummary {
 }
 
 impl OfflineFormContextFactory {
+    pub fn from_run_root(run_root: &Path, source_commit: Option<String>) -> Result<OfflineFormContext> {
+        let manifest_path = run_root.join("candidate_dump/manifest.json");
+        let manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).with_context(|| format!("read {}", manifest_path.display()))?)?;
+        let mut rows = Vec::new();
+        for table in manifest.get("tables").and_then(Value::as_array).ok_or_else(|| anyhow!("manifest.tables missing"))? {
+            for row in table.get("rows").and_then(Value::as_array).ok_or_else(|| anyhow!("manifest rows missing"))? {
+                let (Some(file_name), Some(inflated)) = (row.get("file_name").and_then(Value::as_str), row.get("inflated_path").and_then(Value::as_str)) else { continue; };
+                let path = Path::new(inflated);
+                if path.is_absolute() || path.components().any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_))) { bail!("unsafe inflated path: {inflated}"); }
+                if !inflated.starts_with("Config_inflated/") && !inflated.starts_with("Config_inflated\\") { bail!("unexpected inflated path: {inflated}"); }
+                rows.push((file_name.to_string(), fs::read_to_string(run_root.join("candidate_dump").join(path)).with_context(|| format!("read inflated {inflated}"))?));
+            }
+        }
+        Self::from_plain_rows(rows, source_commit)
+    }
     pub(crate) fn from_plain_rows(
         rows: impl IntoIterator<Item = (String, String)>,
         source_commit: Option<String>,
@@ -45,15 +63,17 @@ impl OfflineFormContextFactory {
             bail!("offline context has duplicate Config row file names");
         }
         let mut metadata = Vec::new();
-        let mut errors = Vec::new();
+        let errors = Vec::new();
         for (file_name, text) in &rows {
             if file_name.contains('.') { continue; }
             match metadata_text_row_audit_from_text(file_name, text.trim_start_matches('\u{feff}').to_string()) {
-                MetadataTextRowAudit::Extracted(mut row) | MetadataTextRowAudit::ExtractedWithWarning(mut row, _) => {
+                MetadataTextRowAudit::Extracted(mut row) => {
                     normalize_direct_form_metadata(&mut row);
                     metadata.push(row);
                 }
-                MetadataTextRowAudit::Miss(miss) => errors.push(format!("{}:{}", miss.file_name, miss.reason.as_str())),
+                MetadataTextRowAudit::ExtractedWithWarning(_, miss) | MetadataTextRowAudit::Miss(miss) => {
+                    bail!("offline context incomplete at {}:{}", miss.file_name, miss.reason.as_str());
+                }
             }
         }
         let indexes = build_metadata_type_indexes_from_texts(&metadata);
@@ -73,6 +93,16 @@ impl OfflineFormContextFactory {
         for (key, value) in &type_index { canonical.push(format!("type\0{key}\0{value}")); }
         for (key, value) in &object_refs { canonical.push(format!("object\0{key}\0{value}")); }
         for (key, value) in &form_owner_references { canonical.push(format!("owner\0{key}\0{value}")); }
+        for (key, value) in &dcs_type_index {
+            let value = match value { DcsTypeResolution::KeepId => "keep".to_string(), DcsTypeResolution::Type { qname } => format!("type:{qname}"), DcsTypeResolution::TypeSet { qname } => format!("set:{qname}") };
+            canonical.push(format!("dcs\0{key}\0{value}"));
+        }
+        for (register, fields) in &information_register_field_refs {
+            let mut fields = fields.iter().map(|field| format!("{}:{}", field.field_reference, field.value_owner_references.iter().cloned().collect::<Vec<_>>().join(","))).collect::<Vec<_>>();
+            fields.sort();
+            for field in fields { canonical.push(format!("ir\0{register}\0{field}")); }
+        }
+        for error in &errors { canonical.push(format!("error\0{error}")); }
         canonical.sort();
         let mut hasher = Sha256::new();
         hasher.update(format!("offline-form-context/v{}\0", OFFLINE_FORM_CONTEXT_SCHEMA_VERSION));
@@ -97,12 +127,12 @@ mod tests {
     #[test]
     fn offline_context_matches_empty_production_builders_and_is_deterministic() {
         let first = OfflineFormContextFactory::from_plain_rows(
-            vec![("not-metadata".to_string(), "broken".to_string())],
+            Vec::<(String, String)>::new(),
             Some("abc".to_string()),
         )
         .unwrap();
         let second = OfflineFormContextFactory::from_plain_rows(
-            vec![("not-metadata".to_string(), "broken".to_string())],
+            Vec::<(String, String)>::new(),
             Some("abc".to_string()),
         )
         .unwrap();
@@ -124,5 +154,11 @@ mod tests {
         )
         .expect_err("duplicate rows must not choose an arbitrary context");
         assert!(error.to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn offline_context_rejects_broken_eligible_metadata_and_skips_dotted_body() {
+        assert!(OfflineFormContextFactory::from_plain_rows(vec![("eligible".to_string(), "broken".to_string())], None).is_err());
+        assert!(OfflineFormContextFactory::from_plain_rows(vec![("eligible.0".to_string(), "broken".to_string())], None).is_ok());
     }
 }

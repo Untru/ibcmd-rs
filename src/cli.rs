@@ -37,6 +37,8 @@ pub enum Commands {
     FormDiffCandidates(FormDiffCandidatesArgs),
     /// Correlate production Form-layout item traces with native and candidate Form.xml corpora.
     FormProvenanceCorpus(FormProvenanceCorpusArgs),
+    /// Build and summarize offline semantic indexes from a saved Config dump.
+    FormContextSummary(FormContextSummaryArgs),
     /// Audit source-tree files that current SQL loader can or cannot consume.
     AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Build a load plan by comparing manifests.
@@ -822,6 +824,12 @@ pub struct FormProvenanceCorpusArgs {
     /// Source commit recorded in output metadata.
     #[arg(long)]
     pub source_commit: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct FormContextSummaryArgs {
+    #[arg(long)] pub run_root: PathBuf,
+    #[arg(long)] pub source_commit: Option<String>,
 }
 
 #[derive(Debug, Args)]

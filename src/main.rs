@@ -117,6 +117,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::form_provenance::run_form_provenance_corpus(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::FormContextSummary(args) => {
+            let context = ibcmd_rs::mssql_dump::offline_context::OfflineFormContextFactory::from_run_root(&args.run_root, args.source_commit)?;
+            println!("{}", serde_json::to_string_pretty(&context.summary)?);
+        }
         Commands::AuditSourceLoadCoverage(args) => {
             let report = ibcmd_rs::source_audit::audit_source_load_coverage(&args.root)?;
             if let Some(output) = args.output {
