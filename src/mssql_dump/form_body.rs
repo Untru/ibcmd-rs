@@ -68,6 +68,34 @@ const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
 
 const MAX_FORM_SERVER_STATE_XML_BYTES: usize = 64 * 1_048_576;
 
+/// Immutable dependencies supplied by the source-asset caller for one form.
+/// Form-local indexes deliberately remain inside the parser.
+pub(super) struct FormParseContext<'a> {
+    type_index: &'a BTreeMap<String, String>,
+    dcs_type_index: &'a DcsTypeIndex,
+    object_refs: &'a BTreeMap<String, String>,
+    information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+    form_owner_reference: Option<&'a str>,
+}
+
+impl<'a> FormParseContext<'a> {
+    pub(super) fn new(
+        type_index: &'a BTreeMap<String, String>,
+        dcs_type_index: &'a DcsTypeIndex,
+        object_refs: &'a BTreeMap<String, String>,
+        information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+        form_owner_reference: Option<&'a str>,
+    ) -> Self {
+        Self {
+            type_index,
+            dcs_type_index,
+            object_refs,
+            information_register_field_refs,
+            form_owner_reference,
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub(crate) fn extract_form_body_xml(
     bytes: &[u8],
@@ -84,22 +112,20 @@ pub(super) fn extract_form_body_xml_from_body(
 ) -> Option<String> {
     extract_form_body_xml_from_body_timed(
         body,
-        type_index,
-        &DcsTypeIndex::new(),
-        object_refs,
-        &BTreeMap::new(),
-        None,
+        &FormParseContext::new(
+            type_index,
+            &DcsTypeIndex::new(),
+            object_refs,
+            &BTreeMap::new(),
+            None,
+        ),
         None,
     )
 }
 
 pub(super) fn extract_form_body_xml_from_body_timed(
     body: &ParsedFormBodyBlob,
-    type_index: &BTreeMap<String, String>,
-    dcs_type_index: &DcsTypeIndex,
-    object_refs: &BTreeMap<String, String>,
-    information_register_field_refs: &InformationRegisterFieldReferenceIndex,
-    form_owner_reference: Option<&str>,
+    context: &FormParseContext<'_>,
     mut timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<String> {
     let started = Instant::now();
@@ -109,7 +135,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let mut properties = extract_form_body_properties(&form_fields, form_owner_reference);
+    let mut properties = extract_form_body_properties(&form_fields, context.form_owner_reference);
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_properties_cpu_ms += elapsed_ms(started);
     }
@@ -123,16 +149,16 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     let started = Instant::now();
     let mut attributes = extract_form_body_attributes_with_dcs_type_index(
         &body.trailing,
-        type_index,
-        dcs_type_index,
-        object_refs,
+        context.type_index,
+        context.dcs_type_index,
+        context.object_refs,
     );
     let attribute_save_field_bindings =
-        extract_form_body_attribute_save_field_bindings(&body.trailing, type_index, object_refs);
+        extract_form_body_attribute_save_field_bindings(&body.trailing, context.type_index, context.object_refs);
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_attributes_cpu_ms += elapsed_ms(started);
     }
-    let attributes_section = extract_form_body_attributes_section(&body.trailing, object_refs);
+    let attributes_section = extract_form_body_attributes_section(&body.trailing, context.object_refs);
 
     let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
@@ -142,14 +168,14 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let parameters = extract_form_body_parameters(&body.trailing, type_index);
+    let parameters = extract_form_body_parameters(&body.trailing, context.type_index);
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_parameters_cpu_ms += elapsed_ms(started);
     }
 
     let started = Instant::now();
     let child_item_indexes =
-        collect_form_child_item_indexes_with_object_refs(&form_fields, &attributes, object_refs);
+        collect_form_child_item_indexes_with_object_refs(&form_fields, &attributes, context.object_refs);
     properties.mobile_device_command_bar_content = extract_form_mobile_device_command_bar_content(
         &form_fields,
         &child_item_indexes.item_name_by_id,
@@ -159,7 +185,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     let started = Instant::now();
     let commands = extract_form_body_commands(
         &body.trailing,
-        object_refs,
+        context.object_refs,
         &child_item_indexes.item_name_by_id,
     );
     if let Some(timings) = timings.as_deref_mut() {
@@ -170,7 +196,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     let auto_command_bar = extract_form_auto_command_bar(
         &form_fields,
         &commands,
-        object_refs,
+        context.object_refs,
         &child_item_indexes.table_name_by_id,
         &child_item_indexes.standard_command_owner_name_by_id,
         &child_item_indexes.command_source_owner_name_by_id,
@@ -183,21 +209,21 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     apply_form_body_attribute_additional_columns(
         &mut attributes,
         &body.trailing,
-        type_index,
-        object_refs,
+        context.type_index,
+        context.object_refs,
         &child_item_indexes,
     );
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
         &child_item_indexes.data_path_by_binding_key,
-        object_refs,
+        context.object_refs,
     );
     let child_items = extract_form_child_items(
         &form_fields,
         &attributes,
         &commands,
-        object_refs,
+        context.object_refs,
         &child_item_indexes,
     );
     if let Some(timings) = timings.as_deref_mut() {
@@ -209,9 +235,9 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     let command_interface = extract_form_command_interface_with_context(
         &body.trailing,
         &commands,
-        object_refs,
-        information_register_field_refs,
-        form_owner_reference,
+        context.object_refs,
+        context.information_register_field_refs,
+        context.form_owner_reference,
         &attributes,
         &child_item_indexes,
     );

@@ -5693,6 +5693,30 @@ fn extracts_form_attribute_additional_columns_from_body_tail() {
 }
 
 #[test]
+fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
+    let body = ParsedFormBodyBlob {
+        layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"}}".to_string(),
+        module_text: String::new(),
+        trailing: Vec::new(),
+        trailing_fields: 0,
+    };
+    let type_index = BTreeMap::new();
+    let object_refs = BTreeMap::new();
+    let dcs_type_index = DcsTypeIndex::new();
+    let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let legacy = extract_form_body_xml_from_body(&body, &type_index, &object_refs).unwrap();
+    let context = FormParseContext::new(
+        &type_index,
+        &dcs_type_index,
+        &object_refs,
+        &information_register_field_refs,
+        None,
+    );
+    let contextual = extract_form_body_xml_from_body_timed(&body, &context, None).unwrap();
+    assert_eq!(contextual, legacy);
+}
+
+#[test]
 fn extracts_nested_value_table_additional_columns_from_body_tail() {
     let value_table_uuid = "acf6192e-81ca-46ef-93a6-5a6968b78663";
     let type_index = BTreeMap::from([(value_table_uuid.to_string(), "v8:ValueTable".to_string())]);

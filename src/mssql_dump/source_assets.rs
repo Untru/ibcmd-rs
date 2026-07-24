@@ -1120,13 +1120,16 @@ pub(super) fn write_source_asset(
                 })?;
                 &owned_body
             };
-            let xml = extract_form_body_xml_from_body_timed(
-                body,
+            let form_context = FormParseContext::new(
                 context.type_index,
                 context.dcs_type_index,
                 context.object_refs,
                 context.information_register_field_refs,
                 owner_reference.as_deref(),
+            );
+            let xml = extract_form_body_xml_from_body_timed(
+                body,
+                &form_context,
                 Some(timings),
             )
             .with_context(|| {
