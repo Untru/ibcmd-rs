@@ -1161,7 +1161,6 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     normalize_moxel_single_set_report_header_tail(
         &column_sets,
         &column_formats,
-        &style_refs,
         &mut resolved_lines,
         &mut formats,
     );
@@ -4207,37 +4206,48 @@ fn normalize_moxel_drawing_format_with_pattern_color(
 pub(super) fn normalize_moxel_single_set_report_header_tail(
     column_sets: &[MoxelColumnSet],
     column_formats: &[MoxelFormat],
-    style_refs: &[Option<String>],
     lines: &mut [ResolvedMoxelLine],
     formats: &mut [MoxelFormat],
 ) {
+    const REPORT_HEADER_TAIL_START: usize = 48;
+    const REPORT_HEADER_TAIL_LEN: usize = 11;
+
+    let Some(line) = lines.get(1) else {
+        return;
+    };
+    let tail_start = REPORT_HEADER_TAIL_START.checked_sub(column_formats.len() + 1);
+    let Some(tail) = tail_start.and_then(|start| formats.get(start..start + REPORT_HEADER_TAIL_LEN)) else {
+        return;
+    };
     if column_sets.len() != 1
         || column_formats.len() != 8
-        || style_refs.get(2).and_then(|slot| slot.as_deref()) != Some("style:ReportHeaderBackColor")
-        || style_refs.get(3).and_then(|slot| slot.as_deref()) != Some("style:ReportHeaderBackColor")
-        || style_refs.get(4).and_then(|slot| slot.as_deref()) != Some("style:ReportHeaderBackColor")
+        || line.style != "Dotted"
+        || line.width != 1
+        || !line
+            .transformations
+            .iter()
+            .any(|transformation| matches!(transformation, MoxelLineTransformation::DefaultShift { .. }))
+        || !tail.iter().all(|format| {
+            format.back_color.as_deref() == Some("style:ReportHeaderBackColor")
+                && format.border_color.is_none()
+                && format.text_placement == Some("Wrap")
+        })
     {
         return;
     }
-    if let Some(line) = lines.get_mut(1)
-        && line.style == "Dotted"
-        && line.width == 1
-    {
+    if let Some(line) = lines.get_mut(1) {
         line.style = "Solid";
         line.width = 2;
         line.transformations.push(MoxelLineTransformation::PostNormalizer {
             reason: "Dotted/1 to Solid/2",
         });
     }
-    for (offset, format) in formats.iter_mut().enumerate() {
-        let format_index = column_formats.len() + offset + 1;
-        if format.back_color.as_deref() == Some("style:ReportHeaderBackColor")
-            && format.border_color.is_none()
-            && format.text_placement == Some("Wrap")
-            && format_index >= 48
-        {
-            format.back_color = Some("#F4ECC5".to_string());
-        }
+    for format in formats
+        .iter_mut()
+        .skip(tail_start.expect("verified above"))
+        .take(REPORT_HEADER_TAIL_LEN)
+    {
+        format.back_color = Some("#F4ECC5".to_string());
     }
 }
 
@@ -8115,8 +8125,17 @@ mod moxel_exact_parity_tests {
         ];
         let column_sets = vec![MoxelColumnSet { id: None, default_format_index: None, source_default_format_index: None, size: 0, columns: Vec::new() }];
         let column_formats = vec![MoxelFormat::default(); 8];
-        let style_refs = vec![None, None, Some("style:ReportHeaderBackColor".to_string()), Some("style:ReportHeaderBackColor".to_string()), Some("style:ReportHeaderBackColor".to_string())];
-        normalize_moxel_single_set_report_header_tail(&column_sets, &column_formats, &style_refs, &mut lines, &mut []);
+        let mut formats = vec![MoxelFormat::default(); 50];
+        for format in formats.iter_mut().skip(39).take(11) {
+            format.back_color = Some("style:ReportHeaderBackColor".to_string());
+            format.text_placement = Some("Wrap");
+        }
+        normalize_moxel_single_set_report_header_tail(
+            &column_sets,
+            &column_formats,
+            &mut lines,
+            &mut formats,
+        );
 
         assert_eq!(lines[1].style, "Solid");
         assert_eq!(lines[1].width, 2);
@@ -8193,6 +8212,27 @@ mod moxel_exact_parity_tests {
             }]
         );
 
+        // Exercise the real strict palette plus its indexed root override;
+        // the normalizer must not depend on its former fixed slot layout.
+        let strict_palette = [
+            "4",
+            "{3,3,{-1}}",
+            "{3,3,{-3}}",
+            "{3,0,{12971252}}",
+            "{3,0,{12971252}}",
+            "{1,2,{3,3,{-25}}}",
+        ];
+        let style_refs = parse_moxel_style_refs(&strict_palette, &BTreeMap::new());
+        assert_eq!(
+            style_refs,
+            vec![
+                Some("style:FormBackColor".to_string()),
+                Some("style:FormTextColor".to_string()),
+                Some("style:ReportHeaderBackColor".to_string()),
+                Some("style:ReportHeaderBackColor".to_string()),
+            ]
+        );
+
         let column_sets = vec![MoxelColumnSet {
             id: None,
             default_format_index: None,
@@ -8201,19 +8241,16 @@ mod moxel_exact_parity_tests {
             columns: Vec::new(),
         }];
         let column_formats = vec![MoxelFormat::default(); 8];
-        let style_refs = vec![
-            None,
-            None,
-            Some("style:ReportHeaderBackColor".to_string()),
-            Some("style:ReportHeaderBackColor".to_string()),
-            Some("style:ReportHeaderBackColor".to_string()),
-        ];
+        let report_header_wrap = parse_moxel_format("{18432,2,3}", &style_refs, &[]).unwrap();
+        let mut formats = vec![MoxelFormat::default(); 51];
+        for format in formats.iter_mut().skip(38).take(13) {
+            *format = report_header_wrap.clone();
+        }
         normalize_moxel_single_set_report_header_tail(
             &column_sets,
             &column_formats,
-            &style_refs,
             &mut lines,
-            &mut [],
+            &mut formats,
         );
 
         assert_eq!(lines[0].style, "Solid");
@@ -8226,6 +8263,11 @@ mod moxel_exact_parity_tests {
         );
         assert_eq!(lines[1].style, "Solid");
         assert_eq!(lines[1].width, 2);
+        assert_eq!(formats[38].back_color.as_deref(), Some("style:ReportHeaderBackColor"));
+        assert!(formats[39..50]
+            .iter()
+            .all(|format| format.back_color.as_deref() == Some("#F4ECC5")));
+        assert_eq!(formats[50].back_color.as_deref(), Some("style:ReportHeaderBackColor"));
         assert_eq!(
             lines[1].raw_parents,
             vec![MoxelRawLineParent {
