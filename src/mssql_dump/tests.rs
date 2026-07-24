@@ -110,6 +110,132 @@ fn form_navigation_panel_kind_4_keeps_catalog_precedence() {
 }
 
 #[test]
+fn form_navigation_panel_resolves_standard_form_and_open_by_recorder_commands() {
+    let register_uuid = "55555555-5555-4555-8555-555555555555".to_string();
+    let catalog_uuid = "66666666-6666-4666-8666-666666666666".to_string();
+    let object_refs = BTreeMap::from([
+        (
+            register_uuid.clone(),
+            "AccumulationRegister.Stock".to_string(),
+        ),
+        (catalog_uuid.clone(), "Catalog.Products".to_string()),
+    ]);
+
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            "{0,71e0226e-ebb2-4e33-8745-0a94a01bbf15}",
+            &object_refs,
+            &BTreeMap::new(),
+            "Document.Invoice",
+        ),
+        Some("Form.StandardCommand.RestoreValues".to_string())
+    );
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{1,{register_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Document.Invoice",
+        ),
+        Some("AccumulationRegister.Stock.StandardCommand.OpenByRecorder".to_string())
+    );
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{1,{catalog_uuid}}}"),
+            &object_refs,
+            &BTreeMap::new(),
+            "Document.Invoice",
+        ),
+        None
+    );
+}
+
+#[test]
+fn form_navigation_panel_open_by_value_uses_only_unambiguous_register_field_fallback() {
+    let register_uuid = "77777777-7777-4777-8777-777777777777".to_string();
+    let object_refs = BTreeMap::from([(
+        register_uuid.clone(),
+        "InformationRegister.Queue".to_string(),
+    )]);
+    let one_field = BTreeMap::from([(
+        register_uuid.clone(),
+        vec![InformationRegisterFieldReference {
+            field_reference: "InformationRegister.Queue.Dimension.Message".to_string(),
+            value_owner_references: BTreeSet::from(["Catalog.OtherOwner".to_string()]),
+        }],
+    )]);
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{3,{register_uuid}}}"),
+            &object_refs,
+            &one_field,
+            "Catalog.CurrentOwner",
+        ),
+        Some("InformationRegister.Queue.StandardCommand.OpenByValue.Message".to_string())
+    );
+
+    let ambiguous = BTreeMap::from([(
+        register_uuid.clone(),
+        ["First", "Second"]
+            .into_iter()
+            .map(|name| InformationRegisterFieldReference {
+                field_reference: format!("InformationRegister.Queue.Dimension.{name}"),
+                value_owner_references: BTreeSet::from(["Catalog.OtherOwner".to_string()]),
+            })
+            .collect(),
+    )]);
+    assert_eq!(
+        form_body::parse_form_command_interface_command_for_test(
+            &format!("{{3,{register_uuid}}}"),
+            &object_refs,
+            &ambiguous,
+            "Catalog.CurrentOwner",
+        ),
+        None
+    );
+}
+
+#[test]
+fn form_navigation_panel_preserves_raw_item_order_and_rejects_bad_counts() {
+    let register_uuid = "88888888-8888-4888-8888-888888888888";
+    let command_uuid = "99999999-9999-4999-8999-999999999999";
+    let item_tail = r#",{0},0,{0},0,0,{0,{0,{"B",0},0}}"#;
+    let body = deflate_for_test(
+        format!(
+            r#"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1}},"",{{0}},{{0,0}},{{0,0}},{{0,3,{{3,0,{{1,{register_uuid}}}{item_tail}}},{{3,1,{{0,71e0226e-ebb2-4e33-8745-0a94a01bbf15}}{item_tail}}},{{3,2,{{0,{command_uuid}}}{item_tail}}}}},{{0,0}},0,0}}"#
+        )
+        .as_bytes(),
+    );
+    let object_refs = BTreeMap::from([
+        (
+            register_uuid.to_string(),
+            "AccumulationRegister.Stock".to_string(),
+        ),
+        (
+            command_uuid.to_string(),
+            "CommonCommand.Attachments".to_string(),
+        ),
+    ]);
+    let xml = extract_form_body_xml(&body, &object_refs).unwrap();
+    let recorder = xml
+        .find("AccumulationRegister.Stock.StandardCommand.OpenByRecorder")
+        .unwrap();
+    let restore = xml.find("Form.StandardCommand.RestoreValues").unwrap();
+    let attachments = xml.find("CommonCommand.Attachments").unwrap();
+    assert!(recorder < restore && restore < attachments);
+
+    let malformed = vec![
+        "{0}".to_string(),
+        "{0,0}".to_string(),
+        "{0,0}".to_string(),
+        format!(
+            r#"{{0,2,{{3,0,{{0,{command_uuid}}},{{0}},0,{{0}},0,0,{{0,{{0,{{"B",0}},0}}}}}}}}"#
+        ),
+    ];
+    assert!(extract_form_command_interface(&malformed, &object_refs).is_none());
+}
+
+#[test]
 fn information_register_type_set_uses_defined_type_owner_index() {
     let value_types = [ConstantValueType::ReferenceTypeSet {
         reference: "cfg:DefinedType.ProductOwner".to_string(),

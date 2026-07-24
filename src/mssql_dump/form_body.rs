@@ -12398,8 +12398,27 @@ pub(super) fn parse_form_command_interface_command(
             if target == "0" || target == "00000000-0000-0000-0000-000000000000" {
                 Some("0".to_string())
             } else {
-                parse_non_zero_uuid(target).and_then(|uuid| context.object_refs.get(&uuid).cloned())
+                let uuid = parse_non_zero_uuid(target)?;
+                context.object_refs.get(&uuid).cloned().or_else(|| {
+                    form_standard_button_command_name(&uuid)
+                        .or_else(|| form_standard_command_name(&uuid))
+                        .map(ToOwned::to_owned)
+                })
             }
+        }
+        "1" => {
+            let uuid = parse_non_zero_uuid(target?)?;
+            let reference = context.object_refs.get(&uuid)?;
+            let (kind, _) = reference.split_once('.')?;
+            (reference.matches('.').count() == 1
+                && matches!(
+                    kind,
+                    "AccountingRegister"
+                        | "AccumulationRegister"
+                        | "CalculationRegister"
+                        | "InformationRegister"
+                ))
+            .then(|| format!("{reference}.StandardCommand.OpenByRecorder"))
         }
         "2" => {
             let uuid = parse_non_zero_uuid(target?)?;
@@ -12470,15 +12489,20 @@ pub(super) fn resolve_information_register_field_reference<'a>(
     register_uuid: &str,
     form_owner_reference: &str,
 ) -> Option<&'a str> {
-    let mut matches = index
-        .get(register_uuid)?
+    let fields = index.get(register_uuid)?;
+    let mut matches = fields
         .iter()
         .filter(|field| field.value_owner_references.contains(form_owner_reference));
-    let field = matches.next()?;
-    if matches.next().is_some() {
-        return None;
+    if let Some(field) = matches.next() {
+        return matches
+            .next()
+            .is_none()
+            .then_some(field.field_reference.as_str());
     }
-    Some(&field.field_reference)
+    match fields.as_slice() {
+        [field] => Some(&field.field_reference),
+        _ => None,
+    }
 }
 
 pub(super) fn form_information_register_open_by_value_reference(reference: &str) -> Option<String> {
