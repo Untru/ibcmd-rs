@@ -1727,15 +1727,12 @@ pub(super) fn moxel_column_format_slots(
 }
 
 pub(super) fn moxel_default_format_index(
-    column_sets: &[MoxelColumnSet],
+    _column_sets: &[MoxelColumnSet],
     _print_settings: Option<&MoxelPrintSettings>,
     has_default_format: bool,
     fallback: usize,
 ) -> Option<usize> {
     if has_default_format {
-        return Some(fallback);
-    }
-    if column_sets.len() > 1 {
         return Some(fallback);
     }
     None

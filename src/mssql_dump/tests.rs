@@ -18206,6 +18206,7 @@ fn spreadsheet_pack_extract_roundtrip_preserves_row_columns_id() {
 
     assert_eq!(extracted, extracted_again);
     assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+    assert!(!extracted.contains("<defaultFormatIndex>"));
 }
 
 #[test]
@@ -18266,6 +18267,7 @@ fn spreadsheet_pack_extract_roundtrip_preserves_row_zero_columns_id() {
 
     assert_eq!(extracted, extracted_again);
     assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
+    assert!(!extracted.contains("<defaultFormatIndex>"));
 }
 
 #[test]
@@ -18354,6 +18356,7 @@ fn spreadsheet_pack_extract_roundtrip_preserves_multiple_row_columns_id_from_zer
     assert_eq!(extracted, extracted_again);
     assert!(extracted.contains("<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>"));
     assert!(extracted.contains("<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>"));
+    assert!(!extracted.contains("<defaultFormatIndex>"));
 }
 
 #[test]
@@ -21047,7 +21050,7 @@ fn formats_moxel_sparse_print_settings_from_raw_pairs() {
 }
 
 #[test]
-fn formats_moxel_print_settings_default_format_index_uses_first_extra_columns() {
+fn formats_moxel_multiple_column_sets_do_not_synthesize_default_format_index() {
     let column_sets = vec![
         MoxelColumnSet {
             id: None,
@@ -21083,7 +21086,7 @@ fn formats_moxel_print_settings_default_format_index_uses_first_extra_columns() 
 
     assert_eq!(
         moxel_default_format_index(&column_sets, Some(&settings), false, 21),
-        Some(21)
+        None
     );
     assert_eq!(
         moxel_default_format_index(&column_sets, Some(&settings), true, 21),
@@ -21091,7 +21094,7 @@ fn formats_moxel_print_settings_default_format_index_uses_first_extra_columns() 
     );
     assert_eq!(
         moxel_default_format_index(&column_sets, None, false, 21),
-        Some(21)
+        None
     );
 }
 
