@@ -16500,9 +16500,7 @@ fn parse_cct_attribute(
         return None;
     }
     let wrapper = split_information_register_braced_fields(item.first()?)?;
-    let expected_code = if nested { "8" } else { "2" };
-    let expected_len = if nested { 5 } else { 6 };
-    if wrapper.len() != expected_len || wrapper.first()?.trim() != expected_code {
+    if !cct_attribute_wrapper_is_exact(&wrapper, nested) {
         return None;
     }
     let payload = split_information_register_braced_fields(wrapper.get(1)?)?;
@@ -16537,6 +16535,22 @@ fn parse_cct_attribute(
         tabular_section_properties: None,
         child_objects: Vec::new(),
     })
+}
+
+fn cct_attribute_wrapper_is_exact(wrapper: &[&str], nested: bool) -> bool {
+    if nested {
+        return wrapper.len() == 5 && wrapper.first().is_some_and(|value| value.trim() == "8");
+    }
+    match (wrapper.first().map(|value| value.trim()), wrapper.len()) {
+        (Some("2"), 6) => true,
+        (Some("3"), 8) => {
+            wrapper.get(6).is_some_and(|value| value.trim() == "0")
+                && wrapper.get(7).is_some_and(|value| {
+                    cct_pair_is(value, "1", "00000000-0000-0000-0000-000000000000")
+                })
+        }
+        _ => false,
+    }
 }
 
 fn parse_cct_attribute_properties(
@@ -16693,8 +16707,7 @@ fn parse_cct_tabular_sections(
                 return None;
             }
             let wrapper = split_information_register_braced_fields(fields.first()?)?;
-            if wrapper.len() != 3 || wrapper.first()?.trim() != "0" || wrapper.get(2)?.trim() != "0"
-            {
+            if !cct_tabular_section_wrapper_is_exact(&wrapper) {
                 return None;
             }
             let payload = split_information_register_braced_fields(wrapper.get(1)?)?;
@@ -16794,6 +16807,17 @@ fn parse_cct_tabular_sections(
             })
         })
         .collect()
+}
+
+fn cct_tabular_section_wrapper_is_exact(wrapper: &[&str]) -> bool {
+    match (wrapper.first().map(|value| value.trim()), wrapper.len()) {
+        (Some("0"), 3) => wrapper.get(2).is_some_and(|value| value.trim() == "0"),
+        (Some("1"), 4) => {
+            wrapper.get(2).is_some_and(|value| value.trim() == "0")
+                && wrapper.get(3).is_some_and(|value| value.trim() == "5")
+        }
+        _ => false,
+    }
 }
 
 fn parse_strict_catalog_properties_from_text(

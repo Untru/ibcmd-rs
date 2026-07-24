@@ -13831,6 +13831,40 @@ fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
 }
 
 #[test]
+fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    assert!(cct_attribute_wrapper_is_exact(
+        &["2", "payload", "0", "0", "1", "1"],
+        false
+    ));
+    assert!(cct_attribute_wrapper_is_exact(
+        &["3", "payload", "0", "2", "1", "0", "0", &format!("{{1,{zero}}}")],
+        false
+    ));
+    assert!(cct_attribute_wrapper_is_exact(
+        &["8", "payload", "0", "1", "1"],
+        true
+    ));
+    assert!(!cct_attribute_wrapper_is_exact(
+        &["3", "payload", "0", "2", "1", "0", "1", &format!("{{1,{zero}}}")],
+        false
+    ));
+    assert!(!cct_attribute_wrapper_is_exact(
+        &["3", "payload", "0", "2", "1", "0", "0", "{1,not-a-uuid}"],
+        false
+    ));
+    assert!(!cct_attribute_wrapper_is_exact(
+        &["8", "payload", "0", "1"],
+        true
+    ));
+
+    assert!(cct_tabular_section_wrapper_is_exact(&["0", "payload", "0"]));
+    assert!(cct_tabular_section_wrapper_is_exact(&["1", "payload", "0", "5"]));
+    assert!(!cct_tabular_section_wrapper_is_exact(&["1", "payload", "0", "4"]));
+    assert!(!cct_tabular_section_wrapper_is_exact(&["1", "payload", "0"]));
+}
+
+#[test]
 fn extracts_common_command_xml_from_metadata_blob() {
     let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let blob = deflate_for_test(
