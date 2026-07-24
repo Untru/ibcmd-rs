@@ -76,6 +76,30 @@ pub(super) struct FormParseContext<'a> {
     object_refs: &'a BTreeMap<String, String>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
     form_owner_reference: Option<&'a str>,
+    trace_sink: Option<&'a dyn FormItemTraceSink>,
+}
+
+pub(super) trait FormItemTraceSink {
+    fn record(&self, event: FormItemTraceEvent);
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormItemTraceEvent {
+    pub(super) id: String,
+    pub(super) tag: String,
+    pub(super) name: String,
+    pub(super) wrapper: String,
+    pub(super) raw_field_count: usize,
+    pub(super) normalized_field_count: usize,
+    pub(super) owner_chain: Vec<String>,
+    pub(super) top_level_scalars: Vec<FormItemTraceScalar>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormItemTraceScalar {
+    pub(super) index: usize,
+    pub(super) value: Option<String>,
+    pub(super) nested: bool,
 }
 
 impl<'a> FormParseContext<'a> {
@@ -92,7 +116,14 @@ impl<'a> FormParseContext<'a> {
             object_refs,
             information_register_field_refs,
             form_owner_reference,
+            trace_sink: None,
         }
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn with_trace_sink(mut self, trace_sink: &'a dyn FormItemTraceSink) -> Self {
+        self.trace_sink = Some(trace_sink);
+        self
     }
 }
 
@@ -174,8 +205,12 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let child_item_indexes =
-        collect_form_child_item_indexes_with_object_refs(&form_fields, &attributes, context.object_refs);
+    let child_item_indexes = collect_form_child_item_indexes_with_object_refs(
+        &form_fields,
+        &attributes,
+        context.object_refs,
+        context.trace_sink,
+    );
     properties.mobile_device_command_bar_content = extract_form_mobile_device_command_bar_content(
         &form_fields,
         &child_item_indexes.item_name_by_id,
@@ -4531,13 +4566,14 @@ pub(super) fn collect_form_child_item_indexes(
     fields: &[&str],
     attributes: &[FormAttribute],
 ) -> FormChildItemIndexes {
-    collect_form_child_item_indexes_with_object_refs(fields, attributes, &BTreeMap::new())
+    collect_form_child_item_indexes_with_object_refs(fields, attributes, &BTreeMap::new(), None)
 }
 
 fn collect_form_child_item_indexes_with_object_refs(
     fields: &[&str],
     attributes: &[FormAttribute],
     object_refs: &BTreeMap<String, String>,
+    trace_sink: Option<&dyn FormItemTraceSink>,
 ) -> FormChildItemIndexes {
     let mut indexes = FormChildItemIndexes::default();
     let attribute_names_by_id = attributes
@@ -4546,12 +4582,14 @@ fn collect_form_child_item_indexes_with_object_refs(
         .collect::<BTreeMap<_, _>>();
     let attribute_metadata_owners_by_id = form_attribute_metadata_owners_by_id(attributes);
     for field in fields {
-        collect_form_child_item_indexes_from_field(
+        collect_form_child_item_indexes_from_field_traced(
             field,
             &attribute_names_by_id,
             &attribute_metadata_owners_by_id,
             object_refs,
             &mut indexes,
+            trace_sink,
+            &[],
         );
     }
     let unresolved_binding_paths = indexes
@@ -4664,12 +4702,46 @@ fn collect_form_child_item_indexes_with_object_refs(
     indexes
 }
 
+#[allow(dead_code)]
 pub(super) fn collect_form_child_item_indexes_from_field(
     field: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     object_refs: &BTreeMap<String, String>,
     indexes: &mut FormChildItemIndexes,
+) {
+    collect_form_child_item_indexes_from_field_traced(
+        field,
+        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
+        object_refs,
+        indexes,
+        None,
+        &[],
+    );
+}
+
+#[cfg(test)]
+pub(super) fn trace_form_item_indexes_for_test(field: &str, trace_sink: &dyn FormItemTraceSink) {
+    collect_form_child_item_indexes_from_field_traced(
+        field,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &mut FormChildItemIndexes::default(),
+        Some(trace_sink),
+        &[],
+    );
+}
+
+fn collect_form_child_item_indexes_from_field_traced(
+    field: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+    indexes: &mut FormChildItemIndexes,
+    trace_sink: Option<&dyn FormItemTraceSink>,
+    owner_chain: &[String],
 ) {
     let Some(raw_fields) = split_1c_braced_fields(field.trim(), 0) else {
         return;
@@ -4685,6 +4757,34 @@ pub(super) fn collect_form_child_item_indexes_from_field(
             .collect::<Vec<_>>()
     });
     let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
+    let structural_identity = wrapper
+        .and_then(|wrapper| form_child_item_tag(wrapper, &fields).map(|tag| (wrapper, tag)))
+        .and_then(|(wrapper, tag)| {
+            form_child_item_id(&fields).map(|id| (wrapper, tag, id))
+        })
+        .and_then(|(wrapper, tag, id)| {
+            parse_form_child_item_name(wrapper, &fields).map(|name| (wrapper, tag, id, name))
+        });
+    if let (Some(trace_sink), Some((wrapper, tag, id, name))) = (trace_sink, &structural_identity) {
+        trace_sink.record(FormItemTraceEvent {
+            id: (*id).to_string(),
+            tag: (*tag).to_string(),
+            name: name.clone(),
+            wrapper: (*wrapper).to_string(),
+            raw_field_count: raw_fields.len(),
+            normalized_field_count: fields.len(),
+            owner_chain: owner_chain.to_vec(),
+            top_level_scalars: raw_fields
+                .iter()
+                .enumerate()
+                .map(|(index, value)| FormItemTraceScalar {
+                    index,
+                    value: (!value.trim_start().starts_with('{')).then(|| value.trim().to_string()),
+                    nested: value.trim_start().starts_with('{'),
+                })
+                .collect(),
+        });
+    }
     if let Some(wrapper) = wrapper
         && form_spreadsheet_document_field_layout(wrapper, &fields)
         && let Some(id) = form_child_item_id(&fields)
@@ -4724,8 +4824,12 @@ pub(super) fn collect_form_child_item_indexes_from_field(
             },
         );
     }
-    if let Some(wrapper) = wrapper
-        && (form_child_item_tag(wrapper, &fields).is_some() || matches!(wrapper, "37" | "48"))
+    if let Some((_, _, id, name)) = structural_identity.as_ref() {
+        indexes
+            .command_source_owner_name_by_id
+            .insert((*id).to_string(), name.clone());
+    } else if let Some(wrapper) = wrapper
+        && matches!(wrapper, "37" | "48")
         && let Some(id) = form_child_item_id(&fields)
         && let Some(name) = parse_form_child_item_name(wrapper, &fields)
     {
@@ -4733,12 +4837,9 @@ pub(super) fn collect_form_child_item_indexes_from_field(
             .command_source_owner_name_by_id
             .insert(id.to_string(), name);
     }
-    if let Some(wrapper) = wrapper
-        && form_child_item_tag(wrapper, &fields).is_some()
-        && let Some(id) = form_child_item_id(&fields)
-        && let Some(name) = parse_form_child_item_name(wrapper, &fields)
-    {
-        let tag = form_child_item_tag(wrapper, &fields).unwrap_or_default();
+    if let Some((_, tag, id, name)) = structural_identity.as_ref() {
+        let tag = *tag;
+        let id = *id;
         indexes.item_name_by_id.insert(id.to_string(), name.clone());
         if tag == "Table" {
             indexes.standard_command_owner_name_by_id.insert(
@@ -4873,15 +4974,37 @@ pub(super) fn collect_form_child_item_indexes_from_field(
             }
         }
     }
-    for nested in fields {
-        if nested.trim_start().starts_with('{') {
-            collect_form_child_item_indexes_from_field(
-                nested,
-                attribute_names_by_id,
-                attribute_metadata_owners_by_id,
-                object_refs,
-                indexes,
-            );
+    if let Some(trace_sink) = trace_sink {
+        let mut child_owner_chain = owner_chain.to_vec();
+        if let Some((_, tag, id, _)) = structural_identity.as_ref() {
+            child_owner_chain.push(format!("{tag}:{id}"));
+        }
+        for nested in fields {
+            if nested.trim_start().starts_with('{') {
+                collect_form_child_item_indexes_from_field_traced(
+                    nested,
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                    indexes,
+                    Some(trace_sink),
+                    &child_owner_chain,
+                );
+            }
+        }
+    } else {
+        for nested in fields {
+            if nested.trim_start().starts_with('{') {
+                collect_form_child_item_indexes_from_field_traced(
+                    nested,
+                    attribute_names_by_id,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                    indexes,
+                    None,
+                    owner_chain,
+                );
+            }
         }
     }
 }

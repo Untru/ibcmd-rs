@@ -5694,8 +5694,14 @@ fn extracts_form_attribute_additional_columns_from_body_tail() {
 
 #[test]
 fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
+    struct Sink(std::cell::RefCell<Vec<FormItemTraceEvent>>);
+    impl FormItemTraceSink for Sink {
+        fn record(&self, event: FormItemTraceEvent) {
+            self.0.borrow_mut().push(event);
+        }
+    }
     let body = ParsedFormBodyBlob {
-        layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"}}".to_string(),
+        layout: "{7,{0,\"OnOpen\",\"ПриОткрытии\"},{31,{1,0},0,0,0,\"Trace\"}}".to_string(),
         module_text: String::new(),
         trailing: Vec::new(),
         trailing_fields: 0,
@@ -5705,15 +5711,54 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
     let dcs_type_index = DcsTypeIndex::new();
     let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
     let legacy = extract_form_body_xml_from_body(&body, &type_index, &object_refs).unwrap();
+    let sink = Sink(std::cell::RefCell::new(Vec::new()));
     let context = FormParseContext::new(
         &type_index,
         &dcs_type_index,
         &object_refs,
         &information_register_field_refs,
         None,
-    );
+    )
+    .with_trace_sink(&sink);
     let contextual = extract_form_body_xml_from_body_timed(&body, &context, None).unwrap();
     assert_eq!(contextual, legacy);
+    assert_eq!(sink.0.borrow().as_slice().len(), 1);
+    assert_eq!(sink.0.borrow()[0].id, "1");
+    assert_eq!(sink.0.borrow()[0].name, "Trace");
+}
+
+#[test]
+fn form_item_trace_records_nested_and_duplicate_identities_without_deduplication() {
+    struct Sink(std::cell::RefCell<Vec<FormItemTraceEvent>>);
+    impl FormItemTraceSink for Sink {
+        fn record(&self, event: FormItemTraceEvent) {
+            self.0.borrow_mut().push(event);
+        }
+    }
+
+    let sink = Sink(std::cell::RefCell::new(Vec::new()));
+    let parent = r#"{31,{1,0},0,0,0,"Parent",{31,{2,0},0,0,0,"Child"},{999,{31,{3,0},0,0,0,"ChildThroughContainer"}}}"#;
+    trace_form_item_indexes_for_test(parent, &sink);
+    trace_form_item_indexes_for_test(r#"{31,{1,0},0,0,0,"Duplicate"}"#, &sink);
+    trace_form_item_indexes_for_test("{31,{1,broken}", &sink);
+
+    let events = sink.0.borrow();
+    assert_eq!(events.len(), 4);
+    assert_eq!(events[0].id, "1");
+    assert_eq!(events[0].tag, "Button");
+    assert_eq!(events[0].name, "Parent");
+    assert_eq!(events[0].wrapper, "31");
+    assert_eq!(events[0].raw_field_count, 8);
+    assert_eq!(events[0].owner_chain, Vec::<String>::new());
+    assert_eq!(events[1].id, "2");
+    assert_eq!(events[1].owner_chain, vec!["Button:1"]);
+    assert_eq!(events[2].id, "3");
+    assert_eq!(events[2].name, "ChildThroughContainer");
+    assert_eq!(events[2].owner_chain, vec!["Button:1"]);
+    assert_eq!(events[3].id, "1");
+    assert_eq!(events[3].name, "Duplicate");
+    assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 0 && scalar.value.as_deref() == Some("31")));
+    assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 1 && scalar.nested));
 }
 
 #[test]
