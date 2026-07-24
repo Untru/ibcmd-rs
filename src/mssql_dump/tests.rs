@@ -5797,7 +5797,7 @@ fn formatter_emits_form_command_children_in_native_order() {
         picture_load_transparent: false,
         shortcut: None,
         action: "ЗаписатьИЗакрытьВыполнить".to_string(),
-        representation: None,
+        representation: Some("TextPicture"),
         functional_options: vec!["FunctionalOption.ИспользоватьФункцию".to_string()],
         modifies_saved_data: Some(true),
         current_row_use: Some(FormCommandCurrentRowProperties {
@@ -5823,6 +5823,9 @@ fn formatter_emits_form_command_children_in_native_order() {
         .unwrap();
     let functional_options = form_xml.find("<FunctionalOptions>").unwrap();
     let functional_options_end = form_xml.find("</FunctionalOptions>").unwrap();
+    let representation = form_xml
+        .find("<Representation>TextPicture</Representation>")
+        .unwrap();
     assert!(form_xml.contains("<Item>FunctionalOption.ИспользоватьФункцию</Item>"));
     let modifies_saved_data = form_xml
         .find("<ModifiesSavedData>true</ModifiesSavedData>")
@@ -5833,10 +5836,27 @@ fn formatter_emits_form_command_children_in_native_order() {
     assert!(
         action < functional_options
             && functional_options < functional_options_end
-            && functional_options_end < modifies_saved_data
+            && functional_options_end < representation
+            && representation < modifies_saved_data
             && modifies_saved_data < current_row_use,
         "unexpected command child order: {form_xml}"
     );
+
+    let mut command_without_options = commands[0].clone();
+    command_without_options.functional_options.clear();
+    let no_options_xml = format_form_body_xml(
+        &FormBodyProperties::default(),
+        None,
+        &[],
+        &[],
+        &[],
+        &FormAttributesSection::default(),
+        &[],
+        &[command_without_options],
+        &None,
+    );
+    assert!(no_options_xml.contains("<Representation>TextPicture</Representation>"));
+    assert!(!no_options_xml.contains("<FunctionalOptions>"));
 }
 
 #[test]
