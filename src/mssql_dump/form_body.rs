@@ -4295,7 +4295,7 @@ pub(super) fn extract_form_child_items(
     items
 }
 
-fn record_complete_table_schema_events(
+pub(super) fn record_complete_table_schema_events(
     items: &[FormChildItem],
     attributes: &[FormAttribute],
     indexes: &FormChildItemIndexes,
@@ -4352,7 +4352,8 @@ fn record_complete_table_schema_events(
                         data_path_provenance: item.data_path_provenance.map(|p| match p { FormChildItemDataPathProvenance::DirectRawSlot => "direct_raw_slot", FormChildItemDataPathProvenance::InferredFallback => "inferred_fallback" }),
                         root_attribute_id: attribute.map(|(id, _)| id.clone()),
                         root_attribute_name: attribute.map(|(_, attribute)| attribute.name.clone()),
-                        root_attribute_dynamic_list: root_attribute_dynamic_list_status(attribute.map(|(_, attribute)| attribute)),
+                        root_attribute_dynamic_list: attribute
+                            .map(|(_, attribute)| attribute.settings.is_some()),
                     });
                 }
             }
@@ -4366,23 +4367,22 @@ pub(super) fn unique_table_trace_occurrence(occurrences: &[usize], final_count: 
     (occurrences.len() == 1 && final_count == Some(1)).then(|| occurrences[0])
 }
 
-fn root_attribute_dynamic_list_status(attribute: Option<&FormAttribute>) -> Option<bool> {
-    attribute_dynamic_list_status(attribute.map(|attribute| attribute.settings.is_some()))
-}
-
-pub(super) fn attribute_dynamic_list_status(has_settings: Option<bool>) -> Option<bool> {
-    has_settings
-}
-
 pub(super) fn table_auto_max_width_emission(
     effective_auto_max_width: Option<bool>,
     hierarchical: bool,
 ) -> (Option<bool>, Option<bool>) {
-    match effective_auto_max_width {
-        Some(false) if hierarchical => (Some(true), None),
-        Some(false) => (None, Some(false)),
-        _ => (None, None),
-    }
+    let emitted = table_emits_auto_max_width_false(effective_auto_max_width, hierarchical);
+    (
+        (effective_auto_max_width == Some(false) && hierarchical).then_some(true),
+        emitted.then_some(false),
+    )
+}
+
+fn table_emits_auto_max_width_false(
+    effective_auto_max_width: Option<bool>,
+    hierarchical: bool,
+) -> bool {
+    effective_auto_max_width == Some(false) && !hierarchical
 }
 
 fn form_attribute_metadata_owners_by_id(
@@ -4705,6 +4705,30 @@ pub(super) fn collect_form_child_item_indexes(
     attributes: &[FormAttribute],
 ) -> FormChildItemIndexes {
     collect_form_child_item_indexes_with_object_refs(fields, attributes, &BTreeMap::new(), None)
+}
+
+#[cfg(test)]
+pub(super) fn extract_form_child_items_with_trace_for_test(
+    fields: &[&str],
+    attributes: &[FormAttribute],
+    trace_sink: &dyn FormItemTraceSink,
+) -> (Vec<FormChildItem>, FormChildItemIndexes) {
+    let object_refs = BTreeMap::new();
+    let indexes = collect_form_child_item_indexes_with_object_refs(
+        fields,
+        attributes,
+        &object_refs,
+        Some(trace_sink),
+    );
+    let items = extract_form_child_items(
+        fields,
+        attributes,
+        &[],
+        &object_refs,
+        &indexes,
+        Some(trace_sink),
+    );
+    (items, indexes)
 }
 
 #[allow(dead_code)]
@@ -13660,11 +13684,12 @@ fn format_form_table_property_xml(
             Some(false) => format!("{tab}<ChangeRowOrder>false</ChangeRowOrder>\r\n"),
             _ => String::new(),
         },
-        FormTableXmlProperty::AutoMaxWidth => match item.auto_max_width {
-            Some(false) if !hierarchical_table => {
+        FormTableXmlProperty::AutoMaxWidth => {
+            if table_emits_auto_max_width_false(item.auto_max_width, hierarchical_table) {
                 format!("{tab}<AutoMaxWidth>false</AutoMaxWidth>\r\n")
+            } else {
+                String::new()
             }
-            _ => String::new(),
         },
         FormTableXmlProperty::ChoiceMode => match item.table_choice_mode {
             Some(true) => format!("{tab}<ChoiceMode>true</ChoiceMode>\r\n"),

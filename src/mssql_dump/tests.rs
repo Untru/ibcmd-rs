@@ -5766,22 +5766,180 @@ fn form_item_trace_records_nested_and_duplicate_identities_without_deduplication
 }
 
 #[test]
-fn table_schema_trace_completion_helpers_are_fail_closed_and_semantic() {
-    // A unique prepass/final identity completes; any duplicate or missing final identity does not.
-    assert_eq!(unique_table_trace_occurrence(&[7], Some(1)), Some(7));
-    assert_eq!(unique_table_trace_occurrence(&[7, 8], Some(2)), None);
-    assert_eq!(unique_table_trace_occurrence(&[7], Some(2)), None);
-    assert_eq!(unique_table_trace_occurrence(&[7], None), None);
+fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer() {
+    #[derive(Default)]
+    struct Sink {
+        raw: std::cell::RefCell<Vec<FormItemTraceEvent>>,
+        schema: std::cell::RefCell<Vec<FormItemSchemaTraceEvent>>,
+    }
+    impl FormItemTraceSink for Sink {
+        fn record(&self, event: FormItemTraceEvent) {
+            self.raw.borrow_mut().push(event);
+        }
 
-    // The value is sourced from the bound root attribute's DynamicList settings, not its name.
-    assert_eq!(attribute_dynamic_list_status(Some(true)), Some(true));
-    assert_eq!(attribute_dynamic_list_status(Some(false)), Some(false));
-    assert_eq!(attribute_dynamic_list_status(None), None);
+        fn record_schema(&self, event: FormItemSchemaTraceEvent) {
+            self.schema.borrow_mut().push(event);
+        }
+    }
 
-    // These are the same predicates used by the Table renderer.
-    assert_eq!(table_auto_max_width_emission(Some(false), true), (Some(true), None));
-    assert_eq!(table_auto_max_width_emission(Some(false), false), (None, Some(false)));
-    assert_eq!(table_auto_max_width_emission(None, false), (None, None));
+    fn attribute(dynamic_list: bool) -> FormAttribute {
+        FormAttribute {
+            id: "1".to_string(),
+            name: "Rows".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            exact_single_type_uuid: None,
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: Vec::new(),
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: dynamic_list.then_some(FormDynamicListSettings {
+                manual_query: false,
+                manual_query_explicit: false,
+                auto_save_user_settings: false,
+                dynamic_data_read: false,
+                dynamic_data_read_explicit: false,
+                query_text: None,
+                main_table: None,
+                explicit_fields: Vec::new(),
+                fields: Vec::new(),
+                server_state_xml: None,
+                list_settings: FormListSettings::default(),
+            }),
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        }
+    }
+
+    const TABLE: &str = r##"{55,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,0,{1,0},{1,0},{1,{1}},0,1,0,0,1,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{1,{10000000}},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{0,0,0},1,0,1,16,{"N",288}}"##;
+    let uuid_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let uuid_b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+    let layout = format!("{{1,{uuid_a},{TABLE}}}");
+    let fields = split_1c_braced_fields(&layout, 0).unwrap();
+    let sink = Sink::default();
+    let (mut items, indexes) =
+        form_body::extract_form_child_items_with_trace_for_test(&fields, &[attribute(false)], &sink);
+    assert_eq!(items.len(), 1);
+    let complete = sink
+        .schema
+        .borrow()
+        .iter()
+        .find(|event| event.evidence_complete)
+        .cloned()
+        .unwrap();
+    assert_eq!(complete.evidence_stage, "final_item_and_renderer_predicate");
+    assert_eq!(complete.root_attribute_id.as_deref(), Some("1"));
+    assert_eq!(complete.root_attribute_name.as_deref(), Some("Rows"));
+    assert_eq!(complete.root_attribute_dynamic_list, Some(false));
+
+    let dynamic_sink = Sink::default();
+    let _ = form_body::extract_form_child_items_with_trace_for_test(
+        &fields,
+        &[attribute(true)],
+        &dynamic_sink,
+    );
+    assert_eq!(
+        dynamic_sink
+            .schema
+            .borrow()
+            .iter()
+            .find(|event| event.evidence_complete)
+            .unwrap()
+            .root_attribute_dynamic_list,
+        Some(true)
+    );
+
+    let missing_sink = Sink::default();
+    let _ =
+        form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &missing_sink);
+    assert_eq!(
+        missing_sink
+            .schema
+            .borrow()
+            .iter()
+            .find(|event| event.evidence_complete)
+            .unwrap()
+            .root_attribute_dynamic_list,
+        None
+    );
+
+    let duplicate_layout = format!("{{2,{uuid_a},{TABLE},{uuid_b},{TABLE}}}");
+    let duplicate_fields = split_1c_braced_fields(&duplicate_layout, 0).unwrap();
+    let duplicate_sink = Sink::default();
+    let _ = form_body::extract_form_child_items_with_trace_for_test(
+        &duplicate_fields,
+        &[attribute(false)],
+        &duplicate_sink,
+    );
+    assert_eq!(
+        duplicate_sink
+            .raw
+            .borrow()
+            .iter()
+            .filter(|event| event.tag == "Table")
+            .count(),
+        2
+    );
+    assert_eq!(
+        duplicate_sink
+            .schema
+            .borrow()
+            .iter()
+            .filter(|event| !event.evidence_complete)
+            .count(),
+        2
+    );
+    assert_eq!(
+        duplicate_sink
+            .schema
+            .borrow()
+            .iter()
+            .filter(|event| event.evidence_complete)
+            .count(),
+        0
+    );
+
+    items[0].auto_max_width = Some(false);
+    items[0].top_level_parent_nil = None;
+    items[0].show_root = None;
+    items[0].allow_root_choice = None;
+    let emitted_sink = Sink::default();
+    form_body::record_complete_table_schema_events(
+        &items,
+        &[attribute(false)],
+        &indexes,
+        &emitted_sink,
+    );
+    let emitted = emitted_sink.schema.borrow();
+    let emitted = emitted.iter().find(|event| event.evidence_complete).unwrap();
+    let emitted_xml = format_form_child_items_xml(&items, 1);
+    assert_eq!(emitted.hierarchical_suppressed, None);
+    assert_eq!(emitted.emitted_auto_max_width, Some(false));
+    assert!(emitted_xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+
+    items[0].top_level_parent_nil = Some(true);
+    let suppressed_sink = Sink::default();
+    form_body::record_complete_table_schema_events(
+        &items,
+        &[attribute(false)],
+        &indexes,
+        &suppressed_sink,
+    );
+    let suppressed = suppressed_sink.schema.borrow();
+    let suppressed = suppressed
+        .iter()
+        .find(|event| event.evidence_complete)
+        .unwrap();
+    let suppressed_xml = format_form_child_items_xml(&items, 1);
+    assert_eq!(suppressed.hierarchical_suppressed, Some(true));
+    assert_eq!(suppressed.emitted_auto_max_width, None);
+    assert!(!suppressed_xml.contains("<AutoMaxWidth>false</AutoMaxWidth>"));
 }
 
 #[test]
