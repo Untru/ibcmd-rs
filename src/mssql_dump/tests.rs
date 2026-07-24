@@ -7944,6 +7944,108 @@ fn table_auto_max_width_uses_validated_fixed_tail_scalar() {
 }
 
 #[test]
+fn table_auto_add_incomplete_uses_validated_fixed_tail_scalar() {
+    for (field_count, raw, expected) in [
+        (99, "0", Some(false)),
+        (105, "1", Some(true)),
+        (125, "2", None),
+    ] {
+        let mut owned = vec!["0".to_string(); field_count];
+        owned[0] = "55".to_string();
+        let slot = owned.len() - 36;
+        owned[slot] = raw.to_string();
+        let fields = owned.iter().map(String::as_str).collect::<Vec<_>>();
+        let schema = crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &fields)
+            .expect("valid variable-arity table layout");
+        assert_eq!(schema.auto_add_incomplete_slot(&fields), Some(slot));
+        assert_eq!(schema.auto_add_incomplete(&fields), expected);
+    }
+
+    let mut malformed = vec!["0".to_string(); 125];
+    malformed[0] = "55".to_string();
+    let malformed_slot = malformed.len() - 36;
+    malformed[malformed_slot] = "3".to_string();
+    let malformed = malformed.iter().map(String::as_str).collect::<Vec<_>>();
+    assert!(crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed).is_none());
+}
+
+#[test]
+fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
+    // Saved production wrapper-55 layout; cases change only scalar values.
+    const TABLE: &str = include_str!("../../.tmp_zhurnal_spisokdokumentov_table_raw.txt");
+    struct Sink;
+    impl FormItemTraceSink for Sink {
+        fn record(&self, _event: FormItemTraceEvent) {}
+    }
+
+    fn run(table: String) -> FormChildItem {
+        let layout = format!("{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}");
+        let fields = split_1c_braced_fields(&layout, 0).unwrap();
+        let (items, _) = form_body::extract_form_child_items_with_trace_for_test(
+            &fields,
+            &[],
+            &Sink,
+        );
+        items
+            .into_iter()
+            .find(|item| item.tag == "Table")
+            .expect("Table item")
+    }
+
+    // Old slot-40 logic would omit this value; the fixed tail emits false.
+    let mut false_fields = split_1c_braced_fields(TABLE, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    false_fields[40] = "1".to_string();
+    let false_slot = false_fields.len() - 36;
+    false_fields[false_slot] = "0".to_string();
+    let mut false_item = run(format!("{{{}}}", false_fields.join(",")));
+    assert_eq!(false_item.auto_add_incomplete, Some(false));
+    false_item.top_level_parent_nil = None;
+    false_item.show_root = None;
+    false_item.allow_root_choice = None;
+    assert!(format_form_child_items_xml(&[false_item], 1)
+        .contains("<AutoAddIncomplete>false</AutoAddIncomplete>"));
+
+    // Old slot-40 logic would emit false; the fixed tail emits true instead.
+    let mut true_fields = split_1c_braced_fields(TABLE, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    true_fields[40] = "0".to_string();
+    let true_slot = true_fields.len() - 36;
+    true_fields[true_slot] = "1".to_string();
+    let mut true_item = run(format!("{{{}}}", true_fields.join(",")));
+    assert_eq!(true_item.auto_add_incomplete, Some(true));
+    true_item.top_level_parent_nil = None;
+    true_item.show_root = None;
+    true_item.allow_root_choice = None;
+    assert!(format_form_child_items_xml(&[true_item], 1)
+        .contains("<AutoAddIncomplete>true</AutoAddIncomplete>"));
+
+    // Old slot-40 logic would emit false; tail code 2 is the platform
+    // default and must omit the property altogether.
+    let mut omitted_fields = split_1c_braced_fields(TABLE, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    omitted_fields[40] = "0".to_string();
+    let omitted_slot = omitted_fields.len() - 36;
+    omitted_fields[omitted_slot] = "2".to_string();
+    let mut omitted_item = run(format!("{{{}}}", omitted_fields.join(",")));
+    assert_eq!(omitted_item.auto_add_incomplete, None);
+    omitted_item.top_level_parent_nil = None;
+    omitted_item.show_root = None;
+    omitted_item.allow_root_choice = None;
+    assert!(!format_form_child_items_xml(&[omitted_item], 1)
+        .contains("<AutoAddIncomplete>"));
+}
+
+#[test]
 fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
     #[derive(Default)]
     struct Sink {
@@ -12331,6 +12433,7 @@ fn formats_table_search_additions_as_direct_sections() {
         mark_required_complete: None,
         auto_edit_mode: None,
         auto_insert_new_row: None,
+        auto_add_incomplete: None,
         format: Vec::new(),
         edit_format: Vec::new(),
         title_font_xml: None,
@@ -12515,6 +12618,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 mark_required_complete: None,
                 auto_edit_mode: None,
                 auto_insert_new_row: None,
+                auto_add_incomplete: None,
                 format: Vec::new(),
                 edit_format: Vec::new(),
                 title_font_xml: None,
@@ -12700,6 +12804,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 mark_required_complete: None,
                 auto_edit_mode: None,
                 auto_insert_new_row: None,
+                auto_add_incomplete: None,
                 format: Vec::new(),
                 edit_format: Vec::new(),
                 title_font_xml: None,

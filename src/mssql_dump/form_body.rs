@@ -765,6 +765,7 @@ pub(super) struct FormChildItem {
     pub(super) mark_required_complete: Option<bool>,
     pub(super) auto_edit_mode: Option<bool>,
     pub(super) auto_insert_new_row: Option<bool>,
+    pub(super) auto_add_incomplete: Option<bool>,
     pub(super) format: Vec<(String, String)>,
     pub(super) edit_format: Vec<(String, String)>,
     pub(super) title_font_xml: Option<String>,
@@ -6821,6 +6822,7 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         auto_insert_new_row: table_schema.and_then(|schema| schema.auto_insert_new_row(&fields)),
+        auto_add_incomplete: table_schema.and_then(|schema| schema.auto_add_incomplete(&fields)),
         format: if tag == "UsualGroup" {
             extended_group_options
                 .as_ref()
@@ -13743,6 +13745,15 @@ fn format_form_table_property_xml(
             Some(true) => format!("{tab}<AutoInsertNewRow>true</AutoInsertNewRow>\r\n"),
             _ => String::new(),
         },
+        FormTableXmlProperty::AutoAddIncomplete => item
+            .auto_add_incomplete
+            .map(|value| {
+                format!(
+                    "{tab}<AutoAddIncomplete>{}</AutoAddIncomplete>\r\n",
+                    xml_bool(value)
+                )
+            })
+            .unwrap_or_default(),
         FormTableXmlProperty::EnableStartDrag => match item.enable_start_drag {
             Some(true) => format!("{tab}<EnableStartDrag>true</EnableStartDrag>\r\n"),
             _ => String::new(),

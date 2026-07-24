@@ -4054,6 +4054,7 @@ pub(crate) enum FormTableXmlProperty {
     VerticalLines,
     UseAlternationRowColor,
     AutoInsertNewRow,
+    AutoAddIncomplete,
     AutoMarkIncomplete,
     SearchOnInput,
     InitialListView,
@@ -4116,6 +4117,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::VerticalLines,
     FormTableXmlProperty::UseAlternationRowColor,
     FormTableXmlProperty::AutoInsertNewRow,
+    FormTableXmlProperty::AutoAddIncomplete,
     FormTableXmlProperty::AutoMarkIncomplete,
     FormTableXmlProperty::SearchOnInput,
     FormTableXmlProperty::InitialListView,
@@ -4474,6 +4476,8 @@ impl FormTableSchema {
     // This scalar is part of the fixed tail, not the counted property bag.
     // Native ibcmd emits AutoMaxWidth=false only for raw code 0 here.
     const AUTO_MAX_WIDTH_REVERSE_OFFSET: usize = 15;
+    // Fixed tail scalar: 0=false, 1=true, 2=platform default (omitted).
+    const AUTO_ADD_INCOMPLETE_REVERSE_OFFSET: usize = 36;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
@@ -4524,6 +4528,12 @@ impl FormTableSchema {
         if !matches!(
             Self::reverse_field(fields, Self::AUTO_MAX_WIDTH_REVERSE_OFFSET)?.trim(),
             "0" | "1"
+        ) {
+            return None;
+        }
+        if !matches!(
+            Self::reverse_field(fields, Self::AUTO_ADD_INCOMPLETE_REVERSE_OFFSET)?.trim(),
+            "0" | "1" | "2"
         ) {
             return None;
         }
@@ -4694,6 +4704,22 @@ impl FormTableSchema {
 
     pub(crate) fn auto_max_width(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.auto_max_width_slot(fields)?)?.trim() == "0").then_some(false)
+    }
+
+    pub(crate) fn auto_add_incomplete_slot(self, fields: &[&str]) -> Option<usize> {
+        let slot = fields
+            .len()
+            .checked_sub(Self::AUTO_ADD_INCOMPLETE_REVERSE_OFFSET)?;
+        matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
+    }
+
+    pub(crate) fn auto_add_incomplete(self, fields: &[&str]) -> Option<bool> {
+        match fields.get(self.auto_add_incomplete_slot(fields)?)?.trim() {
+            "0" => Some(false),
+            "1" => Some(true),
+            "2" => None,
+            _ => None,
+        }
     }
 
     pub(crate) fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
