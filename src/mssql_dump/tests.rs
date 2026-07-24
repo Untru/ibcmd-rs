@@ -17261,7 +17261,7 @@ fn formats_moxel_observed_columns_empty_rows_and_cell_formats() {
         "StyleItem.ЦветШтампаЭП".to_string(),
     )]);
     let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},7,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{3221308845,1,1,1,2,139,6,2,2,0,0,0},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},1,{4,0,{0},\"\",-1,-1,1,0,\"\"}}",
+            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},0,{0,0},{0,0},{0,0},{0,0},{0,0},{0,0},1,2,7,0,0,0,1,0,3,0,{0,1},1,{16,2,{1,0},0},2,{16,3,{1,1,{\"ru\",\"ДОКУМЕНТ ПОДПИСАН\\nЭЛЕКТРОННОЙ ПОДПИСЬЮ\"}},0},2,0,2,0,{0,4},1,{16,5,{1,1,{\"\",\"ТекстШтампа\"}},0},{2,{1,1,1,2,0},{1,3,2,5,0}},{1,\"Штамп\",{1,{3,1,1,2,6,00000000-0000-0000-0000-000000000000},0}},3,{3,3,{-1}},{3,3,{-3}},{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}},7,{719,0,0,0,0,45,72,0},{66985,0,1,2,219,6,2,0},{16769,0,90,6,3},{3221308845,1,1,1,2,139,6,2,2,0,0,0},{128,25},{128,85},{128,226},{7,0,575,60,0,0,0,400,0,0,0,0,0,0,0,0,\"Arial\",1,100},{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100},1,{4,0,{0},\"\",-1,-1,1,0,\"\"}}",
             &object_refs,
         )
         .unwrap();
@@ -20088,7 +20088,8 @@ fn spreadsheet_pack_extract_does_not_promote_field_back_color_style_ref_to_extra
 fn formats_moxel_web_colors_embedded_styles_and_details_use() {
     let style_refs = parse_moxel_style_refs(
         &[
-            "{3,1,{4,0,{0},1,2,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
+            "6",
+            "{3,1,{7}}",
             "{3,3,{-1}}",
             "{3,3,{-3}}",
             "{3,3,{-10}}",
@@ -20098,7 +20099,7 @@ fn formats_moxel_web_colors_embedded_styles_and_details_use() {
         &BTreeMap::new(),
     );
 
-    assert_eq!(style_refs[0].as_deref(), Some("moxel:f527:1:2"));
+    assert_eq!(style_refs[0], None);
     assert_eq!(style_refs[1].as_deref(), Some("style:FormBackColor"));
     assert_eq!(style_refs[2].as_deref(), Some("style:FormTextColor"));
     assert_eq!(style_refs[3].as_deref(), Some("style:FieldBackColor"));
@@ -20134,6 +20135,7 @@ fn formats_moxel_compact_style_ref_indices_cover_field_form_and_tooltip_colors()
 fn formats_moxel_web_color_table_covers_native_template_palette() {
     let style_refs = parse_moxel_style_refs(
         &[
+            "6",
             "{3,2,{27}}",
             "{3,2,{31}}",
             "{3,2,{55}}",
@@ -20155,7 +20157,7 @@ fn formats_moxel_web_color_table_covers_native_template_palette() {
 #[test]
 fn formats_moxel_web_color_slots_keep_tail_indices_aligned() {
     let style_refs = parse_moxel_style_refs(
-        &["{3,2,{55}}", "{3,2,{119}}", "{3,2,{121}}"],
+        &["3", "{3,2,{55}}", "{3,2,{119}}", "{3,2,{121}}"],
         &BTreeMap::new(),
     );
     let format = parse_moxel_format("{3072,0,1}", &style_refs, &[]).unwrap();
@@ -20168,17 +20170,13 @@ fn formats_moxel_web_color_slots_keep_tail_indices_aligned() {
 fn formats_moxel_embedded_form_back_color_kind3_uses_field_selection_back_color() {
     let style_refs = parse_moxel_style_refs(
         &[
+            "1",
             "{3,1,{4,0,{0},0,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0,1,{4,0,{0},1,3,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0,1,{4,0,{0},1,1,0,f527dc88-1d39-40b3-bcbb-d98b690ead68,0},0}",
         ],
         &BTreeMap::new(),
     );
 
-    assert_eq!(style_refs.len(), 5);
-    assert_eq!(style_refs[0].as_deref(), Some("moxel:f527:0:1"));
-    assert_eq!(style_refs[1], None);
-    assert_eq!(style_refs[2].as_deref(), Some("moxel:f527:1:3"));
-    assert_eq!(style_refs[3], None);
-    assert_eq!(style_refs[4].as_deref(), Some("moxel:f527:1:1"));
+    assert!(style_refs.is_empty());
 }
 
 #[test]
@@ -20238,7 +20236,7 @@ fn formats_moxel_leading_f527_palette_offsets_shorter_palette_refs() {
 #[test]
 fn formats_moxel_embedded_f527_colors_resolve_by_property() {
     let render = |style_ref: &str, flags: u64| {
-        let style_refs = parse_moxel_style_refs(&[style_ref], &BTreeMap::new());
+        let style_refs = parse_moxel_embedded_style_refs(style_ref, &BTreeMap::new());
         let format = parse_moxel_format(&format!("{{{flags},0}}"), &style_refs, &[]).unwrap();
         let spreadsheet = MoxelSpreadsheet {
             column_count: 0,
@@ -20365,7 +20363,7 @@ fn formats_moxel_plain_style_item_font_omits_false_flags() {
 
 #[test]
 fn formats_moxel_field_selection_back_color_style() {
-    let style_refs = parse_moxel_style_refs(&["{3,3,{-21}}"], &BTreeMap::new());
+    let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-21}}"], &BTreeMap::new());
     let format = parse_moxel_format("{2048,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
         column_count: 0,
@@ -20403,7 +20401,7 @@ fn formats_moxel_field_selection_back_color_style() {
 
 #[test]
 fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() {
-    let style_refs = parse_moxel_style_refs(&["{3,3,{-14}}"], &BTreeMap::new());
+    let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-14}}"], &BTreeMap::new());
     let format = parse_moxel_format("{2048,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
         column_count: 0,
@@ -20441,7 +20439,7 @@ fn formats_moxel_minus14_slot_uses_field_selection_back_color_in_spreadsheets() 
 
 #[test]
 fn formats_moxel_field_text_color_style() {
-    let style_refs = parse_moxel_style_refs(&["{3,3,{-13}}"], &BTreeMap::new());
+    let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-13}}"], &BTreeMap::new());
     let format = parse_moxel_format("{1024,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
         column_count: 0,
@@ -20479,7 +20477,7 @@ fn formats_moxel_field_text_color_style() {
 
 #[test]
 fn formats_moxel_button_text_color_style() {
-    let style_refs = parse_moxel_style_refs(&["{3,3,{-15}}"], &BTreeMap::new());
+    let style_refs = parse_moxel_style_refs(&["1", "{3,3,{-15}}"], &BTreeMap::new());
     let format = parse_moxel_format("{1024,0}", &style_refs, &[]).unwrap();
     let spreadsheet = MoxelSpreadsheet {
         column_count: 0,
@@ -20519,6 +20517,7 @@ fn formats_moxel_button_text_color_style() {
 fn formats_moxel_report_back_color_styles() {
     let style_refs = parse_moxel_style_refs(
         &[
+            "8",
             "{3,3,{-25}}",
             "{3,3,{-26}}",
             "{3,3,{-27}}",
@@ -20588,6 +20587,7 @@ fn formats_moxel_report_back_color_styles() {
 fn formats_moxel_wrapped_style_ref_slot_is_preserved() {
     let style_refs = parse_moxel_style_refs(
         &[
+            "4",
             "{3,3,{-1}}",
             "{3,3,{-3}}",
             "{3,0,{12971252}}",
@@ -20597,10 +20597,196 @@ fn formats_moxel_wrapped_style_ref_slot_is_preserved() {
         &BTreeMap::new(),
     );
 
-    assert_eq!(style_refs.len(), 5);
+    assert_eq!(style_refs.len(), 4);
     assert_eq!(
-        style_refs[4].as_deref(),
+        style_refs[2].as_deref(),
         Some("style:ReportHeaderBackColor")
+    );
+}
+
+#[test]
+fn moxel_style_refs_require_one_canonical_count_prefixed_span() {
+    let refs = parse_moxel_style_refs(
+        &[
+            "5",
+            "{3,3,{-1}}",
+            "{3,1,{7}}",
+            "{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}}",
+            "{3,4,{0}}",
+            "{3,0,{12971252}}",
+            "{1,2,{3,3,{-25}}}",
+        ],
+        &BTreeMap::from([(
+            "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
+            "StyleItem.Custom".to_string(),
+        )]),
+    );
+    assert_eq!(refs[0].as_deref(), Some("style:FormBackColor"));
+    assert_eq!(refs[1], None, "mode 1 is a positional empty slot");
+    assert_eq!(refs[2].as_deref(), Some("style:ReportHeaderBackColor"));
+    assert_eq!(refs[3].as_deref(), Some("auto"));
+    assert_eq!(refs[4].as_deref(), Some("style:ReportHeaderBackColor"));
+
+    let custom = parse_moxel_style_refs(
+        &[
+            "1",
+            "{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}}",
+        ],
+        &BTreeMap::from([(
+            "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
+            "StyleItem.Custom".to_string(),
+        )]),
+    );
+    assert_eq!(custom[0].as_deref(), Some("style:Custom"));
+
+    for fields in [
+        vec!["2", "{3,3,{-1}}"], // overrun
+        vec!["1", "{3,3,{-1}}", "{3,3,{-3}}"], // underconsume
+        vec!["1", "{3,4,{1}}"], // mode 4 accepts only {0}
+        vec!["1", "{3,3,{-1,-3}}"], // wrong arity
+        vec!["{3,3,{-1}}"], // legacy uncounted descriptor
+        vec!["1", "{3,3,{-1}}", "1", "{3,3,{-3}}"], // ambiguity
+        vec!["01", "{3,3,{-1}}"],
+        vec!["+1", "{3,3,{-1}}"],
+        vec![" 1", "{3,3,{-1}}"],
+        vec!["1 ", "{3,3,{-1}}"],
+        vec!["1", "{3,3,{-1}}", "{1,2048,{3,3,{-3}}}"],
+    ] {
+        assert!(parse_moxel_style_refs(&fields, &BTreeMap::new()).is_empty());
+    }
+}
+
+#[test]
+fn moxel_style_ref_palette_rejects_zero_and_overflow_counts() {
+    for fields in [
+        vec!["0", "{3,3,{-1}}"],
+        vec!["184467440737095516160", "{3,3,{-1}}"],
+    ] {
+        assert!(parse_moxel_style_refs(&fields, &BTreeMap::new()).is_empty());
+    }
+}
+
+#[test]
+fn moxel_style_ref_palette_has_exact_counted_layout_before_nested_formats() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<rowsItem><index>0</index><row><c><c><tl><v8:item><v8:lang>ru</v8:lang><v8:content>x</v8:content></v8:item></tl></c></c></row></rowsItem>
+	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style></line>
+	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style></line>
+	<format><width>37</width><backColor>style:FieldBackColor</backColor></format>
+	<format><width>38</width></format>
+</document>"#;
+    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
+    let inflated = String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate"))
+        .expect("UTF-8");
+    let body_start = inflated.find("{8,").expect("MOXCEL root");
+    let fields = split_1c_braced_fields(&inflated[body_start..], 0).expect("root fields");
+    let candidates = fields
+        .iter()
+        .enumerate()
+        .filter_map(|(start, field)| {
+            let count = field.parse::<usize>().ok()?;
+            if count == 0 {
+                return None;
+            }
+            let entries = fields.get(start + 1..start + 1 + count)?;
+            entries
+                .iter()
+                .all(|entry| parse_moxel_style_ref_slot(entry, &BTreeMap::new()).is_some())
+                .then_some((start, count))
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(candidates.len(), 1);
+    let (palette_start, palette_count) = candidates[0];
+    assert_eq!(palette_count, 2 + 1, "two lines plus one style reference");
+    let palette = &fields[palette_start + 1..=palette_start + palette_count];
+    assert_eq!(palette[0].trim(), "{3,3,{-1}}", "first line descriptor");
+    assert_eq!(palette[1].trim(), "{3,3,{-3}}", "second line descriptor");
+    assert_eq!(
+        parse_moxel_style_ref_slot(palette[2], &BTreeMap::new()),
+        Some(Some("style:FieldBackColor".to_owned())),
+        "third palette entry is the FieldBackColor style reference"
+    );
+    let table = split_1c_braced_fields(fields[palette_start + palette_count + 1], 0)
+        .expect("nested format table follows palette");
+    assert_eq!(table.first().and_then(|count| count.parse::<usize>().ok()), Some(2));
+    assert_eq!(table.len(), 3);
+}
+
+#[test]
+fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_formats() {
+    let fields = [
+        "1",
+        "{3,3,{-1}}",
+        "{2,{0},{0}}",
+        "{3,3,{-3}}",
+    ];
+
+    let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
+    assert_eq!(style_refs.len(), 1);
+    assert_eq!(style_refs[0].as_deref(), Some("style:FormBackColor"));
+    let formats = parse_moxel_format_table(&fields, 0, &style_refs, &BTreeSet::new(), &[])
+        .expect("nested format table");
+    assert_eq!(formats.len(), 2);
+    assert!(formats.iter().all(|format| *format == MoxelFormat::default()));
+}
+
+#[test]
+fn moxel_format_table_skips_confirmed_palette_when_invalid_override_clears_refs() {
+    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<rowsItem><index>0</index><row><c><c><tl><v8:item><v8:lang>ru</v8:lang><v8:content>x</v8:content></v8:item></tl></c></c></row></rowsItem>
+	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style></line>
+	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style></line>
+	<format><width>37</width><backColor>style:FieldBackColor</backColor></format>
+	<format><width>38</width></format>
+</document>"#;
+    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
+    let inflated = String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate"))
+        .expect("UTF-8");
+    let body_start = inflated.find("{8,").expect("MOXCEL root");
+    let mut fields = split_1c_braced_fields(&inflated[body_start..], 0)
+        .expect("root fields")
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let (palette_start, palette_count) = fields
+        .iter()
+        .enumerate()
+        .find_map(|(start, field)| {
+            let count = field.parse::<usize>().ok()?;
+            if count == 0 {
+                return None;
+            }
+            let entries = fields.get(start + 1..start + 1 + count)?;
+            entries
+                .iter()
+                .all(|entry| parse_moxel_style_ref_slot(entry, &BTreeMap::new()).is_some())
+                .then_some((start, count))
+        })
+        .expect("canonical palette");
+    fields.insert(
+        palette_start + palette_count + 1,
+        "{1,2048,{3,3,{-10}}}".to_string(),
+    );
+    let body = format!("{{{}}}", fields.join(","));
+    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new())
+        .expect("full MOXCEL body with fail-closed palette");
+
+    let widths = spreadsheet
+        .column_formats
+        .iter()
+        .chain(&spreadsheet.formats)
+        .map(|format| format.width)
+        .collect::<Vec<_>>();
+    assert!(
+        widths.contains(&Some(37))
+            || spreadsheet.default_format.width == Some(37)
+            || spreadsheet.default_format_width == Some(37),
+        "format widths: {widths:?}, default={:?}, default width={:?}",
+        spreadsheet.default_format.width,
+        spreadsheet.default_format_width,
     );
 }
 

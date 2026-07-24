@@ -1861,10 +1861,24 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings)?);
     }
     fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
-    fields.extend(format_spreadsheet_lines_for_moxel(&spreadsheet.lines));
-    let (format_fields, number_format_refs) =
+    let line_fields = format_spreadsheet_lines_for_moxel(&spreadsheet.lines);
+    let (mut format_fields, number_format_refs) =
         format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots, number_format_hint);
-    fields.extend(format_fields);
+    // Lines and style references form one canonical, count-prefixed palette.
+    // The format table follows it as a separate root field.
+    let format_table = format_fields.pop();
+    let palette_count = line_fields
+        .len()
+        .checked_add(format_fields.len())
+        .ok_or_else(|| anyhow!("MOXCEL palette count overflow"))?;
+    if palette_count > 0 {
+        fields.push(palette_count.to_string());
+        fields.extend(line_fields);
+        fields.extend(format_fields);
+    }
+    if let Some(format_table) = format_table {
+        fields.push(format_table);
+    }
     fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
     fields.extend(format_spreadsheet_number_formats_for_moxel(
         &number_format_refs,

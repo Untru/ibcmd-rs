@@ -4045,7 +4045,21 @@ pub(super) fn parse_moxel_format_table(
     drawing_format_indices: &BTreeSet<usize>,
     number_format_refs: &[Vec<MoxelLocalizedValue>],
 ) -> Option<Vec<MoxelFormat>> {
-    for index in 0..fields.len() {
+    // The palette's count and typed descriptors can satisfy the loose legacy
+    // format grammar. A confirmed palette is a structural boundary and is
+    // excluded while legacy tables before it remain supported.
+    let palette_span = locate_moxel_style_ref_palette(fields, &BTreeMap::new())
+        .map(|(start, end, _)| start..end);
+    let palette_after = palette_span.as_ref().map(|span| span.end);
+    // New packed bodies place the actual table immediately after the palette;
+    // try that structurally confirmed position before legacy global fallback.
+    for index in palette_after.into_iter().chain(0..fields.len()) {
+        if index >= fields.len() {
+            continue;
+        }
+        if palette_span.as_ref().is_some_and(|span| span.contains(&index)) {
+            continue;
+        }
         if let Some(formats) = parse_moxel_nested_format_table(
             fields[index],
             column_count,
@@ -4998,58 +5012,26 @@ pub(super) fn parse_moxel_style_refs(
     fields: &[&str],
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<Option<String>> {
-    let mut style_refs: Vec<Option<String>> = Vec::new();
-    let mut index = 0usize;
-    let normalize = |value: &str| {
-        value
-            .chars()
-            .filter(|ch| !ch.is_whitespace())
-            .collect::<String>()
+    let Some((_, palette_end, mut style_refs)) =
+        locate_moxel_style_ref_palette(fields, object_refs)
+    else {
+        return Vec::new();
     };
-    while index < fields.len() {
-        let has_style_prefix = style_refs.len() >= 2
-            && style_refs[style_refs.len() - 2].as_deref() == Some("style:FormBackColor")
-            && style_refs[style_refs.len() - 1].as_deref() == Some("style:FormTextColor");
-        if has_style_prefix
-            && let Some(end) = index.checked_add(3)
-            && let Some(slots) = fields.get(index..end)
-            && is_moxel_direct_report_palette(slots)
-            && let Some(white_ref) = parse_moxel_style_ref_slot(slots[2], object_refs)
-        {
-            style_refs.push(Some("#CCC085".to_string()));
-            style_refs.push(Some("#F4ECC5".to_string()));
-            style_refs.push(white_ref);
-            index = end;
-            continue;
-        }
-        if normalize(fields[index]) == "{1,3,{3,3,{-28}}}" {
-            index += 1;
-            continue;
-        }
-        let field = fields[index];
-        if let Some(style_ref) = parse_moxel_style_ref_slot(field, object_refs) {
-            style_refs.push(style_ref);
-            index += 1;
-            continue;
-        }
+
+    // Overrides are deliberately limited to explicit root containers and are
+    // applied only after the bounded base table was located.
+    for field in fields.iter().skip(palette_end) {
         if let Some(overrides) = parse_moxel_indexed_style_ref_overrides(field, object_refs) {
             for (slot_index, style_ref) in overrides {
+                if slot_index >= MAX_MOXCEL_STYLE_REFS {
+                    return Vec::new();
+                }
                 if style_refs.len() <= slot_index {
                     style_refs.resize(slot_index + 1, None);
                 }
                 style_refs[slot_index] = style_ref;
             }
-            index += 1;
-            continue;
         }
-        let wrapped_style_refs = parse_moxel_wrapped_style_refs(field, object_refs);
-        if !wrapped_style_refs.is_empty() {
-            style_refs.extend(wrapped_style_refs);
-            index += 1;
-            continue;
-        }
-        style_refs.extend(parse_moxel_embedded_style_refs(field, object_refs));
-        index += 1;
     }
     if style_refs.len() >= 5
         && style_refs.first().is_some_and(Option::is_none)
@@ -5062,25 +5044,61 @@ pub(super) fn parse_moxel_style_refs(
     style_refs
 }
 
-fn is_moxel_direct_report_palette(slots: &[&str]) -> bool {
-    slots.len() == 3
-        && parse_moxel_raw_color_slot(slots[0]) == Some((0, 8765644))
-        && parse_moxel_raw_color_slot(slots[1]) == Some((0, 12971252))
-        && parse_moxel_raw_color_slot(slots[2]) == Some((2, 143))
+const MAX_MOXCEL_STYLE_REFS: usize = 2048;
+
+fn parse_moxel_canonical_positive_count(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.is_empty() || bytes.first() == Some(&b'0') || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    text.parse::<usize>().ok()
 }
 
-fn parse_moxel_raw_color_slot(text: &str) -> Option<(u32, u32)> {
-    let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 3 || fields.first()?.trim() != "3" {
+/// Returns the strict root palette's half-open span and its slots.
+fn locate_moxel_style_ref_palette(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(usize, usize, Vec<Option<String>>)> {
+    // A MOXCEL palette is a single, count-prefixed run in the root.  Do not
+    // scan arbitrary nested/positional descriptors: those are common in row,
+    // drawing and format data and used to corrupt the palette silently.
+    let mut candidates = Vec::new();
+    for (start, count_field) in fields.iter().enumerate() {
+        let Some(count) = parse_moxel_canonical_positive_count(count_field) else {
+            continue;
+        };
+        if count > MAX_MOXCEL_STYLE_REFS {
+            continue;
+        }
+        let Some(end) = start.checked_add(1).and_then(|value| value.checked_add(count)) else {
+            continue;
+        };
+        let Some(entries) = fields.get(start + 1..end) else {
+            continue;
+        };
+        let Some(refs) = entries
+            .iter()
+            .map(|entry| parse_moxel_style_ref_slot(entry, object_refs))
+            .collect::<Option<Vec<_>>>()
+        else {
+            continue;
+        };
+        // A count which stops in the middle of a typed run is not canonical.
+        if fields
+            .get(end)
+            .and_then(|entry| parse_moxel_style_ref_slot(entry, object_refs))
+            .is_some()
+        {
+            continue;
+        }
+        candidates.push((start, end, refs));
+    }
+    // Multiple plausible spans are ambiguous by definition.  Preserve no
+    // palette instead of guessing which unrelated root section won.
+    if candidates.len() != 1 {
         return None;
     }
-    let mode = fields.get(1)?.trim().parse::<u32>().ok()?;
-    let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
-    if payload.len() != 1 {
-        return None;
-    }
-    let value = payload.first()?.trim().parse::<u32>().ok()?;
-    Some((mode, value))
+    candidates.pop()
 }
 
 pub(super) fn parse_moxel_indexed_style_ref_overrides(
@@ -5088,7 +5106,16 @@ pub(super) fn parse_moxel_indexed_style_ref_overrides(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<(usize, Option<String>)>> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() < 5 || fields.first()?.trim() != "3" || fields.get(1)?.trim() != "2" {
+    if fields.first()?.trim() == "1" && fields.len() == 3 {
+        let slot_index = fields.get(1)?.trim().parse::<usize>().ok()?;
+        return parse_moxel_style_ref_slot(fields.get(2)?, object_refs)
+            .map(|style_ref| vec![(slot_index, style_ref)]);
+    }
+    if fields.len() < 5
+        || fields.first()?.trim() != "3"
+        || fields.get(1)?.trim() != "2"
+        || (fields.len() - 3) % 2 != 0
+    {
         return None;
     }
     let mut overrides = Vec::new();
@@ -5100,31 +5127,6 @@ pub(super) fn parse_moxel_indexed_style_ref_overrides(
         cursor += 2;
     }
     (!overrides.is_empty()).then_some(overrides)
-}
-
-pub(super) fn parse_moxel_wrapped_style_refs(
-    text: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Vec<Option<String>> {
-    let Some(fields) = split_1c_braced_fields(text, 0) else {
-        return Vec::new();
-    };
-    if fields.len() < 3 || fields.first().map(|field| field.trim()) != Some("1") {
-        return Vec::new();
-    }
-    let mut refs = Vec::new();
-    for field in fields.iter().skip(2) {
-        if let Some(style_ref) = parse_moxel_style_ref_slot(field, object_refs) {
-            refs.push(style_ref);
-            continue;
-        }
-        let nested = parse_moxel_embedded_style_refs(field, object_refs);
-        if nested.is_empty() {
-            return Vec::new();
-        }
-        refs.extend(nested);
-    }
-    refs
 }
 
 pub(super) fn parse_moxel_empty_headers_footers(fields: &[&str]) -> bool {
@@ -5185,7 +5187,19 @@ pub(super) fn parse_moxel_style_ref_slot(
     }
     let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
     match fields.get(1)?.trim() {
-        "3" => match payload.first()?.trim() {
+        "0" if payload.len() == 1 => payload
+            .first()
+            .filter(|value| value.trim().parse::<u32>().is_ok())
+            .and_then(|value| parse_moxel_style_color(value.trim()))
+            .map(Some),
+        "1" => (payload.len() == 1 && payload.first()?.trim().parse::<u32>().is_ok())
+            .then_some(None),
+        "2" if payload.len() == 1 => payload
+            .first()
+            .filter(|value| value.trim().parse::<u32>().is_ok())
+            .and_then(|value| parse_moxel_web_color(value.trim()))
+            .map(Some),
+        "3" if payload.len() == 1 => match payload.first()?.trim() {
             "-1" => Some(Some("style:FormBackColor".to_string())),
             "-3" => Some(Some("style:FormTextColor".to_string())),
             "-10" => Some(Some("style:FieldBackColor".to_string())),
@@ -5212,28 +5226,20 @@ pub(super) fn parse_moxel_style_ref_slot(
             "-42" => Some(Some("style:NavigationColor".to_string())),
             "-43" => Some(Some("style:AuxiliaryNavigationColor".to_string())),
             "-44" => Some(Some("style:ActivityColor".to_string())),
-            "0" => {
-                let uuid = parse_uuid_field(payload.get(1)?.trim())?;
-                Some(moxel_style_ref_for_uuid(&uuid, object_refs))
-            }
             _ => None,
         },
-        "4" => match payload.first()?.trim() {
-            "0" => Some(Some("auto".to_string())),
-            _ => None,
-        },
-        "2" => payload
-            .first()
-            .and_then(|value| parse_moxel_web_color(value.trim()))
-            .map(Some),
-        "0" => payload
-            .first()
-            .and_then(|value| parse_moxel_style_color(value.trim()))
-            .map(Some),
+        "3" if payload.len() == 2 && payload.first()?.trim() == "0" => {
+            let uuid = parse_uuid_field(payload.get(1)?.trim())?;
+            Some(moxel_style_ref_for_uuid(&uuid, object_refs))
+        }
+        "4" if payload.len() == 1 && payload.first()?.trim() == "0" => {
+            Some(Some("auto".to_string()))
+        }
         _ => None,
     }
 }
 
+#[cfg(test)]
 pub(super) fn parse_moxel_embedded_style_refs(
     text: &str,
     object_refs: &BTreeMap<String, String>,
@@ -5272,6 +5278,7 @@ pub(super) fn parse_moxel_embedded_style_refs(
     refs
 }
 
+#[cfg(test)]
 pub(super) fn moxel_uses_sparse_f527_embedded_slots(
     fields: &[&str],
     refs: &[Option<String>],
@@ -5295,6 +5302,7 @@ pub(super) fn moxel_uses_sparse_f527_embedded_slots(
     )
 }
 
+#[cfg(test)]
 pub(super) fn parse_moxel_embedded_style_ref(
     text: &str,
     container_kind: Option<&str>,
@@ -5327,6 +5335,7 @@ pub(super) fn moxel_style_ref_for_uuid(
     }
 }
 
+#[cfg(test)]
 pub(super) fn moxel_embedded_style_ref_for_uuid(
     uuid: &str,
     container_kind: Option<&str>,
