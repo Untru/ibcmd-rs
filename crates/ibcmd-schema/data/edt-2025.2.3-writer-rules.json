@@ -22,7 +22,8 @@
       ],
       "conditions": [
         "feature must be many-valued and owned by the expected EClass",
-        "empty collection writes an empty wrapper only when writeDefault is true",
+        "ExtInfoWriter passes writeDefault=false for EReference features",
+        "empty collection is omitted for this call site",
         "write picture only for project version 8.5.1 or newer"
       ],
       "delegate": "com._1c.g5.v8.dt.form.export.xml.writer.FormSmartFeatureWriter",
@@ -64,6 +65,60 @@
         "kind": "javap-bytecode",
         "status": "verified",
         "note": "The EDT writer delegates the semantic settings model instead of hand-normalizing XML."
+      }
+    },
+    {
+      "id": "form.input-field-ext-info.choice-parameters",
+      "sourceClass": "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter",
+      "modelType": "InputFieldExtInfo",
+      "feature": "choiceParameters",
+      "operations": [
+        "write logform ChoiceParameters owner wrapper",
+        "for each ChoiceParameter write app:item with unqualified name attribute",
+        "write app:value with FormChoiceListDesTimeValue",
+        "write Presentation before Value",
+        "write FixedArray members as ordered v8:Value design-time values"
+      ],
+      "conditions": [
+        "owner feature order is ChoiceParameterLinks then ChoiceParameters then AvailableTypes",
+        "empty collection writes an empty wrapper only when writeDefault is true",
+        "feature cardinality is 0..many"
+      ],
+      "delegate": "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter",
+      "policy": {
+        "kind": "form-choice-parameters",
+        "ownerQName": "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameters",
+        "ownerPredecessorQName": "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameterLinks",
+        "ownerSuccessorQName": "{http://v8.1c.ru/8.3/xcf/logform}AvailableTypes",
+        "emptyCollection": "omit-when-write-default-false",
+        "item": {
+          "itemQName": "{http://v8.1c.ru/8.2/managed-application/core}item",
+          "nameAttributeQName": "{}name",
+          "valueQName": "{http://v8.1c.ru/8.2/managed-application/core}value",
+          "valueXsiType": "FormChoiceListDesTimeValue",
+          "valueOrder": [
+            "presentation",
+            "value"
+          ],
+          "presentationQName": "{http://v8.1c.ru/8.3/xcf/logform}Presentation",
+          "scalarValueQName": "{http://v8.1c.ru/8.3/xcf/logform}Value",
+          "booleanXsiType": "xs:boolean",
+          "designTimeRefXsiType": "xr:DesignTimeRef"
+        },
+        "fixedArray": {
+          "xsiType": "v8:FixedArray",
+          "itemQName": "{http://v8.1c.ru/8.1/data/core}Value",
+          "itemXsiType": "FormChoiceListDesTimeValue",
+          "itemOrder": [
+            "presentation",
+            "value"
+          ]
+        }
+      },
+      "evidence": {
+        "kind": "javap-v-exact-method-control-flow-constant-pool-and-live-native-export",
+        "status": "verified",
+        "note": "Exact EDT bytecode proves model cardinality, owner adjacency, delegation, and writeDefault=false for this EReference; the byte-bound raw slot-27/native Form.xml pair proves QNames, namespaces, hierarchy, order, and U/FixedArray/B values."
       }
     },
     {

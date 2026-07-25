@@ -45,9 +45,11 @@ use crate::form_schema::{
 };
 use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue, FormChoiceListItemPart,
-    SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+    FormChoiceParameterValuePart, FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy,
+    WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
 };
 use ibcmd_xml::{DcsListSettingsTailError, emit_form_list_settings_tail};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -168,8 +170,35 @@ pub(super) fn extract_form_body_xml_from_body(
 pub(super) fn extract_form_body_xml_from_body_timed(
     body: &ParsedFormBodyBlob,
     context: &FormParseContext<'_>,
-    mut timings: Option<&mut MssqlDumpTimingReport>,
+    timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<String> {
+    extract_form_body_xml_from_body_detailed_timed(body, context, timings)
+        .map(|extraction| extraction.xml)
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormSourceAssetDiagnostic {
+    pub(super) code: &'static str,
+    pub(super) classification: &'static str,
+    pub(super) property: &'static str,
+    pub(super) property_profile: &'static str,
+    pub(super) property_slot: usize,
+    pub(super) form_item_id: String,
+    pub(super) form_item_tag: &'static str,
+    pub(super) raw_length: usize,
+    pub(super) raw_sha256: String,
+}
+
+pub(super) struct DetailedFormBodyExtraction {
+    pub(super) xml: String,
+    pub(super) diagnostics: Vec<FormSourceAssetDiagnostic>,
+}
+
+pub(super) fn extract_form_body_xml_from_body_detailed_timed(
+    body: &ParsedFormBodyBlob,
+    context: &FormParseContext<'_>,
+    mut timings: Option<&mut MssqlDumpTimingReport>,
+) -> Option<DetailedFormBodyExtraction> {
     let started = Instant::now();
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
     if let Some(timings) = timings.as_deref_mut() {
@@ -309,6 +338,29 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     )
     .ok()?;
 
+    let mut diagnostics = Vec::new();
+    collect_opaque_choice_parameters_diagnostics(&child_items, &mut diagnostics);
+    if let Some(auto_command_bar) = auto_command_bar.as_ref() {
+        collect_opaque_choice_parameters_diagnostics(
+            &auto_command_bar.child_items,
+            &mut diagnostics,
+        );
+    }
+    diagnostics.sort_by(|left, right| {
+        (
+            left.form_item_id.as_str(),
+            left.form_item_tag,
+            left.property_slot,
+            left.raw_sha256.as_str(),
+        )
+            .cmp(&(
+                right.form_item_id.as_str(),
+                right.form_item_tag,
+                right.property_slot,
+                right.raw_sha256.as_str(),
+            ))
+    });
+
     let started = Instant::now();
     let xml = format_form_body_xml(
         &properties,
@@ -326,7 +378,31 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         timings.source_asset_form_format_cpu_ms += elapsed_ms(started);
     }
 
-    Some(xml)
+    Some(DetailedFormBodyExtraction { xml, diagnostics })
+}
+
+pub(super) fn collect_opaque_choice_parameters_diagnostics(
+    items: &[FormChildItem],
+    diagnostics: &mut Vec<FormSourceAssetDiagnostic>,
+) {
+    for item in items {
+        if let CanonicalFormChoiceParameters::OpaqueSameProfile { raw, slot } =
+            &item.choice_parameters
+        {
+            diagnostics.push(FormSourceAssetDiagnostic {
+                code: "source_asset.form.choice_parameters.opaque_omitted",
+                classification: "opaque_property_omitted",
+                property: "ChoiceParameters",
+                property_profile: "input_field_extended_options",
+                property_slot: *slot,
+                form_item_id: item.id.clone(),
+                form_item_tag: item.tag,
+                raw_length: raw.len(),
+                raw_sha256: format!("{:x}", Sha256::digest(raw.as_bytes())),
+            });
+        }
+        collect_opaque_choice_parameters_diagnostics(&item.child_items, diagnostics);
+    }
 }
 
 /// Table-specific evidence captured alongside the production layout selection.
@@ -855,6 +931,7 @@ pub(super) struct FormChildItem {
     pub(super) input_hint: Vec<(String, String)>,
     pub(super) choice_list: CanonicalFormChoiceList,
     pub(super) choice_parameter_links: Vec<FormChoiceParameterLink>,
+    pub(super) choice_parameters: CanonicalFormChoiceParameters,
     pub(super) type_link: Option<FormTypeLink>,
     pub(super) extended_tooltip: Option<FormExtendedTooltip>,
     pub(super) events: Vec<FormBodyEvent>,
@@ -924,6 +1001,68 @@ impl CanonicalFormChoiceList {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormChoiceParameter {
+    pub(super) name: String,
+    pub(super) presentation: Vec<(String, String)>,
+    pub(super) value: FormChoiceParameterValue,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormChoiceParameterValue {
+    Boolean(bool),
+    DesignTimeRef(String),
+    FixedArray(Vec<FormChoiceParameterArrayItem>),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormChoiceParameterArrayItem {
+    pub(super) presentation: Vec<(String, String)>,
+    pub(super) value_ref: String,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub(super) enum CanonicalFormChoiceParameters {
+    #[default]
+    Absent,
+    Empty {
+        slot: usize,
+    },
+    Typed {
+        items: Vec<FormChoiceParameter>,
+        slot: usize,
+    },
+    OpaqueSameProfile {
+        raw: String,
+        slot: usize,
+    },
+}
+
+impl CanonicalFormChoiceParameters {
+    pub(super) fn should_emit(&self) -> bool {
+        matches!(self, Self::Typed { items, .. } if !items.is_empty())
+    }
+
+    /// MSSQL source-parity extraction keeps undecoded same-profile payloads non-emitting.
+    /// Direct validation and formatting remain fail-closed through `items()`.
+    pub(super) fn is_non_emitting(&self) -> bool {
+        match self {
+            Self::Absent | Self::Empty { .. } | Self::OpaqueSameProfile { .. } => true,
+            Self::Typed { items, .. } => items.is_empty(),
+        }
+    }
+
+    pub(super) fn items(&self) -> Result<&[FormChoiceParameter], FormSchemaWriteError> {
+        match self {
+            Self::Typed { items, .. } => Ok(items),
+            Self::Absent | Self::Empty { .. } => Ok(&[]),
+            Self::OpaqueSameProfile { slot, .. } => {
+                Err(FormSchemaWriteError::OpaqueChoiceParameters { slot: *slot })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub(super) enum FormSchemaWriteError {
     Corpus(SchemaError),
     WriterRule(WriterRuleLookupError),
@@ -934,6 +1073,9 @@ pub(super) enum FormSchemaWriteError {
     },
     OpaqueChoiceList {
         layout: FormChoiceListRawLayout,
+        slot: usize,
+    },
+    OpaqueChoiceParameters {
         slot: usize,
     },
     #[allow(dead_code)]
@@ -977,6 +1119,22 @@ fn verified_form_choice_list_policy() -> Result<WriterPolicy, FormSchemaWriteErr
     }
 }
 
+fn verified_form_choice_parameters_policy() -> Result<WriterPolicy, FormSchemaWriteError> {
+    let corpus = bundled_writer_rules()?;
+    let rule = corpus.exact_rule(WriterRuleKey {
+        source_release: "2025.2.3+30",
+        model_type: "InputFieldExtInfo",
+        feature: "choiceParameters",
+    })?;
+    match &rule.policy {
+        Some(policy @ WriterPolicy::FormChoiceParameters { .. }) => Ok(policy.clone()),
+        _ => Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: rule.id.clone(),
+            expected: "form-choice-parameters",
+        }),
+    }
+}
+
 /// Resolves the verified delegate without pretending that #283's canonical DCS serializer
 /// already exists.  Calling this as a Form-layer serializer therefore fails closed.
 #[allow(dead_code)]
@@ -1007,6 +1165,15 @@ fn validate_form_choice_list_writer_rules(
 ) -> Result<(), FormSchemaWriteError> {
     fn visit(item: &FormChildItem) -> Result<(), FormSchemaWriteError> {
         validate_canonical_form_choice_list(&item.choice_list)?;
+        match &item.choice_parameters {
+            CanonicalFormChoiceParameters::Empty { .. }
+            | CanonicalFormChoiceParameters::Typed { .. } => {
+                verified_form_choice_parameters_policy().map(|_| ())?
+            }
+            // Opaque values remain intentionally non-emitting and diagnostic-only.
+            CanonicalFormChoiceParameters::Absent
+            | CanonicalFormChoiceParameters::OpaqueSameProfile { .. } => {}
+        }
         for child in &item.child_items {
             visit(child)?;
         }
@@ -1043,6 +1210,22 @@ pub(super) fn validate_canonical_form_choice_list(
         }
         CanonicalFormChoiceList::Empty { .. } | CanonicalFormChoiceList::Typed { .. } => {
             verified_form_choice_list_policy().map(|_| ())
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(super) fn validate_canonical_form_choice_parameters(
+    value: &CanonicalFormChoiceParameters,
+) -> Result<(), FormSchemaWriteError> {
+    match value {
+        CanonicalFormChoiceParameters::Absent => Ok(()),
+        CanonicalFormChoiceParameters::OpaqueSameProfile { slot, .. } => {
+            Err(FormSchemaWriteError::OpaqueChoiceParameters { slot: *slot })
+        }
+        CanonicalFormChoiceParameters::Empty { .. }
+        | CanonicalFormChoiceParameters::Typed { .. } => {
+            verified_form_choice_parameters_policy().map(|_| ())
         }
     }
 }
@@ -7739,6 +7922,22 @@ fn parse_form_child_item_with_metadata_owners(
             audited_input_field_options,
             attribute_names_by_id,
         ),
+        choice_parameters: if tag == "InputField" {
+            field_schema_and_options
+                .as_ref()
+                .map(|(schema, options)| {
+                    canonical_form_input_field_choice_parameters(
+                        *schema,
+                        options,
+                        type_index,
+                        type_index_collisions,
+                        object_refs,
+                    )
+                })
+                .unwrap_or_default()
+        } else {
+            CanonicalFormChoiceParameters::Absent
+        },
         type_link: parse_form_input_field_type_link(
             audited_input_field_options,
             attribute_names_by_id,
@@ -8799,6 +8998,263 @@ pub(super) fn parse_form_input_field_choice_parameter_links(
     }]
 }
 
+pub(super) fn canonical_form_input_field_choice_parameters(
+    schema: FormFieldSchema,
+    options: &[&str],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceParameters {
+    let slot = InputFieldSlot::ChoiceParameters.index();
+    let Some(raw) = schema.input_field_option(options, InputFieldSlot::ChoiceParameters) else {
+        return CanonicalFormChoiceParameters::Absent;
+    };
+    match parse_form_input_field_choice_parameters(
+        raw,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
+        Some(items) if items.is_empty() => CanonicalFormChoiceParameters::Empty { slot },
+        Some(items) => CanonicalFormChoiceParameters::Typed { items, slot },
+        None => CanonicalFormChoiceParameters::OpaqueSameProfile {
+            raw: raw.to_owned(),
+            slot,
+        },
+    }
+}
+
+pub(super) fn parse_form_input_field_choice_parameters(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<FormChoiceParameter>> {
+    let field = field.trim();
+    if scan_1c_braced_value(field, 0) != Some(field.len()) {
+        return None;
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if fields.len() != count.checked_mul(2)?.checked_add(2)? {
+        return None;
+    }
+    fields[2..]
+        .chunks_exact(2)
+        .map(|pair| {
+            let (presentation, value) = parse_form_choice_parameter_value(
+                pair[1],
+                type_index,
+                type_index_collisions,
+                object_refs,
+            )?;
+            Some(FormChoiceParameter {
+                name: parse_exact_1c_quoted_string(pair[0].trim())?,
+                presentation,
+                value,
+            })
+        })
+        .collect()
+}
+
+fn parse_form_choice_parameter_value(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<(Vec<(String, String)>, FormChoiceParameterValue)> {
+    let field = field.trim();
+    if scan_1c_braced_value(field, 0) != Some(field.len()) {
+        return None;
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.len() != 3
+        || parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() != Some("#")
+        || fields.get(1)?.trim() != FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
+    {
+        return None;
+    }
+
+    let payload = fields.get(2)?.trim();
+    if scan_1c_braced_value(payload, 0) != Some(payload.len()) {
+        return None;
+    }
+    let payload = split_1c_braced_fields(payload, 0)?;
+    if payload.len() != 6
+        || payload.first()?.trim() != "0"
+        || !matches!(payload.get(1)?.trim(), "0" | "1")
+    {
+        return None;
+    }
+    let presentation = parse_form_input_field_choice_list_presentation(payload.get(5)?)?;
+    let typed = payload.get(2)?.trim();
+    if scan_1c_braced_value(typed, 0) != Some(typed.len()) {
+        return None;
+    }
+    let typed = split_1c_braced_fields(typed, 0)?;
+    let value = match typed.as_slice() {
+        [kind, value]
+            if kind.trim() == r#""B""#
+                && payload.get(1)?.trim() == "1"
+                && form_choice_parameter_payload_ids_are_nil(&payload) =>
+        {
+            match value.trim() {
+                "0" => FormChoiceParameterValue::Boolean(false),
+                "1" => FormChoiceParameterValue::Boolean(true),
+                _ => return None,
+            }
+        }
+        [kind]
+            if kind.trim() == r#""U""#
+                && payload.get(1)?.trim() == "0"
+                && !form_choice_parameter_payload_ids_are_nil(&payload) =>
+        {
+            FormChoiceParameterValue::DesignTimeRef(parse_form_enum_design_time_reference(
+                payload.get(3)?,
+                payload.get(4)?,
+                type_index,
+                type_index_collisions,
+                object_refs,
+            )?)
+        }
+        [kind, fixed_array_type, values]
+            if parse_exact_1c_quoted_string(kind.trim()).as_deref() == Some("#")
+                && fixed_array_type
+                    .trim()
+                    .eq_ignore_ascii_case(FIXED_ARRAY_TYPE_UUID)
+                && payload.get(1)?.trim() == "1"
+                && form_choice_parameter_payload_ids_are_nil(&payload) =>
+        {
+            FormChoiceParameterValue::FixedArray(parse_form_choice_parameter_fixed_array(
+                values,
+                type_index,
+                type_index_collisions,
+                object_refs,
+            )?)
+        }
+        _ => return None,
+    };
+    Some((presentation, value))
+}
+
+fn form_choice_parameter_payload_ids_are_nil(payload: &[&str]) -> bool {
+    payload
+        .get(3)
+        .and_then(|value| Uuid::parse_str(value.trim()).ok())
+        .is_some_and(|value| value.is_nil())
+        && payload
+            .get(4)
+            .and_then(|value| Uuid::parse_str(value.trim()).ok())
+            .is_some_and(|value| value.is_nil())
+}
+
+fn parse_form_choice_parameter_fixed_array(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<FormChoiceParameterArrayItem>> {
+    let field = field.trim();
+    if scan_1c_braced_value(field, 0) != Some(field.len()) {
+        return None;
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if fields.len() != count.checked_add(1)? {
+        return None;
+    }
+    fields
+        .iter()
+        .skip(1)
+        .map(|field| {
+            parse_form_choice_parameter_array_item(
+                field,
+                type_index,
+                type_index_collisions,
+                object_refs,
+            )
+        })
+        .collect()
+}
+
+fn parse_form_choice_parameter_array_item(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChoiceParameterArrayItem> {
+    let field = field.trim();
+    if scan_1c_braced_value(field, 0) != Some(field.len()) {
+        return None;
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
+    if fields.len() != 3
+        || parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() != Some("#")
+        || fields.get(1)?.trim() != FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
+    {
+        return None;
+    }
+    let payload = fields.get(2)?.trim();
+    if scan_1c_braced_value(payload, 0) != Some(payload.len()) {
+        return None;
+    }
+    let payload = split_1c_braced_fields(payload, 0)?;
+    let [zero, mode, typed, type_id, value_id, presentation] = payload.as_slice() else {
+        return None;
+    };
+    if zero.trim() != "0" || mode.trim() != "0" {
+        return None;
+    }
+    let typed = typed.trim();
+    if scan_1c_braced_value(typed, 0) != Some(typed.len())
+        || !matches!(
+            split_1c_braced_fields(typed, 0).as_deref(),
+            Some([kind]) if kind.trim() == r#""U""#
+        )
+    {
+        return None;
+    }
+    Some(FormChoiceParameterArrayItem {
+        presentation: parse_form_input_field_choice_list_presentation(presentation)?,
+        value_ref: parse_form_enum_design_time_reference(
+            type_id,
+            value_id,
+            type_index,
+            type_index_collisions,
+            object_refs,
+        )?,
+    })
+}
+
+fn parse_form_enum_design_time_reference(
+    type_id: &str,
+    value_id: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let type_uuid = Uuid::parse_str(type_id.trim()).ok()?;
+    let value_uuid = Uuid::parse_str(value_id.trim()).ok()?;
+    if type_uuid.is_nil() || value_uuid.is_nil() {
+        return None;
+    }
+    let type_reference =
+        unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())?;
+    let owner_reference = metadata_reference_type_owner_reference(type_reference)?;
+    if !owner_reference.starts_with("Enum.") {
+        return None;
+    }
+    let value_ref = parse_design_time_reference(value_id.trim(), object_refs)?;
+    let enum_value_prefix = format!("{owner_reference}.EnumValue.");
+    value_ref
+        .strip_prefix(&enum_value_prefix)
+        .is_some_and(|name| !name.is_empty())
+        .then_some(value_ref)
+}
+
 pub(super) fn parse_form_input_field_type_link(
     options: Option<&[&str]>,
     attribute_names_by_id: &BTreeMap<String, String>,
@@ -9841,20 +10297,22 @@ fn parse_form_input_field_choice_list_value(
             let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok()?;
             if type_id.is_nil() && value_id.is_nil() {
                 Some(FormChoiceListValue::Nil)
-            } else if !type_id.is_nil() && value_id.is_nil() {
-                let type_reference = unique_metadata_type_reference(
-                    type_index,
-                    type_index_collisions,
-                    payload_fields.get(3)?.trim(),
-                )?;
-                let owner_reference = metadata_reference_type_owner_reference(type_reference)?;
-                Some(FormChoiceListValue::DesignTimeRef(format!(
-                    "{owner_reference}.EmptyRef"
-                )))
             } else if type_id.is_nil() {
                 None
             } else {
-                if let Some(reference) =
+                if value_id.is_nil() {
+                    if let Some(owner_reference) = unique_metadata_type_reference(
+                        type_index,
+                        type_index_collisions,
+                        payload_fields.get(3)?.trim(),
+                    )
+                    .and_then(metadata_reference_type_owner_reference)
+                    {
+                        return Some(FormChoiceListValue::DesignTimeRef(format!(
+                            "{owner_reference}.EmptyRef"
+                        )));
+                    }
+                } else if let Some(reference) =
                     parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
                 {
                     return Some(FormChoiceListValue::DesignTimeRef(reference));
@@ -15440,11 +15898,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(drop_list_width)
         ));
     }
-    if item.tag == "InputField" && !item.choice_parameter_links.is_empty() {
-        xml.push_str(&format_form_choice_parameter_links_xml(
-            &item.choice_parameter_links,
-            indent + 1,
-        ));
+    if item.tag == "InputField" {
+        xml.push_str(
+            &format_form_choice_parameter_cluster_xml(item, indent + 1)
+                .expect("ChoiceParameters must pass the Form writer tree typed preflight"),
+        );
     }
     if item.tag == "InputField"
         && let Some(type_link) = &item.type_link
@@ -16805,10 +17263,11 @@ pub(super) fn format_form_choice_list_xml(
 
 fn format_form_choice_parameter_links_xml(
     links: &[FormChoiceParameterLink],
+    wrapper_tag: &str,
     indent: usize,
 ) -> String {
     let tab = "\t".repeat(indent);
-    let mut xml = format!("{tab}<ChoiceParameterLinks>\r\n");
+    let mut xml = format!("{tab}<{wrapper_tag}>\r\n");
     for link in links {
         xml.push_str(&format!(
             "{tab}\t<xr:Link>\r\n\
@@ -16821,8 +17280,208 @@ fn format_form_choice_parameter_links_xml(
             escape_xml_text(link.value_change)
         ));
     }
-    xml.push_str(&format!("{tab}</ChoiceParameterLinks>\r\n"));
+    xml.push_str(&format!("{tab}</{wrapper_tag}>\r\n"));
     xml
+}
+
+fn format_form_choice_parameter_cluster_xml(
+    item: &FormChildItem,
+    indent: usize,
+) -> Result<String, FormSchemaWriteError> {
+    let policy = verified_form_choice_parameters_policy()?;
+    let WriterPolicy::FormChoiceParameters {
+        owner_qname,
+        owner_predecessor_qname,
+        owner_successor_qname,
+        ..
+    } = &policy
+    else {
+        return Err(unexpected_form_choice_parameters_policy());
+    };
+    let mut xml = String::new();
+    for qname in [owner_predecessor_qname, owner_qname, owner_successor_qname] {
+        let tag = render_form_choice_parameters_qname(qname)?;
+        match tag.as_str() {
+            "ChoiceParameterLinks" => {
+                if !item.choice_parameter_links.is_empty() {
+                    xml.push_str(&format_form_choice_parameter_links_xml(
+                        &item.choice_parameter_links,
+                        &tag,
+                        indent,
+                    ));
+                }
+            }
+            "ChoiceParameters" => {
+                if !item.choice_parameters.is_non_emitting() {
+                    debug_assert!(item.choice_parameters.should_emit());
+                    xml.push_str(&format_form_choice_parameters_xml(
+                        &item.choice_parameters,
+                        indent,
+                    )?);
+                }
+            }
+            // The canonical model has no AvailableTypes payload yet. Iterating
+            // over this proven successor still pins any future implementation
+            // after ChoiceParameters instead of relying on source-code position.
+            "AvailableTypes" => {}
+            _ => return Err(unexpected_form_choice_parameters_policy()),
+        }
+    }
+    Ok(xml)
+}
+
+pub(super) fn format_form_choice_parameters_xml(
+    parameters: &CanonicalFormChoiceParameters,
+    indent: usize,
+) -> Result<String, FormSchemaWriteError> {
+    let policy = verified_form_choice_parameters_policy()?;
+    let WriterPolicy::FormChoiceParameters {
+        owner_qname,
+        owner_predecessor_qname: _,
+        owner_successor_qname: _,
+        empty_collection: FormChoiceParametersEmptyCollection::OmitWhenWriteDefaultFalse,
+        item,
+        fixed_array,
+    } = &policy
+    else {
+        return Err(unexpected_form_choice_parameters_policy());
+    };
+    let items = parameters.items()?;
+    if items.is_empty() {
+        return Ok(String::new());
+    }
+    let owner_tag = render_form_choice_parameters_qname(owner_qname)?;
+    let item_tag = render_form_choice_parameters_qname(&item.item_qname)?;
+    let name_attribute = render_form_choice_parameters_qname(&item.name_attribute_qname)?;
+    let value_tag = render_form_choice_parameters_qname(&item.value_qname)?;
+    let presentation_tag = render_form_choice_parameters_qname(&item.presentation_qname)?;
+    let scalar_value_tag = render_form_choice_parameters_qname(&item.scalar_value_qname)?;
+    let fixed_array_item_tag = render_form_choice_parameters_qname(&fixed_array.item_qname)?;
+    let tab = "\t".repeat(indent);
+    let mut xml = format!("{tab}<{owner_tag}>\r\n");
+    for parameter in items {
+        xml.push_str(&format!(
+            "{tab}\t<{item_tag} {name_attribute}=\"{}\">\r\n",
+            escape_xml_text(&parameter.name)
+        ));
+        xml.push_str(&format!(
+            "{tab}\t\t<{value_tag} xsi:type=\"{}\">\r\n",
+            escape_xml_text(&item.value_xsi_type)
+        ));
+        for part in &item.value_order {
+            match part {
+                FormChoiceParameterValuePart::Presentation => {
+                    xml.push_str(&format_form_choice_parameter_presentation_xml(
+                        &parameter.presentation,
+                        &presentation_tag,
+                        indent + 3,
+                    ));
+                }
+                FormChoiceParameterValuePart::Value => match &parameter.value {
+                    FormChoiceParameterValue::Boolean(value) => {
+                        xml.push_str(&format!(
+                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\">{}</{scalar_value_tag}>\r\n",
+                            escape_xml_text(&item.boolean_xsi_type),
+                            xml_bool(*value)
+                        ));
+                    }
+                    FormChoiceParameterValue::DesignTimeRef(value_ref) => {
+                        xml.push_str(&format!(
+                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\">{}</{scalar_value_tag}>\r\n",
+                            escape_xml_text(&item.design_time_ref_xsi_type),
+                            escape_xml_text(value_ref)
+                        ));
+                    }
+                    FormChoiceParameterValue::FixedArray(values) if values.is_empty() => {
+                        xml.push_str(&format!(
+                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\"/>\r\n",
+                            escape_xml_text(&fixed_array.xsi_type)
+                        ));
+                    }
+                    FormChoiceParameterValue::FixedArray(values) => {
+                        xml.push_str(&format!(
+                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\">\r\n",
+                            escape_xml_text(&fixed_array.xsi_type)
+                        ));
+                        for value in values {
+                            xml.push_str(&format!(
+                                "{tab}\t\t\t\t<{fixed_array_item_tag} xsi:type=\"{}\">\r\n",
+                                escape_xml_text(&fixed_array.item_xsi_type)
+                            ));
+                            for part in &fixed_array.item_order {
+                                match part {
+                                    FormChoiceParameterValuePart::Presentation => {
+                                        xml.push_str(
+                                            &format_form_choice_parameter_presentation_xml(
+                                                &value.presentation,
+                                                &presentation_tag,
+                                                indent + 5,
+                                            ),
+                                        );
+                                    }
+                                    FormChoiceParameterValuePart::Value => {
+                                        xml.push_str(&format!(
+                                            "{tab}\t\t\t\t\t<{scalar_value_tag} xsi:type=\"{}\">{}</{scalar_value_tag}>\r\n",
+                                            escape_xml_text(&item.design_time_ref_xsi_type),
+                                            escape_xml_text(&value.value_ref)
+                                        ));
+                                    }
+                                }
+                            }
+                            xml.push_str(&format!("{tab}\t\t\t\t</{fixed_array_item_tag}>\r\n"));
+                        }
+                        xml.push_str(&format!("{tab}\t\t\t</{scalar_value_tag}>\r\n"));
+                    }
+                },
+            }
+        }
+        xml.push_str(&format!("{tab}\t\t</{value_tag}>\r\n"));
+        xml.push_str(&format!("{tab}\t</{item_tag}>\r\n"));
+    }
+    xml.push_str(&format!("{tab}</{owner_tag}>\r\n"));
+    Ok(xml)
+}
+
+fn format_form_choice_parameter_presentation_xml(
+    presentation: &[(String, String)],
+    presentation_tag: &str,
+    indent: usize,
+) -> String {
+    if presentation.is_empty() {
+        format!("{}<{presentation_tag}/>\r\n", "\t".repeat(indent))
+    } else {
+        format_form_localized_section(presentation_tag, presentation, indent)
+    }
+}
+
+fn unexpected_form_choice_parameters_policy() -> FormSchemaWriteError {
+    FormSchemaWriteError::UnexpectedPolicy {
+        rule_id: "form.input-field-ext-info.choice-parameters".to_owned(),
+        expected: "form-choice-parameters",
+    }
+}
+
+fn render_form_choice_parameters_qname(qname: &str) -> Result<String, FormSchemaWriteError> {
+    let Some(rest) = qname.strip_prefix('{') else {
+        return Err(unexpected_form_choice_parameters_policy());
+    };
+    let Some((namespace, local_name)) = rest.split_once('}') else {
+        return Err(unexpected_form_choice_parameters_policy());
+    };
+    if local_name.is_empty()
+        || !local_name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return Err(unexpected_form_choice_parameters_policy());
+    }
+    let prefix = match namespace {
+        "" | "http://v8.1c.ru/8.3/xcf/logform" => "",
+        "http://v8.1c.ru/8.2/managed-application/core" => "app:",
+        "http://v8.1c.ru/8.1/data/core" => "v8:",
+        _ => return Err(unexpected_form_choice_parameters_policy()),
+    };
+    Ok(format!("{prefix}{local_name}"))
 }
 
 fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String {

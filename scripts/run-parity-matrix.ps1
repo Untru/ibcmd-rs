@@ -15,7 +15,8 @@ param(
     [ValidateSet('2.20', '2.21')][string]$SourceVersion = '2.20',
     [ValidateSet('full', 'scoped')][string]$Scope = 'full',
     [string[]]$PathPrefix = @(),
-    [switch]$RequireCompleteRootMetadata
+    [switch]$RequireCompleteRootMetadata,
+    [switch]$RequireCompleteSourceAssets
 )
 
 Set-StrictMode -Version Latest
@@ -226,6 +227,29 @@ function Assert-NoReparsePointComponent {
     }
 }
 
+function Test-NonNegativeBoundedInteger {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return $false }
+    if ($Value.GetType().FullName -notin @(
+        'System.Byte',
+        'System.SByte',
+        'System.Int16',
+        'System.UInt16',
+        'System.Int32',
+        'System.UInt32',
+        'System.Int64',
+        'System.UInt64'
+    )) {
+        return $false
+    }
+    try {
+        $number = [decimal]$Value
+        return $number -ge 0 -and $number -le [decimal][int64]::MaxValue
+    } catch {
+        return $false
+    }
+}
+
 function Read-ValidChildManifest {
     param(
         [string]$Path,
@@ -237,7 +261,7 @@ function Read-ValidChildManifest {
     )
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing child manifest: $Path" }
     $child = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
-    if ([int]$child.protocol_version -ne 2) { throw "Child manifest protocol is not supported: $Path" }
+    if ([int]$child.protocol_version -ne 3) { throw "Child manifest protocol is not supported for release: $Path" }
     if ($child.status -ne 'passed') { throw "Child manifest is not successful: $Path" }
     if ($child.scope -ne $ExpectedScope) { throw "Child manifest scope '$($child.scope)' does not match expected '$ExpectedScope': $Path" }
     if ([string]::IsNullOrWhiteSpace([string]$child.database.name) -or
@@ -320,7 +344,9 @@ function Read-ValidChildManifest {
     $childRoot = [IO.Path]::GetFullPath((Split-Path -Parent $Path))
     foreach ($nestedArtifact in @(
         [ordered]@{ path=[string]$child.nested_runtime_calls.native_report; sha=[string]$child.nested_runtime_calls.native_report_sha256; label='native runtime report' },
-        [ordered]@{ path=[string]$child.nested_runtime_calls.candidate_manifest; sha=[string]$child.nested_runtime_calls.candidate_manifest_sha256; label='candidate subprocess journal' }
+        [ordered]@{ path=[string]$child.nested_runtime_calls.candidate_manifest; sha=[string]$child.nested_runtime_calls.candidate_manifest_sha256; label='candidate subprocess journal' },
+        [ordered]@{ path=[string]$child.artifacts.candidate_dump_manifest; sha=[string]$child.artifact_sha256.candidate_dump_manifest; label='candidate source asset manifest' },
+        [ordered]@{ path=[string]$child.artifacts.raw_diff; sha=[string]$child.artifact_sha256.raw_diff; label='raw diff artifact' }
     )) {
         if ([string]::IsNullOrWhiteSpace($nestedArtifact.path) -or [IO.Path]::IsPathRooted($nestedArtifact.path)) {
             throw "Child $($nestedArtifact.label) path must be a non-empty relative path: $Path"
@@ -340,6 +366,154 @@ function Read-ValidChildManifest {
             throw "Child $($nestedArtifact.label) has a mismatched SHA-256: $Path"
         }
     }
+    $sourceEvidence = $child.source_assets
+    $sourceReport = $sourceEvidence.report
+    if ([string]$sourceEvidence.evidence_manifest -cne [string]$child.artifacts.candidate_dump_manifest -or
+        -not [StringComparer]::OrdinalIgnoreCase.Equals(
+            [string]$sourceEvidence.evidence_manifest_sha256,
+            [string]$child.artifact_sha256.candidate_dump_manifest
+        )) {
+        throw "Child source asset evidence reference does not match its artifact binding: $Path"
+    }
+    if ($null -eq $sourceReport -or [int]$sourceReport.schema_version -ne 1) {
+        throw "Child source asset completeness evidence is missing or unsupported: $Path"
+    }
+    if ([string]$sourceReport.scope -cne $ExpectedScope) {
+        throw "Child source asset completeness scope does not match the requested scope: $Path"
+    }
+    $sourceCounts = [ordered]@{}
+    foreach ($count in @('expected', 'emitted', 'opaque', 'missing', 'opaque_property_count')) {
+        if ($sourceReport.PSObject.Properties.Name -notcontains $count -or
+            -not (Test-NonNegativeBoundedInteger $sourceReport.$count)) {
+            throw "Child source asset completeness count '$count' is missing, negative, non-integral, or out of range: $Path"
+        }
+        $sourceCounts[$count] = [decimal]$sourceReport.$count
+    }
+    foreach ($reason in @($sourceReport.reasons.PSObject.Properties)) {
+        if (-not (Test-NonNegativeBoundedInteger $reason.Value)) {
+            throw "Child source asset reason count '$($reason.Name)' is negative, non-integral, or out of range: $Path"
+        }
+    }
+    $dispositionCount = $sourceCounts.emitted + $sourceCounts.opaque + $sourceCounts.missing
+    if ($dispositionCount -gt [decimal][int64]::MaxValue -or
+        $sourceCounts.expected -ne $dispositionCount) {
+        throw "Child source asset completeness count invariant is violated: $Path"
+    }
+    if ($sourceCounts.opaque_property_count -lt $sourceCounts.opaque) {
+        throw "Child source asset opaque property count is invalid: $Path"
+    }
+    $derivedSourceStatus = if ($sourceReport.candidate_set_complete -ne $true) {
+        'unknown'
+    } elseif ($sourceCounts.opaque -eq 0 -and $sourceCounts.missing -eq 0) {
+        'complete'
+    } else {
+        'partial'
+    }
+    if ([string]$sourceReport.status -cne $derivedSourceStatus) {
+        throw "Child source asset completeness status disagrees with its counts: $Path"
+    }
+    $sourceComplete = (
+        [string]$sourceReport.scope -ceq 'full' -and
+        $sourceReport.candidate_set_complete -eq $true -and
+        [string]$sourceReport.status -ceq 'complete' -and
+        $sourceCounts.opaque -eq 0 -and
+        $sourceCounts.missing -eq 0
+    )
+    if ($sourceEvidence.complete -ne $sourceComplete) {
+        throw "Child source asset completeness summary disagrees with its report: $Path"
+    }
+    if (-not $sourceComplete -and (
+        $child.release_eligible -eq $true -or [string]$child.result_class -cne 'diagnostic'
+    )) {
+        throw "Partial child source assets must remain diagnostic and release-ineligible: $Path"
+    }
+    if ($null -eq $child.source_asset_gate -or
+        $child.source_asset_gate.requested -notin @($true, $false) -or
+        $child.source_asset_gate.passed -notin @($true, $false)) {
+        throw "Child source asset strict-gate attestation is missing or invalid: $Path"
+    }
+    if ($child.source_asset_gate.passed -eq $true -and (
+        $child.source_asset_gate.requested -ne $true -or -not $sourceComplete
+    )) {
+        throw "Child source asset strict-gate attestation is incoherent: $Path"
+    }
+    $rawDiffPath = [IO.Path]::GetFullPath((Join-Path $childRoot ([string]$child.artifacts.raw_diff)))
+    $rawDiff = Get-Content -Raw -LiteralPath $rawDiffPath | ConvertFrom-Json -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace([string]$rawDiff.left_root) -or
+        [string]::IsNullOrWhiteSpace([string]$rawDiff.right_root) -or
+        $rawDiff.PSObject.Properties.Name -notcontains 'differences') {
+        throw "Child raw diff artifact has an invalid schema: $Path"
+    }
+    $rawCounts = [ordered]@{}
+    foreach ($count in @('left_only', 'right_only', 'different', 'unchanged')) {
+        if ($rawDiff.summary.PSObject.Properties.Name -notcontains $count -or
+            -not (Test-NonNegativeBoundedInteger $rawDiff.summary.$count)) {
+            throw "Child raw diff summary count '$count' is missing, negative, non-integral, or out of range: $Path"
+        }
+        $rawCounts[$count] = [decimal]$rawDiff.summary.$count
+    }
+    $computedRawCounts = [ordered]@{ left_only=0; right_only=0; different=0; unchanged=0 }
+    foreach ($difference in @($rawDiff.differences)) {
+        $status = [string]$difference.status
+        if ($status -notin @('left_only', 'right_only', 'different', 'unchanged')) {
+            throw "Child raw diff artifact contains an invalid difference status: $Path"
+        }
+        $computedRawCounts[$status] = [decimal]$computedRawCounts[$status] + 1
+        if ($computedRawCounts[$status] -gt [decimal][int64]::MaxValue) {
+            throw "Child raw diff artifact contains too many differences: $Path"
+        }
+    }
+    foreach ($count in $rawCounts.Keys) {
+        if ($rawCounts[$count] -ne $computedRawCounts[$count]) {
+            throw "Child raw diff summary count '$count' disagrees with its difference records: $Path"
+        }
+    }
+    foreach ($count in @('different', 'left_only', 'right_only')) {
+        if ($child.raw_parity.PSObject.Properties.Name -notcontains $count -or
+            -not (Test-NonNegativeBoundedInteger $child.raw_parity.$count) -or
+            [decimal]$child.raw_parity.$count -ne $rawCounts[$count]) {
+            throw "Child raw parity count '$count' is missing, invalid, or disagrees with the hashed raw diff: $Path"
+        }
+    }
+    $rawParityZero = (
+        $rawCounts.different -eq 0 -and
+        $rawCounts.left_only -eq 0 -and
+        $rawCounts.right_only -eq 0
+    )
+    if ($child.raw_parity.zero -ne $rawParityZero) {
+        throw "Child raw parity zero attestation disagrees with its counts: $Path"
+    }
+    if ($child.release_eligible -eq $true -and (
+        [string]$child.result_class -cne 'release' -or
+        $child.source_asset_gate.requested -ne $true -or
+        $child.source_asset_gate.passed -ne $true -or
+        -not $sourceComplete -or
+        -not $rawParityZero
+    )) {
+        throw "Child release classification lacks strict source-assets and zero-parity attestation: $Path"
+    }
+    if ($child.release_eligible -ne $true -and [string]$child.result_class -cne 'diagnostic') {
+        throw "Release-ineligible child must be classified diagnostic: $Path"
+    }
+    $candidateDumpManifestPath = [IO.Path]::GetFullPath((Join-Path $childRoot ([string]$child.artifacts.candidate_dump_manifest)))
+    $candidateDump = Get-Content -Raw -LiteralPath $candidateDumpManifestPath | ConvertFrom-Json -ErrorAction Stop
+    if (-not [StringComparer]::Ordinal.Equals([string]$candidateDump.server, $ExpectedServer) -or
+        -not [StringComparer]::Ordinal.Equals([string]$candidateDump.database, $ExpectedDatabase)) {
+        throw "Child hashed candidate manifest database identity does not match the requested server/database: $Path"
+    }
+    if ($null -eq $candidateDump.source_assets -or
+        [string]$candidateDump.source_assets.status -cne [string]$sourceReport.status -or
+        [int64]$candidateDump.source_assets.expected -ne [int64]$sourceReport.expected -or
+        [int64]$candidateDump.source_assets.emitted -ne [int64]$sourceReport.emitted -or
+        [int64]$candidateDump.source_assets.opaque -ne [int64]$sourceReport.opaque -or
+        [int64]$candidateDump.source_assets.missing -ne [int64]$sourceReport.missing) {
+        throw "Child source asset report does not match the hashed candidate manifest: $Path"
+    }
+    $candidateSourceJson = $candidateDump.source_assets | ConvertTo-Json -Depth 20 -Compress
+    $childSourceJson = $sourceReport | ConvertTo-Json -Depth 20 -Compress
+    if (-not [StringComparer]::Ordinal.Equals($candidateSourceJson, $childSourceJson)) {
+        throw "Child source asset report payload is not identical to the hashed candidate manifest: $Path"
+    }
     $matrixRelative = [string]$child.artifacts.matrix
     if ([IO.Path]::IsPathRooted($matrixRelative)) { throw "Child matrix artifact path must be relative: $Path" }
     $childMatrixPath = [IO.Path]::GetFullPath((Join-Path $childRoot $matrixRelative))
@@ -356,6 +530,31 @@ function Read-ValidChildManifest {
         [string]$child.artifact_sha256.matrix
     )) {
         throw "Child matrix artifact SHA-256 does not match its manifest: $Path"
+    }
+    $childMatrix = Get-Content -Raw -LiteralPath $childMatrixPath | ConvertFrom-Json -ErrorAction Stop
+    if (-not (Test-NonNegativeBoundedInteger $childMatrix.schema_version) -or
+        [decimal]$childMatrix.schema_version -ne 1) {
+        throw "Child matrix artifact schema version is unsupported: $Path"
+    }
+    $matrixRuns = @($childMatrix.runs)
+    if ($matrixRuns.Count -ne 1) {
+        throw "Child matrix artifact must contain exactly one parity run: $Path"
+    }
+    $matrixRun = $matrixRuns[0]
+    if (-not [StringComparer]::Ordinal.Equals([string]$matrixRun.database, $ExpectedDatabase) -or
+        -not [StringComparer]::Ordinal.Equals([string]$matrixRun.run_id, [string]$child.run_id) -or
+        -not [StringComparer]::OrdinalIgnoreCase.Equals([string]$matrixRun.git_sha, [string]$child.git_sha) -or
+        $matrixRun.full -ne ($ExpectedScope -eq 'full') -or
+        -not [StringComparer]::Ordinal.Equals([string]$matrixRun.left_root, [string]$rawDiff.left_root) -or
+        -not [StringComparer]::Ordinal.Equals([string]$matrixRun.right_root, [string]$rawDiff.right_root)) {
+        throw "Child matrix parity run identity or scope disagrees with the child/raw-diff evidence: $Path"
+    }
+    foreach ($count in @('left_only', 'right_only', 'different', 'unchanged')) {
+        if ($matrixRun.raw_summary.PSObject.Properties.Name -notcontains $count -or
+            -not (Test-NonNegativeBoundedInteger $matrixRun.raw_summary.$count) -or
+            [decimal]$matrixRun.raw_summary.$count -ne $rawCounts[$count]) {
+            throw "Child matrix raw summary count '$count' disagrees with the hashed raw diff: $Path"
+        }
     }
     return $child
 }
@@ -415,11 +614,21 @@ function Assert-CompatibleChildManifests {
             }
         }
     }
+    $sourceAssetsComplete = @($Children | Where-Object { $_.source_assets_complete -ne $true }).Count -eq 0
+    $childrenReleaseAttested = @($Children | Where-Object {
+        $_.result_class -cne 'release' -or
+        $_.release_eligible -ne $true -or
+        $_.source_asset_gate_requested -ne $true -or
+        $_.source_asset_gate_passed -ne $true -or
+        $_.raw_parity_zero -ne $true
+    }).Count -eq 0
     return [ordered]@{
         status = 'passed'
         compared_children = $Children.Count
         scope = $ExpectedScope
-        release_proof = ($ExpectedScope -eq 'full')
+        release_proof = ($ExpectedScope -eq 'full' -and $sourceAssetsComplete -and $childrenReleaseAttested)
+        source_assets_complete = $sourceAssetsComplete
+        children_release_attested = $childrenReleaseAttested
         candidate_path_identity_policy = 'absolute-normalized-ordinal-ignore-case'
         native_ibcmd_path_identity_policy = 'absolute-normalized-ordinal-ignore-case'
         sql_client_path_identity_policy = 'absolute-normalized-ordinal-ignore-case'
@@ -472,6 +681,9 @@ if ($Scope -eq 'scoped' -and $PathPrefix.Count -eq 0) {
 if ($RequireCompleteRootMetadata -and $Scope -ne 'full') {
     throw "RequireCompleteRootMetadata is available only for Scope 'full'."
 }
+if ($RequireCompleteSourceAssets -and $Scope -ne 'full') {
+    throw "RequireCompleteSourceAssets is available only for Scope 'full'."
+}
 if ([string]::IsNullOrWhiteSpace($UtDbName) -or [string]::IsNullOrWhiteSpace($BspDbName) -or
     [StringComparer]::OrdinalIgnoreCase.Equals($UtDbName.Trim(), $BspDbName.Trim())) {
     throw 'UtDbName and BspDbName must be distinct non-empty database names (case-insensitive).'
@@ -494,7 +706,7 @@ $steps = [System.Collections.ArrayList]::new()
 $manifestPath = Join-Path $matrixRoot 'parity-matrix-manifest.json'
 $resultClass = 'diagnostic'
 $matrixManifest = [ordered]@{
-    protocol_version = 2
+    protocol_version = 3
     run_id = $RunId
     created_utc = Get-UtcNow
     status = 'running'
@@ -502,6 +714,7 @@ $matrixManifest = [ordered]@{
     result_class = $resultClass
     release_gate_requested = ($Scope -eq 'full' -and $RequireCompleteRootMetadata)
     release_eligible = $false
+    source_asset_gate = [ordered]@{ requested=[bool]$RequireCompleteSourceAssets; passed=$false }
     parity_zero = $null
     child_manifests = @()
     steps = $steps
@@ -551,6 +764,7 @@ try {
         if ($SqlcmdExecutable) { $params.SqlcmdExecutable = $SqlcmdExecutable }
         if ($BcpExecutable) { $params.BcpExecutable = $BcpExecutable }
         if ($RequireCompleteRootMetadata) { $params.RequireCompleteRootMetadata = $true }
+        if ($RequireCompleteSourceAssets) { $params.RequireCompleteSourceAssets = $true }
 
         try {
             & $runner @params *>&1 |
@@ -585,6 +799,12 @@ try {
                 bcp_path = (Get-NormalizedExecutablePath -Path ([string]$child.tools.bcp.path) -Label 'Child bcp path')
                 bcp_version = $child.tools.bcp.version
                 bcp_sha256 = $child.tools.bcp.sha256
+                source_assets_complete = $child.source_assets.complete
+                source_asset_gate_requested = $child.source_asset_gate.requested
+                source_asset_gate_passed = $child.source_asset_gate.passed
+                raw_parity_zero = $child.raw_parity.zero
+                result_class = $child.result_class
+                release_eligible = $child.release_eligible
                 child_log = $childLog
             })
             [void]$matrixPaths.Add((Join-Path $runDirectory ([string]$child.artifacts.matrix)))
@@ -597,6 +817,13 @@ try {
     }
 
     $matrixManifest.child_compatibility = Assert-CompatibleChildManifests -Children @($children) -ExpectedScope $Scope
+    $matrixManifest.source_asset_gate.passed = (
+        $matrixManifest.source_asset_gate.requested -eq $true -and
+        $matrixManifest.child_compatibility.source_assets_complete -eq $true -and
+        @($children | Where-Object {
+            $_.source_asset_gate_requested -ne $true -or $_.source_asset_gate_passed -ne $true
+        }).Count -eq 0
+    )
     Write-AtomicJson -Path $manifestPath -Object $matrixManifest
     foreach ($path in $matrixPaths) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing child matrix: $path" }
@@ -653,6 +880,10 @@ try {
             $RequireCompleteRootMetadata -and
             $matrixManifest.child_compatibility.status -eq 'passed' -and
             $matrixManifest.child_compatibility.release_proof -eq $true -and
+            $matrixManifest.child_compatibility.source_assets_complete -eq $true -and
+            $matrixManifest.child_compatibility.children_release_attested -eq $true -and
+            $matrixManifest.source_asset_gate.requested -eq $true -and
+            $matrixManifest.source_asset_gate.passed -eq $true -and
             $matrixManifest.child_compatibility.distinct_databases -eq $true -and
             $matrixManifest.parity_zero
         )

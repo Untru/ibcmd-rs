@@ -503,6 +503,7 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
             module_text_rows: 0,
             metadata_xml_rows: 0,
             source_asset_rows: 8,
+            source_assets: SourceAssetCompletenessReport::default(),
             metadata_root_inventory: RootMetadataInventoryReport {
                 scope: RootMetadataInventoryScope::Scoped,
                 candidate_set_complete: true,
@@ -540,6 +541,7 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
         total_module_text_rows: 0,
         total_metadata_xml_rows: 0,
         total_source_asset_rows: 8,
+        source_assets: SourceAssetCompletenessReport::default(),
         timings: MssqlDumpTimingReport {
             prepare_indexes_ms: 40,
             prepare_metadata_fetch_ms: 11,
@@ -585,6 +587,187 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
     assert_eq!(summary.tables[0].table, "Config");
     assert_eq!(summary.tables[0].fetch_row_batch_max_binary_mib, 300);
     assert_eq!(summary.tables[0].source_asset_cpu_ms_per_row, Some(15));
+}
+
+#[test]
+fn source_asset_completeness_report_is_deterministic_and_strict() {
+    let unknown = SourceAssetCompletenessReport::default();
+    assert_eq!(unknown.status, SourceAssetCompletenessStatus::Unknown);
+    assert!(!unknown.candidate_set_complete);
+
+    let mut complete = SourceAssetCompletenessReport::default();
+    complete.record_emitted();
+    complete.finish_inventory(SourceAssetCompletenessScope::Full, true, 1);
+    assert_eq!(complete.status, SourceAssetCompletenessStatus::Complete);
+    assert_eq!(
+        complete.expected,
+        complete.emitted + complete.opaque + complete.missing
+    );
+    complete.ensure_complete(true).unwrap();
+
+    let mut report = SourceAssetCompletenessReport::default();
+    report.record_emitted();
+    let mut opaque_entries = Vec::new();
+    for (path, item_id, raw_sha256) in [
+        ("Forms/Z/Ext/Form.xml", "20", "b"),
+        ("Forms/A/Ext/Form.xml", "10", "a"),
+    ] {
+        opaque_entries.push(SourceAssetCompletenessEntry {
+            code: "source_asset.form.choice_parameters.opaque_omitted".to_string(),
+            classification: "opaque_property_omitted".to_string(),
+            table: "Config".to_string(),
+            source_row_id: format!("row-{item_id}"),
+            asset_path: path.to_string(),
+            form_owner_reference: None,
+            form_item_id: item_id.to_string(),
+            form_item_tag: "InputField".to_string(),
+            property: "ChoiceParameters".to_string(),
+            property_profile: "input_field_extended_options".to_string(),
+            property_slot: 58,
+            raw_length: 17,
+            raw_sha256: raw_sha256.repeat(64),
+        });
+    }
+    report.record_opaque(opaque_entries);
+    report.finish_inventory(SourceAssetCompletenessScope::Full, true, 2);
+
+    assert_eq!(report.status, SourceAssetCompletenessStatus::Partial);
+    assert_eq!(report.emitted, 1);
+    assert_eq!(report.opaque, 1);
+    assert_eq!(report.opaque_property_count, 2);
+    assert_eq!(report.expected, 2);
+    assert_eq!(report.missing, 0);
+    assert_eq!(
+        report
+            .reasons
+            .get("source_asset.form.choice_parameters.opaque_omitted"),
+        Some(&2)
+    );
+    assert_eq!(report.affected_assets[0].asset_path, "Forms/A/Ext/Form.xml");
+    assert!(report.ensure_complete(true).is_err());
+
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(!json.contains("unsupported-choice-parameters"));
+}
+
+#[test]
+fn source_asset_discovery_fails_closed_for_recognized_family_decoder_misses() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-source-completeness-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let role_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let subsystem_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+    let catalog_metadata = deflate_for_test(
+        format!(
+            "{{1,{{57,{{0,{{3,{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}}}}}}}"
+        )
+        .as_bytes(),
+    );
+    let role_metadata = deflate_for_test(
+        format!("{{1,{{6,{{3,{{1,0,{role_uuid}}},\"Editor\",{{1,\"en\",\"Editor\"}},\"\"}},0}}}}")
+            .as_bytes(),
+    );
+    let subsystem_metadata = deflate_for_test(
+        format!(
+            "{{1,{{22,{{3,{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1}}}}"
+        )
+        .as_bytes(),
+    );
+    let invalid = deflate_for_test(b"{invalid-source-asset}");
+    let row = |file_name: String, bytes: &[u8]| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: bytes.len() as i64,
+        binary_hex: encode_hex_for_test(bytes),
+    };
+    let rows = vec![
+        row(catalog_uuid.to_string(), &catalog_metadata),
+        row(format!("{catalog_uuid}.5"), &invalid),
+        row(format!("{catalog_uuid}.1c"), &invalid),
+        row(role_uuid.to_string(), &role_metadata),
+        row(format!("{role_uuid}.0"), &invalid),
+        row(subsystem_uuid.to_string(), &subsystem_metadata),
+        row(format!("{subsystem_uuid}.1"), &invalid),
+    ];
+
+    let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+    assert_eq!(
+        dumped.source_assets.status,
+        SourceAssetCompletenessStatus::Unknown
+    );
+    assert!(!dumped.source_assets.candidate_set_complete);
+    for reason in [
+        "source_asset.discovery.help_decoder_failed",
+        "source_asset.discovery.predefined_data_decoder_failed",
+        "source_asset.discovery.role_rights_decoder_failed",
+        "source_asset.discovery.command_interface_decoder_failed",
+    ] {
+        assert_eq!(
+            dumped.source_assets.reasons.get(reason),
+            Some(&1),
+            "{reason}"
+        );
+    }
+    assert_eq!(dumped.source_assets.missing, 4);
+    assert_eq!(
+        dumped.source_assets.expected,
+        dumped.source_assets.emitted + dumped.source_assets.opaque + dumped.source_assets.missing
+    );
+    assert!(dumped.source_assets.ensure_complete(true).is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn source_asset_discovery_fails_closed_for_aggregate_decoder_miss() {
+    let register_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let body_id = format!("{register_uuid}.3");
+    let invalid = deflate_for_test(b"{invalid-aggregates}");
+    let body_row = ConfigRow {
+        file_name: body_id.clone(),
+        part_no: 0,
+        data_size: invalid.len() as i64,
+        binary_hex: encode_hex_for_test(&invalid),
+    };
+    let metadata = MetadataTextRow {
+        file_name: register_uuid.to_string(),
+        text: String::new(),
+        object_code: Some(28),
+        header: Some(MetadataHeader {
+            uuid: register_uuid.to_string(),
+            name: "Stock".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("AccumulationRegister".to_string()),
+        folder: Some("AccumulationRegisters"),
+    };
+    let file_names = BTreeSet::from([body_id.as_str()]);
+    let rows_by_file_name = BTreeMap::from([(body_id.as_str(), &body_row)]);
+
+    let misses = source_asset_discovery_misses(
+        &[metadata],
+        &file_names,
+        &rows_by_file_name,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+
+    assert_eq!(
+        misses.get(&body_id).map(String::as_str),
+        Some("accumulation_register_aggregates_decoder_failed")
+    );
 }
 
 #[test]
@@ -12964,6 +13147,7 @@ fn formats_table_search_additions_as_direct_sections() {
         input_hint: Vec::new(),
         choice_list: CanonicalFormChoiceList::Absent,
         choice_parameter_links: Vec::new(),
+        choice_parameters: CanonicalFormChoiceParameters::Absent,
         type_link: None,
         extended_tooltip: None,
         events: Vec::new(),
@@ -13149,6 +13333,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 input_hint: Vec::new(),
                 choice_list: CanonicalFormChoiceList::Absent,
                 choice_parameter_links: Vec::new(),
+                choice_parameters: CanonicalFormChoiceParameters::Absent,
                 type_link: None,
                 extended_tooltip: None,
                 events: Vec::new(),
@@ -13335,6 +13520,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 input_hint: Vec::new(),
                 choice_list: CanonicalFormChoiceList::Absent,
                 choice_parameter_links: Vec::new(),
+                choice_parameters: CanonicalFormChoiceParameters::Absent,
                 type_link: None,
                 extended_tooltip: None,
                 events: Vec::new(),
@@ -14451,7 +14637,7 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
         })
     );
 
-    let xml = format_form_child_items_xml(&[item], 1);
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
     assert!(xml.contains("<ToolTip>"));
     assert!(!xml.contains("<InputHint>"), "{xml}");
     assert!(
@@ -14462,14 +14648,54 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
         xml.find("<Width>").unwrap() < xml.find("<ChoiceList>").unwrap(),
         "{xml}"
     );
+
+    let mut opaque_parameters_item = item;
+    opaque_parameters_item.choice_parameters = CanonicalFormChoiceParameters::OpaqueSameProfile {
+        raw: "{unsupported-choice-parameters}".to_string(),
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+    };
+    opaque_parameters_item.input_hint =
+        vec![("en".to_string(), "Emitted after parameters".to_string())];
+    assert!(!opaque_parameters_item.choice_parameters.should_emit());
+    assert!(opaque_parameters_item.choice_parameters.is_non_emitting());
+    validate_form_choice_list_writer_trees(std::slice::from_ref(&opaque_parameters_item), None)
+        .unwrap();
+    let opaque_parameters_xml =
+        format_form_child_items_xml(std::slice::from_ref(&opaque_parameters_item), 1);
+    assert!(!opaque_parameters_xml.contains("<ChoiceParameters"));
+    assert!(opaque_parameters_xml.contains("<InputHint>"));
+    assert!(opaque_parameters_xml.contains("Emitted after parameters"));
+    assert!(opaque_parameters_xml.contains("<ContextMenu"));
+    let mut diagnostics = Vec::new();
+    collect_opaque_choice_parameters_diagnostics(
+        std::slice::from_ref(&opaque_parameters_item),
+        &mut diagnostics,
+    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].code,
+        "source_asset.form.choice_parameters.opaque_omitted"
+    );
+    assert_eq!(
+        diagnostics[0].property_profile,
+        "input_field_extended_options"
+    );
+    assert_eq!(
+        diagnostics[0].property_slot,
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()
+    );
+    assert_eq!(diagnostics[0].raw_length, 31);
+    assert_eq!(diagnostics[0].raw_sha256.len(), 64);
 }
 
 #[test]
 fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
     let type_id = "11111111-1111-4111-8111-111111111111";
     let value_id = "22222222-2222-4222-8222-222222222222";
+    let normalized_empty_pair =
+        "11111111-1111-4111-8111-111111111111.00000000-0000-0000-0000-000000000000";
     let item = format!(
-        r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,0,{{"U"}},{type_id},00000000-0000-0000-0000-000000000000,{{1,1,{{"en","No value"}}}}}}}}"##
+        r##"{{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{{0,0,{{"U"}},{type_id},00000000-0000-0000-0000-000000000000,{{1,1,{{"en","No value"}}}}}}}}"##
     );
     let type_index = BTreeMap::from([(
         type_id.to_string(),
@@ -14501,20 +14727,54 @@ fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
         xml.contains(r#"<Value xsi:type="xr:DesignTimeRef">Enum.SyntheticStatus.EmptyRef</Value>"#)
     );
 
-    assert!(
-        parse_form_input_field_choice_list_item(
-            &item,
-            &BTreeMap::new(),
-            &BTreeSet::new(),
-            &BTreeMap::new(),
-        )
-        .is_none()
+    let literal = parse_form_input_field_choice_list_item(
+        &item,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        literal.value,
+        FormChoiceListValue::DesignTimeRef(normalized_empty_pair.to_string())
     );
+    let literal_choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![literal],
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    validate_canonical_form_choice_list(&literal_choice_list).unwrap();
     assert!(
+        format_form_choice_list_xml(&literal_choice_list, 1)
+            .unwrap()
+            .contains(&format!(
+                r#"<Value xsi:type="xr:DesignTimeRef">{normalized_empty_pair}</Value>"#
+            ))
+    );
+    assert!(matches!(
         parse_form_input_field_choice_list_item(
             &item,
             &type_index,
             &BTreeSet::from([type_id.to_string()]),
+            &BTreeMap::new(),
+        ),
+        Some(FormChoiceListItem {
+            value: FormChoiceListValue::DesignTimeRef(reference),
+            ..
+        }) if reference == normalized_empty_pair
+    ));
+
+    let wrong_platform_discriminator = item.replace(
+        "0e704aa2-07bd-48b9-8223-a0212c4d5fc2",
+        "33333333-3333-4333-8333-333333333333",
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &wrong_platform_discriminator,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
             &BTreeMap::new(),
         )
         .is_none()
@@ -14778,6 +15038,318 @@ fn parses_input_field_choice_list_non_nil_uuid_pair_with_semantic_precedence() {
             r#"{{3,1,"",{item},{{0,{{4,0,{{1}},"",-1,-1,1,0,""}}}}}}"#
         ))
         .is_none()
+    );
+}
+
+#[test]
+fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
+    let platform_discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let fixed_array_type = "4500381b-db30-4a10-9db4-990038032acf";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let enum_type = "11111111-1111-4111-8111-111111111111";
+    let first_value = "22222222-2222-4222-8222-222222222221";
+    let second_value = "22222222-2222-4222-8222-222222222222";
+    let boolean =
+        format!(r##"{{"#",{platform_discriminator},{{0,1,{{"B",1}},{nil},{nil},{{1,0}}}}}}"##);
+    let first = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{enum_type},{first_value},{{1,0}}}}}}"##
+    );
+    let second = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{enum_type},{second_value},{{1,0}}}}}}"##
+    );
+    let fixed_array = format!(
+        r##"{{"#",{platform_discriminator},{{0,1,{{"#",{fixed_array_type},{{2,{first},{second}}}}},{nil},{nil},{{1,0}}}}}}"##
+    );
+    let collection = format!(r#"{{0,2,"Filter.Enabled",{boolean},"Filter.Kind",{fixed_array}}}"#);
+    let type_index = BTreeMap::from([(
+        enum_type.to_string(),
+        "cfg:EnumRef.SyntheticKind".to_string(),
+    )]);
+    let object_refs = BTreeMap::from([
+        (
+            first_value.to_string(),
+            "Enum.SyntheticKind.EnumValue.First".to_string(),
+        ),
+        (
+            second_value.to_string(),
+            "Enum.SyntheticKind.EnumValue.Second".to_string(),
+        ),
+    ]);
+
+    let parameters = parse_form_input_field_choice_parameters(
+        &collection,
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(parameters.len(), 2);
+    assert_eq!(parameters[0].value, FormChoiceParameterValue::Boolean(true));
+    assert!(matches!(
+        &parameters[1].value,
+        FormChoiceParameterValue::FixedArray(values)
+            if values.iter().map(|value| value.value_ref.as_str()).collect::<Vec<_>>()
+                == ["Enum.SyntheticKind.EnumValue.First", "Enum.SyntheticKind.EnumValue.Second"]
+    ));
+
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()] =
+        &collection;
+    let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+        "37",
+        59,
+        "InputField",
+        0,
+        Some("2"),
+        &options,
+    )
+    .unwrap();
+    let canonical = canonical_form_input_field_choice_parameters(
+        schema,
+        &options,
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+    );
+    assert!(canonical.should_emit());
+    assert!(!canonical.is_non_emitting());
+    validate_canonical_form_choice_parameters(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_parameters_xml(&canonical, 1).unwrap(),
+        "\t<ChoiceParameters>\r\n\
+\t\t<app:item name=\"Filter.Enabled\">\r\n\
+\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:boolean\">true</Value>\r\n\
+\t\t\t</app:value>\r\n\
+\t\t</app:item>\r\n\
+\t\t<app:item name=\"Filter.Kind\">\r\n\
+\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"v8:FixedArray\">\r\n\
+\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.SyntheticKind.EnumValue.First</Value>\r\n\
+\t\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.SyntheticKind.EnumValue.Second</Value>\r\n\
+\t\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t</Value>\r\n\
+\t\t\t</app:value>\r\n\
+\t\t</app:item>\r\n\
+\t</ChoiceParameters>\r\n"
+    );
+
+    let scalar_reference = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{enum_type},{first_value},{{1,0}}}}}}"##
+    );
+    let scalar_parameters = parse_form_input_field_choice_parameters(
+        &format!(r#"{{0,1,"Filter.Kind",{scalar_reference}}}"#),
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert!(matches!(
+        &scalar_parameters[0].value,
+        FormChoiceParameterValue::DesignTimeRef(value)
+            if value == "Enum.SyntheticKind.EnumValue.First"
+    ));
+    let scalar_wrong_mode = scalar_reference.replacen("{0,0,", "{0,1,", 1);
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Kind",{scalar_wrong_mode}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    let boolean_wrong_mode = boolean.replacen("{0,1,", "{0,0,", 1);
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Enabled",{boolean_wrong_mode}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!("{collection}garbage"),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,2,"Filter.Enabled",{boolean}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    let wrong_discriminator = boolean.replace(
+        platform_discriminator,
+        "33333333-3333-4333-8333-333333333333",
+    );
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Enabled",{wrong_discriminator}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    let wrong_nested_mode = fixed_array.replacen("{0,0,", "{0,1,", 1);
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Kind",{wrong_nested_mode}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Kind",{fixed_array}}}"#),
+            &type_index,
+            &BTreeSet::from([enum_type.to_string()]),
+            &object_refs,
+        )
+        .is_none()
+    );
+
+    let opaque = CanonicalFormChoiceParameters::OpaqueSameProfile {
+        raw: "{unsupported}".to_string(),
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+    };
+    assert!(!opaque.should_emit());
+    assert!(opaque.is_non_emitting());
+    assert_eq!(
+        validate_canonical_form_choice_parameters(&opaque),
+        Err(FormSchemaWriteError::OpaqueChoiceParameters {
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        })
+    );
+    assert_eq!(
+        format_form_choice_parameters_xml(&opaque, 1),
+        Err(FormSchemaWriteError::OpaqueChoiceParameters {
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        })
+    );
+}
+
+#[test]
+fn live_slot27_choice_parameters_slice_matches_native_xml_exactly() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        source: FixtureSource,
+        raw_slot_value: String,
+        type_index: BTreeMap<String, String>,
+        object_refs: BTreeMap<String, String>,
+        expected_xml: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FixtureSource {
+        run: String,
+        raw_row: String,
+        raw_source: String,
+        raw_source_sha256: String,
+        native_source: String,
+        native_source_sha256: String,
+        raw_slot: usize,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_choice_parameters_slot27_live.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.source.raw_slot, 27);
+    assert_eq!(
+        fixture.source.raw_row,
+        "34accda9-6211-4bc3-be8d-e42a24260653.0"
+    );
+    assert!(
+        fixture
+            .source
+            .run
+            .ends_with("ut_ibcmd_ut_full_33a9baf_20260724_a")
+    );
+    assert!(fixture.source.raw_source.ends_with("__part0.txt"));
+    assert_eq!(
+        fixture.source.raw_source_sha256,
+        "77a99cffaa0b5c81ccccafa3a5fa01dec56342b49d1cce2e56f97f28b62785b1"
+    );
+    assert!(fixture.source.native_source.ends_with("/Ext/Form.xml"));
+    assert_eq!(
+        fixture.source.native_source_sha256,
+        "30cf0689522d6b74408da77426a178df282361f36d3787c0cfaf456c85cb8b03"
+    );
+
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()] =
+        &fixture.raw_slot_value;
+    let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+        "37",
+        59,
+        "InputField",
+        0,
+        Some("2"),
+        &options,
+    )
+    .unwrap();
+    let canonical = canonical_form_input_field_choice_parameters(
+        schema,
+        &options,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &fixture.object_refs,
+    );
+    let CanonicalFormChoiceParameters::Typed { items, slot } = &canonical else {
+        panic!("live slot-27 value must be fully typed");
+    };
+    assert_eq!(*slot, 27);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Отбор.Статус",
+            "Отбор.ХозяйственнаяОперация",
+            "Отбор.ПометкаУдаления",
+        ]
+    );
+    assert!(matches!(
+        &items[0].value,
+        FormChoiceParameterValue::DesignTimeRef(value)
+            if value == "Enum.СтатусыДоговоровКонтрагентов.EnumValue.Действует"
+    ));
+    assert!(matches!(
+        &items[1].value,
+        FormChoiceParameterValue::FixedArray(values) if values.len() == 2
+    ));
+    assert_eq!(items[2].value, FormChoiceParameterValue::Boolean(false));
+
+    // This is the production preflight: it resolves the dedicated exact rule and
+    // its cross-bound evidence before the formatter can emit any XML.
+    validate_canonical_form_choice_parameters(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_parameters_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
     );
 }
 

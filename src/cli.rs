@@ -1151,6 +1151,13 @@ pub struct MssqlDumpConfigArgs {
         conflicts_with_all = ["file_names", "file_name_lists"]
     )]
     pub require_complete_root_metadata: bool,
+    /// Fail when a reconstructed source asset omits an opaque property.
+    #[arg(
+        long,
+        requires_all = ["extract_metadata_xml", "no_binary_rows"],
+        conflicts_with_all = ["file_names", "file_name_lists"]
+    )]
+    pub require_complete_source_assets: bool,
     /// Source XML version for reconstructed source files.
     #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
     pub source_version: InfobaseConfigSourceVersion,
@@ -4324,6 +4331,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_strict_source_asset_mssql_dump_config_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-config",
+            "--database",
+            "TestDb",
+            "-o",
+            r"C:\dump",
+            "--extract-metadata-xml",
+            "--no-binary-rows",
+            "--require-complete-source-assets",
+        ]);
+
+        match cli.command {
+            Commands::MssqlDumpConfig(args) => {
+                assert!(args.extract_metadata_xml);
+                assert!(args.no_binary_rows);
+                assert!(args.require_complete_source_assets);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn rejects_invalid_strict_mssql_dump_config_combinations() {
         assert!(
             Cli::try_parse_from([
@@ -4334,6 +4365,19 @@ mod tests {
                 "-o",
                 r"C:\dump",
                 "--require-complete-root-metadata",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--extract-metadata-xml",
+                "--require-complete-source-assets",
             ])
             .is_err()
         );

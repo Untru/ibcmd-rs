@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 
 use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Embedded EDT-derived model inventory.
 pub const BUNDLED_MODEL_INVENTORY_JSON: &str =
@@ -50,6 +51,13 @@ pub const BUNDLED_WRITER_RULES_JSON: &str = include_str!("../data/edt-2025.2.3-w
 /// Embedded, exact EDT writer evidence for the bounded DCS settings tail.
 pub const BUNDLED_DCS_WRITER_EVIDENCE_JSON: &str =
     include_str!("../data/edt-2025.2.3-dcs-writer-evidence.json");
+
+/// Embedded, exact EDT and live native-export evidence for the bounded
+/// `InputFieldExtInfo.choiceParameters` writer.
+pub const BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON: &str =
+    include_str!("../data/edt-2025.2.3-form-choice-parameters-writer-evidence.json");
+const BUNDLED_FORM_CHOICE_PARAMETERS_LIVE_FIXTURE_JSON: &str =
+    include_str!("../../../tests/fixtures/form_choice_parameters_slot27_live.json");
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -307,7 +315,7 @@ struct DcsWriterEvidenceMissingKey {
 /// A structured subset of verified writer behaviour.  Free-form operations remain useful
 /// provenance, but production writers must consume this typed policy instead of parsing prose.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum WriterPolicy {
     FormChoiceList {
         #[serde(rename = "itemOrder")]
@@ -321,6 +329,19 @@ pub enum WriterPolicy {
         #[serde(rename = "nullValue")]
         null_value: FormListSettingsNullValue,
         delegate: String,
+    },
+    FormChoiceParameters {
+        #[serde(rename = "ownerQName")]
+        owner_qname: String,
+        #[serde(rename = "ownerPredecessorQName")]
+        owner_predecessor_qname: String,
+        #[serde(rename = "ownerSuccessorQName")]
+        owner_successor_qname: String,
+        #[serde(rename = "emptyCollection")]
+        empty_collection: FormChoiceParametersEmptyCollection,
+        item: FormChoiceParameterItemPolicy,
+        #[serde(rename = "fixedArray")]
+        fixed_array: FormChoiceParameterFixedArrayPolicy,
     },
 }
 
@@ -348,6 +369,146 @@ pub enum FormChoiceListEmptyStringValue {
 #[serde(rename_all = "kebab-case")]
 pub enum FormListSettingsNullValue {
     Omit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormChoiceParametersEmptyCollection {
+    OmitWhenWriteDefaultFalse,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormChoiceParameterValuePart {
+    Presentation,
+    Value,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FormChoiceParameterItemPolicy {
+    #[serde(rename = "itemQName")]
+    pub item_qname: String,
+    #[serde(rename = "nameAttributeQName")]
+    pub name_attribute_qname: String,
+    #[serde(rename = "valueQName")]
+    pub value_qname: String,
+    pub value_xsi_type: String,
+    pub value_order: Vec<FormChoiceParameterValuePart>,
+    #[serde(rename = "presentationQName")]
+    pub presentation_qname: String,
+    #[serde(rename = "scalarValueQName")]
+    pub scalar_value_qname: String,
+    pub boolean_xsi_type: String,
+    pub design_time_ref_xsi_type: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FormChoiceParameterFixedArrayPolicy {
+    pub xsi_type: String,
+    #[serde(rename = "itemQName")]
+    pub item_qname: String,
+    pub item_xsi_type: String,
+    pub item_order: Vec<FormChoiceParameterValuePart>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FormChoiceParametersWriterEvidence {
+    schema_version: u32,
+    source: FormChoiceParametersEvidenceSource,
+    scope: FormChoiceParametersEvidenceScope,
+    verified_facts: FormChoiceParametersVerifiedFacts,
+    missing_keys: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersEvidenceSource {
+    product: String,
+    release: String,
+    root_identity: FormChoiceParametersEvidenceRootIdentity,
+    validated_bundles: Vec<FormChoiceParametersEvidenceBundle>,
+    derivation: String,
+    invocation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersEvidenceRootIdentity {
+    leaf: String,
+    product_version: String,
+    build_id: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersEvidenceBundle {
+    symbolic_name: String,
+    version: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersEvidenceScope {
+    disposition: String,
+    production_emission: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersVerifiedFacts {
+    model: FormChoiceParametersModelFact,
+    owner_order: FormChoiceParametersOwnerOrderFact,
+    writer: FormChoiceParametersWriterFact,
+    live_slot27: FormChoiceParametersLiveFact,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersModelFact {
+    model_type: String,
+    feature: String,
+    lower_bound: u32,
+    upper_bound: i32,
+    #[serde(rename = "ownerQName")]
+    owner_qname: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersOwnerOrderFact {
+    #[serde(rename = "predecessorQName")]
+    predecessor_qname: String,
+    #[serde(rename = "featureQName")]
+    feature_qname: String,
+    #[serde(rename = "successorQName")]
+    successor_qname: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersWriterFact {
+    delegate: String,
+    empty_collection: FormChoiceParametersEmptyCollection,
+    item: FormChoiceParameterItemPolicy,
+    fixed_array: FormChoiceParameterFixedArrayPolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceParametersLiveFact {
+    fixture: String,
+    fixture_sha256: String,
+    raw_row: String,
+    raw_source: String,
+    raw_source_sha256: String,
+    raw_slot: usize,
+    native_source: String,
+    native_source_sha256: String,
+    item_names_in_order: Vec<String>,
+    value_kinds_in_order: Vec<String>,
 }
 
 /// Exact identity used by a writer-rule consumer.  The release is deliberately part of the
@@ -1157,6 +1318,7 @@ pub enum SchemaError {
     },
     CoverageDerivedDataMismatch(&'static str),
     InvalidDcsWriterEvidence(String),
+    InvalidFormChoiceParametersWriterEvidence(String),
 }
 
 impl Display for SchemaError {
@@ -1214,6 +1376,12 @@ impl Display for SchemaError {
             }
             Self::InvalidDcsWriterEvidence(reason) => {
                 write!(formatter, "invalid DCS writer evidence: {reason}")
+            }
+            Self::InvalidFormChoiceParametersWriterEvidence(reason) => {
+                write!(
+                    formatter,
+                    "invalid Form choice-parameters writer evidence: {reason}"
+                )
             }
         }
     }
@@ -1646,6 +1814,190 @@ fn validate_dcs_writer_evidence_text(field: &'static str, value: &str) -> Result
     Ok(())
 }
 
+fn exact_form_choice_parameters_policy() -> WriterPolicy {
+    WriterPolicy::FormChoiceParameters {
+        owner_qname: "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameters".to_owned(),
+        owner_predecessor_qname: "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameterLinks".to_owned(),
+        owner_successor_qname: "{http://v8.1c.ru/8.3/xcf/logform}AvailableTypes".to_owned(),
+        empty_collection: FormChoiceParametersEmptyCollection::OmitWhenWriteDefaultFalse,
+        item: FormChoiceParameterItemPolicy {
+            item_qname: "{http://v8.1c.ru/8.2/managed-application/core}item".to_owned(),
+            name_attribute_qname: "{}name".to_owned(),
+            value_qname: "{http://v8.1c.ru/8.2/managed-application/core}value".to_owned(),
+            value_xsi_type: "FormChoiceListDesTimeValue".to_owned(),
+            value_order: vec![
+                FormChoiceParameterValuePart::Presentation,
+                FormChoiceParameterValuePart::Value,
+            ],
+            presentation_qname: "{http://v8.1c.ru/8.3/xcf/logform}Presentation".to_owned(),
+            scalar_value_qname: "{http://v8.1c.ru/8.3/xcf/logform}Value".to_owned(),
+            boolean_xsi_type: "xs:boolean".to_owned(),
+            design_time_ref_xsi_type: "xr:DesignTimeRef".to_owned(),
+        },
+        fixed_array: FormChoiceParameterFixedArrayPolicy {
+            xsi_type: "v8:FixedArray".to_owned(),
+            item_qname: "{http://v8.1c.ru/8.1/data/core}Value".to_owned(),
+            item_xsi_type: "FormChoiceListDesTimeValue".to_owned(),
+            item_order: vec![
+                FormChoiceParameterValuePart::Presentation,
+                FormChoiceParameterValuePart::Value,
+            ],
+        },
+    }
+}
+
+impl FormChoiceParametersWriterEvidence {
+    pub fn parse(json: &str) -> Result<Self, SchemaError> {
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    pub fn validate(&self) -> Result<(), SchemaError> {
+        let invalid = |reason: &str| {
+            SchemaError::InvalidFormChoiceParametersWriterEvidence(reason.to_owned())
+        };
+        if self.schema_version != 1
+            || self.source.product != "1C:EDT"
+            || self.source.release != "2025.2.3+30"
+            || self.source.root_identity.leaf != "1c-edt-2025.2.3+30-x86_64"
+            || self.source.root_identity.product_version != "2025.2.3"
+            || self.source.root_identity.build_id != "2025.2.3.30"
+        {
+            return Err(invalid("exact release identity differs"));
+        }
+        let expected_bundles = [
+            ("com._1c.g5.v8.dt.export.xml", "13.0.100.v202602241426"),
+            ("com._1c.g5.v8.dt.form.export.xml", "10.1.0.v202602241426"),
+            ("com._1c.g5.v8.dt.form.model", "14.0.0.v202602241426"),
+            ("com._1c.g5.v8.dt.mcore", "8.6.0.v202602241426"),
+        ];
+        let actual_bundles = self
+            .source
+            .validated_bundles
+            .iter()
+            .map(|bundle| (bundle.symbolic_name.as_str(), bundle.version.as_str()))
+            .collect::<Vec<_>>();
+        if actual_bundles != expected_bundles {
+            return Err(invalid("validated bundle set differs"));
+        }
+        if self.source.derivation.trim().is_empty()
+            || self.source.invocation
+                != "tools/report-edt-form-choice-parameters-writer-evidence.ps1"
+            || self.scope.disposition != "production-emission-evidence"
+            || !self.scope.production_emission
+            || !self.missing_keys.is_empty()
+        {
+            return Err(invalid("production evidence envelope differs"));
+        }
+        let fixture_sha256 = format!(
+            "{:x}",
+            Sha256::digest(BUNDLED_FORM_CHOICE_PARAMETERS_LIVE_FIXTURE_JSON.as_bytes())
+        );
+        if self.verified_facts.live_slot27.fixture_sha256 != fixture_sha256 {
+            return Err(invalid(
+                "committed live fixture bytes do not match the bound SHA-256",
+            ));
+        }
+        let facts = &self.verified_facts;
+        if facts.model.model_type != "InputFieldExtInfo"
+            || facts.model.feature != "choiceParameters"
+            || facts.model.lower_bound != 0
+            || facts.model.upper_bound != -1
+            || facts.owner_order.feature_qname != facts.model.owner_qname
+            || facts.writer.delegate != "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter"
+            || facts.live_slot27.fixture != "tests/fixtures/form_choice_parameters_slot27_live.json"
+            || facts.live_slot27.fixture_sha256
+                != "05e4ef14ae7e3de0b2cc7d1b46e042be6ec70df629c57355036c5c7e58148bf7"
+            || facts.live_slot27.raw_row != "34accda9-6211-4bc3-be8d-e42a24260653.0"
+            || facts.live_slot27.raw_source
+                != "candidate_dump/Config_inflated/34accda9-6211-4bc3-be8d-e42a24260653.0__part0.txt"
+            || facts.live_slot27.raw_source_sha256
+                != "77a99cffaa0b5c81ccccafa3a5fa01dec56342b49d1cce2e56f97f28b62785b1"
+            || facts.live_slot27.raw_slot != 27
+            || facts.live_slot27.native_source
+                != "DataProcessors/УправлениеПродажамиНаOzon/Forms/НастройкиИнтеграции/Ext/Form.xml"
+            || facts.live_slot27.native_source_sha256
+                != "30cf0689522d6b74408da77426a178df282361f36d3787c0cfaf456c85cb8b03"
+            || facts.live_slot27.item_names_in_order
+                != [
+                    "Отбор.Статус",
+                    "Отбор.ХозяйственнаяОперация",
+                    "Отбор.ПометкаУдаления",
+                ]
+            || facts.live_slot27.value_kinds_in_order != ["U", "FixedArray", "B"]
+        {
+            return Err(invalid(
+                "verified model, writer, or live slot-27 facts differ",
+            ));
+        }
+        let expected = exact_form_choice_parameters_policy();
+        let WriterPolicy::FormChoiceParameters {
+            owner_qname,
+            owner_predecessor_qname,
+            owner_successor_qname,
+            empty_collection,
+            item,
+            fixed_array,
+        } = expected
+        else {
+            unreachable!()
+        };
+        if facts.model.owner_qname != owner_qname
+            || facts.owner_order.predecessor_qname != owner_predecessor_qname
+            || facts.owner_order.successor_qname != owner_successor_qname
+            || facts.writer.empty_collection != empty_collection
+            || facts.writer.item != item
+            || facts.writer.fixed_array != fixed_array
+        {
+            return Err(invalid(
+                "verified QName, hierarchy, order, or fixed-array facts differ",
+            ));
+        }
+        Ok(())
+    }
+
+    fn policy(&self) -> WriterPolicy {
+        WriterPolicy::FormChoiceParameters {
+            owner_qname: self.verified_facts.model.owner_qname.clone(),
+            owner_predecessor_qname: self.verified_facts.owner_order.predecessor_qname.clone(),
+            owner_successor_qname: self.verified_facts.owner_order.successor_qname.clone(),
+            empty_collection: self.verified_facts.writer.empty_collection,
+            item: self.verified_facts.writer.item.clone(),
+            fixed_array: self.verified_facts.writer.fixed_array.clone(),
+        }
+    }
+}
+
+pub fn bind_form_choice_parameters_writer_evidence(
+    json: &str,
+    corpus: &WriterRuleCorpus,
+) -> Result<(), SchemaError> {
+    let evidence = FormChoiceParametersWriterEvidence::parse(json)?;
+    let rule = corpus
+        .rules
+        .iter()
+        .find(|rule| rule.model_type == "InputFieldExtInfo" && rule.feature == "choiceParameters")
+        .ok_or_else(|| {
+            SchemaError::InvalidFormChoiceParametersWriterEvidence(
+                "matching writer rule is absent".to_owned(),
+            )
+        })?;
+    if rule.id != "form.input-field-ext-info.choice-parameters"
+        || rule.source_class != "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter"
+        || rule.delegate.as_deref()
+            != Some("com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter")
+        || rule.evidence.status != "verified"
+        || rule.policy.as_ref() != Some(&evidence.policy())
+    {
+        return Err(SchemaError::InvalidFormChoiceParametersWriterEvidence(
+            "writer rule and exact evidence are not cross-bound".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 impl WriterRuleCorpus {
     pub fn parse(json: &str) -> Result<Self, SchemaError> {
         let corpus: Self = serde_json::from_str(json)
@@ -1705,6 +2057,21 @@ impl WriterRuleCorpus {
                         if rule.delegate.as_deref() != Some(delegate.as_str()) {
                             return Err(SchemaError::EmptyField(
                                 "form list-settings matching delegate",
+                            ));
+                        }
+                    }
+                    policy @ WriterPolicy::FormChoiceParameters { .. } => {
+                        if policy != &exact_form_choice_parameters_policy()
+                            || rule.id != "form.input-field-ext-info.choice-parameters"
+                            || rule.model_type != "InputFieldExtInfo"
+                            || rule.feature != "choiceParameters"
+                            || rule.source_class
+                                != "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter"
+                            || rule.delegate.as_deref()
+                                != Some("com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter")
+                        {
+                            return Err(SchemaError::InvalidFormChoiceParametersWriterEvidence(
+                                "dedicated writer policy identity or exact facts differ".to_owned(),
                             ));
                         }
                     }
@@ -2269,7 +2636,17 @@ pub fn bundled_metadata_order() -> Result<MetadataOrderCorpus, SchemaError> {
 }
 
 pub fn bundled_writer_rules() -> Result<WriterRuleCorpus, SchemaError> {
-    WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON)
+    let corpus = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON)?;
+    bind_form_choice_parameters_writer_evidence(
+        BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON,
+        &corpus,
+    )?;
+    Ok(corpus)
+}
+
+pub fn bundled_form_choice_parameters_writer_evidence()
+-> Result<FormChoiceParametersWriterEvidence, SchemaError> {
+    FormChoiceParametersWriterEvidence::parse(BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON)
 }
 
 pub fn bundled_dcs_writer_evidence() -> Result<DcsWriterEvidenceCorpus, SchemaError> {
@@ -2601,7 +2978,7 @@ mod tests {
     #[test]
     fn bundled_writer_rules_are_verified_and_queryable() {
         let corpus = bundled_writer_rules().unwrap();
-        assert_eq!(corpus.rules.len(), 3);
+        assert_eq!(corpus.rules.len(), 4);
         let choice = corpus
             .exact_rule(WriterRuleKey {
                 source_release: "2025.2.3+30",
@@ -2637,6 +3014,196 @@ mod tests {
                 delegate: "DcsV8Serializer.writeSettings".to_owned(),
             })
         );
+
+        let choice_parameters = corpus
+            .exact_rule(WriterRuleKey {
+                source_release: "2025.2.3+30",
+                model_type: "InputFieldExtInfo",
+                feature: "choiceParameters",
+            })
+            .unwrap();
+        assert_eq!(
+            choice_parameters.policy,
+            Some(exact_form_choice_parameters_policy())
+        );
+    }
+
+    #[test]
+    fn form_choice_parameters_policy_is_strictly_cross_bound_to_production_evidence() {
+        let evidence =
+            bundled_form_choice_parameters_writer_evidence().expect("strict production evidence");
+        assert!(evidence.scope.production_emission);
+        assert!(evidence.missing_keys.is_empty());
+        let corpus = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON).unwrap();
+        bind_form_choice_parameters_writer_evidence(
+            BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON,
+            &corpus,
+        )
+        .unwrap();
+
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON).unwrap();
+        let mut unknown = raw.clone();
+        unknown["verifiedFacts"]["writer"]["item"]["unexpected"] = serde_json::json!(true);
+        assert!(
+            FormChoiceParametersWriterEvidence::parse(&serde_json::to_string(&unknown).unwrap())
+                .is_err()
+        );
+        let mut missing = raw.clone();
+        missing["missingKeys"] = serde_json::json!(["form.choiceParameters.qname"]);
+        assert!(
+            FormChoiceParametersWriterEvidence::parse(&serde_json::to_string(&missing).unwrap())
+                .is_err()
+        );
+        let mut wrong_successor = raw;
+        wrong_successor["verifiedFacts"]["ownerOrder"]["successorQName"] =
+            serde_json::json!("{http://v8.1c.ru/8.3/xcf/logform}Wrong");
+        assert!(
+            FormChoiceParametersWriterEvidence::parse(
+                &serde_json::to_string(&wrong_successor).unwrap()
+            )
+            .is_err()
+        );
+        for pointer in [
+            "/verifiedFacts/liveSlot27/fixtureSha256",
+            "/verifiedFacts/liveSlot27/rawSourceSha256",
+            "/verifiedFacts/liveSlot27/nativeSourceSha256",
+        ] {
+            let mut wrong_hash: serde_json::Value =
+                serde_json::from_str(BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON).unwrap();
+            *wrong_hash.pointer_mut(pointer).unwrap() = serde_json::json!(
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            );
+            assert!(
+                FormChoiceParametersWriterEvidence::parse(
+                    &serde_json::to_string(&wrong_hash).unwrap()
+                )
+                .is_err(),
+                "evidence mutation {pointer} must fail closed"
+            );
+        }
+
+        let mut wrong_policy = corpus;
+        let rule = wrong_policy
+            .rules
+            .iter_mut()
+            .find(|rule| rule.feature == "choiceParameters")
+            .unwrap();
+        let Some(WriterPolicy::FormChoiceParameters {
+            owner_successor_qname,
+            ..
+        }) = rule.policy.as_mut()
+        else {
+            panic!("dedicated choice-parameters policy");
+        };
+        *owner_successor_qname = "{http://v8.1c.ru/8.3/xcf/logform}Wrong".to_owned();
+        assert!(
+            bind_form_choice_parameters_writer_evidence(
+                BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON,
+                &wrong_policy,
+            )
+            .is_err()
+        );
+
+        let mut missing_policy = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON).unwrap();
+        missing_policy
+            .rules
+            .iter_mut()
+            .find(|rule| rule.feature == "choiceParameters")
+            .unwrap()
+            .policy = None;
+        assert!(
+            bind_form_choice_parameters_writer_evidence(
+                BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON,
+                &missing_policy,
+            )
+            .is_err()
+        );
+
+        let mut unknown_policy_field: serde_json::Value =
+            serde_json::from_str(BUNDLED_WRITER_RULES_JSON).unwrap();
+        let policy = unknown_policy_field["rules"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|rule| rule["feature"] == "choiceParameters")
+            .unwrap()
+            .get_mut("policy")
+            .unwrap();
+        policy["unexpected"] = serde_json::json!(true);
+        assert!(
+            WriterRuleCorpus::parse(&serde_json::to_string(&unknown_policy_field).unwrap())
+                .is_err()
+        );
+
+        let original_rules: serde_json::Value =
+            serde_json::from_str(BUNDLED_WRITER_RULES_JSON).unwrap();
+        let rule_index = original_rules["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|rule| rule["feature"] == "choiceParameters")
+            .unwrap();
+        let policy_mutations = [
+            (
+                "/ownerQName",
+                serde_json::json!("{urn:wrong}ChoiceParameters"),
+            ),
+            (
+                "/ownerPredecessorQName",
+                serde_json::json!("{urn:wrong}ChoiceParameterLinks"),
+            ),
+            (
+                "/ownerSuccessorQName",
+                serde_json::json!("{urn:wrong}AvailableTypes"),
+            ),
+            (
+                "/emptyCollection",
+                serde_json::json!("write-wrapper-when-write-default"),
+            ),
+            ("/item/itemQName", serde_json::json!("{urn:wrong}item")),
+            (
+                "/item/nameAttributeQName",
+                serde_json::json!("{urn:wrong}name"),
+            ),
+            ("/item/valueQName", serde_json::json!("{urn:wrong}value")),
+            ("/item/valueXsiType", serde_json::json!("Wrong")),
+            (
+                "/item/valueOrder",
+                serde_json::json!(["value", "presentation"]),
+            ),
+            (
+                "/item/presentationQName",
+                serde_json::json!("{urn:wrong}Presentation"),
+            ),
+            (
+                "/item/scalarValueQName",
+                serde_json::json!("{urn:wrong}Value"),
+            ),
+            ("/item/booleanXsiType", serde_json::json!("xs:string")),
+            ("/item/designTimeRefXsiType", serde_json::json!("xs:string")),
+            ("/fixedArray/xsiType", serde_json::json!("v8:Array")),
+            (
+                "/fixedArray/itemQName",
+                serde_json::json!("{urn:wrong}Value"),
+            ),
+            ("/fixedArray/itemXsiType", serde_json::json!("Wrong")),
+            (
+                "/fixedArray/itemOrder",
+                serde_json::json!(["value", "presentation"]),
+            ),
+        ];
+        for (relative_pointer, replacement) in policy_mutations {
+            let mut mutated = original_rules.clone();
+            let pointer = format!("/rules/{rule_index}/policy{relative_pointer}");
+            *mutated
+                .pointer_mut(&pointer)
+                .unwrap_or_else(|| panic!("policy mutation pointer {pointer}")) = replacement;
+            assert!(
+                WriterRuleCorpus::parse(&serde_json::to_string(&mutated).unwrap()).is_err(),
+                "policy mutation {relative_pointer} must fail closed"
+            );
+        }
     }
 
     #[test]

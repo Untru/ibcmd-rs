@@ -54,7 +54,9 @@ Describe "Parity protocol scripts" {
         ($source -match "native_ibcmd_sha256") | Should Be $true
         ($source -match "candidate_sha256") | Should Be $true
         ($source -match 'release_eligible = \$false') | Should Be $true
+        ($source -match 'RequireCompleteSourceAssets') | Should Be $true
         ($source -match '(?s)\$RequireCompleteRootMetadata.*\$matrixManifest.parity_zero') | Should Be $true
+        ($source -match '(?s)child_compatibility\.source_assets_complete.*?\$matrixManifest\.parity_zero') | Should Be $true
     }
 
     It "hashes every executable and keeps SQL passwords out of process arguments" {
@@ -76,6 +78,8 @@ Describe "Parity protocol scripts" {
         ($source -match 'MatrixMerge = "source-diff-matrix-merge"') | Should Be $true
         ($source -match "Invoke-ParityStep -Name 'parity-matrix'") | Should Be $true
         ($source -match "'--require-complete-root-metadata'") | Should Be $true
+        ($source -match "'--require-complete-source-assets'") | Should Be $true
+        ((Get-Content -Raw $matrix) -match '\$params\.RequireCompleteSourceAssets = \$true') | Should Be $true
         ($source -match 'summary=\$summary') | Should Be $false
     }
 
@@ -716,14 +720,19 @@ if ($command -eq 'mssql-dump-config') {
             started_unix_ms=5; ended_unix_ms=6; status='passed'; exit_code=0; timed_out=$false; exception=$null
         }
     )
-    [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ([ordered]@{database='test';tables=@();subprocess_journal=$journal} | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+    $sourceAssets = [ordered]@{
+        schema_version=1; scope='full'; status='complete'; candidate_set_complete=$true
+        expected=0; emitted=0; opaque=0; missing=0; opaque_property_count=0
+        reasons=[ordered]@{}; affected_assets=@()
+    }
+    [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ([ordered]@{server=(Get-Option '--server');database=(Get-Option '--database');source_assets=$sourceAssets;tables=@();subprocess_journal=$journal} | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Get-Option '--runtime-journal'), ([ordered]@{protocol_version=1;status='passed';server=(Get-Option '--server');database=(Get-Option '--database');started_unix_ms=3;ended_unix_ms=6;exception=$null;calls=$journal} | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
     Write-Output '{"candidate":"passed"}'
     $global:LASTEXITCODE=0
     return
 }
 if ($command -eq 'source-diff') {
-    [IO.File]::WriteAllText((Get-Option '-o'), '{"differences":[]}', [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Get-Option '-o'), '{"summary":{"left_only":0,"right_only":0,"different":0,"unchanged":1},"differences":[]}', [Text.UTF8Encoding]::new($false))
 } elseif ($command -eq 'source-diff-signatures') {
     [IO.File]::WriteAllText((Get-Option '-o'), '{}', [Text.UTF8Encoding]::new($false))
 } elseif ($command -eq 'source-diff-matrix') {
@@ -932,7 +941,7 @@ $global:LASTEXITCODE=0
     It "validates complete child evidence and blocks every release identity mismatch before merge" {
         $tokens = $null; $errors = $null
         $ast = [Management.Automation.Language.Parser]::ParseFile($matrix, [ref]$tokens, [ref]$errors)
-        foreach ($name in @('Get-FileSha256', 'ConvertFrom-WindowsExtendedLengthPath', 'Get-NormalizedExecutablePath', 'Assert-NoReparsePointComponent', 'Read-ValidChildManifest', 'Assert-CompatibleChildManifests')) {
+        foreach ($name in @('Get-FileSha256', 'ConvertFrom-WindowsExtendedLengthPath', 'Get-NormalizedExecutablePath', 'Assert-NoReparsePointComponent', 'Test-NonNegativeBoundedInteger', 'Read-ValidChildManifest', 'Assert-CompatibleChildManifests')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -945,12 +954,37 @@ $global:LASTEXITCODE=0
             New-Item -ItemType Directory -Path (Join-Path $Root 'logs'), (Join-Path $Root 'candidate_dump') -Force | Out-Null
             $nativeReport = Join-Path $Root 'logs\native-runtime.json'
             $candidateManifest = Join-Path $Root 'logs\candidate-runtime.json'
+            $candidateDumpManifest = Join-Path $Root 'candidate_dump\manifest.json'
+            $rawDiffArtifact = Join-Path $Root 'raw-diff.json'
             $matrixArtifact = Join-Path $Root 'matrix.json'
             '{"protocol_version":1,"runtime_call":{"status":"passed"}}' | Set-Content -LiteralPath $nativeReport -Encoding UTF8
             '{"protocol_version":1,"status":"passed","calls":[{"status":"passed"}]}' | Set-Content -LiteralPath $candidateManifest -Encoding UTF8
-            '{"matrix":"valid"}' | Set-Content -LiteralPath $matrixArtifact -Encoding UTF8
+            $rawSummary = [ordered]@{ left_only=0; right_only=0; different=0; unchanged=1 }
+            [ordered]@{
+                left_root='native'; right_root='candidate'; summary=$rawSummary
+                differences=@([ordered]@{ status='unchanged'; path='same.xml' })
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $rawDiffArtifact -Encoding UTF8
+            [ordered]@{
+                schema_version=1
+                runs=@([ordered]@{
+                    database=$DatabaseName; run_id='fixture-run'; git_sha=('a' * 40)
+                    full=($Scope -eq 'full'); left_root='native'; right_root='candidate'
+                    raw_summary=$rawSummary
+                })
+                rows=@(); aggregates=@()
+            } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $matrixArtifact -Encoding UTF8
+            $sourceAssets = [ordered]@{
+                schema_version=1; scope=$Scope; status='complete'; candidate_set_complete=$true
+                expected=1; emitted=1; opaque=0; missing=0; opaque_property_count=0
+                reasons=[ordered]@{}; affected_assets=@()
+            }
+            [ordered]@{ server=$Server; database=$DatabaseName; source_assets=$sourceAssets; tables=@(); subprocess_journal=@() } |
+                ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $candidateDumpManifest -Encoding UTF8
             $manifest = [ordered]@{
-                protocol_version=2; status='passed'; scope=$Scope; finished_utc='2026-07-25T00:00:00Z'
+                protocol_version=3; status='passed'; scope=$Scope; finished_utc='2026-07-25T00:00:00Z'
+                run_id='fixture-run'
+                result_class=if ($Scope -eq 'full') { 'release' } else { 'diagnostic' }
+                release_eligible=($Scope -eq 'full')
                 git_sha=('a' * 40); xml_version='2.20'; source_version='2.20'
                 database=[ordered]@{ name=$DatabaseName; server=$Server }
                 repository=[ordered]@{ status=if ($Scope -eq 'full') { 'clean' } else { 'dirty' } }
@@ -978,8 +1012,20 @@ $global:LASTEXITCODE=0
                     native_report='logs/native-runtime.json'; native_report_sha256=(Get-FileSha256 $nativeReport)
                     candidate_manifest='logs/candidate-runtime.json'; candidate_manifest_sha256=(Get-FileSha256 $candidateManifest)
                 }
-                artifacts=[ordered]@{ matrix='matrix.json' }
-                artifact_sha256=[ordered]@{ matrix=(Get-FileSha256 $matrixArtifact) }
+                source_assets=[ordered]@{
+                    evidence_manifest='candidate_dump/manifest.json'
+                    evidence_manifest_sha256=(Get-FileSha256 $candidateDumpManifest)
+                    report=$sourceAssets
+                    complete=($Scope -eq 'full')
+                }
+                source_asset_gate=[ordered]@{ requested=($Scope -eq 'full'); passed=($Scope -eq 'full') }
+                raw_parity=[ordered]@{ different=0; left_only=0; right_only=0; zero=$true }
+                artifacts=[ordered]@{ matrix='matrix.json'; raw_diff='raw-diff.json'; candidate_dump_manifest='candidate_dump/manifest.json' }
+                artifact_sha256=[ordered]@{
+                    matrix=(Get-FileSha256 $matrixArtifact)
+                    raw_diff=(Get-FileSha256 $rawDiffArtifact)
+                    candidate_dump_manifest=(Get-FileSha256 $candidateDumpManifest)
+                }
             }
             $path = Join-Path $Root 'parity-manifest.json'
             $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $path -Encoding UTF8
@@ -993,6 +1039,125 @@ $global:LASTEXITCODE=0
         $full.status | Should Be 'passed'
         $scoped.status | Should Be 'passed'
 
+        $partialRoot = Join-Path $TestDrive 'valid-partial-child'
+        $partialPath = New-ChildEvidence -Root $partialRoot -Scope full -DatabaseName partial
+        $partialManifest = Get-Content -Raw -LiteralPath $partialPath | ConvertFrom-Json
+        $partialReport = $partialManifest.source_assets.report
+        $partialReport.status = 'partial'
+        $partialReport.emitted = 0
+        $partialReport.opaque = 1
+        $partialReport.opaque_property_count = 1
+        $partialReport.reasons = [ordered]@{ 'source_asset.form.choice_parameters.opaque_omitted'=1 }
+        $partialManifest.source_assets.complete = $false
+        $partialManifest.source_asset_gate.passed = $false
+        $partialManifest.result_class = 'diagnostic'
+        $partialManifest.release_eligible = $false
+        $partialDumpPath = Join-Path $partialRoot 'candidate_dump\manifest.json'
+        $partialDump = Get-Content -Raw -LiteralPath $partialDumpPath | ConvertFrom-Json
+        $partialDump.source_assets = $partialReport
+        $partialDump | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $partialDumpPath -Encoding UTF8
+        $partialHash = Get-FileSha256 $partialDumpPath
+        $partialManifest.source_assets.evidence_manifest_sha256 = $partialHash
+        $partialManifest.artifact_sha256.candidate_dump_manifest = $partialHash
+        $partialManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $partialPath -Encoding UTF8
+        $validatedPartial = Read-ValidChildManifest -Path $partialPath -ExpectedScope full -ExpectedCandidatePath $fakeCli -ExpectedSourceVersion '2.20' -ExpectedServer localhost -ExpectedDatabase partial
+        $validatedPartial.source_assets.complete | Should Be $false
+        $validatedPartial.release_eligible | Should Be $false
+
+        $nonzeroPath = New-ChildEvidence -Root (Join-Path $TestDrive 'valid-nonzero-child') -Scope full -DatabaseName nonzero
+        $nonzeroManifest = Get-Content -Raw -LiteralPath $nonzeroPath | ConvertFrom-Json
+        $nonzeroManifest.raw_parity.different = 1
+        $nonzeroManifest.raw_parity.zero = $false
+        $nonzeroManifest.result_class = 'diagnostic'
+        $nonzeroManifest.release_eligible = $false
+        $nonzeroRoot = Split-Path -Parent $nonzeroPath
+        $nonzeroRawPath = Join-Path $nonzeroRoot 'raw-diff.json'
+        $nonzeroRaw = Get-Content -Raw -LiteralPath $nonzeroRawPath | ConvertFrom-Json
+        $nonzeroRaw.summary.different = 1
+        $nonzeroRaw.summary.unchanged = 0
+        $nonzeroRaw.differences[0].status = 'different'
+        $nonzeroRaw | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $nonzeroRawPath -Encoding UTF8
+        $nonzeroManifest.artifact_sha256.raw_diff = Get-FileSha256 $nonzeroRawPath
+        $nonzeroMatrixPath = Join-Path $nonzeroRoot 'matrix.json'
+        $nonzeroMatrix = Get-Content -Raw -LiteralPath $nonzeroMatrixPath | ConvertFrom-Json
+        $nonzeroMatrix.runs[0].raw_summary.different = 1
+        $nonzeroMatrix.runs[0].raw_summary.unchanged = 0
+        $nonzeroMatrix | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $nonzeroMatrixPath -Encoding UTF8
+        $nonzeroManifest.artifact_sha256.matrix = Get-FileSha256 $nonzeroMatrixPath
+        $nonzeroManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $nonzeroPath -Encoding UTF8
+        $validatedNonzero = Read-ValidChildManifest -Path $nonzeroPath -ExpectedScope full -ExpectedCandidatePath $fakeCli -ExpectedSourceVersion '2.20' -ExpectedServer localhost -ExpectedDatabase nonzero
+        $validatedNonzero.source_assets.complete | Should Be $true
+        $validatedNonzero.raw_parity.zero | Should Be $false
+        $validatedNonzero.release_eligible | Should Be $false
+
+        foreach ($invalidExpected in @(-1, '1')) {
+            $invalidCountPath = New-ChildEvidence -Root (Join-Path $TestDrive ("invalid-source-count-" + [guid]::NewGuid().ToString('N'))) -Scope full -DatabaseName invalid_source_count
+            $invalidCount = Get-Content -Raw -LiteralPath $invalidCountPath | ConvertFrom-Json
+            $invalidCount.source_assets.report.expected = $invalidExpected
+            $invalidCount | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $invalidCountPath -Encoding UTF8
+            $invalidCountBlocked = $false
+            try { $null = Read-ValidChildManifest -Path $invalidCountPath -ExpectedScope full -ExpectedCandidatePath $fakeCli -ExpectedSourceVersion '2.20' -ExpectedServer localhost -ExpectedDatabase invalid_source_count }
+            catch { $invalidCountBlocked = $true }
+            $invalidCountBlocked | Should Be $true
+        }
+
+        $rawMismatchPath = New-ChildEvidence -Root (Join-Path $TestDrive 'raw-parity-mismatch-child') -Scope full -DatabaseName raw_mismatch
+        $rawMismatch = Get-Content -Raw -LiteralPath $rawMismatchPath | ConvertFrom-Json
+        $rawMismatch.raw_parity.different = 1
+        $rawMismatch.raw_parity.zero = $false
+        $rawMismatch.result_class = 'diagnostic'
+        $rawMismatch.release_eligible = $false
+        $rawMismatch | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $rawMismatchPath -Encoding UTF8
+        $rawMismatchBlocked = $false
+        try { $null = Read-ValidChildManifest -Path $rawMismatchPath -ExpectedScope full -ExpectedCandidatePath $fakeCli -ExpectedSourceVersion '2.20' -ExpectedServer localhost -ExpectedDatabase raw_mismatch }
+        catch { $rawMismatchBlocked = $true }
+        $rawMismatchBlocked | Should Be $true
+
+        $rawHashPath = New-ChildEvidence -Root (Join-Path $TestDrive 'raw-hash-mutation-child') -Scope full -DatabaseName raw_hash
+        $rawHashArtifact = Join-Path (Split-Path -Parent $rawHashPath) 'raw-diff.json'
+        $rawHash = Get-Content -Raw -LiteralPath $rawHashArtifact | ConvertFrom-Json
+        $rawHash.left_root = 'tampered-native'
+        $rawHash | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $rawHashArtifact -Encoding UTF8
+        $rawHashBlocked = $false
+        try { $null = Read-ValidChildManifest -Path $rawHashPath -ExpectedScope full -ExpectedCandidatePath $fakeCli -ExpectedSourceVersion '2.20' -ExpectedServer localhost -ExpectedDatabase raw_hash }
+        catch { $rawHashBlocked = $true }
+        $rawHashBlocked | Should Be $true
+
+        foreach ($identityMutation in @(
+            [ordered]@{ property='database'; value='OTHER'; label='candidate-db' },
+            [ordered]@{ property='database'; value=$null; label='candidate-db-missing' },
+            [ordered]@{ property='server'; value='LOCALHOST'; label='candidate-server' },
+            [ordered]@{ property='server'; value=$null; label='candidate-server-missing' }
+        )) {
+            $identityPath = New-ChildEvidence -Root (Join-Path $TestDrive ($identityMutation.label + '-' + [guid]::NewGuid().ToString('N'))) -Scope full -DatabaseName identity
+            $identityManifest = Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json
+            $identityDumpPath = Join-Path (Split-Path -Parent $identityPath) 'candidate_dump\manifest.json'
+            $identityDump = Get-Content -Raw -LiteralPath $identityDumpPath | ConvertFrom-Json
+            if ($null -eq $identityMutation.value) {
+                $identityDump.PSObject.Properties.Remove($identityMutation.property)
+            } else {
+                $identityDump.($identityMutation.property) = $identityMutation.value
+            }
+            $identityDump | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $identityDumpPath -Encoding UTF8
+            $identityHash = Get-FileSha256 $identityDumpPath
+            $identityManifest.source_assets.evidence_manifest_sha256 = $identityHash
+            $identityManifest.artifact_sha256.candidate_dump_manifest = $identityHash
+            $identityManifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $identityPath -Encoding UTF8
+            $identityBlocked = $false
+            try { $null = Read-ValidChildManifest -Path $identityPath -ExpectedScope full -ExpectedCandidatePath $fakeCli -ExpectedSourceVersion '2.20' -ExpectedServer localhost -ExpectedDatabase identity }
+            catch { $identityBlocked = $true }
+            $identityBlocked | Should Be $true
+        }
+
+        $v2Path = New-ChildEvidence -Root (Join-Path $TestDrive 'legacy-v2-child') -Scope full -DatabaseName legacy
+        $v2Manifest = Get-Content -Raw -LiteralPath $v2Path | ConvertFrom-Json
+        $v2Manifest.protocol_version = 2
+        $v2Manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $v2Path -Encoding UTF8
+        $v2Blocked = $false
+        try { $null = Read-ValidChildManifest -Path $v2Path -ExpectedScope full -ExpectedCandidatePath $fakeCli -ExpectedSourceVersion '2.20' -ExpectedServer localhost -ExpectedDatabase legacy }
+        catch { $v2Blocked = $true }
+        $v2Blocked | Should Be $true
+
         $base = [ordered]@{
             database='ut'; server=$full.database.server; git_sha=$full.git_sha; xml_version=$full.xml_version; source_version=$full.source_version
             candidate_path=$full.tools.candidate.path; candidate_version=$full.tools.candidate.version
@@ -1000,6 +1165,9 @@ $global:LASTEXITCODE=0
             native_ibcmd_path=$full.tools.native_ibcmd.path; native_ibcmd_sha256=$full.tools.native_ibcmd.sha256
             sqlcmd_path=$full.tools.sqlcmd.path; sqlcmd_version=$full.tools.sqlcmd.version; sqlcmd_sha256=$full.tools.sqlcmd.sha256
             bcp_path=$full.tools.bcp.path; bcp_version=$full.tools.bcp.version; bcp_sha256=$full.tools.bcp.sha256
+            source_assets_complete=$true
+            source_asset_gate_requested=$true; source_asset_gate_passed=$true
+            raw_parity_zero=$true; result_class='release'; release_eligible=$true
         }
         $peer = [ordered]@{}
         foreach ($key in $base.Keys) { $peer[$key] = $base[$key] }
@@ -1007,6 +1175,22 @@ $global:LASTEXITCODE=0
         $proof = Assert-CompatibleChildManifests -Children @($base, $peer) -ExpectedScope full
         $proof.release_proof | Should Be $true
         (Assert-CompatibleChildManifests -Children @($base, $peer) -ExpectedScope scoped).release_proof | Should Be $false
+        $partialPeer = [ordered]@{}
+        foreach ($key in $peer.Keys) { $partialPeer[$key] = $peer[$key] }
+        $partialPeer.source_assets_complete = $false
+        $partialPeer.source_asset_gate_passed = $false
+        $partialPeer.result_class = 'diagnostic'
+        $partialPeer.release_eligible = $false
+        $partialProof = Assert-CompatibleChildManifests -Children @($base, $partialPeer) -ExpectedScope full
+        $partialProof.status | Should Be 'passed'
+        $partialProof.release_proof | Should Be $false
+        $partialProof.source_assets_complete | Should Be $false
+        $nonzeroPeer = [ordered]@{}
+        foreach ($key in $peer.Keys) { $nonzeroPeer[$key] = $peer[$key] }
+        $nonzeroPeer.raw_parity_zero = $false
+        $nonzeroPeer.result_class = 'diagnostic'
+        $nonzeroPeer.release_eligible = $false
+        (Assert-CompatibleChildManifests -Children @($base, $nonzeroPeer) -ExpectedScope full).release_proof | Should Be $false
         $sameDatabasePeer = [ordered]@{}
         foreach ($key in $peer.Keys) { $sameDatabasePeer[$key] = $peer[$key] }
         $sameDatabasePeer.database = ' UT '

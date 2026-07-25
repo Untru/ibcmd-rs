@@ -229,6 +229,8 @@ pub struct MssqlDumpConfigReport {
     pub total_module_text_rows: usize,
     pub total_metadata_xml_rows: usize,
     pub total_source_asset_rows: usize,
+    #[serde(default)]
+    pub source_assets: SourceAssetCompletenessReport,
     pub timings: MssqlDumpTimingReport,
 }
 
@@ -242,8 +244,236 @@ pub struct MssqlDumpedTableReport {
     pub metadata_xml_rows: usize,
     pub source_asset_rows: usize,
     #[serde(default)]
+    pub source_assets: SourceAssetCompletenessReport,
+    #[serde(default)]
     pub metadata_root_inventory: RootMetadataInventoryReport,
     pub timings: MssqlDumpTimingReport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceAssetCompletenessStatus {
+    Unknown,
+    Complete,
+    Partial,
+}
+
+impl Default for SourceAssetCompletenessStatus {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceAssetCompletenessScope {
+    Full,
+    Scoped,
+}
+
+impl Default for SourceAssetCompletenessScope {
+    fn default() -> Self {
+        Self::Scoped
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceAssetCompletenessEntry {
+    pub code: String,
+    pub classification: String,
+    pub table: String,
+    pub source_row_id: String,
+    pub asset_path: String,
+    pub form_owner_reference: Option<String>,
+    pub form_item_id: String,
+    pub form_item_tag: String,
+    pub property: String,
+    pub property_profile: String,
+    pub property_slot: usize,
+    pub raw_length: usize,
+    pub raw_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceAssetCompletenessReport {
+    pub schema_version: u32,
+    pub scope: SourceAssetCompletenessScope,
+    pub status: SourceAssetCompletenessStatus,
+    pub candidate_set_complete: bool,
+    pub expected: usize,
+    pub emitted: usize,
+    pub opaque: usize,
+    pub missing: usize,
+    pub opaque_property_count: usize,
+    pub reasons: BTreeMap<String, usize>,
+    pub affected_assets: Vec<SourceAssetCompletenessEntry>,
+}
+
+impl Default for SourceAssetCompletenessReport {
+    fn default() -> Self {
+        Self {
+            schema_version: 1,
+            scope: SourceAssetCompletenessScope::Scoped,
+            status: SourceAssetCompletenessStatus::Unknown,
+            candidate_set_complete: false,
+            expected: 0,
+            emitted: 0,
+            opaque: 0,
+            missing: 0,
+            opaque_property_count: 0,
+            reasons: BTreeMap::new(),
+            affected_assets: Vec::new(),
+        }
+    }
+}
+
+impl SourceAssetCompletenessReport {
+    fn record_emitted(&mut self) {
+        self.emitted += 1;
+    }
+
+    fn record_opaque(&mut self, entries: Vec<SourceAssetCompletenessEntry>) {
+        self.opaque += 1;
+        self.opaque_property_count += entries.len();
+        for entry in entries {
+            *self.reasons.entry(entry.code.clone()).or_default() += 1;
+            self.affected_assets.push(entry);
+        }
+    }
+
+    fn merge(&mut self, other: &Self) {
+        self.schema_version = self.schema_version.max(other.schema_version);
+        self.scope = if self.scope == SourceAssetCompletenessScope::Full
+            && other.scope == SourceAssetCompletenessScope::Full
+        {
+            SourceAssetCompletenessScope::Full
+        } else {
+            SourceAssetCompletenessScope::Scoped
+        };
+        self.candidate_set_complete &= other.candidate_set_complete;
+        self.expected += other.expected;
+        self.emitted += other.emitted;
+        self.opaque += other.opaque;
+        self.missing += other.missing;
+        self.opaque_property_count += other.opaque_property_count;
+        for (reason, count) in &other.reasons {
+            *self.reasons.entry(reason.clone()).or_default() += count;
+        }
+        self.affected_assets
+            .extend(other.affected_assets.iter().cloned());
+        self.finish_counts();
+    }
+
+    fn finish_inventory(
+        &mut self,
+        scope: SourceAssetCompletenessScope,
+        candidate_set_complete: bool,
+        expected: usize,
+    ) {
+        self.scope = scope;
+        self.candidate_set_complete = candidate_set_complete;
+        self.expected = expected.max(self.emitted + self.opaque);
+        self.missing = self.expected.saturating_sub(self.emitted + self.opaque);
+        self.finish_counts();
+    }
+
+    fn record_affected_reason(&mut self, entry: SourceAssetCompletenessEntry) {
+        *self.reasons.entry(entry.code.clone()).or_default() += 1;
+        self.affected_assets.push(entry);
+    }
+
+    fn finish_counts(&mut self) {
+        self.status = if !self.candidate_set_complete {
+            SourceAssetCompletenessStatus::Unknown
+        } else if self.opaque == 0 && self.missing == 0 {
+            SourceAssetCompletenessStatus::Complete
+        } else {
+            SourceAssetCompletenessStatus::Partial
+        };
+        self.affected_assets.sort_by(|left, right| {
+            (
+                left.asset_path.as_str(),
+                left.source_row_id.as_str(),
+                left.form_item_id.as_str(),
+                left.property_slot,
+                left.raw_sha256.as_str(),
+            )
+                .cmp(&(
+                    right.asset_path.as_str(),
+                    right.source_row_id.as_str(),
+                    right.form_item_id.as_str(),
+                    right.property_slot,
+                    right.raw_sha256.as_str(),
+                ))
+        });
+    }
+
+    pub fn ensure_complete(&self, required: bool) -> Result<()> {
+        if !required || self.status == SourceAssetCompletenessStatus::Complete {
+            if !required || self.scope == SourceAssetCompletenessScope::Full {
+                return Ok(());
+            }
+            bail!("source asset completeness proof is scoped, not full");
+        }
+        if !self.candidate_set_complete {
+            bail!("source asset candidate set is incomplete");
+        }
+        let first = self
+            .affected_assets
+            .first()
+            .map(|entry| {
+                format!(
+                    "{} (row={}, item={}, slot={}, sha256={})",
+                    entry.asset_path,
+                    entry.source_row_id,
+                    entry.form_item_id,
+                    entry.property_slot,
+                    entry.raw_sha256
+                )
+            })
+            .unwrap_or_else(|| "<unknown>".to_string());
+        bail!(
+            "source asset extraction is partial: {} opaque properties; first affected {first}",
+            self.opaque
+        );
+    }
+}
+
+fn source_asset_audit_entry(
+    table: &str,
+    source_row_id: &str,
+    asset: Option<&SourceAsset>,
+    code: String,
+    classification: &str,
+) -> SourceAssetCompletenessEntry {
+    let (asset_path, form_owner_reference) = asset.map_or_else(
+        || (String::new(), None),
+        |asset| {
+            let owner = match &asset.kind {
+                SourceAssetKind::Form { owner_reference } => owner_reference.clone(),
+                _ => None,
+            };
+            (
+                asset.primary_path.to_string_lossy().replace('\\', "/"),
+                owner,
+            )
+        },
+    );
+    SourceAssetCompletenessEntry {
+        code,
+        classification: classification.to_string(),
+        table: table.to_string(),
+        source_row_id: source_row_id.to_string(),
+        asset_path,
+        form_owner_reference,
+        form_item_id: String::new(),
+        form_item_tag: String::new(),
+        property: String::new(),
+        property_profile: String::new(),
+        property_slot: 0,
+        raw_length: 0,
+        raw_sha256: String::new(),
+    }
 }
 
 /// Scope of a root-metadata inventory. A scoped export is informative only;
@@ -434,19 +664,23 @@ pub struct StorageImageSourceExportReport {
 
 #[derive(Debug, Serialize)]
 struct MssqlDumpManifest {
+    server: String,
     database: String,
+    source_assets: SourceAssetCompletenessReport,
     tables: Vec<MssqlDumpTableManifest>,
     subprocess_journal: Vec<SanitizedSubprocessCall>,
 }
 
 #[cfg(test)]
 mod subprocess_manifest_tests {
-    use super::{MssqlDumpManifest, SanitizedSubprocessCall};
+    use super::{MssqlDumpManifest, SanitizedSubprocessCall, SourceAssetCompletenessReport};
 
     #[test]
     fn manifest_serializes_sanitized_subprocess_journal() {
         let manifest = MssqlDumpManifest {
+            server: "localhost".to_owned(),
             database: "test".to_owned(),
+            source_assets: SourceAssetCompletenessReport::default(),
             tables: Vec::new(),
             subprocess_journal: vec![SanitizedSubprocessCall {
                 executable: "sqlcmd".to_owned(),
@@ -476,6 +710,7 @@ mod subprocess_manifest_tests {
 #[derive(Debug, Serialize)]
 struct MssqlDumpTableManifest {
     table: String,
+    source_assets: SourceAssetCompletenessReport,
     rows: Vec<MssqlDumpRowManifest>,
 }
 
@@ -537,6 +772,12 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
         args.extract_metadata_xml,
         &selected_file_names,
     )?;
+    validate_source_asset_gate_options(
+        args.require_complete_source_assets,
+        args.extract_metadata_xml,
+        args.no_binary_rows,
+        &selected_file_names,
+    )?;
     prepare_output_dir(&args.output_dir, args.overwrite)?;
 
     let mut table_names = vec!["Config"];
@@ -585,6 +826,7 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             module_text_rows: dumped.module_text_rows,
             metadata_xml_rows: dumped.metadata_xml_rows,
             source_asset_rows: dumped.source_asset_rows,
+            source_assets: dumped.source_assets.clone(),
             metadata_root_inventory: dumped.metadata_root_inventory.clone(),
             timings: dumped.timings.clone(),
         });
@@ -592,15 +834,25 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
         if args.write_manifest {
             manifest_tables.push(MssqlDumpTableManifest {
                 table: table.to_string(),
+                source_assets: dumped.source_assets,
                 rows: dumped.rows,
             });
         }
     }
     let subprocess_journal = current_subprocess_calls();
+    let mut source_assets = reports
+        .first()
+        .map(|report| report.source_assets.clone())
+        .unwrap_or_default();
+    for report in reports.iter().skip(1) {
+        source_assets.merge(&report.source_assets);
+    }
 
     if args.write_manifest {
         let manifest = MssqlDumpManifest {
+            server: args.server.clone(),
             database: args.database.clone(),
+            source_assets: source_assets.clone(),
             tables: manifest_tables,
             subprocess_journal,
         };
@@ -612,6 +864,9 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             )
         })?;
     }
+    source_assets
+        .ensure_complete(args.require_complete_source_assets)
+        .context("strict full source asset check failed")?;
 
     Ok(MssqlDumpConfigReport {
         database: args.database.clone(),
@@ -622,9 +877,31 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
         total_module_text_rows: reports.iter().map(|table| table.module_text_rows).sum(),
         total_metadata_xml_rows: reports.iter().map(|table| table.metadata_xml_rows).sum(),
         total_source_asset_rows: reports.iter().map(|table| table.source_asset_rows).sum(),
+        source_assets,
         timings: total_timings,
         tables: reports,
     })
+}
+
+fn validate_source_asset_gate_options(
+    require_complete_source_assets: bool,
+    extract_metadata_xml: bool,
+    no_binary_rows: bool,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<()> {
+    if !require_complete_source_assets {
+        return Ok(());
+    }
+    if !extract_metadata_xml {
+        bail!("--require-complete-source-assets requires --extract-metadata-xml");
+    }
+    if !no_binary_rows {
+        bail!("--require-complete-source-assets requires --no-binary-rows");
+    }
+    if !selected_file_names.is_empty() {
+        bail!("--require-complete-source-assets requires a full Config export");
+    }
+    Ok(())
 }
 
 fn validate_root_metadata_gate_options(
@@ -824,6 +1101,7 @@ struct DumpedTable {
     module_text_rows: usize,
     metadata_xml_rows: usize,
     source_asset_rows: usize,
+    source_assets: SourceAssetCompletenessReport,
     metadata_root_inventory: RootMetadataInventoryReport,
     timings: MssqlDumpTimingReport,
 }
@@ -840,6 +1118,7 @@ struct DumpedRow {
     module_text_rows: usize,
     metadata_xml_rows: usize,
     source_asset_rows: usize,
+    source_assets: SourceAssetCompletenessReport,
     timings: MssqlDumpTimingReport,
 }
 
@@ -1118,6 +1397,23 @@ fn dump_table_rows_with_options_mode(
     );
     let source_asset_diagnostics =
         build_form_owner_resolution_diagnostics_from_texts(&metadata_texts);
+    let rows_by_file_name = rows
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let source_asset_discovery_misses = source_asset_discovery_misses(
+        &metadata_texts,
+        &file_names_owned.iter().map(String::as_str).collect(),
+        &rows_by_file_name,
+        &command_refs,
+        &metadata_refs,
+        &object_refs,
+        &field_refs,
+        &type_index,
+        &subsystem_refs,
+        &form_refs,
+        &template_refs,
+    );
     let help_refs = if extract_metadata_xml {
         build_help_reference_index(&object_refs, &form_refs, &template_refs, &subsystem_refs)
     } else {
@@ -1237,6 +1533,7 @@ fn dump_table_rows_with_options_mode(
     let mut module_text_rows = 0;
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
+    let mut source_asset_completeness = SourceAssetCompletenessReport::default();
     let mut failed_rows = Vec::new();
     for (row, dumped) in rows.iter().zip(dumped_rows) {
         let dumped = match dumped {
@@ -1255,8 +1552,50 @@ fn dump_table_rows_with_options_mode(
         module_text_rows += dumped.module_text_rows;
         metadata_xml_rows += dumped.metadata_xml_rows;
         source_asset_rows += dumped.source_asset_rows;
+        source_asset_completeness.merge(&dumped.source_assets);
         manifests.push(dumped.manifest);
     }
+    for (source_row_id, reason) in &source_asset_discovery_misses {
+        source_asset_completeness.record_affected_reason(source_asset_audit_entry(
+            table,
+            source_row_id,
+            source_assets.get(source_row_id),
+            format!("source_asset.discovery.{reason}"),
+            "source_asset_candidate_missing",
+        ));
+    }
+    for (source_row_id, reason) in &metadata_audit.misses {
+        source_asset_completeness.record_affected_reason(source_asset_audit_entry(
+            table,
+            source_row_id,
+            source_assets.get(source_row_id),
+            format!(
+                "source_asset.discovery.metadata_decode_miss.{}",
+                reason.as_str()
+            ),
+            "source_asset_candidate_missing",
+        ));
+    }
+    for source_row_id in source_asset_diagnostics.keys() {
+        source_asset_completeness.record_affected_reason(source_asset_audit_entry(
+            table,
+            source_row_id,
+            source_assets.get(source_row_id),
+            "source_asset.form_owner_resolution.uncertain".to_string(),
+            "source_asset_identity_uncertain",
+        ));
+    }
+    source_asset_completeness.finish_inventory(
+        if inventory_scope == RootMetadataInventoryScope::Full {
+            SourceAssetCompletenessScope::Full
+        } else {
+            SourceAssetCompletenessScope::Scoped
+        },
+        source_asset_discovery_misses.is_empty()
+            && metadata_audit.misses.is_empty()
+            && source_asset_diagnostics.is_empty(),
+        source_assets.len() + source_asset_discovery_misses.len() + metadata_audit.misses.len(),
+    );
 
     let metadata_root_inventory = if extract_metadata_xml {
         let indexed_roots = configuration_root_metadata_file_names_from_texts(&metadata_audit.rows);
@@ -1284,6 +1623,7 @@ fn dump_table_rows_with_options_mode(
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        source_assets: source_asset_completeness,
         metadata_root_inventory,
         timings: MssqlDumpTimingReport::default(),
     })
@@ -1986,6 +2326,23 @@ fn dump_table_rows_streamed(
     );
     let source_asset_diagnostics =
         build_form_owner_resolution_diagnostics_from_texts(source_asset_metadata_texts);
+    let write_rows_by_file_name = write_index_rows
+        .iter()
+        .map(|row| (row.file_name.as_str(), row))
+        .collect::<BTreeMap<_, _>>();
+    let source_asset_discovery_misses = source_asset_discovery_misses(
+        source_asset_metadata_texts,
+        &file_names.iter().map(String::as_str).collect(),
+        &write_rows_by_file_name,
+        &command_refs,
+        &metadata_refs,
+        &object_refs,
+        &field_refs,
+        &type_index,
+        &subsystem_refs,
+        &form_refs,
+        &template_refs,
+    );
     timings.prepare_source_assets_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let help_refs = if extract_metadata_xml
@@ -2158,6 +2515,7 @@ fn dump_table_rows_streamed(
     let mut module_text_rows = 0;
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
+    let mut source_asset_completeness = SourceAssetCompletenessReport::default();
     let mut versions_blob = None;
     let file_name_batches = build_dump_file_name_batches(&headers, &file_names);
     for chunk in file_name_batches {
@@ -2212,10 +2570,59 @@ fn dump_table_rows_streamed(
             module_text_rows += dumped.module_text_rows;
             metadata_xml_rows += dumped.metadata_xml_rows;
             source_asset_rows += dumped.source_asset_rows;
+            source_asset_completeness.merge(&dumped.source_assets);
             timings.add_assign(&dumped.timings);
             manifests.push(dumped.manifest);
         }
     }
+    for (source_row_id, reason) in &source_asset_discovery_misses {
+        source_asset_completeness.record_affected_reason(source_asset_audit_entry(
+            table,
+            source_row_id,
+            source_assets.get(source_row_id),
+            format!("source_asset.discovery.{reason}"),
+            "source_asset_candidate_missing",
+        ));
+    }
+    for (source_row_id, reason) in &selected_metadata_audit.misses {
+        source_asset_completeness.record_affected_reason(source_asset_audit_entry(
+            table,
+            source_row_id,
+            source_assets.get(source_row_id),
+            format!(
+                "source_asset.discovery.metadata_decode_miss.{}",
+                reason.as_str()
+            ),
+            "source_asset_candidate_missing",
+        ));
+    }
+    for source_row_id in source_asset_diagnostics.keys() {
+        source_asset_completeness.record_affected_reason(source_asset_audit_entry(
+            table,
+            source_row_id,
+            source_assets.get(source_row_id),
+            "source_asset.form_owner_resolution.uncertain".to_string(),
+            "source_asset_identity_uncertain",
+        ));
+    }
+    let source_asset_scope = if table == "Config"
+        && selected_file_names.is_empty()
+        && extract_metadata_xml
+        && !write_binary_rows
+    {
+        SourceAssetCompletenessScope::Full
+    } else {
+        SourceAssetCompletenessScope::Scoped
+    };
+    source_asset_completeness.finish_inventory(
+        source_asset_scope,
+        source_asset_discovery_misses.is_empty()
+            && selected_metadata_audit.misses.is_empty()
+            && source_asset_diagnostics.is_empty(),
+        source_assets.len()
+            + source_asset_discovery_misses.len()
+            + selected_metadata_audit.misses.len(),
+    );
 
     if generate_config_dump_info {
         let started = Instant::now();
@@ -2287,6 +2694,7 @@ fn dump_table_rows_streamed(
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        source_assets: source_asset_completeness,
         metadata_root_inventory,
         timings,
     })
@@ -2884,6 +3292,7 @@ fn dump_table_row_bytes(
     };
 
     let mut source_asset_rows = 0;
+    let mut source_assets = SourceAssetCompletenessReport::default();
     let source_asset_relative = if metadata_xml_relative.is_none() {
         let started = Instant::now();
         let dynamic_asset;
@@ -2896,7 +3305,11 @@ fn dump_table_row_bytes(
         };
         match asset {
             Some(asset) => {
-                let relative = write_source_asset(
+                let form_owner_reference = match &asset.kind {
+                    SourceAssetKind::Form { owner_reference } => owner_reference.clone(),
+                    _ => None,
+                };
+                let written = write_source_asset(
                     context,
                     asset,
                     &bytes,
@@ -2904,10 +3317,35 @@ fn dump_table_row_bytes(
                     &mut timings,
                 )?;
                 source_asset_rows = 1;
+                let asset_path = written.primary_path.to_string_lossy().replace('\\', "/");
+                let diagnostics = written
+                    .diagnostics
+                    .into_iter()
+                    .map(|diagnostic| SourceAssetCompletenessEntry {
+                        code: diagnostic.code.to_string(),
+                        classification: diagnostic.classification.to_string(),
+                        table: context.table.to_string(),
+                        source_row_id: file_name.to_string(),
+                        asset_path: asset_path.clone(),
+                        form_owner_reference: form_owner_reference.clone(),
+                        form_item_id: diagnostic.form_item_id,
+                        form_item_tag: diagnostic.form_item_tag.to_string(),
+                        property: diagnostic.property.to_string(),
+                        property_profile: diagnostic.property_profile.to_string(),
+                        property_slot: diagnostic.property_slot,
+                        raw_length: diagnostic.raw_length,
+                        raw_sha256: diagnostic.raw_sha256,
+                    })
+                    .collect::<Vec<_>>();
+                if diagnostics.is_empty() {
+                    source_assets.record_emitted();
+                } else {
+                    source_assets.record_opaque(diagnostics);
+                }
                 let elapsed = elapsed_ms(started);
                 timings.source_asset_cpu_ms += elapsed;
                 timings.add_source_asset_kind(&asset.kind, elapsed);
-                Some(relative.to_string_lossy().replace('\\', "/"))
+                Some(asset_path)
             }
             None => {
                 timings.source_asset_cpu_ms += elapsed_ms(started);
@@ -2935,6 +3373,7 @@ fn dump_table_row_bytes(
         module_text_rows,
         metadata_xml_rows,
         source_asset_rows,
+        source_assets,
         timings,
     })
 }

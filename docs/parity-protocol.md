@@ -26,7 +26,7 @@
 Если сборка не содержит `dump-sources`, она прекращается с подсказкой собрать
 бинарник с `--features platform-oracle`.
 
-## Один прогон
+## Один диагностический прогон
 
 ```powershell
 $env:IBCMD_DB_PSW = "<пароль>"
@@ -34,6 +34,10 @@ powershell -ExecutionPolicy Bypass -File scripts\export-ibcmd-vs-ours.ps1 `
   -DbName ut_ibcmd -DbServer localhost -DbUser sa `
   -RunId 20260723_ut_full -LabRoot E:\ibcmd_lab\parity
 ```
+
+Это диагностическая команда: даже при нулевой сырой разнице она не создаёт
+выпускное доказательство, потому что не требует полноты корневых метаданных и
+множества source assets.
 
 Вариант с интегрированной аутентификацией:
 
@@ -58,6 +62,14 @@ powershell -ExecutionPolicy Bypass -File scripts\export-ibcmd-vs-ours.ps1 `
 XML, точные обезличенные аргументы, журналы и выходные артефакты. Отдельно
 фиксируются точные отпечатки таблиц `Config`/`ConfigSave` до и после выгрузки,
 а также детерминированные SHA-256 нативного и кандидатного деревьев.
+
+Текущий `parity-manifest.json` использует `protocol_version=3`. В цепочку
+доказательств входят `candidate_dump/manifest.json`, его SHA-256, точные
+`server`/`database` и полный отчёт `source_assets`. Дочерний манифест обязан
+содержать идентичный отчёт и ссылаться на тот же хеш. Отрицательные,
+нецелочисленные или выходящие за диапазон счётчики, нарушение
+`expected=emitted+opaque+missing`, несовпадение имени базы/сервера либо хеша
+делают доказательство недействительным.
 
 Полный прогон не может завершиться со статусом `passed`, если репозиторий
 грязный, отпечаток БД отсутствует или изменился во время работы. Значения
@@ -94,7 +106,7 @@ version cause. Do not commit production trees, application XML/BSL, credentials,
 or reports containing application paths/content; committed tests use synthetic
 hash-only evidence.
 
-## Матрица УТ + БСП
+## Диагностическая матрица УТ + БСП
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run-parity-matrix.ps1 `
@@ -109,6 +121,26 @@ powershell -ExecutionPolicy Bypass -File scripts\run-parity-matrix.ps1 `
 разрешённые версии нативного `ibcmd`. Дочерние прогоны и merge журналируются как
 отдельные шаги верхнего манифеста.
 
+Команда выше сохраняет полезную полную матрицу, но по умолчанию остаётся
+диагностической (`result_class=diagnostic`, `release_eligible=false`).
+Выпускной запуск требует оба fail-closed переключателя:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-parity-matrix.ps1 `
+  -UtDbName ut_ibcmd -BspDbName bsp -RunId 20260723_release `
+  -Scope full -RequireCompleteRootMetadata -RequireCompleteSourceAssets
+```
+
+До merge оркестратор проверяет каждый дочерний манифест отдельно. Для выпуска
+оба дочерних прогона должны иметь протокол v3, чистый репозиторий, полный scope,
+`source_asset_gate.requested=true`, `source_asset_gate.passed=true`,
+`source_assets.complete=true`, нулевые `raw_parity` и
+`release_eligible=true`. Хешированный `raw-diff.json` перечитывается, его
+счётчики вычисляются по записям `differences` и должны точно совпасть и с
+дочерним `raw_parity`, и с `raw_summary` единственного запуска в хешированном
+`matrix.json`. Несовпадение любого дочернего доказательства блокирует merge как
+выпускного результата.
+
 `RunId` должен начинаться с буквы или цифры, состоять не более чем из 128
 символов `[A-Za-z0-9._-]` и не содержать `..` либо разделителей пути. Проверка
 выполняется до создания любого каталога.
@@ -118,9 +150,13 @@ powershell -ExecutionPolicy Bypass -File scripts\run-parity-matrix.ps1 `
 `-Scope full` (по умолчанию) означает сравнение всего дерева, запрещает
 `-PathPrefix` и только он годится для заявления о полной совместимости.
 Во время доведения совместимости такой прогон сохраняет инвентарь пропущенных
-корневых XML и продолжает строить матрицу. Для выпускной проверки добавьте
-`-RequireCompleteRootMetadata`: тогда отсутствие хотя бы одного ожидаемого
-корневого XML прервёт прогон. Этот переключатель несовместим с `-Scope scoped`.
+корневых XML и source assets и продолжает строить матрицу. Частичная или
+неподтверждённая полнота source assets не мешает диагностическому merge, но
+результат обязательно получает `release_eligible=false`. Для выпускной проверки
+обязательны одновременно `-RequireCompleteRootMetadata` и
+`-RequireCompleteSourceAssets`: отсутствие хотя бы одного ожидаемого корневого
+XML/source asset либо непрозрачный source asset прервёт соответствующий
+дочерний прогон. Оба переключателя несовместимы с `-Scope scoped`.
 `-Scope scoped` требует хотя бы один `-PathPrefix` и нужен для исследования
 одного семейства файлов; его результат всегда диагностический и не изменяет
 общий процент готовности. Оркестратор поддерживает объединение scoped-матриц,

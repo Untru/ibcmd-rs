@@ -14,7 +14,8 @@ param(
     [ValidateSet("2.20", "2.21")][string]$SourceVersion = "2.20",
     [ValidateSet("full", "scoped")][string]$Scope = "full",
     [string[]]$PathPrefix = @(),
-    [switch]$RequireCompleteRootMetadata
+    [switch]$RequireCompleteRootMetadata,
+    [switch]$RequireCompleteSourceAssets
 )
 
 Set-StrictMode -Version Latest
@@ -26,6 +27,51 @@ $Cli = [ordered]@{
 }
 
 function Get-UtcNow { (Get-Date).ToUniversalTime().ToString("o") }
+
+function Import-SourceAssetCompletenessEvidence {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing candidate source asset manifest: $Path" }
+    $candidate = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
+    $report = $candidate.source_assets
+    if ($null -eq $report -or [int]$report.schema_version -ne 1) {
+        throw 'Candidate source asset completeness evidence is missing or unsupported.'
+    }
+    foreach ($count in @('expected', 'emitted', 'opaque', 'missing', 'opaque_property_count')) {
+        if ([int64]$report.$count -lt 0) { throw "Candidate source asset completeness count '$count' is invalid." }
+    }
+    if ([int64]$report.expected -ne ([int64]$report.emitted + [int64]$report.opaque + [int64]$report.missing)) {
+        throw 'Candidate source asset completeness invariant expected=emitted+opaque+missing is violated.'
+    }
+    if ([int64]$report.opaque_property_count -lt [int64]$report.opaque) {
+        throw 'Candidate source asset opaque property count is smaller than the opaque asset count.'
+    }
+    if ([string]$report.status -notin @('complete', 'partial', 'unknown')) {
+        throw "Candidate source asset completeness status '$($report.status)' is invalid."
+    }
+    $derivedStatus = if ($report.candidate_set_complete -ne $true) {
+        'unknown'
+    } elseif ([int64]$report.opaque -eq 0 -and [int64]$report.missing -eq 0) {
+        'complete'
+    } else {
+        'partial'
+    }
+    if ([string]$report.status -cne $derivedStatus) {
+        throw "Candidate source asset completeness status disagrees with its evidence counts (expected '$derivedStatus')."
+    }
+    $isComplete = (
+        [string]$report.scope -ceq 'full' -and
+        $report.candidate_set_complete -eq $true -and
+        [string]$report.status -ceq 'complete' -and
+        [int64]$report.opaque -eq 0 -and
+        [int64]$report.missing -eq 0
+    )
+    return [ordered]@{
+        evidence_manifest='candidate_dump/manifest.json'
+        evidence_manifest_sha256=(Get-FileSha256 -Path $Path)
+        report=$report
+        complete=$isComplete
+    }
+}
 
 function Protect-SensitiveText {
     param([AllowNull()]$Value)
@@ -885,6 +931,7 @@ if (@($PathPrefix | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -ne
 if ($Scope -eq 'full' -and $PathPrefix.Count -ne 0) { throw "Scope 'full' requires an empty PathPrefix. Use -Scope scoped for a partial comparison." }
 if ($Scope -eq 'scoped' -and $PathPrefix.Count -eq 0) { throw "Scope 'scoped' requires at least one PathPrefix." }
 if ($RequireCompleteRootMetadata -and $Scope -ne 'full') { throw "RequireCompleteRootMetadata is available only for Scope 'full'." }
+if ($RequireCompleteSourceAssets -and $Scope -ne 'full') { throw "RequireCompleteSourceAssets is available only for Scope 'full'." }
 if ([string]::IsNullOrWhiteSpace($ExePath)) { $ExePath = Join-Path $repoRoot 'target\release\ibcmd-rs.exe' }
 $ExePath = [IO.Path]::GetFullPath($ExePath)
 if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) { throw "Missing executable: $ExePath. Build it with: cargo build --release --features platform-oracle" }
@@ -903,8 +950,10 @@ $steps = [System.Collections.ArrayList]::new(); $manifestPath = Join-Path $runRo
 $sqlcmdPath = $null
 $primaryFailure = $false
 $manifest = [ordered]@{
-    protocol_version=2; run_id=$RunId; scope=$Scope; created_utc=(Get-UtcNow); status='initializing'; git_sha=$null; xml_version=$SourceVersion; source_version=$SourceVersion
+    protocol_version=3; run_id=$RunId; scope=$Scope; created_utc=(Get-UtcNow); status='initializing'; git_sha=$null; xml_version=$SourceVersion; source_version=$SourceVersion
     database=[ordered]@{ name=$DbName; server=$DbServer; auth_mode=$authMode; user=$manifestDbUser; password_source=$manifestPasswordSource }
+    result_class='diagnostic'; release_eligible=$false
+    source_asset_gate=[ordered]@{ requested=[bool]$RequireCompleteSourceAssets; passed=$false }
     tools=[ordered]@{}; layout=[ordered]@{ native='native'; candidate_dump='candidate_dump'; candidate='candidate' }; path_prefixes=@($PathPrefix); steps=$steps; artifacts=[ordered]@{}
 }
 # This is intentionally the first persistent action after directory creation: every later external command is journaled.
@@ -940,7 +989,6 @@ try {
         $manifest.repository_probe.ended_utc = Get-UtcNow
         Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
     }
-
     Register-ManifestTool -Name 'candidate' -Path $ExePath -VersionArguments @('--version') -Manifest $manifest -ManifestPath $manifestPath
     $resolvedIbcmd = Get-ResolvedIbcmdPath $IbcmdPath
     $resolvedIbcmdFile = Get-Command -Name $resolvedIbcmd -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
@@ -1082,6 +1130,7 @@ try {
     $candidateArgs = @($Cli.CandidateExport, '--database', $DbName, '--server', $DbServer, '--sqlcmd', $sqlcmdPath, '--bcp-executable', $bcpPath, '--runtime-journal', $candidateRuntimeJournalPath, '-o', $candidateDumpRoot, '--overwrite', '--inflate', '--extract-module-text', '--extract-metadata-xml', '--source-version', $SourceVersion, '--no-binary-rows')
     if (-not $IntegratedAuth) { $candidateArgs += @('--sql-user', $DbUser, '--sql-pwd-env', 'IBCMD_DB_PSW') }
     if ($RequireCompleteRootMetadata) { $candidateArgs += '--require-complete-root-metadata' }
+    if ($RequireCompleteSourceAssets) { $candidateArgs += '--require-complete-source-assets' }
     try {
         Invoke-ParityStep -Name 'candidate-export' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'candidate-export.log') -Arguments $candidateArgs -Artifacts @('candidate_dump/manifest.json', 'logs/candidate-runtime.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @candidateArgs }
     } catch {
@@ -1117,6 +1166,19 @@ try {
         $manifest.nested_runtime_calls.ended_utc = Get-UtcNow
         Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
     }
+    $candidateDumpManifestPath = Join-Path $candidateDumpRoot 'manifest.json'
+    $candidateDumpManifest = Get-Content -Raw -LiteralPath $candidateDumpManifestPath |
+        ConvertFrom-Json -ErrorAction Stop
+    if (-not [StringComparer]::Ordinal.Equals([string]$candidateDumpManifest.server, $DbServer) -or
+        -not [StringComparer]::Ordinal.Equals([string]$candidateDumpManifest.database, $DbName)) {
+        throw 'Candidate dump manifest database identity does not match the requested server/database.'
+    }
+    $manifest.source_assets = Import-SourceAssetCompletenessEvidence -Path $candidateDumpManifestPath
+    $manifest.source_asset_gate.passed = (
+        $manifest.source_asset_gate.requested -eq $true -and
+        $manifest.source_assets.complete -eq $true
+    )
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
 
     $roboArgs = @($candidateDumpRoot, $candidateRoot, '/E', '/XD', 'Config_inflated', 'Config_raw', 'ConfigSave_inflated', 'ConfigSave_raw', '/XF', 'manifest.json', '*.json')
     Invoke-ParityStep -Name 'candidate-source-layout' -Tool 'robocopy' -Executable $robocopyPath -LogPath (Join-Path $logsRoot 'candidate-source-layout.log') -Arguments $roboArgs -Artifacts @('candidate') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $robocopyPath @roboArgs | Out-Host; if ($LASTEXITCODE -le 7) { $global:LASTEXITCODE = 0 } }
@@ -1128,6 +1190,22 @@ try {
         native = Get-TreeSummaryFromDiff -DiffPath $diffPath -Side left
         candidate = Get-TreeSummaryFromDiff -DiffPath $diffPath -Side right
     }
+    $rawDiffReport = Get-Content -Raw -LiteralPath $diffPath | ConvertFrom-Json -ErrorAction Stop
+    foreach ($count in @('different', 'left_only', 'right_only')) {
+        if ($rawDiffReport.summary.PSObject.Properties.Name -notcontains $count -or [int64]$rawDiffReport.summary.$count -lt 0) {
+            throw "Raw diff summary count '$count' is missing or invalid."
+        }
+    }
+    $manifest.raw_parity = [ordered]@{
+        different=[int64]$rawDiffReport.summary.different
+        left_only=[int64]$rawDiffReport.summary.left_only
+        right_only=[int64]$rawDiffReport.summary.right_only
+        zero=(
+            [int64]$rawDiffReport.summary.different -eq 0 -and
+            [int64]$rawDiffReport.summary.left_only -eq 0 -and
+            [int64]$rawDiffReport.summary.right_only -eq 0
+        )
+    }
     Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
     $signaturesPath = Join-Path $runRoot 'signatures.json'; $signatureArgs = @($Cli.Signatures, '-o', $signaturesPath, $diffPath)
     Invoke-ParityStep -Name 'diff-signatures' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'diff-signatures.log') -Arguments $signatureArgs -Artifacts @('signatures.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @signatureArgs }
@@ -1135,13 +1213,24 @@ try {
     $matrixArgs = @($Cli.Matrix, $diffPath, '--database', $DbName, '--run-id', $RunId, '--git-sha', $manifest.git_sha, $matrixScopeArg, '--output', $matrixPath, '--markdown', $matrixMarkdownPath)
     Invoke-ParityStep -Name 'parity-matrix' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'parity-matrix.log') -Arguments $matrixArgs -Artifacts @('matrix.json', 'matrix.md') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @matrixArgs }
     if ($Scope -eq 'full' -and $manifest.repository.status -ne 'clean') { throw 'Full release parity requires a clean Git repository.' }
-    $manifest.artifacts = [ordered]@{ raw_diff='raw-diff.json'; signatures='signatures.json'; matrix='matrix.json'; markdown='matrix.md' }
+    $manifest.artifacts = [ordered]@{ candidate_dump_manifest='candidate_dump/manifest.json'; raw_diff='raw-diff.json'; signatures='signatures.json'; matrix='matrix.json'; markdown='matrix.md' }
     $manifest.artifact_sha256 = [ordered]@{
+        candidate_dump_manifest=(Get-FileSha256 -Path $candidateDumpManifestPath)
         raw_diff=(Get-FileSha256 -Path $diffPath)
         signatures=(Get-FileSha256 -Path $signaturesPath)
         matrix=(Get-FileSha256 -Path $matrixPath)
         markdown=(Get-FileSha256 -Path $matrixMarkdownPath)
     }
+    $manifest.release_eligible = (
+        $Scope -eq 'full' -and
+        $RequireCompleteRootMetadata -and
+        $manifest.source_asset_gate.requested -eq $true -and
+        $manifest.source_asset_gate.passed -eq $true -and
+        $manifest.repository.status -eq 'clean' -and
+        $manifest.source_assets.complete -eq $true -and
+        $manifest.raw_parity.zero -eq $true
+    )
+    $manifest.result_class = if ($manifest.release_eligible) { 'release' } else { 'diagnostic' }
     $manifest.status='finalizing'
 } catch {
     $primaryFailure = $true
