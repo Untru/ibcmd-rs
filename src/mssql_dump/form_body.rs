@@ -10578,6 +10578,8 @@ pub(super) fn parse_form_radio_button_choice_list_item(
     let payload = fields.get(2)?.trim();
     let payload_fields = split_1c_braced_fields(payload, 0)?;
     let raw_value = payload_fields.get(2)?.trim();
+    let value_fields = split_1c_braced_fields(raw_value, 0)?;
+    let value_kind = parse_1c_string(value_fields.first()?.trim())?;
     let exact_u_item = scan_1c_braced_value(field, 0) == Some(field.len())
         && fields.len() == 3
         && parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() == Some("#")
@@ -10585,10 +10587,7 @@ pub(super) fn parse_form_radio_button_choice_list_item(
         && scan_1c_braced_value(payload, 0) == Some(payload.len())
         && payload_fields.len() == 6
         && scan_1c_braced_value(raw_value, 0) == Some(raw_value.len())
-        && matches!(
-            split_1c_braced_fields(raw_value, 0).as_deref(),
-            Some([kind]) if kind.trim() == r#""U""#
-        )
+        && matches!(value_fields.as_slice(), [kind] if kind.trim() == r#""U""#)
         && parse_form_input_field_choice_list_presentation(payload_fields.get(5)?).is_some();
     let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok();
     let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok();
@@ -10612,10 +10611,22 @@ pub(super) fn parse_form_radio_button_choice_list_item(
         )
         .and_then(metadata_reference_type_owner_reference)?;
         FormChoiceListValue::DesignTimeRef(format!("{owner_reference}.EmptyRef"))
+    } else if value_kind == "U" {
+        if !exact_u_item
+            || payload_fields.first()?.trim() != "0"
+            || payload_fields.get(1)?.trim() != "0"
+        {
+            return None;
+        }
+        let type_id = type_id.filter(|id| !id.is_nil())?;
+        let value_id = value_id.filter(|id| !id.is_nil())?;
+        let reference = parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
+            .unwrap_or_else(|| format!("{type_id}.{value_id}"));
+        FormChoiceListValue::DesignTimeRef(reference)
     } else {
         parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?
     };
-    let presentation = if nil_value || empty_ref_value {
+    let presentation = if nil_value || empty_ref_value || value_kind == "U" {
         parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?
     } else {
         payload_fields

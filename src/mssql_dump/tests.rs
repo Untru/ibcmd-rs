@@ -11272,6 +11272,241 @@ fn parses_radio_button_choice_list_value_variants() {
 }
 
 #[test]
+fn minimal_radio_button_literal_ref_choice_is_typed_and_near_misses_are_opaque() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        profile: String,
+        slot: usize,
+        type_id: String,
+        value_id: String,
+        raw_choice_list: String,
+        expected_xml: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_radio_choice_list_literal_ref_minimal.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.profile, "radio_button_options");
+    assert_eq!(fixture.slot, 1);
+
+    let empty_type_index = BTreeMap::new();
+    let empty_collisions = BTreeSet::new();
+    let empty_object_refs = BTreeMap::new();
+    let mut options = vec!["0"; 12];
+    options[fixture.slot] = &fixture.raw_choice_list;
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options),
+        &empty_type_index,
+        &empty_collisions,
+        &empty_object_refs,
+    );
+    let CanonicalFormChoiceList::Typed { items, provenance } = &canonical else {
+        panic!("exact radio U(non-nil type, non-nil value) must remain typed");
+    };
+    assert_eq!(
+        provenance.layout,
+        FormChoiceListRawLayout::RadioButtonOptions
+    );
+    assert_eq!(provenance.slot, fixture.slot);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].value,
+        FormChoiceListValue::DesignTimeRef(format!(
+            "{}.{}",
+            fixture.type_id.to_ascii_lowercase(),
+            fixture.value_id.to_ascii_lowercase()
+        ))
+    );
+    validate_canonical_form_choice_list(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
+    );
+
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let sidecar = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let presentation = r#"{1,1,{"en","Synthetic reference"}}"#;
+    let exact_payload = format!(
+        r#"{{0,0,{{"U"}},{},{},{presentation}}}"#,
+        fixture.type_id, fixture.value_id
+    );
+    let cases = [
+        (
+            "wrong marker",
+            format!(r#"{{"!",{discriminator},{exact_payload}}}"#),
+        ),
+        (
+            "wrong discriminator",
+            format!(r##"{{"#",cccccccc-cccc-4ccc-8ccc-cccccccccccc,{exact_payload}}}"##),
+        ),
+        (
+            "wrong first mode",
+            format!(
+                r##"{{"#",{discriminator},{{1,0,{{"U"}},{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "wrong second mode",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "raw value suffix",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}}suffix,{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "raw value extra field",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U",0}},{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "extra payload field",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},{},{presentation},0}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "nil type",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{},{presentation}}}}}"##,
+                fixture.value_id
+            ),
+        ),
+        (
+            "nil value without an EmptyRef type mapping",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},{nil},{presentation}}}}}"##,
+                fixture.type_id
+            ),
+        ),
+        (
+            "nil pair in reference mode",
+            format!(r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{presentation}}}}}"##),
+        ),
+        (
+            "malformed type UUID",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},not-a-uuid,{},{presentation}}}}}"##,
+                fixture.value_id
+            ),
+        ),
+        (
+            "malformed value UUID",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},not-a-uuid,{presentation}}}}}"##,
+                fixture.type_id
+            ),
+        ),
+        (
+            "malformed presentation",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},{},{{1,1,{{"en","Synthetic reference"}},0}}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "extra item field",
+            format!(r##"{{"#",{discriminator},{exact_payload},0}}"##),
+        ),
+        (
+            "item suffix",
+            format!(r##"{{"#",{discriminator},{exact_payload}}}suffix"##),
+        ),
+    ];
+    for (label, item) in cases {
+        let raw = format!(r#"{{3,1,"",{item},{sidecar}}}"#);
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &empty_type_index,
+            &empty_collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+    }
+
+    let exact_item = format!(r##"{{"#",{discriminator},{exact_payload}}}"##);
+    for (label, raw) in [
+        (
+            "wrong outer header",
+            format!(r#"{{9,1,"",{exact_item},{sidecar}}}"#),
+        ),
+        ("missing sidecar", format!(r#"{{3,1,"",{exact_item}}}"#)),
+        (
+            "extra outer field",
+            format!(r#"{{3,1,"",{exact_item},{sidecar},0}}"#),
+        ),
+        (
+            "outer suffix",
+            format!(r#"{{3,1,"",{exact_item},{sidecar}}}suffix"#),
+        ),
+    ] {
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &empty_type_index,
+            &empty_collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+    }
+
+    let mapped_reference = "Enum.Synthetic.EnumValue.Mapped";
+    let mapped_object_refs = BTreeMap::from([(
+        fixture.value_id.to_ascii_lowercase(),
+        mapped_reference.to_string(),
+    )]);
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options_for_radio_choice_list_test(
+            fixture.slot,
+            &fixture.raw_choice_list,
+        )),
+        &empty_type_index,
+        &empty_collisions,
+        &mapped_object_refs,
+    );
+    let CanonicalFormChoiceList::Typed { items, .. } = canonical else {
+        panic!("ordinary mapped radio U reference must remain typed");
+    };
+    assert_eq!(
+        items[0].value,
+        FormChoiceListValue::DesignTimeRef(mapped_reference.to_string())
+    );
+}
+
+fn options_for_radio_choice_list_test<'a>(slot: usize, raw: &'a str) -> Vec<&'a str> {
+    let mut options = vec!["0"; 12];
+    options[slot] = raw;
+    options
+}
+
+#[test]
 fn minimal_radio_button_empty_ref_choice_is_typed_and_near_misses_are_opaque() {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
