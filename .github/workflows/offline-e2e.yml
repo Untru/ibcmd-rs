@@ -48,6 +48,12 @@ jobs:
         shell: pwsh
         run: ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
 
+      - name: Enforce physical-adapter policy guard
+        shell: pwsh
+        run: |
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot . -SelfTest
+
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,6 +97,12 @@ jobs:
       - name: Enforce EDT-derived corpus governance
         shell: pwsh
         run: ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
+
+      - name: Enforce physical-adapter policy guard
+        shell: pwsh
+        run: |
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot .
+          ./tools/validate-physical-adapter-policy.ps1 -RepositoryRoot . -SelfTest
 
       - name: Install pinned Rust
         uses: dtolnay/rust-toolchain@stable
