@@ -20,6 +20,9 @@
 
 - [ ] Standalone settings и Form ListSettings используют один путь.
 - [x] Picture/color/type qualification не угадывается.
+- [ ] Physical wrapper QName, TypeId and opaque-placement evidence are still
+  incomplete; `edt-2025.2.3-dcs-writer-evidence.json` records the four exact
+  missing keys, so byte emission remains fail-closed.
 
 ## Задача 4: Расширить schema/template
 

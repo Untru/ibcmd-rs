@@ -59,8 +59,8 @@
 
 ## Задача 6: Финальная валидация
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 **Проверка:**
-- [ ] OpenSpec strict, fmt, clippy и schema/xml tests проходят.
-- [ ] GitHub #278 получает totals и evidence.
+- [x] OpenSpec strict, fmt, clippy и schema/xml tests проходят.
+- [x] GitHub #278 получает totals и evidence.

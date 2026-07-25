@@ -46,8 +46,8 @@
 
 ## Задача 5: Финальная валидация
 
-**Статус:** `[ ]`
+**Статус:** `[x]`
 
 **Проверка:**
-- [ ] Validator, OpenSpec strict и offline checks проходят.
-- [ ] GitHub #279 получает evidence и закрывается после merge.
+- [x] Validator, OpenSpec strict и offline checks проходят.
+- [x] GitHub #279 получает evidence и закрывается после зелёного CI.
