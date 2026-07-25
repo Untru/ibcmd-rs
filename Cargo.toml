@@ -6,6 +6,7 @@ edition = "2024"
 [workspace]
 members = [
     "crates/ibcmd-core",
+    "crates/ibcmd-schema",
     "crates/ibcmd-xml",
     "crates/ibcmd-v8",
     "crates/ibcmd-cf",

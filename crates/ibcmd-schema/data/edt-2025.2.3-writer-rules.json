@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:EDT",
+    "release": "2025.2.3+30",
+    "derivation": "clean-room behavioural facts extracted from local bytecode inspection; no code copied"
+  },
+  "rules": [
+    {
+      "id": "form.choice-list.design-time-value",
+      "sourceClass": "com._1c.g5.v8.dt.form.export.xml.writer.FormChoiceListDesTimeValueWriter",
+      "modelType": "FormChoiceList",
+      "feature": "values",
+      "operations": [
+        "write feature wrapper",
+        "for each value write xr:item",
+        "write empty xr:presentation",
+        "write xr:checkState with lexical value 0",
+        "write xr:value with xsi:type FormChoiceListDesTimeValue",
+        "write presentation",
+        "delegate value to FormSmartFeatureWriter"
+      ],
+      "conditions": [
+        "feature must be many-valued and owned by the expected EClass",
+        "empty collection writes an empty wrapper only when writeDefault is true",
+        "write picture only for project version 8.5.1 or newer"
+      ],
+      "delegate": "com._1c.g5.v8.dt.form.export.xml.writer.FormSmartFeatureWriter",
+      "evidence": {
+        "kind": "javap-bytecode",
+        "status": "verified",
+        "note": "Control flow, element order, defaults, delegation, and platform gate independently transcribed."
+      }
+    },
+    {
+      "id": "form.dynamic-list.list-settings",
+      "sourceClass": "com._1c.g5.v8.dt.form.export.xml.writer.ListSettingsWriter",
+      "modelType": "DynamicListExtInfo",
+      "feature": "listSettings",
+      "operations": [
+        "read listSettings feature",
+        "delegate non-null settings to DcsV8Serializer.writeSettings with project context"
+      ],
+      "conditions": [
+        "do not synthesize settings when feature value is null"
+      ],
+      "delegate": "DcsV8Serializer.writeSettings",
+      "evidence": {
+        "kind": "javap-bytecode",
+        "status": "verified",
+        "note": "The EDT writer delegates the semantic settings model instead of hand-normalizing XML."
+      }
+    },
+    {
+      "id": "form.spreadsheet-content.structural-copy",
+      "sourceClass": "com._1c.g5.v8.dt.form.export.xml.writer.SpreadsheetContentWriter",
+      "modelType": "SpreadsheetDocumentFieldExtInfo",
+      "feature": "spreadsheetDocument",
+      "operations": [
+        "read spreadsheet data file as DOM",
+        "write Settings wrapper with MXL namespace and type",
+        "copy nodes and attributes recursively",
+        "trim blank text nodes",
+        "qualify supported xsi:type values"
+      ],
+      "conditions": [
+        "preserve document node order during recursive copy"
+      ],
+      "delegate": null,
+      "evidence": {
+        "kind": "javap-bytecode",
+        "status": "verified",
+        "note": "The XML layer is a structured pass-through; binary MXL decoding remains a separate adapter concern."
+      }
+    }
+  ]
+}

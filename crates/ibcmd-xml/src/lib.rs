@@ -36,6 +36,17 @@ pub use node::{
 pub use reader::{XmlError, XmlErrorCause, XmlReader};
 pub use writer::{LexicalPolicy, WriteError, XmlWriter};
 
+/// Standalone EDT-derived schema registry consumed by XML family writers.
+///
+/// Re-exporting the registry here establishes the dependency direction
+/// `ibcmd-xml -> ibcmd-schema`; physical decoders never own XML ordering rules.
+pub mod schema {
+    pub use ibcmd_schema::{
+        BundleInventory, CorpusSource, InventorySummary, ModelInventory, RuleEvidence, SchemaError,
+        WriterRule, WriterRuleCorpus, bundled_model_inventory, bundled_writer_rules,
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

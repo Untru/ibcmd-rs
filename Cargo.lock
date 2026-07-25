@@ -301,6 +301,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ibcmd-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ibcmd-v8"
 version = "0.1.0"
 dependencies = [
@@ -312,6 +320,7 @@ name = "ibcmd-xml"
 version = "0.1.0"
 dependencies = [
  "ibcmd-core",
+ "ibcmd-schema",
  "quick-xml",
 ]
 
