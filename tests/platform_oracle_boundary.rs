@@ -11,7 +11,9 @@ const FORBIDDEN_BINARY_MARKERS: &[&[u8]] = &[
     b"/1cv8/",
     b".jar",
     b"org.eclipse",
-    b"JNI",
+    b"JNI_CreateJavaVM",
+    b"JNIEnv",
+    b"JavaVM",
     b"OSGi",
 ];
 

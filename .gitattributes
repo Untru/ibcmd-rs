@@ -1,1 +1,2 @@
 tests/fixtures/xml/** -text
+tests/fixtures/migrations/** -text
