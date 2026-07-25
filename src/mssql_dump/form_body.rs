@@ -172,8 +172,10 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     context: &FormParseContext<'_>,
     timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<String> {
-    extract_form_body_xml_from_body_detailed_timed(body, context, timings)
-        .map(|extraction| extraction.xml)
+    match extract_form_body_xml_from_body_detailed_timed(body, context, timings)? {
+        DetailedFormBodyExtraction::Emitted { xml, .. } => Some(xml),
+        DetailedFormBodyExtraction::OpaqueNotEmitted { .. } => None,
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -189,9 +191,14 @@ pub(super) struct FormSourceAssetDiagnostic {
     pub(super) raw_sha256: String,
 }
 
-pub(super) struct DetailedFormBodyExtraction {
-    pub(super) xml: String,
-    pub(super) diagnostics: Vec<FormSourceAssetDiagnostic>,
+pub(super) enum DetailedFormBodyExtraction {
+    Emitted {
+        xml: String,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    OpaqueNotEmitted {
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
 }
 
 pub(super) fn extract_form_body_xml_from_body_detailed_timed(
@@ -327,18 +334,12 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         timings.source_asset_form_command_interface_cpu_ms += elapsed_ms(started);
     }
 
-    // A malformed/opaque ChoiceList must not fall through to the legacy XML formatter.  The
-    // public extraction boundary is currently `Option`; the typed reason remains testable at
-    // this preflight boundary while production fails closed with `None`.
-    validate_form_choice_list_writer_trees(
-        &child_items,
-        auto_command_bar
-            .as_ref()
-            .map(|command_bar| command_bar.child_items.as_slice()),
-    )
-    .ok()?;
-
     let mut diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(&child_items, &mut diagnostics);
+    if let Some(auto_command_bar) = auto_command_bar.as_ref() {
+        collect_opaque_choice_list_diagnostics(&auto_command_bar.child_items, &mut diagnostics);
+    }
+    let has_opaque_choice_list = !diagnostics.is_empty();
     collect_opaque_choice_parameters_diagnostics(&child_items, &mut diagnostics);
     if let Some(auto_command_bar) = auto_command_bar.as_ref() {
         collect_opaque_choice_parameters_diagnostics(
@@ -350,16 +351,47 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         (
             left.form_item_id.as_str(),
             left.form_item_tag,
+            left.property,
+            left.property_profile,
             left.property_slot,
+            left.code,
             left.raw_sha256.as_str(),
         )
             .cmp(&(
                 right.form_item_id.as_str(),
                 right.form_item_tag,
+                right.property,
+                right.property_profile,
                 right.property_slot,
+                right.code,
                 right.raw_sha256.as_str(),
             ))
     });
+
+    if has_opaque_choice_list {
+        // Writer-corpus, policy, and other formatter failures are never diagnostic data
+        // failures. Exercise every fallible writer path before taking the one recoverable exit;
+        // emitted forms continue through the real formatter exactly once below.
+        preflight_form_writer_paths(
+            &child_items,
+            auto_command_bar
+                .as_ref()
+                .map(|command_bar| command_bar.child_items.as_slice()),
+            &attributes,
+        )
+        .ok()?;
+        return Some(DetailedFormBodyExtraction::OpaqueNotEmitted { diagnostics });
+    }
+
+    // With no opaque ChoiceList left, the existing typed preflight remains an invariant check
+    // immediately before formatting.
+    validate_form_choice_list_writer_trees(
+        &child_items,
+        auto_command_bar
+            .as_ref()
+            .map(|command_bar| command_bar.child_items.as_slice()),
+    )
+    .ok()?;
 
     let started = Instant::now();
     let xml = format_form_body_xml(
@@ -378,7 +410,35 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         timings.source_asset_form_format_cpu_ms += elapsed_ms(started);
     }
 
-    Some(DetailedFormBodyExtraction { xml, diagnostics })
+    Some(DetailedFormBodyExtraction::Emitted { xml, diagnostics })
+}
+
+pub(super) fn collect_opaque_choice_list_diagnostics(
+    items: &[FormChildItem],
+    diagnostics: &mut Vec<FormSourceAssetDiagnostic>,
+) {
+    for item in items {
+        if let CanonicalFormChoiceList::OpaqueSameProfile { raw, provenance } = &item.choice_list {
+            let property_profile = match provenance.layout {
+                FormChoiceListRawLayout::InputFieldExtendedOptions => {
+                    "input_field_extended_options"
+                }
+                FormChoiceListRawLayout::RadioButtonOptions => "radio_button_options",
+            };
+            diagnostics.push(FormSourceAssetDiagnostic {
+                code: "source_asset.form.choice_list.opaque_asset_not_emitted",
+                classification: "opaque_asset_not_emitted",
+                property: "ChoiceList",
+                property_profile,
+                property_slot: provenance.slot,
+                form_item_id: item.id.clone(),
+                form_item_tag: item.tag,
+                raw_length: raw.len(),
+                raw_sha256: format!("{:x}", Sha256::digest(raw.as_bytes())),
+            });
+        }
+        collect_opaque_choice_list_diagnostics(&item.child_items, diagnostics);
+    }
 }
 
 pub(super) fn collect_opaque_choice_parameters_diagnostics(
@@ -1182,6 +1242,82 @@ fn validate_form_choice_list_writer_rules(
 
     for item in items {
         visit(item)?;
+    }
+    Ok(())
+}
+
+fn validate_form_writer_policy_availability(
+    items: &[FormChildItem],
+) -> Result<(), FormSchemaWriteError> {
+    fn visit(item: &FormChildItem) -> Result<(), FormSchemaWriteError> {
+        if !matches!(&item.choice_list, CanonicalFormChoiceList::Absent) {
+            verified_form_choice_list_policy().map(|_| ())?;
+        }
+        if !matches!(
+            &item.choice_parameters,
+            CanonicalFormChoiceParameters::Absent
+        ) {
+            verified_form_choice_parameters_policy().map(|_| ())?;
+        }
+        for child in &item.child_items {
+            visit(child)?;
+        }
+        Ok(())
+    }
+
+    for item in items {
+        visit(item)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_form_writer_policy_availability_trees(
+    child_items: &[FormChildItem],
+    auto_command_bar_child_items: Option<&[FormChildItem]>,
+) -> Result<(), FormSchemaWriteError> {
+    validate_form_writer_policy_availability(child_items)?;
+    if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
+        validate_form_writer_policy_availability(auto_command_bar_child_items)?;
+    }
+    Ok(())
+}
+
+fn preflight_form_choice_parameter_writer_paths(
+    items: &[FormChildItem],
+) -> Result<(), FormSchemaWriteError> {
+    for item in items {
+        // The child-item formatter resolves and validates the ChoiceParameters policy for every
+        // InputField, including non-emitting Absent/Empty/Opaque values.
+        if item.tag == "InputField" {
+            drop(format_form_choice_parameter_cluster_xml(item, 0)?);
+        }
+        preflight_form_choice_parameter_writer_paths(&item.child_items)?;
+    }
+    Ok(())
+}
+
+pub(super) fn preflight_form_writer_paths(
+    child_items: &[FormChildItem],
+    auto_command_bar_child_items: Option<&[FormChildItem]>,
+    attributes: &[FormAttribute],
+) -> Result<(), FormSchemaWriteError> {
+    validate_form_writer_policy_availability_trees(child_items, auto_command_bar_child_items)?;
+    preflight_form_choice_parameter_writer_paths(child_items)?;
+    if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
+        preflight_form_choice_parameter_writer_paths(auto_command_bar_child_items)?;
+    }
+    for settings in attributes
+        .iter()
+        .filter_map(|attribute| attribute.settings.as_ref())
+    {
+        // This is the only fallible DynamicList/ListSettings formatter path. It returns its
+        // complete fragment atomically and has no output or filesystem side effects.
+        drop(emit_form_list_settings_tail(
+            settings.list_settings.items_view_mode.as_deref(),
+            settings.list_settings.items_user_setting_id.as_deref(),
+            "dcsset",
+            "\t\t\t\t\t",
+        )?);
     }
     Ok(())
 }

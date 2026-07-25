@@ -491,9 +491,15 @@ pub(super) struct SourceAsset {
     pub(super) kind: SourceAssetKind,
 }
 
-pub(super) struct WrittenSourceAsset {
-    pub(super) primary_path: PathBuf,
-    pub(super) diagnostics: Vec<FormSourceAssetDiagnostic>,
+pub(super) enum WrittenSourceAsset {
+    Emitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    OpaqueNotEmitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
 }
 
 pub(super) fn source_asset_paths_with_indexes(
@@ -1215,6 +1221,7 @@ pub(super) fn write_source_asset(
 ) -> Result<WrittenSourceAsset> {
     let output_dir = context.output_dir;
     let mut diagnostics = Vec::new();
+    let mut opaque_not_emitted = false;
     match &asset.kind {
         SourceAssetKind::ExtPicture => {
             let picture = extract_ext_picture(bytes).with_context(|| {
@@ -1320,30 +1327,45 @@ pub(super) fn write_source_asset(
                             asset.primary_path.display()
                         )
                     })?;
-            diagnostics = extraction.diagnostics;
-            let path = output_dir.join(&asset.primary_path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
-            }
-            write_source_xml_file(&path, extraction.xml, context.source_version)?;
-            timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
+            match extraction {
+                DetailedFormBodyExtraction::Emitted {
+                    xml,
+                    diagnostics: extraction_diagnostics,
+                } => {
+                    diagnostics = extraction_diagnostics;
+                    let path = output_dir.join(&asset.primary_path);
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| format!("failed to create {}", parent.display()))?;
+                    }
+                    write_source_xml_file(&path, xml, context.source_version)?;
 
-            let form_items_started = Instant::now();
-            for item_asset in extract_form_item_assets(bytes) {
-                let item_path = output_dir
-                    .join(asset.primary_path.with_extension(""))
-                    .join("Items")
-                    .join(sanitize_source_path_segment(&item_asset.item_name))
-                    .join(&item_asset.file_name);
-                if let Some(parent) = item_path.parent() {
-                    fs::create_dir_all(parent)
-                        .with_context(|| format!("failed to create {}", parent.display()))?;
+                    let form_items_started = Instant::now();
+                    for item_asset in extract_form_item_assets(bytes) {
+                        let item_path = output_dir
+                            .join(asset.primary_path.with_extension(""))
+                            .join("Items")
+                            .join(sanitize_source_path_segment(&item_asset.item_name))
+                            .join(&item_asset.file_name);
+                        if let Some(parent) = item_path.parent() {
+                            fs::create_dir_all(parent).with_context(|| {
+                                format!("failed to create {}", parent.display())
+                            })?;
+                        }
+                        fs::write(&item_path, &item_asset.content)
+                            .with_context(|| format!("failed to write {}", item_path.display()))?;
+                    }
+                    timings.source_asset_form_items_cpu_ms += elapsed_ms(form_items_started);
                 }
-                fs::write(&item_path, &item_asset.content)
-                    .with_context(|| format!("failed to write {}", item_path.display()))?;
+                DetailedFormBodyExtraction::OpaqueNotEmitted {
+                    diagnostics: extraction_diagnostics,
+                } => {
+                    debug_assert!(!extraction_diagnostics.is_empty());
+                    diagnostics = extraction_diagnostics;
+                    opaque_not_emitted = true;
+                }
             }
-            timings.source_asset_form_items_cpu_ms += elapsed_ms(form_items_started);
+            timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
         }
         SourceAssetKind::Help => {
             let help = parse_help_blob(bytes).with_context(|| {
@@ -1664,10 +1686,17 @@ pub(super) fn write_source_asset(
         }
     }
 
-    Ok(WrittenSourceAsset {
-        primary_path: asset.primary_path.clone(),
-        diagnostics,
-    })
+    if opaque_not_emitted {
+        Ok(WrittenSourceAsset::OpaqueNotEmitted {
+            primary_path: asset.primary_path.clone(),
+            diagnostics,
+        })
+    } else {
+        Ok(WrittenSourceAsset::Emitted {
+            primary_path: asset.primary_path.clone(),
+            diagnostics,
+        })
+    }
 }
 
 fn extract_moxel_source_asset_xml(

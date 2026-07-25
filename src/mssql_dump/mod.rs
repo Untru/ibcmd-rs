@@ -3316,10 +3316,25 @@ fn dump_table_row_bytes(
                     parsed_form_body.as_ref(),
                     &mut timings,
                 )?;
-                source_asset_rows = 1;
-                let asset_path = written.primary_path.to_string_lossy().replace('\\', "/");
-                let diagnostics = written
-                    .diagnostics
+                let (emitted, primary_path, form_diagnostics) = match written {
+                    WrittenSourceAsset::Emitted {
+                        primary_path,
+                        diagnostics,
+                    } => (true, primary_path, diagnostics),
+                    WrittenSourceAsset::OpaqueNotEmitted {
+                        primary_path,
+                        diagnostics,
+                    } => (false, primary_path, diagnostics),
+                };
+                if !emitted && form_diagnostics.is_empty() {
+                    bail!(
+                        "source asset {} was suppressed without an opaque diagnostic",
+                        primary_path.display()
+                    );
+                }
+                source_asset_rows = usize::from(emitted);
+                let asset_path = primary_path.to_string_lossy().replace('\\', "/");
+                let diagnostics = form_diagnostics
                     .into_iter()
                     .map(|diagnostic| SourceAssetCompletenessEntry {
                         code: diagnostic.code.to_string(),
@@ -3338,6 +3353,7 @@ fn dump_table_row_bytes(
                     })
                     .collect::<Vec<_>>();
                 if diagnostics.is_empty() {
+                    debug_assert!(emitted);
                     source_assets.record_emitted();
                 } else {
                     source_assets.record_opaque(diagnostics);
@@ -3345,7 +3361,7 @@ fn dump_table_row_bytes(
                 let elapsed = elapsed_ms(started);
                 timings.source_asset_cpu_ms += elapsed;
                 timings.add_source_asset_kind(&asset.kind, elapsed);
-                Some(asset_path)
+                emitted.then_some(asset_path)
             }
             None => {
                 timings.source_asset_cpu_ms += elapsed_ms(started);

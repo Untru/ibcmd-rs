@@ -3182,6 +3182,52 @@ fn writes_code4_common_form_to_common_forms_layout() {
 }
 
 #[test]
+fn malformed_form_source_asset_remains_fatal() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let form_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"BrokenForm\",{{1,\"en\",\"Broken form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+        )
+        .as_bytes(),
+    );
+    let malformed_body = deflate_for_test(
+        b"{4,{malformed-layout},\"Procedure StillParsed()\r\nEndProcedure\r\n\",{0}}",
+    );
+    let rows = vec![
+        ConfigRow {
+            file_name: form_uuid.to_string(),
+            part_no: 0,
+            data_size: form_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&form_metadata),
+        },
+        ConfigRow {
+            file_name: format!("{form_uuid}.0"),
+            part_no: 0,
+            data_size: malformed_body.len() as i64,
+            binary_hex: encode_hex_for_test(&malformed_body),
+        },
+    ];
+
+    let error = match dump_table_rows(&root, "Config", rows, false, true, true) {
+        Ok(_) => panic!("malformed form source asset unexpectedly succeeded"),
+        Err(error) => error,
+    };
+
+    assert!(
+        format!("{error:#}").contains("failed to parse form body"),
+        "{error:#}"
+    );
+    assert!(!root.join("CommonForms/BrokenForm/Ext/Form.xml").exists());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn writes_form_module_text_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
         "ibcmd-rs-mssql-dump-test-{}",
@@ -3254,6 +3300,171 @@ fn writes_form_module_text_to_source_layout() {
     assert_eq!(
         body_row.source_asset_path.as_deref(),
         Some("Catalogs/Products/Forms/ListForm/Ext/Form.xml")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn keeps_form_module_but_suppresses_opaque_choice_list_asset() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let catalog_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{99999999-9999-4999-8999-999999999999,1,{form_uuid}}}}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let form_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+        )
+        .as_bytes(),
+    );
+    let opaque_radio = r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#;
+    let opaque_raw = "{9,2}";
+    let form_body_text = format!(
+        "{{4,{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{0}}}}"
+    );
+    let form_body = deflate_for_test(form_body_text.as_bytes());
+    let rows = vec![
+        ConfigRow {
+            file_name: catalog_uuid.to_string(),
+            part_no: 0,
+            data_size: catalog_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&catalog_metadata),
+        },
+        ConfigRow {
+            file_name: form_uuid.to_string(),
+            part_no: 0,
+            data_size: form_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&form_metadata),
+        },
+        ConfigRow {
+            file_name: format!("{form_uuid}.0"),
+            part_no: 0,
+            data_size: form_body.len() as i64,
+            binary_hex: encode_hex_for_test(&form_body),
+        },
+    ];
+
+    let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+    let form_dir = root.join("Catalogs/Products/Forms/ListForm/Ext");
+    assert_eq!(dumped.module_text_rows, 1);
+    assert_eq!(dumped.source_asset_rows, 0);
+    assert_eq!(
+        fs::read_to_string(form_dir.join("Form/Module.bsl")).unwrap(),
+        "\u{feff}Procedure KeepMe()\r\nEndProcedure\r\n"
+    );
+    assert!(!form_dir.join("Form.xml").exists());
+    assert!(!form_dir.join("Form/Items").exists());
+
+    let body_row = dumped
+        .rows
+        .iter()
+        .find(|row| row.file_name == format!("{form_uuid}.0"))
+        .unwrap();
+    assert_eq!(
+        body_row.module_text_path.as_deref(),
+        Some("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl")
+    );
+    assert_eq!(body_row.source_asset_path, None);
+
+    let report = &dumped.source_assets;
+    assert_eq!(report.emitted, 0);
+    assert_eq!(report.opaque, 1);
+    assert_eq!(report.missing, 0);
+    assert_eq!(report.opaque_property_count, 1);
+    assert_eq!(
+        report.expected,
+        report.emitted + report.opaque + report.missing
+    );
+    assert!(report.ensure_complete(false).is_ok());
+    assert!(report.ensure_complete(true).is_err());
+    assert_eq!(
+        report
+            .reasons
+            .get("source_asset.form.choice_list.opaque_asset_not_emitted"),
+        Some(&1)
+    );
+    let affected = report.affected_assets.first().unwrap();
+    assert_eq!(affected.classification, "opaque_asset_not_emitted");
+    assert_eq!(affected.property, "ChoiceList");
+    assert_eq!(affected.property_profile, "radio_button_options");
+    assert_eq!(affected.property_slot, 1);
+    assert_eq!(affected.form_item_id, "38");
+    assert_eq!(affected.form_item_tag, "RadioButtonField");
+    assert_eq!(affected.raw_length, opaque_raw.len());
+    assert_eq!(
+        affected.raw_sha256,
+        format!("{:x}", Sha256::digest(opaque_raw.as_bytes()))
+    );
+    let report_json = serde_json::to_string(report).unwrap();
+    assert!(!report_json.contains(opaque_raw));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn opaque_choice_list_does_not_recover_malformed_list_settings_source_asset() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let form_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"BrokenListSettings\",{{1,\"en\",\"Broken list settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+        )
+        .as_bytes(),
+    );
+    let opaque_radio = r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#;
+    let dynamic_list_object_id = "11111111-1111-4111-8111-111111111111";
+    let malformed_attribute = format!(
+        r##"{{9,{{17}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,3,"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{dynamic_list_object_id}}},"AutoSaveUserSettings",{{"B",1}},"ItemsViewMode",{{"S","{}"}}}},{{0,0}}}}"##,
+        '\u{1}'
+    );
+    let form_body = deflate_for_test(
+        format!(
+            "{{4,{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{4,1,{malformed_attribute}}}}}"
+        )
+        .as_bytes(),
+    );
+    let rows = vec![
+        ConfigRow {
+            file_name: form_uuid.to_string(),
+            part_no: 0,
+            data_size: form_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&form_metadata),
+        },
+        ConfigRow {
+            file_name: format!("{form_uuid}.0"),
+            part_no: 0,
+            data_size: form_body.len() as i64,
+            binary_hex: encode_hex_for_test(&form_body),
+        },
+    ];
+
+    let error = match dump_table_rows(&root, "Config", rows, false, true, true) {
+        Ok(_) => panic!("malformed ListSettings unexpectedly became recoverable"),
+        Err(error) => error,
+    };
+
+    assert!(
+        format!("{error:#}").contains("failed to extract form xml"),
+        "{error:#}"
+    );
+    assert!(
+        !root
+            .join("CommonForms/BrokenListSettings/Ext/Form.xml")
+            .exists()
     );
 
     let _ = fs::remove_dir_all(root);
@@ -5209,6 +5420,52 @@ fn appends_escaped_list_settings_tail_after_unchanged_complex_sections() {
         complex_xml.strip_suffix(closing).unwrap()
     );
     assert_eq!(xml, expected);
+}
+
+#[test]
+fn opaque_choice_list_does_not_mask_malformed_dynamic_list_settings() {
+    let opaque_radio = parse_form_child_item(
+        r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(matches!(
+        opaque_radio.choice_list,
+        CanonicalFormChoiceList::OpaqueSameProfile { .. }
+    ));
+
+    let dynamic_list_object_id = "11111111-1111-4111-8111-111111111111";
+    let mut malformed_attribute = parse_form_attribute(
+        &format!(
+            r##"{{9,{{17}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,2,"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{dynamic_list_object_id}}},"AutoSaveUserSettings",{{"B",1}}}},{{0,0}}}}"##
+        ),
+        &BTreeMap::new(),
+        &BTreeMap::from([(
+            dynamic_list_object_id.to_string(),
+            "Document.СинтетическийДокумент".to_string(),
+        )]),
+    )
+    .unwrap();
+    malformed_attribute
+        .settings
+        .as_mut()
+        .unwrap()
+        .list_settings
+        .items_view_mode = Some("\u{1}".to_string());
+
+    assert!(matches!(
+        preflight_form_writer_paths(
+            std::slice::from_ref(&opaque_radio),
+            None,
+            std::slice::from_ref(&malformed_attribute),
+        ),
+        Err(FormSchemaWriteError::DcsTail(_))
+    ));
 }
 
 #[test]
@@ -14951,6 +15208,35 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
             slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
         })
     );
+    validate_form_writer_policy_availability_trees(
+        &[],
+        Some(std::slice::from_ref(&opaque_auto_command_item)),
+    )
+    .unwrap();
+    let mut opaque_choice_list_diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(
+        std::slice::from_ref(&opaque_auto_command_item),
+        &mut opaque_choice_list_diagnostics,
+    );
+    assert_eq!(opaque_choice_list_diagnostics.len(), 1);
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].code,
+        "source_asset.form.choice_list.opaque_asset_not_emitted"
+    );
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].classification,
+        "opaque_asset_not_emitted"
+    );
+    assert_eq!(opaque_choice_list_diagnostics[0].property, "ChoiceList");
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].property_profile,
+        "input_field_extended_options"
+    );
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].raw_length,
+        "{unsupported-auto-command-bar-choice-list}".len()
+    );
+    assert_eq!(opaque_choice_list_diagnostics[0].raw_sha256.len(), 64);
 
     let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
     assert!(xml.contains("<ToolTip>"));
