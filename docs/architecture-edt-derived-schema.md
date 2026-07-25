@@ -31,11 +31,25 @@ XML writer не должен угадывать семантику slot.
 12 224 feature IDs и 1 447 operation IDs. Это структурные идентификаторы
 моделей.
 
-Первый Xcore vertical slice для модели форм содержит 257 classifiers и
-919 локально объявленных features: 671 attribute, 34 reference и
-214 containment. В нём зафиксированы 7 явных defaults. Неподтверждённые
-XML QName, order, default-emission, version gate и delegate имеют статус
-`pending` и не могут использоваться как production-правило.
+Полный доступный Xcore-снимок содержит 63 packages, 1 820 classifiers и
+4 966 локально объявленных features: 3 425 attributes, 214 references и
+1 327 containments. В нём зафиксированы 585 явно заданных defaults. Модели,
+для которых EDT inventory не содержит Xcore-ресурс, в этот corpus не
+выдумываются. Неподтверждённые XML QName, order, default-emission, version
+gate и delegate имеют статус `pending` и не могут использоваться как
+production-правило.
+
+Каждый из 4 966 feature имеет запись в canonical coverage map. Два поля
+`DataCompositionSettings` представлены типизированной `DcsSettings`; остальные
+4 964 ещё не подключённых features помечены как `unsupported` с диагностикой
+`schema.unmapped`. Полнота карты не означает готовность реализации. Отдельный
+metadata-order corpus содержит 60
+подтверждённых записей: 40 property orders, 4 special cases `internalInfo` и
+16 таблиц `producedTypes`. Связь constructor `InvokeDynamic` с конкретным
+`get*`-методом provider доказывается через constant pool и `BootstrapMethods`;
+неизвестная или неоднозначная форма bytecode по-прежнему отклоняется
+fail-closed. Порядок не используется как доказательство QName, nil,
+default-emission или иных XML-правил.
 
 ## Обновление corpus
 
@@ -53,11 +67,37 @@ pwsh ./tools/import-edt-package-features.ps1 `
 pwsh ./tools/import-edt-xcore-semantics.ps1 `
   -InputInventory "C:\path\to\inventory.json" `
   -OutputSemantics "./crates/ibcmd-schema/data/edt-2025.2.3-feature-semantics.json"
+
+pwsh ./tools/generate-canonical-coverage.ps1 `
+  -InputFeatureSemantics "./crates/ibcmd-schema/data/edt-2025.2.3-feature-semantics.json" `
+  -OutputCoverage "./crates/ibcmd-schema/data/edt-2025.2.3-canonical-coverage.json"
+
+pwsh ./tools/import-edt-metadata-order.ps1 `
+  -InputInventory "C:\path\to\inventory.json" `
+  -OutputOrder "./crates/ibcmd-schema/data/edt-2025.2.3-metadata-order.json"
 ```
 
 Сгенерированный JSON проходит тесты `ibcmd-schema` и проверяется как обычное
 изменение исходников. Скрипты не участвуют в default build. Xcore, JAR,
 class-файлы и абсолютные пути в репозиторий не копируются.
+
+## Governance очищенного corpus
+
+CI запускает `tools/validate-edt-corpus.ps1` в Linux и Windows matrix до
+offline-сборки. Валидатор работает без EDT и сети: он проверяет каждый
+отслеживаемый файл на запрещённые расширения и сигнатуры ZIP/JAR, Java class,
+PE, ELF и Mach-O независимо от имени файла, а также отклоняет `.xcore` и
+reparse-point. Затем отдельно проверяется JSON corpus в
+`crates/ibcmd-schema/data`. Отклоняются drive/UNC/POSIX пути и `file:` URI, а
+также corpus без версии источника.
+
+Provenance `verified` факта — непустой массив portable строк `sources`; вложенный
+объект или произвольное поле `provenance` не считаются доказательством. Узкое
+исключение существует только для исторического `rules[].evidence` в writer-rule
+schema: там проверяется точная тройка `status`, `kind`, `note`. После gate CI
+запускает `cargo test --locked -p ibcmd-schema`, чтобы Rust schema валидировала
+структуру и агрегаты committed corpus. Статус `pending` не является production
+знанием и не может быть повышен одной догадкой или XML diff.
 
 ## Правило приёма новых знаний
 
@@ -67,4 +107,8 @@ class-файлы и абсолютные пути в репозиторий не
 2. согласованный результат IBCMD и EDT roundtrip;
 3. полный корпус положительных и отрицательных примеров двух баз.
 
-Один XML diff не является достаточным доказательством.
+Один XML diff не является достаточным доказательством: он показывает лишь
+конкретный наблюдаемый результат и не отличает правило модели от побочного
+эффекта версии, порядка записи или исходного состояния объекта. Для принятия
+правила нужен воспроизводимый источник либо сопоставление нескольких
+независимых примеров с явно сохранённой provenance.

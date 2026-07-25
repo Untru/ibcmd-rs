@@ -1940,7 +1940,7 @@ pub(super) fn extract_configuration_source_xml(
         .unwrap_or_default();
     let mut xml = format_configuration_source_xml(&header, &properties, source_version);
     if let Some(root_layout) = &root_layout {
-        insert_configuration_internal_info_xml(&mut xml, &root_layout.contained_objects);
+        insert_configuration_internal_info_xml(&mut xml, &root_layout.contained_objects).ok()?;
         if let Some(child_objects) =
             resolve_configuration_root_child_objects(root_layout, object_refs)
         {

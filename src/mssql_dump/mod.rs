@@ -12,7 +12,11 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::diagnostic::ObjectPath;
 use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::StorageImage;
-use ibcmd_xml::{XmlReader, bundled_metadata_registry};
+use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
+use ibcmd_xml::{
+    MetadataOrderError, XmlReader, bundled_metadata_registry, order_metadata_features,
+    order_produced_type_values,
+};
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 use quick_xml::{NsReader, Reader};
@@ -35,6 +39,8 @@ mod fetch;
 mod form_body;
 mod forms;
 mod metadata;
+#[cfg(test)]
+mod metadata_order_tests;
 mod moxel;
 pub mod offline_context;
 mod refs;
@@ -7052,7 +7058,7 @@ fn extract_metadata_source_xml_from_text_row(
             form_refs,
             template_refs,
         )?;
-        format_catalog_source_xml(&header, &catalog, source_version).into_bytes()
+        format_catalog_source_xml(&header, &catalog, source_version)?.into_bytes()
     } else if kind == "Report" {
         let report = parse_report_properties_from_text(
             text,
@@ -7084,7 +7090,7 @@ fn extract_metadata_source_xml_from_text_row(
             form_refs,
             template_refs,
         )?;
-        format_document_source_xml(&header, &document, source_version).into_bytes()
+        format_document_source_xml(&header, &document, source_version)?.into_bytes()
     } else if kind == "ChartOfCharacteristicTypes" {
         let chart = parse_chart_of_characteristic_types_properties_from_text(
             text,
@@ -24833,26 +24839,39 @@ fn format_configuration_source_xml(
 fn insert_configuration_internal_info_xml(
     xml: &mut String,
     contained_objects: &[ConfigurationContainedObject],
-) {
+) -> Result<(), MetadataOrderError> {
     if contained_objects.is_empty() {
-        return;
+        return Ok(());
     }
     let Some(index) = xml.find("\t\t<Properties>\r\n") else {
-        return;
+        return Ok(());
     };
+    let feature = "CONFIGURATION__CONTAINED_OBJECTS".to_owned();
+    let ordered_features = order_metadata_features(
+        "CONFIGURATION",
+        MetadataOrderSection::InternalInfo,
+        MetadataOrderVersionPredicate::Always,
+        std::slice::from_ref(&feature),
+    )?;
     let mut internal_info = "\t\t<InternalInfo>\r\n".to_string();
-    for object in contained_objects {
-        internal_info.push_str(&format!(
-            "\t\t\t<xr:ContainedObject>\r\n\
+    for ordered_feature in ordered_features {
+        if ordered_feature != feature {
+            return Err(MetadataOrderError::UnknownFeature(ordered_feature));
+        }
+        for object in contained_objects {
+            internal_info.push_str(&format!(
+                "\t\t\t<xr:ContainedObject>\r\n\
 \t\t\t\t<xr:ClassId>{}</xr:ClassId>\r\n\
 \t\t\t\t<xr:ObjectId>{}</xr:ObjectId>\r\n\
 \t\t\t</xr:ContainedObject>\r\n",
-            escape_xml_element_text(&object.class_id),
-            escape_xml_element_text(&object.object_id),
-        ));
+                escape_xml_element_text(&object.class_id),
+                escape_xml_element_text(&object.object_id),
+            ));
+        }
     }
     internal_info.push_str("\t\t</InternalInfo>\r\n");
     xml.insert_str(index, &internal_info);
+    Ok(())
 }
 
 fn insert_configuration_root_child_objects_xml(
@@ -26112,7 +26131,7 @@ fn format_catalog_source_xml(
     header: &MetadataHeader,
     catalog: &CatalogProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     let palette_namespace = if source_version == InfobaseConfigSourceVersion::V2_21 {
         " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""
     } else {
@@ -26126,9 +26145,13 @@ fn format_catalog_source_xml(
         uuid = escape_xml_text(&header.uuid),
     );
 
-    xml.push_str(&format_generated_types_internal_info_xml(
-        &catalog.generated_types,
-    ));
+    xml.push_str(
+        &format_schema_ordered_generated_types_internal_info_xml(
+            "CATALOG_TYPES",
+            &catalog.generated_types,
+        )
+        .ok()?,
+    );
 
     xml.push_str("\t\t<Properties>\r\n");
     xml.push_str(&format!(
@@ -26383,7 +26406,7 @@ fn format_catalog_source_xml(
         xml.push_str("\t\t</ChildObjects>\r\n");
     }
     xml.push_str("\t</Catalog>\r\n</MetaDataObject>");
-    xml
+    Some(xml)
 }
 
 fn format_report_source_xml(
@@ -26513,9 +26536,13 @@ fn format_document_source_xml(
     header: &MetadataHeader,
     document: &DocumentProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     let mut xml = format_full_metadata_source_xml("Document", header, source_version);
-    let internal_info = format_generated_types_internal_info_xml(&document.generated_types);
+    let internal_info = format_schema_ordered_generated_types_internal_info_xml(
+        "DOCUMENT_TYPES",
+        &document.generated_types,
+    )
+    .ok()?;
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal_info);
     }
@@ -26690,7 +26717,7 @@ fn format_document_source_xml(
             xml.insert_str(index, &child_objects);
         }
     }
-    xml
+    Some(xml)
 }
 
 fn push_document_reference_collection_xml(xml: &mut String, name: &str, references: &[String]) {
@@ -27658,6 +27685,21 @@ fn format_enum_source_xml(
 
 fn format_generated_types_internal_info_xml(generated_types: &[GeneratedTypeEntry]) -> String {
     format_generated_types_internal_info_xml_with_indent(generated_types, "\t\t")
+}
+
+fn format_schema_ordered_generated_types_internal_info_xml(
+    classifier: &str,
+    generated_types: &[GeneratedTypeEntry],
+) -> Result<String, MetadataOrderError> {
+    let ordered = order_produced_type_values(
+        classifier,
+        generated_types
+            .iter()
+            .cloned()
+            .map(|generated_type| (generated_type.category, generated_type))
+            .collect(),
+    )?;
+    Ok(format_generated_types_internal_info_xml(&ordered))
 }
 
 fn format_generated_types_internal_info_xml_with_indent(

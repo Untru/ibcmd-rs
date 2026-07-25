@@ -36,6 +36,9 @@ param(
 
     [string[]]$Bundle = @("com._1c.g5.v8.dt.form.model"),
 
+    [Alias("RejectReportPath")]
+    [string]$RejectReport,
+
     [Alias("Release")]
     [string]$EdtRelease = "2025.2.3+30"
 )
@@ -325,7 +328,34 @@ function Get-XcoreMultiplicity {
                 upperBound = $null
             }
         }
+        "0..*" {
+            return [ordered]@{
+                modelType = $modelType
+                lowerBound = 0
+                upperBound = $null
+            }
+        }
         default {
+            if ($multiplicity -match '^(?<bound>\d+)$') {
+                $bound = [int]$Matches["bound"]
+                return [ordered]@{
+                    modelType = $modelType
+                    lowerBound = $bound
+                    upperBound = $bound
+                }
+            }
+            if ($multiplicity -match '^(?<lower>\d+)\.\.(?<upper>\d+)$') {
+                $lower = [int]$Matches["lower"]
+                $upper = [int]$Matches["upper"]
+                if ($lower -gt $upper) {
+                    throw "Invalid Xcore multiplicity '[$multiplicity]' in $Context"
+                }
+                return [ordered]@{
+                    modelType = $modelType
+                    lowerBound = $lower
+                    upperBound = $upper
+                }
+            }
             throw "Unsupported Xcore multiplicity '[$multiplicity]' in $Context"
         }
     }
@@ -353,7 +383,8 @@ function Parse-XcoreFeature {
         "refers",
         "transient",
         "unsettable",
-        "unique"
+        "unique",
+        "derived"
     )
 
     while ($working -match '^(?<modifier>[A-Za-z_][A-Za-z0-9_]*)\s+(?<rest>.+)$' -and
@@ -476,12 +507,13 @@ function Parse-XcoreResource {
 
     $packageMatches = [regex]::Matches(
         $clean,
-        '(?m)^\s*package\s+(?<name>[A-Za-z_][A-Za-z0-9_.]*)\s*$'
+        '(?m)^\s*package\s+(?<name>\^?[A-Za-z_][A-Za-z0-9_]*' +
+            '(?:\.\^?[A-Za-z_][A-Za-z0-9_]*)*)\s*$'
     )
     if ($packageMatches.Count -ne 1) {
         throw "$Resource must contain exactly one package declaration; found $($packageMatches.Count)"
     }
-    $packageName = $packageMatches[0].Groups["name"].Value
+    $packageName = $packageMatches[0].Groups["name"].Value.Replace("^", "")
 
     $ecoreMatches = [regex]::Matches($clean, '(?s)@Ecore\s*\((?<arguments>.*?)\)')
     if ($ecoreMatches.Count -ne 1) {
@@ -507,11 +539,36 @@ function Parse-XcoreResource {
     $braceDepth = 0
     $annotationParenDepth = 0
     $operationParenDepth = 0
+    $dataTypeHook = $null
+    $dataTypeHookDepth = 0
+    $dataTypeHooksAllowed = $false
 
     for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
         $lineNumber = $lineIndex + 1
         $line = $lines[$lineIndex]
         $trimmed = $line.Trim()
+
+        if ($null -ne $dataTypeHook) {
+            $hookBraceDelta = Get-DelimiterDelta -Text $line -Open '{' -Close '}'
+            if ($dataTypeHookDepth -eq 0) {
+                if ($trimmed -eq "") {
+                    continue
+                }
+                if ($trimmed -ne "{") {
+                    throw "Expected datatype $dataTypeHook body in " +
+                        "$Resource`:$lineNumber"
+                }
+            }
+            $dataTypeHookDepth += $hookBraceDelta
+            if ($dataTypeHookDepth -lt 0) {
+                throw "Unbalanced datatype $dataTypeHook body in " +
+                    "$Resource`:$lineNumber"
+            }
+            if ($dataTypeHookDepth -eq 0) {
+                $dataTypeHook = $null
+            }
+            continue
+        }
 
         if ($annotationParenDepth -gt 0) {
             $annotationParenDepth += Get-DelimiterDelta `
@@ -554,7 +611,7 @@ function Parse-XcoreResource {
             $dataTypeMatch = [regex]::Match(
                 $trimmed,
                 '^type\s+(?<name>\^?[A-Za-z_][A-Za-z0-9_]*)\s+wraps\s+' +
-                    '[A-Za-z_$][A-Za-z0-9_.$]*(?:<[^{}]+>)?$'
+                    '[A-Za-z_$][A-Za-z0-9_.$]*(?:<[^{}]+>)?(?:\[\])*$'
             )
             if ($dataTypeMatch.Success) {
                 $classifiers.Add([ordered]@{
@@ -562,6 +619,22 @@ function Parse-XcoreResource {
                     kind = "datatype"
                     features = @()
                 })
+                $dataTypeHooksAllowed = $true
+                continue
+            }
+
+            if ($dataTypeHooksAllowed -and
+                $trimmed -match '^(?<hook>create|convert)\s*(?<brace>\{)?$') {
+                $dataTypeHook = $Matches["hook"]
+                $dataTypeHookDepth = Get-DelimiterDelta `
+                    -Text $line -Open '{' -Close '}'
+                if ($dataTypeHookDepth -lt 0 -or $dataTypeHookDepth -gt 1) {
+                    throw "Unsupported datatype $dataTypeHook body in " +
+                        "$Resource`:$lineNumber"
+                }
+                if ($Matches["brace"] -eq "{" -and $dataTypeHookDepth -eq 0) {
+                    $dataTypeHook = $null
+                }
                 continue
             }
 
@@ -573,6 +646,7 @@ function Parse-XcoreResource {
             if (-not $classifierMatch.Success) {
                 throw "Unsupported top-level Xcore syntax in $Resource`:${lineNumber}: $trimmed"
             }
+            $dataTypeHooksAllowed = $false
 
             $classifierKind = $classifierMatch.Groups["kind"].Value
             $currentClassifier = [ordered]@{
@@ -593,6 +667,17 @@ function Parse-XcoreResource {
 
         if ($depthBefore -eq 0) {
             if ($trimmed -eq "") {
+                continue
+            }
+            if ($trimmed -eq "{}") {
+                $currentClassifier.features = @(
+                    $currentClassifier.features |
+                        Sort-Object `
+                            { [string]$_.name },
+                            { [string]$_.kind },
+                            { [string]$_.modelType }
+                )
+                $currentClassifier = $null
                 continue
             }
             $headerFragment = $trimmed
@@ -629,7 +714,7 @@ function Parse-XcoreResource {
             }
 
             if ($currentClassifier.kind -eq "enum") {
-                if ($trimmed -notmatch (
+                if ($trimmed -ne "," -and $trimmed -notmatch (
                     '^\^?[A-Za-z_][A-Za-z0-9_]*' +
                     '(?:\s+as\s+"(?:\\.|[^"\\])*")?' +
                     '\s*(?:=\s*-?\d+)?\s*,?$'
@@ -701,6 +786,116 @@ function Parse-XcoreResource {
     }
 }
 
+function New-XcoreRejection {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BundleName,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Resource,
+
+        [Parameter(Mandatory = $true)]
+        [System.Exception]$Exception
+    )
+
+    $message = $Exception.Message
+    $lineNumber = $null
+    $resourceLinePattern = [regex]::Escape($Resource) + ':(?<line>\d+)'
+    if ($message -match $resourceLinePattern) {
+        $lineNumber = [int]$Matches["line"]
+    }
+
+    $production = "resource"
+    $reason = "parser rejected resource"
+    switch -Regex ($message) {
+        '^Unsupported top-level Xcore syntax' {
+            $production = "classifier-declaration"
+            $reason = "unsupported top-level declaration"
+            break
+        }
+        '^Unsupported structural feature syntax' {
+            $production = "structural-feature"
+            $reason = "unsupported structural feature declaration"
+            break
+        }
+        '^Unsupported enum literal syntax' {
+            $production = "enum-literal"
+            $reason = "unsupported enum literal declaration"
+            break
+        }
+        '^Unsupported Xcore multiplicity' {
+            $production = "multiplicity"
+            $reason = "unsupported feature multiplicity"
+            if ($message -match "multiplicity '(?<value>\[[^']+\])'") {
+                $reason += " $($Matches['value'])"
+            }
+            break
+        }
+        'package declaration' {
+            $production = "package-declaration"
+            $reason = "missing or ambiguous package declaration"
+            break
+        }
+        '@Ecore|nsURI' {
+            $production = "package-annotation"
+            $reason = "missing or ambiguous Ecore namespace annotation"
+            break
+        }
+        'comment|string literal|escape sequence|Unicode escape' {
+            $production = "lexical"
+            $reason = "unsupported or unterminated lexical construct"
+            break
+        }
+        'annotation parentheses' {
+            $production = "annotation"
+            $reason = "unsupported or unterminated annotation"
+            break
+        }
+        'operation parentheses' {
+            $production = "operation"
+            $reason = "unsupported or unterminated operation signature"
+            break
+        }
+        'explicit default' {
+            $production = "explicit-default"
+            $reason = "unsupported explicit default"
+            break
+        }
+        'generic type|model type' {
+            $production = "model-type"
+            $reason = "unsupported model type"
+            break
+        }
+        'classifier body|classifier braces|braces|Unterminated classifier' {
+            $production = "classifier-body"
+            $reason = "unsupported or unbalanced classifier body"
+            break
+        }
+        'Duplicate classifier|Duplicate feature' {
+            $production = "semantic-identity"
+            $reason = "duplicate local semantic identity"
+            break
+        }
+        '^tar failed to read' {
+            $production = "archive-read"
+            $reason = "archive tool could not stream selected resource"
+            break
+        }
+    }
+
+    return [ordered]@{
+        bundle = $BundleName
+        resource = $Resource
+        production = $production
+        line = $lineNumber
+        reason = if ($null -eq $lineNumber) {
+            $reason
+        } else {
+            "$reason at line $lineNumber"
+        }
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($EdtRelease)) {
     throw "EdtRelease must not be empty"
 }
@@ -761,6 +956,9 @@ if ($unmatchedBundles.Count -gt 0) {
 }
 
 $packages = [System.Collections.Generic.List[object]]::new()
+$processedResources = [System.Collections.Generic.List[object]]::new()
+$rejectedResources = [System.Collections.Generic.List[object]]::new()
+$selectedResourceCount = 0
 $matchedScopes = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::Ordinal
 )
@@ -808,7 +1006,7 @@ foreach ($inventoryEntry in $selectedBundles) {
             Sort-Object -Unique
     )
     if ($xcoreResources.Count -eq 0) {
-        throw "Selected bundle '$bundleName' contains no model/*.xcore resources"
+        continue
     }
 
     $selectedResources = @(
@@ -819,27 +1017,49 @@ foreach ($inventoryEntry in $selectedBundles) {
             }
     )
     if ($selectedResources.Count -eq 0) {
-        throw "Scope matched no Xcore resources in selected bundle '$bundleName'"
+        continue
     }
     foreach ($resource in $selectedResources) {
+        $selectedResourceCount++
         foreach ($selector in $Scope) {
             if ($resource -like $selector) {
                 [void]$matchedScopes.Add($selector)
             }
         }
 
-        $sourceLines = @(& tar -xOf $jarPath $resource 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            throw "tar failed to read '$resource' from '$bundleName': " +
-                ($sourceLines -join "`n")
-        }
-        $sourceText = $sourceLines -join "`n"
-        $packages.Add(
-            (Parse-XcoreResource `
+        try {
+            $sourceLines = @(& tar -xOf $jarPath $resource 2>&1)
+            if ($LASTEXITCODE -ne 0) {
+                throw "tar failed to read selected Xcore resource"
+            }
+            $sourceText = $sourceLines -join "`n"
+            $parsedPackage = Parse-XcoreResource `
                 -Text $sourceText `
                 -BundleName $bundleName `
-                -Resource $resource)
-        )
+                -Resource $resource
+            $packages.Add($parsedPackage)
+            $processedResources.Add([ordered]@{
+                bundle = $bundleName
+                resource = $resource
+                packageName = [string]$parsedPackage.packageName
+                namespaceUri = [string]$parsedPackage.namespaceUri
+                classifiers = @($parsedPackage.classifiers).Count
+                features = @(
+                    $parsedPackage.classifiers |
+                        ForEach-Object { $_.features }
+                ).Count
+            })
+        } catch {
+            $rejectedResources.Add(
+                (New-XcoreRejection `
+                    -BundleName $bundleName `
+                    -Resource $resource `
+                    -Exception $_.Exception)
+            )
+        } finally {
+            $sourceLines = $null
+            $sourceText = $null
+        }
     }
 }
 
@@ -847,8 +1067,12 @@ $unmatchedScopes = @($Scope | Where-Object { -not $matchedScopes.Contains($_) })
 if ($unmatchedScopes.Count -gt 0) {
     throw "Scope selectors matched no Xcore resources: $($unmatchedScopes -join ', ')"
 }
-if ($packages.Count -eq 0) {
-    throw "The selected inventory/scope produced no Xcore packages"
+if ($selectedResourceCount -eq 0) {
+    throw "The selected inventory/scope discovered no Xcore resources"
+}
+if ($selectedResourceCount -ne
+    ($processedResources.Count + $rejectedResources.Count)) {
+    throw "Internal resource accounting mismatch"
 }
 
 $packages = @(
@@ -858,6 +1082,19 @@ $packages = @(
             { [string]$_.resource },
             { [string]$_.packageName },
             { [string]$_.namespaceUri }
+)
+$processedResources = @(
+    $processedResources |
+        Sort-Object `
+            { [string]$_.bundle },
+            { [string]$_.resource }
+)
+$rejectedResources = @(
+    $rejectedResources |
+        Sort-Object `
+            { [string]$_.bundle },
+            { [string]$_.resource },
+            { [string]$_.production }
 )
 $classifierCount = @($packages | ForEach-Object { $_.classifiers }).Count
 $features = @(
@@ -907,3 +1144,61 @@ Write-Output (
     "attributes=$attributeCount references=$referenceCount " +
     "containments=$containmentCount explicitDefaults=$defaultCount"
 )
+Write-Output (
+    "selectedResources=$selectedResourceCount " +
+    "processedResources=$($processedResources.Count) " +
+    "rejectedResources=$($rejectedResources.Count)"
+)
+
+if (-not [string]::IsNullOrWhiteSpace($RejectReport)) {
+    $clusters = @(
+        $rejectedResources |
+            Group-Object { [string]$_.production } |
+            ForEach-Object {
+                [ordered]@{
+                    production = $_.Name
+                    count = $_.Count
+                }
+            } |
+            Sort-Object { [string]$_.production }
+    )
+    $report = [ordered]@{
+        schemaVersion = 1
+        source = [ordered]@{
+            product = "1C:EDT"
+            release = $EdtRelease
+            derivation = "deterministic Xcore discovery accounting; no source, archive, class bytes, or absolute paths"
+        }
+        summary = [ordered]@{
+            selected = $selectedResourceCount
+            processed = $processedResources.Count
+            rejected = $rejectedResources.Count
+        }
+        clusters = $clusters
+        processed = $processedResources
+        rejected = $rejectedResources
+    }
+    $reportJson = $report | ConvertTo-Json -Depth 12
+    $reportJson = $reportJson.Replace("`r`n", "`n") + "`n"
+    if ($reportJson -match '(?i)(?:[A-Z]:\\|\\\\[^\\]|file:/)') {
+        throw "Refusing to write non-portable absolute path to reject report"
+    }
+
+    $rejectReportPath = [System.IO.Path]::GetFullPath($RejectReport)
+    $rejectReportParent = [System.IO.Path]::GetDirectoryName($rejectReportPath)
+    [System.IO.Directory]::CreateDirectory($rejectReportParent) | Out-Null
+    [System.IO.File]::WriteAllText(
+        $rejectReportPath,
+        $reportJson,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    Write-Output "Wrote $rejectReportPath"
+    foreach ($cluster in $clusters) {
+        Write-Output "reject.$($cluster.production)=$($cluster.count)"
+    }
+} elseif ($rejectedResources.Count -gt 0) {
+    Write-Warning (
+        "$($rejectedResources.Count) resources were rejected; " +
+        "use -RejectReport to persist deterministic details"
+    )
+}

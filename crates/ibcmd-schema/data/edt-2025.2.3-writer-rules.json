@@ -26,6 +26,15 @@
         "write picture only for project version 8.5.1 or newer"
       ],
       "delegate": "com._1c.g5.v8.dt.form.export.xml.writer.FormSmartFeatureWriter",
+      "policy": {
+        "kind": "form-choice-list",
+        "itemOrder": [
+          "presentation",
+          "check-state",
+          "value"
+        ],
+        "emptyCollection": "write-wrapper-when-write-default"
+      },
       "evidence": {
         "kind": "javap-bytecode",
         "status": "verified",
@@ -45,6 +54,11 @@
         "do not synthesize settings when feature value is null"
       ],
       "delegate": "DcsV8Serializer.writeSettings",
+      "policy": {
+        "kind": "form-list-settings",
+        "nullValue": "omit",
+        "delegate": "DcsV8Serializer.writeSettings"
+      },
       "evidence": {
         "kind": "javap-bytecode",
         "status": "verified",

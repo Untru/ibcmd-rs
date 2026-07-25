@@ -20,9 +20,17 @@ pub const BUNDLED_MODEL_INVENTORY_JSON: &str =
 pub const BUNDLED_PACKAGE_FEATURES_JSON: &str =
     include_str!("../data/edt-2025.2.3-package-features.json");
 
-/// Embedded EDT Xcore-derived feature semantics for the first form vertical slice.
+/// Embedded EDT Xcore-derived feature semantics for every packaged model resource.
 pub const BUNDLED_FEATURE_SEMANTICS_JSON: &str =
     include_str!("../data/edt-2025.2.3-feature-semantics.json");
+
+/// Embedded exhaustive canonical-model implementation coverage.
+pub const BUNDLED_CANONICAL_COVERAGE_JSON: &str =
+    include_str!("../data/edt-2025.2.3-canonical-coverage.json");
+
+/// Embedded, provider-derived metadata and produced-type feature order.
+pub const BUNDLED_METADATA_ORDER_JSON: &str =
+    include_str!("../data/edt-2025.2.3-metadata-order.json");
 
 /// Embedded, verified writer behaviour rules.
 pub const BUNDLED_WRITER_RULES_JSON: &str = include_str!("../data/edt-2025.2.3-writer-rules.json");
@@ -128,7 +136,79 @@ pub struct WriterRule {
     pub operations: Vec<String>,
     pub conditions: Vec<String>,
     pub delegate: Option<String>,
+    #[serde(default)]
+    pub policy: Option<WriterPolicy>,
     pub evidence: RuleEvidence,
+}
+
+/// A structured subset of verified writer behaviour.  Free-form operations remain useful
+/// provenance, but production writers must consume this typed policy instead of parsing prose.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum WriterPolicy {
+    FormChoiceList {
+        #[serde(rename = "itemOrder")]
+        item_order: Vec<FormChoiceListItemPart>,
+        #[serde(rename = "emptyCollection")]
+        empty_collection: FormChoiceListEmptyCollection,
+    },
+    FormListSettings {
+        #[serde(rename = "nullValue")]
+        null_value: FormListSettingsNullValue,
+        delegate: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormChoiceListItemPart {
+    Presentation,
+    CheckState,
+    Value,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormChoiceListEmptyCollection {
+    WriteWrapperWhenWriteDefault,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormListSettingsNullValue {
+    Omit,
+}
+
+/// Exact identity used by a writer-rule consumer.  The release is deliberately part of the
+/// key: silently reusing evidence obtained from a different EDT release is forbidden.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WriterRuleKey<'a> {
+    pub source_release: &'a str,
+    pub model_type: &'a str,
+    pub feature: &'a str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WriterRuleLookupError {
+    SourceReleaseMismatch {
+        requested: String,
+        available: String,
+    },
+    Missing {
+        model_type: String,
+        feature: String,
+    },
+    Ambiguous {
+        model_type: String,
+        feature: String,
+    },
+    Unverified {
+        id: String,
+        status: String,
+    },
+    MissingTypedPolicy {
+        id: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -181,6 +261,7 @@ pub enum FeatureKind {
 #[serde(rename_all = "lowercase")]
 pub enum XcoreFeatureQualifier {
     Container,
+    Derived,
     Transient,
     Unsettable,
     Unique,
@@ -279,6 +360,133 @@ pub struct FeatureSemanticsCorpus {
     pub packages: Vec<FeatureSemanticsPackage>,
 }
 
+/// How one EDT feature is preserved by the canonical model.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CoverageStatus {
+    Typed,
+    OpaqueLossless,
+    Unsupported,
+    PlatformOnly,
+}
+
+/// One explicit EDT feature to canonical-model mapping.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalCoverageEntry {
+    pub key: FeatureSemanticKey,
+    pub family: String,
+    pub status: CoverageStatus,
+    pub canonical_type: Option<String>,
+    pub canonical_field: Option<String>,
+    pub opaque_placement: Option<String>,
+    pub diagnostic_code: Option<String>,
+    pub evidence: FeatureEvidence,
+}
+
+/// Derived coverage totals for completeness and reporting.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalCoverageSummary {
+    pub entries: usize,
+    pub typed: usize,
+    pub opaque_lossless: usize,
+    pub unsupported: usize,
+    pub platform_only: usize,
+}
+
+/// Complete coverage mapping for one EDT-derived feature corpus.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CanonicalCoverageCorpus {
+    pub schema_version: u32,
+    pub source: CorpusSource,
+    pub summary: CanonicalCoverageSummary,
+    pub entries: Vec<CanonicalCoverageEntry>,
+}
+
+/// EDT writer-provider section whose feature order was observed.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MetadataOrderSection {
+    InternalInfo,
+    Properties,
+    ChildObjects,
+    ProducedTypes,
+}
+
+/// Version condition attached to a provider order record.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MetadataOrderVersionPredicate {
+    Always,
+    #[serde(rename = "greaterThan(V8_3_14)")]
+    GreaterThanV8_3_14,
+    #[serde(rename = "notGreaterThan(V8_3_14)")]
+    NotGreaterThanV8_3_14,
+}
+
+/// Explicit provider fallback; it is not an XML default or emission rule.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum MetadataOrderFallback {
+    #[serde(rename = "eClass.getEAllReferences() when ORDER_MAP has no key")]
+    AllReferencesWhenUnmapped,
+    #[serde(
+        rename = "ListBuilder(eClass, defaultPropertyFilter).build() when propertiesOrderMap has no key"
+    )]
+    DefaultPropertyFilterWhenUnmapped,
+    #[serde(
+        rename = "eClass.getEStructuralFeature(\"producedTypes\") when present, otherwise empty list"
+    )]
+    ProducedTypesWhenPresent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MetadataOrderOperationKind {
+    Cursor,
+    Next,
+    Emit,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataOrderOperation {
+    pub operation: MetadataOrderOperationKind,
+    pub feature: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataOrderRecord {
+    pub provider: String,
+    pub classifier: String,
+    pub section: MetadataOrderSection,
+    pub ordered_features: Vec<String>,
+    #[serde(default)]
+    pub order_operations: Vec<MetadataOrderOperation>,
+    pub version_predicate: MetadataOrderVersionPredicate,
+    pub fallback: MetadataOrderFallback,
+    pub evidence: FeatureEvidence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataOrderSummary {
+    pub bundle: String,
+    pub verified_records: usize,
+    pub rejected_records: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataOrderCorpus {
+    pub schema_version: u32,
+    pub source: CorpusSource,
+    pub summary: MetadataOrderSummary,
+    pub records: Vec<MetadataOrderRecord>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SchemaError {
     InvalidJson(String),
@@ -301,6 +509,14 @@ pub enum SchemaError {
     IncompleteVerifiedXmlBehavior {
         key: FeatureSemanticKey,
         field: &'static str,
+    },
+    InvalidCoverageEntry {
+        key: FeatureSemanticKey,
+        reason: &'static str,
+    },
+    CoverageMismatch {
+        kind: &'static str,
+        key: FeatureSemanticKey,
     },
 }
 
@@ -334,11 +550,60 @@ impl Display for SchemaError {
                 "verified XML behaviour for {} / {} / {} is missing {field}",
                 key.namespace_uri, key.classifier, key.feature
             ),
+            Self::InvalidCoverageEntry { key, reason } => write!(
+                formatter,
+                "invalid canonical coverage for {} / {} / {}: {reason}",
+                key.namespace_uri, key.classifier, key.feature
+            ),
+            Self::CoverageMismatch { kind, key } => write!(
+                formatter,
+                "{kind} canonical coverage key {} / {} / {}",
+                key.namespace_uri, key.classifier, key.feature
+            ),
         }
     }
 }
 
 impl Error for SchemaError {}
+
+impl Display for WriterRuleLookupError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SourceReleaseMismatch {
+                requested,
+                available,
+            } => write!(
+                formatter,
+                "writer rule source release mismatch: requested `{requested}`, available `{available}`"
+            ),
+            Self::Missing {
+                model_type,
+                feature,
+            } => write!(
+                formatter,
+                "writer rule is missing for `{model_type}` / `{feature}`"
+            ),
+            Self::Ambiguous {
+                model_type,
+                feature,
+            } => write!(
+                formatter,
+                "writer rule is ambiguous for `{model_type}` / `{feature}`"
+            ),
+            Self::Unverified { id, status } => {
+                write!(
+                    formatter,
+                    "writer rule `{id}` has unverified status `{status}`"
+                )
+            }
+            Self::MissingTypedPolicy { id } => {
+                write!(formatter, "writer rule `{id}` has no typed policy")
+            }
+        }
+    }
+}
+
+impl Error for WriterRuleLookupError {}
 
 impl ModelInventory {
     pub fn parse(json: &str) -> Result<Self, SchemaError> {
@@ -445,6 +710,7 @@ impl WriterRuleCorpus {
     pub fn validate(&self) -> Result<(), SchemaError> {
         validate_source(self.schema_version, &self.source)?;
         let mut identifiers = BTreeSet::new();
+        let mut exact_keys = BTreeSet::new();
         for rule in &self.rules {
             for (field, value) in [
                 ("writer rule id", rule.id.as_str()),
@@ -462,10 +728,41 @@ impl WriterRuleCorpus {
                     value: rule.id.clone(),
                 });
             }
+            if !exact_keys.insert((rule.model_type.as_str(), rule.feature.as_str())) {
+                return Err(SchemaError::DuplicateValue {
+                    field: "writer rule model type/feature",
+                    value: format!("{} / {}", rule.model_type, rule.feature),
+                });
+            }
             if rule.operations.is_empty() {
                 return Err(SchemaError::EmptyField("writer rule operations"));
             }
             validate_unique_names("writer operation", &rule.operations)?;
+            if let Some(policy) = &rule.policy {
+                match policy {
+                    WriterPolicy::FormChoiceList { item_order, .. } => {
+                        if item_order.as_slice()
+                            != [
+                                FormChoiceListItemPart::Presentation,
+                                FormChoiceListItemPart::CheckState,
+                                FormChoiceListItemPart::Value,
+                            ]
+                        {
+                            return Err(SchemaError::EmptyField(
+                                "form choice-list verified item order",
+                            ));
+                        }
+                    }
+                    WriterPolicy::FormListSettings { delegate, .. } => {
+                        validate_text("form list-settings delegate", delegate)?;
+                        if rule.delegate.as_deref() != Some(delegate.as_str()) {
+                            return Err(SchemaError::EmptyField(
+                                "form list-settings matching delegate",
+                            ));
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -481,6 +778,47 @@ impl WriterRuleCorpus {
         self.rules
             .iter()
             .filter(move |rule| rule.source_class == source_class)
+    }
+
+    /// Returns one verified, structured rule for an exact corpus release/model/feature key.
+    ///
+    /// Every incomplete state is an error.  Callers must not fall back to a rule from another
+    /// release or interpret the human-readable `operations`/`conditions` fields.
+    pub fn exact_rule(&self, key: WriterRuleKey<'_>) -> Result<&WriterRule, WriterRuleLookupError> {
+        if key.source_release != self.source.release {
+            return Err(WriterRuleLookupError::SourceReleaseMismatch {
+                requested: key.source_release.to_owned(),
+                available: self.source.release.clone(),
+            });
+        }
+        let mut matches = self
+            .rules
+            .iter()
+            .filter(|rule| rule.model_type == key.model_type && rule.feature == key.feature);
+        let Some(rule) = matches.next() else {
+            return Err(WriterRuleLookupError::Missing {
+                model_type: key.model_type.to_owned(),
+                feature: key.feature.to_owned(),
+            });
+        };
+        if matches.next().is_some() {
+            return Err(WriterRuleLookupError::Ambiguous {
+                model_type: key.model_type.to_owned(),
+                feature: key.feature.to_owned(),
+            });
+        }
+        if rule.evidence.status != "verified" {
+            return Err(WriterRuleLookupError::Unverified {
+                id: rule.id.clone(),
+                status: rule.evidence.status.clone(),
+            });
+        }
+        if rule.policy.is_none() {
+            return Err(WriterRuleLookupError::MissingTypedPolicy {
+                id: rule.id.clone(),
+            });
+        }
+        Ok(rule)
     }
 }
 
@@ -587,6 +925,339 @@ impl FeatureSemanticsCorpus {
     }
 }
 
+impl CanonicalCoverageCorpus {
+    pub fn parse(json: &str) -> Result<Self, SchemaError> {
+        let corpus: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        corpus.validate()?;
+        Ok(corpus)
+    }
+
+    pub fn validate(&self) -> Result<(), SchemaError> {
+        validate_source(self.schema_version, &self.source)?;
+        let mut keys = BTreeSet::new();
+        let mut typed = 0usize;
+        let mut opaque_lossless = 0usize;
+        let mut unsupported = 0usize;
+        let mut platform_only = 0usize;
+
+        for entry in &self.entries {
+            validate_feature_semantic_key(&entry.key)?;
+            validate_text("canonical coverage family", &entry.family)?;
+            validate_feature_evidence("canonical coverage evidence", &entry.evidence)?;
+            if entry.evidence.status != EvidenceStatus::Verified {
+                return Err(SchemaError::InvalidCoverageEntry {
+                    key: entry.key.clone(),
+                    reason: "coverage mapping requires verified evidence",
+                });
+            }
+            if !keys.insert(entry.key.clone()) {
+                return Err(SchemaError::DuplicateValue {
+                    field: "canonical coverage key",
+                    value: format!(
+                        "{} / {} / {}",
+                        entry.key.namespace_uri, entry.key.classifier, entry.key.feature
+                    ),
+                });
+            }
+            for (field, value) in [
+                ("canonical coverage type", entry.canonical_type.as_deref()),
+                ("canonical coverage field", entry.canonical_field.as_deref()),
+                (
+                    "canonical opaque placement",
+                    entry.opaque_placement.as_deref(),
+                ),
+                (
+                    "canonical diagnostic code",
+                    entry.diagnostic_code.as_deref(),
+                ),
+            ] {
+                if let Some(value) = value {
+                    validate_text(field, value)?;
+                }
+            }
+            match entry.status {
+                CoverageStatus::Typed => {
+                    if entry.canonical_type.is_none() || entry.canonical_field.is_none() {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "typed mapping requires canonical type and field",
+                        });
+                    }
+                    if entry.opaque_placement.is_some() || entry.diagnostic_code.is_some() {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "typed mapping contains irrelevant status fields",
+                        });
+                    }
+                    typed += 1;
+                }
+                CoverageStatus::OpaqueLossless => {
+                    if entry.opaque_placement.is_none() {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "opaque-lossless mapping requires placement",
+                        });
+                    }
+                    if entry.canonical_type.is_some()
+                        || entry.canonical_field.is_some()
+                        || entry.diagnostic_code.is_some()
+                    {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "opaque-lossless mapping contains irrelevant status fields",
+                        });
+                    }
+                    opaque_lossless += 1;
+                }
+                CoverageStatus::Unsupported => {
+                    if entry.diagnostic_code.is_none() {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "unsupported mapping requires diagnostic code",
+                        });
+                    }
+                    if entry.canonical_type.is_some()
+                        || entry.canonical_field.is_some()
+                        || entry.opaque_placement.is_some()
+                    {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "unsupported mapping contains irrelevant status fields",
+                        });
+                    }
+                    unsupported += 1;
+                }
+                CoverageStatus::PlatformOnly => {
+                    if entry.evidence.note.is_none() {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "platform-only mapping requires an evidence note",
+                        });
+                    }
+                    if entry.canonical_type.is_some()
+                        || entry.canonical_field.is_some()
+                        || entry.opaque_placement.is_some()
+                        || entry.diagnostic_code.is_some()
+                    {
+                        return Err(SchemaError::InvalidCoverageEntry {
+                            key: entry.key.clone(),
+                            reason: "platform-only mapping contains irrelevant status fields",
+                        });
+                    }
+                    platform_only += 1;
+                }
+            }
+        }
+
+        validate_count("coverage entries", self.summary.entries, self.entries.len())?;
+        validate_count("typed coverage", self.summary.typed, typed)?;
+        validate_count(
+            "opaque-lossless coverage",
+            self.summary.opaque_lossless,
+            opaque_lossless,
+        )?;
+        validate_count(
+            "unsupported coverage",
+            self.summary.unsupported,
+            unsupported,
+        )?;
+        validate_count(
+            "platform-only coverage",
+            self.summary.platform_only,
+            platform_only,
+        )
+    }
+
+    /// Proves that coverage and feature corpora form an exact full join.
+    pub fn validate_against(&self, features: &FeatureSemanticsCorpus) -> Result<(), SchemaError> {
+        self.validate()?;
+        features.validate()?;
+
+        let feature_keys = features
+            .packages
+            .iter()
+            .flat_map(|package| {
+                package.classifiers.iter().flat_map(move |classifier| {
+                    classifier
+                        .features
+                        .iter()
+                        .map(move |feature| FeatureSemanticKey {
+                            namespace_uri: package.namespace_uri.clone(),
+                            classifier: classifier.name.clone(),
+                            feature: feature.name.clone(),
+                        })
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        let coverage_keys = self
+            .entries
+            .iter()
+            .map(|entry| entry.key.clone())
+            .collect::<BTreeSet<_>>();
+
+        if let Some(key) = feature_keys.difference(&coverage_keys).next() {
+            return Err(SchemaError::CoverageMismatch {
+                kind: "unmapped",
+                key: key.clone(),
+            });
+        }
+        if let Some(key) = coverage_keys.difference(&feature_keys).next() {
+            return Err(SchemaError::CoverageMismatch {
+                kind: "stale",
+                key: key.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl MetadataOrderCorpus {
+    pub fn parse(json: &str) -> Result<Self, SchemaError> {
+        let corpus: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        corpus.validate()?;
+        Ok(corpus)
+    }
+
+    pub fn validate(&self) -> Result<(), SchemaError> {
+        validate_source(self.schema_version, &self.source)?;
+        validate_text("metadata order bundle", &self.summary.bundle)?;
+        let mut keys = BTreeSet::new();
+
+        for record in &self.records {
+            validate_text("metadata order provider", &record.provider)?;
+            validate_text("metadata order classifier", &record.classifier)?;
+            if record.ordered_features.is_empty() {
+                return Err(SchemaError::EmptyField("metadata order ordered features"));
+            }
+            let mut features = BTreeSet::new();
+            for feature in &record.ordered_features {
+                validate_text("metadata order feature", feature)?;
+                if !features.insert(feature.as_str()) {
+                    return Err(SchemaError::DuplicateValue {
+                        field: "metadata order feature",
+                        value: feature.clone(),
+                    });
+                }
+            }
+            for operation in &record.order_operations {
+                validate_text("metadata order operation feature", &operation.feature)?;
+            }
+            let operation_features = record
+                .order_operations
+                .iter()
+                .map(|operation| operation.feature.as_str())
+                .collect::<Vec<_>>();
+            let ordered_features = record
+                .ordered_features
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            match record.section {
+                MetadataOrderSection::Properties => {
+                    if operation_features != ordered_features
+                        || record.order_operations.first().is_none_or(|operation| {
+                            operation.operation != MetadataOrderOperationKind::Cursor
+                        })
+                        || record.order_operations.iter().any(|operation| {
+                            operation.operation == MetadataOrderOperationKind::Emit
+                        })
+                    {
+                        return Err(SchemaError::InvalidJson(format!(
+                            "invalid properties order operations for {}",
+                            record.classifier
+                        )));
+                    }
+                    if record.fallback != MetadataOrderFallback::DefaultPropertyFilterWhenUnmapped {
+                        return Err(SchemaError::InvalidJson(format!(
+                            "invalid properties fallback for {}",
+                            record.classifier
+                        )));
+                    }
+                }
+                MetadataOrderSection::InternalInfo | MetadataOrderSection::ChildObjects => {
+                    if operation_features != ordered_features
+                        || record.order_operations.iter().any(|operation| {
+                            operation.operation != MetadataOrderOperationKind::Emit
+                        })
+                    {
+                        return Err(SchemaError::InvalidJson(format!(
+                            "invalid {:?} order operations for {}",
+                            record.section, record.classifier
+                        )));
+                    }
+                    if record.fallback != MetadataOrderFallback::ProducedTypesWhenPresent {
+                        return Err(SchemaError::InvalidJson(format!(
+                            "invalid {:?} fallback for {}",
+                            record.section, record.classifier
+                        )));
+                    }
+                }
+                MetadataOrderSection::ProducedTypes => {
+                    if !record.order_operations.is_empty()
+                        || record.fallback != MetadataOrderFallback::AllReferencesWhenUnmapped
+                    {
+                        return Err(SchemaError::InvalidJson(format!(
+                            "invalid produced-types operations or fallback for {}",
+                            record.classifier
+                        )));
+                    }
+                }
+            }
+            validate_feature_evidence("metadata order evidence", &record.evidence)?;
+            if record.evidence.status != EvidenceStatus::Verified {
+                return Err(SchemaError::IncompleteVerifiedXmlBehavior {
+                    key: FeatureSemanticKey {
+                        namespace_uri: record.provider.clone(),
+                        classifier: record.classifier.clone(),
+                        feature: format!("{:?}", record.section),
+                    },
+                    field: "metadata order evidence",
+                });
+            }
+            if !keys.insert((
+                record.provider.as_str(),
+                record.classifier.as_str(),
+                record.section,
+                record.version_predicate,
+            )) {
+                return Err(SchemaError::DuplicateValue {
+                    field: "metadata order provider/classifier/section/version",
+                    value: format!(
+                        "{} / {} / {:?} / {:?}",
+                        record.provider,
+                        record.classifier,
+                        record.section,
+                        record.version_predicate
+                    ),
+                });
+            }
+        }
+
+        validate_count(
+            "metadata verified records",
+            self.summary.verified_records,
+            self.records.len(),
+        )
+    }
+
+    pub fn order(
+        &self,
+        provider: &str,
+        classifier: &str,
+        section: MetadataOrderSection,
+        version_predicate: MetadataOrderVersionPredicate,
+    ) -> Option<&MetadataOrderRecord> {
+        self.records.iter().find(|record| {
+            record.provider == provider
+                && record.classifier == classifier
+                && record.section == section
+                && record.version_predicate == version_predicate
+        })
+    }
+}
+
 pub fn bundled_model_inventory() -> Result<ModelInventory, SchemaError> {
     ModelInventory::parse(BUNDLED_MODEL_INVENTORY_JSON)
 }
@@ -597,6 +1268,16 @@ pub fn bundled_package_features() -> Result<PackageFeatureCorpus, SchemaError> {
 
 pub fn bundled_feature_semantics() -> Result<FeatureSemanticsCorpus, SchemaError> {
     FeatureSemanticsCorpus::parse(BUNDLED_FEATURE_SEMANTICS_JSON)
+}
+
+pub fn bundled_canonical_coverage() -> Result<CanonicalCoverageCorpus, SchemaError> {
+    let coverage = CanonicalCoverageCorpus::parse(BUNDLED_CANONICAL_COVERAGE_JSON)?;
+    coverage.validate_against(&bundled_feature_semantics()?)?;
+    Ok(coverage)
+}
+
+pub fn bundled_metadata_order() -> Result<MetadataOrderCorpus, SchemaError> {
+    MetadataOrderCorpus::parse(BUNDLED_METADATA_ORDER_JSON)
 }
 
 pub fn bundled_writer_rules() -> Result<WriterRuleCorpus, SchemaError> {
@@ -809,14 +1490,78 @@ mod tests {
     fn bundled_writer_rules_are_verified_and_queryable() {
         let corpus = bundled_writer_rules().unwrap();
         assert_eq!(corpus.rules.len(), 3);
-        let choice = corpus.rule("form.choice-list.design-time-value").unwrap();
+        let choice = corpus
+            .exact_rule(WriterRuleKey {
+                source_release: "2025.2.3+30",
+                model_type: "FormChoiceList",
+                feature: "values",
+            })
+            .unwrap();
         assert_eq!(choice.evidence.status, "verified");
-        assert!(
-            choice
-                .conditions
-                .iter()
-                .any(|condition| condition.contains("8.5.1"))
+        assert_eq!(
+            choice.policy,
+            Some(WriterPolicy::FormChoiceList {
+                item_order: vec![
+                    FormChoiceListItemPart::Presentation,
+                    FormChoiceListItemPart::CheckState,
+                    FormChoiceListItemPart::Value,
+                ],
+                empty_collection: FormChoiceListEmptyCollection::WriteWrapperWhenWriteDefault,
+            })
         );
+
+        let settings = corpus
+            .exact_rule(WriterRuleKey {
+                source_release: "2025.2.3+30",
+                model_type: "DynamicListExtInfo",
+                feature: "listSettings",
+            })
+            .unwrap();
+        assert_eq!(
+            settings.policy,
+            Some(WriterPolicy::FormListSettings {
+                null_value: FormListSettingsNullValue::Omit,
+                delegate: "DcsV8Serializer.writeSettings".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn exact_writer_rule_lookup_fails_closed() {
+        let corpus = bundled_writer_rules().unwrap();
+        assert!(matches!(
+            corpus.exact_rule(WriterRuleKey {
+                source_release: "2026.1",
+                model_type: "FormChoiceList",
+                feature: "values",
+            }),
+            Err(WriterRuleLookupError::SourceReleaseMismatch { .. })
+        ));
+        assert!(matches!(
+            corpus.exact_rule(WriterRuleKey {
+                source_release: "2025.2.3+30",
+                model_type: "FormChoiceList",
+                feature: "unknown",
+            }),
+            Err(WriterRuleLookupError::Missing { .. })
+        ));
+
+        let mut pending = corpus.clone();
+        pending
+            .rules
+            .iter_mut()
+            .find(|rule| rule.id == "form.choice-list.design-time-value")
+            .expect("fixture rule")
+            .evidence
+            .status = "pending".to_owned();
+        assert!(matches!(
+            pending.exact_rule(WriterRuleKey {
+                source_release: "2025.2.3+30",
+                model_type: "FormChoiceList",
+                feature: "values",
+            }),
+            Err(WriterRuleLookupError::Unverified { .. })
+        ));
     }
 
     #[test]
@@ -842,12 +1587,12 @@ mod tests {
     }
 
     #[test]
-    fn bundled_feature_semantics_cover_representative_form_features() {
+    fn bundled_feature_semantics_cover_all_resources_and_representative_families() {
         let corpus = bundled_feature_semantics().unwrap();
         assert_eq!(corpus.source.release, "2025.2.3+30");
-        assert_eq!(corpus.summary.packages, 1);
-        assert_eq!(corpus.summary.classifiers, 257);
-        assert_eq!(corpus.summary.features, 919);
+        assert_eq!(corpus.summary.packages, 63);
+        assert_eq!(corpus.summary.classifiers, 1_820);
+        assert_eq!(corpus.summary.features, 4_966);
 
         let key = |classifier: &str, feature: &str| FeatureSemanticKey {
             namespace_uri: "http://g5.1c.ru/v8/dt/form".to_owned(),
@@ -877,6 +1622,175 @@ mod tests {
             .unwrap();
         assert_eq!(image_scale.default_value.as_deref(), Some("100"));
         assert_eq!(image_scale.xml.evidence.status, EvidenceStatus::Pending);
+
+        let dcs_enabled = corpus
+            .feature(&FeatureSemanticKey {
+                namespace_uri: "http://g5.1c.ru/v8/dt/data-composition-system/settings".to_owned(),
+                classifier: "AvailableFieldUseRestriction".to_owned(),
+                feature: "enabled".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(dcs_enabled.kind, FeatureKind::Attribute);
+        assert_eq!(dcs_enabled.model_type, "boolean");
+
+        let mcore_gap = corpus
+            .feature(&FeatureSemanticKey {
+                namespace_uri: "http://g5.1c.ru/v8/dt/mcore".to_owned(),
+                classifier: "AbstractLine".to_owned(),
+                feature: "gap".to_owned(),
+            })
+            .unwrap();
+        assert_eq!(mcore_gap.model_type, "boolean");
+
+        assert!(corpus.packages.iter().any(|package| {
+            package.namespace_uri == "http://g5.1c.ru/v8/dt/binary"
+                && package
+                    .classifiers
+                    .iter()
+                    .any(|classifier| classifier.name == "BinaryData")
+        }));
+    }
+
+    #[test]
+    fn bundled_canonical_coverage_is_an_exact_full_join() {
+        let corpus = bundled_canonical_coverage().unwrap();
+        assert_eq!(corpus.source.release, "2025.2.3+30");
+        assert_eq!(corpus.summary.entries, 4_966);
+        assert_eq!(corpus.summary.typed, 2);
+        assert_eq!(corpus.summary.opaque_lossless, 0);
+        assert_eq!(corpus.summary.unsupported, 4_964);
+        assert_eq!(corpus.summary.platform_only, 0);
+
+        let family_count = |family: &str| {
+            corpus
+                .entries
+                .iter()
+                .filter(|entry| entry.family == family)
+                .count()
+        };
+        assert_eq!(family_count("forms"), 2_314);
+        assert_eq!(family_count("dcs"), 511);
+        assert_eq!(family_count("common"), 8);
+        assert_eq!(family_count("other"), 2_133);
+        assert_eq!(
+            corpus
+                .entries
+                .iter()
+                .filter(|entry| entry.status == CoverageStatus::Typed)
+                .map(|entry| (
+                    entry.key.classifier.as_str(),
+                    entry.key.feature.as_str(),
+                    entry.canonical_field.as_deref().unwrap()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    "DataCompositionSettings",
+                    "itemsUserSettingID",
+                    "items_user_setting_id"
+                ),
+                (
+                    "DataCompositionSettings",
+                    "itemsViewMode",
+                    "items_view_mode"
+                ),
+            ]
+        );
+        assert!(corpus.entries.iter().all(|entry| {
+            entry.status != CoverageStatus::Unsupported
+                || entry.diagnostic_code.as_deref() == Some("schema.unmapped")
+        }));
+    }
+
+    #[test]
+    fn bundled_metadata_order_is_verified_and_queryable() {
+        let corpus = bundled_metadata_order().unwrap();
+        assert_eq!(corpus.source.release, "2025.2.3+30");
+        assert_eq!(corpus.summary.verified_records, 60);
+        assert_eq!(corpus.summary.rejected_records, 0);
+        let catalog = corpus
+            .order(
+                "ProducedTypesOrderProvider",
+                "CATALOG_TYPES",
+                MetadataOrderSection::ProducedTypes,
+                MetadataOrderVersionPredicate::Always,
+            )
+            .unwrap();
+        assert_eq!(
+            catalog.fallback,
+            MetadataOrderFallback::AllReferencesWhenUnmapped
+        );
+        assert_eq!(
+            catalog.ordered_features,
+            [
+                "BASIC_DB_OBJECT_TYPES__OBJECT_TYPE",
+                "BASIC_DB_OBJECT_TYPES__REF_TYPE",
+                "BASIC_DB_OBJECT_TYPES__SELECTION_TYPE",
+                "BASIC_DB_OBJECT_TYPES__LIST_TYPE",
+                "BASIC_DB_OBJECT_TYPES__MANAGER_TYPE",
+            ]
+        );
+        assert!(
+            corpus
+                .records
+                .iter()
+                .all(|record| record.evidence.status == EvidenceStatus::Verified)
+        );
+
+        let configuration = corpus
+            .order(
+                "MetadataObjectFeatureOrderProvider",
+                "CONFIGURATION",
+                MetadataOrderSection::Properties,
+                MetadataOrderVersionPredicate::GreaterThanV8_3_14,
+            )
+            .unwrap();
+        assert_eq!(
+            configuration.fallback,
+            MetadataOrderFallback::DefaultPropertyFilterWhenUnmapped
+        );
+        assert_eq!(
+            configuration.order_operations[0].operation,
+            MetadataOrderOperationKind::Cursor
+        );
+        assert_eq!(
+            configuration.order_operations[0].feature,
+            "MD_OBJECT__COMMENT"
+        );
+        assert!(
+            corpus
+                .order(
+                    "MetadataObjectFeatureOrderProvider",
+                    "CONFIGURATION",
+                    MetadataOrderSection::InternalInfo,
+                    MetadataOrderVersionPredicate::Always,
+                )
+                .is_some()
+        );
+        assert!(
+            corpus
+                .order(
+                    "MetadataObjectFeatureOrderProvider",
+                    "DOCUMENT",
+                    MetadataOrderSection::Properties,
+                    MetadataOrderVersionPredicate::Always,
+                )
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn metadata_order_rejects_duplicate_classifier_section_version() {
+        let mut corpus = bundled_metadata_order().unwrap();
+        corpus.records.push(corpus.records[0].clone());
+        corpus.summary.verified_records += 1;
+        assert!(matches!(
+            corpus.validate(),
+            Err(SchemaError::DuplicateValue {
+                field: "metadata order provider/classifier/section/version",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1114,5 +2028,161 @@ mod tests {
             serde_json::json!({"status": "known", "value": "8.3"})
         );
         assert!(feature["xml"].get("qName").is_none());
+    }
+
+    fn canonical_coverage_fixture() -> CanonicalCoverageCorpus {
+        CanonicalCoverageCorpus {
+            schema_version: 1,
+            source: CorpusSource {
+                product: "ibcmd-rs".to_owned(),
+                release: "2025.2.3+30".to_owned(),
+                derivation: "canonical coverage bootstrap".to_owned(),
+            },
+            summary: CanonicalCoverageSummary {
+                entries: 1,
+                typed: 1,
+                opaque_lossless: 0,
+                unsupported: 0,
+                platform_only: 0,
+            },
+            entries: vec![CanonicalCoverageEntry {
+                key: FeatureSemanticKey {
+                    namespace_uri: "http://g5.1c.ru/v8/dt/form".to_owned(),
+                    classifier: "Form".to_owned(),
+                    feature: "baseForm".to_owned(),
+                },
+                family: "forms".to_owned(),
+                status: CoverageStatus::Typed,
+                canonical_type: Some("CanonicalForm".to_owned()),
+                canonical_field: Some("base_form".to_owned()),
+                opaque_placement: None,
+                diagnostic_code: None,
+                evidence: FeatureEvidence {
+                    status: EvidenceStatus::Verified,
+                    kind: "code-inspection".to_owned(),
+                    sources: vec!["crates/ibcmd-core/src/model.rs".to_owned()],
+                    note: None,
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn canonical_coverage_requires_status_specific_contracts() {
+        let mut corpus = canonical_coverage_fixture();
+        corpus.entries[0].canonical_field = None;
+        assert!(matches!(
+            corpus.validate(),
+            Err(SchemaError::InvalidCoverageEntry {
+                reason: "typed mapping requires canonical type and field",
+                ..
+            })
+        ));
+
+        let entry = &mut corpus.entries[0];
+        entry.status = CoverageStatus::OpaqueLossless;
+        entry.canonical_type = None;
+        entry.canonical_field = None;
+        entry.opaque_placement = Some("property-slot".to_owned());
+        corpus.summary.typed = 0;
+        corpus.summary.opaque_lossless = 1;
+        assert!(corpus.validate().is_ok());
+
+        corpus.entries[0].evidence.status = EvidenceStatus::Pending;
+        corpus.entries[0].evidence.sources.clear();
+        assert!(matches!(
+            corpus.validate(),
+            Err(SchemaError::InvalidCoverageEntry {
+                reason: "coverage mapping requires verified evidence",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn canonical_coverage_rejects_irrelevant_status_fields() {
+        let mut typed = canonical_coverage_fixture();
+        typed.entries[0].diagnostic_code = Some("unexpected".to_owned());
+        assert!(matches!(
+            typed.validate(),
+            Err(SchemaError::InvalidCoverageEntry {
+                reason: "typed mapping contains irrelevant status fields",
+                ..
+            })
+        ));
+
+        let mut opaque = canonical_coverage_fixture();
+        opaque.entries[0].status = CoverageStatus::OpaqueLossless;
+        opaque.entries[0].opaque_placement = Some("slot".to_owned());
+        opaque.summary.typed = 0;
+        opaque.summary.opaque_lossless = 1;
+        assert!(matches!(
+            opaque.validate(),
+            Err(SchemaError::InvalidCoverageEntry {
+                reason: "opaque-lossless mapping contains irrelevant status fields",
+                ..
+            })
+        ));
+
+        let mut unsupported = canonical_coverage_fixture();
+        unsupported.entries[0].status = CoverageStatus::Unsupported;
+        unsupported.entries[0].diagnostic_code = Some("schema.unsupported".to_owned());
+        unsupported.summary.typed = 0;
+        unsupported.summary.unsupported = 1;
+        assert!(matches!(
+            unsupported.validate(),
+            Err(SchemaError::InvalidCoverageEntry {
+                reason: "unsupported mapping contains irrelevant status fields",
+                ..
+            })
+        ));
+
+        let mut platform_only = canonical_coverage_fixture();
+        platform_only.entries[0].status = CoverageStatus::PlatformOnly;
+        platform_only.entries[0].evidence.note = Some("requires platform runtime".to_owned());
+        platform_only.summary.typed = 0;
+        platform_only.summary.platform_only = 1;
+        assert!(matches!(
+            platform_only.validate(),
+            Err(SchemaError::InvalidCoverageEntry {
+                reason: "platform-only mapping contains irrelevant status fields",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn canonical_coverage_full_join_rejects_unmapped_and_stale_keys() {
+        let mut features = feature_semantics_fixture();
+        features.packages[0].package_name = "com._1c.g5.v8.dt.form.model".to_owned();
+        features.packages[0].namespace_uri = "http://g5.1c.ru/v8/dt/form".to_owned();
+        features.packages[0].classifiers[0].name = "Form".to_owned();
+        features.packages[0].classifiers[0].features[0].name = "baseForm".to_owned();
+
+        let coverage = canonical_coverage_fixture();
+        assert!(coverage.validate_against(&features).is_ok());
+
+        let mut missing = coverage.clone();
+        missing.entries.clear();
+        missing.summary.entries = 0;
+        missing.summary.typed = 0;
+        assert!(matches!(
+            missing.validate_against(&features),
+            Err(SchemaError::CoverageMismatch {
+                kind: "unmapped",
+                ..
+            })
+        ));
+
+        let mut stale = coverage;
+        let mut stale_entry = stale.entries[0].clone();
+        stale_entry.key.feature = "removedFeature".to_owned();
+        stale.entries.push(stale_entry);
+        stale.summary.entries = 2;
+        stale.summary.typed = 2;
+        assert!(matches!(
+            stale.validate_against(&features),
+            Err(SchemaError::CoverageMismatch { kind: "stale", .. })
+        ));
     }
 }

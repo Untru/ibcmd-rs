@@ -10314,13 +10314,14 @@ fn extracts_radio_button_field_with_choice_list_from_layout_code() {
     assert_eq!(item.tag, "RadioButtonField");
     assert_eq!(item.data_path.as_deref(), Some("ВариантОбработки"));
     assert_eq!(item.radio_button_type, Some("Auto"));
-    assert_eq!(item.choice_list.len(), 2);
+    let choice_list = item.choice_list.items().unwrap();
+    assert_eq!(choice_list.len(), 2);
     assert_eq!(
-        item.choice_list[0].value,
+        choice_list[0].value,
         FormChoiceListValue::Decimal("0".to_string())
     );
     assert_eq!(
-        item.choice_list[1].value,
+        choice_list[1].value,
         FormChoiceListValue::Decimal("1".to_string())
     );
 
@@ -12521,7 +12522,7 @@ fn formats_table_search_additions_as_direct_sections() {
         title_formatted: None,
         tooltip: Vec::new(),
         input_hint: Vec::new(),
-        choice_list: Vec::new(),
+        choice_list: CanonicalFormChoiceList::Absent,
         choice_parameter_links: Vec::new(),
         type_link: None,
         extended_tooltip: None,
@@ -12706,7 +12707,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 title_formatted: None,
                 tooltip: Vec::new(),
                 input_hint: Vec::new(),
-                choice_list: Vec::new(),
+                choice_list: CanonicalFormChoiceList::Absent,
                 choice_parameter_links: Vec::new(),
                 type_link: None,
                 extended_tooltip: None,
@@ -12892,7 +12893,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 title_formatted: None,
                 tooltip: Vec::new(),
                 input_hint: Vec::new(),
-                choice_list: Vec::new(),
+                choice_list: CanonicalFormChoiceList::Absent,
                 choice_parameter_links: Vec::new(),
                 type_link: None,
                 extended_tooltip: None,
@@ -13976,18 +13977,38 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
     assert_eq!(item.width.as_deref(), Some("7"));
     assert_eq!(item.list_choice_mode, Some(true));
     assert!(item.input_hint.is_empty());
-    assert_eq!(item.choice_list.len(), 3);
+    let choice_list = item.choice_list.items().unwrap();
+    assert_eq!(choice_list.len(), 3);
     assert_eq!(
-        item.choice_list[0].value,
+        choice_list[0].value,
         FormChoiceListValue::Decimal("0".to_string())
     );
     assert_eq!(
-        item.choice_list[1].value,
+        choice_list[1].value,
         FormChoiceListValue::Decimal("1".to_string())
     );
     assert_eq!(
-        item.choice_list[2].value,
+        choice_list[2].value,
         FormChoiceListValue::Decimal("2".to_string())
+    );
+
+    let mut opaque_auto_command_item = item.clone();
+    opaque_auto_command_item.choice_list = CanonicalFormChoiceList::OpaqueSameProfile {
+        raw: "{unsupported-auto-command-bar-choice-list}".to_owned(),
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    assert_eq!(
+        validate_form_choice_list_writer_trees(
+            &[],
+            Some(std::slice::from_ref(&opaque_auto_command_item)),
+        ),
+        Err(FormSchemaWriteError::OpaqueChoiceList {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        })
     );
 
     let xml = format_form_child_items_xml(&[item], 1);
@@ -14000,6 +14021,72 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
     assert!(
         xml.find("<Width>").unwrap() < xml.find("<ChoiceList>").unwrap(),
         "{xml}"
+    );
+}
+
+#[test]
+fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_payload() {
+    let provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+    };
+    let choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![FormChoiceListItem {
+            presentation_present: true,
+            presentation: Vec::new(),
+            value: FormChoiceListValue::Decimal("1".to_string()),
+        }],
+        provenance,
+    };
+
+    validate_canonical_form_choice_list(&choice_list).unwrap();
+    let xml = format_form_choice_list_xml(&choice_list, 1).unwrap();
+    assert_eq!(
+        xml,
+        "\t<ChoiceList>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:decimal\">1</Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t</ChoiceList>\r\n"
+    );
+
+    let empty = CanonicalFormChoiceList::Empty { provenance };
+    validate_canonical_form_choice_list(&empty).unwrap();
+    assert_eq!(format_form_choice_list_xml(&empty, 1).unwrap(), "");
+
+    let opaque = CanonicalFormChoiceList::OpaqueSameProfile {
+        raw: "{unsupported}".to_owned(),
+        provenance,
+    };
+    assert_eq!(
+        validate_canonical_form_choice_list(&opaque),
+        Err(FormSchemaWriteError::OpaqueChoiceList {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        })
+    );
+    assert_eq!(
+        format_form_choice_list_xml(&opaque, 1),
+        Err(FormSchemaWriteError::OpaqueChoiceList {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        })
+    );
+}
+
+#[test]
+fn form_list_settings_reports_canonical_dcs_dependency_instead_of_guessing() {
+    assert_eq!(
+        require_canonical_form_list_settings_serializer(),
+        Err(FormSchemaWriteError::CanonicalDcsSerializerPending {
+            rule_id: "form.dynamic-list.list-settings".to_owned(),
+            dependency: "GitHub #283 / build-canonical-dcs-serializer",
+        })
     );
 }
 
@@ -44110,7 +44197,8 @@ fn document_formatter_stably_orders_root_child_groups() {
         comment: String::new(),
         template_type_code: None,
     };
-    let xml = format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21);
+    let xml =
+        format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21).unwrap();
     let field1 = xml.find("<Name>Field1</Name>").unwrap();
     let field2 = xml.find("<Name>Field2</Name>").unwrap();
     let form = xml.find("<Form>Main</Form>").unwrap();

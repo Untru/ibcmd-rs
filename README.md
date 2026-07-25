@@ -52,9 +52,17 @@ EDT используется только на исследовательско�
 Новый crate `ibcmd-schema` уже содержит очищенный индекс EDT 2025.2.3:
 `76` bundles, `3 902` model types, `229` importers и `265` exporters, а также
 `67` EPackage, `1 845` classifiers, `12 224` feature IDs и `1 447` operation
-IDs. Первые проверенные правила writer-классов хранятся отдельно от структуры
-модели. Default build загружает corpus непосредственно из репозитория и не ищет
-установленную EDT.
+IDs. Доступный Xcore corpus расширен до `63` packages, `1 820` classifiers и
+`4 966` локальных features. Для каждого feature существует явная запись
+canonical coverage: `2` поля `DataCompositionSettings` уже типизированы,
+оставшиеся `4 964` пока помечены как `unsupported/schema.unmapped`. Поэтому
+100-процентная полнота карты не означает готовность конвертации.
+Metadata-order corpus содержит `60` подтверждённых записей: `40` property
+orders, `4` special cases `internalInfo` и `16` таблиц `producedTypes`, включая
+Configuration, Catalog и Document. Связь `InvokeDynamic` подтверждается через
+JVM `BootstrapMethods`, а неизвестный bytecode отклоняется fail-closed. Default
+build загружает corpus непосредственно из репозитория и не ищет установленную
+EDT.
 
 Границы новой архитектуры:
 

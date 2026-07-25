@@ -43,6 +43,10 @@ use crate::form_schema::{
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
+use ibcmd_schema::{
+    FormChoiceListEmptyCollection, FormChoiceListItemPart, SchemaError, WriterPolicy,
+    WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+};
 use uuid::Uuid;
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -286,6 +290,17 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_command_interface_cpu_ms += elapsed_ms(started);
     }
+
+    // A malformed/opaque ChoiceList must not fall through to the legacy XML formatter.  The
+    // public extraction boundary is currently `Option`; the typed reason remains testable at
+    // this preflight boundary while production fails closed with `None`.
+    validate_form_choice_list_writer_trees(
+        &child_items,
+        auto_command_bar
+            .as_ref()
+            .map(|command_bar| command_bar.child_items.as_slice()),
+    )
+    .ok()?;
 
     let started = Instant::now();
     let xml = format_form_body_xml(
@@ -828,7 +843,7 @@ pub(super) struct FormChildItem {
     pub(super) title_formatted: Option<bool>,
     pub(super) tooltip: Vec<(String, String)>,
     pub(super) input_hint: Vec<(String, String)>,
-    pub(super) choice_list: Vec<FormChoiceListItem>,
+    pub(super) choice_list: CanonicalFormChoiceList,
     pub(super) choice_parameter_links: Vec<FormChoiceParameterLink>,
     pub(super) type_link: Option<FormTypeLink>,
     pub(super) extended_tooltip: Option<FormExtendedTooltip>,
@@ -846,6 +861,173 @@ pub(super) struct FormChoiceListItem {
     pub(super) presentation_present: bool,
     pub(super) presentation: Vec<(String, String)>,
     pub(super) value: FormChoiceListValue,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum FormChoiceListRawLayout {
+    InputFieldExtendedOptions,
+    RadioButtonOptions,
+}
+
+/// Physical provenance is retained for diagnostics only.  It deliberately contains no XML
+/// QName, ordering, default-emission or target-version policy.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) struct FormChoiceListRawProvenance {
+    pub(super) layout: FormChoiceListRawLayout,
+    pub(super) slot: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub(super) enum CanonicalFormChoiceList {
+    #[default]
+    Absent,
+    Empty {
+        provenance: FormChoiceListRawProvenance,
+    },
+    Typed {
+        items: Vec<FormChoiceListItem>,
+        provenance: FormChoiceListRawProvenance,
+    },
+    OpaqueSameProfile {
+        raw: String,
+        provenance: FormChoiceListRawProvenance,
+    },
+}
+
+impl CanonicalFormChoiceList {
+    pub(super) fn is_empty(&self) -> bool {
+        matches!(self, Self::Absent | Self::Empty { .. })
+    }
+
+    pub(super) fn items(&self) -> Result<&[FormChoiceListItem], FormSchemaWriteError> {
+        match self {
+            Self::Typed { items, .. } => Ok(items),
+            Self::Absent | Self::Empty { .. } => Ok(&[]),
+            Self::OpaqueSameProfile { provenance, .. } => {
+                Err(FormSchemaWriteError::OpaqueChoiceList {
+                    layout: provenance.layout,
+                    slot: provenance.slot,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormSchemaWriteError {
+    Corpus(SchemaError),
+    WriterRule(WriterRuleLookupError),
+    UnexpectedPolicy {
+        rule_id: String,
+        expected: &'static str,
+    },
+    OpaqueChoiceList {
+        layout: FormChoiceListRawLayout,
+        slot: usize,
+    },
+    #[allow(dead_code)]
+    CanonicalDcsSerializerPending {
+        rule_id: String,
+        dependency: &'static str,
+    },
+}
+
+impl From<WriterRuleLookupError> for FormSchemaWriteError {
+    fn from(error: WriterRuleLookupError) -> Self {
+        Self::WriterRule(error)
+    }
+}
+
+impl From<SchemaError> for FormSchemaWriteError {
+    fn from(error: SchemaError) -> Self {
+        Self::Corpus(error)
+    }
+}
+
+fn verified_form_choice_list_policy() -> Result<WriterPolicy, FormSchemaWriteError> {
+    let corpus = bundled_writer_rules()?;
+    let rule = corpus.exact_rule(WriterRuleKey {
+        source_release: "2025.2.3+30",
+        model_type: "FormChoiceList",
+        feature: "values",
+    })?;
+    match &rule.policy {
+        Some(policy @ WriterPolicy::FormChoiceList { .. }) => Ok(policy.clone()),
+        _ => Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: rule.id.clone(),
+            expected: "form-choice-list",
+        }),
+    }
+}
+
+/// Resolves the verified delegate without pretending that #283's canonical DCS serializer
+/// already exists.  Calling this as a Form-layer serializer therefore fails closed.
+#[allow(dead_code)]
+pub(super) fn require_canonical_form_list_settings_serializer() -> Result<(), FormSchemaWriteError>
+{
+    let corpus = bundled_writer_rules()?;
+    let rule = corpus.exact_rule(WriterRuleKey {
+        source_release: "2025.2.3+30",
+        model_type: "DynamicListExtInfo",
+        feature: "listSettings",
+    })?;
+    match &rule.policy {
+        Some(WriterPolicy::FormListSettings { .. }) => {
+            Err(FormSchemaWriteError::CanonicalDcsSerializerPending {
+                rule_id: rule.id.clone(),
+                dependency: "GitHub #283 / build-canonical-dcs-serializer",
+            })
+        }
+        _ => Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: rule.id.clone(),
+            expected: "form-list-settings",
+        }),
+    }
+}
+
+fn validate_form_choice_list_writer_rules(
+    items: &[FormChildItem],
+) -> Result<(), FormSchemaWriteError> {
+    fn visit(item: &FormChildItem) -> Result<(), FormSchemaWriteError> {
+        validate_canonical_form_choice_list(&item.choice_list)?;
+        for child in &item.child_items {
+            visit(child)?;
+        }
+        Ok(())
+    }
+
+    for item in items {
+        visit(item)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_form_choice_list_writer_trees(
+    child_items: &[FormChildItem],
+    auto_command_bar_child_items: Option<&[FormChildItem]>,
+) -> Result<(), FormSchemaWriteError> {
+    validate_form_choice_list_writer_rules(child_items)?;
+    if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
+        validate_form_choice_list_writer_rules(auto_command_bar_child_items)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_canonical_form_choice_list(
+    value: &CanonicalFormChoiceList,
+) -> Result<(), FormSchemaWriteError> {
+    match value {
+        CanonicalFormChoiceList::Absent => Ok(()),
+        CanonicalFormChoiceList::OpaqueSameProfile { provenance, .. } => {
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: provenance.layout,
+                slot: provenance.slot,
+            })
+        }
+        CanonicalFormChoiceList::Empty { .. } | CanonicalFormChoiceList::Typed { .. } => {
+            verified_form_choice_list_policy().map(|_| ())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -7453,16 +7635,16 @@ fn parse_form_child_item_with_metadata_owners(
         tooltip,
         input_hint,
         choice_list: if tag == "RadioButtonField" {
-            parse_form_radio_button_choice_list(radio_button_options.as_deref(), object_refs)
+            canonical_form_radio_button_choice_list(radio_button_options.as_deref(), object_refs)
         } else if tag == "InputField" {
             field_schema_and_options
                 .as_ref()
                 .map(|(schema, options)| {
-                    parse_form_input_field_choice_list(*schema, options, object_refs)
+                    canonical_form_input_field_choice_list(*schema, options, object_refs)
                 })
                 .unwrap_or_default()
         } else {
-            Vec::new()
+            CanonicalFormChoiceList::Absent
         },
         choice_parameter_links: parse_form_input_field_choice_parameter_links(
             audited_input_field_options,
@@ -9325,55 +9507,108 @@ pub(super) fn parse_form_radio_button_font_xml(
         .and_then(|field| parse_form_font_tuple_xml(field, object_refs))
 }
 
+#[allow(dead_code)]
 pub(super) fn parse_form_radio_button_choice_list(
     extended_options: Option<&[&str]>,
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<FormChoiceListItem> {
-    let Some(field) = extended_options.and_then(|options| options.get(1)) else {
-        return Vec::new();
-    };
+    try_parse_form_radio_button_choice_list(extended_options, object_refs).unwrap_or_default()
+}
+
+fn try_parse_form_radio_button_choice_list(
+    extended_options: Option<&[&str]>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<FormChoiceListItem>> {
+    let field = extended_options?.get(1)?;
     let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
-        return Vec::new();
+        return None;
     };
     let Some(item_count) = fields
         .get(1)
         .and_then(|value| value.trim().parse::<usize>().ok())
     else {
-        return Vec::new();
+        return None;
     };
 
     (0..item_count)
-        .filter_map(|index| fields.get(3 + index * 2).copied())
-        .filter_map(|field| parse_form_radio_button_choice_list_item(field, object_refs))
+        .map(|index| {
+            fields
+                .get(3 + index * 2)
+                .and_then(|field| parse_form_radio_button_choice_list_item(field, object_refs))
+        })
         .collect()
 }
 
-pub(super) fn parse_form_input_field_choice_list(
+fn try_parse_form_input_field_choice_list(
     schema: FormFieldSchema,
     options: &[&str],
     object_refs: &BTreeMap<String, String>,
-) -> Vec<FormChoiceListItem> {
-    let Some(field) = schema.input_field_option(options, InputFieldSlot::ChoiceList) else {
-        return Vec::new();
-    };
+) -> Option<Vec<FormChoiceListItem>> {
+    let field = schema.input_field_option(options, InputFieldSlot::ChoiceList)?;
     let field = field.trim();
     if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return Vec::new();
+        return None;
     }
     let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return Vec::new();
+        return None;
     };
     let Some(item_count) = fields
         .get(1)
         .and_then(|value| value.trim().parse::<usize>().ok())
     else {
-        return Vec::new();
+        return None;
     };
 
     (0..item_count)
-        .filter_map(|index| fields.get(3 + index * 2).copied())
-        .filter_map(|field| parse_form_input_field_choice_list_item(field, object_refs))
+        .map(|index| {
+            fields
+                .get(3 + index * 2)
+                .and_then(|field| parse_form_input_field_choice_list_item(field, object_refs))
+        })
         .collect()
+}
+
+fn canonical_form_radio_button_choice_list(
+    extended_options: Option<&[&str]>,
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceList {
+    let provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::RadioButtonOptions,
+        slot: 1,
+    };
+    let Some(raw) = extended_options.and_then(|options| options.get(provenance.slot)) else {
+        return CanonicalFormChoiceList::Absent;
+    };
+    match try_parse_form_radio_button_choice_list(extended_options, object_refs) {
+        Some(items) if items.is_empty() => CanonicalFormChoiceList::Empty { provenance },
+        Some(items) => CanonicalFormChoiceList::Typed { items, provenance },
+        None => CanonicalFormChoiceList::OpaqueSameProfile {
+            raw: (*raw).to_owned(),
+            provenance,
+        },
+    }
+}
+
+fn canonical_form_input_field_choice_list(
+    schema: FormFieldSchema,
+    options: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceList {
+    let provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+        slot: InputFieldSlot::ChoiceList.index(),
+    };
+    let Some(raw) = schema.input_field_option(options, InputFieldSlot::ChoiceList) else {
+        return CanonicalFormChoiceList::Absent;
+    };
+    match try_parse_form_input_field_choice_list(schema, options, object_refs) {
+        Some(items) if items.is_empty() => CanonicalFormChoiceList::Empty { provenance },
+        Some(items) => CanonicalFormChoiceList::Typed { items, provenance },
+        None => CanonicalFormChoiceList::OpaqueSameProfile {
+            raw: raw.to_owned(),
+            provenance,
+        },
+    }
 }
 
 pub(super) fn parse_form_input_field_choice_list_item(
@@ -14888,7 +15123,9 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if !item.choice_list.is_empty() {
-        xml.push_str(&format_form_choice_list_xml(&item.choice_list, indent + 1));
+        let choice_list_xml = format_form_choice_list_xml(&item.choice_list, indent + 1)
+            .expect("ChoiceList must pass both Form writer trees' typed preflight");
+        xml.push_str(&choice_list_xml);
     }
     if item.tag == "InputField" {
         xml.push_str(&format_form_input_field_button_option_xml(
@@ -16185,53 +16422,82 @@ fn format_form_extended_tooltip_events_xml(events: &[FormBodyEvent], indent: usi
     xml
 }
 
-pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {
+pub(super) fn format_form_choice_list_xml(
+    choice_list: &CanonicalFormChoiceList,
+    indent: usize,
+) -> Result<String, FormSchemaWriteError> {
+    let policy = verified_form_choice_list_policy()?;
+    let WriterPolicy::FormChoiceList {
+        item_order,
+        empty_collection: FormChoiceListEmptyCollection::WriteWrapperWhenWriteDefault,
+        ..
+    } = policy
+    else {
+        return Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: "form.choice-list.design-time-value".to_owned(),
+            expected: "form-choice-list",
+        });
+    };
+    let items = choice_list.items()?;
+    // This writer is invoked with writeDefault=false.  The verified policy allows an empty
+    // wrapper only when writeDefault=true, so both absent and explicit-empty values emit nothing.
+    if items.is_empty() {
+        return Ok(String::new());
+    }
     let tab = "\t".repeat(indent);
     let mut xml = format!("{tab}<ChoiceList>\r\n");
     for item in items {
-        xml.push_str(&format!(
-            "{tab}\t<xr:Item>\r\n\
-{tab}\t\t<xr:Presentation/>\r\n\
-{tab}\t\t<xr:CheckState>0</xr:CheckState>\r\n\
-{tab}\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"
-        ));
-        if item.presentation_present && item.presentation.is_empty() {
-            xml.push_str(&format!("{tab}\t\t\t<Presentation/>\r\n"));
-        } else if !item.presentation.is_empty() {
-            xml.push_str(&format_form_localized_section(
-                "Presentation",
-                &item.presentation,
-                indent + 3,
-            ));
-        }
-        match &item.value {
-            FormChoiceListValue::Boolean(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xs:boolean\">{}</Value>\r\n",
-                xml_bool(*value)
-            )),
-            FormChoiceListValue::Decimal(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xs:decimal\">{}</Value>\r\n",
-                escape_xml_text(value)
-            )),
-            FormChoiceListValue::Nil => {
-                xml.push_str(&format!("{tab}\t\t\t<Value xsi:nil=\"true\"/>\r\n"))
+        xml.push_str(&format!("{tab}\t<xr:Item>\r\n"));
+        for part in &item_order {
+            match part {
+                FormChoiceListItemPart::Presentation => {
+                    xml.push_str(&format!("{tab}\t\t<xr:Presentation/>\r\n"));
+                }
+                FormChoiceListItemPart::CheckState => {
+                    xml.push_str(&format!("{tab}\t\t<xr:CheckState>0</xr:CheckState>\r\n"));
+                }
+                FormChoiceListItemPart::Value => {
+                    xml.push_str(&format!(
+                        "{tab}\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"
+                    ));
+                    if item.presentation_present && item.presentation.is_empty() {
+                        xml.push_str(&format!("{tab}\t\t\t<Presentation/>\r\n"));
+                    } else if !item.presentation.is_empty() {
+                        xml.push_str(&format_form_localized_section(
+                            "Presentation",
+                            &item.presentation,
+                            indent + 3,
+                        ));
+                    }
+                    match &item.value {
+                        FormChoiceListValue::Boolean(value) => xml.push_str(&format!(
+                            "{tab}\t\t\t<Value xsi:type=\"xs:boolean\">{}</Value>\r\n",
+                            xml_bool(*value)
+                        )),
+                        FormChoiceListValue::Decimal(value) => xml.push_str(&format!(
+                            "{tab}\t\t\t<Value xsi:type=\"xs:decimal\">{}</Value>\r\n",
+                            escape_xml_text(value)
+                        )),
+                        FormChoiceListValue::Nil => {
+                            xml.push_str(&format!("{tab}\t\t\t<Value xsi:nil=\"true\"/>\r\n"))
+                        }
+                        FormChoiceListValue::String(value) => xml.push_str(&format!(
+                            "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",
+                            escape_xml_text(value)
+                        )),
+                        FormChoiceListValue::DesignTimeRef(value) => xml.push_str(&format!(
+                            "{tab}\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">{}</Value>\r\n",
+                            escape_xml_text(value)
+                        )),
+                    }
+                    xml.push_str(&format!("{tab}\t\t</xr:Value>\r\n"));
+                }
             }
-            FormChoiceListValue::String(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",
-                escape_xml_text(value)
-            )),
-            FormChoiceListValue::DesignTimeRef(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">{}</Value>\r\n",
-                escape_xml_text(value)
-            )),
         }
-        xml.push_str(&format!(
-            "{tab}\t\t</xr:Value>\r\n\
-{tab}\t</xr:Item>\r\n"
-        ));
+        xml.push_str(&format!("{tab}\t</xr:Item>\r\n"));
     }
     xml.push_str(&format!("{tab}</ChoiceList>\r\n"));
-    xml
+    Ok(xml)
 }
 
 fn format_form_choice_parameter_links_xml(

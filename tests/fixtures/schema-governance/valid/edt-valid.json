@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:Enterprise Development Tools",
+    "release": "2025.1",
+    "derivation": "Curated public schema facts"
+  },
+  "facts": [
+    {
+      "name": "managed-form",
+      "evidence": {
+        "status": "verified",
+        "sources": ["model/ManagedForm.xcore"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,521 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "1C:EDT",
+    "release": "2025.2.3+30",
+    "derivation": "deterministic Xcore discovery accounting; no source, archive, class bytes, or absolute paths"
+  },
+  "summary": {
+    "selected": 63,
+    "processed": 63,
+    "rejected": 0
+  },
+  "clusters": [],
+  "processed": [
+    {
+      "bundle": "com._1c.g5.v8.dt.aggregates.model",
+      "resource": "model/Aggregates.xcore",
+      "packageName": "com._1c.g5.v8.dt.aggregates.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/aggregates",
+      "classifiers": 3,
+      "features": 5
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.binary.model",
+      "resource": "model/Binary.xcore",
+      "packageName": "com._1c.g5.v8.dt.binary.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/binary",
+      "classifiers": 2,
+      "features": 0
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.bp.scheme.model",
+      "resource": "model/GraphicalScheme.xcore",
+      "packageName": "com._1c.g5.v8.dt.bp.scheme.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/graphicalscheme",
+      "classifiers": 33,
+      "features": 86
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.bsl.model",
+      "resource": "model/Bsl.xcore",
+      "packageName": "com._1c.g5.v8.dt.bsl.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/bsl/model",
+      "classifiers": 99,
+      "features": 123
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.bsl.model",
+      "resource": "model/BslContextDef.xcore",
+      "packageName": "com._1c.g5.v8.dt.bsl.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/bsl/contextdef/model",
+      "classifiers": 7,
+      "features": 10
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.bsl.model",
+      "resource": "model/BslIndex.xcore",
+      "packageName": "com._1c.g5.v8.dt.bsl.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/bsl/index/model",
+      "classifiers": 7,
+      "features": 15
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.cai.model",
+      "resource": "model/Cai.xcore",
+      "packageName": "com._1c.g5.v8.dt.cai.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/cai",
+      "classifiers": 5,
+      "features": 9
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.chart.model",
+      "resource": "model/Chart.xcore",
+      "packageName": "com._1c.g5.v8.dt.chart.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/chart/model",
+      "classifiers": 75,
+      "features": 335
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.chart.model",
+      "resource": "model/Dendrogram.xcore",
+      "packageName": "com._1c.g5.v8.dt.dendrogram.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/dendrogram/model",
+      "classifiers": 8,
+      "features": 34
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.chart.model",
+      "resource": "model/GanttChart.xcore",
+      "packageName": "com._1c.g5.v8.dt.ganttchart.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/ganttchart/model",
+      "classifiers": 21,
+      "features": 88
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.chart.model",
+      "resource": "model/TimeScale.xcore",
+      "packageName": "com._1c.g5.v8.dt.chart.model.timescale",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/chart/model/timescale",
+      "classifiers": 7,
+      "features": 24
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.cmi.model",
+      "resource": "model/Cmi.xcore",
+      "packageName": "com._1c.g5.v8.dt.cmi.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/cmi",
+      "classifiers": 10,
+      "features": 18
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.cmi.model",
+      "resource": "model/CmiDerivedData.xcore",
+      "packageName": "com._1c.g5.v8.dt.cmi.model.deriveddata",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/cmi/deriveddata",
+      "classifiers": 28,
+      "features": 87
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.compare.model",
+      "resource": "model/Compare.xcore",
+      "packageName": "com._1c.g5.v8.dt.compare.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/compare/model",
+      "classifiers": 57,
+      "features": 74
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.expressions.model",
+      "resource": "model/expressions.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.expressions.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/dcs/expressions/model",
+      "classifiers": 30,
+      "features": 37
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/appearanceTemplate.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.appearancetemplate",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/appearanceTemplate",
+      "classifiers": 4,
+      "features": 3
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/areaTemplate.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.areaTemplate",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/areaTemplate",
+      "classifiers": 23,
+      "features": 42
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/common.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.common",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/common",
+      "classifiers": 7,
+      "features": 19
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/core.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.core",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/core",
+      "classifiers": 32,
+      "features": 36
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/dbCopies.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.dbcopies",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/dbcopies",
+      "classifiers": 4,
+      "features": 3
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/details.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.details",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/details",
+      "classifiers": 1,
+      "features": 0
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/schema.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.schema",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/schema",
+      "classifiers": 21,
+      "features": 108
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.dcs.model",
+      "resource": "model/settings.xcore",
+      "packageName": "com._1c.g5.v8.dt.dcs.model.settings",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/data-composition-system/settings",
+      "classifiers": 81,
+      "features": 244
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Area.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.area",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugArea",
+      "classifiers": 5,
+      "features": 14
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Attach.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.attach",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugAutoAttach",
+      "classifiers": 2,
+      "features": 3
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Breakpoints.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.breakpoints",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugBreakpoints",
+      "classifiers": 5,
+      "features": 24
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/BslExceptions.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.bsl.exceptions",
+      "namespaceUri": "http://v8.1c.ru/8.2/bsl",
+      "classifiers": 4,
+      "features": 22
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Calculations.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.calculations",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugCalculations",
+      "classifiers": 16,
+      "features": 54
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Commands.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.dbgui.commands",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugDBGUICommands",
+      "classifiers": 16,
+      "features": 32
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Core.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.core",
+      "namespaceUri": "http://v8.1c.ru/8.1/data/core",
+      "classifiers": 2,
+      "features": 8
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Data.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.base.data",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugBaseData",
+      "classifiers": 12,
+      "features": 32
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Filter.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.rte.filter",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugRTEFilter",
+      "classifiers": 2,
+      "features": 5
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/ForegroundData.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.foreground.data",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugForegroundData",
+      "classifiers": 1,
+      "features": 3
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Info.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.rte.info",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugRTEInfo",
+      "classifiers": 3,
+      "features": 15
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Measure.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.measure",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugMeasure",
+      "classifiers": 3,
+      "features": 13
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Response.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.rdbg.request.response",
+      "namespaceUri": "http://v8.1c.ru/8.3/debugger/debugRDBGRequestResponse",
+      "classifiers": 65,
+      "features": 81
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.debug.model",
+      "resource": "model/Virtual.xcore",
+      "packageName": "com._1c.g5.v8.dt.debug.model.virtual",
+      "namespaceUri": "http://v8.1c.ru/8.2/virtual-resource-system",
+      "classifiers": 1,
+      "features": 2
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.form.layout.model",
+      "resource": "model/CalculationContext.xcore",
+      "packageName": "com._1c.g5.v8.dt.form.layout.model.calculation.context",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/form.layout.model.calculation.context",
+      "classifiers": 56,
+      "features": 164
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.form.layout.model",
+      "resource": "model/GenerationContext.xcore",
+      "packageName": "com._1c.g5.v8.dt.form.layout.model.generation.context",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/form.layout.model.generation.context",
+      "classifiers": 85,
+      "features": 278
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.form.layout.model",
+      "resource": "model/LayoutDescription.xcore",
+      "packageName": "com._1c.g5.v8.dt.form.layout.model.description",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/form.layout.model.description.model",
+      "classifiers": 126,
+      "features": 620
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.form.layout.model",
+      "resource": "model/TransformationContext.xcore",
+      "packageName": "com._1c.g5.v8.dt.form.layout.model.transformation.context",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/form.layout.model.transformation.context",
+      "classifiers": 107,
+      "features": 284
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.form.model",
+      "resource": "model/Form.xcore",
+      "packageName": "com._1c.g5.v8.dt.form.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/form",
+      "classifiers": 257,
+      "features": 919
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.form.model",
+      "resource": "model/Mapping.xcore",
+      "packageName": "com._1c.g5.v8.dt.form.mapping.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/form.mapping",
+      "classifiers": 33,
+      "features": 49
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.geographicalschema.model",
+      "resource": "model/GeographicalSchema.xcore",
+      "packageName": "com._1c.g5.v8.dt.geographicalschema.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/geographicalschema",
+      "classifiers": 33,
+      "features": 130
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.hpwa.model",
+      "resource": "model/Hpwa.xcore",
+      "packageName": "com._1c.g5.v8.dt.hpwa.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/hpwa",
+      "classifiers": 5,
+      "features": 7
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.lcore.model",
+      "resource": "model/Lcore.xcore",
+      "packageName": "com._1c.g5.v8.dt.lcore.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/lcore",
+      "classifiers": 6,
+      "features": 6
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.mcore",
+      "resource": "model/Mcore.xcore",
+      "packageName": "com._1c.g5.v8.dt.mcore",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/mcore",
+      "classifiers": 121,
+      "features": 179
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.planner.model",
+      "resource": "model/Planner.xcore",
+      "packageName": "com._1c.g5.v8.dt.planner.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/planner/model",
+      "classifiers": 14,
+      "features": 87
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.platform.model",
+      "resource": "model/Platform.xcore",
+      "packageName": "com._1c.g5.v8.dt.platform.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/platform/model",
+      "classifiers": 8,
+      "features": 8
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.platform.services.model",
+      "resource": "model/Services.xcore",
+      "packageName": "com._1c.g5.v8.dt.platform.services.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/platform/services/model",
+      "classifiers": 51,
+      "features": 148
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.ql.dcs.model",
+      "resource": "model/QlDcs.xcore",
+      "packageName": "com._1c.g5.v8.dt.ql.dcs.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/ql/dcs/model",
+      "classifiers": 12,
+      "features": 19
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.ql.model",
+      "resource": "model/QL.xcore",
+      "packageName": "com._1c.g5.v8.dt.ql.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/ql/model",
+      "classifiers": 95,
+      "features": 137
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.right.ql.model",
+      "resource": "model/RightQl.xcore",
+      "packageName": "com._1c.g5.v8.dt.right.ql.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/right/ql/model",
+      "classifiers": 6,
+      "features": 15
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.right.templates.model",
+      "resource": "model/RightTemplates.xcore",
+      "packageName": "com._1c.g5.v8.dt.right.templates.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/right/templates/model",
+      "classifiers": 21,
+      "features": 21
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.rights.model",
+      "resource": "model/Rights.xcore",
+      "packageName": "com._1c.g5.v8.dt.rights.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/rights",
+      "classifiers": 9,
+      "features": 19
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.scc.model",
+      "resource": "model/Scc.xcore",
+      "packageName": "com._1c.g5.v8.dt.scc.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/scc",
+      "classifiers": 7,
+      "features": 13
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.schedule.model",
+      "resource": "model/Schedule.xcore",
+      "packageName": "com._1c.g5.v8.dt.schedule.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/schedule",
+      "classifiers": 6,
+      "features": 21
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.style.model",
+      "resource": "model/Style.xcore",
+      "packageName": "com._1c.g5.v8.dt.style.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/style",
+      "classifiers": 5,
+      "features": 4
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.supply.model",
+      "resource": "model/SupplySettings.xcore",
+      "packageName": "com._1c.g5.v8.dt.supply.settings.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/compare/supply/model",
+      "classifiers": 27,
+      "features": 40
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.v8help.model",
+      "resource": "model/help.xcore",
+      "packageName": "com._1c.g5.v8.dt.v8help.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/v8help",
+      "classifiers": 4,
+      "features": 11
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.ws.model",
+      "resource": "model/WSDefinitions.xcore",
+      "packageName": "com._1c.g5.v8.dt.ws.wsdefinitions.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/ws/wsdefinitions",
+      "classifiers": 7,
+      "features": 22
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.xdto.model",
+      "resource": "model/Xdto.xcore",
+      "packageName": "com._1c.g5.v8.dt.xdto.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/xdto/model",
+      "classifiers": 14,
+      "features": 55
+    },
+    {
+      "bundle": "com._1c.g5.v8.dt.xdto.model",
+      "resource": "model/XdtoType.xcore",
+      "packageName": "com._1c.g5.v8.dt.xdto.type.model",
+      "namespaceUri": "http://g5.1c.ru/v8/dt/xdto/type/model",
+      "classifiers": 3,
+      "features": 2
+    }
+  ],
+  "rejected": []
+}

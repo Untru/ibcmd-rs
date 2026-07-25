@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dcs;
 mod dialect;
 pub mod metadata;
 mod node;
@@ -9,6 +10,11 @@ mod reader;
 pub mod source_tree;
 mod writer;
 
+pub use dcs::{
+    DCS_WRITER_EVIDENCE, DCS_WRITER_EVIDENCE_INVALID_CODE, DCS_WRITER_EVIDENCE_PENDING_CODE,
+    DCS_WRITER_EVIDENCE_RELEASE, DcsSerializationError, DcsSerializationPermit, DcsWriterDecision,
+    DcsWriterEvidence, DcsWriterEvidenceStatus, preflight_dcs_settings_serialization,
+};
 pub use dialect::{
     BomRule, DetectionCandidate, DialectDescriptor, DialectDetection, DialectError,
     DialectEvidence, DialectFeature, DialectLexicalPolicy, DialectRegistry, DialectRule,
@@ -18,8 +24,9 @@ pub use dialect::{
 };
 pub use metadata::{
     MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
-    MetadataRegistry, MetadataRegistryError, bundled_metadata_registry, decode_metadata_envelope,
-    decode_metadata_envelope_with_dialect, register_business_process_codec, register_catalog_codec,
+    MetadataOrderError, MetadataRegistry, MetadataRegistryError, bundled_metadata_registry,
+    decode_metadata_envelope, decode_metadata_envelope_with_dialect, order_metadata_features,
+    order_produced_type_values, register_business_process_codec, register_catalog_codec,
     register_constant_codec, register_data_processor_codec, register_defined_type_codec,
     register_document_codec, register_enum_codec, register_event_subscription_codec,
     register_exchange_plan_codec, register_functional_option_codec,
@@ -45,10 +52,12 @@ pub mod schema {
         BundleInventory, CorpusSource, EvidenceStatus, EvidenceValue, FeatureClassifierKind,
         FeatureEvidence, FeatureKind, FeatureSemanticKey, FeatureSemantics,
         FeatureSemanticsClassifier, FeatureSemanticsCorpus, FeatureSemanticsPackage,
-        FeatureSemanticsSummary, InventorySummary, ModelClassifier, ModelInventory, ModelMember,
-        ModelPackage, PackageFeatureCorpus, PackageFeatureSummary, RuleEvidence, SchemaError,
-        WriterRule, WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior,
-        bundled_feature_semantics, bundled_model_inventory, bundled_package_features,
+        FeatureSemanticsSummary, InventorySummary, MetadataOrderOperation,
+        MetadataOrderOperationKind, MetadataOrderRecord, MetadataOrderSection,
+        MetadataOrderVersionPredicate, ModelClassifier, ModelInventory, ModelMember, ModelPackage,
+        PackageFeatureCorpus, PackageFeatureSummary, RuleEvidence, SchemaError, WriterRule,
+        WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior, bundled_feature_semantics,
+        bundled_metadata_order, bundled_model_inventory, bundled_package_features,
         bundled_writer_rules,
     };
 }
