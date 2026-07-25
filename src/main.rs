@@ -266,6 +266,19 @@ fn main() -> Result<()> {
                 }))?
             );
         }
+        Commands::SourceThreeWayOracle(args) => {
+            let report = ibcmd_rs::source_oracle::run_source_three_way_oracle(&args)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": report.schema_version,
+                    "rows": report.rows.len(),
+                    "summary": &report.summary,
+                    "json": &args.output,
+                    "markdown": &args.markdown,
+                }))?
+            );
+        }
         Commands::Compatibility(args) => {
             let report = ibcmd_rs::compatibility::current_compatibility_report()?;
             if let Some(output) = args.output {

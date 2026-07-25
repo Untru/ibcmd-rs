@@ -55,6 +55,8 @@ pub enum Commands {
     SourceDiffMatrix(SourceDiffMatrixArgs),
     /// Merge independently produced parity matrices without collapsing database results.
     SourceDiffMatrixMerge(SourceDiffMatrixMergeArgs),
+    /// Compare pre-existing native, EDT, and ibcmd-rs source trees without launching external tools.
+    SourceThreeWayOracle(SourceThreeWayOracleArgs),
     /// Print the current compatibility matrix for implemented operations.
     Compatibility(CompatibilityArgs),
     /// Run an external command, measure it, and capture stdout/stderr.
@@ -973,6 +975,46 @@ pub struct SourceDiffMatrixMergeArgs {
     /// Replace a pre-existing output only when explicitly requested.
     #[arg(long)]
     pub overwrite: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct SourceThreeWayOracleArgs {
+    /// Pre-existing source tree exported by native ibcmd. This command only reads it.
+    #[arg(long)]
+    pub native: PathBuf,
+    /// Pre-existing source tree produced by an EDT import/export cycle. This command only reads it.
+    #[arg(long)]
+    pub edt: PathBuf,
+    /// Pre-existing source tree produced by ibcmd-rs. This command only reads it.
+    #[arg(long)]
+    pub ours: PathBuf,
+    /// Exact source/configuration version shared by the three input trees.
+    #[arg(long)]
+    pub source_version: String,
+    /// Exact native ibcmd version used to produce --native.
+    #[arg(long)]
+    pub native_tool_version: String,
+    /// Exact EDT version and import/export route used to produce --edt.
+    #[arg(long)]
+    pub edt_tool_version: String,
+    /// Exact ibcmd-rs version or commit used to produce --ours.
+    #[arg(long)]
+    pub ours_tool_version: String,
+    /// Stop before hashing when a tree exceeds this many files.
+    #[arg(long, default_value_t = 100_000)]
+    pub max_files: usize,
+    /// Stop before hashing when a tree exceeds this total byte count.
+    #[arg(long, default_value_t = 4 * 1024 * 1024 * 1024_u64)]
+    pub max_total_bytes: u64,
+    /// Stop before hashing a file larger than this many bytes.
+    #[arg(long, default_value_t = 512 * 1024 * 1024_u64)]
+    pub max_file_bytes: u64,
+    /// New JSON report destination. Must share an existing parent with --markdown.
+    #[arg(short, long)]
+    pub output: PathBuf,
+    /// New deterministic Markdown destination. Must share --output's existing parent.
+    #[arg(long)]
+    pub markdown: PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -3719,6 +3761,41 @@ mod tests {
                     args.output,
                     Some(PathBuf::from(r"C:\audit\source-diff-signatures.json"))
                 );
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+
+        let oracle = Cli::parse_from([
+            "ibcmd-rs",
+            "source-three-way-oracle",
+            "--native",
+            r"C:\oracle\native",
+            "--edt",
+            r"C:\oracle\edt",
+            "--ours",
+            r"C:\oracle\ours",
+            "--source-version",
+            "2.20",
+            "--native-tool-version",
+            "8.3.27.1989",
+            "--edt-tool-version",
+            "2025.2.3+30 import/export",
+            "--ours-tool-version",
+            "git:abc",
+            "--output",
+            r"C:\oracle\report.json",
+            "--markdown",
+            r"C:\oracle\report.md",
+        ]);
+        match oracle.command {
+            Commands::SourceThreeWayOracle(args) => {
+                assert_eq!(args.native, PathBuf::from(r"C:\oracle\native"));
+                assert_eq!(args.edt, PathBuf::from(r"C:\oracle\edt"));
+                assert_eq!(args.ours, PathBuf::from(r"C:\oracle\ours"));
+                assert_eq!(args.source_version, "2.20");
+                assert_eq!(args.max_files, 100_000);
+                assert_eq!(args.max_total_bytes, 4 * 1024 * 1024 * 1024_u64);
+                assert_eq!(args.max_file_bytes, 512 * 1024 * 1024_u64);
             }
             other => panic!("unexpected command: {other:?}"),
         }

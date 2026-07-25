@@ -299,6 +299,7 @@ dependencies = [
  "sha2",
  "uuid",
  "walkdir",
+ "windows-sys",
 ]
 
 [[package]]

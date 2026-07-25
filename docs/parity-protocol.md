@@ -63,6 +63,37 @@ XML, точные обезличенные аргументы, журналы и
 грязный, отпечаток БД отсутствует или изменился во время работы. Значения
 паролей и имя парольной переменной не сериализуются.
 
+## Offline three-way oracle (native, EDT, ibcmd-rs)
+
+`source-three-way-oracle` is a research diagnostic, not a release gate. It
+only reads three already-created source trees and writes a new JSON and Markdown
+report outside those trees. It never starts EDT, Java/JVM, `ibcmd`, or a database
+client, so the default workflow has no EDT runtime dependency.
+
+Each input requires an explicit exact version string: the common source version,
+native `ibcmd`, the EDT import/export route, and `ibcmd-rs`. The report preserves
+per-path raw SHA-256/size values plus a deterministic tree SHA-256 using
+`path + NUL + file SHA-256 + NUL + size + LF`. It has bounded file-count, total
+byte, and per-file byte limits; existing reports are never overwritten.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-three-way-source-oracle.ps1 `
+  -NativeRoot E:\oracle\native -EdtRoot E:\oracle\edt -OursRoot E:\oracle\ours `
+  -SourceVersion '8.3.27 / XML 2.20' `
+  -NativeToolVersion 'ibcmd 8.3.27.1989' `
+  -EdtToolVersion 'EDT 2025.2.3+30 import/export' `
+  -OursToolVersion 'ibcmd-rs 0.1.0 @ <commit>' `
+  -Output E:\oracle\report.json -Markdown E:\oracle\report.md
+```
+
+At every path, exactly one deterministic branch is reported: all equal;
+native=EDT≠ours; native=ours≠EDT; EDT=ours≠native; or all different. The latter
+four branches are candidate hypotheses only. In particular, matching hashes do
+not by themselves prove a decoder/model/schema/writer, EDT, native/storage, or
+version cause. Do not commit production trees, application XML/BSL, credentials,
+or reports containing application paths/content; committed tests use synthetic
+hash-only evidence.
+
 ## Матрица УТ + БСП
 
 ```powershell

@@ -25,6 +25,7 @@ pub mod profile;
 pub mod profile_registry;
 pub mod source;
 pub mod source_audit;
+pub mod source_oracle;
 pub mod storage_map;
 pub mod templates;
 pub mod trace;

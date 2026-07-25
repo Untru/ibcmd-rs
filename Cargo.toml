@@ -37,3 +37,6 @@ sha2 = "0.10"
 rayon = "1.10"
 uuid = { version = "1.19", features = ["v4"] }
 walkdir = "2.5"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
