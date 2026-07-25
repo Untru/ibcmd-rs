@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 pub const BUNDLED_MODEL_INVENTORY_JSON: &str =
     include_str!("../data/edt-2025.2.3-model-inventory.json");
 
+/// Embedded EDT EPackage classifier and feature identifiers.
+pub const BUNDLED_PACKAGE_FEATURES_JSON: &str =
+    include_str!("../data/edt-2025.2.3-package-features.json");
+
 /// Embedded, verified writer behaviour rules.
 pub const BUNDLED_WRITER_RULES_JSON: &str = include_str!("../data/edt-2025.2.3-writer-rules.json");
 
@@ -53,6 +57,53 @@ pub struct ModelInventory {
     pub source: CorpusSource,
     pub summary: InventorySummary,
     pub bundles: Vec<BundleInventory>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageFeatureSummary {
+    pub packages: usize,
+    pub classifiers: usize,
+    pub features: usize,
+    pub operations: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageFeatureCorpus {
+    pub schema_version: u32,
+    pub source: CorpusSource,
+    pub summary: PackageFeatureSummary,
+    pub packages: Vec<ModelPackage>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPackage {
+    pub bundle: String,
+    pub package_class: String,
+    pub name: Option<String>,
+    pub namespace_uri: Option<String>,
+    pub namespace_prefix: Option<String>,
+    pub classifiers: Vec<ModelClassifier>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelClassifier {
+    pub token: String,
+    pub id: i32,
+    pub feature_count: Option<i32>,
+    pub operation_count: Option<i32>,
+    pub features: Vec<ModelMember>,
+    pub operations: Vec<ModelMember>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelMember {
+    pub token: String,
+    pub id: i32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -171,6 +222,58 @@ impl ModelInventory {
     }
 }
 
+impl PackageFeatureCorpus {
+    pub fn parse(json: &str) -> Result<Self, SchemaError> {
+        let corpus: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        corpus.validate()?;
+        Ok(corpus)
+    }
+
+    pub fn validate(&self) -> Result<(), SchemaError> {
+        validate_source(self.schema_version, &self.source)?;
+        let mut package_names = BTreeSet::new();
+        let mut classifier_count = 0usize;
+        let mut feature_count = 0usize;
+        let mut operation_count = 0usize;
+        for package in &self.packages {
+            validate_text("model package bundle", &package.bundle)?;
+            validate_text("model package class", &package.package_class)?;
+            if !package_names.insert(package.package_class.as_str()) {
+                return Err(SchemaError::DuplicateValue {
+                    field: "model package class",
+                    value: package.package_class.clone(),
+                });
+            }
+            let mut classifier_tokens = BTreeSet::new();
+            for classifier in &package.classifiers {
+                validate_text("model classifier token", &classifier.token)?;
+                if !classifier_tokens.insert(classifier.token.as_str()) {
+                    return Err(SchemaError::DuplicateValue {
+                        field: "model classifier token",
+                        value: classifier.token.clone(),
+                    });
+                }
+                validate_members("model feature", &classifier.features)?;
+                validate_members("model operation", &classifier.operations)?;
+                classifier_count += 1;
+                feature_count += classifier.features.len();
+                operation_count += classifier.operations.len();
+            }
+        }
+        validate_count("packages", self.summary.packages, self.packages.len())?;
+        validate_count("classifiers", self.summary.classifiers, classifier_count)?;
+        validate_count("features", self.summary.features, feature_count)?;
+        validate_count("operations", self.summary.operations, operation_count)
+    }
+
+    pub fn package(&self, package_class: &str) -> Option<&ModelPackage> {
+        self.packages
+            .iter()
+            .find(|package| package.package_class == package_class)
+    }
+}
+
 impl WriterRuleCorpus {
     pub fn parse(json: &str) -> Result<Self, SchemaError> {
         let corpus: Self = serde_json::from_str(json)
@@ -225,6 +328,10 @@ pub fn bundled_model_inventory() -> Result<ModelInventory, SchemaError> {
     ModelInventory::parse(BUNDLED_MODEL_INVENTORY_JSON)
 }
 
+pub fn bundled_package_features() -> Result<PackageFeatureCorpus, SchemaError> {
+    PackageFeatureCorpus::parse(BUNDLED_PACKAGE_FEATURES_JSON)
+}
+
 pub fn bundled_writer_rules() -> Result<WriterRuleCorpus, SchemaError> {
     WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON)
 }
@@ -266,6 +373,20 @@ fn validate_unique_names(field: &'static str, values: &[String]) -> Result<(), S
             return Err(SchemaError::DuplicateValue {
                 field,
                 value: value.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_members(field: &'static str, values: &[ModelMember]) -> Result<(), SchemaError> {
+    let mut tokens = BTreeSet::new();
+    for value in values {
+        validate_text(field, &value.token)?;
+        if !tokens.insert(value.token.as_str()) {
+            return Err(SchemaError::DuplicateValue {
+                field,
+                value: value.token.clone(),
             });
         }
     }
@@ -316,6 +437,28 @@ mod tests {
                 .conditions
                 .iter()
                 .any(|condition| condition.contains("8.5.1"))
+        );
+    }
+
+    #[test]
+    fn bundled_package_features_include_real_form_model_fields() {
+        let corpus = bundled_package_features().unwrap();
+        assert!(corpus.summary.packages > 50);
+        assert!(corpus.summary.classifiers > 1_000);
+        assert!(corpus.summary.features > 5_000);
+        let package = corpus
+            .package("com._1c.g5.v8.dt.form.model.FormPackage")
+            .unwrap();
+        let form = package
+            .classifiers
+            .iter()
+            .find(|classifier| classifier.token == "FORM")
+            .unwrap();
+        assert_eq!(form.feature_count, Some(65));
+        assert!(
+            form.features
+                .iter()
+                .any(|feature| feature.token == "SHOW_TITLE851" && feature.id == 47)
         );
     }
 

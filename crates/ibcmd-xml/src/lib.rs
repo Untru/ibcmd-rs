@@ -42,8 +42,10 @@ pub use writer::{LexicalPolicy, WriteError, XmlWriter};
 /// `ibcmd-xml -> ibcmd-schema`; physical decoders never own XML ordering rules.
 pub mod schema {
     pub use ibcmd_schema::{
-        BundleInventory, CorpusSource, InventorySummary, ModelInventory, RuleEvidence, SchemaError,
-        WriterRule, WriterRuleCorpus, bundled_model_inventory, bundled_writer_rules,
+        BundleInventory, CorpusSource, InventorySummary, ModelClassifier, ModelInventory,
+        ModelMember, ModelPackage, PackageFeatureCorpus, PackageFeatureSummary, RuleEvidence,
+        SchemaError, WriterRule, WriterRuleCorpus, bundled_model_inventory,
+        bundled_package_features, bundled_writer_rules,
     };
 }
 

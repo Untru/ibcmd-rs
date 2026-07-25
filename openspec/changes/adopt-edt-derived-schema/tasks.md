@@ -16,6 +16,7 @@
 - [x] Добавить детерминированный research importer.
 - [x] Удалить абсолютные пути и бинарные материалы.
 - [x] Зафиксировать контрольные количества corpus.
+- [x] Перенести EPackage classifier/feature/operation identifiers.
 
 ## Задача 3: Перенести первые проверенные writer rules
 
