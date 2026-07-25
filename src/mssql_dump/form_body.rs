@@ -7901,7 +7901,12 @@ fn parse_form_child_item_with_metadata_owners(
         tooltip,
         input_hint,
         choice_list: if tag == "RadioButtonField" {
-            canonical_form_radio_button_choice_list(radio_button_options.as_deref(), object_refs)
+            canonical_form_radio_button_choice_list(
+                radio_button_options.as_deref(),
+                type_index,
+                type_index_collisions,
+                object_refs,
+            )
         } else if tag == "InputField" {
             field_schema_and_options
                 .as_ref()
@@ -10069,11 +10074,19 @@ pub(super) fn parse_form_radio_button_choice_list(
     extended_options: Option<&[&str]>,
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<FormChoiceListItem> {
-    try_parse_form_radio_button_choice_list(extended_options, object_refs).unwrap_or_default()
+    try_parse_form_radio_button_choice_list(
+        extended_options,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+    )
+    .unwrap_or_default()
 }
 
 fn try_parse_form_radio_button_choice_list(
     extended_options: Option<&[&str]>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChoiceListItem>> {
     let field = extended_options?.get(1)?.trim();
@@ -10103,9 +10116,14 @@ fn try_parse_form_radio_button_choice_list(
 
     (0..item_count)
         .map(|index| {
-            fields
-                .get(3 + index * 2)
-                .and_then(|field| parse_form_radio_button_choice_list_item(field, object_refs))
+            fields.get(3 + index * 2).and_then(|field| {
+                parse_form_radio_button_choice_list_item(
+                    field,
+                    type_index,
+                    type_index_collisions,
+                    object_refs,
+                )
+            })
         })
         .collect()
 }
@@ -10161,6 +10179,8 @@ pub(super) fn try_parse_form_input_field_choice_list(
 
 pub(super) fn canonical_form_radio_button_choice_list(
     extended_options: Option<&[&str]>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> CanonicalFormChoiceList {
     let provenance = FormChoiceListRawProvenance {
@@ -10170,7 +10190,12 @@ pub(super) fn canonical_form_radio_button_choice_list(
     let Some(raw) = extended_options.and_then(|options| options.get(provenance.slot)) else {
         return CanonicalFormChoiceList::Absent;
     };
-    match try_parse_form_radio_button_choice_list(extended_options, object_refs) {
+    match try_parse_form_radio_button_choice_list(
+        extended_options,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
         Some(items) if items.is_empty() => CanonicalFormChoiceList::Empty { provenance },
         Some(items) => CanonicalFormChoiceList::Typed { items, provenance },
         None => CanonicalFormChoiceList::OpaqueSameProfile {
@@ -10408,6 +10433,8 @@ const FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR: &str = "0e704aa2-07bd-48b9-8
 
 pub(super) fn parse_form_radio_button_choice_list_item(
     field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListItem> {
     let field = field.trim();
@@ -10415,28 +10442,44 @@ pub(super) fn parse_form_radio_button_choice_list_item(
     let payload = fields.get(2)?.trim();
     let payload_fields = split_1c_braced_fields(payload, 0)?;
     let raw_value = payload_fields.get(2)?.trim();
-    let nil_value = scan_1c_braced_value(field, 0) == Some(field.len())
+    let exact_u_item = scan_1c_braced_value(field, 0) == Some(field.len())
         && fields.len() == 3
         && parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() == Some("#")
         && fields.get(1)?.trim() == FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
         && scan_1c_braced_value(payload, 0) == Some(payload.len())
         && payload_fields.len() == 6
-        && payload_fields.first()?.trim() == "0"
-        && payload_fields.get(1)?.trim() == "1"
         && scan_1c_braced_value(raw_value, 0) == Some(raw_value.len())
         && matches!(
             split_1c_braced_fields(raw_value, 0).as_deref(),
             Some([kind]) if kind.trim() == r#""U""#
         )
-        && Uuid::parse_str(payload_fields.get(3)?.trim()).is_ok_and(|id| id.is_nil())
-        && Uuid::parse_str(payload_fields.get(4)?.trim()).is_ok_and(|id| id.is_nil())
         && parse_form_input_field_choice_list_presentation(payload_fields.get(5)?).is_some();
+    let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok();
+    let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok();
+    let nil_value = exact_u_item
+        && payload_fields.first()?.trim() == "0"
+        && payload_fields.get(1)?.trim() == "1"
+        && type_id.as_ref().is_some_and(Uuid::is_nil)
+        && value_id.as_ref().is_some_and(Uuid::is_nil);
+    let empty_ref_value = exact_u_item
+        && payload_fields.first()?.trim() == "0"
+        && payload_fields.get(1)?.trim() == "0"
+        && type_id.as_ref().is_some_and(|id| !id.is_nil())
+        && value_id.as_ref().is_some_and(Uuid::is_nil);
     let value = if nil_value {
         FormChoiceListValue::Nil
+    } else if empty_ref_value {
+        let owner_reference = unique_metadata_type_reference(
+            type_index,
+            type_index_collisions,
+            payload_fields.get(3)?.trim(),
+        )
+        .and_then(metadata_reference_type_owner_reference)?;
+        FormChoiceListValue::DesignTimeRef(format!("{owner_reference}.EmptyRef"))
     } else {
         parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?
     };
-    let presentation = if nil_value {
+    let presentation = if nil_value || empty_ref_value {
         parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?
     } else {
         payload_fields

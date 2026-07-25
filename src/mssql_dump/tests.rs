@@ -11015,6 +11015,141 @@ fn parses_radio_button_choice_list_value_variants() {
 }
 
 #[test]
+fn minimal_radio_button_empty_ref_choice_is_typed_and_near_misses_are_opaque() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        profile: String,
+        slot: usize,
+        raw_choice_list: String,
+        type_index: BTreeMap<String, String>,
+        expected_xml: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_radio_choice_list_empty_ref_minimal.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.profile, "radio_button_options");
+    assert_eq!(fixture.slot, 1);
+
+    let empty_collisions = BTreeSet::new();
+    let empty_object_refs = BTreeMap::new();
+    let mut options = vec!["0"; 12];
+    options[fixture.slot] = &fixture.raw_choice_list;
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options),
+        &fixture.type_index,
+        &empty_collisions,
+        &empty_object_refs,
+    );
+    let CanonicalFormChoiceList::Typed { items, provenance } = &canonical else {
+        panic!("exact radio U(non-nil type, nil value) must remain typed");
+    };
+    assert_eq!(
+        provenance.layout,
+        FormChoiceListRawLayout::RadioButtonOptions
+    );
+    assert_eq!(provenance.slot, fixture.slot);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].value,
+        FormChoiceListValue::DesignTimeRef("Enum.SyntheticChoices.EmptyRef".to_string())
+    );
+    validate_canonical_form_choice_list(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
+    );
+
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let sidecar = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let item_cases = [
+        (
+            "wrong platform mode",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "nil type",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "wrong discriminator",
+            format!(
+                r##"{{"#",22222222-2222-4222-8222-222222222222,{{0,0,{{"U"}},{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "trailing raw value garbage",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}}garbage,{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "extra payload field",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}},0}}}}"##
+            ),
+        ),
+    ];
+    for (label, item) in item_cases {
+        let raw = format!(r#"{{3,1,"",{item},{sidecar}}}"#);
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &fixture.type_index,
+            &empty_collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+        assert_eq!(
+            validate_canonical_form_choice_list(&canonical),
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: FormChoiceListRawLayout::RadioButtonOptions,
+                slot: fixture.slot,
+            }),
+            "{label}"
+        );
+    }
+
+    for (label, type_index, collisions) in [
+        ("missing type", BTreeMap::new(), BTreeSet::new()),
+        (
+            "ambiguous type",
+            fixture.type_index.clone(),
+            BTreeSet::from([type_id.to_string()]),
+        ),
+    ] {
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &type_index,
+            &collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+    }
+}
+
+#[test]
 fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -11034,7 +11169,12 @@ fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
 
     let mut options = vec!["0"; 12];
     options[fixture.slot] = &fixture.raw_choice_list;
-    let canonical = canonical_form_radio_button_choice_list(Some(&options), &BTreeMap::new());
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    );
     let CanonicalFormChoiceList::Typed { items, provenance } = &canonical else {
         panic!("nil U pair from the radio-button profile must remain typed");
     };
@@ -11113,7 +11253,12 @@ fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
         } else {
             &empty_object_refs
         };
-        let canonical = canonical_form_radio_button_choice_list(Some(&options), object_refs);
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            object_refs,
+        );
         assert!(
             matches!(
                 &canonical,
@@ -11160,7 +11305,12 @@ fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
     for (label, raw) in outer_cases {
         let mut options = vec!["0"; 12];
         options[fixture.slot] = &raw;
-        let canonical = canonical_form_radio_button_choice_list(Some(&options), &empty_object_refs);
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &empty_object_refs,
+        );
         assert!(
             matches!(
                 &canonical,
