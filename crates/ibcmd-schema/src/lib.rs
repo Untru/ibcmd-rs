@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 
 use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,10 @@ pub const BUNDLED_METADATA_ORDER_JSON: &str =
 
 /// Embedded, verified writer behaviour rules.
 pub const BUNDLED_WRITER_RULES_JSON: &str = include_str!("../data/edt-2025.2.3-writer-rules.json");
+
+/// Embedded, exact EDT writer evidence for the bounded DCS settings tail.
+pub const BUNDLED_DCS_WRITER_EVIDENCE_JSON: &str =
+    include_str!("../data/edt-2025.2.3-dcs-writer-evidence.json");
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,6 +146,153 @@ pub struct WriterRule {
     #[serde(default)]
     pub policy: Option<WriterPolicy>,
     pub evidence: RuleEvidence,
+}
+
+const MAX_DCS_WRITER_EVIDENCE_JSON_BYTES: usize = 32 * 1024;
+const MAX_DCS_WRITER_EVIDENCE_TEXT_BYTES: usize = 4 * 1024;
+const MAX_DCS_WRITER_EVIDENCE_FACTS: usize = 16;
+const MAX_DCS_WRITER_EVIDENCE_MISSING_KEYS: usize = 8;
+const MAX_DCS_WRITER_EVIDENCE_SOURCES: usize = 8;
+const DCS_SETTINGS_MODEL_NAMESPACE: &str = "http://g5.1c.ru/v8/dt/data-composition-system/settings";
+const DCS_SETTINGS_CLASSIFIER: &str = "DataCompositionSettings";
+
+/// Verified field identity for the only schema-driven Form `ListSettings` tail.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DcsListSettingsTailField {
+    ItemsViewMode,
+    ItemsUserSettingId,
+}
+
+/// Exact verified policy for the two final Form `ListSettings` children.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsListSettingsTailPolicy {
+    namespace_uri: String,
+    tail_order: [DcsListSettingsTailField; 2],
+    items_view_mode_qname: String,
+    items_view_mode_default: String,
+    items_user_setting_id_qname: String,
+    items_user_setting_id_default: String,
+}
+
+impl DcsListSettingsTailPolicy {
+    pub fn namespace_uri(&self) -> &str {
+        &self.namespace_uri
+    }
+
+    pub const fn tail_order(&self) -> &[DcsListSettingsTailField; 2] {
+        &self.tail_order
+    }
+
+    pub fn items_view_mode_qname(&self) -> &str {
+        &self.items_view_mode_qname
+    }
+
+    pub fn items_view_mode_default(&self) -> &str {
+        &self.items_view_mode_default
+    }
+
+    pub fn items_user_setting_id_qname(&self) -> &str {
+        &self.items_user_setting_id_qname
+    }
+
+    pub fn items_user_setting_id_default(&self) -> &str {
+        &self.items_user_setting_id_default
+    }
+}
+
+/// Strict, bounded representation of the committed EDT DCS writer evidence.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DcsWriterEvidenceCorpus {
+    schema_version: u32,
+    source: DcsWriterEvidenceSource,
+    verified_facts: Vec<DcsWriterEvidenceFact>,
+    missing_keys: Vec<DcsWriterEvidenceMissingKey>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsWriterEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    input_contract: String,
+    invocation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsWriterEvidenceFact {
+    key: String,
+    value: DcsWriterEvidenceValue,
+    evidence: DcsWriterEvidenceProof,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(untagged)]
+enum DcsWriterEvidenceValue {
+    Text(String),
+    TailOrder(Vec<String>),
+    EnumNotDefault(DcsEnumNotDefaultEvidence),
+    StringNotDefault(DcsStringNotDefaultEvidence),
+    DefaultValue(DcsDefaultValueEvidence),
+    FormDelegate(DcsFormDelegateEvidence),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsEnumNotDefaultEvidence {
+    qname: String,
+    default_model_constant: String,
+    writer: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsStringNotDefaultEvidence {
+    qname: String,
+    default_string: String,
+    writer: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsDefaultValueEvidence {
+    predicate: String,
+    operations: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFormDelegateEvidence {
+    delegate: String,
+    qname_source: String,
+    null_branch: DcsNullBranchEvidence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsNullBranchEvidence {
+    from_offset: u32,
+    target_offset: u32,
+    target_opcode: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsWriterEvidenceProof {
+    kind: String,
+    status: EvidenceStatus,
+    sources: Vec<String>,
+    note: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsWriterEvidenceMissingKey {
+    key: String,
+    status: String,
+    reason: String,
 }
 
 /// A structured subset of verified writer behaviour.  Free-form operations remain useful
@@ -987,6 +1139,7 @@ pub enum SchemaError {
         classifier_kind: FeatureClassifierKind,
     },
     CoverageDerivedDataMismatch(&'static str),
+    InvalidDcsWriterEvidence(String),
 }
 
 impl Display for SchemaError {
@@ -1041,6 +1194,9 @@ impl Display for SchemaError {
                     formatter,
                     "canonical coverage {field} does not match recomputation"
                 )
+            }
+            Self::InvalidDcsWriterEvidence(reason) => {
+                write!(formatter, "invalid DCS writer evidence: {reason}")
             }
         }
     }
@@ -1179,6 +1335,298 @@ impl PackageFeatureCorpus {
             .iter()
             .find(|package| package.package_class == package_class)
     }
+}
+
+impl DcsWriterEvidenceCorpus {
+    pub fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > MAX_DCS_WRITER_EVIDENCE_JSON_BYTES {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "JSON exceeds {MAX_DCS_WRITER_EVIDENCE_JSON_BYTES} UTF-8 bytes"
+            )));
+        }
+        let corpus: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        corpus.validate()?;
+        Ok(corpus)
+    }
+
+    pub fn validate(&self) -> Result<(), SchemaError> {
+        if self.schema_version != 1 {
+            return Err(SchemaError::UnsupportedSchemaVersion(self.schema_version));
+        }
+        if self.source.product != "1C:EDT" || self.source.release != "2025.2.3+30" {
+            return Err(invalid_dcs_writer_evidence(
+                "source product or release does not match the verified evidence",
+            ));
+        }
+        for (field, value) in [
+            ("source product", self.source.product.as_str()),
+            ("source release", self.source.release.as_str()),
+            ("source derivation", self.source.derivation.as_str()),
+            ("source input contract", self.source.input_contract.as_str()),
+            ("source invocation", self.source.invocation.as_str()),
+        ] {
+            validate_dcs_writer_evidence_text(field, value)?;
+        }
+        if self.verified_facts.len() > MAX_DCS_WRITER_EVIDENCE_FACTS {
+            return Err(invalid_dcs_writer_evidence(format!(
+                "verified facts exceed {MAX_DCS_WRITER_EVIDENCE_FACTS}"
+            )));
+        }
+        if self.missing_keys.len() > MAX_DCS_WRITER_EVIDENCE_MISSING_KEYS {
+            return Err(invalid_dcs_writer_evidence(format!(
+                "missing keys exceed {MAX_DCS_WRITER_EVIDENCE_MISSING_KEYS}"
+            )));
+        }
+
+        let expected_fact_keys = BTreeSet::from([
+            "dcs.DataCompositionSettings.namespace",
+            "dcs.DataCompositionSettings.verified-tail-order",
+            "dcs.DataCompositionSettings.itemsViewMode",
+            "dcs.DataCompositionSettings.itemsUserSettingID",
+            "dcs.DataCompositionSettings.default-value",
+            "form.DynamicListExtInfo.listSettings.delegate",
+        ]);
+        let mut fact_keys = BTreeSet::new();
+        for fact in &self.verified_facts {
+            validate_dcs_writer_evidence_text("verified fact key", &fact.key)?;
+            if !fact_keys.insert(fact.key.as_str()) {
+                return Err(invalid_dcs_writer_evidence(format!(
+                    "duplicate verified fact `{}`",
+                    fact.key
+                )));
+            }
+            if fact.evidence.status != EvidenceStatus::Verified
+                || fact.evidence.kind != "javap-v-exact-method-control-flow-constant-pool"
+            {
+                return Err(invalid_dcs_writer_evidence(format!(
+                    "fact `{}` is not backed by the exact verified extractor",
+                    fact.key
+                )));
+            }
+            if fact.evidence.sources.is_empty()
+                || fact.evidence.sources.len() > MAX_DCS_WRITER_EVIDENCE_SOURCES
+            {
+                return Err(invalid_dcs_writer_evidence(format!(
+                    "fact `{}` has an invalid evidence source count",
+                    fact.key
+                )));
+            }
+            validate_dcs_writer_evidence_text("evidence kind", &fact.evidence.kind)?;
+            validate_dcs_writer_evidence_text("evidence note", &fact.evidence.note)?;
+            for source in &fact.evidence.sources {
+                validate_dcs_writer_evidence_text("evidence source", source)?;
+            }
+        }
+        if fact_keys != expected_fact_keys {
+            return Err(invalid_dcs_writer_evidence(
+                "verified fact keys differ from the exact supported evidence set",
+            ));
+        }
+
+        let expected_missing_keys = BTreeSet::from([
+            "dcs.settings.document.qname",
+            "form.DynamicListExtInfo.listSettings.qname",
+            "dcs.DataCompositionSettings.type-id",
+            "dcs.DataCompositionSettings.opaque-extension.placement",
+        ]);
+        let mut missing_keys = BTreeSet::new();
+        for missing in &self.missing_keys {
+            for (field, value) in [
+                ("missing key", missing.key.as_str()),
+                ("missing key status", missing.status.as_str()),
+                ("missing key reason", missing.reason.as_str()),
+            ] {
+                validate_dcs_writer_evidence_text(field, value)?;
+            }
+            if missing.status != "not-proven-by-this-extractor"
+                || !missing_keys.insert(missing.key.as_str())
+            {
+                return Err(invalid_dcs_writer_evidence(
+                    "missing evidence keys are duplicate or have an unexpected status",
+                ));
+            }
+        }
+        if missing_keys != expected_missing_keys {
+            return Err(invalid_dcs_writer_evidence(
+                "missing evidence keys differ from the exact four blocked facts",
+            ));
+        }
+
+        self.verified_form_list_settings_tail_evidence().map(|_| ())
+    }
+
+    pub fn form_list_settings_tail_policy(
+        &self,
+        feature_semantics: &FeatureSemanticsCorpus,
+    ) -> Result<DcsListSettingsTailPolicy, SchemaError> {
+        feature_semantics.validate()?;
+        if feature_semantics.source.release != self.source.release {
+            return Err(invalid_dcs_writer_evidence(
+                "writer evidence and feature semantics releases differ",
+            ));
+        }
+        let view_feature = feature_semantics
+            .feature(&FeatureSemanticKey {
+                namespace_uri: DCS_SETTINGS_MODEL_NAMESPACE.to_owned(),
+                classifier: DCS_SETTINGS_CLASSIFIER.to_owned(),
+                feature: "itemsViewMode".to_owned(),
+            })
+            .ok_or_else(|| {
+                invalid_dcs_writer_evidence(
+                    "verified itemsViewMode feature semantics are unavailable",
+                )
+            })?;
+        if view_feature.model_evidence.status != EvidenceStatus::Verified {
+            return Err(invalid_dcs_writer_evidence(
+                "itemsViewMode model default is not verified",
+            ));
+        }
+
+        let (namespace, view, user_id) = self.verified_form_list_settings_tail_evidence()?;
+        let model_default = view_feature.default_value.as_deref().ok_or_else(|| {
+            invalid_dcs_writer_evidence("verified itemsViewMode model default is absent")
+        })?;
+        if (view.default_model_constant.as_str(), model_default) != ("QUICK_ACCESS", "QuickAccess")
+        {
+            return Err(invalid_dcs_writer_evidence(format!(
+                "itemsViewMode exact default join requires writer `QUICK_ACCESS` and model `QuickAccess`, got writer `{}` and model `{model_default}`",
+                view.default_model_constant
+            )));
+        }
+
+        Ok(DcsListSettingsTailPolicy {
+            namespace_uri: namespace.to_owned(),
+            tail_order: [
+                DcsListSettingsTailField::ItemsViewMode,
+                DcsListSettingsTailField::ItemsUserSettingId,
+            ],
+            items_view_mode_qname: view.qname.clone(),
+            items_view_mode_default: model_default.to_owned(),
+            items_user_setting_id_qname: user_id.qname.clone(),
+            items_user_setting_id_default: user_id.default_string.clone(),
+        })
+    }
+
+    fn verified_form_list_settings_tail_evidence(
+        &self,
+    ) -> Result<
+        (
+            &str,
+            &DcsEnumNotDefaultEvidence,
+            &DcsStringNotDefaultEvidence,
+        ),
+        SchemaError,
+    > {
+        let namespace = match self.fact_value("dcs.DataCompositionSettings.namespace")? {
+            DcsWriterEvidenceValue::Text(value)
+                if value == "http://v8.1c.ru/8.1/data-composition-system/settings" =>
+            {
+                value.as_str()
+            }
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "DataCompositionSettings namespace drifted",
+                ));
+            }
+        };
+        match self.fact_value("dcs.DataCompositionSettings.verified-tail-order")? {
+            DcsWriterEvidenceValue::TailOrder(order)
+                if order == &["itemsViewMode", "itemsUserSettingID"] => {}
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "verified settings tail order drifted",
+                ));
+            }
+        }
+        let view = match self.fact_value("dcs.DataCompositionSettings.itemsViewMode")? {
+            DcsWriterEvidenceValue::EnumNotDefault(value)
+                if value.qname
+                    == "{http://v8.1c.ru/8.1/data-composition-system/settings}itemsViewMode"
+                    && value.default_model_constant == "QUICK_ACCESS"
+                    && value.writer == "V8XmlSerializer.writeEnumNotDefault" =>
+            {
+                value
+            }
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "itemsViewMode writer policy drifted",
+                ));
+            }
+        };
+        let user_id = match self.fact_value("dcs.DataCompositionSettings.itemsUserSettingID")? {
+            DcsWriterEvidenceValue::StringNotDefault(value)
+                if value.qname
+                    == "{http://v8.1c.ru/8.1/data-composition-system/settings}itemsUserSettingID"
+                    && value.default_string.is_empty()
+                    && value.writer == "V8XmlSerializer.writeStringNotDefault" =>
+            {
+                value
+            }
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "itemsUserSettingID writer policy drifted",
+                ));
+            }
+        };
+        match self.fact_value("dcs.DataCompositionSettings.default-value")? {
+            DcsWriterEvidenceValue::DefaultValue(value)
+                if value.predicate == "DcsDefaultValueUtil.isDefaultValue"
+                    && value.operations
+                        == [
+                            "V8XmlSerializer.writeEmptyElement",
+                            "DcsV8Serializer.writeSettingsNamespace",
+                        ] => {}
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "settings default-value policy drifted",
+                ));
+            }
+        }
+        match self.fact_value("form.DynamicListExtInfo.listSettings.delegate")? {
+            DcsWriterEvidenceValue::FormDelegate(value)
+                if value.delegate == "DcsV8Serializer.writeSettings"
+                    && value.qname_source == "IQNameProvider.getElementQName"
+                    && value.null_branch.from_offset == 48
+                    && value.null_branch.target_offset == 106
+                    && value.null_branch.target_opcode == "return" => {}
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "Form ListSettings delegate or null omission policy drifted",
+                ));
+            }
+        }
+        Ok((namespace, view, user_id))
+    }
+
+    fn fact_value(&self, key: &str) -> Result<&DcsWriterEvidenceValue, SchemaError> {
+        self.verified_facts
+            .iter()
+            .find(|fact| fact.key == key)
+            .map(|fact| &fact.value)
+            .ok_or_else(|| invalid_dcs_writer_evidence(format!("missing verified fact `{key}`")))
+    }
+}
+
+fn invalid_dcs_writer_evidence(reason: impl Into<String>) -> SchemaError {
+    SchemaError::InvalidDcsWriterEvidence(reason.into())
+}
+
+fn validate_dcs_writer_evidence_text(field: &'static str, value: &str) -> Result<(), SchemaError> {
+    if value.is_empty() {
+        return Err(invalid_dcs_writer_evidence(format!("{field} is empty")));
+    }
+    if value.len() > MAX_DCS_WRITER_EVIDENCE_TEXT_BYTES {
+        return Err(invalid_dcs_writer_evidence(format!(
+            "{field} exceeds {MAX_DCS_WRITER_EVIDENCE_TEXT_BYTES} UTF-8 bytes"
+        )));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(invalid_dcs_writer_evidence(format!(
+            "{field} contains a control character"
+        )));
+    }
+    Ok(())
 }
 
 impl WriterRuleCorpus {
@@ -1801,6 +2249,21 @@ pub fn bundled_metadata_order() -> Result<MetadataOrderCorpus, SchemaError> {
 
 pub fn bundled_writer_rules() -> Result<WriterRuleCorpus, SchemaError> {
     WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON)
+}
+
+pub fn bundled_dcs_writer_evidence() -> Result<DcsWriterEvidenceCorpus, SchemaError> {
+    DcsWriterEvidenceCorpus::parse(BUNDLED_DCS_WRITER_EVIDENCE_JSON)
+}
+
+pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsListSettingsTailPolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            let evidence = bundled_dcs_writer_evidence()?;
+            let feature_semantics = bundled_feature_semantics()?;
+            evidence.form_list_settings_tail_policy(&feature_semantics)
+        })
+        .clone()
 }
 
 fn validate_source(schema_version: u32, source: &CorpusSource) -> Result<(), SchemaError> {
@@ -2573,6 +3036,106 @@ mod tests {
             serde_json::json!({"status": "known", "value": "8.3"})
         );
         assert!(feature["xml"].get("qName").is_none());
+    }
+
+    #[test]
+    fn bundled_dcs_writer_evidence_exposes_only_the_verified_tail() {
+        let corpus = bundled_dcs_writer_evidence().unwrap();
+        let feature_semantics = bundled_feature_semantics().unwrap();
+        let policy = corpus
+            .form_list_settings_tail_policy(&feature_semantics)
+            .unwrap();
+        assert_eq!(
+            policy.namespace_uri(),
+            "http://v8.1c.ru/8.1/data-composition-system/settings"
+        );
+        assert_eq!(
+            policy.tail_order(),
+            &[
+                DcsListSettingsTailField::ItemsViewMode,
+                DcsListSettingsTailField::ItemsUserSettingId,
+            ]
+        );
+        assert_eq!(policy.items_view_mode_default(), "QuickAccess");
+        assert_eq!(policy.items_user_setting_id_default(), "");
+        assert_eq!(corpus.missing_keys.len(), 4);
+    }
+
+    #[test]
+    fn dcs_tail_model_default_other_fails_closed() {
+        let corpus = bundled_dcs_writer_evidence().unwrap();
+        let mut feature_semantics = bundled_feature_semantics().unwrap();
+        let feature = feature_semantics
+            .packages
+            .iter_mut()
+            .find(|package| package.namespace_uri == DCS_SETTINGS_MODEL_NAMESPACE)
+            .and_then(|package| {
+                package
+                    .classifiers
+                    .iter_mut()
+                    .find(|classifier| classifier.name == DCS_SETTINGS_CLASSIFIER)
+            })
+            .and_then(|classifier| {
+                classifier
+                    .features
+                    .iter_mut()
+                    .find(|feature| feature.name == "itemsViewMode")
+            })
+            .unwrap();
+        feature.default_value = Some("Other".to_owned());
+
+        assert!(matches!(
+            corpus.form_list_settings_tail_policy(&feature_semantics),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("exact default join")
+        ));
+    }
+
+    #[test]
+    fn dcs_tail_writer_constant_other_fails_closed() {
+        let mut writer_evidence =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        writer_evidence["verifiedFacts"][2]["value"]["defaultModelConstant"] =
+            serde_json::json!("OTHER");
+
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(
+                &serde_json::to_string(&writer_evidence).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("itemsViewMode writer policy drifted")
+        ));
+    }
+
+    #[test]
+    fn dcs_writer_evidence_parser_is_bounded_and_fails_closed_on_drift() {
+        let oversized = " ".repeat(MAX_DCS_WRITER_EVIDENCE_JSON_BYTES + 1);
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(&oversized),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("JSON exceeds")
+        ));
+
+        let mut unknown =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        unknown["forged"] = serde_json::json!(true);
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(&serde_json::to_string(&unknown).unwrap()),
+            Err(SchemaError::InvalidJson(message)) if message.contains("unknown field")
+        ));
+
+        let mut duplicate =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        let duplicate_fact = duplicate["verifiedFacts"][0].clone();
+        duplicate["verifiedFacts"]
+            .as_array_mut()
+            .unwrap()
+            .push(duplicate_fact);
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(&serde_json::to_string(&duplicate).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("duplicate verified fact")
+        ));
     }
 
     fn canonical_coverage_fixture() -> CanonicalCoverageCorpus {

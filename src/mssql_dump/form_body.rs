@@ -47,6 +47,7 @@ use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListItemPart, SchemaError, WriterPolicy,
     WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
 };
+use ibcmd_xml::{DcsListSettingsTailError, emit_form_list_settings_tail};
 use uuid::Uuid;
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -313,7 +314,8 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &parameters,
         &commands,
         &command_interface,
-    );
+    )
+    .ok()?;
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_format_cpu_ms += elapsed_ms(started);
     }
@@ -917,6 +919,7 @@ impl CanonicalFormChoiceList {
 pub(super) enum FormSchemaWriteError {
     Corpus(SchemaError),
     WriterRule(WriterRuleLookupError),
+    DcsTail(DcsListSettingsTailError),
     UnexpectedPolicy {
         rule_id: String,
         expected: &'static str,
@@ -941,6 +944,12 @@ impl From<WriterRuleLookupError> for FormSchemaWriteError {
 impl From<SchemaError> for FormSchemaWriteError {
     fn from(error: SchemaError) -> Self {
         Self::Corpus(error)
+    }
+}
+
+impl From<DcsListSettingsTailError> for FormSchemaWriteError {
+    fn from(error: DcsListSettingsTailError) -> Self {
+        Self::DcsTail(error)
     }
 }
 
@@ -13293,7 +13302,7 @@ pub(super) fn format_form_body_xml(
     parameters: &[FormParameter],
     commands: &[FormCommand],
     command_interface: &Option<FormCommandInterface>,
-) -> String {
+) -> Result<String, FormSchemaWriteError> {
     let mut xml = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 "
@@ -13506,7 +13515,7 @@ pub(super) fn format_form_body_xml(
     xml.push_str(&format_form_attributes_section_xml(
         attributes,
         attributes_section,
-    ));
+    )?);
     if !commands.is_empty() {
         xml.push_str("\t<Commands>\r\n");
         for command in commands {
@@ -13590,7 +13599,7 @@ pub(super) fn format_form_body_xml(
         xml.push_str(&format_form_command_interface_xml(command_interface));
     }
     xml.push_str("</Form>");
-    xml
+    Ok(xml)
 }
 
 pub(super) fn format_form_child_items_xml(items: &[FormChildItem], indent: usize) -> String {
@@ -16568,17 +16577,18 @@ pub(super) fn format_form_context_menu_xml(item: &FormChildItem, indent: usize) 
 #[cfg(test)]
 pub(super) fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
     format_form_attributes_section_xml(attributes, &FormAttributesSection::default())
+        .expect("bundled DCS writer evidence must validate in tests")
 }
 
 pub(super) fn format_form_attributes_section_xml(
     attributes: &[FormAttribute],
     attributes_section: &FormAttributesSection,
-) -> String {
+) -> Result<String, FormSchemaWriteError> {
     if attributes.is_empty() && attributes_section.conditional_appearance_xml.is_none() {
-        return "\t<Attributes/>\r\n".to_string();
+        return Ok("\t<Attributes/>\r\n".to_string());
     }
     let mut xml = "\t<Attributes>\r\n".to_string();
-    xml.push_str(&format_form_attributes_items_xml(attributes));
+    xml.push_str(&format_form_attributes_items_xml(attributes)?);
     if let Some(conditional_appearance_xml) = &attributes_section.conditional_appearance_xml {
         xml.push_str(&indent_xml_fragment(
             &split_adjacent_xml_tags(conditional_appearance_xml),
@@ -16586,10 +16596,12 @@ pub(super) fn format_form_attributes_section_xml(
         ));
     }
     xml.push_str("\t</Attributes>\r\n");
-    xml
+    Ok(xml)
 }
 
-pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> String {
+pub(super) fn format_form_attributes_items_xml(
+    attributes: &[FormAttribute],
+) -> Result<String, FormSchemaWriteError> {
     let mut xml = String::new();
     for attribute in attributes {
         xml.push_str(&format!(
@@ -16721,7 +16733,7 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
                     escape_xml_text(main_table)
                 ));
             }
-            xml.push_str(&format_form_list_settings_xml(&settings.list_settings));
+            xml.push_str(&format_form_list_settings_xml(&settings.list_settings)?);
             xml.push_str("\t\t\t</Settings>\r\n");
         } else if let Some(spreadsheet_document_settings) = &attribute.spreadsheet_document_settings
         {
@@ -16747,7 +16759,7 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
         }
         xml.push_str("\t\t</Attribute>\r\n");
     }
-    xml
+    Ok(xml)
 }
 
 pub(super) fn format_form_attribute_column_xml(
@@ -16787,14 +16799,21 @@ pub(super) fn format_form_attribute_column_xml(
     xml
 }
 
-pub(super) fn format_form_list_settings_xml(settings: &FormListSettings) -> String {
+pub(super) fn format_form_list_settings_xml(
+    settings: &FormListSettings,
+) -> Result<String, FormSchemaWriteError> {
+    let tail_xml = emit_form_list_settings_tail(
+        settings.items_view_mode.as_deref(),
+        settings.items_user_setting_id.as_deref(),
+        "dcsset",
+        "\t\t\t\t\t",
+    )?;
     if !form_list_settings_standard_section_has_output(settings.filter.as_ref())
         && !form_list_settings_order_has_output(settings.order.as_ref())
         && !form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
-        && settings.items_view_mode.is_none()
-        && settings.items_user_setting_id.is_none()
+        && tail_xml.is_empty()
     {
-        return String::new();
+        return Ok(String::new());
     }
     let mut xml = "\t\t\t\t<ListSettings>\r\n".to_string();
     if form_list_settings_standard_section_has_output(settings.filter.as_ref())
@@ -16856,20 +16875,9 @@ pub(super) fn format_form_list_settings_xml(settings: &FormListSettings) -> Stri
             ));
         }
     }
-    if let Some(items_view_mode) = &settings.items_view_mode {
-        xml.push_str(&format!(
-            "\t\t\t\t\t<dcsset:itemsViewMode>{}</dcsset:itemsViewMode>\r\n",
-            escape_xml_text(items_view_mode)
-        ));
-    }
-    if let Some(items_user_setting_id) = &settings.items_user_setting_id {
-        xml.push_str(&format!(
-            "\t\t\t\t\t<dcsset:itemsUserSettingID>{}</dcsset:itemsUserSettingID>\r\n",
-            escape_xml_text(items_user_setting_id)
-        ));
-    }
+    xml.push_str(&tail_xml);
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
-    xml
+    Ok(xml)
 }
 
 pub(super) fn form_list_settings_standard_section_has_output(

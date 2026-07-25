@@ -4591,14 +4591,15 @@ fn prefix_default_xml_tags_preserves_utf8_text() {
 #[test]
 fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
     let xml = format_form_attributes_section_xml(
-            &[],
-            &FormAttributesSection {
-                conditional_appearance_xml: Some(
-                    "<ConditionalAppearance><dcsset:item><dcsset:selection/></dcsset:item></ConditionalAppearance>"
-                        .to_string(),
-                ),
-            },
-        );
+        &[],
+        &FormAttributesSection {
+            conditional_appearance_xml: Some(
+                "<ConditionalAppearance><dcsset:item><dcsset:selection/></dcsset:item></ConditionalAppearance>"
+                    .to_string(),
+            ),
+        },
+    )
+    .unwrap();
 
     assert!(xml.contains("\t<Attributes>\r\n"), "{xml}");
     assert!(xml.contains("\t\t<ConditionalAppearance>\r\n"), "{xml}");
@@ -4971,6 +4972,60 @@ fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
             "<dcsset:itemsUserSettingID>971fd96e-2ae3-41d5-9d7a-bad772efb890</dcsset:itemsUserSettingID>"
         ));
     assert!(!xml.contains("<dcsset:itemsViewMode>"), "{xml}");
+}
+
+#[test]
+fn omits_list_settings_wrapper_when_tail_has_only_evidence_defaults() {
+    let xml = format_form_list_settings_xml(&FormListSettings {
+        items_view_mode: Some("QuickAccess".to_string()),
+        items_user_setting_id: Some(String::new()),
+        ..FormListSettings::default()
+    })
+    .unwrap();
+
+    assert_eq!(xml, "");
+}
+
+#[test]
+fn appends_escaped_list_settings_tail_after_unchanged_complex_sections() {
+    let complex_settings = FormListSettings {
+        filter: Some(FormListSettingsStandardSection {
+            raw_xml: Some(
+                "<dcsset:filter><dcsset:item>opaque-filter</dcsset:item></dcsset:filter>"
+                    .to_string(),
+            ),
+            ..FormListSettingsStandardSection::default()
+        }),
+        order: Some(FormListSettingsOrder {
+            raw_xml: Some(
+                "<dcsset:order><dcsset:item>opaque-order</dcsset:item></dcsset:order>".to_string(),
+            ),
+            ..FormListSettingsOrder::default()
+        }),
+        conditional_appearance: Some(FormListSettingsStandardSection {
+            raw_xml: Some(
+                "<dcsset:conditionalAppearance><dcsset:item>opaque-appearance</dcsset:item></dcsset:conditionalAppearance>"
+                    .to_string(),
+            ),
+            ..FormListSettingsStandardSection::default()
+        }),
+        ..FormListSettings::default()
+    };
+    let complex_xml = format_form_list_settings_xml(&complex_settings).unwrap();
+
+    let mut settings_with_tail = complex_settings;
+    settings_with_tail.items_view_mode = Some("Compact<&".to_string());
+    settings_with_tail.items_user_setting_id = Some("id<&".to_string());
+    let xml = format_form_list_settings_xml(&settings_with_tail).unwrap();
+
+    let closing = "\t\t\t\t</ListSettings>\r\n";
+    let expected = format!(
+        "{}\t\t\t\t\t<dcsset:itemsViewMode>Compact&lt;&amp;</dcsset:itemsViewMode>\r\n\
+\t\t\t\t\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n\
+{closing}",
+        complex_xml.strip_suffix(closing).unwrap()
+    );
+    assert_eq!(xml, expected);
 }
 
 #[test]
@@ -6197,7 +6252,8 @@ fn formatter_emits_form_command_children_in_native_order() {
         &[],
         &commands,
         &None,
-    );
+    )
+    .unwrap();
 
     assert!(form_xml.contains(r#"<Command name="ЗаписатьИЗакрыть" id="1">"#));
     let action = form_xml
@@ -6236,7 +6292,8 @@ fn formatter_emits_form_command_children_in_native_order() {
         &[],
         &[command_without_options],
         &None,
-    );
+    )
+    .unwrap();
     assert!(no_options_xml.contains("<Representation>TextPicture</Representation>"));
     assert!(!no_options_xml.contains("<FunctionalOptions>"));
 }

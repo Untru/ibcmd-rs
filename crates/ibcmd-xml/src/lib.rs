@@ -12,8 +12,9 @@ mod writer;
 
 pub use dcs::{
     DCS_WRITER_EVIDENCE, DCS_WRITER_EVIDENCE_INVALID_CODE, DCS_WRITER_EVIDENCE_PENDING_CODE,
-    DCS_WRITER_EVIDENCE_RELEASE, DcsSerializationError, DcsSerializationPermit, DcsWriterDecision,
-    DcsWriterEvidence, DcsWriterEvidenceStatus, preflight_dcs_settings_serialization,
+    DCS_WRITER_EVIDENCE_RELEASE, DcsListSettingsTailError, DcsSerializationError,
+    DcsSerializationPermit, DcsWriterDecision, DcsWriterEvidence, DcsWriterEvidenceStatus,
+    emit_form_list_settings_tail, preflight_dcs_settings_serialization,
 };
 pub use dialect::{
     BomRule, DetectionCandidate, DialectDescriptor, DialectDetection, DialectError,
@@ -49,16 +50,18 @@ pub use writer::{LexicalPolicy, WriteError, XmlWriter};
 /// `ibcmd-xml -> ibcmd-schema`; physical decoders never own XML ordering rules.
 pub mod schema {
     pub use ibcmd_schema::{
-        BundleInventory, CorpusSource, EvidenceStatus, EvidenceValue, FeatureClassifierKind,
+        BundleInventory, CorpusSource, DcsListSettingsTailField, DcsListSettingsTailPolicy,
+        DcsWriterEvidenceCorpus, EvidenceStatus, EvidenceValue, FeatureClassifierKind,
         FeatureEvidence, FeatureKind, FeatureSemanticKey, FeatureSemantics,
         FeatureSemanticsClassifier, FeatureSemanticsCorpus, FeatureSemanticsPackage,
         FeatureSemanticsSummary, InventorySummary, MetadataOrderOperation,
         MetadataOrderOperationKind, MetadataOrderRecord, MetadataOrderSection,
         MetadataOrderVersionPredicate, ModelClassifier, ModelInventory, ModelMember, ModelPackage,
         PackageFeatureCorpus, PackageFeatureSummary, RuleEvidence, SchemaError, WriterRule,
-        WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior, bundled_feature_semantics,
-        bundled_metadata_order, bundled_model_inventory, bundled_package_features,
-        bundled_writer_rules,
+        WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior,
+        bundled_dcs_list_settings_tail_policy, bundled_dcs_writer_evidence,
+        bundled_feature_semantics, bundled_metadata_order, bundled_model_inventory,
+        bundled_package_features, bundled_writer_rules,
     };
 }
 

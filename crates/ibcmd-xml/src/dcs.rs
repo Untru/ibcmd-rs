@@ -1,12 +1,9 @@
 //! Evidence-gated serialization boundary for canonical DCS settings.
 //!
-//! The bundled EDT corpus currently proves the Form `ListSettings` delegation
-//! boundary and the structural existence of the two typed settings features.
-//! It does not yet prove the XML QName, TypeId, default-emission, or ordering
-//! rules needed to emit either physical context. This module therefore exposes
-//! one shared fail-closed preflight for standalone settings and Form
-//! `ListSettings`; no caller can obtain an emission permit while those exact
-//! decisions remain pending.
+//! The bundled EDT corpus proves the Form `ListSettings` delegation boundary
+//! and the final two typed settings children. A narrow tail emitter consumes
+//! only those facts. Full standalone/Form serialization remains fail-closed
+//! because wrapper QNames, TypeId, and opaque placement are still unproven.
 
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -15,9 +12,10 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::dcs::DcsSettingsEnvelope;
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
 use ibcmd_schema::{
-    EvidenceStatus, FeatureSemanticKey, FeatureSemanticsCorpus, FormListSettingsNullValue,
-    WriterPolicy, WriterRuleCorpus, WriterRuleKey, bundled_feature_semantics, bundled_writer_rules,
+    DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
+    WriterRuleCorpus, WriterRuleKey, bundled_dcs_list_settings_tail_policy, bundled_writer_rules,
 };
+use quick_xml::escape::escape;
 
 /// EDT release against which the DCS writer boundary was inspected.
 pub const DCS_WRITER_EVIDENCE_RELEASE: &str = "2025.2.3+30";
@@ -25,9 +23,6 @@ pub const DCS_WRITER_EVIDENCE_RELEASE: &str = "2025.2.3+30";
 pub const DCS_WRITER_EVIDENCE_PENDING_CODE: &str = "dcs.writer-evidence-pending";
 /// Stable diagnostic emitted when the embedded corpus cannot prove a claimed rule.
 pub const DCS_WRITER_EVIDENCE_INVALID_CODE: &str = "dcs.writer-evidence-invalid";
-
-const DCS_SETTINGS_NAMESPACE: &str = "http://g5.1c.ru/v8/dt/data-composition-system/settings";
-const DCS_SETTINGS_CLASSIFIER: &str = "DataCompositionSettings";
 
 /// One XML decision that must be evidence-backed before DCS bytes are emitted.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -121,33 +116,33 @@ pub const DCS_WRITER_EVIDENCE: &[DcsWriterEvidence] = &[
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::ItemsUserSettingIdQName,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "feature-semantics:DataCompositionSettings/itemsUserSettingID:qname",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:DataCompositionSettings/itemsUserSettingID:qname",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::ItemsUserSettingIdOrder,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "feature-semantics:DataCompositionSettings/itemsUserSettingID:order",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:DataCompositionSettings/verified-tail-order",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::ItemsUserSettingIdDefaultEmission,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "feature-semantics:DataCompositionSettings/itemsUserSettingID:emitDefault",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:DataCompositionSettings/itemsUserSettingID",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::ItemsViewModeQName,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "feature-semantics:DataCompositionSettings/itemsViewMode:qname",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:DataCompositionSettings/itemsViewMode:qname",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::ItemsViewModeOrder,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "feature-semantics:DataCompositionSettings/itemsViewMode:order",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:DataCompositionSettings/verified-tail-order",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::ItemsViewModeDefaultEmission,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "feature-semantics:DataCompositionSettings/itemsViewMode:emitDefault",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:DataCompositionSettings/itemsViewMode",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::OpaqueExtensionPlacement,
@@ -215,6 +210,153 @@ impl DcsSerializationPermit {
     }
 }
 
+/// Narrow failure produced before any Form `ListSettings` tail bytes are returned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DcsListSettingsTailError {
+    Schema(SchemaError),
+    InvalidFormat(&'static str),
+    InvalidValue(&'static str),
+}
+
+impl Display for DcsListSettingsTailError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Schema(error) => write!(formatter, "{error}"),
+            Self::InvalidFormat(reason) => {
+                write!(formatter, "invalid ListSettings tail format: {reason}")
+            }
+            Self::InvalidValue(field) => {
+                write!(formatter, "invalid ListSettings tail value for {field}")
+            }
+        }
+    }
+}
+
+impl Error for DcsListSettingsTailError {}
+
+impl From<SchemaError> for DcsListSettingsTailError {
+    fn from(error: SchemaError) -> Self {
+        Self::Schema(error)
+    }
+}
+
+/// Emits only the two verified final children of a caller-owned Form
+/// `ListSettings` wrapper.
+pub fn emit_form_list_settings_tail(
+    items_view_mode: Option<&str>,
+    items_user_setting_id: Option<&str>,
+    prefix: &str,
+    indent: &str,
+) -> Result<String, DcsListSettingsTailError> {
+    if !is_xml_prefix(prefix) {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "prefix must be a bounded XML NCName",
+        ));
+    }
+    if indent.len() > 64 || !indent.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "indent must contain at most 64 spaces or tabs",
+        ));
+    }
+    for (field, value) in [
+        ("itemsViewMode", items_view_mode),
+        ("itemsUserSettingID", items_user_setting_id),
+    ] {
+        if value.is_some_and(|value| {
+            value.len() > 4 * 1024 || value.chars().any(|character| !is_xml_1_0_char(character))
+        }) {
+            return Err(DcsListSettingsTailError::InvalidValue(field));
+        }
+    }
+
+    let policy = bundled_dcs_list_settings_tail_policy()?;
+    let mut output = String::new();
+    for field in policy.tail_order() {
+        let (qname, value, default) = match field {
+            DcsListSettingsTailField::ItemsViewMode => (
+                policy.items_view_mode_qname(),
+                items_view_mode,
+                policy.items_view_mode_default(),
+            ),
+            DcsListSettingsTailField::ItemsUserSettingId => (
+                policy.items_user_setting_id_qname(),
+                items_user_setting_id,
+                policy.items_user_setting_id_default(),
+            ),
+        };
+        let Some(value) = value.filter(|value| *value != default) else {
+            continue;
+        };
+        let local_name = qname
+            .rsplit_once('}')
+            .map(|(_, local_name)| local_name)
+            .ok_or(DcsListSettingsTailError::InvalidFormat(
+                "verified QName is not expanded",
+            ))?;
+        output.push_str(indent);
+        output.push('<');
+        output.push_str(prefix);
+        output.push(':');
+        output.push_str(local_name);
+        output.push('>');
+        output.push_str(&escape(value));
+        output.push_str("</");
+        output.push_str(prefix);
+        output.push(':');
+        output.push_str(local_name);
+        output.push_str(">\r\n");
+    }
+    Ok(output)
+}
+
+fn is_xml_prefix(prefix: &str) -> bool {
+    if prefix.is_empty()
+        || prefix.len() > 64
+        || prefix.eq_ignore_ascii_case("xml")
+        || prefix.eq_ignore_ascii_case("xmlns")
+    {
+        return false;
+    }
+    let mut characters = prefix.chars();
+    characters.next().is_some_and(is_ncname_start_char) && characters.all(is_ncname_char)
+}
+
+fn is_ncname_start_char(character: char) -> bool {
+    matches!(
+        character,
+        'A'..='Z'
+            | '_'
+            | 'a'..='z'
+            | '\u{c0}'..='\u{d6}'
+            | '\u{d8}'..='\u{f6}'
+            | '\u{f8}'..='\u{2ff}'
+            | '\u{370}'..='\u{37d}'
+            | '\u{37f}'..='\u{1fff}'
+            | '\u{200c}'..='\u{200d}'
+            | '\u{2070}'..='\u{218f}'
+            | '\u{2c00}'..='\u{2fef}'
+            | '\u{3001}'..='\u{d7ff}'
+            | '\u{f900}'..='\u{fdcf}'
+            | '\u{fdf0}'..='\u{fffd}'
+            | '\u{10000}'..='\u{effff}'
+    )
+}
+
+fn is_ncname_char(character: char) -> bool {
+    is_ncname_start_char(character)
+        || matches!(
+            character,
+            '-' | '.' | '0'..='9' | '\u{b7}' | '\u{300}'..='\u{36f}' | '\u{203f}'..='\u{2040}'
+        )
+}
+
+fn is_xml_1_0_char(character: char) -> bool {
+    matches!(
+        character,
+        '\u{9}' | '\u{a}' | '\u{d}' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}'
+    )
+}
+
 /// Runs the single schema/evidence boundary shared by standalone settings and
 /// Form `ListSettings`.
 ///
@@ -238,46 +380,21 @@ pub fn preflight_dcs_settings_serialization(
 
     let writer_rules = bundled_writer_rules()
         .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
-    let feature_semantics = bundled_feature_semantics()
+    bundled_dcs_list_settings_tail_policy()
         .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
 
     if matches!(envelope, DcsSettingsEnvelope::ListSettings(_)) {
         verify_form_list_settings_delegate(envelope, target_profile, &writer_rules)?;
     }
 
-    let mut missing = Vec::new();
-    match envelope {
-        DcsSettingsEnvelope::Settings(_) => {
-            missing.push(DcsWriterDecision::StandaloneDocumentQName);
-        }
-        DcsSettingsEnvelope::ListSettings(_) => {
-            missing.push(DcsWriterDecision::FormListSettingsWrapperQName);
-        }
-    }
+    let mut missing = vec![match envelope {
+        DcsSettingsEnvelope::Settings(_) => DcsWriterDecision::StandaloneDocumentQName,
+        DcsSettingsEnvelope::ListSettings(_) => DcsWriterDecision::FormListSettingsWrapperQName,
+    }];
     missing.push(DcsWriterDecision::SettingsTypeId);
-    collect_feature_evidence(
-        &feature_semantics,
-        "itemsUserSettingID",
-        DcsWriterDecision::ItemsUserSettingIdQName,
-        DcsWriterDecision::ItemsUserSettingIdOrder,
-        DcsWriterDecision::ItemsUserSettingIdDefaultEmission,
-        &mut missing,
-    )
-    .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
-    collect_feature_evidence(
-        &feature_semantics,
-        "itemsViewMode",
-        DcsWriterDecision::ItemsViewModeQName,
-        DcsWriterDecision::ItemsViewModeOrder,
-        DcsWriterDecision::ItemsViewModeDefaultEmission,
-        &mut missing,
-    )
-    .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
     if !settings.opaque_extensions().is_empty() {
         missing.push(DcsWriterDecision::OpaqueExtensionPlacement);
     }
-    missing.sort_unstable();
-    missing.dedup();
 
     if !missing.is_empty() {
         return Err(pending_evidence(envelope, target_profile, missing));
@@ -316,36 +433,6 @@ fn verify_form_list_settings_delegate(
             &"verified Form ListSettings rule has no exact DCS delegation policy",
         )),
     }
-}
-
-fn collect_feature_evidence(
-    corpus: &FeatureSemanticsCorpus,
-    feature_name: &str,
-    qname_decision: DcsWriterDecision,
-    order_decision: DcsWriterDecision,
-    default_decision: DcsWriterDecision,
-    missing: &mut Vec<DcsWriterDecision>,
-) -> Result<(), String> {
-    let key = FeatureSemanticKey {
-        namespace_uri: DCS_SETTINGS_NAMESPACE.to_owned(),
-        classifier: DCS_SETTINGS_CLASSIFIER.to_owned(),
-        feature: feature_name.to_owned(),
-    };
-    let feature = corpus
-        .feature(&key)
-        .ok_or_else(|| format!("feature semantics are missing for {feature_name}"))?;
-
-    if feature.xml.evidence.status != EvidenceStatus::Verified || feature.xml.qname.is_none() {
-        missing.push(qname_decision);
-    }
-    if feature.xml.evidence.status != EvidenceStatus::Verified || feature.xml.order.is_none() {
-        missing.push(order_decision);
-    }
-    if feature.xml.evidence.status != EvidenceStatus::Verified || feature.xml.emit_default.is_none()
-    {
-        missing.push(default_decision);
-    }
-    Ok(())
 }
 
 fn pending_evidence(
@@ -473,17 +560,38 @@ mod tests {
                 .filter(|entry| entry.status == DcsWriterEvidenceStatus::Verified)
                 .map(|entry| entry.decision)
                 .collect::<Vec<_>>(),
-            vec![DcsWriterDecision::FormListSettingsDelegate]
+            vec![
+                DcsWriterDecision::ItemsUserSettingIdQName,
+                DcsWriterDecision::ItemsUserSettingIdOrder,
+                DcsWriterDecision::ItemsUserSettingIdDefaultEmission,
+                DcsWriterDecision::ItemsViewModeQName,
+                DcsWriterDecision::ItemsViewModeOrder,
+                DcsWriterDecision::ItemsViewModeDefaultEmission,
+                DcsWriterDecision::FormListSettingsDelegate,
+            ]
         );
         assert!(
             DCS_WRITER_EVIDENCE
                 .iter()
                 .all(|entry| !entry.decision.schema_key().is_empty() && !entry.source.is_empty())
         );
+        assert_eq!(
+            DCS_WRITER_EVIDENCE
+                .iter()
+                .filter(|entry| entry.status == DcsWriterEvidenceStatus::Pending)
+                .map(|entry| entry.decision)
+                .collect::<Vec<_>>(),
+            vec![
+                DcsWriterDecision::StandaloneDocumentQName,
+                DcsWriterDecision::FormListSettingsWrapperQName,
+                DcsWriterDecision::SettingsTypeId,
+                DcsWriterDecision::OpaqueExtensionPlacement,
+            ]
+        );
     }
 
     #[test]
-    fn standalone_and_form_use_one_boundary_and_report_exact_context_keys() {
+    fn full_preflight_reports_only_context_and_input_relevant_missing_facts() {
         let target = ProfileId::parse("platform:8.3.24").unwrap();
         let standalone =
             preflight_dcs_settings_serialization(&envelope(false, None), &target).unwrap_err();
@@ -498,32 +606,104 @@ mod tests {
             form.diagnostic().code().as_str(),
             DCS_WRITER_EVIDENCE_PENDING_CODE
         );
-        assert!(
-            standalone
-                .missing_decisions()
-                .contains(&DcsWriterDecision::StandaloneDocumentQName)
+        assert_eq!(
+            standalone.missing_decisions(),
+            [
+                DcsWriterDecision::StandaloneDocumentQName,
+                DcsWriterDecision::SettingsTypeId,
+            ]
+        );
+        assert_eq!(
+            form.missing_decisions(),
+            [
+                DcsWriterDecision::FormListSettingsWrapperQName,
+                DcsWriterDecision::SettingsTypeId,
+            ]
         );
         assert!(
-            form.missing_decisions()
+            !standalone
+                .missing_decisions()
                 .contains(&DcsWriterDecision::FormListSettingsWrapperQName)
         );
         assert!(
             !form
                 .missing_decisions()
-                .contains(&DcsWriterDecision::FormListSettingsDelegate)
+                .contains(&DcsWriterDecision::StandaloneDocumentQName)
         );
-        for common in [
+        assert!(
+            !standalone
+                .missing_decisions()
+                .contains(&DcsWriterDecision::OpaqueExtensionPlacement)
+        );
+        assert!(
+            !form
+                .missing_decisions()
+                .contains(&DcsWriterDecision::OpaqueExtensionPlacement)
+        );
+    }
+
+    #[test]
+    fn aggregate_evidence_matrix_still_contains_the_four_exact_missing_facts() {
+        let expected = [
+            DcsWriterDecision::StandaloneDocumentQName,
+            DcsWriterDecision::FormListSettingsWrapperQName,
             DcsWriterDecision::SettingsTypeId,
-            DcsWriterDecision::ItemsUserSettingIdQName,
-            DcsWriterDecision::ItemsUserSettingIdOrder,
-            DcsWriterDecision::ItemsUserSettingIdDefaultEmission,
-            DcsWriterDecision::ItemsViewModeQName,
-            DcsWriterDecision::ItemsViewModeOrder,
-            DcsWriterDecision::ItemsViewModeDefaultEmission,
-        ] {
-            assert!(standalone.missing_decisions().contains(&common));
-            assert!(form.missing_decisions().contains(&common));
+            DcsWriterDecision::OpaqueExtensionPlacement,
+        ];
+        assert_eq!(
+            DCS_WRITER_EVIDENCE
+                .iter()
+                .filter(|entry| entry.status == DcsWriterEvidenceStatus::Pending)
+                .map(|entry| entry.decision)
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+
+    #[test]
+    fn form_list_settings_tail_uses_verified_order_escaping_and_omission() {
+        let emitted =
+            emit_form_list_settings_tail(Some("Compact<&"), Some("id<&"), "dcsset", "\t\t")
+                .unwrap();
+        assert_eq!(
+            emitted,
+            concat!(
+                "\t\t<dcsset:itemsViewMode>Compact&lt;&amp;</dcsset:itemsViewMode>\r\n",
+                "\t\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n",
+            )
+        );
+        assert_eq!(
+            emit_form_list_settings_tail(None, None, "dcsset", "\t").unwrap(),
+            ""
+        );
+        assert_eq!(
+            emit_form_list_settings_tail(Some("QuickAccess"), Some(""), "dcsset", "\t").unwrap(),
+            ""
+        );
+        assert!(
+            emit_form_list_settings_tail(Some("Compact\nMode"), None, "dcsset", "")
+                .unwrap()
+                .contains("Compact\nMode")
+        );
+        for prefix in ["bad:prefix", "1bad", "xml", "XML", "xmlns", "XmlNs"] {
+            assert!(
+                emit_form_list_settings_tail(Some("Compact"), None, prefix, "").is_err(),
+                "{prefix}"
+            );
         }
+        assert!(emit_form_list_settings_tail(Some("Compact"), None, "параметр", "").is_ok());
+        for forbidden in ['\0', '\u{1f}', '\u{fffe}', '\u{ffff}'] {
+            let value = format!("Compact{forbidden}");
+            assert!(
+                emit_form_list_settings_tail(Some(&value), None, "dcsset", "").is_err(),
+                "U+{:04X}",
+                u32::from(forbidden)
+            );
+        }
+        assert!(
+            emit_form_list_settings_tail(Some(&"x".repeat(4 * 1024 + 1)), None, "dcsset", "")
+                .is_err()
+        );
     }
 
     #[test]
@@ -535,13 +715,12 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(
-            error.diagnostic().code().as_str(),
-            DCS_WRITER_EVIDENCE_PENDING_CODE
-        );
-        assert!(
-            error
-                .missing_decisions()
-                .contains(&DcsWriterDecision::OpaqueExtensionPlacement)
+            error.missing_decisions(),
+            [
+                DcsWriterDecision::StandaloneDocumentQName,
+                DcsWriterDecision::SettingsTypeId,
+                DcsWriterDecision::OpaqueExtensionPlacement,
+            ]
         );
     }
 
