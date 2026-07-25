@@ -22,8 +22,7 @@
       ],
       "conditions": [
         "feature must be many-valued and owned by the expected EClass",
-        "ExtInfoWriter passes writeDefault=false for EReference features",
-        "empty collection is omitted for this call site",
+        "empty collection writes an empty wrapper only when writeDefault is true",
         "write picture only for project version 8.5.1 or newer"
       ],
       "delegate": "com._1c.g5.v8.dt.form.export.xml.writer.FormSmartFeatureWriter",
@@ -81,7 +80,8 @@
       ],
       "conditions": [
         "owner feature order is ChoiceParameterLinks then ChoiceParameters then AvailableTypes",
-        "empty collection writes an empty wrapper only when writeDefault is true",
+        "ExtInfoWriter passes writeDefault=false for EReference features",
+        "empty collection is omitted for this call site",
         "feature cardinality is 0..many"
       ],
       "delegate": "com._1c.g5.v8.dt.export.xml.writer.ChoiceParameterWriter",

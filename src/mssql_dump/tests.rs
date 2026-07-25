@@ -10988,7 +10988,7 @@ fn parses_radio_button_choice_list_value_variants() {
     );
 
     let mut decimal_options = vec!["0"; 12];
-    decimal_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Архивирование чеков ККМ"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+    decimal_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Архивирование чеков ККМ"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
     let decimal_items = parse_form_radio_button_choice_list(Some(&decimal_options), &object_refs);
     assert_eq!(
         decimal_items[0].value,
@@ -10996,7 +10996,7 @@ fn parses_radio_button_choice_list_value_variants() {
     );
 
     let mut string_options = vec!["0"; 12];
-    string_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"S","ПоОтдельности"},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Загрузить категории по отдельности"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+    string_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"S","ПоОтдельности"},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Загрузить категории по отдельности"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
     let string_items = parse_form_radio_button_choice_list(Some(&string_options), &object_refs);
     assert_eq!(
         string_items[0].value,
@@ -11004,7 +11004,7 @@ fn parses_radio_button_choice_list_value_variants() {
     );
 
     let mut ref_options = vec!["0"; 12];
-    ref_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,0,{"U"},e914059f-4304-4438-82fc-8ebf2019b331,16edd24a-02b8-432a-ab20-de3fe0039ac3,{1,1,{"ru","Загрузка отчета"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+    ref_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,0,{"U"},e914059f-4304-4438-82fc-8ebf2019b331,16edd24a-02b8-432a-ab20-de3fe0039ac3,{1,1,{"ru","Загрузка отчета"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
     let ref_items = parse_form_radio_button_choice_list(Some(&ref_options), &object_refs);
     assert_eq!(
         ref_items[0].value,
@@ -11012,6 +11012,171 @@ fn parses_radio_button_choice_list_value_variants() {
             "Enum.ВариантыЗагрузкиОтчетаБанкаПоСБП.EnumValue.ЗагрузкаОтчета".to_string()
         )
     );
+}
+
+#[test]
+fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        profile: String,
+        slot: usize,
+        raw_choice_list: String,
+        expected_xml: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_radio_choice_list_nil_minimal.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.profile, "radio_button_options");
+    assert_eq!(fixture.slot, 1);
+
+    let mut options = vec!["0"; 12];
+    options[fixture.slot] = &fixture.raw_choice_list;
+    let canonical = canonical_form_radio_button_choice_list(Some(&options), &BTreeMap::new());
+    let CanonicalFormChoiceList::Typed { items, provenance } = &canonical else {
+        panic!("nil U pair from the radio-button profile must remain typed");
+    };
+    assert_eq!(
+        provenance.layout,
+        FormChoiceListRawLayout::RadioButtonOptions
+    );
+    assert_eq!(provenance.slot, fixture.slot);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].value, FormChoiceListValue::Nil);
+    validate_canonical_form_choice_list(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
+    );
+
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let non_nil_type = "11111111-1111-4111-8111-111111111111";
+    let non_nil_value = "22222222-2222-4222-8222-222222222222";
+    let empty_object_refs = BTreeMap::new();
+    let resolvable_object_refs = BTreeMap::from([(
+        non_nil_value.to_string(),
+        "Enum.Synthetic.EnumValue.Resolved".to_string(),
+    )]);
+    let cases = [
+        (
+            "wrong discriminator",
+            format!(
+                r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "wrong payload mode",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "extra payload field",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}},0}}}}"##
+            ),
+            false,
+        ),
+        (
+            "trailing nested raw value garbage",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}}garbage,{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "non-nil type",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{non_nil_type},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "nil type with resolvable non-nil value",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{non_nil_value},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            true,
+        ),
+    ];
+    for (label, item, use_resolvable_refs) in cases {
+        let raw = format!(r#"{{3,1,"",{item},{{0,{{4,0,{{0}},"",-1,-1,1,0,""}}}}}}"#);
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let object_refs = if use_resolvable_refs {
+            &resolvable_object_refs
+        } else {
+            &empty_object_refs
+        };
+        let canonical = canonical_form_radio_button_choice_list(Some(&options), object_refs);
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+        assert_eq!(
+            validate_canonical_form_choice_list(&canonical),
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: FormChoiceListRawLayout::RadioButtonOptions,
+                slot: fixture.slot,
+            }),
+            "{label}"
+        );
+    }
+
+    let exact_item = format!(
+        r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+    );
+    let sidecar = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let outer_cases = [
+        (
+            "wrong outer header",
+            format!(r#"{{9,1,"",{exact_item},{sidecar}}}"#),
+        ),
+        (
+            "non-empty item name",
+            format!(r#"{{3,1,"named",{exact_item},{sidecar}}}"#),
+        ),
+        (
+            "missing all sidecars",
+            format!(r#"{{3,1,"",{exact_item}}}"#),
+        ),
+        (
+            "extra sidecar beyond allowed range",
+            format!(r#"{{3,1,"",{exact_item},{sidecar},{sidecar},{sidecar}}}"#),
+        ),
+        (
+            "trailing outer garbage",
+            format!(r#"{{3,1,"",{exact_item},{sidecar}}}garbage"#),
+        ),
+    ];
+    for (label, raw) in outer_cases {
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(Some(&options), &empty_object_refs);
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+        assert_eq!(
+            validate_canonical_form_choice_list(&canonical),
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: FormChoiceListRawLayout::RadioButtonOptions,
+                slot: fixture.slot,
+            }),
+            "{label}"
+        );
+    }
 }
 
 #[test]

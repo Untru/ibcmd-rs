@@ -10076,16 +10076,30 @@ fn try_parse_form_radio_button_choice_list(
     extended_options: Option<&[&str]>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChoiceListItem>> {
-    let field = extended_options?.get(1)?;
-    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+    let field = extended_options?.get(1)?.trim();
+    if scan_1c_braced_value(field, 0) != Some(field.len()) {
         return None;
-    };
+    }
+    let fields = split_1c_braced_fields(field, 0)?;
     let Some(item_count) = fields
         .get(1)
         .and_then(|value| value.trim().parse::<usize>().ok())
     else {
         return None;
     };
+    let item_fields_end = item_count.checked_mul(2)?.checked_add(2)?;
+    if fields.first()?.trim() != "3"
+        || fields.len() != item_fields_end.checked_add(item_count)?
+        || (0..item_count).any(|index| {
+            parse_exact_1c_quoted_string(fields[2 + index * 2].trim()).as_deref() != Some("")
+        })
+        || fields
+            .iter()
+            .skip(item_fields_end)
+            .any(|field| !is_form_choice_list_empty_sidecar(field))
+    {
+        return None;
+    }
 
     (0..item_count)
         .map(|index| {
@@ -10145,7 +10159,7 @@ pub(super) fn try_parse_form_input_field_choice_list(
         .collect()
 }
 
-fn canonical_form_radio_button_choice_list(
+pub(super) fn canonical_form_radio_button_choice_list(
     extended_options: Option<&[&str]>,
     object_refs: &BTreeMap<String, String>,
 ) -> CanonicalFormChoiceList {
@@ -10396,13 +10410,40 @@ pub(super) fn parse_form_radio_button_choice_list_item(
     field: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListItem> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    let value = parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?;
-    let presentation = payload_fields
-        .get(5)
-        .map(|field| parse_form_localized_strings(field))
-        .unwrap_or_default();
+    let field = field.trim();
+    let fields = split_1c_braced_fields(field, 0)?;
+    let payload = fields.get(2)?.trim();
+    let payload_fields = split_1c_braced_fields(payload, 0)?;
+    let raw_value = payload_fields.get(2)?.trim();
+    let nil_value = scan_1c_braced_value(field, 0) == Some(field.len())
+        && fields.len() == 3
+        && parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() == Some("#")
+        && fields.get(1)?.trim() == FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
+        && scan_1c_braced_value(payload, 0) == Some(payload.len())
+        && payload_fields.len() == 6
+        && payload_fields.first()?.trim() == "0"
+        && payload_fields.get(1)?.trim() == "1"
+        && scan_1c_braced_value(raw_value, 0) == Some(raw_value.len())
+        && matches!(
+            split_1c_braced_fields(raw_value, 0).as_deref(),
+            Some([kind]) if kind.trim() == r#""U""#
+        )
+        && Uuid::parse_str(payload_fields.get(3)?.trim()).is_ok_and(|id| id.is_nil())
+        && Uuid::parse_str(payload_fields.get(4)?.trim()).is_ok_and(|id| id.is_nil())
+        && parse_form_input_field_choice_list_presentation(payload_fields.get(5)?).is_some();
+    let value = if nil_value {
+        FormChoiceListValue::Nil
+    } else {
+        parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?
+    };
+    let presentation = if nil_value {
+        parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?
+    } else {
+        payload_fields
+            .get(5)
+            .map(|field| parse_form_localized_strings(field))
+            .unwrap_or_default()
+    };
     Some(FormChoiceListItem {
         presentation_present: false,
         presentation,
@@ -10420,8 +10461,15 @@ pub(super) fn parse_form_radio_button_choice_list_value(
             value_fields.get(1)?.trim().to_string(),
         )),
         "S" => parse_1c_quoted_string(value_fields.get(1)?.trim()).map(FormChoiceListValue::String),
-        "U" => parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
-            .map(FormChoiceListValue::DesignTimeRef),
+        "U" => {
+            let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok()?;
+            let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok()?;
+            if type_id.is_nil() || value_id.is_nil() {
+                return None;
+            }
+            parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
+                .map(FormChoiceListValue::DesignTimeRef)
+        }
         _ => None,
     }
 }
