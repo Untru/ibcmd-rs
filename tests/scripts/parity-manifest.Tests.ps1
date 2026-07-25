@@ -363,7 +363,7 @@ Describe "Parity protocol scripts" {
     It "rejects wrong runtime database identity and incoherent failed calls" {
         $tokens = $null; $errors = $null
         $ast = [Management.Automation.Language.Parser]::ParseFile($runner, [ref]$tokens, [ref]$errors)
-        foreach ($name in @('Assert-ManifestSafe', 'Get-FileSha256', 'Get-NormalizedExecutablePath', 'Assert-CompleteRuntimeCall', 'Import-VerifiedRuntimeEvidence')) {
+        foreach ($name in @('Assert-ManifestSafe', 'Get-FileSha256', 'ConvertFrom-WindowsExtendedLengthPath', 'Get-NormalizedExecutablePath', 'Assert-CompleteRuntimeCall', 'Import-VerifiedRuntimeEvidence')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
@@ -447,6 +447,111 @@ Describe "Parity protocol scripts" {
         $incoherentBlocked | Should Be $true
     }
 
+    It "normalizes only equivalent Windows extended executable paths" {
+        $tokens = $null; $errors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($runner, [ref]$tokens, [ref]$errors)
+        foreach ($name in @('ConvertFrom-WindowsExtendedLengthPath', 'Get-NormalizedExecutablePath', 'Assert-CompleteRuntimeCall')) {
+            $functionAst = $ast.Find({
+                param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+            }.GetNewClosure(), $true)
+            Invoke-Expression $functionAst.Extent.Text
+        }
+
+        $normalPath = [IO.Path]::GetFullPath($fakeCli)
+        $extendedPath = '\\?\' + $normalPath
+        (ConvertFrom-WindowsExtendedLengthPath $extendedPath) | Should Be $normalPath
+        (ConvertFrom-WindowsExtendedLengthPath '\\?\UNC\server\share\tool.exe') |
+            Should Be '\\server\share\tool.exe'
+        (Get-NormalizedExecutablePath $extendedPath) | Should Be (Get-NormalizedExecutablePath $normalPath)
+
+        foreach ($invalidPath in @(
+            '\\?\GLOBALROOT\Device\HarddiskVolume1\tool.exe',
+            '\\?\Volume{11111111-1111-4111-8111-111111111111}\tool.exe',
+            '\\.\C:\tool.exe',
+            '\??\C:\tool.exe',
+            '\\??\C:\tool.exe',
+            '\\?\C:/tool.exe',
+            '\\?\C:\dir\.\tool.exe',
+            '\\?\C:\dir\..\tool.exe',
+            '\\?\C:\dir.\tool.exe',
+            '\\?\C:\dir \tool.exe',
+            '\\?\C:\tool.exe:stream',
+            '\\?\C:\dir\\tool.exe',
+            '\\?\C:\dir\*.exe',
+            '\\?\UNC\server\share',
+            '\\?\UNC\\share\tool.exe',
+            '\\?\UNC\server\\tool.exe',
+            '\\?\UNC\server\share\..\tool.exe',
+            '\\?\UNC\server\share\tool.exe:stream'
+        )) {
+            $invalidBlocked = $false
+            try { $null = ConvertFrom-WindowsExtendedLengthPath $invalidPath }
+            catch { $invalidBlocked = $true }
+            if (-not $invalidBlocked) { throw "Accepted invalid Windows executable path: $invalidPath" }
+        }
+        foreach ($journalControlledPath in @('ibcmd.exe', (Join-Path $TestDrive '*.ps1'))) {
+            $unqualifiedBlocked = $false
+            try { $null = Get-NormalizedExecutablePath $journalControlledPath }
+            catch { $unqualifiedBlocked = $true }
+            if (-not $unqualifiedBlocked) { throw "Accepted unqualified/wildcard journal path: $journalControlledPath" }
+        }
+        $normalParent = Split-Path -Parent $normalPath
+        $normalLeaf = Split-Path -Leaf $normalPath
+        foreach ($ordinaryInvalidPath in @(
+            ($normalPath + ':stream'),
+            ($normalParent + '\.\' + $normalLeaf),
+            ($normalParent + '\child\..\' + $normalLeaf),
+            ($normalParent + '\\' + $normalLeaf),
+            ($normalParent + '\trailing.\' + $normalLeaf),
+            ($normalParent + '\trailing \' + $normalLeaf)
+        )) {
+            $ordinaryBlocked = $false
+            try { $null = Get-NormalizedExecutablePath $ordinaryInvalidPath }
+            catch { $ordinaryBlocked = $true }
+            if (-not $ordinaryBlocked) { throw "Accepted ambiguous ordinary executable path: $ordinaryInvalidPath" }
+        }
+
+        function New-ValidNativeRuntimeCall([string]$Executable) {
+            return [pscustomobject]@{
+                executable=$Executable
+                arguments=@('infobase','config','export','--db-server=runtime-host','--db-name=runtime-db','--force','C:\out')
+                started_unix_ms=1; ended_unix_ms=2; status='passed'; exit_code=0
+                timed_out=$false; exception=$null
+            }
+        }
+
+        Assert-CompleteRuntimeCall -Call (New-ValidNativeRuntimeCall $extendedPath) `
+            -ExpectedExecutable $normalPath -ExpectedServer runtime-host -ExpectedDatabase runtime-db -Kind native_ibcmd
+
+        $differentPath = Join-Path $TestDrive 'different-runtime.ps1'
+        Copy-Item -LiteralPath $fakeCli -Destination $differentPath
+        $differentBlocked = $false
+        try {
+            Assert-CompleteRuntimeCall -Call (New-ValidNativeRuntimeCall $differentPath) `
+                -ExpectedExecutable $normalPath -ExpectedServer runtime-host -ExpectedDatabase runtime-db -Kind native_ibcmd
+        } catch { $differentBlocked = $true }
+        $differentBlocked | Should Be $true
+
+        $reparseRoot = Join-Path $TestDrive 'runtime-reparse'
+        $targetRoot = Split-Path -Parent $fakeCli
+        $linkType = if ($env:OS -eq 'Windows_NT') { 'Junction' } else { 'SymbolicLink' }
+        $null = New-Item -ItemType $linkType -Path $reparseRoot -Target $targetRoot -ErrorAction Stop
+        $reparsePath = Join-Path $reparseRoot (Split-Path -Leaf $fakeCli)
+        $reparseBlocked = $false
+        try {
+            Assert-CompleteRuntimeCall -Call (New-ValidNativeRuntimeCall $reparsePath) `
+                -ExpectedExecutable $normalPath -ExpectedServer runtime-host -ExpectedDatabase runtime-db -Kind native_ibcmd
+        } catch { $reparseBlocked = $true }
+        $reparseBlocked | Should Be $true
+        $aliasIdentityBlocked = $false
+        try {
+            Assert-CompleteRuntimeCall -Call (New-ValidNativeRuntimeCall $reparsePath) `
+                -ExpectedExecutable $reparsePath -ExpectedServer runtime-host -ExpectedDatabase runtime-db -Kind native_ibcmd
+        } catch { $aliasIdentityBlocked = $true }
+        $aliasIdentityBlocked | Should Be $true
+    }
+
     It "records an after fingerprint when candidate export fails" {
         $lab = Join-Path $TestDrive "candidate-fingerprint"
         $fixtureDir = Split-Path -Parent $fakeCli
@@ -478,6 +583,7 @@ Describe "Parity protocol scripts" {
         $manifest.database_fingerprint.after.status | Should Be "passed"
         $manifest.database_fingerprint.after.sha256 | Should Match "^[0-9a-f]{64}$"
         $manifest.database_fingerprint.after.ended_utc | Should Not BeNullOrEmpty
+        $manifest.database_fingerprint.unchanged | Should Be $true
     }
 
     It "keeps a self-contained valid manifest when the process is interrupted mid-step" {
@@ -715,6 +821,7 @@ $global:LASTEXITCODE=0
         $manifest.database_fingerprint.after.status | Should Be "passed"
         $manifest.database_fingerprint.after.sha256 | Should Match "^[0-9a-f]{64}$"
         $manifest.database_fingerprint.after.ended_utc | Should Not BeNullOrEmpty
+        $manifest.database_fingerprint.unchanged | Should Be $true
     }
 
     It "redacts SQL-auth secret names and values from manifests and logs" {
@@ -772,10 +879,60 @@ $global:LASTEXITCODE=0
         }
     }
 
+    It "redacts password options without corrupting JSON-looking log text" {
+        foreach ($path in @($runner, $matrix)) {
+            $tokens = $null; $errors = $null
+            $ast = [Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
+            $functionAst = $ast.Find({
+                param($node)
+                $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq 'Protect-SensitiveText'
+            }, $true)
+            Invoke-Expression $functionAst.Extent.Text
+
+            $protectedJson = Protect-SensitiveText '{"x":"--db-pwd=token-aware-secret"}'
+            $protectedJson | Should Not Match 'token-aware-secret'
+            $parsed = $protectedJson | ConvertFrom-Json
+            $parsed.x | Should Be '--db-pwd=<redacted>'
+
+            $plain = Protect-SensitiveText 'failed --db-pwd="secret with spaces" retry'
+            $plain | Should Not Match 'secret with spaces'
+            $plain | Should Match 'failed --db-pwd=<redacted> retry'
+        }
+    }
+
+    It "redacts exact JSON-escaped environment secret values" {
+        $secretName = 'IBCMD_DB_PSW'
+        $savedSecret = [Environment]::GetEnvironmentVariable($secretName, 'Process')
+        $secret = 'alpha secret"omega'
+        try {
+            [Environment]::SetEnvironmentVariable($secretName, $secret, 'Process')
+            foreach ($path in @($runner, $matrix)) {
+                $tokens = $null; $errors = $null
+                $ast = [Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
+                $functionAst = $ast.Find({
+                    param($node)
+                    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                    $node.Name -eq 'Protect-SensitiveText'
+                }, $true)
+                Invoke-Expression $functionAst.Extent.Text
+
+                $serialized = ConvertTo-Json -InputObject ([ordered]@{ x = "--db-pwd=$secret" }) -Compress
+                $protected = Protect-SensitiveText $serialized
+                $protected | Should Not Match 'alpha|omega'
+                $protected | Should Not Match ([regex]::Escape($secret))
+                $parsed = $protected | ConvertFrom-Json
+                $parsed.x | Should Be '--db-pwd=<redacted>'
+            }
+        } finally {
+            [Environment]::SetEnvironmentVariable($secretName, $savedSecret, 'Process')
+        }
+    }
+
     It "validates complete child evidence and blocks every release identity mismatch before merge" {
         $tokens = $null; $errors = $null
         $ast = [Management.Automation.Language.Parser]::ParseFile($matrix, [ref]$tokens, [ref]$errors)
-        foreach ($name in @('Get-FileSha256', 'Get-NormalizedExecutablePath', 'Assert-NoReparsePointComponent', 'Read-ValidChildManifest', 'Assert-CompatibleChildManifests')) {
+        foreach ($name in @('Get-FileSha256', 'ConvertFrom-WindowsExtendedLengthPath', 'Get-NormalizedExecutablePath', 'Assert-NoReparsePointComponent', 'Read-ValidChildManifest', 'Assert-CompatibleChildManifests')) {
             $functionAst = $ast.Find({
                 param($node)
                 $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name

@@ -47,6 +47,13 @@ function Protect-SensitiveText {
         Where-Object { -not [string]::IsNullOrEmpty($_) } |
         Sort-Object -Property @{ Expression = { $_.Length }; Descending = $true }, @{ Expression = { $_ }; Descending = $false } -Unique)
     foreach ($secretValue in $secretValues) {
+        $jsonLiteral = [string](ConvertTo-Json -InputObject $secretValue -Compress)
+        if ($jsonLiteral.Length -ge 2 -and $jsonLiteral[0] -eq '"' -and $jsonLiteral[$jsonLiteral.Length - 1] -eq '"') {
+            $jsonEscapedValue = $jsonLiteral.Substring(1, $jsonLiteral.Length - 2)
+            if (-not [string]::IsNullOrEmpty($jsonEscapedValue)) {
+                $text = $text.Replace($jsonEscapedValue, '<redacted>')
+            }
+        }
         $text = $text.Replace($secretValue, '<redacted>')
     }
     foreach ($secretName in $secretNames) {
@@ -59,7 +66,7 @@ function Protect-SensitiveText {
     }
     return [regex]::Replace(
         $text,
-        '(?i)(--(?:db-pwd|sql-pwd|password|pwd)(?:-env)?)(?:=|\s+)(?:"[^"]*"|\S+)',
+        '(?i)(--(?:db-pwd|sql-pwd|password|pwd)(?:-env)?)(?:=|\s+)(?:"(?:\\.|[^"\\])*"|(?:\\.|[^\s"\\])+)',
         '$1=<redacted>'
     )
 }
@@ -92,12 +99,108 @@ function Write-AtomicJson {
     }
 }
 
+function ConvertFrom-WindowsExtendedLengthPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+
+    $extendedPrefix = '\\?\'
+    $extendedUncPrefix = '\\?\UNC\'
+    foreach ($unsupportedPrefix in @('\\.\', '\??\', '\\??\')) {
+        if ($Path.StartsWith($unsupportedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsupported Windows device/NT executable path namespace: $Path"
+        }
+    }
+    if (-not $Path.StartsWith($extendedPrefix, [StringComparison]::Ordinal)) {
+        return $Path
+    }
+    if ($Path.IndexOf('/') -ge 0) {
+        throw "Invalid Windows extended-length executable path: $Path"
+    }
+
+    $relativeComponents = @()
+    $converted = $null
+    if ($Path.StartsWith($extendedUncPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $tail = $Path.Substring($extendedUncPrefix.Length)
+        $components = @([regex]::Split($tail, '\\'))
+        if ($components.Count -lt 3 -or
+            [string]::IsNullOrEmpty($components[0]) -or
+            [string]::IsNullOrEmpty($components[1])) {
+            throw "Malformed Windows extended-length UNC executable path: $Path"
+        }
+        $relativeComponents = $components
+        $converted = '\\' + $tail
+    } elseif ($Path.Length -ge 8 -and
+        $Path.StartsWith($extendedPrefix, [StringComparison]::Ordinal) -and
+        [char]::IsLetter($Path[4]) -and $Path[5] -eq ':' -and $Path[6] -eq '\') {
+        $relative = $Path.Substring(7)
+        $relativeComponents = @([regex]::Split($relative, '\\'))
+        $converted = $Path.Substring($extendedPrefix.Length)
+    } else {
+        throw "Unsupported Windows extended-length executable path namespace: $Path"
+    }
+
+    foreach ($component in $relativeComponents) {
+        if ([string]::IsNullOrEmpty($component) -or
+            $component -eq '.' -or $component -eq '..' -or
+            $component.EndsWith('.', [StringComparison]::Ordinal) -or
+            $component.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $component.IndexOf(':') -ge 0 -or
+            [Management.Automation.WildcardPattern]::ContainsWildcardCharacters($component)) {
+            throw "Ambiguous Windows extended-length executable path component: $Path"
+        }
+    }
+    return $converted
+}
+
 function Get-NormalizedExecutablePath {
     param([string]$Path, [string]$Label)
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) {
+    $identityPath = ConvertFrom-WindowsExtendedLengthPath $Path
+    if ([string]::IsNullOrWhiteSpace($identityPath) -or $identityPath.IndexOf('/') -ge 0 -or
+        [Management.Automation.WildcardPattern]::ContainsWildcardCharacters($identityPath)) {
         throw "$Label must be an absolute resolved executable path."
     }
-    return [IO.Path]::GetFullPath($Path)
+    $driveRooted = $identityPath.Length -ge 3 -and
+        [char]::IsLetter($identityPath[0]) -and $identityPath[1] -eq ':' -and $identityPath[2] -eq '\'
+    $uncRooted = $identityPath.StartsWith('\\', [StringComparison]::Ordinal)
+    if (-not ($driveRooted -or $uncRooted)) {
+        throw "$Label must be an absolute resolved executable path."
+    }
+    $components = if ($driveRooted) {
+        @([regex]::Split($identityPath.Substring(3), '\\'))
+    } else {
+        @([regex]::Split($identityPath.Substring(2), '\\'))
+    }
+    if ($components.Count -lt $(if ($driveRooted) { 1 } else { 3 })) {
+        throw "$Label has an incomplete drive or UNC route."
+    }
+    foreach ($component in $components) {
+        if ([string]::IsNullOrEmpty($component) -or
+            $component -eq '.' -or $component -eq '..' -or
+            $component.EndsWith('.', [StringComparison]::Ordinal) -or
+            $component.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $component.IndexOf(':') -ge 0) {
+            throw "$Label contains an ambiguous path component."
+        }
+    }
+
+    $fullPath = [IO.Path]::GetFullPath($identityPath)
+    $root = [IO.Path]::GetPathRoot($fullPath)
+    $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+    if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Label root is a reparse point."
+    }
+    $current = $root
+    $relative = $fullPath.Substring($root.Length)
+    $item = $null
+    foreach ($component in @([regex]::Split($relative, '\\'))) {
+        $current = Join-Path $current $component
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "$Label crosses a reparse point: $current"
+        }
+    }
+    if ($null -eq $item -or $item.PSIsContainer) { throw "$Label must be an executable file path." }
+    return $fullPath
 }
 
 function Assert-NoReparsePointComponent {

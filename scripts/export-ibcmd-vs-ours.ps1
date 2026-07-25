@@ -36,6 +36,13 @@ function Protect-SensitiveText {
         Where-Object { -not [string]::IsNullOrEmpty($_) } |
         Sort-Object -Property @{ Expression = { $_.Length }; Descending = $true }, @{ Expression = { $_ }; Descending = $false } -Unique)
     foreach ($secretValue in $secretValues) {
+        $jsonLiteral = [string](ConvertTo-Json -InputObject $secretValue -Compress)
+        if ($jsonLiteral.Length -ge 2 -and $jsonLiteral[0] -eq '"' -and $jsonLiteral[$jsonLiteral.Length - 1] -eq '"') {
+            $jsonEscapedValue = $jsonLiteral.Substring(1, $jsonLiteral.Length - 2)
+            if (-not [string]::IsNullOrEmpty($jsonEscapedValue)) {
+                $text = $text.Replace($jsonEscapedValue, '<redacted>')
+            }
+        }
         $text = $text.Replace($secretValue, '<redacted>')
     }
     foreach ($secretName in $secretNames) {
@@ -48,7 +55,7 @@ function Protect-SensitiveText {
     }
     return [regex]::Replace(
         $text,
-        '(?i)(--(?:db-pwd|sql-pwd|password|pwd)(?:-env)?)(?:=|\s+)(?:"[^"]*"|\S+)',
+        '(?i)(--(?:db-pwd|sql-pwd|password|pwd)(?:-env)?)(?:=|\s+)(?:"(?:\\.|[^"\\])*"|(?:\\.|[^\s"\\])+)',
         '$1=<redacted>'
     )
 }
@@ -369,11 +376,111 @@ function Test-CliCommand {
     } finally { $ErrorActionPreference = $previousPreference }
 }
 
+function ConvertFrom-WindowsExtendedLengthPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+
+    $extendedPrefix = '\\?\'
+    $extendedUncPrefix = '\\?\UNC\'
+    foreach ($unsupportedPrefix in @('\\.\', '\??\', '\\??\')) {
+        if ($Path.StartsWith($unsupportedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsupported Windows device/NT executable path namespace: $Path"
+        }
+    }
+    if (-not $Path.StartsWith($extendedPrefix, [StringComparison]::Ordinal)) {
+        return $Path
+    }
+    if ($Path.IndexOf('/') -ge 0) {
+        throw "Invalid Windows extended-length executable path: $Path"
+    }
+
+    $relativeComponents = @()
+    $converted = $null
+    if ($Path.StartsWith($extendedUncPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $tail = $Path.Substring($extendedUncPrefix.Length)
+        $components = @([regex]::Split($tail, '\\'))
+        if ($components.Count -lt 3 -or
+            [string]::IsNullOrEmpty($components[0]) -or
+            [string]::IsNullOrEmpty($components[1])) {
+            throw "Malformed Windows extended-length UNC executable path: $Path"
+        }
+        $relativeComponents = $components
+        $converted = '\\' + $tail
+    } elseif ($Path.Length -ge 8 -and
+        $Path.StartsWith($extendedPrefix, [StringComparison]::Ordinal) -and
+        [char]::IsLetter($Path[4]) -and $Path[5] -eq ':' -and $Path[6] -eq '\') {
+        $relative = $Path.Substring(7)
+        $relativeComponents = @([regex]::Split($relative, '\\'))
+        $converted = $Path.Substring($extendedPrefix.Length)
+    } else {
+        throw "Unsupported Windows extended-length executable path namespace: $Path"
+    }
+
+    foreach ($component in $relativeComponents) {
+        if ([string]::IsNullOrEmpty($component) -or
+            $component -eq '.' -or $component -eq '..' -or
+            $component.EndsWith('.', [StringComparison]::Ordinal) -or
+            $component.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $component.IndexOf(':') -ge 0 -or
+            [Management.Automation.WildcardPattern]::ContainsWildcardCharacters($component)) {
+            throw "Ambiguous Windows extended-length executable path component: $Path"
+        }
+    }
+    return $converted
+}
+
 function Get-NormalizedExecutablePath {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Runtime journal executable path is empty.' }
-    $resolved = Get-Command -Name $Path -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
-    return [IO.Path]::GetFullPath($resolved.Source)
+    $lookupPath = ConvertFrom-WindowsExtendedLengthPath $Path
+    if ($lookupPath.IndexOf('/') -ge 0 -or
+        [Management.Automation.WildcardPattern]::ContainsWildcardCharacters($lookupPath)) {
+        throw 'Runtime journal executable path contains an unsupported separator or wildcard.'
+    }
+    $driveRooted = $lookupPath.Length -ge 3 -and
+        [char]::IsLetter($lookupPath[0]) -and $lookupPath[1] -eq ':' -and $lookupPath[2] -eq '\'
+    $uncRooted = $lookupPath.StartsWith('\\', [StringComparison]::Ordinal)
+    if (-not ($driveRooted -or $uncRooted)) {
+        throw 'Runtime journal executable path must be a fully qualified drive or UNC path.'
+    }
+    $components = if ($driveRooted) {
+        @([regex]::Split($lookupPath.Substring(3), '\\'))
+    } else {
+        @([regex]::Split($lookupPath.Substring(2), '\\'))
+    }
+    if ($components.Count -lt $(if ($driveRooted) { 1 } else { 3 })) {
+        throw 'Runtime journal executable path has an incomplete drive or UNC route.'
+    }
+    foreach ($component in $components) {
+        if ([string]::IsNullOrEmpty($component) -or
+            $component -eq '.' -or $component -eq '..' -or
+            $component.EndsWith('.', [StringComparison]::Ordinal) -or
+            $component.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $component.IndexOf(':') -ge 0) {
+            throw 'Runtime journal executable path contains an ambiguous component.'
+        }
+    }
+
+    $fullPath = [IO.Path]::GetFullPath($lookupPath)
+    $root = [IO.Path]::GetPathRoot($fullPath)
+    $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+    if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Runtime journal executable path root is a reparse point.'
+    }
+    $current = $root
+    $relative = $fullPath.Substring($root.Length)
+    $item = $null
+    foreach ($component in @([regex]::Split($relative, '\\'))) {
+        $current = Join-Path $current $component
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Runtime journal executable path crosses a reparse point: $current"
+        }
+    }
+    if ($null -eq $item -or $item.PSIsContainer) {
+        throw 'Runtime journal executable path is not a file.'
+    }
+    return $fullPath
 }
 
 function Assert-CompleteRuntimeCall {
@@ -388,7 +495,10 @@ function Assert-CompleteRuntimeCall {
     foreach ($property in @('executable', 'arguments', 'started_unix_ms', 'ended_unix_ms', 'status', 'exit_code', 'timed_out', 'exception')) {
         if ($Call.PSObject.Properties.Name -notcontains $property) { throw "Runtime journal $Kind call is missing '$property'." }
     }
-    if ((Get-NormalizedExecutablePath ([string]$Call.executable)) -ne (Get-NormalizedExecutablePath $ExpectedExecutable)) {
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        (Get-NormalizedExecutablePath ([string]$Call.executable)),
+        (Get-NormalizedExecutablePath $ExpectedExecutable)
+    )) {
         throw "Runtime journal $Kind executable does not match the registered tool."
     }
     if ([string]$Call.status -ne $ExpectedStatus) {
@@ -520,11 +630,11 @@ function Import-VerifiedRuntimeEvidence {
     $bcpCalls = 0
     foreach ($call in $calls) {
         $runtimeExecutable = Get-NormalizedExecutablePath ([string]$call.executable)
-        if ($runtimeExecutable -eq (Get-NormalizedExecutablePath $SqlcmdPath)) {
+        if ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $SqlcmdPath))) {
             Assert-CompleteRuntimeCall -Call $call -ExpectedExecutable $SqlcmdPath `
                 -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind sqlcmd
             $sqlcmdCalls++
-        } elseif ($runtimeExecutable -eq (Get-NormalizedExecutablePath $BcpPath)) {
+        } elseif ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $BcpPath))) {
             Assert-CompleteRuntimeCall -Call $call -ExpectedExecutable $BcpPath `
                 -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind bcp
             $bcpCalls++
@@ -592,9 +702,9 @@ function Import-FailedRuntimeEvidence {
     $bcpCalls = 0
     foreach ($call in @($journal.calls)) {
         $runtimeExecutable = Get-NormalizedExecutablePath ([string]$call.executable)
-        $kind = if ($runtimeExecutable -eq (Get-NormalizedExecutablePath $SqlcmdPath)) {
+        $kind = if ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $SqlcmdPath))) {
             $sqlcmdCalls++; 'sqlcmd'
-        } elseif ($runtimeExecutable -eq (Get-NormalizedExecutablePath $BcpPath)) {
+        } elseif ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $BcpPath))) {
             $bcpCalls++; 'bcp'
         } else {
             throw "Candidate failure journal contains an unregistered executable: $($call.executable)"
@@ -685,9 +795,9 @@ function Complete-StaleRuntimeJournal {
         if ([string]$journal.status -ne 'running') { return $false }
         foreach ($call in @($journal.calls)) {
             $runtimeExecutable = Get-NormalizedExecutablePath ([string]$call.executable)
-            $kind = if ($runtimeExecutable -eq (Get-NormalizedExecutablePath $SqlcmdPath)) {
+            $kind = if ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $SqlcmdPath))) {
                 'sqlcmd'
-            } elseif ($runtimeExecutable -eq (Get-NormalizedExecutablePath $BcpPath)) {
+            } elseif ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $BcpPath))) {
                 'bcp'
             } else {
                 throw "Stale candidate journal contains an unregistered executable: $($call.executable)"
@@ -1061,6 +1171,17 @@ try {
         }
     }
 
+    $fingerprintsComplete = $manifest.Contains('database_fingerprint') -and
+        $manifest.database_fingerprint.before.status -eq 'passed' -and
+        $null -ne $manifest.database_fingerprint.after -and
+        $manifest.database_fingerprint.after.status -eq 'passed'
+    if ($fingerprintsComplete) {
+        $manifest.database_fingerprint.unchanged = [StringComparer]::OrdinalIgnoreCase.Equals(
+            [string]$manifest.database_fingerprint.before.sha256,
+            [string]$manifest.database_fingerprint.after.sha256
+        )
+    }
+
     $integrityFailure = $null
     if (-not $primaryFailure) {
         if (-not $manifest.Contains('nested_runtime_calls') -or $manifest.nested_runtime_calls.status -ne 'passed') {
@@ -1070,7 +1191,6 @@ try {
         } elseif ($null -eq $manifest.database_fingerprint.after -or $manifest.database_fingerprint.after.status -ne 'passed') {
             $integrityFailure = 'Database fingerprint after export is unavailable; run is invalid.'
         } else {
-            $manifest.database_fingerprint.unchanged = ($manifest.database_fingerprint.before.sha256 -eq $manifest.database_fingerprint.after.sha256)
             if (-not $manifest.database_fingerprint.unchanged) { $integrityFailure = 'Database configuration storage changed during parity export.' }
         }
         if ($null -ne $integrityFailure) {
