@@ -14168,6 +14168,249 @@ fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
 }
 
 #[test]
+fn parses_input_field_choice_list_non_nil_uuid_pair_with_semantic_precedence() {
+    let platform_discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let type_id = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+    let value_id = "FFFFFFFF-AAAA-4BBB-8CCC-DDDDDDDDDDDD";
+    let normalized_pair =
+        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.ffffffff-aaaa-4bbb-8ccc-dddddddddddd";
+    let item = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}}}}"##
+    );
+
+    let semantic_reference = "Enum.SyntheticStatus.EnumValue.Active";
+    let object_refs = BTreeMap::from([(
+        value_id.to_ascii_lowercase(),
+        semantic_reference.to_string(),
+    )]);
+    let semantic = parse_form_input_field_choice_list_item(
+        &item,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        semantic.value,
+        FormChoiceListValue::DesignTimeRef(semantic_reference.to_string())
+    );
+
+    let literal = parse_form_input_field_choice_list_item(
+        &item,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        literal.value,
+        FormChoiceListValue::DesignTimeRef(normalized_pair.to_string())
+    );
+
+    let choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![literal],
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    validate_canonical_form_choice_list(&choice_list).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&choice_list, 1).unwrap(),
+        "\t<ChoiceList>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.ffffffff-aaaa-4bbb-8ccc-dddddddddddd</Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t</ChoiceList>\r\n"
+    );
+
+    let malformed_uuid = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},not-a-uuid,{value_id},{{1,0}}}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &malformed_uuid,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let malformed_value_uuid = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},not-a-uuid,{{1,0}}}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &malformed_value_uuid,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let nil_pair = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{{1,0}}}}}}"##
+    );
+    assert_eq!(
+        parse_form_input_field_choice_list_item(
+            &nil_pair,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap()
+        .value,
+        FormChoiceListValue::Nil
+    );
+
+    let extra_payload_field = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}},0}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &extra_payload_field,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let extra_item_field = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}},0}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &extra_item_field,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let trailing_item_garbage = format!("{item}garbage");
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &trailing_item_garbage,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let trailing_payload_garbage = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}}garbage}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &trailing_payload_garbage,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    for (first_slot, second_slot) in [("1", "0"), ("0", "1")] {
+        let wrong_prefix = format!(
+            r##"{{"#",{platform_discriminator},{{{first_slot},{second_slot},{{"U"}},{type_id},{value_id},{{1,0}}}}}}"##
+        );
+        assert!(
+            parse_form_input_field_choice_list_item(
+                &wrong_prefix,
+                &BTreeMap::new(),
+                &BTreeSet::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "literal fallback accepted prefix {first_slot},{second_slot}"
+        );
+    }
+
+    let wrong_platform_discriminator = format!(
+        r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &wrong_platform_discriminator,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let semantic_with_wrong_platform = parse_form_input_field_choice_list_item(
+        &wrong_platform_discriminator,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        semantic_with_wrong_platform.value,
+        FormChoiceListValue::DesignTimeRef(semantic_reference.to_string())
+    );
+
+    let parse_collection = |raw: &str| {
+        let mut options = vec!["0"; 66];
+        options[0] = "36";
+        options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index()] = raw;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            &options,
+        )
+        .unwrap();
+        form_body::try_parse_form_input_field_choice_list(
+            schema,
+            &options,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+    };
+    let collection_tail = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let collection = format!(r#"{{3,1,"",{item},{collection_tail}}}"#);
+    assert_eq!(parse_collection(&collection).unwrap().len(), 1);
+    let multiline_collection_tail =
+        "{ 0,\r\n  { 4, 0,\r\n    { 0 }, \"\", -1, -1, 1, 0, \"\" }\r\n}";
+    assert_eq!(
+        parse_collection(&format!(r#"{{3,1,"",{item},{multiline_collection_tail}}}"#))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(parse_collection(&format!("{collection}garbage")).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,"",{item},{collection_tail},0}}"#)).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,0,{item},{collection_tail}}}"#)).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,"",{item},{collection_tail}garbage}}"#)).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,"",{item},{{garbage}}}}"#)).is_none());
+    assert!(
+        parse_collection(&format!(
+            r#"{{3,1,"",{item},{{1,{{4,0,{{0}},"",-1,-1,1,0,""}}}}}}"#
+        ))
+        .is_none()
+    );
+    assert!(
+        parse_collection(&format!(
+            r#"{{3,1,"",{item},{{0,{{4,0,{{1}},"",-1,-1,1,0,""}}}}}}"#
+        ))
+        .is_none()
+    );
+}
+
+#[test]
 fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_payload() {
     let provenance = FormChoiceListRawProvenance {
         layout: FormChoiceListRawLayout::InputFieldExtendedOptions,

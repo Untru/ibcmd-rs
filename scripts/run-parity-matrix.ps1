@@ -9,6 +9,8 @@ param(
     [string]$RunId = (Get-Date -Format 'yyyyMMdd_HHmmss'),
     [string]$ExePath = '',
     [string]$IbcmdPath = '',
+    [string]$SqlcmdExecutable = '',
+    [string]$BcpExecutable = '',
     [ValidateRange(1, 86400)][int]$NativeTimeoutSec = 900,
     [ValidateSet('2.20', '2.21')][string]$SourceVersion = '2.20',
     [ValidateSet('full', 'scoped')][string]$Scope = 'full',
@@ -39,17 +41,21 @@ function Get-FileSha256 {
 function Protect-SensitiveText {
     param([AllowNull()]$Value)
     $text = [string]$Value
-    foreach ($secretName in @('IBCMD_DB_PSW', 'IBCMD_USER_PSW', 'SQLCMDPASSWORD')) {
+    $secretNames = @('IBCMD_DB_PSW', 'IBCMD_USER_PSW', 'SQLCMDPASSWORD')
+    $secretValues = @($secretNames |
+        ForEach-Object { [Environment]::GetEnvironmentVariable($_, 'Process') } |
+        Where-Object { -not [string]::IsNullOrEmpty($_) } |
+        Sort-Object -Property @{ Expression = { $_.Length }; Descending = $true }, @{ Expression = { $_ }; Descending = $false } -Unique)
+    foreach ($secretValue in $secretValues) {
+        $text = $text.Replace($secretValue, '<redacted>')
+    }
+    foreach ($secretName in $secretNames) {
         $text = [regex]::Replace(
             $text,
             [regex]::Escape($secretName),
             '<redacted-environment>',
             [Text.RegularExpressions.RegexOptions]::IgnoreCase
         )
-        $secretValue = [Environment]::GetEnvironmentVariable($secretName, 'Process')
-        if (-not [string]::IsNullOrEmpty($secretValue)) {
-            $text = $text.Replace($secretValue, '<redacted>')
-        }
     }
     return [regex]::Replace(
         $text,
@@ -86,25 +92,252 @@ function Write-AtomicJson {
     }
 }
 
+function Get-NormalizedExecutablePath {
+    param([string]$Path, [string]$Label)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathRooted($Path)) {
+        throw "$Label must be an absolute resolved executable path."
+    }
+    return [IO.Path]::GetFullPath($Path)
+}
+
+function Assert-NoReparsePointComponent {
+    param([string]$Root, [string]$Target, [string]$Label)
+    $rootFull = [IO.Path]::GetFullPath($Root)
+    $targetFull = [IO.Path]::GetFullPath($Target)
+    $prefix = $rootFull.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $targetFull.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Label escapes its child run directory."
+    }
+    $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
+    if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "$Label child root is a reparse point."
+    }
+    $relative = $targetFull.Substring($prefix.Length)
+    $current = $rootFull
+    foreach ($component in @($relative -split '[\\/]' | Where-Object { -not [string]::IsNullOrEmpty($_) })) {
+        $current = Join-Path $current $component
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "$Label crosses a reparse point: $current"
+        }
+    }
+}
+
 function Read-ValidChildManifest {
-    param([string]$Path, [string]$ExpectedScope)
+    param(
+        [string]$Path,
+        [string]$ExpectedScope,
+        [string]$ExpectedCandidatePath,
+        [string]$ExpectedSourceVersion,
+        [string]$ExpectedServer,
+        [string]$ExpectedDatabase
+    )
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing child manifest: $Path" }
     $child = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$child.protocol_version -ne 2) { throw "Child manifest protocol is not supported: $Path" }
     if ($child.status -ne 'passed') { throw "Child manifest is not successful: $Path" }
     if ($child.scope -ne $ExpectedScope) { throw "Child manifest scope '$($child.scope)' does not match expected '$ExpectedScope': $Path" }
-    foreach ($property in @('git_sha', 'xml_version')) {
+    if ([string]::IsNullOrWhiteSpace([string]$child.database.name) -or
+        -not [StringComparer]::Ordinal.Equals([string]$child.database.name, $ExpectedDatabase)) {
+        throw "Child manifest database does not match expected '$ExpectedDatabase': $Path"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$child.database.server) -or
+        -not [StringComparer]::Ordinal.Equals([string]$child.database.server, $ExpectedServer)) {
+        throw "Child manifest database server does not match expected '$ExpectedServer': $Path"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$child.finished_utc)) { throw "Child manifest is unfinished: $Path" }
+    foreach ($property in @('git_sha', 'xml_version', 'source_version')) {
         if ([string]::IsNullOrWhiteSpace([string]$child.$property)) { throw "Child manifest misses ${property}: $Path" }
     }
-    if ([string]::IsNullOrWhiteSpace([string]$child.tools.native_ibcmd.version)) {
-        throw "Child manifest misses resolved native ibcmd version: $Path"
+    if ([string]$child.git_sha -notmatch '^[0-9a-fA-F]{40,64}$') {
+        throw "Child manifest has invalid candidate Git SHA: $Path"
     }
-    foreach ($tool in @('candidate', 'native_ibcmd')) {
+    if ([string]$child.xml_version -cne [string]$child.source_version) {
+        throw "Child manifest XML/source versions differ: $Path"
+    }
+    if ([string]$child.source_version -cne $ExpectedSourceVersion) {
+        throw "Child manifest source version '$($child.source_version)' does not match requested '$ExpectedSourceVersion': $Path"
+    }
+    if ($child.database_fingerprint.unchanged -ne $true) {
+        throw "Child manifest has no unchanged database fingerprint: $Path"
+    }
+    foreach ($side in @('before', 'after')) {
+        if ([string]$child.database_fingerprint.$side.status -cne 'passed') {
+            throw "Child manifest database fingerprint ${side} is not passed: $Path"
+        }
+    }
+    if (@($child.steps).Count -eq 0 -or @($child.steps | Where-Object { $_.status -ne 'passed' }).Count -ne 0) {
+        throw "Child manifest has incomplete or failed steps: $Path"
+    }
+    if ($ExpectedScope -eq 'full' -and [string]$child.repository.status -cne 'clean') {
+        throw "Full child manifest does not describe a clean candidate repository: $Path"
+    }
+    foreach ($tool in @('candidate', 'native_ibcmd', 'sqlcmd', 'bcp')) {
+        if ([string]$child.tools.$tool.status -cne 'passed') {
+            throw "Child manifest has no passed ${tool} identity probe: $Path"
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$child.tools.$tool.version)) {
+            throw "Child manifest misses resolved ${tool} version: $Path"
+        }
         if ([string]$child.tools.$tool.sha256 -notmatch '^[0-9a-fA-F]{64}$') {
             throw "Child manifest misses valid ${tool} SHA-256: $Path"
         }
     }
+    if ([string]$child.tools.candidate.capability_probe_status -cne 'passed') {
+        throw "Child manifest candidate capability probe set is not passed: $Path"
+    }
+    $capabilityProbes = @($child.tools.candidate.capability_probes)
+    if ($capabilityProbes.Count -ne 6 -or @($capabilityProbes | Where-Object {
+        [string]$_.status -cne 'passed' -or [int]$_.exit_code -ne 0 -or
+        [string]::IsNullOrWhiteSpace([string]$_.ended_utc) -or @($_.arguments).Count -ne 2
+    }).Count -ne 0) {
+        throw "Child manifest candidate capability probe journal is incomplete: $Path"
+    }
+    if ([string]$child.nested_runtime_calls.status -cne 'passed' -or
+        [string]$child.nested_runtime_calls.candidate_subprocess_journal_status -cne 'passed' -or
+        [int]$child.nested_runtime_calls.sqlcmd_calls -le 0 -or
+        [int]$child.nested_runtime_calls.bcp_calls -le 0) {
+        throw "Child manifest has no complete nested native/sqlcmd/bcp runtime journals: $Path"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$child.nested_runtime_calls.ended_utc)) {
+        throw "Child manifest nested runtime journal verification is unfinished: $Path"
+    }
+    $expectedCandidate = Get-NormalizedExecutablePath -Path $ExpectedCandidatePath -Label 'Expected candidate path'
+    $actualCandidate = Get-NormalizedExecutablePath -Path ([string]$child.tools.candidate.path) -Label 'Child candidate path'
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals($actualCandidate, $expectedCandidate)) {
+        throw "Child manifest candidate path does not match the orchestrator executable identity: $Path"
+    }
+    [void](Get-NormalizedExecutablePath -Path ([string]$child.tools.native_ibcmd.path) -Label 'Child native ibcmd path')
+    [void](Get-NormalizedExecutablePath -Path ([string]$child.tools.sqlcmd.path) -Label 'Child sqlcmd path')
+    [void](Get-NormalizedExecutablePath -Path ([string]$child.tools.bcp.path) -Label 'Child bcp path')
     if (-not $child.artifacts.matrix) { throw "Child manifest misses matrix artifact: $Path" }
+    if ([string]$child.artifact_sha256.matrix -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "Child manifest misses matrix artifact SHA-256: $Path"
+    }
+    $childRoot = [IO.Path]::GetFullPath((Split-Path -Parent $Path))
+    foreach ($nestedArtifact in @(
+        [ordered]@{ path=[string]$child.nested_runtime_calls.native_report; sha=[string]$child.nested_runtime_calls.native_report_sha256; label='native runtime report' },
+        [ordered]@{ path=[string]$child.nested_runtime_calls.candidate_manifest; sha=[string]$child.nested_runtime_calls.candidate_manifest_sha256; label='candidate subprocess journal' }
+    )) {
+        if ([string]::IsNullOrWhiteSpace($nestedArtifact.path) -or [IO.Path]::IsPathRooted($nestedArtifact.path)) {
+            throw "Child $($nestedArtifact.label) path must be a non-empty relative path: $Path"
+        }
+        if ($nestedArtifact.sha -notmatch '^[0-9a-fA-F]{64}$') {
+            throw "Child $($nestedArtifact.label) SHA-256 is invalid: $Path"
+        }
+        $nestedPath = [IO.Path]::GetFullPath((Join-Path $childRoot $nestedArtifact.path))
+        $childPrefix = $childRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        if (-not $nestedPath.StartsWith($childPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $nestedPath -PathType Leaf)) {
+            throw "Child $($nestedArtifact.label) is missing or escapes its run directory: $Path"
+        }
+        Assert-NoReparsePointComponent -Root $childRoot -Target $nestedPath -Label "Child $($nestedArtifact.label)"
+        if (
+            -not [StringComparer]::OrdinalIgnoreCase.Equals((Get-FileSha256 -Path $nestedPath), $nestedArtifact.sha)) {
+            throw "Child $($nestedArtifact.label) has a mismatched SHA-256: $Path"
+        }
+    }
+    $matrixRelative = [string]$child.artifacts.matrix
+    if ([IO.Path]::IsPathRooted($matrixRelative)) { throw "Child matrix artifact path must be relative: $Path" }
+    $childMatrixPath = [IO.Path]::GetFullPath((Join-Path $childRoot $matrixRelative))
+    $childPrefix = $childRoot.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $childMatrixPath.StartsWith($childPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Child matrix artifact escapes its run directory: $Path"
+    }
+    if (-not (Test-Path -LiteralPath $childMatrixPath -PathType Leaf)) {
+        throw "Child matrix artifact is missing: $childMatrixPath"
+    }
+    Assert-NoReparsePointComponent -Root $childRoot -Target $childMatrixPath -Label 'Child matrix artifact'
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        (Get-FileSha256 -Path $childMatrixPath),
+        [string]$child.artifact_sha256.matrix
+    )) {
+        throw "Child matrix artifact SHA-256 does not match its manifest: $Path"
+    }
     return $child
+}
+
+function Assert-CompatibleChildManifests {
+    param([object[]]$Children, [string]$ExpectedScope)
+    if ($Children.Count -ne 2) { throw "Exactly two validated child manifests are required before merge; found $($Children.Count)." }
+    $databaseNames = @($Children | ForEach-Object { ([string]$_.database).Trim() })
+    if (@($databaseNames | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -ne 0 -or
+        [StringComparer]::OrdinalIgnoreCase.Equals($databaseNames[0], $databaseNames[1])) {
+        throw 'Validated child manifests must represent two distinct database names. Merge blocked.'
+    }
+    $reference = $Children[0]
+    if ([string]::IsNullOrWhiteSpace([string]$reference.server)) {
+        throw 'Validated child manifests must carry an exact database server identity. Merge blocked.'
+    }
+    $fields = @(
+        'git_sha',
+        'xml_version',
+        'source_version',
+        'candidate_version',
+        'candidate_sha256',
+        'native_ibcmd_version',
+        'native_ibcmd_sha256',
+        'sqlcmd_version',
+        'sqlcmd_sha256',
+        'bcp_version',
+        'bcp_sha256'
+    )
+    foreach ($child in $Children | Select-Object -Skip 1) {
+        if (-not [StringComparer]::Ordinal.Equals([string]$child.server, [string]$reference.server)) {
+            throw "Child manifest mismatch for server: '$($reference.database)' != '$($child.database)'. Merge blocked."
+        }
+        foreach ($field in $fields) {
+            if (-not [StringComparer]::Ordinal.Equals([string]$child.$field, [string]$reference.$field)) {
+                throw "Child manifest mismatch for ${field}: '$($reference.database)' != '$($child.database)'. Merge blocked."
+            }
+        }
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+            [string]$child.candidate_path,
+            [string]$reference.candidate_path
+        )) {
+            throw "Child manifest mismatch for candidate_path under absolute-normalized-ordinal-ignore-case policy: '$($reference.database)' != '$($child.database)'. Merge blocked."
+        }
+        if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+            [string]$child.native_ibcmd_path,
+            [string]$reference.native_ibcmd_path
+        )) {
+            throw "Child manifest mismatch for native_ibcmd_path under absolute-normalized-ordinal-ignore-case policy: '$($reference.database)' != '$($child.database)'. Merge blocked."
+        }
+        foreach ($pathField in @('sqlcmd_path', 'bcp_path')) {
+            if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+                [string]$child.$pathField,
+                [string]$reference.$pathField
+            )) {
+                throw "Child manifest mismatch for $pathField under absolute-normalized-ordinal-ignore-case policy: '$($reference.database)' != '$($child.database)'. Merge blocked."
+            }
+        }
+    }
+    return [ordered]@{
+        status = 'passed'
+        compared_children = $Children.Count
+        scope = $ExpectedScope
+        release_proof = ($ExpectedScope -eq 'full')
+        candidate_path_identity_policy = 'absolute-normalized-ordinal-ignore-case'
+        native_ibcmd_path_identity_policy = 'absolute-normalized-ordinal-ignore-case'
+        sql_client_path_identity_policy = 'absolute-normalized-ordinal-ignore-case'
+        distinct_databases = $true
+        server = $reference.server
+        git_sha = $reference.git_sha
+        xml_version = $reference.xml_version
+        source_version = $reference.source_version
+        candidate_path = $reference.candidate_path
+        candidate_version = $reference.candidate_version
+        candidate_sha256 = $reference.candidate_sha256
+        native_ibcmd_path = $reference.native_ibcmd_path
+        native_ibcmd_version = $reference.native_ibcmd_version
+        native_ibcmd_sha256 = $reference.native_ibcmd_sha256
+        sqlcmd_path = $reference.sqlcmd_path
+        sqlcmd_version = $reference.sqlcmd_version
+        sqlcmd_sha256 = $reference.sqlcmd_sha256
+        bcp_path = $reference.bcp_path
+        bcp_version = $reference.bcp_version
+        bcp_sha256 = $reference.bcp_sha256
+    }
 }
 
 function Complete-FailedStep {
@@ -135,6 +368,10 @@ if ($Scope -eq 'scoped' -and $PathPrefix.Count -eq 0) {
 }
 if ($RequireCompleteRootMetadata -and $Scope -ne 'full') {
     throw "RequireCompleteRootMetadata is available only for Scope 'full'."
+}
+if ([string]::IsNullOrWhiteSpace($UtDbName) -or [string]::IsNullOrWhiteSpace($BspDbName) -or
+    [StringComparer]::OrdinalIgnoreCase.Equals($UtDbName.Trim(), $BspDbName.Trim())) {
+    throw 'UtDbName and BspDbName must be distinct non-empty database names (case-insensitive).'
 }
 
 $runner = Join-Path $PSScriptRoot 'export-ibcmd-vs-ours.ps1'
@@ -208,6 +445,8 @@ try {
         }
         if ($IntegratedAuth -or [string]::IsNullOrWhiteSpace($DbUser)) { $params.IntegratedAuth = $true }
         if ($IbcmdPath) { $params.IbcmdPath = $IbcmdPath }
+        if ($SqlcmdExecutable) { $params.SqlcmdExecutable = $SqlcmdExecutable }
+        if ($BcpExecutable) { $params.BcpExecutable = $BcpExecutable }
         if ($RequireCompleteRootMetadata) { $params.RequireCompleteRootMetadata = $true }
 
         try {
@@ -218,18 +457,31 @@ try {
             if ($LASTEXITCODE -ne 0) {
                 throw "Parity run failed for database '$($database.name)' with exit code $LASTEXITCODE"
             }
-            $child = Read-ValidChildManifest -Path $childManifestPath -ExpectedScope $Scope
+            $child = Read-ValidChildManifest -Path $childManifestPath -ExpectedScope $Scope `
+                -ExpectedCandidatePath $ExePath -ExpectedSourceVersion $SourceVersion `
+                -ExpectedServer $DbServer -ExpectedDatabase $database.name
             $childStep.status = 'passed'
             $childStep.ended_utc = Get-UtcNow
             $childStep.exit_code = 0
             [void]$children.Add([ordered]@{
                 database = $database.name
+                server = $child.database.server
                 manifest = $childManifestPath
                 git_sha = $child.git_sha
                 xml_version = $child.xml_version
+                source_version = $child.source_version
+                candidate_path = (Get-NormalizedExecutablePath -Path ([string]$child.tools.candidate.path) -Label 'Child candidate path')
+                candidate_version = $child.tools.candidate.version
                 native_ibcmd_version = $child.tools.native_ibcmd.version
+                native_ibcmd_path = (Get-NormalizedExecutablePath -Path ([string]$child.tools.native_ibcmd.path) -Label 'Child native ibcmd path')
                 native_ibcmd_sha256 = $child.tools.native_ibcmd.sha256
                 candidate_sha256 = $child.tools.candidate.sha256
+                sqlcmd_path = (Get-NormalizedExecutablePath -Path ([string]$child.tools.sqlcmd.path) -Label 'Child sqlcmd path')
+                sqlcmd_version = $child.tools.sqlcmd.version
+                sqlcmd_sha256 = $child.tools.sqlcmd.sha256
+                bcp_path = (Get-NormalizedExecutablePath -Path ([string]$child.tools.bcp.path) -Label 'Child bcp path')
+                bcp_version = $child.tools.bcp.version
+                bcp_sha256 = $child.tools.bcp.sha256
                 child_log = $childLog
             })
             [void]$matrixPaths.Add((Join-Path $runDirectory ([string]$child.artifacts.matrix)))
@@ -241,14 +493,8 @@ try {
         }
     }
 
-    $reference = $children[0]
-    foreach ($child in $children | Select-Object -Skip 1) {
-        foreach ($field in @('git_sha', 'xml_version', 'native_ibcmd_version', 'native_ibcmd_sha256', 'candidate_sha256')) {
-            if ([string]$child.$field -ne [string]$reference.$field) {
-                throw "Child manifest mismatch for ${field}: '$($reference.database)' != '$($child.database)'. Merge blocked."
-            }
-        }
-    }
+    $matrixManifest.child_compatibility = Assert-CompatibleChildManifests -Children @($children) -ExpectedScope $Scope
+    Write-AtomicJson -Path $manifestPath -Object $matrixManifest
     foreach ($path in $matrixPaths) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing child matrix: $path" }
     }
@@ -302,6 +548,9 @@ try {
         $matrixManifest.release_eligible = (
             $Scope -eq 'full' -and
             $RequireCompleteRootMetadata -and
+            $matrixManifest.child_compatibility.status -eq 'passed' -and
+            $matrixManifest.child_compatibility.release_proof -eq $true -and
+            $matrixManifest.child_compatibility.distinct_databases -eq $true -and
             $matrixManifest.parity_zero
         )
         $matrixManifest.result_class = if ($matrixManifest.release_eligible) { 'release' } else { 'diagnostic' }

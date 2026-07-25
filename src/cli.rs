@@ -1083,6 +1083,9 @@ pub struct DumpSourcesArgs {
     /// Kill ibcmd after this many seconds.
     #[arg(long, default_value_t = 300)]
     pub timeout_sec: u64,
+    /// Durable atomic JSON journal for the nested ibcmd subprocess.
+    #[arg(long)]
+    pub runtime_journal: Option<PathBuf>,
     /// Replace files under the output directory after a successful export.
     #[arg(long)]
     pub overwrite: bool,
@@ -1096,6 +1099,12 @@ pub struct MssqlDumpConfigArgs {
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
+    /// bcp executable path.
+    #[arg(long, default_value = "bcp")]
+    pub bcp_executable: PathBuf,
+    /// Durable atomic JSON journal for nested sqlcmd and bcp subprocesses.
+    #[arg(long)]
+    pub runtime_journal: Option<PathBuf>,
     /// SQL Server name.
     #[arg(long, default_value = "localhost")]
     pub server: String,
@@ -3933,6 +3942,8 @@ mod tests {
             r"C:\repo\src\cfe\EmergingTravelGroup",
             "--timeout-sec",
             "180",
+            "--runtime-journal",
+            r"C:\repo\logs\native-runtime.json",
             "--user",
             "ws",
             "--password-env",
@@ -3953,6 +3964,10 @@ mod tests {
                     PathBuf::from(r"C:\repo\src\cfe\EmergingTravelGroup")
                 );
                 assert_eq!(args.timeout_sec, 180);
+                assert_eq!(
+                    args.runtime_journal,
+                    Some(PathBuf::from(r"C:\repo\logs\native-runtime.json"))
+                );
                 assert_eq!(args.user.as_deref(), Some("ws"));
                 assert_eq!(args.password_env, "IBCMD_USER_PSW");
                 assert!(args.overwrite);
@@ -4227,6 +4242,10 @@ mod tests {
             "mssql-dump-config",
             "--database",
             "TestDb",
+            "--runtime-journal",
+            r"C:\logs\candidate-runtime.json",
+            "--bcp-executable",
+            r"C:\tools\bcp.exe",
             "--sql-user",
             "test-sql-user",
             "--sql-pwd",
@@ -4248,6 +4267,11 @@ mod tests {
         match cli.command {
             Commands::MssqlDumpConfig(args) => {
                 assert_eq!(args.database, "TestDb");
+                assert_eq!(
+                    args.runtime_journal,
+                    Some(PathBuf::from(r"C:\logs\candidate-runtime.json"))
+                );
+                assert_eq!(args.bcp_executable, PathBuf::from(r"C:\tools\bcp.exe"));
                 assert_eq!(args.sql_user.as_deref(), Some("test-sql-user"));
                 assert_eq!(
                     args.sql_pwd.as_deref(),

@@ -50,6 +50,9 @@ mod selected;
 mod source_assets;
 mod timing;
 
+#[cfg(feature = "platform-oracle")]
+pub(crate) use fetch::bcp_executable_for_sqlcmd;
+
 use command_interface::*;
 use config_dump_info::*;
 use config_rows::*;
@@ -433,6 +436,41 @@ pub struct StorageImageSourceExportReport {
 struct MssqlDumpManifest {
     database: String,
     tables: Vec<MssqlDumpTableManifest>,
+    subprocess_journal: Vec<SanitizedSubprocessCall>,
+}
+
+#[cfg(test)]
+mod subprocess_manifest_tests {
+    use super::{MssqlDumpManifest, SanitizedSubprocessCall};
+
+    #[test]
+    fn manifest_serializes_sanitized_subprocess_journal() {
+        let manifest = MssqlDumpManifest {
+            database: "test".to_owned(),
+            tables: Vec::new(),
+            subprocess_journal: vec![SanitizedSubprocessCall {
+                executable: "sqlcmd".to_owned(),
+                arguments: vec![
+                    "-P".to_owned(),
+                    "<password-source:environment>".to_owned(),
+                    "-Q".to_owned(),
+                    format!("<query-sha256:{}>", "a".repeat(64)),
+                ],
+                started_unix_ms: 1,
+                ended_unix_ms: Some(2),
+                status: "passed".to_owned(),
+                exit_code: Some(0),
+                timed_out: false,
+                exception: None,
+            }],
+        };
+
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert!(json.contains("\"subprocess_journal\""));
+        assert!(json.contains("<password-source:environment>"));
+        assert!(!json.contains("raw-password"));
+        assert!(!json.contains("SELECT "));
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -455,6 +493,36 @@ struct MssqlDumpRowManifest {
 }
 
 pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
+    let password_marker = if args.sql_user.is_none() {
+        "<password-source:none>"
+    } else if args.sql_pwd.as_ref().is_some_and(|value| !value.is_empty()) {
+        "<password-source:inline>"
+    } else {
+        "<password-source:environment>"
+    };
+    let subprocess_journal = begin_subprocess_journal(
+        password_marker,
+        &args.server,
+        &args.database,
+        args.runtime_journal.as_deref(),
+    )?;
+    match dump_config_inner(args) {
+        Ok(report) => {
+            subprocess_journal.finish_passed()?;
+            Ok(report)
+        }
+        Err(error) => {
+            if let Err(journal_error) = subprocess_journal.finish_failed(&error) {
+                return Err(error).context(format!(
+                    "also failed to finalize subprocess journal: {journal_error:#}"
+                ));
+            }
+            Err(error)
+        }
+    }
+}
+
+fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
     let legacy_adapter = MssqlLegacyAdapter::from_legacy_selector(args.source_version);
     let source_version = legacy_adapter.legacy_selector().ok_or_else(|| {
         anyhow!(
@@ -483,6 +551,7 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
     for table in table_names {
         let dumped = dump_table_rows_streamed(
             &args.sqlcmd,
+            &args.bcp_executable,
             &args.server,
             args.sql_user.as_deref(),
             sql_password(
@@ -527,11 +596,13 @@ pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> 
             });
         }
     }
+    let subprocess_journal = current_subprocess_calls();
 
     if args.write_manifest {
         let manifest = MssqlDumpManifest {
             database: args.database.clone(),
             tables: manifest_tables,
+            subprocess_journal,
         };
         let manifest_json = serde_json::to_string_pretty(&manifest)?;
         fs::write(args.output_dir.join("manifest.json"), manifest_json).with_context(|| {
@@ -1220,6 +1291,7 @@ fn dump_table_rows_with_options_mode(
 
 fn dump_table_rows_streamed(
     sqlcmd: &Path,
+    bcp: &Path,
     server: &str,
     user: Option<&str>,
     password: Option<&str>,
@@ -1299,13 +1371,14 @@ fn dump_table_rows_streamed(
     {
         if selected_file_names.is_empty() {
             metadata_fetch_used_bcp = true;
-            fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?
+            fetch_metadata_rows_bcp(sqlcmd, bcp, server, user, password, database, table)?
         } else if metadata_file_names.is_empty() {
             Vec::new()
         } else {
             metadata_fetch_used_bcp = true;
             fetch_config_rows_bcp(
                 sqlcmd,
+                bcp,
                 server,
                 user,
                 password,
@@ -1326,6 +1399,7 @@ fn dump_table_rows_streamed(
         let metadata_fetch_started = Instant::now();
         let rows = fetch_config_rows_bcp(
             sqlcmd,
+            bcp,
             server,
             user,
             password,
@@ -1400,8 +1474,16 @@ fn dump_table_rows_streamed(
             .is_some_and(|needs| needs.command_refs || needs.metadata_refs)
     {
         let metadata_fetch_started = Instant::now();
-        selected_configuration_body_rows =
-            fetch_config_rows_bcp(sqlcmd, server, user, password, database, table, &file_names)?;
+        selected_configuration_body_rows = fetch_config_rows_bcp(
+            sqlcmd,
+            bcp,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &file_names,
+        )?;
         let elapsed = elapsed_ms(metadata_fetch_started);
         timings.prepare_metadata_fetch_ms += elapsed;
         timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -1418,7 +1500,8 @@ fn dump_table_rows_streamed(
     }
     if broad_metadata_indexes && !selected_file_names.is_empty() {
         let metadata_fetch_started = Instant::now();
-        metadata_rows = fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+        metadata_rows =
+            fetch_metadata_rows_bcp(sqlcmd, bcp, server, user, password, database, table)?;
         let elapsed = elapsed_ms(metadata_fetch_started);
         timings.prepare_metadata_fetch_ms += elapsed;
         timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -1436,6 +1519,7 @@ fn dump_table_rows_streamed(
             metadata_fetch_used_bcp = true;
             metadata_rows = fetch_config_rows_bcp(
                 sqlcmd,
+                bcp,
                 server,
                 user,
                 password,
@@ -1467,7 +1551,7 @@ fn dump_table_rows_streamed(
             if !unresolved_command_refs.is_empty() {
                 let metadata_fetch_started = Instant::now();
                 let broad_metadata_rows =
-                    fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+                    fetch_metadata_rows_bcp(sqlcmd, bcp, server, user, password, database, table)?;
                 let elapsed = elapsed_ms(metadata_fetch_started);
                 timings.prepare_metadata_fetch_ms += elapsed;
                 timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -1501,6 +1585,7 @@ fn dump_table_rows_streamed(
             let metadata_fetch_started = Instant::now();
             let direct_metadata_rows = fetch_config_rows_bcp(
                 sqlcmd,
+                bcp,
                 server,
                 user,
                 password,
@@ -1525,7 +1610,7 @@ fn dump_table_rows_streamed(
             if !unresolved.is_empty() || !direct_form_file_names.is_empty() {
                 let metadata_fetch_started = Instant::now();
                 let broad_metadata_rows =
-                    fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+                    fetch_metadata_rows_bcp(sqlcmd, bcp, server, user, password, database, table)?;
                 let elapsed = elapsed_ms(metadata_fetch_started);
                 timings.prepare_metadata_fetch_ms += elapsed;
                 timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -1547,7 +1632,7 @@ fn dump_table_rows_streamed(
         } else if !selected_form_file_names.is_empty() {
             let metadata_fetch_started = Instant::now();
             let broad_metadata_rows =
-                fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+                fetch_metadata_rows_bcp(sqlcmd, bcp, server, user, password, database, table)?;
             let elapsed = elapsed_ms(metadata_fetch_started);
             timings.prepare_metadata_fetch_ms += elapsed;
             timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -1562,8 +1647,16 @@ fn dump_table_rows_streamed(
     }
     if !selected_file_names.is_empty() && !broad_metadata_indexes {
         let fetch_selected_rows_started = Instant::now();
-        let selected_body_rows =
-            fetch_config_rows_bcp(sqlcmd, server, user, password, database, table, &file_names)?;
+        let selected_body_rows = fetch_config_rows_bcp(
+            sqlcmd,
+            bcp,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &file_names,
+        )?;
         let elapsed = elapsed_ms(fetch_selected_rows_started);
         timings.prepare_metadata_fetch_ms += elapsed;
         timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -1576,6 +1669,7 @@ fn dump_table_rows_streamed(
             let metadata_fetch_started = Instant::now();
             let direct_metadata_rows = fetch_config_rows_bcp(
                 sqlcmd,
+                bcp,
                 server,
                 user,
                 password,
@@ -1598,7 +1692,7 @@ fn dump_table_rows_streamed(
             if !unresolved.is_empty() {
                 let metadata_fetch_started = Instant::now();
                 let broad_metadata_rows =
-                    fetch_metadata_rows_bcp(sqlcmd, server, user, password, database, table)?;
+                    fetch_metadata_rows_bcp(sqlcmd, bcp, server, user, password, database, table)?;
                 let elapsed = elapsed_ms(metadata_fetch_started);
                 timings.prepare_metadata_fetch_ms += elapsed;
                 timings.prepare_metadata_fetch_bcp_ms += elapsed;
@@ -1635,6 +1729,7 @@ fn dump_table_rows_streamed(
             let metadata_fetch_started = Instant::now();
             let fetched_rows = fetch_config_rows_bcp(
                 sqlcmd,
+                bcp,
                 server,
                 user,
                 password,
@@ -1672,6 +1767,7 @@ fn dump_table_rows_streamed(
             let metadata_fetch_started = Instant::now();
             supplemental_owner_rows = fetch_metadata_owner_rows_bcp(
                 sqlcmd,
+                bcp,
                 server,
                 user,
                 password,
@@ -1949,6 +2045,7 @@ fn dump_table_rows_streamed(
         } else {
             fetch_config_rows_bcp(
                 sqlcmd,
+                bcp,
                 server,
                 user,
                 password,
@@ -1987,6 +2084,7 @@ fn dump_table_rows_streamed(
     } else {
         fetch_config_rows_bcp(
             sqlcmd,
+            bcp,
             server,
             user,
             password,
@@ -2067,6 +2165,7 @@ fn dump_table_rows_streamed(
         let fetch_started = Instant::now();
         let rows = fetch_binary_rows_bcp(
             sqlcmd,
+            bcp,
             server,
             user,
             password,

@@ -4,7 +4,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -36,6 +36,25 @@ pub struct DumpSourcesReport {
     pub file_count: usize,
     pub stdout: String,
     pub stderr: String,
+    pub runtime_call: SanitizedRuntimeCall,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct SanitizedRuntimeCall {
+    pub executable: PathBuf,
+    pub arguments: Vec<String>,
+    pub started_unix_ms: u128,
+    pub ended_unix_ms: Option<u128>,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub exception: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DumpSourcesRuntimeJournal {
+    protocol_version: u32,
+    runtime_call: SanitizedRuntimeCall,
 }
 
 struct DumpConfig {
@@ -61,36 +80,92 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
     let config = resolve_config(args)?;
     let temp_export_dir = make_temp_dir("ibcmd-rs-export")?;
 
-    let mut command = Command::new(&config.ibcmd);
-    command
-        .arg("infobase")
-        .arg("config")
-        .arg("export")
-        .arg(format!("--dbms={}", config.dbms))
-        .arg(format!("--db-server={}", config.db_server))
-        .arg(format!("--db-name={}", config.db_name))
-        .arg(format!("--data={}", config.data_dir.display()));
+    let mut arguments = vec![
+        "infobase".to_owned(),
+        "config".to_owned(),
+        "export".to_owned(),
+        format!("--dbms={}", config.dbms),
+        format!("--db-server={}", config.db_server),
+        format!("--db-name={}", config.db_name),
+        format!("--data={}", config.data_dir.display()),
+    ];
+    let mut sanitized_arguments = arguments.clone();
     if let Some(db_user) = &config.db_user {
-        command
-            .arg(format!("--db-user={db_user}"))
-            .arg(format!("--db-pwd={}", config.db_pwd));
+        arguments.push(format!("--db-user={db_user}"));
+        arguments.push(format!("--db-pwd={}", config.db_pwd));
+        sanitized_arguments.push(format!("--db-user={db_user}"));
+        sanitized_arguments.push(format!(
+            "--db-pwd={}",
+            password_source_marker(&config.password_source)
+        ));
     }
 
     if let Some(user) = &config.infobase_user {
-        command.arg(format!("--user={user}"));
+        arguments.push(format!("--user={user}"));
+        sanitized_arguments.push(format!("--user={user}"));
     }
     if let Some(password) = &config.infobase_password {
-        command.arg(format!("--password={password}"));
+        arguments.push(format!("--password={password}"));
+        sanitized_arguments.push(format!(
+            "--password={}",
+            password_source_marker(
+                config
+                    .infobase_password_source
+                    .as_deref()
+                    .unwrap_or("unknown"),
+            )
+        ));
     }
 
     if let Some(extension) = &config.extension {
-        command.arg(format!("--extension={extension}"));
+        arguments.push(format!("--extension={extension}"));
+        sanitized_arguments.push(format!("--extension={extension}"));
     }
 
-    command.arg("--force").arg(&temp_export_dir);
+    arguments.push("--force".to_owned());
+    arguments.push(temp_export_dir.display().to_string());
+    sanitized_arguments.push("--force".to_owned());
+    sanitized_arguments.push(temp_export_dir.display().to_string());
+    redact_password_values(
+        &mut sanitized_arguments,
+        &[
+            (
+                config.db_pwd.as_str(),
+                password_source_marker(&config.password_source),
+            ),
+            (
+                config.infobase_password.as_deref().unwrap_or_default(),
+                password_source_marker(
+                    config
+                        .infobase_password_source
+                        .as_deref()
+                        .unwrap_or("unknown"),
+                ),
+            ),
+        ],
+    );
 
     let started = Instant::now();
-    let output = run_with_timeout(command, config.timeout)?;
+    let mut runtime_call = SanitizedRuntimeCall {
+        executable: config.ibcmd.clone(),
+        arguments: sanitized_arguments,
+        started_unix_ms: unix_time_ms(),
+        ended_unix_ms: None,
+        status: "running".to_owned(),
+        exit_code: None,
+        timed_out: false,
+        exception: None,
+    };
+    persist_runtime_journal(args.runtime_journal.as_deref(), &runtime_call)?;
+
+    let mut command = Command::new(&config.ibcmd);
+    command.args(&arguments);
+    let output = run_with_runtime_journal(
+        command,
+        config.timeout,
+        args.runtime_journal.as_deref(),
+        &mut runtime_call,
+    )?;
     let duration_ms = started.elapsed().as_millis();
 
     if output.timed_out {
@@ -127,7 +202,7 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
     let file_count = count_files(&config.output_dir)?;
 
     Ok(DumpSourcesReport {
-        ibcmd: config.ibcmd,
+        ibcmd: config.ibcmd.clone(),
         dbms: config.dbms,
         db_server: config.db_server,
         db_name: config.db_name,
@@ -144,7 +219,165 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
         file_count,
         stdout: output.stdout,
         stderr: output.stderr,
+        runtime_call,
     })
+}
+
+fn persist_runtime_journal(path: Option<&Path>, runtime_call: &SanitizedRuntimeCall) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let journal = DumpSourcesRuntimeJournal {
+        protocol_version: 1,
+        runtime_call: runtime_call.clone(),
+    };
+    write_json_atomic(path, &journal)
+        .with_context(|| format!("failed to persist runtime journal {}", path.display()))
+}
+
+fn run_with_runtime_journal(
+    command: Command,
+    timeout: Duration,
+    journal_path: Option<&Path>,
+    runtime_call: &mut SanitizedRuntimeCall,
+) -> Result<ProcessOutput> {
+    let output = match run_with_timeout(command, timeout) {
+        Ok(output) => output,
+        Err(error) => {
+            runtime_call.ended_unix_ms = Some(unix_time_ms());
+            runtime_call.status = "failed".to_owned();
+            runtime_call.exception = Some(format!("failed to execute nested ibcmd: {error:#}"));
+            persist_runtime_journal(journal_path, runtime_call)?;
+            return Err(error).context("nested ibcmd execution failed");
+        }
+    };
+    runtime_call.ended_unix_ms = Some(unix_time_ms());
+    runtime_call.exit_code = output.exit_code;
+    runtime_call.timed_out = output.timed_out;
+    runtime_call.status = if output.success {
+        "passed".to_owned()
+    } else {
+        "failed".to_owned()
+    };
+    runtime_call.exception = if output.timed_out {
+        Some(format!(
+            "nested ibcmd timed out after {} seconds",
+            timeout.as_secs()
+        ))
+    } else if !output.success {
+        Some(format!(
+            "nested ibcmd exited with code {:?}",
+            output.exit_code
+        ))
+    } else {
+        None
+    };
+    persist_runtime_journal(journal_path, runtime_call)?;
+    Ok(output)
+}
+
+fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| anyhow!("journal path must have a parent: {}", path.display()))?;
+    fs::create_dir_all(parent)?;
+    let temporary = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("runtime-journal"),
+        uuid::Uuid::new_v4().simple()
+    ));
+    let bytes = serde_json::to_vec_pretty(value)?;
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    drop(file);
+    if let Err(error) = replace_file_atomic(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomic(source: &Path, destination: &Path) -> Result<()> {
+    fs::rename(source, destination)?;
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| anyhow!("journal path must have a parent: {}", destination.display()))?;
+    fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_file_atomic(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if result == 0 {
+        return Err(std::io::Error::last_os_error()).context("MoveFileExW failed");
+    }
+    Ok(())
+}
+
+fn unix_time_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+fn password_source_marker(source: &str) -> &'static str {
+    if source == "integrated" {
+        "<password-source:none>"
+    } else if source == "--db-pwd" || source == "--password" {
+        "<password-source:inline>"
+    } else if source == "settings" {
+        "<password-source:settings>"
+    } else {
+        "<password-source:environment>"
+    }
+}
+
+fn redact_password_values(arguments: &mut [String], values: &[(&str, &str)]) {
+    let mut values = values
+        .iter()
+        .copied()
+        .filter(|(value, _)| !value.is_empty())
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| right.0.len().cmp(&left.0.len()).then(left.0.cmp(right.0)));
+    for (value, marker) in values {
+        for argument in arguments.iter_mut() {
+            if !argument.contains("<password-source:") {
+                *argument = argument.replace(value, marker);
+            }
+        }
+    }
 }
 
 fn resolve_config(args: &DumpSourcesArgs) -> Result<DumpConfig> {
@@ -568,5 +801,85 @@ mod tests {
     fn version_key_reads_1c_version_directory() {
         let path = PathBuf::from(r"C:\Program Files\1cv8\8.3.27.1989\bin\ibcmd.exe");
         assert_eq!(version_key(&path), vec![8, 3, 27, 1989]);
+    }
+
+    #[test]
+    fn runtime_password_markers_disclose_only_the_source_class() {
+        assert_eq!(
+            password_source_marker("integrated"),
+            "<password-source:none>"
+        );
+        assert_eq!(
+            password_source_marker("--db-pwd"),
+            "<password-source:inline>"
+        );
+        assert_eq!(
+            password_source_marker("settings"),
+            "<password-source:settings>"
+        );
+        assert_eq!(
+            password_source_marker("IBCMD_DB_PSW"),
+            "<password-source:environment>"
+        );
+    }
+
+    #[test]
+    fn runtime_password_values_are_redacted_longest_first() {
+        let mut arguments = vec![
+            "--db-user=alpha-long".to_owned(),
+            "--db-pwd=alpha-long".to_owned(),
+            "--password=alpha".to_owned(),
+        ];
+        redact_password_values(
+            &mut arguments,
+            &[
+                ("alpha", "<password-source:environment>"),
+                ("alpha-long", "<password-source:settings>"),
+            ],
+        );
+        let joined = arguments.join(" ");
+        assert!(!joined.contains("alpha"));
+        assert!(joined.contains("<password-source:settings>"));
+        assert!(joined.contains("<password-source:environment>"));
+    }
+
+    #[test]
+    fn runtime_journal_survives_actual_spawn_failure() {
+        let journal_path = env::temp_dir().join(format!(
+            "ibcmd-rs-native-runtime-failure-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut call = SanitizedRuntimeCall {
+            executable: PathBuf::from("ibcmd-rs-command-that-does-not-exist"),
+            arguments: vec![
+                "infobase".to_owned(),
+                "config".to_owned(),
+                "export".to_owned(),
+            ],
+            started_unix_ms: unix_time_ms(),
+            ended_unix_ms: None,
+            status: "running".to_owned(),
+            exit_code: None,
+            timed_out: false,
+            exception: None,
+        };
+        persist_runtime_journal(Some(&journal_path), &call).unwrap();
+        let command = Command::new(&call.executable);
+
+        assert!(
+            run_with_runtime_journal(
+                command,
+                Duration::from_secs(1),
+                Some(&journal_path),
+                &mut call,
+            )
+            .is_err()
+        );
+        let journal: Value =
+            serde_json::from_str(&fs::read_to_string(&journal_path).unwrap()).unwrap();
+        assert_eq!(journal["runtime_call"]["status"], "failed");
+        assert!(journal["runtime_call"]["ended_unix_ms"].as_u64().is_some());
+        assert!(journal["runtime_call"]["exception"].is_string());
+        let _ = fs::remove_file(journal_path);
     }
 }
