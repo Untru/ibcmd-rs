@@ -8,12 +8,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use super::{
     BinaryConfigRow, ConfigChunkRow, ConfigRow, ConfigRowHeader, encode_hex_lower,
     qualified_storage_table, quote_string,
 };
+use crate::runtime_evidence_schema::{SanitizedRuntimeArgumentKind, SubprocessJournalSchema};
 
 #[derive(Clone, Debug, Serialize)]
 pub(super) struct SanitizedSubprocessCall {
@@ -136,7 +136,9 @@ fn password_source_marker() -> String {
             .borrow()
             .as_ref()
             .map(|state| state.password_source_marker.clone())
-            .unwrap_or_else(|| "<password-source:redacted>".to_owned())
+            .unwrap_or_else(|| {
+                SubprocessJournalSchema::redacted_password_source_marker().to_owned()
+            })
     })
 }
 
@@ -217,17 +219,12 @@ fn persist_subprocess_journal(
 }
 
 fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .ok_or_else(|| anyhow!("journal path must have a parent: {}", path.display()))?;
+    let parent = SubprocessJournalSchema::journal_parent(path)
+        .ok_or_else(|| anyhow!(SubprocessJournalSchema::missing_parent_error(path)))?;
     fs::create_dir_all(parent)?;
-    let temporary = parent.join(format!(
-        ".{}.{}.tmp",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("subprocess-journal"),
-        uuid::Uuid::new_v4().simple()
+    let temporary = parent.join(SubprocessJournalSchema::temporary_file_name(
+        path,
+        uuid::Uuid::new_v4().simple(),
     ));
     let bytes = serde_json::to_vec_pretty(value)?;
     let mut file = fs::OpenOptions::new()
@@ -247,10 +244,8 @@ fn write_json_atomic(path: &Path, value: &impl Serialize) -> Result<()> {
 #[cfg(not(windows))]
 fn replace_file_atomic(source: &Path, destination: &Path) -> Result<()> {
     fs::rename(source, destination)?;
-    let parent = destination
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .ok_or_else(|| anyhow!("journal path must have a parent: {}", destination.display()))?;
+    let parent = SubprocessJournalSchema::journal_parent(destination)
+        .ok_or_else(|| anyhow!(SubprocessJournalSchema::missing_parent_error(destination)))?;
     fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
@@ -293,7 +288,7 @@ fn unix_time_ms() -> u128 {
 }
 
 fn query_marker(query: &str) -> String {
-    format!("<query-sha256:{:x}>", Sha256::digest(query.as_bytes()))
+    SubprocessJournalSchema::query_digest_marker(query)
 }
 
 fn redact_password_value(arguments: &mut [String], password: Option<&str>) {
@@ -302,7 +297,9 @@ fn redact_password_value(arguments: &mut [String], password: Option<&str>) {
     };
     let marker = password_source_marker();
     for argument in arguments {
-        if !argument.contains("<password-source:") && !argument.contains("<query-sha256:") {
+        if SubprocessJournalSchema::argument_kind(argument)
+            == SanitizedRuntimeArgumentKind::Ordinary
+        {
             *argument = argument.replace(password, &marker);
         }
     }
@@ -1431,6 +1428,64 @@ mod tests {
         assert!(!serialized.contains(raw_query));
         assert!(!serialized.contains(raw_password));
         assert!(serialized.contains("<password-source:environment>"));
+    }
+
+    #[test]
+    fn durable_subprocess_journal_redacts_hostile_marker_like_arguments() {
+        let raw_password = "top-secret-password";
+        let journal_path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-runtime-hostile-marker-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let guard = begin_subprocess_journal(
+            "<password-source:environment>",
+            "localhost",
+            "test_db",
+            Some(&journal_path),
+        )
+        .unwrap();
+        let exact_password_marker = password_source_marker();
+        let exact_query_marker = query_marker("SELECT 1");
+        let mut arguments = vec![
+            exact_password_marker.clone(),
+            exact_query_marker.clone(),
+            format!("<password-source:environment>{raw_password}"),
+            format!("<password-source:<query-sha256:{raw_password}"),
+            format!("<query-sha256:{raw_password}"),
+            format!("<query-sha256:{}>{raw_password}", "a".repeat(63)),
+            format!("<query-sha256:{}>{raw_password}", "A".repeat(64)),
+            format!("<query-sha256:{}>suffix-{raw_password}", "a".repeat(64)),
+        ];
+        redact_password_value(&mut arguments, Some(raw_password));
+
+        assert_eq!(arguments[0], exact_password_marker);
+        assert_eq!(arguments[1], exact_query_marker);
+        assert!(
+            arguments
+                .iter()
+                .skip(2)
+                .all(|argument| !argument.contains(raw_password))
+        );
+
+        let index = start_subprocess_call(SanitizedSubprocessCall {
+            executable: "sqlcmd".to_owned(),
+            arguments,
+            started_unix_ms: 1,
+            ended_unix_ms: None,
+            status: "running".to_owned(),
+            exit_code: None,
+            timed_out: false,
+            exception: None,
+        })
+        .unwrap();
+        complete_subprocess_call(index, "passed", Some(0), None).unwrap();
+        guard.finish_passed().unwrap();
+
+        let serialized = fs::read_to_string(&journal_path).unwrap();
+        assert!(!serialized.contains(raw_password));
+        assert!(serialized.contains(&exact_password_marker));
+        assert!(serialized.contains(&exact_query_marker));
+        let _ = fs::remove_file(journal_path);
     }
 
     #[test]
