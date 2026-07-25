@@ -1467,12 +1467,7 @@ pub(super) fn write_source_asset(
         }
         SourceAssetKind::MoxelSpreadsheet => {
             let xml =
-                extract_moxel_spreadsheet_xml(bytes, context.object_refs).with_context(|| {
-                    format!(
-                        "failed to extract spreadsheet template from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+                extract_moxel_source_asset_xml(bytes, context.object_refs, &asset.primary_path)?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1483,6 +1478,45 @@ pub(super) fn write_source_asset(
     }
 
     Ok(asset.primary_path.clone())
+}
+
+fn extract_moxel_source_asset_xml(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    source_path: &Path,
+) -> Result<String> {
+    try_extract_moxel_spreadsheet_xml(bytes, object_refs).with_context(|| {
+        format!(
+            "failed to extract spreadsheet template from source asset {}",
+            source_path.display()
+        )
+    })
+}
+
+#[cfg(test)]
+mod mxl_source_asset_tests {
+    use super::*;
+
+    #[test]
+    fn typed_mxl_diagnostic_survives_source_asset_context() {
+        let error = extract_moxel_source_asset_xml(
+            &[0],
+            &BTreeMap::new(),
+            Path::new("Templates/Example/Ext/Template.xml"),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to extract spreadsheet template from source asset")
+        );
+        let diagnostic = error
+            .chain()
+            .find_map(|source| source.downcast_ref::<MxlDiagnostic>())
+            .expect("typed MXL diagnostic must remain in the anyhow error chain");
+        assert_eq!(diagnostic.stage(), MxlDiagnosticStage::Decoder);
+        assert_eq!(diagnostic.code(), "mxl.decoder.binary-container");
+    }
 }
 
 pub(super) struct HelpPage {

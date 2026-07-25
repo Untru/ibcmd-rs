@@ -42,6 +42,7 @@ mod metadata;
 #[cfg(test)]
 mod metadata_order_tests;
 mod moxel;
+mod mxl_ir;
 pub mod offline_context;
 mod refs;
 mod role_rights;
@@ -64,6 +65,7 @@ use selected::*;
 use source_assets::*;
 
 pub use metadata::MetadataExtractionMissReason;
+pub use mxl_ir::{MxlDiagnostic, MxlDiagnosticStage};
 
 pub(crate) fn resolve_form_item_picture_owner(
     text: &str,
@@ -76,6 +78,7 @@ pub(crate) use form_body::{
     FormItemSchemaTraceEvent, FormItemTraceEvent, FormItemTraceSink, trace_form_body_with_context,
 };
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
+pub use moxel::try_extract_moxel_spreadsheet_xml;
 pub(crate) use moxel::{
     MoxelLineTraceEvent, MoxelLineTraceSink,
     extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,

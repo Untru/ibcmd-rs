@@ -1,4 +1,16 @@
+use super::mxl_ir::{
+    MxlDiagnostic, MxlFormatReferenceMap, MxlPaletteProvenance, MxlSpreadsheetWritePlan,
+};
 use super::*;
+
+/// A decoded spreadsheet plus the exact palette/reference plan that the XML
+/// projection is allowed to consume.  Keeping this private makes the current
+/// slice additive: legacy parser helpers can remain available while production
+/// extraction crosses the explicit boundary below.
+struct DecodedMoxelSpreadsheet {
+    spreadsheet: MoxelSpreadsheet,
+    write_plan: MxlSpreadsheetWritePlan,
+}
 
 pub(super) struct MoxelSpreadsheet {
     pub(super) column_count: usize,
@@ -854,7 +866,22 @@ pub(crate) fn extract_moxel_spreadsheet_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    extract_moxel_spreadsheet_xml_with_line_trace(bytes, object_refs, None)
+    try_extract_moxel_spreadsheet_xml(bytes, object_refs).ok()
+}
+
+/// Decodes a compressed MOXCEL container, builds canonical spreadsheet IR and
+/// then projects it to the already-evidenced XML writer.  Its diagnostics keep
+/// decoder and writer failures distinct without changing the legacy `Option`
+/// API used by the dump pipeline.
+pub fn try_extract_moxel_spreadsheet_xml(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+) -> Result<String, MxlDiagnostic> {
+    let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).map_err(|error| {
+        MxlDiagnostic::decoder("mxl.decoder.binary-container", error.to_string())
+    })?;
+    let decoded = decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, None)?;
+    write_moxel_spreadsheet_xml(&decoded)
 }
 
 pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
@@ -863,12 +890,9 @@ pub(crate) fn extract_moxel_spreadsheet_xml_with_line_trace(
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).ok()?;
-    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(
-        body.native_body_text(),
-        object_refs,
-        trace_sink,
-    )?;
-    Some(format_moxel_spreadsheet_xml(&spreadsheet))
+    let decoded =
+        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, trace_sink).ok()?;
+    write_moxel_spreadsheet_xml(&decoded).ok()
 }
 
 /// Trace an already-inflated native MXL body retained by an offline dump.
@@ -879,12 +903,74 @@ pub(crate) fn extract_inflated_moxel_spreadsheet_xml_with_line_trace(
     trace_sink: Option<&dyn MoxelLineTraceSink>,
 ) -> Option<String> {
     let body = crate::compiler::bodies::mxl::decode_inflated_compatible_mxl(bytes).ok()?;
-    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(
-        body.native_body_text(),
-        object_refs,
-        trace_sink,
-    )?;
-    Some(format_moxel_spreadsheet_xml(&spreadsheet))
+    let decoded =
+        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, trace_sink).ok()?;
+    write_moxel_spreadsheet_xml(&decoded).ok()
+}
+
+/// Builds the bounded canonical hand-off without introducing any XML QName or
+/// ordering decision into the decoder. Palette slots and canonical/XML format
+/// identity are captured before the writer is called.
+fn decode_moxel_spreadsheet_ir(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+    trace_sink: Option<&dyn MoxelLineTraceSink>,
+) -> Result<DecodedMoxelSpreadsheet, MxlDiagnostic> {
+    let spreadsheet = parse_moxel_spreadsheet_text_with_line_trace(text, object_refs, trace_sink)
+        .ok_or_else(|| {
+        MxlDiagnostic::decoder(
+            "mxl.decoder.canonical-ir",
+            "native MOXCEL body could not be decoded into supported spreadsheet IR",
+        )
+    })?;
+    let body = text.trim_start_matches('\u{feff}');
+    let fields = split_1c_braced_fields(body, 0).ok_or_else(|| {
+        MxlDiagnostic::decoder(
+            "mxl.decoder.canonical-ir",
+            "native MOXCEL body has no complete root field list",
+        )
+    })?;
+    let palette = parse_moxel_raw_palette_provenance(&fields, object_refs);
+    let write_plan = moxel_spreadsheet_write_plan(&spreadsheet, palette)?;
+    Ok(DecodedMoxelSpreadsheet {
+        spreadsheet,
+        write_plan,
+    })
+}
+
+fn write_moxel_spreadsheet_xml(decoded: &DecodedMoxelSpreadsheet) -> Result<String, MxlDiagnostic> {
+    format_moxel_spreadsheet_xml_with_plan(&decoded.spreadsheet, &decoded.write_plan)
+}
+
+fn moxel_spreadsheet_write_plan(
+    spreadsheet: &MoxelSpreadsheet,
+    palette: MxlPaletteProvenance,
+) -> Result<MxlSpreadsheetWritePlan, MxlDiagnostic> {
+    let format_count = moxel_output_format_count(spreadsheet);
+    let output_format_indices = moxel_output_format_indices(spreadsheet);
+    let output_format_index_map = moxel_output_format_index_map(&output_format_indices);
+    let format_map = if output_format_indices
+        .iter()
+        .enumerate()
+        .all(|(offset, canonical_index)| *canonical_index == offset + 1)
+    {
+        MxlFormatReferenceMap::identity(format_count)
+    } else {
+        let canonical_to_xml = output_format_index_map.clone();
+        let xml_to_canonical = output_format_indices
+            .iter()
+            .enumerate()
+            .map(|(offset, canonical_index)| (offset + 1, *canonical_index))
+            .collect();
+        MxlFormatReferenceMap::explicit(canonical_to_xml, xml_to_canonical)?
+    };
+    MxlSpreadsheetWritePlan::new(
+        palette,
+        format_map,
+        output_format_indices,
+        output_format_index_map,
+        format_count,
+    )
 }
 
 pub(super) fn parse_moxel_spreadsheet_text(
@@ -4507,10 +4593,10 @@ pub(super) fn normalize_moxel_single_set_report_header_tail(
     let Some(line) = lines.get(1) else {
         return;
     };
-    let tail_start = REPORT_HEADER_TAIL_START.checked_sub(column_formats.len() + 1);
-    let Some(tail) =
-        tail_start.and_then(|start| formats.get(start..start + REPORT_HEADER_TAIL_LEN))
-    else {
+    let Some(tail_start) = REPORT_HEADER_TAIL_START.checked_sub(column_formats.len() + 1) else {
+        return;
+    };
+    let Some(tail) = formats.get(tail_start..tail_start + REPORT_HEADER_TAIL_LEN) else {
         return;
     };
     if column_sets.len() != 1
@@ -4538,7 +4624,7 @@ pub(super) fn normalize_moxel_single_set_report_header_tail(
     }
     for format in formats
         .iter_mut()
-        .skip(tail_start.expect("verified above"))
+        .skip(tail_start)
         .take(REPORT_HEADER_TAIL_LEN)
     {
         format.back_color = Some("#F4ECC5".to_string());
@@ -5348,6 +5434,17 @@ pub(super) fn parse_moxel_style_refs(
     style_refs
 }
 
+fn parse_moxel_raw_palette_provenance(
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> MxlPaletteProvenance {
+    let raw_slots = locate_moxel_style_ref_palette(fields, object_refs)
+        .and_then(|(start, end, _)| fields.get(start + 1..end))
+        .map(|slots| slots.iter().map(|slot| (*slot).to_string()).collect())
+        .unwrap_or_default();
+    MxlPaletteProvenance { raw_slots }
+}
+
 const MAX_MOXCEL_STYLE_REFS: usize = 2048;
 
 fn parse_moxel_canonical_positive_count(text: &str) -> Option<usize> {
@@ -6126,8 +6223,37 @@ pub(super) fn parse_moxel_bounds_area(bounds: &[&str], name: String) -> Option<M
 }
 
 pub(super) fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> String {
+    // Isolated unchanged renderer for the legacy embedded-form caller. It does
+    // not construct a typed plan and therefore cannot panic on plan admission.
     let output_format_indices = moxel_output_format_indices(spreadsheet);
     let output_format_index_map = moxel_output_format_index_map(&output_format_indices);
+    render_moxel_spreadsheet_xml(
+        spreadsheet,
+        &output_format_indices,
+        &output_format_index_map,
+    )
+}
+
+fn format_moxel_spreadsheet_xml_with_plan(
+    spreadsheet: &MoxelSpreadsheet,
+    plan: &MxlSpreadsheetWritePlan,
+) -> Result<String, MxlDiagnostic> {
+    // Palette slots and source-slot maps are retained for diagnostics and later
+    // writer migration.  This renderer only receives their already-resolved
+    // output projection and does not inspect raw MOXCEL values.
+    let _ = (&plan.palette, &plan.format_map);
+    Ok(render_moxel_spreadsheet_xml(
+        spreadsheet,
+        &plan.output_format_indices,
+        &plan.output_format_index_map,
+    ))
+}
+
+fn render_moxel_spreadsheet_xml(
+    spreadsheet: &MoxelSpreadsheet,
+    output_format_indices: &[usize],
+    output_format_index_map: &BTreeMap<usize, usize>,
+) -> String {
     let emit_first_row_format_index =
         moxel_column_format_slots(&spreadsheet.column_sets, spreadsheet.column_count) == 0;
     let mut xml = String::from(
@@ -6220,7 +6346,7 @@ pub(super) fn format_moxel_spreadsheet_xml(spreadsheet: &MoxelSpreadsheet) -> St
     for font in &spreadsheet.fonts {
         push_moxel_font_xml(&mut xml, font);
     }
-    for format_index in output_format_indices {
+    for &format_index in output_format_indices {
         push_moxel_format_xml(&mut xml, spreadsheet, format_index);
     }
     for picture in &spreadsheet.pictures {
@@ -8277,6 +8403,41 @@ fn push_moxel_note_xml(
 #[cfg(test)]
 mod moxel_exact_parity_tests {
     use super::*;
+
+    #[test]
+    fn typed_extraction_reports_binary_container_as_decoder_failure() {
+        let error = try_extract_moxel_spreadsheet_xml(&[0], &BTreeMap::new()).unwrap_err();
+
+        assert_eq!(
+            error.stage(),
+            crate::mssql_dump::MxlDiagnosticStage::Decoder
+        );
+        assert_eq!(error.code(), "mxl.decoder.binary-container");
+    }
+
+    #[test]
+    fn raw_palette_provenance_precedes_compatibility_synthesis() {
+        let fields = [
+            "5",
+            "{3,1,{0}}",
+            "{3,1,{0}}",
+            "{3,3,{-28}}",
+            "{3,1,{0}}",
+            "{3,4,{0}}",
+        ];
+        let resolved = parse_moxel_style_refs(&fields, &BTreeMap::new());
+        assert_eq!(resolved[1].as_deref(), Some("style:FormTextColor"));
+
+        let provenance = parse_moxel_raw_palette_provenance(&fields, &BTreeMap::new());
+        assert_eq!(
+            provenance.raw_slots,
+            fields[1..]
+                .iter()
+                .map(|slot| (*slot).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(provenance.raw_slots[1], "{3,1,{0}}");
+    }
 
     #[test]
     fn remaps_leading_source_column_format_row_and_cell_refs() {
