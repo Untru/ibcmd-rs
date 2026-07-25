@@ -12,6 +12,7 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::diagnostic::ObjectPath;
 use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::StorageImage;
+use ibcmd_schema::{GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner};
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{
     MetadataOrderError, XmlReader, bundled_metadata_registry, order_metadata_features,
@@ -4083,7 +4084,8 @@ fn parse_flowchart_addressing_attribute_value(
     let owner_type_id = parse_data_processor_empty_ref_fill_owner(value)?;
     let type_reference =
         unique_metadata_type_reference(type_index, type_index_collisions, &owner_type_id)?;
-    let owner_reference = metadata_reference_type_owner_reference(type_reference)?;
+    let owner_reference =
+        parse_generated_metadata_reference_owner(type_reference)?.owner_reference();
     Some(FlowchartAddressingAttributeValue::DesignTimeRef(format!(
         "{owner_reference}.EmptyRef"
     )))
@@ -11959,7 +11961,8 @@ fn parse_data_processor_empty_ref_fill_values(
         }
         let type_reference =
             unique_metadata_type_reference(type_index, type_index_collisions, &fill_owner_type_id)?;
-        let owner_reference = metadata_reference_type_owner_reference(type_reference)?;
+        let owner_reference =
+            parse_generated_metadata_reference_owner(type_reference)?.owner_reference();
         let key = header.uuid.to_ascii_lowercase();
         if attributes
             .insert(
@@ -12074,15 +12077,6 @@ fn parse_data_processor_empty_ref_fill_owner(value: &str) -> Option<String> {
     let owner_type_id = parse_information_register_non_zero_uuid(reference.get(1)?)?;
     let value_id = parse_information_register_uuid(reference.get(2)?)?;
     information_register_uuid_is_zero(&value_id).then_some(owner_type_id)
-}
-
-fn metadata_reference_type_owner_reference(type_reference: &str) -> Option<String> {
-    let generated_type = type_reference.strip_prefix("cfg:")?;
-    let (kind, name) = generated_type.split_once("Ref.")?;
-    if kind.is_empty() || kind.contains('.') || name.is_empty() || name.contains('.') {
-        return None;
-    }
-    Some(format!("{kind}.{name}"))
 }
 
 fn apply_data_processor_empty_ref_fill_values(
@@ -13614,12 +13608,8 @@ fn information_register_design_time_owner_reference(
     if let Some(reference) = object_refs.get(owner_uuid) {
         return Some(reference.clone());
     }
-    let generated_type = type_index.get(owner_uuid)?.strip_prefix("cfg:")?;
-    let (kind, name) = generated_type.split_once("Ref.")?;
-    if kind.is_empty() || name.is_empty() || name.contains('.') {
-        return None;
-    }
-    Some(format!("{kind}.{name}"))
+    parse_generated_metadata_reference_owner(type_index.get(owner_uuid)?)
+        .map(|owner| owner.owner_reference())
 }
 
 fn information_register_uuid_is_zero(value: &str) -> bool {
@@ -14326,8 +14316,8 @@ fn parse_document_fill_value(
         return None;
     }
     let owner_type = type_index.get(&owner_uuid)?;
-    let enum_name = owner_type.strip_prefix("cfg:EnumRef.")?;
-    if enum_name.is_empty() || enum_name.contains('.') {
+    let owner = parse_generated_metadata_reference_owner(owner_type)?;
+    if owner.kind() != GeneratedMetadataReferenceOwnerKind::Enum {
         return None;
     }
     if !matches!(
@@ -14440,24 +14430,23 @@ fn parse_document_child_choice_form(
         return Some(MetadataChoiceForm::Empty);
     }
     let reference = information_register_form_reference(&uuid, form_refs)?;
-    let (owner, form_name) = reference.split_once(".Form.")?;
+    let (form_owner_reference, form_name) = reference.split_once(".Form.")?;
     if form_name.is_empty() || form_name.contains('.') {
         return None;
     }
-    let (owner_kind, owner_name) = owner.split_once('.')?;
-    if !matches!(owner_kind, "Catalog" | "Document")
-        || owner_name.is_empty()
-        || owner_name.contains('.')
-    {
-        return None;
-    }
-    let expected_type = format!("cfg:{owner_kind}Ref.{owner_name}");
     (value_types
         .iter()
         .filter(|value_type| {
             matches!(
                 value_type,
-                ConstantValueType::Reference { reference } if reference == &expected_type
+                ConstantValueType::Reference { reference }
+                    if parse_generated_metadata_reference_owner(reference).is_some_and(|owner| {
+                        matches!(
+                            owner.kind(),
+                            GeneratedMetadataReferenceOwnerKind::Catalog
+                                | GeneratedMetadataReferenceOwnerKind::Document
+                        ) && owner.owner_reference() == form_owner_reference
+                    })
             )
         })
         .count()
@@ -14705,13 +14694,16 @@ fn parse_catalog_child_choice_form(
         return Some(choice_form);
     };
     let owner_name = catalog_choice_form_owner_name(reference)?;
-    let expected_type = format!("cfg:CatalogRef.{owner_name}");
     (value_types
         .iter()
         .filter(|value_type| {
             matches!(
                 value_type,
-                ConstantValueType::Reference { reference } if reference == &expected_type
+                ConstantValueType::Reference { reference }
+                    if parse_generated_metadata_reference_owner(reference).is_some_and(|owner| {
+                        owner.kind() == GeneratedMetadataReferenceOwnerKind::Catalog
+                            && owner.name() == owner_name
+                    })
             )
         })
         .count()
@@ -30414,14 +30406,7 @@ fn resolve_filter_criterion_index_reference(
 }
 
 fn filter_criterion_type_reference_is_valid(reference: &str) -> bool {
-    let Some(reference) = reference.strip_prefix("cfg:") else {
-        return false;
-    };
-    let mut parts = reference.split('.');
-    let (Some(family), Some(name), None) = (parts.next(), parts.next(), parts.next()) else {
-        return false;
-    };
-    !family.is_empty() && family.ends_with("Ref") && !name.is_empty()
+    parse_generated_metadata_reference_owner(reference).is_some()
 }
 
 fn filter_criterion_content_reference_is_valid(reference: &str) -> bool {

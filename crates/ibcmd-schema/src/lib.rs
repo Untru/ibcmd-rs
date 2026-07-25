@@ -59,6 +59,90 @@ pub const BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON: &str =
 const BUNDLED_FORM_CHOICE_PARAMETERS_LIVE_FIXTURE_JSON: &str =
     include_str!("../../../tests/fixtures/form_choice_parameters_slot27_live.json");
 
+/// Metadata object families whose generated reference types use the exact
+/// `cfg:<Kind>Ref.<Name>` QName shape.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum GeneratedMetadataReferenceOwnerKind {
+    Catalog,
+    Document,
+    Enum,
+    ExchangePlan,
+    ChartOfAccounts,
+    ChartOfCharacteristicTypes,
+    ChartOfCalculationTypes,
+    BusinessProcess,
+    Task,
+}
+
+impl GeneratedMetadataReferenceOwnerKind {
+    pub const fn reference_token(self) -> &'static str {
+        match self {
+            Self::Catalog => "Catalog",
+            Self::Document => "Document",
+            Self::Enum => "Enum",
+            Self::ExchangePlan => "ExchangePlan",
+            Self::ChartOfAccounts => "ChartOfAccounts",
+            Self::ChartOfCharacteristicTypes => "ChartOfCharacteristicTypes",
+            Self::ChartOfCalculationTypes => "ChartOfCalculationTypes",
+            Self::BusinessProcess => "BusinessProcess",
+            Self::Task => "Task",
+        }
+    }
+
+    fn parse(reference_token: &str) -> Option<Self> {
+        match reference_token {
+            "Catalog" => Some(Self::Catalog),
+            "Document" => Some(Self::Document),
+            "Enum" => Some(Self::Enum),
+            "ExchangePlan" => Some(Self::ExchangePlan),
+            "ChartOfAccounts" => Some(Self::ChartOfAccounts),
+            "ChartOfCharacteristicTypes" => Some(Self::ChartOfCharacteristicTypes),
+            "ChartOfCalculationTypes" => Some(Self::ChartOfCalculationTypes),
+            "BusinessProcess" => Some(Self::BusinessProcess),
+            "Task" => Some(Self::Task),
+            _ => None,
+        }
+    }
+}
+
+/// A parsed generated metadata reference owner.
+///
+/// Parsing is exact and fail-closed: only a supported metadata owner kind and
+/// one non-empty, non-dotted name are accepted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GeneratedMetadataReferenceOwner<'a> {
+    kind: GeneratedMetadataReferenceOwnerKind,
+    name: &'a str,
+}
+
+impl<'a> GeneratedMetadataReferenceOwner<'a> {
+    pub const fn kind(self) -> GeneratedMetadataReferenceOwnerKind {
+        self.kind
+    }
+
+    pub const fn name(self) -> &'a str {
+        self.name
+    }
+
+    /// Canonical design-time owner reference used by existing XML serializers.
+    pub fn owner_reference(self) -> String {
+        format!("{}.{}", self.kind.reference_token(), self.name)
+    }
+}
+
+/// Parse an exact generated reference type QName into its typed metadata owner.
+pub fn parse_generated_metadata_reference_owner(
+    type_reference: &str,
+) -> Option<GeneratedMetadataReferenceOwner<'_>> {
+    let generated_type = type_reference.strip_prefix("cfg:")?;
+    let (kind, name) = generated_type.split_once("Ref.")?;
+    let kind = GeneratedMetadataReferenceOwnerKind::parse(kind)?;
+    if name.is_empty() || name.trim() != name || name.contains('.') {
+        return None;
+    }
+    Some(GeneratedMetadataReferenceOwner { kind, name })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CorpusSource {
@@ -2850,6 +2934,76 @@ mod tests {
 
     const FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON: &str =
         include_str!("../data/edt-2025.2.3-form-choice-list-string-writer-evidence.json");
+
+    #[test]
+    fn generated_metadata_reference_owner_parses_all_supported_kinds_exactly() {
+        let cases = [
+            ("Catalog", GeneratedMetadataReferenceOwnerKind::Catalog),
+            ("Document", GeneratedMetadataReferenceOwnerKind::Document),
+            ("Enum", GeneratedMetadataReferenceOwnerKind::Enum),
+            (
+                "ExchangePlan",
+                GeneratedMetadataReferenceOwnerKind::ExchangePlan,
+            ),
+            (
+                "ChartOfAccounts",
+                GeneratedMetadataReferenceOwnerKind::ChartOfAccounts,
+            ),
+            (
+                "ChartOfCharacteristicTypes",
+                GeneratedMetadataReferenceOwnerKind::ChartOfCharacteristicTypes,
+            ),
+            (
+                "ChartOfCalculationTypes",
+                GeneratedMetadataReferenceOwnerKind::ChartOfCalculationTypes,
+            ),
+            (
+                "BusinessProcess",
+                GeneratedMetadataReferenceOwnerKind::BusinessProcess,
+            ),
+            ("Task", GeneratedMetadataReferenceOwnerKind::Task),
+        ];
+
+        for (token, expected_kind) in cases {
+            let type_reference = format!("cfg:{token}Ref.Владелец");
+            let owner = parse_generated_metadata_reference_owner(&type_reference).unwrap();
+            assert_eq!(owner.kind(), expected_kind);
+            assert_eq!(owner.name(), "Владелец");
+            assert_eq!(owner.owner_reference(), format!("{token}.Владелец"));
+        }
+    }
+
+    #[test]
+    fn generated_metadata_reference_owner_rejects_unknown_or_inexact_shapes() {
+        for hostile in [
+            "",
+            "CatalogRef.Owner",
+            "cfg:catalogRef.Owner",
+            "cfg:UnknownRef.Owner",
+            "cfg:Ref.Owner",
+            "cfg:Enum.Owner",
+            "cfg:EnumRef.",
+            "cfg:EnumRef.Owner.Child",
+            "cfg:EnumRef.OwnerRef.Child",
+            "cfg:EnumRefOwner",
+            "cfg:EnumRef.Owner ",
+            " cfg:EnumRef.Owner",
+        ] {
+            assert!(
+                parse_generated_metadata_reference_owner(hostile).is_none(),
+                "{hostile:?}"
+            );
+        }
+
+        let catalog_named_enum =
+            parse_generated_metadata_reference_owner("cfg:CatalogRef.Enum").unwrap();
+        assert_eq!(
+            catalog_named_enum.kind(),
+            GeneratedMetadataReferenceOwnerKind::Catalog
+        );
+        assert_eq!(catalog_named_enum.name(), "Enum");
+        assert_eq!(catalog_named_enum.owner_reference(), "Catalog.Enum");
+    }
 
     #[derive(Debug, Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]

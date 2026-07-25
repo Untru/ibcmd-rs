@@ -9629,6 +9629,36 @@ fn resolves_document_form_paths_from_the_typed_metadata_owner() {
 }
 
 #[test]
+fn form_metadata_owner_base_uses_typed_reference_kinds() {
+    for kind in [
+        "Catalog",
+        "Document",
+        "Enum",
+        "ExchangePlan",
+        "ChartOfAccounts",
+        "ChartOfCharacteristicTypes",
+        "ChartOfCalculationTypes",
+        "BusinessProcess",
+        "Task",
+    ] {
+        assert_eq!(
+            form_metadata_owner_base_from_type_reference(&format!("cfg:{kind}Ref.Owner")),
+            Some(format!("{kind}.Owner")),
+            "{kind}"
+        );
+    }
+    assert!(
+        form_metadata_owner_base_from_type_reference("cfg:UnknownRef.Owner").is_none(),
+        "unsupported Ref families must not fall back to the generic generated-role parser"
+    );
+    assert_eq!(
+        form_metadata_owner_base_from_type_reference("cfg:InformationRegisterRecordSet.Prices"),
+        Some("InformationRegister.Prices".to_string()),
+        "non-reference generated roles remain supported"
+    );
+}
+
+#[test]
 fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional_columns() {
     let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let table_binding = format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#);
@@ -11639,6 +11669,29 @@ fn minimal_radio_button_empty_ref_choice_is_typed_and_near_misses_are_opaque() {
             "{label}"
         );
     }
+}
+
+#[test]
+fn radio_button_empty_ref_owner_kind_is_generic_even_when_named_enum() {
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let item = format!(
+        r##"{{"#",{discriminator},{{0,0,{{"U"}},{type_id},{nil},{{1,1,{{"en","No value"}}}}}}}}"##
+    );
+    let type_index = BTreeMap::from([(type_id.to_string(), "cfg:CatalogRef.Enum".to_string())]);
+
+    let parsed = parse_form_radio_button_choice_list_item(
+        &item,
+        &type_index,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.value,
+        FormChoiceListValue::DesignTimeRef("Catalog.Enum.EmptyRef".to_string())
+    );
 }
 
 #[test]
@@ -16083,6 +16136,68 @@ fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
             slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
         })
     );
+}
+
+#[test]
+fn input_field_enum_reference_uses_schema_owner_kind_not_owner_name() {
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let value_id = "22222222-2222-4222-8222-222222222222";
+    let object_refs = BTreeMap::from([(
+        value_id.to_string(),
+        "Enum.Catalog.EnumValue.Enum".to_string(),
+    )]);
+
+    let enum_named_catalog =
+        BTreeMap::from([(type_id.to_string(), "cfg:EnumRef.Catalog".to_string())]);
+    assert_eq!(
+        parse_form_enum_design_time_reference(
+            type_id,
+            value_id,
+            &enum_named_catalog,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .as_deref(),
+        Some("Enum.Catalog.EnumValue.Enum")
+    );
+
+    let catalog_named_enum =
+        BTreeMap::from([(type_id.to_string(), "cfg:CatalogRef.Enum".to_string())]);
+    let catalog_object_refs = BTreeMap::from([(
+        value_id.to_string(),
+        "Catalog.Enum.EnumValue.Enum".to_string(),
+    )]);
+    assert!(
+        parse_form_enum_design_time_reference(
+            type_id,
+            value_id,
+            &catalog_named_enum,
+            &BTreeSet::new(),
+            &catalog_object_refs,
+        )
+        .is_none()
+    );
+
+    for hostile_type_reference in [
+        "cfg:enumRef.Catalog",
+        "cfg:UnknownRef.Catalog",
+        "cfg:EnumRef.Catalog.Extra",
+        "cfg:EnumRef.",
+    ] {
+        let hostile_type_index =
+            BTreeMap::from([(type_id.to_string(), hostile_type_reference.to_string())]);
+        assert!(
+            parse_form_enum_design_time_reference(
+                type_id,
+                value_id,
+                &hostile_type_index,
+                &BTreeSet::new(),
+                &object_refs,
+            )
+            .is_none(),
+            "{hostile_type_reference}"
+        );
+    }
 }
 
 #[test]
@@ -31356,6 +31471,40 @@ fn parses_information_register_variable_collections_without_partial_results() {
 }
 
 #[test]
+fn information_register_design_time_ref_uses_typed_generated_owner_kinds() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let nil_uuid = "00000000-0000-0000-0000-000000000000";
+    let raw = format!(r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{nil_uuid}}}}}"##);
+    let object_refs = BTreeMap::new();
+
+    for kind in [
+        "Catalog",
+        "Document",
+        "Enum",
+        "ExchangePlan",
+        "ChartOfAccounts",
+        "ChartOfCharacteristicTypes",
+        "ChartOfCalculationTypes",
+        "BusinessProcess",
+        "Task",
+    ] {
+        let type_index = BTreeMap::from([(owner_uuid.to_string(), format!("cfg:{kind}Ref.Owner"))]);
+        assert_eq!(
+            parse_information_register_design_time_ref(&raw, &type_index, &object_refs),
+            Some(format!("{kind}.Owner.EmptyRef")),
+            "{kind}"
+        );
+    }
+
+    let hostile_type_index =
+        BTreeMap::from([(owner_uuid.to_string(), "cfg:UnknownRef.Owner".to_string())]);
+    assert!(
+        parse_information_register_design_time_ref(&raw, &hostile_type_index, &object_refs)
+            .is_none()
+    );
+}
+
+#[test]
 fn parses_information_register_choice_form_reference_variants_fail_closed() {
     let owner_uuid = "11111111-1111-4111-8111-111111111111";
     let form_uuid = "22222222-2222-4222-8222-222222222222";
@@ -37944,6 +38093,7 @@ fn rejects_invalid_strict_filter_criterion_type_patterns_atomically() {
         "DocumentRef.Invoice",
         "cfg:DocumentManager.Invoice",
         "cfg:DocumentRef.Invoice.Extra",
+        "cfg:UnknownRef.Owner",
         "cfg:RefOnly.",
     ] {
         let mut invalid_index = fixture.type_index.clone();

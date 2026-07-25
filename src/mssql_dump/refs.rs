@@ -1323,7 +1323,8 @@ pub(super) fn build_defined_type_value_owner_reference_index_from_texts(
                 .iter()
                 .filter_map(|value_type| match value_type {
                     ConstantValueType::Reference { reference } => {
-                        metadata_reference_type_owner_reference(reference)
+                        parse_generated_metadata_reference_owner(reference)
+                            .map(|owner| owner.owner_reference())
                     }
                     ConstantValueType::ReferenceTypeSet { .. } => None,
                     _ => None,
@@ -1342,7 +1343,8 @@ pub(super) fn information_register_value_owner_references(
         .iter()
         .flat_map(|value_type| match value_type {
             ConstantValueType::Reference { reference } => {
-                metadata_reference_type_owner_reference(reference)
+                parse_generated_metadata_reference_owner(reference)
+                    .map(|owner| owner.owner_reference())
                     .into_iter()
                     .collect::<BTreeSet<_>>()
             }

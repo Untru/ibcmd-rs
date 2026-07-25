@@ -9370,7 +9370,7 @@ fn parse_form_choice_parameter_array_item(
     })
 }
 
-fn parse_form_enum_design_time_reference(
+pub(super) fn parse_form_enum_design_time_reference(
     type_id: &str,
     value_id: &str,
     type_index: &BTreeMap<String, String>,
@@ -9384,10 +9384,11 @@ fn parse_form_enum_design_time_reference(
     }
     let type_reference =
         unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())?;
-    let owner_reference = metadata_reference_type_owner_reference(type_reference)?;
-    if !owner_reference.starts_with("Enum.") {
+    let owner = parse_generated_metadata_reference_owner(type_reference)?;
+    if owner.kind() != GeneratedMetadataReferenceOwnerKind::Enum {
         return None;
     }
+    let owner_reference = owner.owner_reference();
     let value_ref = parse_design_time_reference(value_id.trim(), object_refs)?;
     let enum_value_prefix = format!("{owner_reference}.EnumValue.");
     value_ref
@@ -10481,8 +10482,9 @@ fn parse_form_input_field_choice_list_value(
                         type_index_collisions,
                         payload_fields.get(3)?.trim(),
                     )
-                    .and_then(metadata_reference_type_owner_reference)
+                    .and_then(parse_generated_metadata_reference_owner)
                     {
+                        let owner_reference = owner_reference.owner_reference();
                         return Some(FormChoiceListValue::DesignTimeRef(format!(
                             "{owner_reference}.EmptyRef"
                         )));
@@ -10609,7 +10611,8 @@ pub(super) fn parse_form_radio_button_choice_list_item(
             type_index_collisions,
             payload_fields.get(3)?.trim(),
         )
-        .and_then(metadata_reference_type_owner_reference)?;
+        .and_then(parse_generated_metadata_reference_owner)?
+        .owner_reference();
         FormChoiceListValue::DesignTimeRef(format!("{owner_reference}.EmptyRef"))
     } else if value_kind == "U" {
         if !exact_u_item
@@ -12972,7 +12975,10 @@ fn resolve_form_title_rows_count_path(
     Some(format!("{}.{}.RowsCount", attribute.name, table_name))
 }
 
-fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
+pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
+    if let Some(owner) = parse_generated_metadata_reference_owner(reference) {
+        return Some(owner.owner_reference());
+    }
     let (generated_type, owner_name) = form_generated_owner_type_from_type_reference(reference)?;
     let owner_kind = [
         "RecordManager",
@@ -12985,6 +12991,11 @@ fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<Strin
     .into_iter()
     .find_map(|role| generated_type.strip_suffix(role))
     .filter(|owner_kind| !owner_kind.is_empty())?;
+    // `Ref` is the only three-byte role above. Supported reference families
+    // returned through the schema parser, so reaching this branch must fail.
+    if generated_type.len().checked_sub(owner_kind.len()) == Some(3) {
+        return None;
+    }
     Some(format!("{owner_kind}.{owner_name}"))
 }
 
