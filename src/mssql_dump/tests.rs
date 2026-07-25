@@ -9112,6 +9112,277 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
 }
 
 #[test]
+fn resolves_document_form_paths_from_the_typed_metadata_owner() {
+    let attribute = FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.Invoice".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    };
+    let owner = form_attribute_metadata_owner(&attribute);
+    let owners = BTreeMap::from([("1".to_string(), owner)]);
+    let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let object_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.Invoice.TabularSection.Lines".to_string(),
+    )]);
+
+    assert_eq!(
+        resolve_form_strict_field_model_data_path(r#"{2,{1},{-2}}"#, &owners, &BTreeMap::new(),)
+            .as_deref(),
+        Some("Object.Number")
+    );
+    assert_eq!(
+        resolve_form_owner_scoped_metadata_data_path(
+            &format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#),
+            &owners,
+            &object_refs,
+        )
+        .as_deref(),
+        Some("Object.Lines")
+    );
+
+    assert!(
+        resolve_form_strict_field_model_data_path(
+            r#"{2,{1},{-2}}"#,
+            &BTreeMap::from([(
+                "1".to_string(),
+                form_attribute_metadata_owner(&FormAttribute {
+                    value_types: vec![ConstantValueType::Reference {
+                        reference: "cfg:CatalogObject.Invoice".to_string(),
+                    }],
+                    ..attribute.clone()
+                }),
+            )]),
+            &BTreeMap::new(),
+        )
+        .is_none(),
+        "the marker alone must not prove a document standard attribute"
+    );
+    assert!(
+        resolve_form_owner_scoped_metadata_data_path(
+            &format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#),
+            &owners,
+            &BTreeMap::from([(
+                table_uuid.to_string(),
+                "Document.OtherInvoice.TabularSection.Lines".to_string(),
+            )]),
+        )
+        .is_none(),
+        "a tabular-section reference from another metadata owner must be rejected"
+    );
+}
+
+#[test]
+fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional_columns() {
+    let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let table_binding = format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#);
+    let base_table = r#"{73,{25,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},0,{1,{6}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#;
+    let table_a = base_table
+        .replace("{25,", "{31,")
+        .replace("\"Rows\"", "\"PrimaryView\"")
+        .replace("{1,{6}}", &table_binding);
+    let table_b = base_table
+        .replace("{25,", "{32,")
+        .replace("\"Rows\"", "\"SecondaryView\"")
+        .replace("{1,{6}}", &table_binding);
+    let table_c = base_table
+        .replace("{25,", "{34,")
+        .replace("\"Rows\"", "\"TertiaryView\"")
+        .replace("{1,{6}}", &table_binding);
+    let line_number_field = |id: &str, name: &str| {
+        format!(
+            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,1,"{name}",1,0,{{1,0}},{{1,0}},{{3,{{1}},{{0,{table_uuid}}},{{-2}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+        )
+    };
+    let line_a = line_number_field("41", "PrimaryLineNumber");
+    let line_b = line_number_field("42", "SecondaryLineNumber");
+    let line_c = line_number_field("43", "TertiaryLineNumber");
+    let mut attributes = vec![FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.Invoice".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }];
+    let object_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.Invoice.TabularSection.Lines".to_string(),
+    )]);
+    let layout = format!(
+        "{{6,11111111-1111-4111-8111-111111111111,{table_a},\
+22222222-2222-4222-8222-222222222222,{line_a},\
+33333333-3333-4333-8333-333333333333,{table_b},\
+44444444-4444-4444-8444-444444444444,{line_b},\
+55555555-5555-4555-8555-555555555555,{table_c},\
+66666666-6666-4666-8666-666666666666,{line_c}}}"
+    );
+    let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
+    let indexes = collect_form_child_item_indexes_with_object_refs(
+        &layout_fields,
+        &attributes,
+        &object_refs,
+        None,
+    );
+    let binding_key = format!("0|{table_uuid}");
+
+    assert_eq!(
+        indexes
+            .bound_table_path_by_binding_key
+            .get(&binding_key)
+            .map(String::as_str),
+        Some("Object.Lines")
+    );
+    assert_eq!(
+        indexes
+            .resolve_owner_scoped_data_path_for_test(
+                &format!(r#"{{3,{{1}},{{0,{table_uuid}}},{{-2}}}}"#),
+                &attributes,
+                &object_refs,
+            )
+            .as_deref(),
+        Some("Object.Lines.LineNumber")
+    );
+    let items = extract_form_child_items(
+        &layout_fields,
+        &attributes,
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+        &indexes,
+        None,
+    );
+    let items_xml = format_form_child_items_xml(&items, 1);
+    assert_eq!(
+        items_xml
+            .matches("<DataPath>Object.Lines</DataPath>")
+            .count(),
+        3,
+        "{items_xml}"
+    );
+    assert_eq!(
+        items_xml
+            .matches("<DataPath>Object.Lines.LineNumber</DataPath>")
+            .count(),
+        3,
+        "{items_xml}"
+    );
+
+    let additional_columns = format!(
+        r#"{{0,{{2,{{1}},{{0,{table_uuid}}}}},2,{{5,1,0,"Selected",{{1,1,{{"en","Selected"}}}},{{"Pattern",{{"B"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},0}},{{5,2,0,"Taxable",{{1,1,{{"en","Taxable"}}}},{{"Pattern",{{"B"}}}},{{0,{{0,{{"B",0}},0}}}},{{0,{{0,{{"B",0}},0}}}},{{0,0}},0}}}}"#
+    );
+    apply_form_attribute_additional_columns(
+        &mut attributes,
+        &["1", additional_columns.as_str()],
+        0,
+        &BTreeMap::new(),
+        &object_refs,
+        &indexes,
+    );
+    let xml = format_form_attributes_xml(&attributes);
+    assert!(xml.contains("<Columns>"), "{xml}");
+    assert!(
+        xml.contains(r#"<AdditionalColumns table="Object.Lines">"#),
+        "{xml}"
+    );
+    assert!(xml.contains(r#"<Column name="Selected" id="1">"#), "{xml}");
+    assert!(xml.contains(r#"<Column name="Taxable" id="2">"#), "{xml}");
+    assert!(
+        xml.find(r#"<Column name="Selected" id="1">"#).unwrap()
+            < xml.find(r#"<Column name="Taxable" id="2">"#).unwrap(),
+        "{xml}"
+    );
+
+    let mismatched_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.OtherInvoice.TabularSection.Lines".to_string(),
+    )]);
+    let mismatched_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table_a.as_str(), line_a.as_str()],
+        &attributes,
+        &mismatched_refs,
+        None,
+    );
+    assert!(
+        !mismatched_indexes
+            .bound_table_path_by_binding_key
+            .contains_key(&binding_key),
+        "a single table must not fall back to its visual name after an owner mismatch"
+    );
+    assert!(
+        mismatched_indexes
+            .resolve_owner_scoped_data_path_for_test(
+                &format!(r#"{{3,{{1}},{{0,{table_uuid}}},{{-2}}}}"#),
+                &attributes,
+                &mismatched_refs,
+            )
+            .is_none(),
+        "an indexed metadata reference from another owner must fail closed"
+    );
+
+    let unsupported_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.Invoice.Command.Lines".to_string(),
+    )]);
+    let unsupported_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table_a.as_str()],
+        &attributes,
+        &unsupported_refs,
+        None,
+    );
+    assert!(
+        !unsupported_indexes
+            .bound_table_path_by_binding_key
+            .contains_key(&binding_key),
+        "an indexed unsupported metadata route must not become Object.PrimaryView"
+    );
+
+    let malformed_binding = table_a.replace(table_uuid, "not-a-uuid");
+    let malformed_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[malformed_binding.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !malformed_indexes
+            .bound_table_path_by_binding_key
+            .contains_key("0|not-a-uuid"),
+        "a malformed UUID must not use the visual table alias"
+    );
+}
+
+#[test]
 fn extracts_nested_table_additional_columns_group() {
     let attributes = vec![FormAttribute {
         id: "1".to_string(),
@@ -9155,7 +9426,7 @@ fn extracts_nested_table_additional_columns_group() {
 }
 
 #[test]
-fn prefers_child_binding_path_for_additional_columns_group() {
+fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_unindexed() {
     let attributes = vec![FormAttribute {
         id: "1".to_string(),
         name: "Объект".to_string(),
@@ -9199,6 +9470,106 @@ fn prefers_child_binding_path_for_additional_columns_group() {
         .unwrap();
 
     assert_eq!(group.table, "Объект.ТаблицаПравилВыгрузки");
+}
+
+#[test]
+fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
+    let metadata_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let attributes = vec![FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.Invoice".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }];
+    let mut indexes = FormChildItemIndexes::default();
+    indexes.insert_owner_scoped_table_path_for_test(
+        "1",
+        &format!("0|{metadata_uuid}"),
+        "Object.ChildFallback",
+    );
+    indexes.insert_owner_scoped_table_path_for_test(
+        "1",
+        "0|not-a-uuid",
+        "Object.MalformedFallback",
+    );
+    let group = |uuid: &str| {
+        format!(
+            r#"{{0,{{2,{{1}},{{0,{uuid}}}}},1,{{5,1,0,"Selected",{{1,0}},{{"Pattern",{{"B"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},0}}}}"#
+        )
+    };
+
+    assert_eq!(
+        parse_form_attribute_additional_columns_group(
+            &group(metadata_uuid),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .unwrap()
+        .table,
+        "Object.ChildFallback",
+        "a valid UUID absent from object_refs may use the unique child binding"
+    );
+    assert_eq!(
+        parse_form_attribute_additional_columns_group(
+            &group(metadata_uuid),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                metadata_uuid.to_string(),
+                "Document.Invoice.TabularSection.Lines".to_string(),
+            )]),
+            &indexes,
+        )
+        .unwrap()
+        .table,
+        "Object.Lines",
+        "an indexed valid metadata route must take precedence over the child path"
+    );
+
+    for reference in [
+        "Document.OtherInvoice.TabularSection.Lines",
+        "Document.Invoice.Command.Lines",
+    ] {
+        assert!(
+            parse_form_attribute_additional_columns_group(
+                &group(metadata_uuid),
+                &attributes,
+                &BTreeMap::new(),
+                &BTreeMap::from([(metadata_uuid.to_string(), reference.to_string())]),
+                &indexes,
+            )
+            .is_none(),
+            "an indexed invalid metadata reference must not fall back to a child path: {reference}"
+        );
+    }
+    assert!(
+        parse_form_attribute_additional_columns_group(
+            &group("not-a-uuid"),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .is_none(),
+        "a malformed UUID must be rejected even when a child binding exists"
+    );
 }
 
 #[test]

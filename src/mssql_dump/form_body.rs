@@ -2899,6 +2899,16 @@ fn resolve_form_attribute_additional_columns_metadata_table_path(
     object_refs: &BTreeMap<String, String>,
     child_item_indexes: &FormChildItemIndexes,
 ) -> Option<String> {
+    let type_id = parse_non_zero_uuid(type_id)?;
+    if let Some(reference) = object_refs.get(&type_id) {
+        let (owner_base, relative_path) =
+            form_attribute_additional_columns_metadata_route(reference)?;
+        let attribute_owners = form_attribute_metadata_owners_by_id(attributes);
+        let attribute = attribute_owners.get(attribute_id)?;
+        return form_attribute_matches_metadata_owner(attribute, &owner_base)
+            .then(|| format!("{}.{}", attribute.name, relative_path));
+    }
+
     let binding_key = parse_form_binding_key(binding)?;
     let scoped_key = FormBoundTableKey {
         attribute_id: attribute_id.to_string(),
@@ -2913,13 +2923,7 @@ fn resolve_form_attribute_additional_columns_metadata_table_path(
         Some(None) => return None,
         None => {}
     }
-    let type_id = parse_non_zero_uuid(type_id)?;
-    let reference = object_refs.get(&type_id)?;
-    let (owner_base, relative_path) = form_attribute_additional_columns_metadata_route(reference)?;
-    let attribute_owners = form_attribute_metadata_owners_by_id(attributes);
-    let attribute = attribute_owners.get(attribute_id)?;
-    form_attribute_matches_metadata_owner(attribute, &owner_base)
-        .then(|| format!("{}.{}", attribute.name, relative_path))
+    None
 }
 
 fn form_attribute_additional_columns_metadata_route(reference: &str) -> Option<(String, String)> {
@@ -4638,7 +4642,9 @@ fn form_attribute_metadata_owners_by_id(
         .collect()
 }
 
-fn form_attribute_metadata_owner(attribute: &FormAttribute) -> FormAttributeMetadataOwner {
+pub(super) fn form_attribute_metadata_owner(
+    attribute: &FormAttribute,
+) -> FormAttributeMetadataOwner {
     let exact_single_type_reference = match attribute.value_types.as_slice() {
         [ConstantValueType::Reference { reference }] => Some(reference.clone()),
         _ => None,
@@ -4839,6 +4845,24 @@ impl FormChildItemIndexes {
             table_path.to_string(),
         );
     }
+
+    pub(super) fn resolve_owner_scoped_data_path_for_test(
+        &self,
+        field: &str,
+        attributes: &[FormAttribute],
+        object_refs: &BTreeMap<String, String>,
+    ) -> Option<String> {
+        let attribute_owners = form_attribute_metadata_owners_by_id(attributes);
+        match resolve_form_owner_scoped_bound_data_path(
+            field,
+            &attribute_owners,
+            &self.owner_scoped_bindings,
+            object_refs,
+        ) {
+            FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+            FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -4985,7 +5009,7 @@ pub(crate) fn trace_form_body_items(body: &str, trace_sink: &dyn FormItemTraceSi
     Ok(())
 }
 
-fn collect_form_child_item_indexes_with_object_refs(
+pub(super) fn collect_form_child_item_indexes_with_object_refs(
     fields: &[&str],
     attributes: &[FormAttribute],
     object_refs: &BTreeMap<String, String>,
@@ -5344,23 +5368,37 @@ fn collect_form_child_item_indexes_from_field_traced(
                     .bound_attribute_id_by_table_id
                     .insert(id.to_string(), attribute_id);
             }
-            if let Some((attribute_id, table_key)) = fields
-                .get(11)
-                .and_then(|field| parse_form_table_binding(field))
-                && let Some(attribute_name) = attribute_names_by_id.get(&attribute_id)
+            if let Some(binding) = fields.get(11)
+                && let Some((attribute_id, table_key)) = parse_form_table_binding(binding)
             {
-                let table_path = format!("{attribute_name}.{}", indexes.table_name_by_id[id]);
-                insert_unambiguous_form_binding(
-                    &mut indexes.owner_scoped_bindings.table_paths,
-                    FormBoundTableKey {
-                        attribute_id,
-                        table_key: table_key.clone(),
-                    },
-                    table_path.clone(),
+                let metadata_path = resolve_form_owner_scoped_metadata_data_path_status(
+                    binding,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
                 );
-                indexes
-                    .bound_table_path_by_binding_key
-                    .insert(table_key, table_path);
+                let table_path = match metadata_path {
+                    FormMetadataDataPathResolution::Resolved(table_path) => Some(table_path),
+                    FormMetadataDataPathResolution::NotMetadata
+                    | FormMetadataDataPathResolution::ReferenceAbsent => attribute_names_by_id
+                        .get(&attribute_id)
+                        .map(|attribute_name| {
+                            format!("{attribute_name}.{}", indexes.table_name_by_id[id])
+                        }),
+                    FormMetadataDataPathResolution::Invalid => None,
+                };
+                if let Some(table_path) = table_path {
+                    insert_unambiguous_form_binding(
+                        &mut indexes.owner_scoped_bindings.table_paths,
+                        FormBoundTableKey {
+                            attribute_id,
+                            table_key: table_key.clone(),
+                        },
+                        table_path.clone(),
+                    );
+                    indexes
+                        .bound_table_path_by_binding_key
+                        .insert(table_key, table_path);
+                }
             }
             let mut columns = BTreeMap::new();
             collect_form_table_column_names_for_table(&fields, &mut columns);
@@ -11800,12 +11838,19 @@ fn resolve_form_owner_scoped_bound_data_path(
     if !matches!(attribute_column, FormOwnerScopedDataPath::Unknown) {
         return attribute_column;
     }
-    if let Some(data_path) = resolve_form_owner_scoped_metadata_data_path(
+    match resolve_form_owner_scoped_metadata_data_path_status(
         field,
         attribute_metadata_owners_by_id,
         object_refs,
     ) {
-        return FormOwnerScopedDataPath::Resolved(data_path);
+        FormMetadataDataPathResolution::Resolved(data_path) => {
+            return FormOwnerScopedDataPath::Resolved(data_path);
+        }
+        FormMetadataDataPathResolution::Invalid => {
+            return FormOwnerScopedDataPath::Ambiguous;
+        }
+        FormMetadataDataPathResolution::NotMetadata
+        | FormMetadataDataPathResolution::ReferenceAbsent => {}
     }
     let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
         return FormOwnerScopedDataPath::Unknown;
@@ -11921,13 +11966,14 @@ fn parse_form_bound_data_path_with_metadata_owner(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    resolve_form_owner_scoped_metadata_data_path(
+    match resolve_form_owner_scoped_metadata_data_path_status(
         field,
         attribute_metadata_owners_by_id,
         object_refs,
-    )
-    .or_else(|| {
-        parse_form_bound_data_path(
+    ) {
+        FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+        FormMetadataDataPathResolution::NotMetadata
+        | FormMetadataDataPathResolution::ReferenceAbsent => parse_form_bound_data_path(
             field,
             name,
             attribute_names_by_id,
@@ -11935,16 +11981,44 @@ fn parse_form_bound_data_path_with_metadata_owner(
             table_column_names_by_id,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
-        )
-    })
+        ),
+        FormMetadataDataPathResolution::Invalid => None,
+    }
 }
 
-fn resolve_form_owner_scoped_metadata_data_path(
+#[cfg(test)]
+pub(super) fn resolve_form_owner_scoped_metadata_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match resolve_form_owner_scoped_metadata_data_path_status(
+        field,
+        attribute_metadata_owners_by_id,
+        object_refs,
+    ) {
+        FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+        FormMetadataDataPathResolution::NotMetadata
+        | FormMetadataDataPathResolution::ReferenceAbsent
+        | FormMetadataDataPathResolution::Invalid => None,
+    }
+}
+
+enum FormMetadataDataPathResolution {
+    NotMetadata,
+    ReferenceAbsent,
+    Invalid,
+    Resolved(String),
+}
+
+fn resolve_form_owner_scoped_metadata_data_path_status(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> FormMetadataDataPathResolution {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
     let (owner_field, terminal_field) = match fields.as_slice() {
         [kind, owner, terminal] if kind.trim() == "2" => (*owner, *terminal),
         [kind, owner, table, terminal]
@@ -11952,28 +12026,53 @@ fn resolve_form_owner_scoped_metadata_data_path(
         {
             (*owner, *terminal)
         }
-        _ => return None,
+        _ => return FormMetadataDataPathResolution::NotMetadata,
     };
-    let owner = split_1c_braced_fields(owner_field.trim(), 0)?;
-    if owner.len() != 1 {
-        return None;
+    let Some(terminal) = split_1c_braced_fields(terminal_field.trim(), 0) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    if terminal.len() != 2 {
+        return FormMetadataDataPathResolution::NotMetadata;
     }
-    let attribute = attribute_metadata_owners_by_id.get(owner.first()?.trim())?;
+    let Some(marker) = terminal.first() else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    if marker.trim().parse::<i64>().is_err() {
+        return FormMetadataDataPathResolution::Invalid;
+    }
+    let Some(uuid) = terminal
+        .get(1)
+        .and_then(|uuid| parse_non_zero_uuid(uuid.trim()))
+    else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
 
-    let terminal = split_1c_braced_fields(terminal_field.trim(), 0)?;
-    if terminal.len() != 2 || terminal.first()?.trim().parse::<i64>().is_err() {
-        return None;
+    let Some(owner) = split_1c_braced_fields(owner_field.trim(), 0) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    if owner.len() != 1 {
+        return FormMetadataDataPathResolution::Invalid;
     }
-    let uuid = parse_non_zero_uuid(terminal.get(1)?.trim())?;
-    let reference = object_refs.get(&uuid)?;
-    let (owner_base, relative_path) = form_metadata_data_path_route(reference)?;
+    let Some(attribute_id) = owner.first() else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id.trim()) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+
+    let Some(reference) = object_refs.get(&uuid) else {
+        return FormMetadataDataPathResolution::ReferenceAbsent;
+    };
+    let Some((owner_base, relative_path)) = form_metadata_data_path_route(reference) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
     if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
-        return None;
+        return FormMetadataDataPathResolution::Invalid;
     }
-    Some(format!("{}.{}", attribute.name, relative_path))
+    FormMetadataDataPathResolution::Resolved(format!("{}.{}", attribute.name, relative_path))
 }
 
-fn resolve_form_strict_field_model_data_path(
+pub(super) fn resolve_form_strict_field_model_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     object_refs: &BTreeMap<String, String>,
@@ -12014,6 +12113,9 @@ fn resolve_form_owner_scoped_standard_attribute_data_path(
     let reference = attribute.exact_single_type_reference.as_deref()?;
     let (generated_type, _) = form_generated_owner_type_from_type_reference(reference)?;
     let attribute_name = match generated_type {
+        "DocumentObject" => DOCUMENT_STANDARD_ATTRIBUTES
+            .iter()
+            .find_map(|(candidate, name)| (*candidate == marker).then_some(*name)),
         "ChartOfAccountsObject" => chart_of_accounts_standard_attribute_name(marker),
         _ => None,
     }?;
@@ -12046,6 +12148,7 @@ fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
     let route = relative.split('.').collect::<Vec<_>>();
     let relative_path = match route.as_slice() {
         ["Attribute" | "Dimension" | "Resource", name] if !name.is_empty() => (*name).to_string(),
+        ["TabularSection", table] if !table.is_empty() => (*table).to_string(),
         ["TabularSection", table, "Attribute", name] if !table.is_empty() && !name.is_empty() => {
             format!("{table}.{name}")
         }
