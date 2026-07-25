@@ -1,2 +1,3 @@
 tests/fixtures/xml/** -text
 tests/fixtures/migrations/** -text
+crates/ibcmd-schema/data/** text eol=lf

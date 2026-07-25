@@ -19,6 +19,8 @@ XML writer не должен угадывать семантику slot.
 
 - очищенный список bundle/model/import/export class names;
 - идентификаторы EPackage classifiers, features и operations;
+- очищенная семантика Xcore features: kind, model type, cardinality,
+  qualifiers и явно заданный default;
 - проверенные декларативные правила writer-классов;
 - версия источника и способ получения;
 - тесты полноты, уникальности и отсутствия абсолютных путей.
@@ -27,8 +29,13 @@ XML writer не должен угадывать семантику slot.
 
 Текущий снимок EDT 2025.2.3 содержит 67 EPackage, 1 845 classifiers,
 12 224 feature IDs и 1 447 operation IDs. Это структурные идентификаторы
-моделей; XML QName, default и version behaviour пополняются отдельными
-проверенными writer rules.
+моделей.
+
+Первый Xcore vertical slice для модели форм содержит 257 classifiers и
+919 локально объявленных features: 671 attribute, 34 reference и
+214 containment. В нём зафиксированы 7 явных defaults. Неподтверждённые
+XML QName, order, default-emission, version gate и delegate имеют статус
+`pending` и не могут использоваться как production-правило.
 
 ## Обновление corpus
 
@@ -42,10 +49,15 @@ pwsh ./tools/import-edt-model-inventory.ps1 `
 pwsh ./tools/import-edt-package-features.ps1 `
   -InputInventory "C:\path\to\inventory.json" `
   -OutputFeatures "./crates/ibcmd-schema/data/edt-2025.2.3-package-features.json"
+
+pwsh ./tools/import-edt-xcore-semantics.ps1 `
+  -InputInventory "C:\path\to\inventory.json" `
+  -OutputSemantics "./crates/ibcmd-schema/data/edt-2025.2.3-feature-semantics.json"
 ```
 
 Сгенерированный JSON проходит тесты `ibcmd-schema` и проверяется как обычное
-изменение исходников. Скрипт не участвует в default build.
+изменение исходников. Скрипты не участвуют в default build. Xcore, JAR,
+class-файлы и абсолютные пути в репозиторий не копируются.
 
 ## Правило приёма новых знаний
 
