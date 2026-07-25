@@ -843,8 +843,10 @@ pub struct MxlLineProvenanceCorpusArgs {
 
 #[derive(Debug, Args)]
 pub struct FormContextSummaryArgs {
-    #[arg(long)] pub run_root: PathBuf,
-    #[arg(long)] pub source_commit: Option<String>,
+    #[arg(long)]
+    pub run_root: PathBuf,
+    #[arg(long)]
+    pub source_commit: Option<String>,
 }
 
 #[derive(Debug, Args)]

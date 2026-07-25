@@ -1127,17 +1127,13 @@ pub(super) fn write_source_asset(
                 context.information_register_field_refs,
                 owner_reference.as_deref(),
             );
-            let xml = extract_form_body_xml_from_body_timed(
-                body,
-                &form_context,
-                Some(timings),
-            )
-            .with_context(|| {
-                format!(
-                    "failed to extract form xml from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
+            let xml = extract_form_body_xml_from_body_timed(body, &form_context, Some(timings))
+                .with_context(|| {
+                    format!(
+                        "failed to extract form xml from source asset {}",
+                        asset.primary_path.display()
+                    )
+                })?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -2754,19 +2750,15 @@ mod predefined_code_tests {
     #[test]
     fn all_predefined_layouts_preserve_numeric_and_text_code_representation() {
         for kind in ["Catalog", "ChartOfAccounts", "ChartOfCalculationTypes"] {
-            let numeric = format_item_code(
-                kind,
-                parse_predefined_code_value(r#"{"N",0}"#).unwrap(),
-            );
+            let numeric =
+                format_item_code(kind, parse_predefined_code_value(r#"{"N",0}"#).unwrap());
             assert!(
                 numeric.contains(r#"<Code xsi:type="xs:decimal">0</Code>"#),
                 "{kind}: {numeric}"
             );
 
-            let text = format_item_code(
-                kind,
-                parse_predefined_code_value(r#"{"S","A01"}"#).unwrap(),
-            );
+            let text =
+                format_item_code(kind, parse_predefined_code_value(r#"{"S","A01"}"#).unwrap());
             assert!(text.contains("<Code>A01</Code>"), "{kind}: {text}");
             assert!(!text.contains(r#"<Code xsi:type="#), "{kind}: {text}");
         }

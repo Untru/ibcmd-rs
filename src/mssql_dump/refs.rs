@@ -44,9 +44,7 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
     let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
     let recalculation_refs = build_calculation_recalculation_reference_index(rows);
     for row in rows {
-        if let Some(name) =
-            parse_configuration_reference_text_for_row(&row.text, &row.file_name)
-        {
+        if let Some(name) = parse_configuration_reference_text_for_row(&row.text, &row.file_name) {
             index.insert(row.file_name.clone(), format!("Configuration.{name}"));
             continue;
         }

@@ -1,8 +1,7 @@
 use super::*;
 
 const MAX_COMMAND_INTERFACE_SECTION_ITEMS: usize = 100_000;
-const MAX_COMMAND_INTERFACE_ROOT_FIELDS: usize =
-    12 + 9 * MAX_COMMAND_INTERFACE_SECTION_ITEMS;
+const MAX_COMMAND_INTERFACE_ROOT_FIELDS: usize = 12 + 9 * MAX_COMMAND_INTERFACE_SECTION_ITEMS;
 
 pub(super) struct CommandInterface {
     pub(super) commands_order: Vec<CommandInterfaceOrderEntry>,

@@ -121,7 +121,11 @@ fn decode(blob: &[u8], strict: bool) -> Result<MxlBody, MxlCodecError> {
     decode_plain(plain, strict, false)
 }
 
-fn decode_plain(plain: Vec<u8>, strict: bool, exact_inflated_framing: bool) -> Result<MxlBody, MxlCodecError> {
+fn decode_plain(
+    plain: Vec<u8>,
+    strict: bool,
+    exact_inflated_framing: bool,
+) -> Result<MxlBody, MxlCodecError> {
     if !plain.starts_with(b"MOXCEL") {
         return Err(MxlCodecError::UnsupportedLayout(
             "missing MOXCEL signature".to_string(),

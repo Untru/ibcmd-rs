@@ -71,8 +71,8 @@ pub(crate) use form_body::{
 };
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
 pub(crate) use moxel::{
-    MoxelLineTraceEvent, MoxelLineTraceSink, extract_moxel_spreadsheet_xml,
-    extract_inflated_moxel_spreadsheet_xml_with_line_trace,
+    MoxelLineTraceEvent, MoxelLineTraceSink,
+    extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,
     extract_moxel_spreadsheet_xml_with_line_trace,
 };
 #[cfg(all(test, feature = "mssql-live-tests"))]
@@ -24292,7 +24292,10 @@ fn split_1c_braced_fields(text: &str, start: usize) -> Option<Vec<&str>> {
 /// Top-level 1C fields with byte offsets into the original source text.
 /// Offsets delimit the trimmed field value, so provenance points at the exact
 /// raw token rather than a reconstructed/value-matched occurrence.
-fn split_1c_braced_fields_with_spans(text: &str, start: usize) -> Option<Vec<(&str, usize, usize)>> {
+fn split_1c_braced_fields_with_spans(
+    text: &str,
+    start: usize,
+) -> Option<Vec<(&str, usize, usize)>> {
     let end = scan_1c_braced_value(text, start)?;
     let inner_start = start + text[start..].chars().next()?.len_utf8();
     let inner_end = end.checked_sub(1)?;
@@ -24305,7 +24308,12 @@ fn split_1c_braced_fields_with_spans(text: &str, start: usize) -> Option<Vec<(&s
     while let Some((index, ch)) = chars.next() {
         if in_string {
             if ch == '"' {
-                if let Some((_, next)) = chars.peek() && *next == '"' { let _ = chars.next(); continue; }
+                if let Some((_, next)) = chars.peek()
+                    && *next == '"'
+                {
+                    let _ = chars.next();
+                    continue;
+                }
                 in_string = false;
             }
             continue;
@@ -24318,7 +24326,11 @@ fn split_1c_braced_fields_with_spans(text: &str, start: usize) -> Option<Vec<(&s
                 let value = &inner[field_start..index];
                 let trimmed = value.trim();
                 let offset = value.find(trimmed).unwrap_or(0);
-                fields.push((trimmed, inner_start + field_start + offset, inner_start + field_start + offset + trimmed.len()));
+                fields.push((
+                    trimmed,
+                    inner_start + field_start + offset,
+                    inner_start + field_start + offset + trimmed.len(),
+                ));
                 field_start = index + ch.len_utf8();
             }
             _ => {}
@@ -24327,7 +24339,11 @@ fn split_1c_braced_fields_with_spans(text: &str, start: usize) -> Option<Vec<(&s
     let value = &inner[field_start..];
     let trimmed = value.trim();
     let offset = value.find(trimmed).unwrap_or(0);
-    fields.push((trimmed, inner_start + field_start + offset, inner_start + field_start + offset + trimmed.len()));
+    fields.push((
+        trimmed,
+        inner_start + field_start + offset,
+        inner_start + field_start + offset + trimmed.len(),
+    ));
     Some(fields)
 }
 

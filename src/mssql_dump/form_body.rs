@@ -4307,10 +4307,15 @@ pub(super) fn record_complete_table_schema_events(
         .map(|attribute| (attribute.id.as_str(), attribute))
         .collect::<BTreeMap<_, _>>();
     let mut final_counts = BTreeMap::<(String, String, String), usize>::new();
-    fn count_tables(items: &[FormChildItem], counts: &mut BTreeMap<(String, String, String), usize>) {
+    fn count_tables(
+        items: &[FormChildItem],
+        counts: &mut BTreeMap<(String, String, String), usize>,
+    ) {
         for item in items {
             if item.tag == "Table" {
-                *counts.entry((item.id.clone(), item.tag.to_string(), item.name.clone())).or_default() += 1;
+                *counts
+                    .entry((item.id.clone(), item.tag.to_string(), item.name.clone()))
+                    .or_default() += 1;
             }
             count_tables(&item.child_items, counts);
         }
@@ -4326,31 +4331,56 @@ pub(super) fn record_complete_table_schema_events(
         for item in items {
             if item.tag == "Table" {
                 let key = (item.id.clone(), item.tag.to_string(), item.name.clone());
-                let occurrence = indexes
-                    .trace_table_occurrences
-                    .get(&key)
-                    .and_then(|occurrences| unique_table_trace_occurrence(occurrences, final_counts.get(&key).copied()));
+                let occurrence =
+                    indexes
+                        .trace_table_occurrences
+                        .get(&key)
+                        .and_then(|occurrences| {
+                            unique_table_trace_occurrence(
+                                occurrences,
+                                final_counts.get(&key).copied(),
+                            )
+                        });
                 if let Some(occurrence) = occurrence {
                     let attribute = indexes
                         .bound_attribute_id_by_table_id
                         .get(&item.id)
-                        .and_then(|id| attributes.get(id.as_str()).map(|attribute| (id, *attribute)));
+                        .and_then(|id| {
+                            attributes
+                                .get(id.as_str())
+                                .map(|attribute| (id, *attribute))
+                        });
                     let hierarchical = form_table_has_hierarchical_navigation(item);
                     let (hierarchical_suppressed, emitted_auto_max_width) =
                         table_auto_max_width_emission(item.auto_max_width, hierarchical);
                     sink.record_schema(FormItemSchemaTraceEvent {
-                        id: item.id.clone(), tag: item.tag.to_string(), name: item.name.clone(), occurrence,
-                        wrapper: String::new(), raw_field_count: 0, normalized_field_count: 0,
-                        strict_table_schema: false, ordinary_table_variant: false, ordinary_discriminator: None,
-                        auto_max_width_source: "final_item", auto_max_width_slot: None,
-                        auto_max_width_raw: None, auto_max_width_auxiliary_raw: None,
+                        id: item.id.clone(),
+                        tag: item.tag.to_string(),
+                        name: item.name.clone(),
+                        occurrence,
+                        wrapper: String::new(),
+                        raw_field_count: 0,
+                        normalized_field_count: 0,
+                        strict_table_schema: false,
+                        ordinary_table_variant: false,
+                        ordinary_discriminator: None,
+                        auto_max_width_source: "final_item",
+                        auto_max_width_slot: None,
+                        auto_max_width_raw: None,
+                        auto_max_width_auxiliary_raw: None,
                         effective_auto_max_width: item.auto_max_width,
-                        evidence_complete: true, evidence_stage: "final_item_and_renderer_predicate",
+                        evidence_complete: true,
+                        evidence_stage: "final_item_and_renderer_predicate",
                         hierarchical_suppressed,
                         emitted_auto_max_width,
                         auto_max_width_xml_order: Some(12),
                         resolved_data_path: item.data_path.clone(),
-                        data_path_provenance: item.data_path_provenance.map(|p| match p { FormChildItemDataPathProvenance::DirectRawSlot => "direct_raw_slot", FormChildItemDataPathProvenance::InferredFallback => "inferred_fallback" }),
+                        data_path_provenance: item.data_path_provenance.map(|p| match p {
+                            FormChildItemDataPathProvenance::DirectRawSlot => "direct_raw_slot",
+                            FormChildItemDataPathProvenance::InferredFallback => {
+                                "inferred_fallback"
+                            }
+                        }),
                         root_attribute_id: attribute.map(|(id, _)| id.clone()),
                         root_attribute_name: attribute.map(|(_, attribute)| attribute.name.clone()),
                         root_attribute_dynamic_list: attribute
@@ -4364,7 +4394,10 @@ pub(super) fn record_complete_table_schema_events(
     visit(items, &attributes_by_id, indexes, &final_counts, trace_sink);
 }
 
-pub(super) fn unique_table_trace_occurrence(occurrences: &[usize], final_count: Option<usize>) -> Option<usize> {
+pub(super) fn unique_table_trace_occurrence(
+    occurrences: &[usize],
+    final_count: Option<usize>,
+) -> Option<usize> {
     (occurrences.len() == 1 && final_count == Some(1)).then(|| occurrences[0])
 }
 
@@ -13689,7 +13722,7 @@ fn format_form_table_property_xml(
             } else {
                 String::new()
             }
-        },
+        }
         FormTableXmlProperty::ChoiceMode => match item.table_choice_mode {
             Some(true) => format!("{tab}<ChoiceMode>true</ChoiceMode>\r\n"),
             _ => String::new(),

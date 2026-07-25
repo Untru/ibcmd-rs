@@ -93,10 +93,7 @@ fn form_navigation_panel_kind_3_keeps_external_command_fallback() {
 #[test]
 fn form_navigation_panel_kind_4_keeps_catalog_precedence() {
     let catalog_uuid = "44444444-4444-4444-8444-444444444444".to_string();
-    let object_refs = BTreeMap::from([(
-        catalog_uuid.clone(),
-        "Catalog.Products".to_string(),
-    )]);
+    let object_refs = BTreeMap::from([(catalog_uuid.clone(), "Catalog.Products".to_string())]);
 
     assert_eq!(
         form_body::parse_form_command_interface_command_for_test(
@@ -1679,9 +1676,7 @@ fn parses_legacy_command_interface_visibility_wrapper_for_source_export() {
     assert!(parse_command_interface_blob(&blob, &BTreeMap::new(), &BTreeMap::new()).is_some());
 
     let oversized = deflate_for_test(b"{7,1,100001,0,0,0,0,0}");
-    assert!(
-        parse_command_interface_blob(&oversized, &BTreeMap::new(), &BTreeMap::new()).is_none()
-    );
+    assert!(parse_command_interface_blob(&oversized, &BTreeMap::new(), &BTreeMap::new()).is_none());
 
     let oversized_command_reference = deflate_for_test(
         b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,unexpected},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
@@ -1704,10 +1699,8 @@ fn parses_legacy_command_interface_visibility_wrapper_for_source_export() {
         parse_command_interface_blob(&nil_group, &BTreeMap::new(), &BTreeMap::new()).unwrap();
     let xml = format_command_interface_xml(&parsed);
     assert_eq!(
-        xml.matches(
-            "<CommandGroup>00000000-0000-0000-0000-000000000000</CommandGroup>"
-        )
-        .count(),
+        xml.matches("<CommandGroup>00000000-0000-0000-0000-000000000000</CommandGroup>")
+            .count(),
         2
     );
     assert!(xml.contains("<CommandsPlacement>"));
@@ -3301,8 +3294,8 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
         })
     );
     let table_raw = format!(r#"{{1,{EVENT_ID},"TableHandler"}}"#);
-    let table_record = split_1c_braced_fields(&table_raw, 0)
-        .expect("well-formed table event record");
+    let table_record =
+        split_1c_braced_fields(&table_raw, 0).expect("well-formed table event record");
     assert_eq!(
         parse_form_child_item_event_record(&table_record),
         vec![FormBodyEvent {
@@ -5080,9 +5073,7 @@ fn canonicalizes_dynamic_list_appearance_nested_default_namespaces() {
         "{normalized}"
     );
     assert!(
-        normalized.contains(
-            r#"<dcscor:value xsi:type="v8ui:Color">web:FireBrick</dcscor:value>"#
-        ),
+        normalized.contains(r#"<dcscor:value xsi:type="v8ui:Color">web:FireBrick</dcscor:value>"#),
         "{normalized}"
     );
     assert!(!normalized.contains("xmlns"), "{normalized}");
@@ -5761,8 +5752,18 @@ fn form_item_trace_records_nested_and_duplicate_identities_without_deduplication
     // A separate trace traversal restarts its ordinal; within one traversal it is unique.
     assert_eq!(events[3].occurrence, 0);
     assert_eq!(events[3].name, "Duplicate");
-    assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 0 && scalar.value.as_deref() == Some("31")));
-    assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 1 && scalar.nested));
+    assert!(
+        events[0]
+            .top_level_scalars
+            .iter()
+            .any(|scalar| scalar.index == 0 && scalar.value.as_deref() == Some("31"))
+    );
+    assert!(
+        events[0]
+            .top_level_scalars
+            .iter()
+            .any(|scalar| scalar.index == 1 && scalar.nested)
+    );
 }
 
 #[test]
@@ -5823,8 +5824,11 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
     let layout = format!("{{1,{uuid_a},{TABLE}}}");
     let fields = split_1c_braced_fields(&layout, 0).unwrap();
     let sink = Sink::default();
-    let (mut items, indexes) =
-        form_body::extract_form_child_items_with_trace_for_test(&fields, &[attribute(false)], &sink);
+    let (mut items, indexes) = form_body::extract_form_child_items_with_trace_for_test(
+        &fields,
+        &[attribute(false)],
+        &sink,
+    );
     assert_eq!(items.len(), 1);
     let complete = sink
         .schema
@@ -5856,8 +5860,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
     );
 
     let missing_sink = Sink::default();
-    let _ =
-        form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &missing_sink);
+    let _ = form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &missing_sink);
     assert_eq!(
         missing_sink
             .schema
@@ -5917,7 +5920,10 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
         &emitted_sink,
     );
     let emitted = emitted_sink.schema.borrow();
-    let emitted = emitted.iter().find(|event| event.evidence_complete).unwrap();
+    let emitted = emitted
+        .iter()
+        .find(|event| event.evidence_complete)
+        .unwrap();
     let emitted_xml = format_form_child_items_xml(&items, 1);
     assert_eq!(emitted.hierarchical_suppressed, None);
     assert_eq!(emitted.emitted_auto_max_width, Some(false));
@@ -6341,7 +6347,14 @@ fn extracts_form_child_items_from_layout_pairs() {
     )]);
 
     let indexes = collect_form_child_item_indexes(&layout_fields, &attributes);
-    let items = extract_form_child_items(&layout_fields, &attributes, &[], &object_refs, &indexes, None);
+    let items = extract_form_child_items(
+        &layout_fields,
+        &attributes,
+        &[],
+        &object_refs,
+        &indexes,
+        None,
+    );
     let xml = format_form_child_items_xml(&items, 1);
 
     assert!(xml.contains(r#"<CommandBar name="Панель" id="64">"#));
@@ -7575,7 +7588,8 @@ fn extracts_wrapper55_table_user_settings_group() {
     let fields = split_1c_braced_fields(&layout, 0).unwrap();
 
     let indexes = collect_form_child_item_indexes(&fields, &attributes);
-    let items = extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new(), &indexes, None);
+    let items =
+        extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new(), &indexes, None);
 
     let table = items.iter().find(|item| item.tag == "Table").unwrap();
     assert_eq!(table.user_settings_group.as_deref(), Some("SettingsGroup"));
@@ -7932,15 +7946,25 @@ fn table_auto_max_width_uses_validated_fixed_tail_scalar() {
     default_fields[0] = "55".to_string();
     let slot = default_fields.len() - 15;
     default_fields[slot] = "1".to_string();
-    let default_refs = default_fields.iter().map(String::as_str).collect::<Vec<_>>();
-    let default_schema = crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &default_refs)
-        .expect("default scalar remains a valid table layout");
+    let default_refs = default_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let default_schema =
+        crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &default_refs)
+            .expect("default scalar remains a valid table layout");
     assert_eq!(default_schema.auto_max_width(&default_refs), None);
 
     let mut malformed_fields = default_fields;
     malformed_fields[slot] = "2".to_string();
-    let malformed_refs = malformed_fields.iter().map(String::as_str).collect::<Vec<_>>();
-    assert!(crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed_refs).is_none());
+    let malformed_refs = malformed_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed_refs)
+            .is_none()
+    );
 }
 
 #[test]
@@ -7966,7 +7990,9 @@ fn table_auto_add_incomplete_uses_validated_fixed_tail_scalar() {
     let malformed_slot = malformed.len() - 36;
     malformed[malformed_slot] = "3".to_string();
     let malformed = malformed.iter().map(String::as_str).collect::<Vec<_>>();
-    assert!(crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed).is_none());
+    assert!(
+        crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed).is_none()
+    );
 }
 
 #[test]
@@ -7981,11 +8007,8 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     fn run(table: String) -> FormChildItem {
         let layout = format!("{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}");
         let fields = split_1c_braced_fields(&layout, 0).unwrap();
-        let (items, _) = form_body::extract_form_child_items_with_trace_for_test(
-            &fields,
-            &[],
-            &Sink,
-        );
+        let (items, _) =
+            form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &Sink);
         items
             .into_iter()
             .find(|item| item.tag == "Table")
@@ -8006,8 +8029,10 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     false_item.top_level_parent_nil = None;
     false_item.show_root = None;
     false_item.allow_root_choice = None;
-    assert!(format_form_child_items_xml(&[false_item], 1)
-        .contains("<AutoAddIncomplete>false</AutoAddIncomplete>"));
+    assert!(
+        format_form_child_items_xml(&[false_item], 1)
+            .contains("<AutoAddIncomplete>false</AutoAddIncomplete>")
+    );
 
     // Old slot-40 logic would emit false; the fixed tail emits true instead.
     let mut true_fields = split_1c_braced_fields(TABLE, 0)
@@ -8023,8 +8048,10 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     true_item.top_level_parent_nil = None;
     true_item.show_root = None;
     true_item.allow_root_choice = None;
-    assert!(format_form_child_items_xml(&[true_item], 1)
-        .contains("<AutoAddIncomplete>true</AutoAddIncomplete>"));
+    assert!(
+        format_form_child_items_xml(&[true_item], 1)
+            .contains("<AutoAddIncomplete>true</AutoAddIncomplete>")
+    );
 
     // Old slot-40 logic would emit false; tail code 2 is the platform
     // default and must omit the property altogether.
@@ -8041,8 +8068,7 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     omitted_item.top_level_parent_nil = None;
     omitted_item.show_root = None;
     omitted_item.allow_root_choice = None;
-    assert!(!format_form_child_items_xml(&[omitted_item], 1)
-        .contains("<AutoAddIncomplete>"));
+    assert!(!format_form_child_items_xml(&[omitted_item], 1).contains("<AutoAddIncomplete>"));
 }
 
 #[test]
@@ -8064,9 +8090,7 @@ fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
     const TABLE: &str = include_str!("../../.tmp_zhurnal_spisokdokumentov_table_raw.txt");
 
     fn run(table: String) -> (FormChildItem, FormItemSchemaTraceEvent) {
-        let layout = format!(
-            "{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}"
-        );
+        let layout = format!("{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}");
         let fields = split_1c_braced_fields(&layout, 0).unwrap();
         let sink = Sink::default();
         let (items, _) =
@@ -8108,7 +8132,9 @@ fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
     a_item.top_level_parent_nil = None;
     a_item.show_root = None;
     a_item.allow_root_choice = None;
-    assert!(format_form_child_items_xml(&[a_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    assert!(
+        format_form_child_items_xml(&[a_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>")
+    );
 
     // Case B has exactly the old false-positive pair (53, 54) = (0, 2),
     // while reverse-15=1 means the XML must omit it.
@@ -8126,7 +8152,9 @@ fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
     b_item.top_level_parent_nil = None;
     b_item.show_root = None;
     b_item.allow_root_choice = None;
-    assert!(!format_form_child_items_xml(&[b_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    assert!(
+        !format_form_child_items_xml(&[b_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>")
+    );
     assert!(b_trace.strict_table_schema);
     assert_eq!(b_trace.auto_max_width_source, "fixed_tail_reverse_15");
     assert_eq!(b_trace.auto_max_width_slot, Some(b_slot));
@@ -11915,9 +11943,7 @@ fn extracts_available_fields_table_command_aliases() {
 #[test]
 fn maps_formatted_document_search_command_alias() {
     assert_eq!(
-        form_formatted_document_standard_command_suffix(
-            "6e2f7ea0-a346-4c78-96d9-a0f512000910"
-        ),
+        form_formatted_document_standard_command_suffix("6e2f7ea0-a346-4c78-96d9-a0f512000910"),
         Some("SearchEverywhere")
     );
 }
@@ -14312,7 +14338,16 @@ fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
         false
     ));
     assert!(cct_attribute_wrapper_is_exact(
-        &["3", "payload", "0", "2", "1", "0", "0", &format!("{{1,{zero}}}")],
+        &[
+            "3",
+            "payload",
+            "0",
+            "2",
+            "1",
+            "0",
+            "0",
+            &format!("{{1,{zero}}}")
+        ],
         false
     ));
     assert!(cct_attribute_wrapper_is_exact(
@@ -14320,7 +14355,16 @@ fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
         true
     ));
     assert!(!cct_attribute_wrapper_is_exact(
-        &["3", "payload", "0", "2", "1", "0", "1", &format!("{{1,{zero}}}")],
+        &[
+            "3",
+            "payload",
+            "0",
+            "2",
+            "1",
+            "0",
+            "1",
+            &format!("{{1,{zero}}}")
+        ],
         false
     ));
     assert!(!cct_attribute_wrapper_is_exact(
@@ -14333,9 +14377,15 @@ fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
     ));
 
     assert!(cct_tabular_section_wrapper_is_exact(&["0", "payload", "0"]));
-    assert!(cct_tabular_section_wrapper_is_exact(&["1", "payload", "0", "5"]));
-    assert!(!cct_tabular_section_wrapper_is_exact(&["1", "payload", "0", "4"]));
-    assert!(!cct_tabular_section_wrapper_is_exact(&["1", "payload", "0"]));
+    assert!(cct_tabular_section_wrapper_is_exact(&[
+        "1", "payload", "0", "5"
+    ]));
+    assert!(!cct_tabular_section_wrapper_is_exact(&[
+        "1", "payload", "0", "4"
+    ]));
+    assert!(!cct_tabular_section_wrapper_is_exact(&[
+        "1", "payload", "0"
+    ]));
 }
 
 #[test]
@@ -20697,10 +20747,7 @@ fn moxel_style_refs_require_one_canonical_count_prefixed_span() {
     assert_eq!(refs[4].as_deref(), Some("style:ReportHeaderBackColor"));
 
     let custom = parse_moxel_style_refs(
-        &[
-            "1",
-            "{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}}",
-        ],
+        &["1", "{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}}"],
         &BTreeMap::from([(
             "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
             "StyleItem.Custom".to_string(),
@@ -20709,11 +20756,11 @@ fn moxel_style_refs_require_one_canonical_count_prefixed_span() {
     assert_eq!(custom[0].as_deref(), Some("style:Custom"));
 
     for fields in [
-        vec!["2", "{3,3,{-1}}"], // overrun
-        vec!["1", "{3,3,{-1}}", "{3,3,{-3}}"], // underconsume
-        vec!["1", "{3,4,{1}}"], // mode 4 accepts only {0}
-        vec!["1", "{3,3,{-1,-3}}"], // wrong arity
-        vec!["{3,3,{-1}}"], // legacy uncounted descriptor
+        vec!["2", "{3,3,{-1}}"],                    // overrun
+        vec!["1", "{3,3,{-1}}", "{3,3,{-3}}"],      // underconsume
+        vec!["1", "{3,4,{1}}"],                     // mode 4 accepts only {0}
+        vec!["1", "{3,3,{-1,-3}}"],                 // wrong arity
+        vec!["{3,3,{-1}}"],                         // legacy uncounted descriptor
         vec!["1", "{3,3,{-1}}", "1", "{3,3,{-3}}"], // ambiguity
         vec!["01", "{3,3,{-1}}"],
         vec!["+1", "{3,3,{-1}}"],
@@ -20746,8 +20793,8 @@ fn moxel_style_ref_palette_has_exact_counted_layout_before_nested_formats() {
 	<format><width>38</width></format>
 </document>"#;
     let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
-    let inflated = String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate"))
-        .expect("UTF-8");
+    let inflated =
+        String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate")).expect("UTF-8");
     let body_start = inflated.find("{8,").expect("MOXCEL root");
     let fields = split_1c_braced_fields(&inflated[body_start..], 0).expect("root fields");
     let candidates = fields
@@ -20779,18 +20826,16 @@ fn moxel_style_ref_palette_has_exact_counted_layout_before_nested_formats() {
     );
     let table = split_1c_braced_fields(fields[palette_start + palette_count + 1], 0)
         .expect("nested format table follows palette");
-    assert_eq!(table.first().and_then(|count| count.parse::<usize>().ok()), Some(2));
+    assert_eq!(
+        table.first().and_then(|count| count.parse::<usize>().ok()),
+        Some(2)
+    );
     assert_eq!(table.len(), 3);
 }
 
 #[test]
 fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_formats() {
-    let fields = [
-        "1",
-        "{3,3,{-1}}",
-        "{2,{0},{0}}",
-        "{3,3,{-3}}",
-    ];
+    let fields = ["1", "{3,3,{-1}}", "{2,{0},{0}}", "{3,3,{-3}}"];
 
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
     assert_eq!(style_refs.len(), 1);
@@ -20798,7 +20843,11 @@ fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_format
     let formats = parse_moxel_format_table(&fields, 0, &style_refs, &BTreeSet::new(), &[])
         .expect("nested format table");
     assert_eq!(formats.len(), 2);
-    assert!(formats.iter().all(|format| *format == MoxelFormat::default()));
+    assert!(
+        formats
+            .iter()
+            .all(|format| *format == MoxelFormat::default())
+    );
 }
 
 #[test]
@@ -20812,8 +20861,8 @@ fn moxel_format_table_skips_confirmed_palette_when_invalid_override_clears_refs(
 	<format><width>38</width></format>
 </document>"#;
     let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
-    let inflated = String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate"))
-        .expect("UTF-8");
+    let inflated =
+        String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate")).expect("UTF-8");
     let body_start = inflated.find("{8,").expect("MOXCEL root");
     let mut fields = split_1c_braced_fields(&inflated[body_start..], 0)
         .expect("root fields")
@@ -30321,9 +30370,7 @@ fn configuration_reference_requires_identity_and_exact_root_slots() {
         .replace("$OBJECT", object_uuid)
         .replace("$ZERO", zero_uuid);
     assert!(parse_configuration_reference_text(&extended_catalog).is_none());
-    assert!(
-        parse_configuration_reference_text_for_row(&extended_catalog, identity).is_none()
-    );
+    assert!(parse_configuration_reference_text_for_row(&extended_catalog, identity).is_none());
 
     let missing_tail = format!("{{2,{{{identity}}},1,{child}}}");
     let wrong_count = format!(r#"{{2,{{{identity}}},2,{child},{{{{0,"",""}}}}}}"#);
@@ -33647,7 +33694,9 @@ fn metadata_reference_index_maps_extended_catalog_tabular_attribute() {
     let refs = build_metadata_object_reference_index_from_texts(&rows);
     assert_eq!(
         refs.get(attribute_uuid).map(String::as_str),
-        Some("Catalog.AdditionalProperties.TabularSection.AdditionalAttributes.Attribute.TrackChanges")
+        Some(
+            "Catalog.AdditionalProperties.TabularSection.AdditionalAttributes.Attribute.TrackChanges"
+        )
     );
 }
 

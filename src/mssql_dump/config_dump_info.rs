@@ -260,9 +260,7 @@ fn add_configuration_group_references(
     }
     let configuration_names = metadata_texts
         .iter()
-        .filter_map(|row| {
-            parse_configuration_reference_text_for_row(&row.text, &row.file_name)
-        })
+        .filter_map(|row| parse_configuration_reference_text_for_row(&row.text, &row.file_name))
         .collect::<BTreeSet<_>>();
     let mut names = configuration_names.into_iter();
     let name = names

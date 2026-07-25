@@ -462,24 +462,36 @@ impl From<&ResolvedMoxelLine> for MoxelLineTraceEvent {
     fn from(line: &ResolvedMoxelLine) -> Self {
         Self {
             output_line_index: 0,
-            raw_parents: line.raw_parents.iter().map(|parent| MoxelRawLineParentTrace {
-                raw_entry_index: parent.raw_entry_index,
-                line_entry_index: parent.line_entry_index,
-                span_start: parent.span_start,
-                span_end: parent.span_end,
-            }).collect(),
-            transformations: line.transformations.iter().map(MoxelLineTransformationTrace::from).collect(),
-            format_support: line.format_support.iter().map(|support| MoxelLineFormatSupportTrace {
-                format_index: support.format_index,
-                border_slot: match support.border_slot {
-                    MoxelLineBorderSlot::Border => "border",
-                    MoxelLineBorderSlot::Left => "left",
-                    MoxelLineBorderSlot::Top => "top",
-                    MoxelLineBorderSlot::Right => "right",
-                    MoxelLineBorderSlot::Bottom => "bottom",
-                    MoxelLineBorderSlot::Drawing => "drawing",
-                },
-            }).collect(),
+            raw_parents: line
+                .raw_parents
+                .iter()
+                .map(|parent| MoxelRawLineParentTrace {
+                    raw_entry_index: parent.raw_entry_index,
+                    line_entry_index: parent.line_entry_index,
+                    span_start: parent.span_start,
+                    span_end: parent.span_end,
+                })
+                .collect(),
+            transformations: line
+                .transformations
+                .iter()
+                .map(MoxelLineTransformationTrace::from)
+                .collect(),
+            format_support: line
+                .format_support
+                .iter()
+                .map(|support| MoxelLineFormatSupportTrace {
+                    format_index: support.format_index,
+                    border_slot: match support.border_slot {
+                        MoxelLineBorderSlot::Border => "border",
+                        MoxelLineBorderSlot::Left => "left",
+                        MoxelLineBorderSlot::Top => "top",
+                        MoxelLineBorderSlot::Right => "right",
+                        MoxelLineBorderSlot::Bottom => "bottom",
+                        MoxelLineBorderSlot::Drawing => "drawing",
+                    },
+                })
+                .collect(),
             final_style: line.style,
             final_type: line.line_type,
             final_width: line.width,
@@ -493,11 +505,31 @@ impl From<&ResolvedMoxelLine> for MoxelLineTraceEvent {
 impl From<&MoxelLineTransformation> for MoxelLineTransformationTrace {
     fn from(transformation: &MoxelLineTransformation) -> Self {
         match transformation {
-            MoxelLineTransformation::Truncated { reason } => Self { kind: "truncated", reason: Some(reason), source_index: None },
-            MoxelLineTransformation::DrawingOnlySelectedSource { source_index } => Self { kind: "drawing_only_selected_source", reason: None, source_index: Some(*source_index) },
-            MoxelLineTransformation::DefaultShift { reason } => Self { kind: "default_shift", reason: Some(reason), source_index: None },
-            MoxelLineTransformation::Synthesized { reason } => Self { kind: "synthesized", reason: Some(reason), source_index: None },
-            MoxelLineTransformation::PostNormalizer { reason } => Self { kind: "post_normalizer", reason: Some(reason), source_index: None },
+            MoxelLineTransformation::Truncated { reason } => Self {
+                kind: "truncated",
+                reason: Some(reason),
+                source_index: None,
+            },
+            MoxelLineTransformation::DrawingOnlySelectedSource { source_index } => Self {
+                kind: "drawing_only_selected_source",
+                reason: None,
+                source_index: Some(*source_index),
+            },
+            MoxelLineTransformation::DefaultShift { reason } => Self {
+                kind: "default_shift",
+                reason: Some(reason),
+                source_index: None,
+            },
+            MoxelLineTransformation::Synthesized { reason } => Self {
+                kind: "synthesized",
+                reason: Some(reason),
+                source_index: None,
+            },
+            MoxelLineTransformation::PostNormalizer { reason } => Self {
+                kind: "post_normalizer",
+                reason: Some(reason),
+                source_index: None,
+            },
         }
     }
 }
@@ -869,7 +901,10 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
 ) -> Option<MoxelSpreadsheet> {
     let body = text.trim_start_matches('\u{feff}');
     let spanned_fields = split_1c_braced_fields_with_spans(body, 0)?;
-    let fields = spanned_fields.iter().map(|(value, _, _)| *value).collect::<Vec<_>>();
+    let fields = spanned_fields
+        .iter()
+        .map(|(value, _, _)| *value)
+        .collect::<Vec<_>>();
     if fields.first()?.trim() != "8" {
         return None;
     }
@@ -1157,7 +1192,12 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let has_sparse_column_sets = column_sets
         .iter()
         .any(|column_set| column_set.columns.len() != column_set.size);
-    let mut resolved_lines = parse_moxel_lines_with_raw_spans(&fields, &spanned_fields, &all_formats, has_sparse_column_sets);
+    let mut resolved_lines = parse_moxel_lines_with_raw_spans(
+        &fields,
+        &spanned_fields,
+        &all_formats,
+        has_sparse_column_sets,
+    );
     normalize_moxel_single_set_report_header_tail(
         &column_sets,
         &column_formats,
@@ -2463,21 +2503,31 @@ fn parse_moxel_lines_with_raw_spans(
     let mut lines = fields
         .iter()
         .enumerate()
-        .filter_map(|(raw_entry_index, field)| parse_moxel_line(field).map(|line| (raw_entry_index, field.len(), line)))
-        .enumerate()
-        .map(|(line_entry_index, (raw_entry_index, raw_len, line))| ResolvedMoxelLine {
-            line,
-            raw_parents: vec![MoxelRawLineParent {
-                raw_entry_index,
-                line_entry_index,
-                span_start: raw_spans.get(raw_entry_index).map(|(_, start, _)| *start).unwrap_or(0),
-                span_end: raw_spans.get(raw_entry_index).map(|(_, _, end)| *end).unwrap_or(raw_len),
-            }],
-            transformations: Vec::new(),
-            format_support: Vec::new(),
-            ambiguous: false,
-            fail_closed: false,
+        .filter_map(|(raw_entry_index, field)| {
+            parse_moxel_line(field).map(|line| (raw_entry_index, field.len(), line))
         })
+        .enumerate()
+        .map(
+            |(line_entry_index, (raw_entry_index, raw_len, line))| ResolvedMoxelLine {
+                line,
+                raw_parents: vec![MoxelRawLineParent {
+                    raw_entry_index,
+                    line_entry_index,
+                    span_start: raw_spans
+                        .get(raw_entry_index)
+                        .map(|(_, start, _)| *start)
+                        .unwrap_or(0),
+                    span_end: raw_spans
+                        .get(raw_entry_index)
+                        .map(|(_, _, end)| *end)
+                        .unwrap_or(raw_len),
+                }],
+                transformations: Vec::new(),
+                format_support: Vec::new(),
+                ambiguous: false,
+                fail_closed: false,
+            },
+        )
         .collect::<Vec<_>>();
     if uses_drawing_line
         && !uses_cell_line
@@ -2506,9 +2556,10 @@ fn parse_moxel_lines_with_raw_spans(
         let discarded = lines.split_off(3);
         if !discarded.is_empty() {
             for line in &mut lines {
-                line.transformations.push(MoxelLineTransformation::Truncated {
-                    reason: "default palette tail after None/Solid/Dotted",
-                });
+                line.transformations
+                    .push(MoxelLineTransformation::Truncated {
+                        reason: "default palette tail after None/Solid/Dotted",
+                    });
             }
         }
     }
@@ -2524,9 +2575,10 @@ fn parse_moxel_lines_with_raw_spans(
         let discarded = lines.split_off(expected_line_slots);
         if !discarded.is_empty() {
             for line in &mut lines {
-                line.transformations.push(MoxelLineTransformation::Truncated {
-                    reason: "unused raw palette tail",
-                });
+                line.transformations
+                    .push(MoxelLineTransformation::Truncated {
+                        reason: "unused raw palette tail",
+                    });
             }
         }
     }
@@ -2541,10 +2593,50 @@ fn parse_moxel_lines_with_raw_spans(
     {
         return finalize_moxel_line_slots(
             vec![
-                resolved_moxel_line_from_parents(&lines[0..1], MoxelLine { style: "None", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 }, MoxelLineTransformation::DefaultShift { reason: "None/Solid expanded to four cell defaults" }),
-                resolved_moxel_line_from_parents(&lines[1..2], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 3 }, MoxelLineTransformation::DefaultShift { reason: "None/Solid expanded to four cell defaults" }),
-                resolved_moxel_line_from_parents(&lines[0..2], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 2 }, MoxelLineTransformation::Synthesized { reason: "None/Solid expanded to four cell defaults" }),
-                resolved_moxel_line_from_parents(&lines[0..2], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 }, MoxelLineTransformation::Synthesized { reason: "None/Solid expanded to four cell defaults" }),
+                resolved_moxel_line_from_parents(
+                    &lines[0..1],
+                    MoxelLine {
+                        style: "None",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "None/Solid expanded to four cell defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[1..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 3,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "None/Solid expanded to four cell defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 2,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "None/Solid expanded to four cell defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "None/Solid expanded to four cell defaults",
+                    },
+                ),
             ],
             formats,
         );
@@ -2561,74 +2653,149 @@ fn parse_moxel_lines_with_raw_spans(
         && used_indexes.contains(&3)
     {
         if has_thin_dashed_default_line_palette {
-            return finalize_moxel_line_slots(vec![
-                resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                    style: "ThinDashed",
-                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                    width: 1,
-                }, MoxelLineTransformation::Synthesized { reason: "thin dashed drawing palette" }),
-                resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                    style: "None",
-                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                    width: 0,
-                }, MoxelLineTransformation::Synthesized { reason: "thin dashed drawing palette" }),
-                resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                    style: "Solid",
-                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                    width: 2,
-                }, MoxelLineTransformation::DefaultShift { reason: "thin dashed drawing palette" }),
-                resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                    style: "None",
-                    line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
-                    width: 1,
-                }, MoxelLineTransformation::Synthesized { reason: "thin dashed drawing palette" }),
-            ], formats);
+            return finalize_moxel_line_slots(
+                vec![
+                    resolved_moxel_line_from_parents(
+                        &lines[0..3],
+                        MoxelLine {
+                            style: "ThinDashed",
+                            line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                            width: 1,
+                        },
+                        MoxelLineTransformation::Synthesized {
+                            reason: "thin dashed drawing palette",
+                        },
+                    ),
+                    resolved_moxel_line_from_parents(
+                        &lines[0..3],
+                        MoxelLine {
+                            style: "None",
+                            line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                            width: 0,
+                        },
+                        MoxelLineTransformation::Synthesized {
+                            reason: "thin dashed drawing palette",
+                        },
+                    ),
+                    resolved_moxel_line_from_parents(
+                        &lines[0..3],
+                        MoxelLine {
+                            style: "Solid",
+                            line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                            width: 2,
+                        },
+                        MoxelLineTransformation::DefaultShift {
+                            reason: "thin dashed drawing palette",
+                        },
+                    ),
+                    resolved_moxel_line_from_parents(
+                        &lines[0..3],
+                        MoxelLine {
+                            style: "None",
+                            line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+                            width: 1,
+                        },
+                        MoxelLineTransformation::Synthesized {
+                            reason: "thin dashed drawing palette",
+                        },
+                    ),
+                ],
+                formats,
+            );
         }
-        return finalize_moxel_line_slots(vec![
-            resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                style: "Solid",
-                line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                width: 1,
-            }, MoxelLineTransformation::DefaultShift { reason: "drawing palette defaults" }),
-            resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                style: "None",
-                line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                width: 1,
-            }, MoxelLineTransformation::DefaultShift { reason: "drawing palette defaults" }),
-            resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                style: "Solid",
-                line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                width: 2,
-            }, MoxelLineTransformation::DefaultShift { reason: "drawing palette defaults" }),
-            resolved_moxel_line_from_parents(&lines[0..3], MoxelLine {
-                style: "None",
-                line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
-                width: 1,
-            }, MoxelLineTransformation::Synthesized { reason: "drawing palette defaults" }),
-        ], formats);
+        return finalize_moxel_line_slots(
+            vec![
+                resolved_moxel_line_from_parents(
+                    &lines[0..3],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "drawing palette defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..3],
+                    MoxelLine {
+                        style: "None",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "drawing palette defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..3],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 2,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "drawing palette defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..3],
+                    MoxelLine {
+                        style: "None",
+                        line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "drawing palette defaults",
+                    },
+                ),
+            ],
+            formats,
+        );
     }
     if uses_drawing_line
         && lines.len() >= 2
         && lines.first().is_some_and(|line| line.style == "None")
         && lines.get(1).is_some_and(|line| line.style == "Solid")
     {
-        return finalize_moxel_line_slots(vec![
-            resolved_moxel_line_from_parents(&lines[0..1], MoxelLine {
-                style: "None",
-                line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                width: 1,
-            }, MoxelLineTransformation::DefaultShift { reason: "drawing palette cell default" }),
-            resolved_moxel_line_from_parents(&lines[1..2], MoxelLine {
-                style: "Solid",
-                line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                width: 1,
-            }, MoxelLineTransformation::DefaultShift { reason: "drawing palette cell default" }),
-            resolved_moxel_line_from_parents(&lines[0..2], MoxelLine {
-                style: "None",
-                line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
-                width: 1,
-            }, MoxelLineTransformation::Synthesized { reason: "drawing palette line default" }),
-        ], formats);
+        return finalize_moxel_line_slots(
+            vec![
+                resolved_moxel_line_from_parents(
+                    &lines[0..1],
+                    MoxelLine {
+                        style: "None",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "drawing palette cell default",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[1..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "drawing palette cell default",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..2],
+                    MoxelLine {
+                        style: "None",
+                        line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "drawing palette line default",
+                    },
+                ),
+            ],
+            formats,
+        );
     }
     if lines.len() >= 3
         && lines.first().is_some_and(|line| line.style == "None")
@@ -2639,18 +2806,33 @@ fn parse_moxel_lines_with_raw_spans(
         && used_indexes.contains(&0)
         && used_indexes.contains(&1)
     {
-        return finalize_moxel_line_slots(vec![
-            resolved_moxel_line_from_parents(&lines[1..2], MoxelLine {
-                style: "Solid",
-                line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                width: 1,
-            }, MoxelLineTransformation::DefaultShift { reason: "three-entry default shift" }),
-            resolved_moxel_line_from_parents(&lines[2..3], MoxelLine {
-                style: "Solid",
-                line_type: "v8ui:SpreadsheetDocumentCellLineType",
-                width: 2,
-            }, MoxelLineTransformation::DefaultShift { reason: "three-entry default shift" }),
-        ], formats);
+        return finalize_moxel_line_slots(
+            vec![
+                resolved_moxel_line_from_parents(
+                    &lines[1..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "three-entry default shift",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[2..3],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 2,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "three-entry default shift",
+                    },
+                ),
+            ],
+            formats,
+        );
     }
     if lines.len() >= 2
         && lines.first().is_some_and(|line| line.style == "None")
@@ -2661,11 +2843,44 @@ fn parse_moxel_lines_with_raw_spans(
         && used_indexes.contains(&1)
         && used_indexes.contains(&2)
     {
-        return finalize_moxel_line_slots(vec![
-            resolved_moxel_line_from_parents(&lines[0..1], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 }, MoxelLineTransformation::DefaultShift { reason: "two-entry default shift" }),
-            resolved_moxel_line_from_parents(&lines[1..2], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 2 }, MoxelLineTransformation::DefaultShift { reason: "two-entry default shift" }),
-            resolved_moxel_line_from_parents(&lines[0..2], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 3 }, MoxelLineTransformation::Synthesized { reason: "two-entry default shift" }),
-        ], formats);
+        return finalize_moxel_line_slots(
+            vec![
+                resolved_moxel_line_from_parents(
+                    &lines[0..1],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "two-entry default shift",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[1..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 2,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "two-entry default shift",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 3,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "two-entry default shift",
+                    },
+                ),
+            ],
+            formats,
+        );
     }
     if lines.len() >= 2
         && lines.first().is_some_and(|line| line.style == "None")
@@ -2676,11 +2891,44 @@ fn parse_moxel_lines_with_raw_spans(
         && used_indexes.contains(&1)
         && used_indexes.contains(&2)
     {
-        return finalize_moxel_line_slots(vec![
-            resolved_moxel_line_from_parents(&lines[0..2], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 2 }, MoxelLineTransformation::Synthesized { reason: "unshifted two-entry defaults" }),
-            resolved_moxel_line_from_parents(&lines[0..2], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 }, MoxelLineTransformation::Synthesized { reason: "unshifted two-entry defaults" }),
-            resolved_moxel_line_from_parents(&lines[0..2], MoxelLine { style: "None", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 0 }, MoxelLineTransformation::Synthesized { reason: "unshifted two-entry defaults" }),
-        ], formats);
+        return finalize_moxel_line_slots(
+            vec![
+                resolved_moxel_line_from_parents(
+                    &lines[0..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 2,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "unshifted two-entry defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..2],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "unshifted two-entry defaults",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[0..2],
+                    MoxelLine {
+                        style: "None",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 0,
+                    },
+                    MoxelLineTransformation::Synthesized {
+                        reason: "unshifted two-entry defaults",
+                    },
+                ),
+            ],
+            formats,
+        );
     }
     if lines.len() >= 2
         && lines.first().is_some_and(|line| line.style == "None")
@@ -2690,10 +2938,33 @@ fn parse_moxel_lines_with_raw_spans(
         && used_indexes.contains(&0)
         && used_indexes.contains(&1)
     {
-        return finalize_moxel_line_slots(vec![
-            resolved_moxel_line_from_parents(&lines[0..1], MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 }, MoxelLineTransformation::DefaultShift { reason: "two-line default shift" }),
-            resolved_moxel_line_from_parents(&lines[1..2], MoxelLine { style: "Dotted", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 }, MoxelLineTransformation::DefaultShift { reason: "two-line default shift" }),
-        ], formats);
+        return finalize_moxel_line_slots(
+            vec![
+                resolved_moxel_line_from_parents(
+                    &lines[0..1],
+                    MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "two-line default shift",
+                    },
+                ),
+                resolved_moxel_line_from_parents(
+                    &lines[1..2],
+                    MoxelLine {
+                        style: "Dotted",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    MoxelLineTransformation::DefaultShift {
+                        reason: "two-line default shift",
+                    },
+                ),
+            ],
+            formats,
+        );
     }
     if lines.len() >= 2
         && lines.first().is_some_and(|line| line.style == "None")
@@ -2701,23 +2972,41 @@ fn parse_moxel_lines_with_raw_spans(
         && used_indexes.len() == 1
         && used_indexes.contains(&0)
     {
-        return finalize_moxel_line_slots(vec![resolved_moxel_line_from_parents(
-            &lines[0..1],
-            MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
-            MoxelLineTransformation::DefaultShift { reason: "single default line" },
-        )], formats);
+        return finalize_moxel_line_slots(
+            vec![resolved_moxel_line_from_parents(
+                &lines[0..1],
+                MoxelLine {
+                    style: "Solid",
+                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                    width: 1,
+                },
+                MoxelLineTransformation::DefaultShift {
+                    reason: "single default line",
+                },
+            )],
+            formats,
+        );
     }
     if !lines.is_empty() {
         return finalize_moxel_line_slots(lines, formats);
     }
-    finalize_moxel_line_slots(vec![ResolvedMoxelLine {
-        line: MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
-        raw_parents: Vec::new(),
-        transformations: vec![MoxelLineTransformation::Synthesized { reason: "missing raw palette" }],
-        format_support: Vec::new(),
-        ambiguous: true,
-        fail_closed: true,
-    }], formats)
+    finalize_moxel_line_slots(
+        vec![ResolvedMoxelLine {
+            line: MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
+            raw_parents: Vec::new(),
+            transformations: vec![MoxelLineTransformation::Synthesized {
+                reason: "missing raw palette",
+            }],
+            format_support: Vec::new(),
+            ambiguous: true,
+            fail_closed: true,
+        }],
+        formats,
+    )
 }
 
 fn moxel_line_format_support(
@@ -2735,7 +3024,10 @@ fn moxel_line_format_support(
             (format.drawing_border, MoxelLineBorderSlot::Drawing),
         ] {
             if value == Some(line_index) {
-                support.push(MoxelLineFormatSupport { format_index, border_slot });
+                support.push(MoxelLineFormatSupport {
+                    format_index,
+                    border_slot,
+                });
             }
         }
     }
@@ -4044,8 +4336,8 @@ pub(super) fn parse_moxel_format_table(
     // The palette's count and typed descriptors can satisfy the loose legacy
     // format grammar. A confirmed palette is a structural boundary and is
     // excluded while legacy tables before it remain supported.
-    let palette_span = locate_moxel_style_ref_palette(fields, &BTreeMap::new())
-        .map(|(start, end, _)| start..end);
+    let palette_span =
+        locate_moxel_style_ref_palette(fields, &BTreeMap::new()).map(|(start, end, _)| start..end);
     let palette_after = palette_span.as_ref().map(|span| span.end);
     // New packed bodies place the actual table immediately after the palette;
     // try that structurally confirmed position before legacy global fallback.
@@ -4053,7 +4345,10 @@ pub(super) fn parse_moxel_format_table(
         if index >= fields.len() {
             continue;
         }
-        if palette_span.as_ref().is_some_and(|span| span.contains(&index)) {
+        if palette_span
+            .as_ref()
+            .is_some_and(|span| span.contains(&index))
+        {
             continue;
         }
         if let Some(formats) = parse_moxel_nested_format_table(
@@ -4213,17 +4508,18 @@ pub(super) fn normalize_moxel_single_set_report_header_tail(
         return;
     };
     let tail_start = REPORT_HEADER_TAIL_START.checked_sub(column_formats.len() + 1);
-    let Some(tail) = tail_start.and_then(|start| formats.get(start..start + REPORT_HEADER_TAIL_LEN)) else {
+    let Some(tail) =
+        tail_start.and_then(|start| formats.get(start..start + REPORT_HEADER_TAIL_LEN))
+    else {
         return;
     };
     if column_sets.len() != 1
         || column_formats.len() != 8
         || line.style != "Dotted"
         || line.width != 1
-        || !line
-            .transformations
-            .iter()
-            .any(|transformation| matches!(transformation, MoxelLineTransformation::DefaultShift { .. }))
+        || !line.transformations.iter().any(|transformation| {
+            matches!(transformation, MoxelLineTransformation::DefaultShift { .. })
+        })
         || !tail.iter().all(|format| {
             format.back_color.as_deref() == Some("style:ReportHeaderBackColor")
                 && format.border_color.is_none()
@@ -4235,9 +4531,10 @@ pub(super) fn normalize_moxel_single_set_report_header_tail(
     if let Some(line) = lines.get_mut(1) {
         line.style = "Solid";
         line.width = 2;
-        line.transformations.push(MoxelLineTransformation::PostNormalizer {
-            reason: "Dotted/1 to Solid/2",
-        });
+        line.transformations
+            .push(MoxelLineTransformation::PostNormalizer {
+                reason: "Dotted/1 to Solid/2",
+            });
     }
     for format in formats
         .iter_mut()
@@ -5077,7 +5374,10 @@ fn locate_moxel_style_ref_palette(
         if count > MAX_MOXCEL_STYLE_REFS {
             continue;
         }
-        let Some(end) = start.checked_add(1).and_then(|value| value.checked_add(count)) else {
+        let Some(end) = start
+            .checked_add(1)
+            .and_then(|value| value.checked_add(count))
+        else {
             continue;
         };
         let Some(entries) = fields.get(start + 1..end) else {
@@ -5199,8 +5499,9 @@ pub(super) fn parse_moxel_style_ref_slot(
             .filter(|value| value.trim().parse::<u32>().is_ok())
             .and_then(|value| parse_moxel_style_color(value.trim()))
             .map(Some),
-        "1" => (payload.len() == 1 && payload.first()?.trim().parse::<u32>().is_ok())
-            .then_some(None),
+        "1" => {
+            (payload.len() == 1 && payload.first()?.trim().parse::<u32>().is_ok()).then_some(None)
+        }
         "2" if payload.len() == 1 => payload
             .first()
             .filter(|value| value.trim().parse::<u32>().is_ok())
@@ -8068,12 +8369,12 @@ mod moxel_exact_parity_tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].style, "None");
         assert_eq!(
-            lines[0].raw_parents[0].line_entry_index,
-            0,
+            lines[0].raw_parents[0].line_entry_index, 0,
             "drawing-only normalization records the chosen raw source"
         );
         assert!(lines[0].transformations.iter().any(|transformation| {
-            *transformation == MoxelLineTransformation::DrawingOnlySelectedSource { source_index: 0 }
+            *transformation
+                == MoxelLineTransformation::DrawingOnlySelectedSource { source_index: 0 }
         }));
         assert_eq!(
             lines[0].line_type,
@@ -8097,10 +8398,9 @@ mod moxel_exact_parity_tests {
         let lines = parse_moxel_lines(&["{3,3,{-1}}", "{3,3,{-3}}"], &formats, true);
 
         assert!(lines.iter().any(|line| {
-            line.transformations.iter().any(|transformation| matches!(
-                transformation,
-                MoxelLineTransformation::DefaultShift { .. }
-            )) && !line.raw_parents.is_empty()
+            line.transformations.iter().any(|transformation| {
+                matches!(transformation, MoxelLineTransformation::DefaultShift { .. })
+            }) && !line.raw_parents.is_empty()
         }));
     }
 
@@ -8108,19 +8408,47 @@ mod moxel_exact_parity_tests {
     fn post_normalizer_appends_to_existing_shift_chain() {
         let mut lines = vec![
             ResolvedMoxelLine {
-                line: MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
-                raw_parents: vec![MoxelRawLineParent { raw_entry_index: 1, line_entry_index: 0, span_start: 0, span_end: 0 }],
+                line: MoxelLine {
+                    style: "Solid",
+                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                    width: 1,
+                },
+                raw_parents: vec![MoxelRawLineParent {
+                    raw_entry_index: 1,
+                    line_entry_index: 0,
+                    span_start: 0,
+                    span_end: 0,
+                }],
                 transformations: vec![MoxelLineTransformation::DefaultShift { reason: "fixture" }],
-                format_support: Vec::new(), ambiguous: false, fail_closed: false,
+                format_support: Vec::new(),
+                ambiguous: false,
+                fail_closed: false,
             },
             ResolvedMoxelLine {
-                line: MoxelLine { style: "Dotted", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
-                raw_parents: vec![MoxelRawLineParent { raw_entry_index: 2, line_entry_index: 1, span_start: 0, span_end: 0 }],
+                line: MoxelLine {
+                    style: "Dotted",
+                    line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                    width: 1,
+                },
+                raw_parents: vec![MoxelRawLineParent {
+                    raw_entry_index: 2,
+                    line_entry_index: 1,
+                    span_start: 0,
+                    span_end: 0,
+                }],
                 transformations: vec![MoxelLineTransformation::DefaultShift { reason: "fixture" }],
-                format_support: Vec::new(), ambiguous: false, fail_closed: false,
+                format_support: Vec::new(),
+                ambiguous: false,
+                fail_closed: false,
             },
         ];
-        let column_sets = vec![MoxelColumnSet { id: None, default_format_index: None, source_default_format_index: None, size: 0, columns: Vec::new() }];
+        let column_sets = vec![MoxelColumnSet {
+            id: None,
+            default_format_index: None,
+            source_default_format_index: None,
+            size: 0,
+            columns: Vec::new(),
+        }];
         let column_formats = vec![MoxelFormat::default(); 8];
         let mut formats = vec![MoxelFormat::default(); 50];
         for format in formats.iter_mut().skip(39).take(11) {
@@ -8137,7 +8465,13 @@ mod moxel_exact_parity_tests {
         assert_eq!(lines[1].style, "Solid");
         assert_eq!(lines[1].width, 2);
         assert_eq!(lines[1].raw_parents[0].raw_entry_index, 2);
-        assert!(matches!(lines[1].transformations.as_slice(), [MoxelLineTransformation::DefaultShift { .. }, MoxelLineTransformation::PostNormalizer { .. }]));
+        assert!(matches!(
+            lines[1].transformations.as_slice(),
+            [
+                MoxelLineTransformation::DefaultShift { .. },
+                MoxelLineTransformation::PostNormalizer { .. }
+            ]
+        ));
     }
 
     #[test]
@@ -8260,11 +8594,19 @@ mod moxel_exact_parity_tests {
         );
         assert_eq!(lines[1].style, "Solid");
         assert_eq!(lines[1].width, 2);
-        assert_eq!(formats[38].back_color.as_deref(), Some("style:ReportHeaderBackColor"));
-        assert!(formats[39..50]
-            .iter()
-            .all(|format| format.back_color.as_deref() == Some("#F4ECC5")));
-        assert_eq!(formats[50].back_color.as_deref(), Some("style:ReportHeaderBackColor"));
+        assert_eq!(
+            formats[38].back_color.as_deref(),
+            Some("style:ReportHeaderBackColor")
+        );
+        assert!(
+            formats[39..50]
+                .iter()
+                .all(|format| format.back_color.as_deref() == Some("#F4ECC5"))
+        );
+        assert_eq!(
+            formats[50].back_color.as_deref(),
+            Some("style:ReportHeaderBackColor")
+        );
         assert_eq!(
             lines[1].raw_parents,
             vec![MoxelRawLineParent {
@@ -8324,18 +8666,31 @@ mod moxel_exact_parity_tests {
                 .collect::<Vec<_>>(),
             vec!["default_shift", "post_normalizer"]
         );
-        assert!(events.iter().all(|event| !event.ambiguous && !event.fail_closed));
+        assert!(
+            events
+                .iter()
+                .all(|event| !event.ambiguous && !event.fail_closed)
+        );
     }
 
     #[test]
     fn duplicate_raw_lines_stay_distinct_without_value_matching() {
         let formats = vec![
-            MoxelFormat { border: Some(0), ..MoxelFormat::default() },
-            MoxelFormat { border: Some(1), ..MoxelFormat::default() },
+            MoxelFormat {
+                border: Some(0),
+                ..MoxelFormat::default()
+            },
+            MoxelFormat {
+                border: Some(1),
+                ..MoxelFormat::default()
+            },
         ];
         let source = "{8,{3,3,{-3}},{3,3,{-3}}}";
         let raw_spans = split_1c_braced_fields_with_spans(source, 0).unwrap();
-        let fields = raw_spans.iter().map(|(value, _, _)| *value).collect::<Vec<_>>();
+        let fields = raw_spans
+            .iter()
+            .map(|(value, _, _)| *value)
+            .collect::<Vec<_>>();
         let lines = parse_moxel_lines_with_raw_spans(&fields, &raw_spans, &formats, false);
 
         assert_eq!(lines.len(), 2);
@@ -8377,24 +8732,58 @@ mod moxel_exact_parity_tests {
         }
 
         let line = ResolvedMoxelLine {
-            line: MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
+            line: MoxelLine {
+                style: "Solid",
+                line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                width: 1,
+            },
             // Large evidence would be cloned by `MoxelLineTraceEvent::from`;
             // it must remain untouched for entries after the rejected reserve.
-            raw_parents: vec![MoxelRawLineParent { raw_entry_index: 0, line_entry_index: 0, span_start: 0, span_end: 1_000_000 }],
-            transformations: Vec::new(), format_support: Vec::new(), ambiguous: false, fail_closed: false,
+            raw_parents: vec![MoxelRawLineParent {
+                raw_entry_index: 0,
+                line_entry_index: 0,
+                span_start: 0,
+                span_end: 1_000_000,
+            }],
+            transformations: Vec::new(),
+            format_support: Vec::new(),
+            ambiguous: false,
+            fail_closed: false,
         };
-        let sink = BoundedSink { remaining: Cell::new(1), reserve_calls: Cell::new(0), events: RefCell::new(Vec::new()) };
-        trace_final_moxel_lines(&[line.clone(), line, ResolvedMoxelLine {
-            line: MoxelLine { style: "Solid", line_type: "v8ui:SpreadsheetDocumentCellLineType", width: 1 },
-            raw_parents: Vec::new(), transformations: Vec::new(), format_support: Vec::new(), ambiguous: false, fail_closed: false,
-        }], Some(&sink));
+        let sink = BoundedSink {
+            remaining: Cell::new(1),
+            reserve_calls: Cell::new(0),
+            events: RefCell::new(Vec::new()),
+        };
+        trace_final_moxel_lines(
+            &[
+                line.clone(),
+                line,
+                ResolvedMoxelLine {
+                    line: MoxelLine {
+                        style: "Solid",
+                        line_type: "v8ui:SpreadsheetDocumentCellLineType",
+                        width: 1,
+                    },
+                    raw_parents: Vec::new(),
+                    transformations: Vec::new(),
+                    format_support: Vec::new(),
+                    ambiguous: false,
+                    fail_closed: false,
+                },
+            ],
+            Some(&sink),
+        );
         assert_eq!(sink.reserve_calls.get(), 2);
         assert_eq!(sink.events.borrow().len(), 1);
     }
 
     #[test]
     fn truncation_marks_survivors_without_reassigning_parents() {
-        let formats = vec![MoxelFormat { border: Some(0), ..MoxelFormat::default() }];
+        let formats = vec![MoxelFormat {
+            border: Some(0),
+            ..MoxelFormat::default()
+        }];
         let lines = parse_moxel_lines(
             &["{3,3,{-1}}", "{3,3,{-3}}", "{3,3,{-10}}", "{3,3,{-3}}"],
             &formats,
@@ -8403,7 +8792,9 @@ mod moxel_exact_parity_tests {
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].raw_parents[0].line_entry_index, 0);
-        assert!(lines.iter().all(|line| line.transformations.iter().any(|transformation| matches!(transformation, MoxelLineTransformation::Truncated { .. }))));
+        assert!(lines.iter().all(|line| line.transformations.iter().any(
+            |transformation| matches!(transformation, MoxelLineTransformation::Truncated { .. })
+        )));
     }
 
     #[test]
