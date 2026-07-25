@@ -46,7 +46,9 @@ jobs:
 
       - name: Enforce EDT-derived corpus governance
         shell: pwsh
-        run: ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
+        run: |
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot . -SelfTest
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
 
       - name: Enforce physical-adapter policy guard
         shell: pwsh
@@ -96,7 +98,29 @@ jobs:
 
       - name: Enforce EDT-derived corpus governance
         shell: pwsh
-        run: ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
+        run: |
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot . -SelfTest
+          ./tools/validate-edt-corpus.ps1 -RepositoryRoot .
+
+      - name: Test EDT corpus governance under Windows PowerShell
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $pester = Get-Module -ListAvailable Pester |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+          if ($null -eq $pester) {
+            throw 'Pester is required for the Windows PowerShell governance test.'
+          }
+          Import-Module $pester.Path
+          if ($pester.Version.Major -ge 5) {
+            $result = Invoke-Pester -Path tests/scripts/validate-edt-corpus.Tests.ps1 -PassThru
+          } else {
+            $result = Invoke-Pester -Script tests/scripts/validate-edt-corpus.Tests.ps1 -PassThru
+          }
+          if ($result.FailedCount -ne 0) {
+            exit 1
+          }
 
       - name: Enforce physical-adapter policy guard
         shell: pwsh

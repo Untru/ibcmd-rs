@@ -339,9 +339,9 @@ pub enum WriterPolicy {
         owner_successor_qname: String,
         #[serde(rename = "emptyCollection")]
         empty_collection: FormChoiceParametersEmptyCollection,
-        item: FormChoiceParameterItemPolicy,
+        item: Box<FormChoiceParameterItemPolicy>,
         #[serde(rename = "fixedArray")]
-        fixed_array: FormChoiceParameterFixedArrayPolicy,
+        fixed_array: Box<FormChoiceParameterFixedArrayPolicy>,
     },
 }
 
@@ -1820,7 +1820,7 @@ fn exact_form_choice_parameters_policy() -> WriterPolicy {
         owner_predecessor_qname: "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameterLinks".to_owned(),
         owner_successor_qname: "{http://v8.1c.ru/8.3/xcf/logform}AvailableTypes".to_owned(),
         empty_collection: FormChoiceParametersEmptyCollection::OmitWhenWriteDefaultFalse,
-        item: FormChoiceParameterItemPolicy {
+        item: Box::new(FormChoiceParameterItemPolicy {
             item_qname: "{http://v8.1c.ru/8.2/managed-application/core}item".to_owned(),
             name_attribute_qname: "{}name".to_owned(),
             value_qname: "{http://v8.1c.ru/8.2/managed-application/core}value".to_owned(),
@@ -1833,8 +1833,8 @@ fn exact_form_choice_parameters_policy() -> WriterPolicy {
             scalar_value_qname: "{http://v8.1c.ru/8.3/xcf/logform}Value".to_owned(),
             boolean_xsi_type: "xs:boolean".to_owned(),
             design_time_ref_xsi_type: "xr:DesignTimeRef".to_owned(),
-        },
-        fixed_array: FormChoiceParameterFixedArrayPolicy {
+        }),
+        fixed_array: Box::new(FormChoiceParameterFixedArrayPolicy {
             xsi_type: "v8:FixedArray".to_owned(),
             item_qname: "{http://v8.1c.ru/8.1/data/core}Value".to_owned(),
             item_xsi_type: "FormChoiceListDesTimeValue".to_owned(),
@@ -1842,7 +1842,7 @@ fn exact_form_choice_parameters_policy() -> WriterPolicy {
                 FormChoiceParameterValuePart::Presentation,
                 FormChoiceParameterValuePart::Value,
             ],
-        },
+        }),
     }
 }
 
@@ -1948,8 +1948,8 @@ impl FormChoiceParametersWriterEvidence {
             || facts.owner_order.predecessor_qname != owner_predecessor_qname
             || facts.owner_order.successor_qname != owner_successor_qname
             || facts.writer.empty_collection != empty_collection
-            || facts.writer.item != item
-            || facts.writer.fixed_array != fixed_array
+            || &facts.writer.item != item.as_ref()
+            || &facts.writer.fixed_array != fixed_array.as_ref()
         {
             return Err(invalid(
                 "verified QName, hierarchy, order, or fixed-array facts differ",
@@ -1964,8 +1964,8 @@ impl FormChoiceParametersWriterEvidence {
             owner_predecessor_qname: self.verified_facts.owner_order.predecessor_qname.clone(),
             owner_successor_qname: self.verified_facts.owner_order.successor_qname.clone(),
             empty_collection: self.verified_facts.writer.empty_collection,
-            item: self.verified_facts.writer.item.clone(),
-            fixed_array: self.verified_facts.writer.fixed_array.clone(),
+            item: Box::new(self.verified_facts.writer.item.clone()),
+            fixed_array: Box::new(self.verified_facts.writer.fixed_array.clone()),
         }
     }
 }
@@ -3025,6 +3025,20 @@ mod tests {
         assert_eq!(
             choice_parameters.policy,
             Some(exact_form_choice_parameters_policy())
+        );
+        let bundled_json: serde_json::Value =
+            serde_json::from_str(BUNDLED_WRITER_RULES_JSON).unwrap();
+        let bundled_policy = bundled_json["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|rule| rule["feature"] == "choiceParameters")
+            .unwrap()["policy"]
+            .clone();
+        assert_eq!(
+            serde_json::to_value(choice_parameters.policy.as_ref().unwrap()).unwrap(),
+            bundled_policy,
+            "typed indirection must not change the writer-policy JSON contract"
         );
     }
 

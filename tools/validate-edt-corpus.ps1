@@ -7,6 +7,25 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$script:AbsolutePathPatterns = @(
+    '(?i)(?:^|[^\p{L}\p{N}_])[A-Z]:[\\/]',
+    '(?i)\\\\[^\\\s]+\\[^\s]+',
+    '(?m)(?<![:/])//[^/\s]+/[^\s]+',
+    '(?i)(?<![\p{L}\p{N}_])file:(?:/{1,3})?',
+    '(?m)(?<![\p{L}\p{N}_.:/-])/(?![/\s])'
+)
+
+function Test-StringContainsAbsolutePath {
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$Value)
+
+    foreach ($pattern in $script:AbsolutePathPatterns) {
+        if ($Value -match $pattern) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-NormalizedRelativePath {
     param(
         [Parameter(Mandatory)] [string]$BasePath,
@@ -15,7 +34,23 @@ function Get-NormalizedRelativePath {
 
     $baseFullPath = [System.IO.Path]::GetFullPath($BasePath)
     $fullPath = [System.IO.Path]::GetFullPath($Path)
-    return [System.IO.Path]::GetRelativePath($baseFullPath, $fullPath).Replace('\', '/')
+    $getRelativePath = [System.IO.Path].GetMethod(
+        'GetRelativePath',
+        [type[]]@([string], [string])
+    )
+    if ($null -ne $getRelativePath) {
+        return ([string]$getRelativePath.Invoke($null, @($baseFullPath, $fullPath))).Replace('\', '/')
+    }
+
+    $trimmedBasePath = $baseFullPath.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $baseUri = [System.Uri]::new($trimmedBasePath + [System.IO.Path]::DirectorySeparatorChar)
+    $pathUri = [System.Uri]::new($fullPath)
+    return [System.Uri]::UnescapeDataString(
+        $baseUri.MakeRelativeUri($pathUri).OriginalString
+    ).Replace('\', '/')
 }
 
 function Get-TrackedFiles {
@@ -136,17 +171,8 @@ function Assert-TextContainsPortablePaths {
         [Parameter(Mandatory)] [string]$DisplayPath
     )
 
-    $absolutePathPatterns = @(
-        '(?i)(?:^|[^A-Za-z0-9_])[A-Za-z]:[\\/]',
-        '(?i)\\\\[^\\\s]+\\[^\s]+',
-        '(?i)file:(?:/{1,3})?',
-        '(?m)(?<![A-Za-z0-9_.:/-])/(?![/\s])'
-    )
-
-    foreach ($pattern in $absolutePathPatterns) {
-        if ($Text -match $pattern) {
-            throw "$DisplayPath contains an absolute drive, UNC, POSIX, or file URI path."
-        }
+    if (Test-StringContainsAbsolutePath -Value $Text) {
+        throw "$DisplayPath contains an absolute drive, UNC, POSIX, or file URI path."
     }
 }
 
@@ -158,6 +184,82 @@ function Test-PortableEvidenceSource {
     }
 
     return $Value -notmatch '(?i)(?:^[A-Z]:[\\/]|^\\\\|^file:|^/)'
+}
+
+function ConvertTo-Hashtable {
+    param([AllowNull()] $Value)
+
+    if ($null -eq $Value -or $Value -is [string]) {
+        return $Value
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $table = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $table[$key] = ConvertTo-Hashtable -Value $Value[$key]
+        }
+        return $table
+    }
+
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $table = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $table[$property.Name] = ConvertTo-Hashtable -Value $property.Value
+        }
+        return $table
+    }
+
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = @()
+        foreach ($item in $Value) {
+            $items += ,(ConvertTo-Hashtable -Value $item)
+        }
+        return ,$items
+    }
+
+    return $Value
+}
+
+function Assert-DecodedJsonValueContainsPortablePaths {
+    param(
+        [AllowNull()] [AllowEmptyString()] $Value,
+        [Parameter(Mandatory)] [string]$DisplayPath,
+        [string]$JsonPath = '$'
+    )
+
+    if ($Value -is [string]) {
+        if (Test-StringContainsAbsolutePath -Value $Value) {
+            throw "$DisplayPath contains an absolute drive, UNC, POSIX, or file URI path at $JsonPath."
+        }
+        return
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $propertyIndex = 0
+        foreach ($key in $Value.Keys) {
+            Assert-DecodedJsonValueContainsPortablePaths `
+                -Value ([string]$key) `
+                -DisplayPath $DisplayPath `
+                -JsonPath "$JsonPath.<key[$propertyIndex]>"
+            Assert-DecodedJsonValueContainsPortablePaths `
+                -Value $Value[$key] `
+                -DisplayPath $DisplayPath `
+                -JsonPath "$JsonPath.<value[$propertyIndex]>"
+            $propertyIndex++
+        }
+        return
+    }
+
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $index = 0
+        foreach ($item in $Value) {
+            Assert-DecodedJsonValueContainsPortablePaths `
+                -Value $item `
+                -DisplayPath $DisplayPath `
+                -JsonPath "$JsonPath[$index]"
+            $index++
+        }
+    }
 }
 
 function Test-HasVerifiedProvenance {
@@ -242,11 +344,23 @@ function Assert-EdtCorpusFile {
     Assert-TextContainsPortablePaths -Text $text -DisplayPath $DisplayPath
 
     try {
-        $document = $text | ConvertFrom-Json -AsHashtable -Depth 100
+        $convertFromJsonParameters = @{}
+        $convertFromJsonCommand = Get-Command ConvertFrom-Json
+        if ($convertFromJsonCommand.Parameters.ContainsKey('AsHashtable')) {
+            $convertFromJsonParameters['AsHashtable'] = $true
+        }
+        if ($convertFromJsonCommand.Parameters.ContainsKey('Depth')) {
+            $convertFromJsonParameters['Depth'] = 100
+        }
+        $document = ConvertTo-Hashtable -Value (
+            $text | ConvertFrom-Json @convertFromJsonParameters
+        )
     }
     catch {
         throw "$DisplayPath is not valid JSON: $($_.Exception.Message)"
     }
+
+    Assert-DecodedJsonValueContainsPortablePaths -Value $document -DisplayPath $DisplayPath
 
     if (-not ($document -is [System.Collections.IDictionary])) {
         throw "$DisplayPath must contain a JSON object."
@@ -296,10 +410,19 @@ function Invoke-SelfTest {
     $fixtureRoot = Join-Path $Root 'tests/fixtures/schema-governance'
     $cases = @(
         @{ Name = 'valid'; MustPass = $true },
-        @{ Name = 'absolute-path'; MustPass = $false },
-        @{ Name = 'unc-path'; MustPass = $false },
-        @{ Name = 'file-uri'; MustPass = $false },
-        @{ Name = 'posix-path'; MustPass = $false },
+        @{ Name = 'legitimate-profile-identifiers'; MustPass = $true },
+        @{ Name = 'absolute-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'unc-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'file-uri'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'posix-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'escaped-posix-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'escaped-unc-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'escaped-file-uri'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'forward-unc-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'escaped-absolute-key'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'delimited-escaped-posix-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'delimited-escaped-unc-path'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
+        @{ Name = 'delimited-escaped-file-uri'; MustPass = $false; ExpectedError = 'contains an absolute drive, UNC, POSIX, or file URI path' },
         @{ Name = 'missing-provenance'; MustPass = $false },
         @{ Name = 'fake-provenance'; MustPass = $false }
     )
@@ -362,27 +485,36 @@ function Invoke-SelfTest {
         $targetPath = Join-Path $temporaryDirectory 'target.json'
         $linkPath = Join-Path $temporaryDirectory 'linked.json'
         [System.IO.File]::WriteAllText($targetPath, '{}', [System.Text.UTF8Encoding]::new($false))
-        try {
-            [System.IO.File]::CreateSymbolicLink($linkPath, $targetPath) | Out-Null
-            $rejected = $false
-            try {
-                Invoke-EdtCorpusValidation -Files @($linkPath) -DisplayRoot $temporaryDirectory -CheckPayloadOnly
-            }
-            catch {
-                $rejected = $true
-            }
-            if (-not $rejected) {
-                throw 'Self-test symlink was not rejected.'
-            }
-        }
-        catch [System.PlatformNotSupportedException] {
+        $createSymbolicLink = [System.IO.File].GetMethod(
+            'CreateSymbolicLink',
+            [type[]]@([string], [string])
+        )
+        if ($null -eq $createSymbolicLink) {
             Write-Host 'Symlink self-test skipped: symbolic links are unsupported.'
         }
-        catch [System.UnauthorizedAccessException] {
-            Write-Host 'Symlink self-test skipped: symbolic-link permission is unavailable.'
-        }
-        catch [System.IO.IOException] {
-            Write-Host 'Symlink self-test skipped: symbolic-link creation is unavailable.'
+        else {
+            try {
+                [System.IO.File]::CreateSymbolicLink($linkPath, $targetPath) | Out-Null
+                $rejected = $false
+                try {
+                    Invoke-EdtCorpusValidation -Files @($linkPath) -DisplayRoot $temporaryDirectory -CheckPayloadOnly
+                }
+                catch {
+                    $rejected = $true
+                }
+                if (-not $rejected) {
+                    throw 'Self-test symlink was not rejected.'
+                }
+            }
+            catch [System.PlatformNotSupportedException] {
+                Write-Host 'Symlink self-test skipped: symbolic links are unsupported.'
+            }
+            catch [System.UnauthorizedAccessException] {
+                Write-Host 'Symlink self-test skipped: symbolic-link permission is unavailable.'
+            }
+            catch [System.IO.IOException] {
+                Write-Host 'Symlink self-test skipped: symbolic-link creation is unavailable.'
+            }
         }
     }
     finally {
