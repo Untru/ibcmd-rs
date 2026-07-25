@@ -5755,11 +5755,13 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
     let type_index = BTreeMap::new();
     let object_refs = BTreeMap::new();
     let dcs_type_index = DcsTypeIndex::new();
+    let type_index_collisions = BTreeSet::new();
     let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
     let legacy = extract_form_body_xml_from_body(&body, &type_index, &object_refs).unwrap();
     let sink = Sink(std::cell::RefCell::new(Vec::new()));
     let context = FormParseContext::new(
         &type_index,
+        &type_index_collisions,
         &dcs_type_index,
         &object_refs,
         &information_register_field_refs,
@@ -6408,6 +6410,8 @@ fn extracts_form_child_items_from_layout_pairs() {
         &layout_fields,
         &attributes,
         &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
         &object_refs,
         &indexes,
         None,
@@ -7645,8 +7649,16 @@ fn extracts_wrapper55_table_user_settings_group() {
     let fields = split_1c_braced_fields(&layout, 0).unwrap();
 
     let indexes = collect_form_child_item_indexes(&fields, &attributes);
-    let items =
-        extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new(), &indexes, None);
+    let items = extract_form_child_items(
+        &fields,
+        &attributes,
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &indexes,
+        None,
+    );
 
     let table = items.iter().find(|item| item.tag == "Table").unwrap();
     assert_eq!(table.user_settings_group.as_deref(), Some("SettingsGroup"));
@@ -14082,6 +14094,80 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
 }
 
 #[test]
+fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let value_id = "22222222-2222-4222-8222-222222222222";
+    let item = format!(
+        r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,0,{{"U"}},{type_id},00000000-0000-0000-0000-000000000000,{{1,1,{{"en","No value"}}}}}}}}"##
+    );
+    let type_index = BTreeMap::from([(
+        type_id.to_string(),
+        "cfg:EnumRef.SyntheticStatus".to_string(),
+    )]);
+
+    let parsed = parse_form_input_field_choice_list_item(
+        &item,
+        &type_index,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.value,
+        FormChoiceListValue::DesignTimeRef("Enum.SyntheticStatus.EmptyRef".to_string())
+    );
+
+    let choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![parsed],
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    validate_canonical_form_choice_list(&choice_list).unwrap();
+    let xml = format_form_choice_list_xml(&choice_list, 1).unwrap();
+    assert!(
+        xml.contains(r#"<Value xsi:type="xr:DesignTimeRef">Enum.SyntheticStatus.EmptyRef</Value>"#)
+    );
+
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &item,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &item,
+            &type_index,
+            &BTreeSet::from([type_id.to_string()]),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let invalid_reverse_pair = format!(
+        r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,0,{{"U"}},00000000-0000-0000-0000-000000000000,{value_id},{{1,1,{{"en","Invalid"}}}}}}}}"##
+    );
+    let object_refs = BTreeMap::from([(
+        value_id.to_string(),
+        "Enum.SyntheticStatus.EnumValue.Active".to_string(),
+    )]);
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &invalid_reverse_pair,
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_payload() {
     let provenance = FormChoiceListRawProvenance {
         layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
@@ -14111,6 +14197,26 @@ fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_paylo
 \t\t</xr:Item>\r\n\
 \t</ChoiceList>\r\n"
     );
+
+    let string_choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![
+            FormChoiceListItem {
+                presentation_present: true,
+                presentation: Vec::new(),
+                value: FormChoiceListValue::String(String::new()),
+            },
+            FormChoiceListItem {
+                presentation_present: true,
+                presentation: Vec::new(),
+                value: FormChoiceListValue::String("text".to_owned()),
+            },
+        ],
+        provenance,
+    };
+    let string_xml = format_form_choice_list_xml(&string_choice_list, 1).unwrap();
+    assert!(string_xml.contains("\t\t\t\t<Value xsi:type=\"xs:string\"/>\r\n"));
+    assert!(string_xml.contains("\t\t\t\t<Value xsi:type=\"xs:string\">text</Value>\r\n"));
+    assert!(!string_xml.contains("<Value xsi:type=\"xs:string\"></Value>"));
 
     let empty = CanonicalFormChoiceList::Empty { provenance };
     validate_canonical_form_choice_list(&empty).unwrap();

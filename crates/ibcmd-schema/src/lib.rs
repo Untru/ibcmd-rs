@@ -27,6 +27,15 @@ pub const BUNDLED_PACKAGE_FEATURES_JSON: &str =
 pub const BUNDLED_FEATURE_SEMANTICS_JSON: &str =
     include_str!("../data/edt-2025.2.3-feature-semantics.json");
 
+/// Runtime projection containing only the model fact required by the verified
+/// Form `ListSettings` tail policy.
+///
+/// Keeping this projection separate prevents the complete EDT research corpus
+/// from becoming product-binary payload. Schema tests prove that the projection
+/// is structurally identical to the corresponding parsed feature.
+const BUNDLED_DCS_LIST_SETTINGS_FEATURE_SEMANTICS_JSON: &str =
+    include_str!("../data/edt-2025.2.3-dcs-list-settings-feature-semantics.json");
+
 /// Embedded exhaustive canonical-model implementation coverage.
 pub const BUNDLED_CANONICAL_COVERAGE_JSON: &str =
     include_str!("../data/edt-2025.2.3-canonical-coverage.json");
@@ -305,6 +314,8 @@ pub enum WriterPolicy {
         item_order: Vec<FormChoiceListItemPart>,
         #[serde(rename = "emptyCollection")]
         empty_collection: FormChoiceListEmptyCollection,
+        #[serde(rename = "emptyStringValue")]
+        empty_string_value: FormChoiceListEmptyStringValue,
     },
     FormListSettings {
         #[serde(rename = "nullValue")]
@@ -325,6 +336,12 @@ pub enum FormChoiceListItemPart {
 #[serde(rename_all = "kebab-case")]
 pub enum FormChoiceListEmptyCollection {
     WriteWrapperWhenWriteDefault,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormChoiceListEmptyStringValue {
+    SelfClosing,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -2237,6 +2254,10 @@ pub fn bundled_feature_semantics() -> Result<FeatureSemanticsCorpus, SchemaError
     FeatureSemanticsCorpus::parse(BUNDLED_FEATURE_SEMANTICS_JSON)
 }
 
+fn bundled_dcs_list_settings_feature_semantics() -> Result<FeatureSemanticsCorpus, SchemaError> {
+    FeatureSemanticsCorpus::parse(BUNDLED_DCS_LIST_SETTINGS_FEATURE_SEMANTICS_JSON)
+}
+
 pub fn bundled_canonical_coverage() -> Result<CanonicalCoverageCorpus, SchemaError> {
     let coverage = CanonicalCoverageCorpus::parse(BUNDLED_CANONICAL_COVERAGE_JSON)?;
     coverage.validate_against(&bundled_feature_semantics()?)?;
@@ -2260,7 +2281,7 @@ pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPoli
     POLICY
         .get_or_init(|| {
             let evidence = bundled_dcs_writer_evidence()?;
-            let feature_semantics = bundled_feature_semantics()?;
+            let feature_semantics = bundled_dcs_list_settings_feature_semantics()?;
             evidence.form_list_settings_tail_policy(&feature_semantics)
         })
         .clone()
@@ -2450,6 +2471,115 @@ fn validate_count(field: &'static str, expected: usize, actual: usize) -> Result
 mod tests {
     use super::*;
 
+    const FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON: &str =
+        include_str!("../data/edt-2025.2.3-form-choice-list-string-writer-evidence.json");
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceReport {
+        schema_version: u32,
+        source: FormChoiceListStringEvidenceSource,
+        verified_facts: Vec<FormChoiceListStringEvidenceFact>,
+        missing_keys: Vec<serde_json::Value>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceSource {
+        product: String,
+        release: String,
+        root_identity: FormChoiceListStringEvidenceRootIdentity,
+        validated_bundles: Vec<FormChoiceListStringEvidenceBundle>,
+        derivation: String,
+        input_contract: String,
+        invocation: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceRootIdentity {
+        leaf: String,
+        product_version: String,
+        build_id: String,
+        product: String,
+        application: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceBundle {
+        symbolic_name: String,
+        version: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceFact {
+        key: String,
+        value: FormChoiceListStringEvidenceValue,
+        evidence: FormChoiceListStringEvidenceProof,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceValue {
+        model_value_type: String,
+        empty_predicate: String,
+        element: String,
+        xsi_type: String,
+        emission: FormChoiceListEmptyStringValue,
+        delegate_chain: Vec<String>,
+        branch: FormChoiceListStringEvidenceBranch,
+        method_envelopes: Vec<FormChoiceListStringEvidenceMethodEnvelope>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceBranch {
+        string_type_offset: u32,
+        empty_predicate_offset: u32,
+        non_empty_target_offset: u32,
+        empty_element_offset: u32,
+        xsi_type_attribute_offset: u32,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceMethodEnvelope {
+        method: String,
+        descriptor: String,
+        instruction_count: usize,
+        first_offset: u32,
+        last_offset: u32,
+        branch_graph: Vec<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FormChoiceListStringEvidenceProof {
+        kind: String,
+        status: String,
+        sources: Vec<String>,
+        note: String,
+    }
+
+    fn parse_exact_form_choice_list_string_evidence(
+        json: &str,
+    ) -> Result<FormChoiceListStringEvidenceReport, String> {
+        let report: FormChoiceListStringEvidenceReport =
+            serde_json::from_str(json).map_err(|error| error.to_string())?;
+        if report.schema_version != 1
+            || report.source.product != "1C:EDT"
+            || report.source.release != "2025.2.3+30"
+            || !report.missing_keys.is_empty()
+            || report.verified_facts.len() != 1
+            || report.verified_facts[0].key != "form.FormChoiceListDesTimeValue.value.empty-string"
+        {
+            return Err("evidence does not have the exact verified fact envelope".to_owned());
+        }
+        Ok(report)
+    }
+
     #[test]
     fn bundled_inventory_is_complete_and_portable() {
         let inventory = bundled_model_inventory().unwrap();
@@ -2489,6 +2619,7 @@ mod tests {
                     FormChoiceListItemPart::Value,
                 ],
                 empty_collection: FormChoiceListEmptyCollection::WriteWrapperWhenWriteDefault,
+                empty_string_value: FormChoiceListEmptyStringValue::SelfClosing,
             })
         );
 
@@ -2505,6 +2636,197 @@ mod tests {
                 null_value: FormListSettingsNullValue::Omit,
                 delegate: "DcsV8Serializer.writeSettings".to_owned(),
             })
+        );
+    }
+
+    #[test]
+    fn form_choice_list_empty_string_policy_matches_exact_research_evidence() {
+        let report = parse_exact_form_choice_list_string_evidence(
+            FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON,
+        )
+        .expect("strict Form choice-list string evidence");
+        assert_eq!(report.schema_version, 1);
+        assert_eq!(report.source.product, "1C:EDT");
+        assert_eq!(report.source.release, "2025.2.3+30");
+        assert_eq!(
+            report.source.root_identity.leaf,
+            "1c-edt-2025.2.3+30-x86_64"
+        );
+        assert_eq!(report.source.root_identity.product_version, "2025.2.3");
+        assert_eq!(report.source.root_identity.build_id, "2025.2.3.30");
+        assert_eq!(
+            report.source.root_identity.product,
+            "com._1c.g5.v8.dt.product.application.rcp"
+        );
+        assert_eq!(
+            report.source.root_identity.application,
+            "org.eclipse.ui.ide.workbench"
+        );
+        assert_eq!(report.source.validated_bundles.len(), 2);
+        assert_eq!(
+            (
+                report.source.validated_bundles[0].symbolic_name.as_str(),
+                report.source.validated_bundles[0].version.as_str(),
+            ),
+            ("com._1c.g5.v8.dt.form.export.xml", "10.1.0.v202602241426",)
+        );
+        assert_eq!(
+            (
+                report.source.validated_bundles[1].symbolic_name.as_str(),
+                report.source.validated_bundles[1].version.as_str(),
+            ),
+            ("com._1c.g5.v8.dt.export.xml", "13.0.100.v202602241426",)
+        );
+        assert!(!report.source.derivation.trim().is_empty());
+        assert!(!report.source.input_contract.trim().is_empty());
+        assert!(!report.source.invocation.trim().is_empty());
+        assert!(report.missing_keys.is_empty());
+        assert_eq!(report.verified_facts.len(), 1);
+
+        let fact = &report.verified_facts[0];
+        assert_eq!(
+            fact.key,
+            "form.FormChoiceListDesTimeValue.value.empty-string"
+        );
+        assert_eq!(fact.value.model_value_type, "mcore:StringValue");
+        assert_eq!(fact.value.empty_predicate, "Strings.isNullOrEmpty");
+        assert_eq!(fact.value.element, "feature QName");
+        assert_eq!(fact.value.xsi_type, "xs:string");
+        assert_eq!(
+            fact.value.delegate_chain,
+            [
+                "FormChoiceListDesTimeValueWriter.write",
+                "FormSmartFeatureWriter.write",
+                "FormValueWriter.writeValue",
+                "ValueWriter.writeValue",
+                "ExportXmlStreamWriter.writeEmptyElement",
+                "XMLStreamWriter.writeEmptyElement",
+            ]
+        );
+        assert_eq!(fact.value.branch.string_type_offset, 144);
+        assert_eq!(fact.value.branch.empty_predicate_offset, 163);
+        assert_eq!(fact.value.branch.non_empty_target_offset, 187);
+        assert_eq!(fact.value.branch.empty_element_offset, 171);
+        assert_eq!(fact.value.branch.xsi_type_attribute_offset, 181);
+        assert_eq!(fact.value.method_envelopes.len(), 6);
+        let feature_descriptor = "(Lcom/_1c/g5/v8/dt/export/xml/writer/ExportXmlStreamWriter;Lorg/eclipse/emf/ecore/EObject;Lorg/eclipse/emf/ecore/EStructuralFeature;ZLcom/_1c/g5/v8/dt/export/xml/IExportContext;)V";
+        let value_descriptor = "(Lcom/_1c/g5/v8/dt/export/xml/writer/ExportXmlStreamWriter;Ljava/lang/Object;Ljavax/xml/namespace/QName;ZLorg/eclipse/emf/ecore/EStructuralFeature;Lcom/_1c/g5/v8/dt/export/xml/IExportContext;)V";
+        let expected_envelopes = [
+            (
+                "FormChoiceListDesTimeValueWriter.write",
+                feature_descriptor,
+                108,
+                253,
+                8,
+            ),
+            (
+                "FormSmartFeatureWriter.write",
+                feature_descriptor,
+                90,
+                209,
+                11,
+            ),
+            (
+                "FormSmartFeatureWriter.fillSpecialClassifierWriters",
+                "()Lcom/google/common/collect/ImmutableMap;",
+                165,
+                360,
+                0,
+            ),
+            ("FormValueWriter.writeValue", value_descriptor, 125, 314, 14),
+            ("ValueWriter.writeValue", value_descriptor, 567, 1345, 64),
+            (
+                "ExportXmlStreamWriter.writeEmptyElement",
+                "(Ljavax/xml/namespace/QName;)V",
+                21,
+                42,
+                1,
+            ),
+        ];
+        for (envelope, (method, descriptor, count, last_offset, branch_count)) in
+            fact.value.method_envelopes.iter().zip(expected_envelopes)
+        {
+            assert_eq!(envelope.method, method);
+            assert_eq!(envelope.descriptor, descriptor);
+            assert_eq!(envelope.instruction_count, count);
+            assert_eq!(envelope.first_offset, 0);
+            assert_eq!(envelope.last_offset, last_offset);
+            assert_eq!(envelope.branch_graph.len(), branch_count);
+        }
+        assert_eq!(
+            fact.evidence.kind,
+            "javap-v-exact-method-control-flow-constant-pool"
+        );
+        assert_eq!(fact.evidence.status, "verified");
+        assert_eq!(fact.evidence.sources.len(), 7);
+        assert!(!fact.evidence.note.trim().is_empty());
+        assert!(fact.evidence.sources.iter().all(|source| {
+            source == "tools/report-edt-form-choice-list-string-writer-evidence.ps1"
+                || source.starts_with("edt-derived://2025.2.3+30/")
+        }));
+
+        let corpus = bundled_writer_rules().unwrap();
+        let policy = corpus
+            .exact_rule(WriterRuleKey {
+                source_release: &report.source.release,
+                model_type: "FormChoiceList",
+                feature: "values",
+            })
+            .unwrap()
+            .policy
+            .as_ref()
+            .expect("verified choice-list writer policy");
+        let WriterPolicy::FormChoiceList {
+            empty_string_value, ..
+        } = policy
+        else {
+            panic!("unexpected choice-list writer policy kind");
+        };
+        assert_eq!(*empty_string_value, fact.value.emission);
+
+        let raw: serde_json::Value =
+            serde_json::from_str(FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON).unwrap();
+        let mut extra_field = raw.clone();
+        extra_field["unexpected"] = serde_json::json!(true);
+        assert!(
+            parse_exact_form_choice_list_string_evidence(
+                &serde_json::to_string(&extra_field).unwrap()
+            )
+            .is_err()
+        );
+
+        let mut missing_emission = raw.clone();
+        missing_emission["verifiedFacts"][0]["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("emission");
+        assert!(
+            parse_exact_form_choice_list_string_evidence(
+                &serde_json::to_string(&missing_emission).unwrap()
+            )
+            .is_err()
+        );
+
+        let mut other_emission = raw.clone();
+        other_emission["verifiedFacts"][0]["value"]["emission"] = serde_json::json!("paired");
+        assert!(
+            parse_exact_form_choice_list_string_evidence(
+                &serde_json::to_string(&other_emission).unwrap()
+            )
+            .is_err()
+        );
+
+        let mut extra_fact = raw;
+        let duplicate = extra_fact["verifiedFacts"][0].clone();
+        extra_fact["verifiedFacts"]
+            .as_array_mut()
+            .unwrap()
+            .push(duplicate);
+        assert!(
+            parse_exact_form_choice_list_string_evidence(
+                &serde_json::to_string(&extra_fact).unwrap()
+            )
+            .is_err()
         );
     }
 
@@ -2544,6 +2866,39 @@ mod tests {
             }),
             Err(WriterRuleLookupError::Unverified { .. })
         ));
+
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_WRITER_RULES_JSON).expect("bundled writer rules JSON");
+        let choice_index = raw["rules"]
+            .as_array()
+            .and_then(|rules| {
+                rules
+                    .iter()
+                    .position(|rule| rule["id"] == "form.choice-list.design-time-value")
+            })
+            .expect("choice-list writer rule");
+
+        let mut missing_empty_string = raw.clone();
+        missing_empty_string["rules"][choice_index]["policy"]
+            .as_object_mut()
+            .expect("choice-list writer policy")
+            .remove("emptyStringValue");
+        assert!(
+            WriterRuleCorpus::parse(
+                &serde_json::to_string(&missing_empty_string).expect("mutated JSON")
+            )
+            .is_err()
+        );
+
+        let mut unsupported_empty_string = raw;
+        unsupported_empty_string["rules"][choice_index]["policy"]["emptyStringValue"] =
+            serde_json::json!("paired");
+        assert!(
+            WriterRuleCorpus::parse(
+                &serde_json::to_string(&unsupported_empty_string).expect("mutated JSON")
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -3041,7 +3396,7 @@ mod tests {
     #[test]
     fn bundled_dcs_writer_evidence_exposes_only_the_verified_tail() {
         let corpus = bundled_dcs_writer_evidence().unwrap();
-        let feature_semantics = bundled_feature_semantics().unwrap();
+        let feature_semantics = bundled_dcs_list_settings_feature_semantics().unwrap();
         let policy = corpus
             .form_list_settings_tail_policy(&feature_semantics)
             .unwrap();
@@ -3059,6 +3414,99 @@ mod tests {
         assert_eq!(policy.items_view_mode_default(), "QuickAccess");
         assert_eq!(policy.items_user_setting_id_default(), "");
         assert_eq!(corpus.missing_keys.len(), 4);
+    }
+
+    #[test]
+    fn bundled_dcs_runtime_feature_slice_matches_full_research_corpus() {
+        let runtime = bundled_dcs_list_settings_feature_semantics().unwrap();
+        let full = bundled_feature_semantics().unwrap();
+        let runtime_raw = serde_json::from_str::<serde_json::Value>(
+            BUNDLED_DCS_LIST_SETTINGS_FEATURE_SEMANTICS_JSON,
+        )
+        .unwrap();
+        let typed_runtime_raw = serde_json::to_value(&runtime).unwrap();
+        assert_eq!(runtime_raw, typed_runtime_raw);
+        let is_exact_typed_projection =
+            |raw: &serde_json::Value, parsed: &FeatureSemanticsCorpus| {
+                raw == &serde_json::to_value(parsed).unwrap()
+            };
+
+        let mut root_extra = runtime_raw.clone();
+        root_extra["unexpected"] = serde_json::json!("payload");
+        let root_extra_parsed =
+            FeatureSemanticsCorpus::parse(&serde_json::to_string(&root_extra).unwrap()).unwrap();
+        assert!(!is_exact_typed_projection(&root_extra, &root_extra_parsed));
+
+        let mut nested_extra = runtime_raw.clone();
+        nested_extra["packages"][0]["classifiers"][0]["features"][0]["unexpected"] =
+            serde_json::json!("payload");
+        let nested_extra_parsed =
+            FeatureSemanticsCorpus::parse(&serde_json::to_string(&nested_extra).unwrap()).unwrap();
+        assert!(!is_exact_typed_projection(
+            &nested_extra,
+            &nested_extra_parsed
+        ));
+
+        assert_eq!(runtime.schema_version, 1);
+        assert_eq!(runtime.source.product, "1C:EDT");
+        assert_eq!(runtime.source.release, "2025.2.3+30");
+        assert_eq!(runtime.source.product, full.source.product);
+        assert_eq!(runtime.source.release, full.source.release);
+        assert_eq!(
+            runtime.source.derivation,
+            "deterministic runtime projection of the verified Xcore feature semantics corpus"
+        );
+        assert_eq!(
+            runtime.summary,
+            FeatureSemanticsSummary {
+                packages: 1,
+                classifiers: 1,
+                features: 1,
+            }
+        );
+        assert_eq!(runtime.packages.len(), 1);
+        let package = &runtime.packages[0];
+        assert_eq!(package.bundle, "com._1c.g5.v8.dt.dcs.model");
+        assert_eq!(package.resource, "model/settings.xcore");
+        assert_eq!(package.package_name, "com._1c.g5.v8.dt.dcs.model.settings");
+        assert_eq!(package.namespace_uri, DCS_SETTINGS_MODEL_NAMESPACE);
+        assert_eq!(package.classifiers.len(), 1);
+        let classifier = &package.classifiers[0];
+        assert_eq!(classifier.name, DCS_SETTINGS_CLASSIFIER);
+        assert_eq!(classifier.kind, FeatureClassifierKind::Class);
+        assert_eq!(classifier.features.len(), 1);
+        let feature = &classifier.features[0];
+        assert_eq!(feature.name, "itemsViewMode");
+
+        let key = FeatureSemanticKey {
+            namespace_uri: DCS_SETTINGS_MODEL_NAMESPACE.to_owned(),
+            classifier: DCS_SETTINGS_CLASSIFIER.to_owned(),
+            feature: "itemsViewMode".to_owned(),
+        };
+        assert_eq!(Some(feature), full.feature(&key));
+
+        for marker in [
+            b"ibcmd.exe".as_slice(),
+            b"1cv8.exe",
+            b"1cv8c.exe",
+            b"\\1cv8\\",
+            b"/1cv8/",
+            b".jar",
+            b"org.eclipse",
+            b"JNI_CreateJavaVM",
+            b"JNIEnv",
+            b"JavaVM",
+            b"OSGi",
+        ] {
+            assert!(
+                !BUNDLED_DCS_LIST_SETTINGS_FEATURE_SEMANTICS_JSON
+                    .as_bytes()
+                    .windows(marker.len())
+                    .any(|window| window == marker),
+                "runtime DCS feature-semantics slice contains forbidden payload marker `{}`",
+                String::from_utf8_lossy(marker)
+            );
+        }
     }
 
     #[test]

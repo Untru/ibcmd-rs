@@ -1122,6 +1122,7 @@ pub(super) fn write_source_asset(
             };
             let form_context = FormParseContext::new(
                 context.type_index,
+                context.type_index_collisions,
                 context.dcs_type_index,
                 context.object_refs,
                 context.information_register_field_refs,

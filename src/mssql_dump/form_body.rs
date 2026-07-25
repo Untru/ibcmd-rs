@@ -44,8 +44,8 @@ use crate::form_schema::{
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
 use ibcmd_schema::{
-    FormChoiceListEmptyCollection, FormChoiceListItemPart, SchemaError, WriterPolicy,
-    WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+    FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue, FormChoiceListItemPart,
+    SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
 };
 use ibcmd_xml::{DcsListSettingsTailError, emit_form_list_settings_tail};
 use uuid::Uuid;
@@ -77,6 +77,7 @@ const MAX_FORM_SERVER_STATE_XML_BYTES: usize = 64 * 1_048_576;
 /// Form-local indexes deliberately remain inside the parser.
 pub(super) struct FormParseContext<'a> {
     type_index: &'a BTreeMap<String, String>,
+    type_index_collisions: &'a BTreeSet<String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
@@ -112,6 +113,7 @@ pub(crate) struct FormItemTraceScalar {
 impl<'a> FormParseContext<'a> {
     pub(super) fn new(
         type_index: &'a BTreeMap<String, String>,
+        type_index_collisions: &'a BTreeSet<String>,
         dcs_type_index: &'a DcsTypeIndex,
         object_refs: &'a BTreeMap<String, String>,
         information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
@@ -119,6 +121,7 @@ impl<'a> FormParseContext<'a> {
     ) -> Self {
         Self {
             type_index,
+            type_index_collisions,
             dcs_type_index,
             object_refs,
             information_register_field_refs,
@@ -152,6 +155,7 @@ pub(super) fn extract_form_body_xml_from_body(
         body,
         &FormParseContext::new(
             type_index,
+            &BTreeSet::new(),
             &DcsTypeIndex::new(),
             object_refs,
             &BTreeMap::new(),
@@ -269,6 +273,8 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &form_fields,
         &attributes,
         &commands,
+        context.type_index,
+        context.type_index_collisions,
         context.object_refs,
         &child_item_indexes,
         context.trace_sink,
@@ -363,8 +369,10 @@ pub(crate) fn trace_form_body_with_context(
     form_owner_reference: Option<&str>,
     trace_sink: &dyn FormItemTraceSink,
 ) -> Option<()> {
+    let type_index_collisions = BTreeSet::new();
     let context = FormParseContext::new(
         type_index,
+        &type_index_collisions,
         dcs_type_index,
         object_refs,
         information_register_field_refs,
@@ -1831,6 +1839,8 @@ pub(super) fn parse_form_auto_command_bar_fields(
             &BTreeMap::new(),
             &FormOwnerScopedBindingIndexes::default(),
             commands,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
             object_refs,
         )
         .unwrap_or_default(),
@@ -4446,6 +4456,8 @@ pub(super) fn extract_form_child_items(
     fields: &[&str],
     attributes: &[FormAttribute],
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
     indexes: &FormChildItemIndexes,
     trace_sink: Option<&dyn FormItemTraceSink>,
@@ -4477,6 +4489,8 @@ pub(super) fn extract_form_child_items(
         &indexes.table_column_names_by_binding_key,
         &indexes.owner_scoped_bindings,
         commands,
+        type_index,
+        type_index_collisions,
         object_refs,
     )
     .unwrap_or_default();
@@ -4949,6 +4963,8 @@ pub(super) fn extract_form_child_items_with_trace_for_test(
         fields,
         attributes,
         &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
         &object_refs,
         &indexes,
         Some(trace_sink),
@@ -5525,6 +5541,8 @@ pub(super) fn parse_form_child_item_pairs(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChildItem>> {
     let mut best = Vec::new();
@@ -5565,6 +5583,8 @@ pub(super) fn parse_form_child_item_pairs(
                 table_column_names_by_binding_key,
                 owner_scoped_bindings,
                 commands,
+                type_index,
+                type_index_collisions,
                 object_refs,
             ) {
                 items.push(item);
@@ -5689,6 +5709,8 @@ pub(super) fn parse_form_child_item_with_attrs(
         table_column_names_by_binding_key,
         &FormOwnerScopedBindingIndexes::default(),
         commands,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
         object_refs,
     )
 }
@@ -5727,6 +5749,8 @@ pub(super) fn parse_form_child_item_with_context(
         table_column_names_by_binding_key,
         &FormOwnerScopedBindingIndexes::default(),
         commands,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
         object_refs,
     )
 }
@@ -5777,6 +5801,8 @@ fn parse_form_child_item_with_metadata_owners(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
     let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -6092,6 +6118,8 @@ fn parse_form_child_item_with_metadata_owners(
         table_column_names_by_binding_key,
         owner_scoped_bindings,
         commands,
+        type_index,
+        type_index_collisions,
         object_refs,
     )
     .unwrap_or_default();
@@ -6114,6 +6142,8 @@ fn parse_form_child_item_with_metadata_owners(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         );
     } else if is_form_field_direct_service_parent(tag) {
@@ -6136,6 +6166,8 @@ fn parse_form_child_item_with_metadata_owners(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         );
     } else if tag.ends_with("Addition") {
@@ -6158,6 +6190,8 @@ fn parse_form_child_item_with_metadata_owners(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         );
     }
@@ -6180,6 +6214,8 @@ fn parse_form_child_item_with_metadata_owners(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         )
     {
@@ -7649,7 +7685,13 @@ fn parse_form_child_item_with_metadata_owners(
             field_schema_and_options
                 .as_ref()
                 .map(|(schema, options)| {
-                    canonical_form_input_field_choice_list(*schema, options, object_refs)
+                    canonical_form_input_field_choice_list(
+                        *schema,
+                        options,
+                        type_index,
+                        type_index_collisions,
+                        object_refs,
+                    )
                 })
                 .unwrap_or_default()
         } else {
@@ -7795,6 +7837,8 @@ pub(super) fn append_form_table_service_child_items(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) {
     append_form_child_items_by_tag(
@@ -7822,6 +7866,8 @@ pub(super) fn append_form_table_service_child_items(
         table_column_names_by_binding_key,
         owner_scoped_bindings,
         commands,
+        type_index,
+        type_index_collisions,
         object_refs,
     );
 }
@@ -7845,6 +7891,8 @@ pub(super) fn append_form_child_items_by_tag(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) {
     for field in fields {
@@ -7865,6 +7913,8 @@ pub(super) fn append_form_child_items_by_tag(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         ) else {
             continue;
@@ -7909,6 +7959,8 @@ pub(super) fn parse_form_text_document_context_menu(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
     if fields.get(41).map(|field| field.trim()) != Some("1") {
@@ -7931,6 +7983,8 @@ pub(super) fn parse_form_text_document_context_menu(
         table_column_names_by_binding_key,
         owner_scoped_bindings,
         commands,
+        type_index,
+        type_index_collisions,
         object_refs,
     )
 }
@@ -9551,6 +9605,8 @@ fn try_parse_form_radio_button_choice_list(
 fn try_parse_form_input_field_choice_list(
     schema: FormFieldSchema,
     options: &[&str],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChoiceListItem>> {
     let field = schema.input_field_option(options, InputFieldSlot::ChoiceList)?;
@@ -9570,9 +9626,14 @@ fn try_parse_form_input_field_choice_list(
 
     (0..item_count)
         .map(|index| {
-            fields
-                .get(3 + index * 2)
-                .and_then(|field| parse_form_input_field_choice_list_item(field, object_refs))
+            fields.get(3 + index * 2).and_then(|field| {
+                parse_form_input_field_choice_list_item(
+                    field,
+                    type_index,
+                    type_index_collisions,
+                    object_refs,
+                )
+            })
         })
         .collect()
 }
@@ -9601,6 +9662,8 @@ fn canonical_form_radio_button_choice_list(
 fn canonical_form_input_field_choice_list(
     schema: FormFieldSchema,
     options: &[&str],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> CanonicalFormChoiceList {
     let provenance = FormChoiceListRawProvenance {
@@ -9610,7 +9673,13 @@ fn canonical_form_input_field_choice_list(
     let Some(raw) = schema.input_field_option(options, InputFieldSlot::ChoiceList) else {
         return CanonicalFormChoiceList::Absent;
     };
-    match try_parse_form_input_field_choice_list(schema, options, object_refs) {
+    match try_parse_form_input_field_choice_list(
+        schema,
+        options,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
         Some(items) if items.is_empty() => CanonicalFormChoiceList::Empty { provenance },
         Some(items) => CanonicalFormChoiceList::Typed { items, provenance },
         None => CanonicalFormChoiceList::OpaqueSameProfile {
@@ -9622,6 +9691,8 @@ fn canonical_form_input_field_choice_list(
 
 pub(super) fn parse_form_input_field_choice_list_item(
     field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListItem> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -9629,7 +9700,12 @@ pub(super) fn parse_form_input_field_choice_list_item(
         return None;
     }
     let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    let value = parse_form_input_field_choice_list_value(&payload_fields, object_refs)?;
+    let value = parse_form_input_field_choice_list_value(
+        &payload_fields,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    )?;
     let presentation = parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?;
     Some(FormChoiceListItem {
         presentation_present: true,
@@ -9673,6 +9749,8 @@ fn parse_form_input_field_choice_list_presentation(field: &str) -> Option<Vec<(S
 
 fn parse_form_input_field_choice_list_value(
     payload_fields: &[&str],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListValue> {
     let raw_value = payload_fields.get(2)?.trim();
@@ -9699,6 +9777,18 @@ fn parse_form_input_field_choice_list_value(
             let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok()?;
             if type_id.is_nil() && value_id.is_nil() {
                 Some(FormChoiceListValue::Nil)
+            } else if !type_id.is_nil() && value_id.is_nil() {
+                let type_reference = unique_metadata_type_reference(
+                    type_index,
+                    type_index_collisions,
+                    payload_fields.get(3)?.trim(),
+                )?;
+                let owner_reference = metadata_reference_type_owner_reference(type_reference)?;
+                Some(FormChoiceListValue::DesignTimeRef(format!(
+                    "{owner_reference}.EmptyRef"
+                )))
+            } else if type_id.is_nil() {
+                None
             } else {
                 parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
                     .map(FormChoiceListValue::DesignTimeRef)
@@ -16439,7 +16529,7 @@ pub(super) fn format_form_choice_list_xml(
     let WriterPolicy::FormChoiceList {
         item_order,
         empty_collection: FormChoiceListEmptyCollection::WriteWrapperWhenWriteDefault,
-        ..
+        empty_string_value: FormChoiceListEmptyStringValue::SelfClosing,
     } = policy
     else {
         return Err(FormSchemaWriteError::UnexpectedPolicy {
@@ -16489,6 +16579,9 @@ pub(super) fn format_form_choice_list_xml(
                         )),
                         FormChoiceListValue::Nil => {
                             xml.push_str(&format!("{tab}\t\t\t<Value xsi:nil=\"true\"/>\r\n"))
+                        }
+                        FormChoiceListValue::String(value) if value.is_empty() => {
+                            xml.push_str(&format!("{tab}\t\t\t<Value xsi:type=\"xs:string\"/>\r\n"))
                         }
                         FormChoiceListValue::String(value) => xml.push_str(&format!(
                             "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",

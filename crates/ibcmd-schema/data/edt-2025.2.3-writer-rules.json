@@ -33,12 +33,13 @@
           "check-state",
           "value"
         ],
-        "emptyCollection": "write-wrapper-when-write-default"
+        "emptyCollection": "write-wrapper-when-write-default",
+        "emptyStringValue": "self-closing"
       },
       "evidence": {
-        "kind": "javap-bytecode",
+        "kind": "javap-v-exact-method-control-flow-constant-pool",
         "status": "verified",
-        "note": "Control flow, element order, defaults, delegation, and platform gate independently transcribed."
+        "note": "Exact descriptors and control flow prove that the value feature delegates through FormSmartFeatureWriter and FormValueWriter into ValueWriter; an empty mcore StringValue calls ExportXmlStreamWriter.writeEmptyElement, which invokes XMLStreamWriter.writeEmptyElement, before writing xsi:type xs:string."
       }
     },
     {
