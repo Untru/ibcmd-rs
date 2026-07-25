@@ -12,6 +12,1274 @@
     "unsupported": 4964,
     "platformOnly": 0
   },
+  "familyAggregates": [
+    {
+      "family": "metadata",
+      "entries": 0,
+      "typed": 0,
+      "opaqueLossless": 0,
+      "unsupported": 0,
+      "platformOnly": 0
+    },
+    {
+      "family": "forms",
+      "entries": 2314,
+      "typed": 0,
+      "opaqueLossless": 0,
+      "unsupported": 2314,
+      "platformOnly": 0
+    },
+    {
+      "family": "dcs",
+      "entries": 511,
+      "typed": 2,
+      "opaqueLossless": 0,
+      "unsupported": 509,
+      "platformOnly": 0
+    },
+    {
+      "family": "mxl",
+      "entries": 0,
+      "typed": 0,
+      "opaqueLossless": 0,
+      "unsupported": 0,
+      "platformOnly": 0
+    },
+    {
+      "family": "common",
+      "entries": 0,
+      "typed": 0,
+      "opaqueLossless": 0,
+      "unsupported": 0,
+      "platformOnly": 0
+    },
+    {
+      "family": "other",
+      "entries": 2141,
+      "typed": 0,
+      "opaqueLossless": 0,
+      "unsupported": 2141,
+      "platformOnly": 0
+    }
+  ],
+  "migrationBacklog": [
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.calculation.context",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 116
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.calculation.context",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.calculation.context",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 11
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.calculation.context",
+      "classifierKind": "interface",
+      "featureKind": "attribute",
+      "features": 34
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.calculation.context",
+      "classifierKind": "interface",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.description",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 530
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.description",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.description",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 8
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.description",
+      "classifierKind": "interface",
+      "featureKind": "attribute",
+      "features": 72
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.description",
+      "classifierKind": "interface",
+      "featureKind": "reference",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.description",
+      "classifierKind": "interface",
+      "featureKind": "containment",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.generation.context",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 200
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.generation.context",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 26
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.generation.context",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.generation.context",
+      "classifierKind": "interface",
+      "featureKind": "attribute",
+      "features": 39
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.generation.context",
+      "classifierKind": "interface",
+      "featureKind": "reference",
+      "features": 7
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.generation.context",
+      "classifierKind": "interface",
+      "featureKind": "containment",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.transformation.context",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 200
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.transformation.context",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 22
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.transformation.context",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 33
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.transformation.context",
+      "classifierKind": "interface",
+      "featureKind": "attribute",
+      "features": 19
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.transformation.context",
+      "classifierKind": "interface",
+      "featureKind": "reference",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.layout.model.transformation.context",
+      "classifierKind": "interface",
+      "featureKind": "containment",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.mapping.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 25
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.mapping.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.mapping.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 14
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.mapping.model",
+      "classifierKind": "interface",
+      "featureKind": "attribute",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.mapping.model",
+      "classifierKind": "interface",
+      "featureKind": "containment",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 666
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 33
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 194
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.model",
+      "classifierKind": "interface",
+      "featureKind": "attribute",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.model",
+      "classifierKind": "interface",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "forms",
+      "package": "com._1c.g5.v8.dt.form.model",
+      "classifierKind": "interface",
+      "featureKind": "containment",
+      "features": 20
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.expressions.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 10
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.expressions.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.expressions.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 26
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.appearancetemplate",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.appearancetemplate",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.areaTemplate",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 13
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.areaTemplate",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 29
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.common",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 19
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.core",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 15
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.core",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 21
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.dbcopies",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.dbcopies",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.schema",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 57
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.schema",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 51
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.settings",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 109
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.dcs.model.settings",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 133
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "dcs",
+      "package": "com._1c.g5.v8.dt.ql.dcs.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 19
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.aggregates.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.aggregates.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.aggregates.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.bp.scheme.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 63
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.bp.scheme.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.bp.scheme.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 20
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.bsl.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 60
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.bsl.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 21
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.bsl.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 67
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.cai.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.cai.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 6
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.chart.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 206
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.chart.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 129
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.chart.model.timescale",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 11
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.chart.model.timescale",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 13
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.cmi.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 7
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.cmi.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 11
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.cmi.model.deriveddata",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 26
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.cmi.model.deriveddata",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 17
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.cmi.model.deriveddata",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 44
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.compare.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 59
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.compare.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.compare.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 10
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.area",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 9
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.area",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.attach",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.attach",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.base.data",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 30
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.base.data",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.breakpoints",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 18
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.breakpoints",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 6
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.bsl.exceptions",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 20
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.bsl.exceptions",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.calculations",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 40
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.calculations",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 14
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.core",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 7
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.core",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.dbgui.commands",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 19
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.dbgui.commands",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 13
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.foreground.data",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.measure",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 9
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.measure",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.rdbg.request.response",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 35
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.rdbg.request.response",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 46
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.rte.filter",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.rte.filter",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.rte.info",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 10
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.rte.info",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.debug.model.virtual",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.dendrogram.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 22
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.dendrogram.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 12
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.ganttchart.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 50
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.ganttchart.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 38
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.geographicalschema.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 89
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.geographicalschema.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 41
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.hpwa.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.hpwa.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.hpwa.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 3
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.lcore.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 6
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.mcore",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 117
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.mcore",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 19
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.mcore",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 40
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.mcore",
+      "classifierKind": "interface",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.mcore",
+      "classifierKind": "interface",
+      "featureKind": "containment",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.planner.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 48
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.planner.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 39
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.platform.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 8
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.platform.services.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 132
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.platform.services.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.platform.services.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 14
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.ql.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 48
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.ql.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 10
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.ql.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 79
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.right.ql.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.right.ql.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.right.ql.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 12
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.right.templates.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 10
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.right.templates.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 11
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.rights.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 8
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.rights.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 7
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.rights.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.scc.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 6
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.scc.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.scc.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.scc.model",
+      "classifierKind": "interface",
+      "featureKind": "reference",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.schedule.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 20
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.schedule.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.style.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.supply.settings.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 24
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.supply.settings.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 14
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.supply.settings.model",
+      "classifierKind": "interface",
+      "featureKind": "attribute",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.supply.settings.model",
+      "classifierKind": "interface",
+      "featureKind": "containment",
+      "features": 1
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.v8help.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.v8help.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 2
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.v8help.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 4
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.ws.wsdefinitions.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 15
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.ws.wsdefinitions.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 7
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.xdto.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 34
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.xdto.model",
+      "classifierKind": "class",
+      "featureKind": "reference",
+      "features": 5
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.xdto.model",
+      "classifierKind": "class",
+      "featureKind": "containment",
+      "features": 16
+    },
+    {
+      "rule": "unsupported/schema.unmapped",
+      "family": "other",
+      "package": "com._1c.g5.v8.dt.xdto.type.model",
+      "classifierKind": "class",
+      "featureKind": "attribute",
+      "features": 2
+    }
+  ],
   "entries": [
     {
       "key": {
@@ -102495,7 +103763,7 @@
         "classifier": "Exception",
         "feature": "data"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,
@@ -102517,7 +103785,7 @@
         "classifier": "GenericException",
         "feature": "category"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,
@@ -102539,7 +103807,7 @@
         "classifier": "GenericException",
         "feature": "clsid"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,
@@ -102561,7 +103829,7 @@
         "classifier": "GenericException",
         "feature": "creationStack"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,
@@ -102583,7 +103851,7 @@
         "classifier": "GenericException",
         "feature": "descr"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,
@@ -102605,7 +103873,7 @@
         "classifier": "GenericException",
         "feature": "encoded"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,
@@ -102627,7 +103895,7 @@
         "classifier": "GenericException",
         "feature": "inner"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,
@@ -102649,7 +103917,7 @@
         "classifier": "GenericException",
         "feature": "uiHelperUUID"
       },
-      "family": "common",
+      "family": "other",
       "status": "unsupported",
       "canonicalType": null,
       "canonicalField": null,

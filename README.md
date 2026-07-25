@@ -56,7 +56,11 @@ IDs. Доступный Xcore corpus расширен до `63` packages, `1 820
 `4 966` локальных features. Для каждого feature существует явная запись
 canonical coverage: `2` поля `DataCompositionSettings` уже типизированы,
 оставшиеся `4 964` пока помечены как `unsupported/schema.unmapped`. Поэтому
-100-процентная полнота карты не означает готовность конвертации.
+100-процентная полнота карты не означает готовность конвертации. Машинные
+агрегаты распределяют эти `4 966` features так: Forms — `2 314`, DCS — `511`
+(`2` typed и `509` unsupported), common — `0`, metadata — `0`, MXL — `0`,
+прочие модели — `2 141`. Backlog содержит `152` переиспользуемые
+семантические группы и не опирается на имена объектов или UUID.
 Metadata-order corpus содержит `60` подтверждённых записей: `40` property
 orders, `4` special cases `internalInfo` и `16` таблиц `producedTypes`, включая
 Configuration, Catalog и Document. Связь `InvokeDynamic` подтверждается через

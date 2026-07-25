@@ -6,10 +6,12 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::marker::PhantomData;
 
+use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
 /// Embedded EDT-derived model inventory.
@@ -248,7 +250,7 @@ pub struct FeatureEvidence {
 }
 
 /// The Xcore declaration kind of a feature.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FeatureKind {
     Attribute,
@@ -268,7 +270,7 @@ pub enum XcoreFeatureQualifier {
 }
 
 /// The kind of an Xcore classifier.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FeatureClassifierKind {
     Class,
@@ -361,7 +363,7 @@ pub struct FeatureSemanticsCorpus {
 }
 
 /// How one EDT feature is preserved by the canonical model.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CoverageStatus {
     Typed,
@@ -370,12 +372,24 @@ pub enum CoverageStatus {
     PlatformOnly,
 }
 
+/// Canonical implementation family used for deterministic coverage reporting.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CanonicalCoverageFamily {
+    Metadata,
+    Forms,
+    Dcs,
+    Mxl,
+    Common,
+    Other,
+}
+
 /// One explicit EDT feature to canonical-model mapping.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CanonicalCoverageEntry {
     pub key: FeatureSemanticKey,
-    pub family: String,
+    pub family: CanonicalCoverageFamily,
     pub status: CoverageStatus,
     pub canonical_type: Option<String>,
     pub canonical_field: Option<String>,
@@ -386,7 +400,7 @@ pub struct CanonicalCoverageEntry {
 
 /// Derived coverage totals for completeness and reporting.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CanonicalCoverageSummary {
     pub entries: usize,
     pub typed: usize,
@@ -395,14 +409,464 @@ pub struct CanonicalCoverageSummary {
     pub platform_only: usize,
 }
 
+/// Status totals for one canonical implementation family.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanonicalCoverageFamilyAggregate {
+    pub family: CanonicalCoverageFamily,
+    pub entries: usize,
+    pub typed: usize,
+    pub opaque_lossless: usize,
+    pub unsupported: usize,
+    pub platform_only: usize,
+}
+
+/// Reusable migration work grouped without object, feature, UUID, or file names.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CanonicalMigrationBacklogEntry {
+    pub rule: String,
+    pub family: CanonicalCoverageFamily,
+    pub package: String,
+    pub classifier_kind: FeatureClassifierKind,
+    pub feature_kind: FeatureKind,
+    pub features: usize,
+}
+
 /// Complete coverage mapping for one EDT-derived feature corpus.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CanonicalCoverageCorpus {
     pub schema_version: u32,
     pub source: CorpusSource,
     pub summary: CanonicalCoverageSummary,
+    pub family_aggregates: Vec<CanonicalCoverageFamilyAggregate>,
+    pub migration_backlog: Vec<CanonicalMigrationBacklogEntry>,
     pub entries: Vec<CanonicalCoverageEntry>,
+}
+
+const MAX_CANONICAL_COVERAGE_JSON_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CANONICAL_COVERAGE_STRING_BYTES: usize = 4 * 1024;
+const MAX_CANONICAL_COVERAGE_ENTRIES: usize = 5_000;
+const MAX_CANONICAL_COVERAGE_FAMILY_AGGREGATES: usize = 6;
+const MAX_CANONICAL_COVERAGE_BACKLOG_ENTRIES: usize = 256;
+const MAX_CANONICAL_COVERAGE_EVIDENCE_SOURCES: usize = 16;
+
+struct BoundedText<const MAX: usize>;
+
+impl<'de, const MAX: usize> Deserialize<'de> for BoundedText<MAX> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct TextVisitor<const MAX: usize>;
+
+        impl<const MAX: usize> Visitor<'_> for TextVisitor<MAX> {
+            type Value = BoundedText<MAX>;
+
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+                write!(formatter, "a string of at most {MAX} UTF-8 bytes")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                if value.len() > MAX {
+                    return Err(E::custom(format!(
+                        "canonical coverage string exceeds {MAX} UTF-8 bytes"
+                    )));
+                }
+                Ok(BoundedText)
+            }
+
+            fn visit_borrowed_str<E>(self, value: &'_ str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                self.visit_str(value)
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                self.visit_str(&value)
+            }
+        }
+
+        deserializer.deserialize_string(TextVisitor::<MAX>)
+    }
+}
+
+struct BoundedVec<T, const MAX: usize>(PhantomData<T>);
+
+impl<T, const MAX: usize> Default for BoundedVec<T, MAX> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<'de, T, const MAX: usize> Deserialize<'de> for BoundedVec<T, MAX>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct VecVisitor<T, const MAX: usize>(PhantomData<T>);
+
+        impl<'de, T, const MAX: usize> Visitor<'de> for VecVisitor<T, MAX>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = BoundedVec<T, MAX>;
+
+            fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+                write!(formatter, "an array of at most {MAX} elements")
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                if sequence.size_hint().is_some_and(|size| size > MAX) {
+                    return Err(A::Error::custom(format!(
+                        "canonical coverage array exceeds {MAX} elements"
+                    )));
+                }
+                let mut count = 0usize;
+                while sequence.next_element::<T>()?.is_some() {
+                    count += 1;
+                    if count > MAX {
+                        return Err(A::Error::custom(format!(
+                            "canonical coverage array exceeds {MAX} elements"
+                        )));
+                    }
+                }
+                Ok(BoundedVec(PhantomData))
+            }
+        }
+
+        deserializer.deserialize_seq(VecVisitor::<T, MAX>(PhantomData))
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CanonicalCoveragePreflight {
+    schema_version: u32,
+    source: CoverageSourcePreflight,
+    summary: CoverageSummaryPreflight,
+    family_aggregates:
+        BoundedVec<CoverageFamilyAggregatePreflight, MAX_CANONICAL_COVERAGE_FAMILY_AGGREGATES>,
+    migration_backlog: BoundedVec<CoverageBacklogPreflight, MAX_CANONICAL_COVERAGE_BACKLOG_ENTRIES>,
+    entries: BoundedVec<CoverageEntryPreflight, MAX_CANONICAL_COVERAGE_ENTRIES>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageSourcePreflight {
+    product: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+    release: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+    derivation: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageSummaryPreflight {
+    entries: usize,
+    typed: usize,
+    opaque_lossless: usize,
+    unsupported: usize,
+    platform_only: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageFamilyAggregatePreflight {
+    family: CanonicalCoverageFamily,
+    entries: usize,
+    typed: usize,
+    opaque_lossless: usize,
+    unsupported: usize,
+    platform_only: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageBacklogPreflight {
+    rule: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+    family: CanonicalCoverageFamily,
+    package: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+    classifier_kind: FeatureClassifierKind,
+    feature_kind: FeatureKind,
+    features: usize,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageEntryPreflight {
+    key: CoverageKeyPreflight,
+    family: CanonicalCoverageFamily,
+    status: CoverageStatus,
+    canonical_type: Option<BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>>,
+    canonical_field: Option<BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>>,
+    opaque_placement: Option<BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>>,
+    diagnostic_code: Option<BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>>,
+    evidence: CoverageEvidencePreflight,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageKeyPreflight {
+    namespace_uri: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+    classifier: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+    feature: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageEvidencePreflight {
+    status: EvidenceStatus,
+    kind: BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+    #[serde(default)]
+    sources: BoundedVec<
+        BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>,
+        MAX_CANONICAL_COVERAGE_EVIDENCE_SOURCES,
+    >,
+    note: Option<BoundedText<MAX_CANONICAL_COVERAGE_STRING_BYTES>>,
+}
+
+fn preflight_canonical_coverage_json(json: &str) -> Result<(), SchemaError> {
+    enforce_canonical_coverage_json_size(json)?;
+    serde_json::from_str::<CanonicalCoveragePreflight>(json)
+        .map(|_| ())
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))
+}
+
+fn enforce_canonical_coverage_json_size(json: &str) -> Result<(), SchemaError> {
+    if json.len() > MAX_CANONICAL_COVERAGE_JSON_BYTES {
+        return Err(SchemaError::InvalidJson(format!(
+            "canonical coverage JSON exceeds {MAX_CANONICAL_COVERAGE_JSON_BYTES} UTF-8 bytes"
+        )));
+    }
+    Ok(())
+}
+
+const CANONICAL_COVERAGE_FAMILIES: [CanonicalCoverageFamily; 6] = [
+    CanonicalCoverageFamily::Metadata,
+    CanonicalCoverageFamily::Forms,
+    CanonicalCoverageFamily::Dcs,
+    CanonicalCoverageFamily::Mxl,
+    CanonicalCoverageFamily::Common,
+    CanonicalCoverageFamily::Other,
+];
+
+fn canonical_coverage_family(
+    package: &str,
+    classifier_kind: FeatureClassifierKind,
+) -> Option<CanonicalCoverageFamily> {
+    use CanonicalCoverageFamily::{Dcs, Forms, Other};
+    use FeatureClassifierKind::{Class, Interface};
+
+    let routed = match package {
+        "com._1c.g5.v8.dt.form.layout.model.calculation.context"
+        | "com._1c.g5.v8.dt.form.layout.model.description"
+        | "com._1c.g5.v8.dt.form.layout.model.generation.context"
+        | "com._1c.g5.v8.dt.form.layout.model.transformation.context"
+        | "com._1c.g5.v8.dt.form.mapping.model"
+        | "com._1c.g5.v8.dt.form.model"
+            if matches!(classifier_kind, Class | Interface) =>
+        {
+            Forms
+        }
+        "com._1c.g5.v8.dt.dcs.expressions.model"
+        | "com._1c.g5.v8.dt.dcs.model.appearancetemplate"
+        | "com._1c.g5.v8.dt.dcs.model.areaTemplate"
+        | "com._1c.g5.v8.dt.dcs.model.common"
+        | "com._1c.g5.v8.dt.dcs.model.core"
+        | "com._1c.g5.v8.dt.dcs.model.dbcopies"
+        | "com._1c.g5.v8.dt.dcs.model.schema"
+        | "com._1c.g5.v8.dt.dcs.model.settings"
+        | "com._1c.g5.v8.dt.ql.dcs.model"
+            if classifier_kind == Class =>
+        {
+            Dcs
+        }
+        "com._1c.g5.v8.dt.debug.model.core" if classifier_kind == Class => Other,
+        "com._1c.g5.v8.dt.mcore"
+        | "com._1c.g5.v8.dt.scc.model"
+        | "com._1c.g5.v8.dt.supply.settings.model"
+            if matches!(classifier_kind, Class | Interface) =>
+        {
+            Other
+        }
+        "com._1c.g5.v8.dt.aggregates.model"
+        | "com._1c.g5.v8.dt.bp.scheme.model"
+        | "com._1c.g5.v8.dt.bsl.model"
+        | "com._1c.g5.v8.dt.cai.model"
+        | "com._1c.g5.v8.dt.chart.model"
+        | "com._1c.g5.v8.dt.chart.model.timescale"
+        | "com._1c.g5.v8.dt.cmi.model"
+        | "com._1c.g5.v8.dt.cmi.model.deriveddata"
+        | "com._1c.g5.v8.dt.compare.model"
+        | "com._1c.g5.v8.dt.debug.model.area"
+        | "com._1c.g5.v8.dt.debug.model.attach"
+        | "com._1c.g5.v8.dt.debug.model.base.data"
+        | "com._1c.g5.v8.dt.debug.model.breakpoints"
+        | "com._1c.g5.v8.dt.debug.model.bsl.exceptions"
+        | "com._1c.g5.v8.dt.debug.model.calculations"
+        | "com._1c.g5.v8.dt.debug.model.dbgui.commands"
+        | "com._1c.g5.v8.dt.debug.model.foreground.data"
+        | "com._1c.g5.v8.dt.debug.model.measure"
+        | "com._1c.g5.v8.dt.debug.model.rdbg.request.response"
+        | "com._1c.g5.v8.dt.debug.model.rte.filter"
+        | "com._1c.g5.v8.dt.debug.model.rte.info"
+        | "com._1c.g5.v8.dt.debug.model.virtual"
+        | "com._1c.g5.v8.dt.dendrogram.model"
+        | "com._1c.g5.v8.dt.ganttchart.model"
+        | "com._1c.g5.v8.dt.geographicalschema.model"
+        | "com._1c.g5.v8.dt.hpwa.model"
+        | "com._1c.g5.v8.dt.lcore.model"
+        | "com._1c.g5.v8.dt.planner.model"
+        | "com._1c.g5.v8.dt.platform.model"
+        | "com._1c.g5.v8.dt.platform.services.model"
+        | "com._1c.g5.v8.dt.ql.model"
+        | "com._1c.g5.v8.dt.right.ql.model"
+        | "com._1c.g5.v8.dt.right.templates.model"
+        | "com._1c.g5.v8.dt.rights.model"
+        | "com._1c.g5.v8.dt.schedule.model"
+        | "com._1c.g5.v8.dt.style.model"
+        | "com._1c.g5.v8.dt.v8help.model"
+        | "com._1c.g5.v8.dt.ws.wsdefinitions.model"
+        | "com._1c.g5.v8.dt.xdto.model"
+        | "com._1c.g5.v8.dt.xdto.type.model"
+            if classifier_kind == Class =>
+        {
+            Other
+        }
+        _ => return None,
+    };
+    Some(routed)
+}
+
+fn recompute_family_aggregates(
+    entries: &[CanonicalCoverageEntry],
+) -> Vec<CanonicalCoverageFamilyAggregate> {
+    let mut counts = BTreeMap::<CanonicalCoverageFamily, CanonicalCoverageFamilyAggregate>::new();
+    for family in CANONICAL_COVERAGE_FAMILIES {
+        counts.insert(
+            family,
+            CanonicalCoverageFamilyAggregate {
+                family,
+                entries: 0,
+                typed: 0,
+                opaque_lossless: 0,
+                unsupported: 0,
+                platform_only: 0,
+            },
+        );
+    }
+    for entry in entries {
+        let aggregate = counts
+            .get_mut(&entry.family)
+            .expect("all canonical coverage families are initialized");
+        aggregate.entries += 1;
+        match entry.status {
+            CoverageStatus::Typed => aggregate.typed += 1,
+            CoverageStatus::OpaqueLossless => aggregate.opaque_lossless += 1,
+            CoverageStatus::Unsupported => aggregate.unsupported += 1,
+            CoverageStatus::PlatformOnly => aggregate.platform_only += 1,
+        }
+    }
+    counts.into_values().collect()
+}
+
+fn recompute_migration_backlog(
+    coverage: &CanonicalCoverageCorpus,
+    features: &FeatureSemanticsCorpus,
+) -> Result<Vec<CanonicalMigrationBacklogEntry>, SchemaError> {
+    let coverage_by_key = coverage
+        .entries
+        .iter()
+        .map(|entry| (entry.key.clone(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let mut groups = BTreeMap::<
+        (
+            CanonicalCoverageFamily,
+            String,
+            FeatureClassifierKind,
+            FeatureKind,
+        ),
+        usize,
+    >::new();
+
+    for package in &features.packages {
+        for classifier in &package.classifiers {
+            if classifier.features.is_empty() {
+                continue;
+            }
+            let family = canonical_coverage_family(&package.package_name, classifier.kind)
+                .ok_or_else(|| SchemaError::UnknownCoverageRoute {
+                    package: package.package_name.clone(),
+                    classifier_kind: classifier.kind,
+                })?;
+            for feature in &classifier.features {
+                let key = FeatureSemanticKey {
+                    namespace_uri: package.namespace_uri.clone(),
+                    classifier: classifier.name.clone(),
+                    feature: feature.name.clone(),
+                };
+                let entry = coverage_by_key
+                    .get(&key)
+                    .expect("exact full join is checked before backlog recomputation");
+                if entry.family != family {
+                    return Err(SchemaError::InvalidCoverageEntry {
+                        key,
+                        reason: "coverage family does not match canonical package/classifier route",
+                    });
+                }
+                if entry.status == CoverageStatus::Unsupported
+                    && entry.diagnostic_code.as_deref() == Some("schema.unmapped")
+                {
+                    *groups
+                        .entry((
+                            family,
+                            package.package_name.clone(),
+                            classifier.kind,
+                            feature.kind,
+                        ))
+                        .or_default() += 1;
+                }
+            }
+        }
+    }
+
+    Ok(groups
+        .into_iter()
+        .map(
+            |((family, package, classifier_kind, feature_kind), features)| {
+                CanonicalMigrationBacklogEntry {
+                    rule: "unsupported/schema.unmapped".to_owned(),
+                    family,
+                    package,
+                    classifier_kind,
+                    feature_kind,
+                    features,
+                }
+            },
+        )
+        .collect())
 }
 
 /// EDT writer-provider section whose feature order was observed.
@@ -518,6 +982,11 @@ pub enum SchemaError {
         kind: &'static str,
         key: FeatureSemanticKey,
     },
+    UnknownCoverageRoute {
+        package: String,
+        classifier_kind: FeatureClassifierKind,
+    },
+    CoverageDerivedDataMismatch(&'static str),
 }
 
 impl Display for SchemaError {
@@ -560,6 +1029,19 @@ impl Display for SchemaError {
                 "{kind} canonical coverage key {} / {} / {}",
                 key.namespace_uri, key.classifier, key.feature
             ),
+            Self::UnknownCoverageRoute {
+                package,
+                classifier_kind,
+            } => write!(
+                formatter,
+                "canonical coverage has no route for package `{package}` / classifier kind `{classifier_kind:?}`"
+            ),
+            Self::CoverageDerivedDataMismatch(field) => {
+                write!(
+                    formatter,
+                    "canonical coverage {field} does not match recomputation"
+                )
+            }
         }
     }
 }
@@ -927,6 +1409,7 @@ impl FeatureSemanticsCorpus {
 
 impl CanonicalCoverageCorpus {
     pub fn parse(json: &str) -> Result<Self, SchemaError> {
+        preflight_canonical_coverage_json(json)?;
         let corpus: Self = serde_json::from_str(json)
             .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
         corpus.validate()?;
@@ -943,7 +1426,6 @@ impl CanonicalCoverageCorpus {
 
         for entry in &self.entries {
             validate_feature_semantic_key(&entry.key)?;
-            validate_text("canonical coverage family", &entry.family)?;
             validate_feature_evidence("canonical coverage evidence", &entry.evidence)?;
             if entry.evidence.status != EvidenceStatus::Verified {
                 return Err(SchemaError::InvalidCoverageEntry {
@@ -1066,7 +1548,39 @@ impl CanonicalCoverageCorpus {
             "platform-only coverage",
             self.summary.platform_only,
             platform_only,
-        )
+        )?;
+        if self.family_aggregates != recompute_family_aggregates(&self.entries) {
+            return Err(SchemaError::CoverageDerivedDataMismatch(
+                "family aggregates",
+            ));
+        }
+
+        let mut previous_backlog_key = None;
+        for item in &self.migration_backlog {
+            validate_text("canonical migration rule", &item.rule)?;
+            validate_text("canonical migration package", &item.package)?;
+            if item.features == 0 {
+                return Err(SchemaError::CoverageDerivedDataMismatch(
+                    "migration backlog",
+                ));
+            }
+            let key = (
+                item.family,
+                item.package.as_str(),
+                item.classifier_kind,
+                item.feature_kind,
+            );
+            if previous_backlog_key
+                .as_ref()
+                .is_some_and(|previous| previous >= &key)
+            {
+                return Err(SchemaError::CoverageDerivedDataMismatch(
+                    "migration backlog order",
+                ));
+            }
+            previous_backlog_key = Some(key);
+        }
+        Ok(())
     }
 
     /// Proves that coverage and feature corpora form an exact full join.
@@ -1107,6 +1621,11 @@ impl CanonicalCoverageCorpus {
                 kind: "stale",
                 key: key.clone(),
             });
+        }
+        if self.migration_backlog != recompute_migration_backlog(self, features)? {
+            return Err(SchemaError::CoverageDerivedDataMismatch(
+                "migration backlog",
+            ));
         }
         Ok(())
     }
@@ -1665,13 +2184,39 @@ mod tests {
             corpus
                 .entries
                 .iter()
-                .filter(|entry| entry.family == family)
+                .filter(|entry| {
+                    serde_json::to_value(entry.family).unwrap() == serde_json::json!(family)
+                })
                 .count()
         };
+        assert_eq!(family_count("metadata"), 0);
         assert_eq!(family_count("forms"), 2_314);
         assert_eq!(family_count("dcs"), 511);
-        assert_eq!(family_count("common"), 8);
-        assert_eq!(family_count("other"), 2_133);
+        assert_eq!(family_count("mxl"), 0);
+        assert_eq!(family_count("common"), 0);
+        assert_eq!(family_count("other"), 2_141);
+        assert_eq!(
+            corpus
+                .family_aggregates
+                .iter()
+                .map(|aggregate| aggregate.entries)
+                .sum::<usize>(),
+            4_966
+        );
+        assert_eq!(
+            corpus
+                .migration_backlog
+                .iter()
+                .map(|item| item.features)
+                .sum::<usize>(),
+            4_964
+        );
+        assert!(
+            corpus
+                .migration_backlog
+                .iter()
+                .all(|item| item.rule == "unsupported/schema.unmapped")
+        );
         assert_eq!(
             corpus
                 .entries
@@ -2045,13 +2590,64 @@ mod tests {
                 unsupported: 0,
                 platform_only: 0,
             },
+            family_aggregates: vec![
+                CanonicalCoverageFamilyAggregate {
+                    family: CanonicalCoverageFamily::Metadata,
+                    entries: 0,
+                    typed: 0,
+                    opaque_lossless: 0,
+                    unsupported: 0,
+                    platform_only: 0,
+                },
+                CanonicalCoverageFamilyAggregate {
+                    family: CanonicalCoverageFamily::Forms,
+                    entries: 1,
+                    typed: 1,
+                    opaque_lossless: 0,
+                    unsupported: 0,
+                    platform_only: 0,
+                },
+                CanonicalCoverageFamilyAggregate {
+                    family: CanonicalCoverageFamily::Dcs,
+                    entries: 0,
+                    typed: 0,
+                    opaque_lossless: 0,
+                    unsupported: 0,
+                    platform_only: 0,
+                },
+                CanonicalCoverageFamilyAggregate {
+                    family: CanonicalCoverageFamily::Mxl,
+                    entries: 0,
+                    typed: 0,
+                    opaque_lossless: 0,
+                    unsupported: 0,
+                    platform_only: 0,
+                },
+                CanonicalCoverageFamilyAggregate {
+                    family: CanonicalCoverageFamily::Common,
+                    entries: 0,
+                    typed: 0,
+                    opaque_lossless: 0,
+                    unsupported: 0,
+                    platform_only: 0,
+                },
+                CanonicalCoverageFamilyAggregate {
+                    family: CanonicalCoverageFamily::Other,
+                    entries: 0,
+                    typed: 0,
+                    opaque_lossless: 0,
+                    unsupported: 0,
+                    platform_only: 0,
+                },
+            ],
+            migration_backlog: vec![],
             entries: vec![CanonicalCoverageEntry {
                 key: FeatureSemanticKey {
                     namespace_uri: "http://g5.1c.ru/v8/dt/form".to_owned(),
                     classifier: "Form".to_owned(),
                     feature: "baseForm".to_owned(),
                 },
-                family: "forms".to_owned(),
+                family: CanonicalCoverageFamily::Forms,
                 status: CoverageStatus::Typed,
                 canonical_type: Some("CanonicalForm".to_owned()),
                 canonical_field: Some("base_form".to_owned()),
@@ -2065,6 +2661,176 @@ mod tests {
                 },
             }],
         }
+    }
+
+    #[test]
+    fn canonical_coverage_public_parse_enforces_exact_byte_and_string_limits() {
+        let mut json = serde_json::to_string(&canonical_coverage_fixture()).unwrap();
+        json.push_str(&" ".repeat(MAX_CANONICAL_COVERAGE_JSON_BYTES - json.len()));
+        assert_eq!(json.len(), MAX_CANONICAL_COVERAGE_JSON_BYTES);
+        assert!(CanonicalCoverageCorpus::parse(&json).is_ok());
+
+        json.push(' ');
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&json),
+            Err(SchemaError::InvalidJson(message))
+                if message.contains("exceeds 4194304 UTF-8 bytes")
+        ));
+
+        let mut value = serde_json::to_value(canonical_coverage_fixture()).unwrap();
+        value["source"]["derivation"] =
+            serde_json::Value::String("x".repeat(MAX_CANONICAL_COVERAGE_STRING_BYTES));
+        assert!(CanonicalCoverageCorpus::parse(&serde_json::to_string(&value).unwrap()).is_ok());
+
+        value["source"]["derivation"] =
+            serde_json::Value::String("x".repeat(MAX_CANONICAL_COVERAGE_STRING_BYTES + 1));
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&value).unwrap()),
+            Err(SchemaError::InvalidJson(message))
+                if message.contains("exceeds 4096 UTF-8 bytes")
+        ));
+    }
+
+    #[test]
+    fn canonical_coverage_public_parse_enforces_exact_vector_limits() {
+        let mut evidence_limit = canonical_coverage_fixture();
+        evidence_limit.entries[0].evidence.sources = (0..MAX_CANONICAL_COVERAGE_EVIDENCE_SOURCES)
+            .map(|index| format!("evidence/source-{index}"))
+            .collect();
+        assert!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&evidence_limit).unwrap())
+                .is_ok()
+        );
+        evidence_limit.entries[0]
+            .evidence
+            .sources
+            .push("evidence/overflow".to_owned());
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&evidence_limit).unwrap()),
+            Err(SchemaError::InvalidJson(message))
+                if message.contains("exceeds 16 elements")
+        ));
+
+        let mut family_limit = canonical_coverage_fixture();
+        assert!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&family_limit).unwrap()).is_ok()
+        );
+        family_limit
+            .family_aggregates
+            .push(family_limit.family_aggregates[0].clone());
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&family_limit).unwrap()),
+            Err(SchemaError::InvalidJson(message))
+                if message.contains("exceeds 6 elements")
+        ));
+
+        let mut backlog_limit = canonical_coverage_fixture();
+        backlog_limit.migration_backlog = (0..MAX_CANONICAL_COVERAGE_BACKLOG_ENTRIES)
+            .map(|index| CanonicalMigrationBacklogEntry {
+                rule: "unsupported/schema.unmapped".to_owned(),
+                family: CanonicalCoverageFamily::Metadata,
+                package: format!("package.{index:03}"),
+                classifier_kind: FeatureClassifierKind::Class,
+                feature_kind: FeatureKind::Attribute,
+                features: 1,
+            })
+            .collect();
+        assert!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&backlog_limit).unwrap()).is_ok()
+        );
+        backlog_limit
+            .migration_backlog
+            .push(CanonicalMigrationBacklogEntry {
+                rule: "unsupported/schema.unmapped".to_owned(),
+                family: CanonicalCoverageFamily::Metadata,
+                package: "package.overflow".to_owned(),
+                classifier_kind: FeatureClassifierKind::Class,
+                feature_kind: FeatureKind::Attribute,
+                features: 1,
+            });
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&backlog_limit).unwrap()),
+            Err(SchemaError::InvalidJson(message))
+                if message.contains("exceeds 256 elements")
+        ));
+
+        let template = canonical_coverage_fixture().entries.remove(0);
+        let mut entry_limit = canonical_coverage_fixture();
+        entry_limit.entries = (0..MAX_CANONICAL_COVERAGE_ENTRIES)
+            .map(|index| {
+                let mut entry = template.clone();
+                entry.key.feature = format!("feature{index:04}");
+                entry
+            })
+            .collect();
+        entry_limit.summary.entries = MAX_CANONICAL_COVERAGE_ENTRIES;
+        entry_limit.summary.typed = MAX_CANONICAL_COVERAGE_ENTRIES;
+        entry_limit.family_aggregates = recompute_family_aggregates(&entry_limit.entries);
+        assert!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&entry_limit).unwrap()).is_ok()
+        );
+        let mut overflow = template;
+        overflow.key.feature = "featureOverflow".to_owned();
+        entry_limit.entries.push(overflow);
+        entry_limit.summary.entries += 1;
+        entry_limit.summary.typed += 1;
+        entry_limit.family_aggregates = recompute_family_aggregates(&entry_limit.entries);
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&entry_limit).unwrap()),
+            Err(SchemaError::InvalidJson(message))
+                if message.contains("exceeds 5000 elements")
+        ));
+    }
+
+    #[test]
+    fn canonical_coverage_public_parse_rejects_forged_and_duplicate_fields() {
+        for field in ["unexpected", "uuid", "objectName"] {
+            let mut value = serde_json::to_value(canonical_coverage_fixture()).unwrap();
+            value["entries"][0]
+                .as_object_mut()
+                .unwrap()
+                .insert(field.to_owned(), serde_json::json!("forged"));
+            assert!(matches!(
+                CanonicalCoverageCorpus::parse(&serde_json::to_string(&value).unwrap()),
+                Err(SchemaError::InvalidJson(message)) if message.contains("unknown field")
+            ));
+        }
+
+        let json = serde_json::to_string(&canonical_coverage_fixture()).unwrap();
+        let duplicate_root = json.replacen(
+            "\"schemaVersion\":1",
+            "\"schemaVersion\":1,\"schemaVersion\":1",
+            1,
+        );
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&duplicate_root),
+            Err(SchemaError::InvalidJson(message)) if message.contains("duplicate field")
+        ));
+        let duplicate_key = json.replacen(
+            "\"feature\":\"baseForm\"",
+            "\"feature\":\"baseForm\",\"feature\":\"baseForm\"",
+            1,
+        );
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&duplicate_key),
+            Err(SchemaError::InvalidJson(message)) if message.contains("duplicate field")
+        ));
+    }
+
+    #[test]
+    fn canonical_coverage_public_parse_rejects_duplicate_key_map_entries() {
+        let mut corpus = canonical_coverage_fixture();
+        corpus.entries.push(corpus.entries[0].clone());
+        corpus.summary.entries = 2;
+        corpus.summary.typed = 2;
+        corpus.family_aggregates = recompute_family_aggregates(&corpus.entries);
+        assert!(matches!(
+            CanonicalCoverageCorpus::parse(&serde_json::to_string(&corpus).unwrap()),
+            Err(SchemaError::DuplicateValue {
+                field: "canonical coverage key",
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -2086,6 +2852,7 @@ mod tests {
         entry.opaque_placement = Some("property-slot".to_owned());
         corpus.summary.typed = 0;
         corpus.summary.opaque_lossless = 1;
+        corpus.family_aggregates = recompute_family_aggregates(&corpus.entries);
         assert!(corpus.validate().is_ok());
 
         corpus.entries[0].evidence.status = EvidenceStatus::Pending;
@@ -2116,6 +2883,7 @@ mod tests {
         opaque.entries[0].opaque_placement = Some("slot".to_owned());
         opaque.summary.typed = 0;
         opaque.summary.opaque_lossless = 1;
+        opaque.family_aggregates = recompute_family_aggregates(&opaque.entries);
         assert!(matches!(
             opaque.validate(),
             Err(SchemaError::InvalidCoverageEntry {
@@ -2129,6 +2897,7 @@ mod tests {
         unsupported.entries[0].diagnostic_code = Some("schema.unsupported".to_owned());
         unsupported.summary.typed = 0;
         unsupported.summary.unsupported = 1;
+        unsupported.family_aggregates = recompute_family_aggregates(&unsupported.entries);
         assert!(matches!(
             unsupported.validate(),
             Err(SchemaError::InvalidCoverageEntry {
@@ -2142,6 +2911,7 @@ mod tests {
         platform_only.entries[0].evidence.note = Some("requires platform runtime".to_owned());
         platform_only.summary.typed = 0;
         platform_only.summary.platform_only = 1;
+        platform_only.family_aggregates = recompute_family_aggregates(&platform_only.entries);
         assert!(matches!(
             platform_only.validate(),
             Err(SchemaError::InvalidCoverageEntry {
@@ -2166,6 +2936,7 @@ mod tests {
         missing.entries.clear();
         missing.summary.entries = 0;
         missing.summary.typed = 0;
+        missing.family_aggregates = recompute_family_aggregates(&missing.entries);
         assert!(matches!(
             missing.validate_against(&features),
             Err(SchemaError::CoverageMismatch {
@@ -2180,9 +2951,47 @@ mod tests {
         stale.entries.push(stale_entry);
         stale.summary.entries = 2;
         stale.summary.typed = 2;
+        stale.family_aggregates = recompute_family_aggregates(&stale.entries);
         assert!(matches!(
             stale.validate_against(&features),
             Err(SchemaError::CoverageMismatch { kind: "stale", .. })
+        ));
+    }
+
+    #[test]
+    fn canonical_coverage_rejects_drifted_aggregates_and_backlog() {
+        let features = bundled_feature_semantics().unwrap();
+        let mut aggregate_drift = bundled_canonical_coverage().unwrap();
+        aggregate_drift.family_aggregates[1].entries += 1;
+        assert!(matches!(
+            aggregate_drift.validate(),
+            Err(SchemaError::CoverageDerivedDataMismatch(
+                "family aggregates"
+            ))
+        ));
+
+        let mut backlog_drift = bundled_canonical_coverage().unwrap();
+        backlog_drift.migration_backlog[0].features += 1;
+        assert!(matches!(
+            backlog_drift.validate_against(&features),
+            Err(SchemaError::CoverageDerivedDataMismatch(
+                "migration backlog"
+            ))
+        ));
+    }
+
+    #[test]
+    fn canonical_coverage_unknown_package_classifier_route_fails_closed() {
+        let mut features = feature_semantics_fixture();
+        features.packages[0].package_name = "unknown.package".to_owned();
+        features.packages[0].namespace_uri = "http://g5.1c.ru/v8/dt/form".to_owned();
+        features.packages[0].classifiers[0].name = "Form".to_owned();
+        features.packages[0].classifiers[0].features[0].name = "baseForm".to_owned();
+
+        assert!(matches!(
+            canonical_coverage_fixture().validate_against(&features),
+            Err(SchemaError::UnknownCoverageRoute { package, .. })
+                if package == "unknown.package"
         ));
     }
 }

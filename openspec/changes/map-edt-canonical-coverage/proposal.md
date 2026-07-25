@@ -11,7 +11,11 @@
 - Добавляется versioned coverage corpus для каждого EDT model feature.
 - Статусы: `typed`, `opaque-lossless`, `unsupported`, `platform-only`.
 - Строгий gate запрещает feature без явного mapping.
-- Агрегация показывает покрытие metadata/forms/DCS/MXL.
+- Машинные агрегаты показывают покрытие
+  metadata/forms/DCS/MXL/common/other, включая честные нулевые семейства.
+- Упорядоченный migration backlog группирует `unsupported/schema.unmapped`
+  только по переиспользуемой семантике rule/package/classifier/feature kind,
+  без имён прикладных объектов, файлов и UUID.
 
 ## Результат
 
