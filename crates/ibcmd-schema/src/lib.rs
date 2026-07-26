@@ -1115,8 +1115,15 @@ pub const BUNDLED_METADATA_ORDER_JSON: &str =
 /// Embedded, verified writer behaviour rules.
 pub const BUNDLED_WRITER_RULES_JSON: &str = include_str!("../data/edt-2025.2.3-writer-rules.json");
 
+/// Compact, portable proof binding the production ChoiceList policy to one
+/// exact research artifact without embedding its platform descriptors.
+const BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON: &str =
+    include_str!("../data/edt-2025.2.3-form-choice-list-string-writer-proof.json");
+
 /// Embedded, exact EDT writer evidence for empty string values in a Form
-/// `ChoiceList`.
+/// `ChoiceList`. The complete artifact is research/test-only so its platform
+/// descriptors cannot become product-binary payload.
+#[cfg(test)]
 const BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON: &str =
     include_str!("../data/edt-2025.2.3-form-choice-list-string-writer-evidence.json");
 
@@ -1521,10 +1528,33 @@ pub enum FormChoiceListEmptyStringValue {
     SelfClosing,
 }
 
-const MAX_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_BYTES: usize = 16 * 1024;
-const FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_SHA256: &str =
+const MAX_FORM_CHOICE_LIST_STRING_WRITER_PROOF_BYTES: usize = 1024;
+const FORM_CHOICE_LIST_STRING_WRITER_FULL_EVIDENCE_SHA256: &str =
     "394b38699352b707682bdfe267537bef318b8535eeed7d112fd9a07a3079e042";
 
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringWriterProof {
+    schema_version: u32,
+    release: String,
+    rule: FormChoiceListStringWriterProofRule,
+    emission: FormChoiceListEmptyStringValue,
+    full_evidence_sha256: String,
+    provenance_ids: [String; 2],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringWriterProofRule {
+    id: String,
+    model_type: String,
+    feature: String,
+}
+
+#[cfg(test)]
+const MAX_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_BYTES: usize = 16 * 1024;
+
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FormChoiceListStringWriterEvidence {
@@ -1534,6 +1564,7 @@ pub struct FormChoiceListStringWriterEvidence {
     missing_keys: Vec<String>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceSource {
@@ -1546,6 +1577,7 @@ struct FormChoiceListStringEvidenceSource {
     invocation: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceRootIdentity {
@@ -1556,6 +1588,7 @@ struct FormChoiceListStringEvidenceRootIdentity {
     application: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceBundle {
@@ -1563,6 +1596,7 @@ struct FormChoiceListStringEvidenceBundle {
     version: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceFact {
@@ -1571,6 +1605,7 @@ struct FormChoiceListStringEvidenceFact {
     evidence: FormChoiceListStringEvidenceProof,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceValue {
@@ -1584,6 +1619,7 @@ struct FormChoiceListStringEvidenceValue {
     method_envelopes: Vec<FormChoiceListStringEvidenceMethodEnvelope>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceBranch {
@@ -1594,6 +1630,7 @@ struct FormChoiceListStringEvidenceBranch {
     xsi_type_attribute_offset: u32,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceMethodEnvelope {
@@ -1605,6 +1642,7 @@ struct FormChoiceListStringEvidenceMethodEnvelope {
     branch_graph: Vec<String>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringEvidenceProof {
@@ -3106,6 +3144,84 @@ fn exact_form_choice_parameters_policy() -> WriterPolicy {
     }
 }
 
+impl FormChoiceListStringWriterProof {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        let invalid = |reason: &str| {
+            SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned())
+        };
+        if json.len() > MAX_FORM_CHOICE_LIST_STRING_WRITER_PROOF_BYTES {
+            return Err(invalid("compact proof exceeds the bounded JSON size"));
+        }
+        let proof: Self = serde_json::from_str(json)
+            .map_err(|error| invalid(&format!("invalid compact proof JSON: {error}")))?;
+        proof.validate()?;
+        Ok(proof)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        let invalid = |reason: &str| {
+            SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned())
+        };
+        if self.schema_version != 1
+            || self.release != "2025.2.3+30"
+            || self.rule.id != "form.choice-list.design-time-value"
+            || self.rule.model_type != "FormChoiceList"
+            || self.rule.feature != "values"
+            || self.emission != FormChoiceListEmptyStringValue::SelfClosing
+            || self.full_evidence_sha256 != FORM_CHOICE_LIST_STRING_WRITER_FULL_EVIDENCE_SHA256
+            || self.provenance_ids
+                != [
+                    "choice-list-empty-string/full-artifact-v1",
+                    "choice-list-empty-string/semantic-projection-v1",
+                ]
+        {
+            return Err(invalid(
+                "compact proof differs from the exact supported projection",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn bind_form_choice_list_string_writer_proof(
+    json: &str,
+    corpus: &WriterRuleCorpus,
+) -> Result<(), SchemaError> {
+    let invalid =
+        |reason: &str| SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned());
+    let proof = FormChoiceListStringWriterProof::parse(json)?;
+    if corpus.source.release != proof.release {
+        return Err(invalid("writer corpus and compact proof releases differ"));
+    }
+    let mut matching = corpus.rules.iter().filter(|rule| {
+        rule.model_type == proof.rule.model_type && rule.feature == proof.rule.feature
+    });
+    let rule = matching
+        .next()
+        .ok_or_else(|| invalid("compact-proof writer rule is absent"))?;
+    if matching.next().is_some() {
+        return Err(invalid("compact-proof writer rule is ambiguous"));
+    }
+    let Some(WriterPolicy::FormChoiceList {
+        empty_string_value, ..
+    }) = rule.policy.as_ref()
+    else {
+        return Err(invalid(
+            "compact-proof matching typed writer policy is absent",
+        ));
+    };
+    if rule.id != proof.rule.id
+        || rule.evidence.status != "verified"
+        || *empty_string_value != proof.emission
+    {
+        return Err(invalid(
+            "writer rule and compact empty-string proof are not cross-bound",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 impl FormChoiceListStringWriterEvidence {
     pub fn parse(json: &str) -> Result<Self, SchemaError> {
         let invalid = |reason: &str| {
@@ -3117,7 +3233,7 @@ impl FormChoiceListStringWriterEvidence {
         let evidence: Self = serde_json::from_str(json)
             .map_err(|error| invalid(&format!("invalid JSON: {error}")))?;
         let digest = format!("{:x}", Sha256::digest(json.as_bytes()));
-        if digest != FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_SHA256 {
+        if digest != FORM_CHOICE_LIST_STRING_WRITER_FULL_EVIDENCE_SHA256 {
             return Err(invalid("exact evidence artifact SHA-256 differs"));
         }
         evidence.validate()?;
@@ -3180,11 +3296,13 @@ impl FormChoiceListStringWriterEvidence {
     }
 }
 
+#[cfg(test)]
 pub fn bundled_form_choice_list_string_writer_evidence()
 -> Result<FormChoiceListStringWriterEvidence, SchemaError> {
     FormChoiceListStringWriterEvidence::parse(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON)
 }
 
+#[cfg(test)]
 pub fn bind_form_choice_list_string_writer_evidence(
     json: &str,
     corpus: &WriterRuleCorpus,
@@ -4018,8 +4136,8 @@ pub fn bundled_metadata_order() -> Result<MetadataOrderCorpus, SchemaError> {
 
 pub fn bundled_writer_rules() -> Result<WriterRuleCorpus, SchemaError> {
     let corpus = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON)?;
-    bind_form_choice_list_string_writer_evidence(
-        BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON,
+    bind_form_choice_list_string_writer_proof(
+        BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON,
         &corpus,
     )?;
     bind_form_choice_parameters_writer_evidence(
@@ -4568,8 +4686,27 @@ mod tests {
 
     #[test]
     fn form_choice_list_empty_string_policy_matches_exact_research_evidence() {
+        let compact = FormChoiceListStringWriterProof::parse(
+            BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON,
+        )
+        .expect("strict compact Form choice-list string proof");
         let report = bundled_form_choice_list_string_writer_evidence()
             .expect("strict Form choice-list string evidence");
+        assert_eq!(
+            compact.full_evidence_sha256,
+            format!(
+                "{:x}",
+                Sha256::digest(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON.as_bytes())
+            )
+        );
+        assert_eq!(
+            compact.full_evidence_sha256,
+            FORM_CHOICE_LIST_STRING_WRITER_FULL_EVIDENCE_SHA256
+        );
+        assert_eq!(compact.release, report.source.release);
+        assert_eq!(compact.rule.id, "form.choice-list.design-time-value");
+        assert_eq!(compact.rule.model_type, "FormChoiceList");
+        assert_eq!(compact.rule.feature, "values");
         assert_eq!(report.schema_version, 1);
         assert_eq!(report.source.product, "1C:EDT");
         assert_eq!(report.source.release, "2025.2.3+30");
@@ -4689,6 +4826,7 @@ mod tests {
             source == "tools/report-edt-form-choice-list-string-writer-evidence.ps1"
                 || source.starts_with("edt-derived://2025.2.3+30/")
         }));
+        assert_eq!(compact.emission, fact.value.emission);
 
         let corpus = bundled_writer_rules().unwrap();
         let policy = corpus
@@ -4708,6 +4846,29 @@ mod tests {
             panic!("unexpected choice-list writer policy kind");
         };
         assert_eq!(*empty_string_value, fact.value.emission);
+
+        for marker in [
+            b"ibcmd.exe".as_slice(),
+            b"1cv8.exe",
+            b"1cv8c.exe",
+            b"\\1cv8\\",
+            b"/1cv8/",
+            b".jar",
+            b"org.eclipse",
+            b"JNI_CreateJavaVM",
+            b"JNIEnv",
+            b"JavaVM",
+            b"OSGi",
+        ] {
+            assert!(
+                !BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON
+                    .as_bytes()
+                    .windows(marker.len())
+                    .any(|window| window == marker),
+                "compact Form choice-list proof contains forbidden payload marker `{}`",
+                String::from_utf8_lossy(marker)
+            );
+        }
 
         let raw: serde_json::Value =
             serde_json::from_str(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON).unwrap();
@@ -4754,7 +4915,69 @@ mod tests {
     }
 
     #[test]
-    fn form_choice_list_empty_string_evidence_is_production_bound_and_fails_closed() {
+    fn form_choice_list_empty_string_compact_proof_is_production_bound_and_fails_closed() {
+        let corpus = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON).unwrap();
+        bind_form_choice_list_string_writer_proof(
+            BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON,
+            &corpus,
+        )
+        .unwrap();
+
+        let original: serde_json::Value =
+            serde_json::from_str(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON).unwrap();
+        for (pointer, replacement) in [
+            ("/schemaVersion", serde_json::json!(2)),
+            ("/release", serde_json::json!("2025.2.3+31")),
+            ("/rule/id", serde_json::json!("form.choice-list.wrong")),
+            ("/rule/modelType", serde_json::json!("Wrong")),
+            ("/rule/feature", serde_json::json!("wrong")),
+            ("/emission", serde_json::json!("paired")),
+            ("/fullEvidenceSha256", serde_json::json!("00")),
+            (
+                "/provenanceIds/0",
+                serde_json::json!("choice-list-empty-string/wrong"),
+            ),
+        ] {
+            let mut corrupted = original.clone();
+            *corrupted.pointer_mut(pointer).unwrap() = replacement;
+            assert!(
+                FormChoiceListStringWriterProof::parse(&serde_json::to_string(&corrupted).unwrap())
+                    .is_err(),
+                "compact proof mutation {pointer} must fail closed"
+            );
+        }
+        let mut extra = original;
+        extra["unexpected"] = serde_json::json!(true);
+        assert!(
+            FormChoiceListStringWriterProof::parse(&serde_json::to_string(&extra).unwrap())
+                .is_err()
+        );
+
+        let corruptions: [fn(&mut WriterRule); 3] = [
+            |rule: &mut WriterRule| rule.id = "form.choice-list.wrong".to_owned(),
+            |rule: &mut WriterRule| rule.evidence.status = "pending".to_owned(),
+            |rule: &mut WriterRule| rule.policy = None,
+        ];
+        for corrupt_rule in corruptions {
+            let mut corrupted_corpus = corpus.clone();
+            let rule = corrupted_corpus
+                .rules
+                .iter_mut()
+                .find(|rule| rule.model_type == "FormChoiceList" && rule.feature == "values")
+                .unwrap();
+            corrupt_rule(rule);
+            assert!(matches!(
+                bind_form_choice_list_string_writer_proof(
+                    BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON,
+                    &corrupted_corpus,
+                ),
+                Err(SchemaError::InvalidFormChoiceListStringWriterEvidence(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn form_choice_list_empty_string_full_evidence_is_research_bound_and_fails_closed() {
         let corpus = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON).unwrap();
         bind_form_choice_list_string_writer_evidence(
             BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON,
