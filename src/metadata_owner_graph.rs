@@ -548,6 +548,7 @@ pub(crate) enum OwnerIdentityRole {
     GeneratedType,
     GeneratedValue,
     Child,
+    CommandValue,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -568,6 +569,11 @@ impl From<GeneratedIdentityRole> for OwnerIdentityRole {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct OwnerIdentityLedger {
     by_uuid: BTreeMap<String, OwnerIdentityRole>,
+    /// Command value UUIDs are native type/value proofs, not owned child
+    /// identities: several commands are allowed to share one.  Keep them in
+    /// the same redacted ledger so all decoded command slots are accounted for
+    /// without turning a valid shared value into a false child collision.
+    command_value_ids: BTreeSet<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -581,6 +587,7 @@ impl OwnerIdentityLedger {
     pub(crate) fn new(root_uuid: String) -> Self {
         Self {
             by_uuid: BTreeMap::from([(root_uuid.to_ascii_lowercase(), OwnerIdentityRole::Root)]),
+            command_value_ids: BTreeSet::new(),
         }
     }
 
@@ -594,6 +601,13 @@ impl OwnerIdentityLedger {
         if let Some(previous) = self.by_uuid.get(&key) {
             return Err(OwnerIdentityCollision {
                 previous: *previous,
+                field_index,
+                collection_role: None,
+            });
+        }
+        if self.command_value_ids.contains(&key) {
+            return Err(OwnerIdentityCollision {
+                previous: OwnerIdentityRole::CommandValue,
                 field_index,
                 collection_role: None,
             });
@@ -619,12 +633,37 @@ impl OwnerIdentityLedger {
                 collection_role: Some(collection_role),
             });
         }
+        if self.command_value_ids.contains(&key) {
+            return Err(OwnerIdentityCollision {
+                previous: OwnerIdentityRole::CommandValue,
+                field_index,
+                collection_role: Some(collection_role),
+            });
+        }
         self.by_uuid.insert(key, OwnerIdentityRole::Child);
         Ok(())
     }
 
     pub(crate) fn contains(&self, uuid: &str) -> bool {
         self.by_uuid.contains_key(&uuid.to_ascii_lowercase())
+    }
+
+    pub(crate) fn observe_command_value(
+        &mut self,
+        uuid: String,
+        field_index: usize,
+        collection_role: OwnerCollectionRole,
+    ) -> Result<(), OwnerIdentityCollision> {
+        let key = uuid.to_ascii_lowercase();
+        if let Some(previous) = self.by_uuid.get(&key) {
+            return Err(OwnerIdentityCollision {
+                previous: *previous,
+                field_index,
+                collection_role: Some(collection_role),
+            });
+        }
+        self.command_value_ids.insert(key);
+        Ok(())
     }
 
     pub(crate) fn generated_identities(&self) -> BTreeSet<String> {
@@ -813,6 +852,44 @@ pub(crate) enum OwnerGraphReference {
     OwnerHeader,
     GeneratedType,
     GeneratedValue,
+    OwnedForm,
+    OwnedTemplate,
+    OwnedCommand,
+}
+
+const OWNER_GRAPH_REFERENCE_OWNED_FORM: &str = "owned_form";
+const OWNER_GRAPH_REFERENCE_OWNED_TEMPLATE: &str = "owned_template";
+const OWNER_GRAPH_REFERENCE_OWNED_COMMAND: &str = "owned_command";
+const OWNER_IDENTITY_ROLE_COMMAND_VALUE: &str = "command_value_id";
+const OWNER_GRAPH_OWNED_CHILD_REASON_TOKENS: [&str; 8] = [
+    "missing",
+    "ambiguous",
+    "unexpected",
+    "wrong_kind",
+    "wrong_owner",
+    "header_mismatch",
+    "declaration_order",
+    "property_parse",
+];
+
+/// Redacted, closed vocabulary for post-root owned-child resolution failures.
+#[repr(usize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OwnerGraphOwnedChildReason {
+    Missing,
+    Ambiguous,
+    Unexpected,
+    WrongKind,
+    WrongOwner,
+    HeaderMismatch,
+    DeclarationOrder,
+    PropertyParse,
+}
+
+impl OwnerGraphOwnedChildReason {
+    pub(crate) const fn as_str(self) -> &'static str {
+        OWNER_GRAPH_OWNED_CHILD_REASON_TOKENS[self as usize]
+    }
 }
 
 impl OwnerGraphReference {
@@ -824,6 +901,9 @@ impl OwnerGraphReference {
             Self::OwnerHeader => "owner_header",
             Self::GeneratedType => "generated_type_id",
             Self::GeneratedValue => "generated_value_id",
+            Self::OwnedForm => OWNER_GRAPH_REFERENCE_OWNED_FORM,
+            Self::OwnedTemplate => OWNER_GRAPH_REFERENCE_OWNED_TEMPLATE,
+            Self::OwnedCommand => OWNER_GRAPH_REFERENCE_OWNED_COMMAND,
         }
     }
 }
@@ -854,9 +934,16 @@ pub(crate) enum OwnerGraphDiagnosticKind {
     ChildUuidSyntax,
     ChildUuidNilUuid,
     ChildIdentityCollision,
+    OwnedChildReference,
     DuplicateIdentity,
     EdtFeatureOrder,
 }
+
+const OWNER_GRAPH_OWNED_CHILD_REFERENCE_FACTS: (OwnerGraphDiagnosticClass, &str, &str) = (
+    OwnerGraphDiagnosticClass::Invariant,
+    "owner_graph_owned_child",
+    "owned_child_reference",
+);
 
 impl OwnerGraphDiagnosticKind {
     pub(crate) const fn facts(self) -> (OwnerGraphDiagnosticClass, &'static str, &'static str) {
@@ -910,6 +997,7 @@ impl OwnerGraphDiagnosticKind {
                 "owner_identity_ledger",
                 "child_identity_collision",
             ),
+            Self::OwnedChildReference => OWNER_GRAPH_OWNED_CHILD_REFERENCE_FACTS,
             Self::DuplicateIdentity => (Invariant, "owner_identity_ledger", "duplicate_identity"),
             Self::EdtFeatureOrder => (Invariant, "produced_type_order", "edt_feature_order"),
         }
@@ -962,6 +1050,20 @@ impl OwnerGraphDiagnosticEvidence {
             collection_role: Some(role),
         }
     }
+
+    pub(crate) const fn owned_child(
+        role: OwnerCollectionRole,
+        item_index: usize,
+        reference: OwnerGraphReference,
+    ) -> Self {
+        Self {
+            kind: OwnerGraphDiagnosticKind::OwnedChildReference,
+            reference: Some(reference),
+            field_index: None,
+            collection_index: Some(item_index),
+            collection_role: Some(role),
+        }
+    }
 }
 
 impl OwnerIdentityRole {
@@ -971,6 +1073,7 @@ impl OwnerIdentityRole {
             Self::GeneratedType => "generated_type_id",
             Self::GeneratedValue => "generated_value_id",
             Self::Child => "child_uuid",
+            Self::CommandValue => OWNER_IDENTITY_ROLE_COMMAND_VALUE,
         }
     }
 }
@@ -1278,5 +1381,59 @@ mod tests {
         let rendered = format!("{evidence:?}");
         assert!(!rendered.contains("TYPE-UUID"));
         assert!(!rendered.contains("child-uuid"));
+    }
+
+    #[test]
+    fn command_value_evidence_collides_symmetrically_with_identity_ledger() {
+        let mut ledger = OwnerIdentityLedger::new("root".to_owned());
+        ledger
+            .insert_generated("generated".to_owned(), 1, GeneratedIdentityRole::Type)
+            .unwrap();
+        let root_collision = ledger
+            .observe_command_value("ROOT".to_owned(), 2, OwnerCollectionRole::Command)
+            .unwrap_err();
+        assert_eq!(root_collision.previous, OwnerIdentityRole::Root);
+        let generated_collision = ledger
+            .observe_command_value("GENERATED".to_owned(), 3, OwnerCollectionRole::Command)
+            .unwrap_err();
+        assert_eq!(
+            generated_collision.previous,
+            OwnerIdentityRole::GeneratedType
+        );
+        ledger
+            .observe_command_value("shared".to_owned(), 4, OwnerCollectionRole::Command)
+            .unwrap();
+        // Native command collections can intentionally reuse a value UUID.
+        ledger
+            .observe_command_value("SHARED".to_owned(), 5, OwnerCollectionRole::Command)
+            .unwrap();
+        let later_child = ledger
+            .insert_child("shared".to_owned(), 6, OwnerCollectionRole::Form)
+            .unwrap_err();
+        assert_eq!(later_child.previous, OwnerIdentityRole::CommandValue);
+        assert_eq!(later_child.collection_role, Some(OwnerCollectionRole::Form));
+    }
+
+    #[test]
+    fn owned_child_reason_vocabulary_is_closed_and_stable() {
+        let tokens = [
+            (OwnerGraphOwnedChildReason::Missing, "missing"),
+            (OwnerGraphOwnedChildReason::Ambiguous, "ambiguous"),
+            (OwnerGraphOwnedChildReason::Unexpected, "unexpected"),
+            (OwnerGraphOwnedChildReason::WrongKind, "wrong_kind"),
+            (OwnerGraphOwnedChildReason::WrongOwner, "wrong_owner"),
+            (
+                OwnerGraphOwnedChildReason::HeaderMismatch,
+                "header_mismatch",
+            ),
+            (
+                OwnerGraphOwnedChildReason::DeclarationOrder,
+                "declaration_order",
+            ),
+            (OwnerGraphOwnedChildReason::PropertyParse, "property_parse"),
+        ];
+        for (reason, token) in tokens {
+            assert_eq!(reason.as_str(), token);
+        }
     }
 }

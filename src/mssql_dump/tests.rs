@@ -1710,6 +1710,246 @@ fn audit_owner_graph_row_for_test(
     )
 }
 
+fn audit_owner_graph_row_with_forms_for_test(
+    row: &MetadataTextRow,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    extract_metadata_source_xml_from_text_row_audited(
+        row,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        form_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
+#[test]
+fn audited_catalog_and_document_reject_second_declared_form_from_other_owner() {
+    for expected in &EXPECTED_OWNER_GRAPH_LAYOUTS[..2] {
+        let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
+        let good = owner_graph_uuid_for_test(80);
+        let bad = owner_graph_uuid_for_test(81);
+        collections[4] = format!("{{{},2,{good},{bad}}}", expected.collection_markers[4]);
+        let folder = match expected.family {
+            owner_graph::OwnerGraphFamily::Catalog => "Catalogs",
+            owner_graph::OwnerGraphFamily::Document => "Documents",
+            _ => unreachable!(),
+        };
+        let row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: render_owner_graph_fixture_for_test(&fields, &collections),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(folder),
+        };
+        let form_refs = BTreeMap::from([
+            (
+                good,
+                FormSourceReference {
+                    relative_path: PathBuf::from(folder).join("Owner/Forms/Good.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                bad,
+                FormSourceReference {
+                    relative_path: PathBuf::from(folder).join("Other/Forms/Bad.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+        let diagnostic = match audit_owner_graph_row_with_forms_for_test(&row, &form_refs) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!("wrong-owner form was accepted for {:?}", expected.family),
+        };
+        assert_eq!(diagnostic.family, expected.family.as_str());
+        assert_eq!(
+            diagnostic.class,
+            MetadataSourceExtractionFailureClass::Invariant
+        );
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(diagnostic.structural_signature, "wrong_owner");
+        assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.offending_reference.as_deref(),
+            Some("owned_form")
+        );
+    }
+}
+
+#[test]
+fn catalog_and_document_validators_keep_second_tabular_property_failure_location() {
+    let first = "11111111-1111-4111-8111-111111111111";
+    let second = "22222222-2222-4222-8222-222222222222";
+    let properties = || MetadataTabularSectionProperties {
+        tooltip: Vec::new(),
+        fill_checking: "DontCheck",
+        line_number_fill_checking: "",
+        line_number_fill_value: None,
+        line_number_synonym: Vec::new(),
+        use_mode: None,
+        line_number_length: Some(5),
+    };
+    let child = |uuid: &str, name: &str, tabular_section_properties| MetadataChildObject {
+        tag: OWNER_CHILD_TABULAR_SECTION_TAG,
+        header: MetadataHeader {
+            uuid: uuid.to_owned(),
+            name: name.to_owned(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        },
+        generated_types: Vec::new(),
+        value_types: Vec::new(),
+        emit_empty_type: false,
+        properties: None,
+        register_properties: None,
+        tabular_section_properties,
+        child_objects: Vec::new(),
+    };
+    let children = vec![
+        child(first, "First", Some(properties())),
+        child(second, "Second", None),
+    ];
+    let expected_document = vec![
+        DocumentTabularSectionLayout {
+            uuid: first.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+        DocumentTabularSectionLayout {
+            uuid: second.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+    ];
+    let expected_catalog = vec![
+        CatalogTabularSectionLayout {
+            uuid: first.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+        CatalogTabularSectionLayout {
+            uuid: second.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+    ];
+    let object_refs = BTreeMap::from([
+        (
+            first.to_owned(),
+            "Catalog.Owner.TabularSection.First".to_owned(),
+        ),
+        (
+            second.to_owned(),
+            "Catalog.Owner.TabularSection.Second".to_owned(),
+        ),
+    ]);
+    for failure in [
+        validate_catalog_child_objects(&children, &[], &expected_catalog, "Owner", &object_refs)
+            .unwrap_err(),
+        validate_document_owner_graph_child_objects(&children, &[], &expected_document)
+            .unwrap_err(),
+    ] {
+        assert_eq!(
+            failure.role,
+            owner_graph::OwnerCollectionRole::TabularSection
+        );
+        assert_eq!(failure.item_index, 1);
+        assert_eq!(
+            failure.reason,
+            owner_graph::OwnerGraphOwnedChildReason::PropertyParse
+        );
+    }
+}
+
+#[test]
+fn owned_form_and_template_duplicate_names_report_second_item_as_ambiguous() {
+    let first = "11111111-1111-4111-8111-111111111111".to_owned();
+    let second = "22222222-2222-4222-8222-222222222222".to_owned();
+    let forms = BTreeMap::from([
+        (
+            first.clone(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Catalogs/Owner/Forms/Duplicate.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            second.clone(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Catalogs/Owner/Forms/dUpLiCaTe.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+    let mut form_diagnostic = None;
+    assert!(
+        validate_owner_graph_owned_forms(
+            &[first.clone(), second.clone()],
+            owner_graph::OwnerGraphFamily::Catalog,
+            "Owner",
+            &forms,
+            &mut form_diagnostic,
+        )
+        .is_none()
+    );
+    let form_diagnostic = form_diagnostic.unwrap();
+    assert_eq!(form_diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(form_diagnostic.collection_index, Some(1));
+    assert_eq!(form_diagnostic.structural_signature, "ambiguous");
+
+    let templates = BTreeMap::from([
+        (
+            first,
+            TemplateSourceReference {
+                relative_path: PathBuf::from("Documents/Owner/Templates/Duplicate.xml"),
+                kind: "Template",
+                template_type: "SpreadsheetDocument",
+            },
+        ),
+        (
+            second,
+            TemplateSourceReference {
+                relative_path: PathBuf::from("Documents/Owner/Templates/dUpLiCaTe.xml"),
+                kind: "Template",
+                template_type: "SpreadsheetDocument",
+            },
+        ),
+    ]);
+    let mut template_diagnostic = None;
+    assert!(
+        validate_owner_graph_owned_templates(
+            &[
+                "11111111-1111-4111-8111-111111111111".to_owned(),
+                "22222222-2222-4222-8222-222222222222".to_owned(),
+            ],
+            owner_graph::OwnerGraphFamily::Document,
+            "Owner",
+            &templates,
+            &mut template_diagnostic,
+        )
+        .is_none()
+    );
+    let template_diagnostic = template_diagnostic.unwrap();
+    assert_eq!(
+        template_diagnostic.collection_role.as_deref(),
+        Some("template")
+    );
+    assert_eq!(template_diagnostic.collection_index, Some(1));
+    assert_eq!(template_diagnostic.structural_signature, "ambiguous");
+}
+
 #[test]
 fn owner_graph_decoder_is_table_driven_for_four_exact_family_layouts() {
     for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
@@ -1813,12 +2053,23 @@ fn audited_owner_graph_handoff_distinguishes_decode_errors_from_downstream_misse
             ),
         };
         assert_eq!(downstream.family, expected.family.as_str());
-        assert_eq!(
-            downstream.class,
-            MetadataSourceExtractionFailureClass::Unknown
-        );
-        assert_eq!(downstream.parser_stage, "legacy_option_none");
-        assert_eq!(downstream.structural_signature, "legacy_option_none");
+        if matches!(
+            expected.family,
+            owner_graph::OwnerGraphFamily::Catalog | owner_graph::OwnerGraphFamily::Document
+        ) {
+            assert_eq!(
+                downstream.class,
+                MetadataSourceExtractionFailureClass::Invariant
+            );
+            assert_eq!(downstream.parser_stage, "owner_graph_owned_child");
+        } else {
+            assert_eq!(
+                downstream.class,
+                MetadataSourceExtractionFailureClass::Unknown
+            );
+            assert_eq!(downstream.parser_stage, "legacy_option_none");
+            assert_eq!(downstream.structural_signature, "legacy_option_none");
+        }
     }
 }
 
@@ -1908,6 +2159,830 @@ fn owner_graph_decoder_reports_exact_identity_failures_without_payload_disclosur
         assert!(!serialized.contains(secret));
         assert!(!serialized.contains(&header.uuid));
         assert!(!serialized.contains(&header.name));
+    }
+}
+
+#[test]
+fn owner_graph_post_root_evidence_is_role_based_and_redacted() {
+    let secret = "9a4f38fb-9d13-4b71-83d1-0123456789ab";
+    let mut identities = owner_graph::OwnerIdentityLedger::new(secret.to_owned());
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_child_ids(
+            &mut identities,
+            owner_graph::OwnerGraphFamily::Catalog,
+            owner_graph::OwnerCollectionRole::Form,
+            vec![secret.to_owned()],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.expect("root/child collision must stay typed");
+    assert_eq!(diagnostic.family, "Catalog");
+    assert_eq!(diagnostic.parser_stage, "owner_identity_ledger");
+    assert_eq!(diagnostic.structural_signature, "child_identity_collision");
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(diagnostic.collection_index, Some(0));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+    assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+
+    let evidence = owner_graph_owned_child_diagnostic(
+        owner_graph::OwnerGraphFamily::Document,
+        owner_graph::OwnerCollectionRole::Template,
+        2,
+        owner_graph::OwnerGraphReference::OwnedTemplate,
+        owner_graph::OwnerGraphOwnedChildReason::DeclarationOrder,
+    );
+    assert_eq!(evidence.family, "Document");
+    assert_eq!(evidence.parser_stage, "owner_graph_owned_child");
+    assert_eq!(evidence.structural_signature, "declaration_order");
+    assert_eq!(evidence.collection_role.as_deref(), Some("template"));
+    assert_eq!(evidence.collection_index, Some(2));
+    assert_eq!(
+        evidence.offending_reference.as_deref(),
+        Some("owned_template")
+    );
+    assert!(!serde_json::to_string(&evidence).unwrap().contains(secret));
+}
+
+#[test]
+fn owner_graph_owned_child_failures_are_typed_for_form_template_and_command() {
+    let secret = "7b18e5c1-1a2b-4a7a-9c07-abcdef123456".to_owned();
+    let mut form_diagnostic = None;
+    let forms = BTreeMap::from([(
+        secret.clone(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Other/Forms/Foreign.xml"),
+            kind: "Form",
+        },
+    )]);
+    assert!(
+        validate_owner_graph_owned_forms(
+            std::slice::from_ref(&secret),
+            owner_graph::OwnerGraphFamily::Catalog,
+            "Owner",
+            &forms,
+            &mut form_diagnostic,
+        )
+        .is_none()
+    );
+    let form_diagnostic = form_diagnostic.unwrap();
+    assert_eq!(form_diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(form_diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(form_diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(form_diagnostic.collection_index, Some(0));
+    assert_eq!(
+        form_diagnostic.offending_reference.as_deref(),
+        Some("owned_form")
+    );
+    assert!(
+        !serde_json::to_string(&form_diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+
+    let mut template_diagnostic = None;
+    let templates = BTreeMap::from([(
+        secret.clone(),
+        TemplateSourceReference {
+            relative_path: PathBuf::from("Documents/Other/Templates/Foreign.xml"),
+            kind: "Template",
+            template_type: "SpreadsheetDocument",
+        },
+    )]);
+    assert!(
+        validate_owner_graph_owned_templates(
+            std::slice::from_ref(&secret),
+            owner_graph::OwnerGraphFamily::Document,
+            "Owner",
+            &templates,
+            &mut template_diagnostic,
+        )
+        .is_none()
+    );
+    let template_diagnostic = template_diagnostic.unwrap();
+    assert_eq!(template_diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(template_diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(
+        template_diagnostic.collection_role.as_deref(),
+        Some("template")
+    );
+    assert_eq!(template_diagnostic.collection_index, Some(0));
+    assert_eq!(
+        template_diagnostic.offending_reference.as_deref(),
+        Some("owned_template")
+    );
+    assert!(
+        !serde_json::to_string(&template_diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+
+    let command_failure =
+        match parse_owner_graph_command_identity_slots_indexed(&["{not-a-command}"]) {
+            Err(failure) => failure,
+            Ok(_) => panic!("malformed command identity must be rejected"),
+        };
+    let command_diagnostic = owner_graph_command_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::Catalog,
+        command_failure,
+    );
+    assert_eq!(command_diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(command_diagnostic.structural_signature, "header_mismatch");
+    assert_eq!(
+        command_diagnostic.collection_role.as_deref(),
+        Some("command")
+    );
+    assert_eq!(command_diagnostic.collection_index, Some(0));
+    assert_eq!(
+        command_diagnostic.offending_reference.as_deref(),
+        Some("owned_command")
+    );
+    assert!(
+        !serde_json::to_string(&command_diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+}
+
+#[test]
+fn owner_graph_form_slots_report_exact_field_and_second_declared_item() {
+    let first = "11111111-1111-4111-8111-111111111111".to_owned();
+    let secret = "22222222-2222-4222-8222-222222222222".to_owned();
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let mut fields = vec![zero; 24];
+    fields[23] = &secret;
+    let forms = BTreeMap::from([(
+        secret.clone(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Other/Forms/Foreign.xml"),
+            kind: OWNER_GRAPH_FORM_KIND,
+        },
+    )]);
+
+    let diagnostic = validate_owner_graph_form_slots(
+        &fields,
+        &[23],
+        &[first, secret.clone()],
+        owner_graph::OwnerGraphFamily::Catalog,
+        "Owner",
+        &forms,
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        diagnostic.class,
+        MetadataSourceExtractionFailureClass::Invariant
+    );
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(diagnostic.field_index, Some(23));
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("owned_form")
+    );
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+}
+
+#[test]
+fn owner_graph_form_slots_distinguish_exact_but_undeclared_form() {
+    let declared = "11111111-1111-4111-8111-111111111111".to_owned();
+    let secret = "33333333-3333-4333-8333-333333333333".to_owned();
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let mut fields = vec![zero; 18];
+    fields[17] = &secret;
+    let forms = BTreeMap::from([(
+        secret.clone(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Documents/Owner/Forms/Exact.xml"),
+            kind: OWNER_GRAPH_FORM_KIND,
+        },
+    )]);
+
+    let diagnostic = validate_owner_graph_form_slots(
+        &fields,
+        &[17],
+        &[declared],
+        owner_graph::OwnerGraphFamily::Document,
+        "Owner",
+        &forms,
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.structural_signature, "unexpected");
+    assert_eq!(diagnostic.field_index, Some(17));
+    assert_eq!(diagnostic.collection_index, None);
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+}
+
+#[test]
+fn catalog_field_references_report_unknown_second_item_without_payload() {
+    let secret = "native-secret-marker";
+    let first = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{-3}}}}");
+    let second = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{{secret}}}}}");
+    let collection = format!("{{1,{{0,2,{first},{second}}}}}");
+    let mut fields = vec![""; 43];
+    fields[42] = &collection;
+
+    let diagnostic = parse_catalog_field_references(
+        &fields,
+        42,
+        "Owner",
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &[("-3", "Description"), ("-2", "Code")],
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        diagnostic.class,
+        MetadataSourceExtractionFailureClass::Invariant
+    );
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "unexpected");
+    assert_eq!(diagnostic.field_index, Some(42));
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+    assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+}
+
+#[test]
+fn catalog_field_references_report_duplicate_second_item() {
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{-3}}}}");
+    let collection = format!("{{1,{{0,2,{item},{item}}}}}");
+    let mut fields = vec![""; 55];
+    fields[54] = &collection;
+
+    let diagnostic = parse_catalog_field_references(
+        &fields,
+        54,
+        "Owner",
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &CATALOG_STANDARD_ATTRIBUTES,
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.structural_signature, "ambiguous");
+    assert_eq!(diagnostic.field_index, Some(54));
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+}
+
+#[test]
+fn document_field_references_report_second_foreign_attribute() {
+    let first_uuid = "44444444-4444-4444-8444-444444444444";
+    let secret = "55555555-5555-4555-8555-555555555555";
+    let first = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{first_uuid}}}}}");
+    let second = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{secret}}}}}");
+    let collection = format!("{{1,{{0,2,{first},{second}}}}}");
+    let mut fields = vec![""; 48];
+    fields[47] = &collection;
+    let object_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "Document.Owner.Attribute.First".to_owned(),
+        ),
+        (
+            secret.to_owned(),
+            "Document.Other.Attribute.Foreign".to_owned(),
+        ),
+    ]);
+    let attribute_references = BTreeSet::from(["Document.Owner.Attribute.First".to_owned()]);
+
+    let diagnostic = parse_document_field_references(
+        &fields,
+        47,
+        "Owner",
+        &object_refs,
+        &attribute_references,
+        &[],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(diagnostic.field_index, Some(47));
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    let serialized = serde_json::to_string(&diagnostic).unwrap();
+    assert!(!serialized.contains(secret));
+    assert!(!serialized.contains("Foreign"));
+}
+
+#[test]
+fn owner_graph_declared_role_mismatch_does_not_fall_back_to_legacy_option_none() {
+    let wrong = owner_graph::DecodedOwnerCollection::new(
+        Vec::new(),
+        owner_graph::OwnerCollectionProvenance::from_layout(
+            owner_graph::OwnerGraphFamily::Catalog
+                .layout()
+                .collection_layout(owner_graph::OwnerCollectionRole::Template)
+                .unwrap(),
+        ),
+    );
+    let graph = owner_graph::DecodedOwnerGraph {
+        generated_types: Vec::new(),
+        identities: owner_graph::OwnerIdentityLedger::new("root".to_owned()),
+        owner_fields: Vec::new(),
+        collections: vec![wrong],
+    };
+    let mut diagnostic = None;
+    assert!(
+        owner_graph_collection_for_family_parser(
+            &graph,
+            owner_graph::OwnerGraphFamily::Document,
+            owner_graph::OwnerCollectionRole::TabularSection,
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.parser_stage, "owner_graph_collection");
+    assert_eq!(diagnostic.structural_signature, "collection_role_mismatch");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("tabular_section")
+    );
+    assert_ne!(diagnostic.parser_stage, "legacy_option_none");
+}
+
+#[test]
+fn physical_scanner_orders_declared_catalog_and_document_children_and_reports_actual_mismatch() {
+    let owner = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let direct = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let section = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    let nested = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    let extra = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    let header = |uuid: &str, name: &str| {
+        format!(
+            "{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}"
+        )
+    };
+    // Native text order is deliberately section/nested/direct; the owner
+    // declaration is direct/section/nested for both physical families.
+    let text = format!(
+        "{{11,{},{{8,{}}}}},{{5,{}}}",
+        header(section, "Lines"),
+        header(nested, "Nested"),
+        header(direct, "Direct"),
+    );
+    let inventory = DeclaredOwnerChildInventory {
+        direct_attributes: vec![direct.to_owned()],
+        tabular_sections: vec![(section.to_owned(), vec![nested.to_owned()])],
+    };
+
+    for (family, name) in [("Catalog", "Products"), ("Document", "Invoice")] {
+        let observed = nested_headers_with_offsets_from_text(&text, owner, |_| true)
+            .into_iter()
+            .filter_map(|(child, offset)| {
+                attribute_tabular_section_child_object_tag(
+                    family, name, owner, &text, offset, &child,
+                )
+                .map(|(tag, parent)| (tag, child, parent))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed
+                .iter()
+                .map(|(tag, child, _)| (*tag, child.uuid.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("TabularSection", section),
+                ("Attribute", nested),
+                ("Attribute", direct),
+            ],
+            "{family} physical scanner"
+        );
+        for (tag, child, parent) in &observed {
+            assert!(
+                inventory
+                    .failure_for_observed(tag, &child.uuid, parent.as_ref())
+                    .is_none()
+            );
+        }
+        let mut roots = observed
+            .iter()
+            .filter(|(_, _, parent)| parent.is_none())
+            .map(|(tag, child, _)| (*tag, child.uuid.clone()))
+            .collect::<Vec<_>>();
+        roots.sort_by_key(|(tag, uuid)| inventory.root_order_for(tag, uuid).unwrap());
+        assert_eq!(
+            roots,
+            vec![
+                ("Attribute", direct.to_owned()),
+                ("TabularSection", section.to_owned())
+            ]
+        );
+        assert_eq!(inventory.child_order(section, nested), Some(0));
+    }
+
+    let wrong_parent_text = format!(
+        "{{11,{},{{8,{}}}}}",
+        header(section, "Lines"),
+        header(direct, "Direct"),
+    );
+    let (_, wrong_parent, parent) =
+        nested_headers_with_offsets_from_text(&wrong_parent_text, owner, |_| true)
+            .into_iter()
+            .filter_map(|(child, offset)| {
+                attribute_tabular_section_child_object_tag(
+                    "Document",
+                    "Invoice",
+                    owner,
+                    &wrong_parent_text,
+                    offset,
+                    &child,
+                )
+                .map(|(tag, parent)| (tag, child, parent))
+            })
+            .find(|(tag, child, _)| *tag == "Attribute" && child.uuid.eq_ignore_ascii_case(direct))
+            .unwrap();
+    let failure = inventory
+        .failure_for_observed("Attribute", &wrong_parent.uuid, parent.as_ref())
+        .unwrap();
+    assert_eq!(
+        failure.role,
+        owner_graph::OwnerCollectionRole::DirectAttribute
+    );
+    assert_eq!(failure.item_index, 0);
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::WrongOwner
+    );
+
+    let extra_text = format!("{{5,{}}}", header(extra, "Extra"));
+    let (_, extra_header, parent) =
+        nested_headers_with_offsets_from_text(&extra_text, owner, |_| true)
+            .into_iter()
+            .filter_map(|(child, offset)| {
+                attribute_tabular_section_child_object_tag(
+                    "Catalog",
+                    "Products",
+                    owner,
+                    &extra_text,
+                    offset,
+                    &child,
+                )
+                .map(|(tag, parent)| (tag, child, parent))
+            })
+            .next()
+            .unwrap();
+    let failure = inventory
+        .failure_for_observed("Attribute", &extra_header.uuid, parent.as_ref())
+        .unwrap();
+    assert_eq!(
+        failure.role,
+        owner_graph::OwnerCollectionRole::DirectAttribute
+    );
+    assert_eq!(failure.item_index, 1);
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::Unexpected
+    );
+}
+
+#[test]
+fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
+    let first = "11111111-1111-4111-8111-111111111111";
+    let second = "22222222-2222-4222-8222-222222222222";
+    let direct =
+        document_attribute_wrapper_for_test(6, first, r#"{"Pattern",{"B"}}"#, r#"{"U"}"#, "0", "1");
+    let direct_items = vec![format!("{{{direct},0}}"), "{malformed}".to_owned()];
+    assert_eq!(
+        parse_document_direct_attribute_collection_indexed(
+            &direct_items.iter().map(String::as_str).collect::<Vec<_>>()
+        )
+        .map_err(|failure| failure.item_index),
+        Err(1)
+    );
+
+    let nested = document_attribute_wrapper_for_test(
+        8,
+        second,
+        r#"{"Pattern",{"B"}}"#,
+        r#"{"S",""}"#,
+        "0",
+        "1",
+    );
+    let attributes = document_attribute_collection_for_test(
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&nested),
+    );
+    let payload = format!(
+        "{{11,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-8ccc-cccccccccccc,dddddddd-dddd-4ddd-8ddd-dddddddddddd,{{0,{{3,{{1,0,{first}}},\"Lines\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}},0,0,0}}"
+    );
+    let tabular = format!("{{{{1,{payload}}},1,{attributes}}}");
+    let tabular_items = vec![tabular, "{malformed}".to_owned()];
+    let refs = BTreeMap::from([(
+        first.to_owned(),
+        "Document.Invoice.TabularSection.Lines".to_owned(),
+    )]);
+    assert_eq!(
+        parse_document_tabular_sections_indexed(
+            &tabular_items.iter().map(String::as_str).collect::<Vec<_>>(),
+            "Invoice",
+            &refs,
+        )
+        .map(|_| ())
+        .map_err(|failure| failure.item_index),
+        Err(1)
+    );
+
+    let command_header = format!(
+        "{{3,{{1,0,{first}}},\"Run\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}"
+    );
+    let command_properties = format!("{{9,0,0,0,0,0,0,0,0,{command_header},0,0,0}}");
+    let command_body = format!("{{1,{{2,{first},{second}}},{command_properties}}}");
+    let command_nested = format!("{{0,0,0,{command_body}}}");
+    let command_wrapper = format!("{{0,{command_nested}}}");
+    let command = format!("{{{command_wrapper},0}}");
+    let outer = split_information_register_braced_fields(&command).unwrap();
+    assert_eq!(outer.len(), 2, "{command}");
+    let wrapper = split_information_register_braced_fields(outer[0]).unwrap();
+    assert_eq!(wrapper.len(), 2, "{command}");
+    let nested_command = split_information_register_braced_fields(wrapper[1]).unwrap();
+    assert_eq!(nested_command.len(), 4, "{command}");
+    let body = split_information_register_braced_fields(nested_command[3]).unwrap();
+    assert_eq!(body.len(), 3, "{command}");
+    let properties = split_information_register_braced_fields(body[2]).unwrap();
+    assert_eq!(properties.len(), 13, "{command}");
+    assert!(
+        parse_owner_graph_command_identity_slots_indexed(&[command.as_str()]).is_ok(),
+        "{command}"
+    );
+    let failure = match parse_owner_graph_command_identity_slots_indexed(&[
+        command.as_str(),
+        "{malformed}",
+    ]) {
+        Err(failure) => failure,
+        Ok(_) => panic!("second malformed command must report its ordinal"),
+    };
+    assert_eq!(failure.item_index, 1);
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch
+    );
+}
+
+fn owner_graph_nested_attribute_for_test(
+    family: owner_graph::OwnerGraphFamily,
+    wrapper_code: u32,
+    uuid: &str,
+) -> String {
+    match family {
+        owner_graph::OwnerGraphFamily::Catalog => catalog_attribute_wrapper_for_test(
+            wrapper_code,
+            uuid,
+            r#"{"Pattern",{"B"}}"#,
+            r#"{"U"}"#,
+            "0",
+        ),
+        owner_graph::OwnerGraphFamily::Document => document_attribute_wrapper_for_test(
+            wrapper_code,
+            uuid,
+            r#"{"Pattern",{"B"}}"#,
+            r#"{"S",""}"#,
+            "0",
+            "1",
+        ),
+        _ => unreachable!(),
+    }
+}
+
+fn owner_graph_tabular_section_item_for_test(
+    family: owner_graph::OwnerGraphFamily,
+    uuid: &str,
+    name: &str,
+    generated: [&str; 4],
+    nested_wrappers: &[String],
+) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let payload = format!(
+        "{{11,{},{},{},{},{{0,{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,{zero},0}}}},0,{{0}},{{0}}}}",
+        generated[0], generated[1], generated[2], generated[3]
+    );
+    match family {
+        owner_graph::OwnerGraphFamily::Catalog => {
+            let nested = catalog_attribute_collection_for_test(
+                CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
+                nested_wrappers,
+            );
+            format!("{{{{1,{payload},0}},1,{nested}}}")
+        }
+        owner_graph::OwnerGraphFamily::Document => {
+            let nested = document_attribute_collection_for_test(
+                DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+                nested_wrappers,
+            );
+            format!("{{{{1,{payload}}},1,{nested}}}")
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn catalog_and_document_tabular_sections_report_exact_second_item_matrix() {
+    let section_first = "11111111-1111-4111-8111-111111111111";
+    let section_second = "22222222-2222-4222-8222-222222222222";
+    let nested_first = "33333333-3333-4333-8333-333333333333";
+    let nested_second = "44444444-4444-4444-8444-444444444444";
+    let generated_first = [
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+    ];
+    let generated_second = [
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4",
+    ];
+
+    for family in [
+        owner_graph::OwnerGraphFamily::Catalog,
+        owner_graph::OwnerGraphFamily::Document,
+    ] {
+        let kind = family.as_str();
+        let first_nested = owner_graph_nested_attribute_for_test(family, 8, nested_first);
+        let valid_second_nested = owner_graph_nested_attribute_for_test(family, 8, nested_second);
+        let first = owner_graph_tabular_section_item_for_test(
+            family,
+            section_first,
+            "First",
+            generated_first,
+            &[first_nested],
+        );
+
+        for (
+            case,
+            second_uuid,
+            second_name,
+            second_generated,
+            second_nested,
+            second_reference,
+            expected_reason,
+            expected_reference,
+        ) in [
+            (
+                "wrong owner",
+                section_second,
+                "Second",
+                generated_second,
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Other.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "duplicate uuid",
+                section_first,
+                "First",
+                generated_second,
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.First"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "duplicate name",
+                section_second,
+                "First",
+                generated_second,
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.First"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "duplicate generated type",
+                section_second,
+                "Second",
+                [
+                    generated_first[0],
+                    generated_second[1],
+                    generated_second[2],
+                    generated_second[3],
+                ],
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::GeneratedType,
+            ),
+            (
+                "invalid generated value",
+                section_second,
+                "Second",
+                [
+                    generated_second[0],
+                    "not-a-generated-uuid",
+                    generated_second[2],
+                    generated_second[3],
+                ],
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                owner_graph::OwnerGraphReference::GeneratedValue,
+            ),
+            (
+                "duplicate nested attribute",
+                section_second,
+                "Second",
+                generated_second,
+                vec![valid_second_nested.clone(), valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "wrong nested kind",
+                section_second,
+                "Second",
+                generated_second,
+                vec![owner_graph_nested_attribute_for_test(
+                    family,
+                    6,
+                    nested_second,
+                )],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+        ] {
+            let second = owner_graph_tabular_section_item_for_test(
+                family,
+                second_uuid,
+                second_name,
+                second_generated,
+                &second_nested,
+            );
+            let refs = BTreeMap::from([
+                (
+                    section_first.to_owned(),
+                    format!("{kind}.Owner.TabularSection.First"),
+                ),
+                (second_uuid.to_owned(), second_reference),
+            ]);
+            let items = [first.as_str(), second.as_str()];
+            let failure = match family {
+                owner_graph::OwnerGraphFamily::Catalog => {
+                    let seed = "cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_owned();
+                    let mut generated_ids = BTreeSet::from([seed.clone()]);
+                    let failure = match parse_catalog_tabular_sections_indexed(
+                        &items,
+                        "Owner",
+                        &refs,
+                        &mut generated_ids,
+                    ) {
+                        Err(failure) => failure,
+                        Ok(_) => panic!("{kind}: {case} was accepted"),
+                    };
+                    assert_eq!(
+                        generated_ids,
+                        BTreeSet::from([seed]),
+                        "{kind}: {case} leaked staged generated identities"
+                    );
+                    failure
+                }
+                owner_graph::OwnerGraphFamily::Document => {
+                    match parse_document_tabular_sections_indexed(&items, "Owner", &refs) {
+                        Err(failure) => failure,
+                        Ok(_) => panic!("{kind}: {case} was accepted"),
+                    }
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(failure.item_index, 1, "{kind}: {case}");
+            assert_eq!(failure.reason, expected_reason, "{kind}: {case}");
+            assert_eq!(failure.reference, expected_reference, "{kind}: {case}");
+        }
     }
 }
 
@@ -44572,7 +45647,7 @@ fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
         &BTreeMap::new(),
     )
     .unwrap();
-    let mut child_objects = parse_attribute_tabular_section_child_objects(
+    let child_objects = parse_attribute_tabular_section_child_objects(
         "DataProcessor",
         &owner_header.name,
         &fixture.raw,
@@ -44583,6 +45658,7 @@ fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
         &BTreeMap::new(),
         &BTreeMap::new(),
     );
+    let mut child_objects = child_objects;
     let attribute = child_objects
         .iter_mut()
         .flat_map(|child| child.child_objects.iter_mut())
@@ -47165,9 +48241,10 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         6
     ));
     assert_eq!(
-        parse_document_direct_attribute_collection(
+        parse_document_direct_attribute_collection_indexed(
             &split_1c_braced_fields(&direct_collection, 0).unwrap()[2..]
-        ),
+        )
+        .ok(),
         Some(vec![first_uuid.to_string()])
     );
     let legacy_direct_collection = document_attribute_collection_for_test(
@@ -47175,9 +48252,10 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         std::slice::from_ref(&direct5),
     );
     assert_eq!(
-        parse_document_direct_attribute_collection(
+        parse_document_direct_attribute_collection_indexed(
             &split_1c_braced_fields(&legacy_direct_collection, 0).unwrap()[2..]
-        ),
+        )
+        .ok(),
         Some(vec![first_uuid.to_string()])
     );
     let wrong_marker = document_attribute_collection_for_test(
@@ -47214,10 +48292,10 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         6
     ));
     assert!(
-        parse_document_direct_attribute_collection(
+        parse_document_direct_attribute_collection_indexed(
             &split_1c_braced_fields(&mixed, 0).unwrap()[2..]
         )
-        .is_none()
+        .is_err()
     );
     let duplicate = document_attribute_collection_for_test(
         DOCUMENT_ATTRIBUTE_GROUP_UUID,
@@ -47376,7 +48454,7 @@ fn document_tabular_sections_accept_legacy_and_extended_envelopes_only() {
     );
     let parse = |envelope: String| {
         let item = format!("{{{envelope},1,{attributes}}}");
-        parse_document_tabular_sections(
+        parse_document_tabular_sections_indexed(
             &[item.as_str()],
             "Invoice",
             &BTreeMap::from([(
@@ -47384,6 +48462,7 @@ fn document_tabular_sections_accept_legacy_and_extended_envelopes_only() {
                 "Document.Invoice.TabularSection.Lines".to_string(),
             )]),
         )
+        .ok()
     };
 
     for envelope in [format!("{{1,{payload}}}"), format!("{{2,{payload},5}}")] {
