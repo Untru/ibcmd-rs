@@ -1871,6 +1871,62 @@ fn exact_document_owner_fixture_for_test(
     (header, fields, collections)
 }
 
+fn exact_catalog_owner_fixture_for_test(
+    catalog_uuid: &str,
+    name: &str,
+    comment: &str,
+) -> (MetadataHeader, Vec<String>, Vec<String>) {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[0];
+    let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    header.uuid = catalog_uuid.to_owned();
+    header.name = name.to_owned();
+    header.comment = comment.to_owned();
+    fields[0] = "57".to_owned();
+    fields[9] = format!(
+        "{{0,{{3,{{1,0,{catalog_uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"{comment}\",0,0,{zero_uuid},0}}}}"
+    );
+    fields[10] = "2".to_owned();
+    fields[11] = "1".to_owned();
+    fields[12] = "{0,0}".to_owned();
+    fields[13] = "1".to_owned();
+    fields[14] = "0".to_owned();
+    fields[15] = "0".to_owned();
+    fields[16] = "0".to_owned();
+    fields[17] = "3".to_owned();
+    fields[18] = "1".to_owned();
+    fields[19] = "10".to_owned();
+    fields[20] = "1".to_owned();
+    for field in &mut fields[21..=30] {
+        *field = zero_uuid.to_owned();
+    }
+    fields[31] = "1".to_owned();
+    fields[32] = "{0,0}".to_owned();
+    fields[33] = "1".to_owned();
+    fields[36] = "0".to_owned();
+    fields[37] = "0".to_owned();
+    fields[38] = "0".to_owned();
+    fields[39] = "0".to_owned();
+    fields[40] = "2".to_owned();
+    fields[41] = "1".to_owned();
+    fields[42] = "{1,{0,0}}".to_owned();
+    fields[43] = "1".to_owned();
+    fields[44] = "0".to_owned();
+    for field in &mut fields[45..=50] {
+        *field = "{0}".to_owned();
+    }
+    fields[51] = "1".to_owned();
+    fields[53] = "1".to_owned();
+    fields[54] = "{1,{0,0}}".to_owned();
+    fields[55] = "0".to_owned();
+    fields[56] = "{1,2,0}".to_owned();
+    fields[57] = "0".to_owned();
+    fields[58] = "0".to_owned();
+    fields[59] = "0".to_owned();
+    fields[60] = "0".to_owned();
+    (header, fields, collections)
+}
+
 fn render_owner_graph_fixture_for_test(fields: &[String], collections: &[String]) -> String {
     format!("{{1,{{{}}},5,{}}}", fields.join(","), collections.join(","))
 }
@@ -49253,12 +49309,24 @@ fn extracts_catalog_generated_types_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
 
     let extracted = extract_metadata_source_xml(
         &catalog_blob,
