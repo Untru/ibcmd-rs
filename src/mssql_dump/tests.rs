@@ -49449,13 +49449,29 @@ fn extracts_catalog_create_and_data_history_tail_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}},2,1,1,1,1}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    fields[53] = "2".to_owned();
+    fields[57] = "1".to_owned();
+    fields[58] = "1".to_owned();
+    fields[59] = "1".to_owned();
+    fields[60] = "1".to_owned();
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
 
     let extracted = extract_metadata_source_xml(
         &catalog_blob,
@@ -49544,13 +49560,29 @@ fn extracts_catalog_owners_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"BankAccounts\",{{1,\"en\",\"Bank accounts\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{2,{owner_catalog_uuid},{owner_person_uuid}}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "BankAccounts", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    let metadata_object_ref_type_uuid = "157fa490-4ce9-11d4-9415-008048da11f9";
+    fields[12] = format!(
+        "{{0,2,{{\"#\",{metadata_object_ref_type_uuid},{{1,{owner_catalog_uuid}}}}},\
+{{\"#\",{metadata_object_ref_type_uuid},{{1,{owner_person_uuid}}}}}}}"
+    );
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
     let object_refs = BTreeMap::from([
         (
             owner_catalog_uuid.to_string(),
