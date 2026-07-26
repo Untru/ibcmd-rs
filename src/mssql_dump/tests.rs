@@ -12874,6 +12874,49 @@ fn typed_form_metadata_paths_cover_members_and_fail_closed() {
 }
 
 #[test]
+fn indexes_table_current_data_metadata_uuid_bindings_per_table_and_rejects_collisions() {
+    let table_binding_uuid = "e79eb444-8be0-4d33-af83-81c9d8362618";
+    let column_binding_uuid = "461bb43b-8803-4f48-811f-6beef397ee4c";
+    let table_binding = format!(r#"{{2,{{1}},{{0,{table_binding_uuid}}}}}"#);
+    let table = r#"{73,{81,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"ВыбранныеОтправители",0,0,1,{1,0},0,{1,{6}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#
+        .replace("{1,{6}}", &table_binding);
+    let field = |id: &str, name: &str| {
+        format!(
+            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,1,"{name}",1,0,{{1,0}},{{1,0}},{{3,{{1}},{{0,{table_binding_uuid}}},{{0,{column_binding_uuid}}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+        )
+    };
+    let sender = field("149", "ВыбранныеОтправителиОтправитель");
+    let indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table.as_str(), sender.as_str()],
+        &[],
+        &BTreeMap::new(),
+        None,
+    );
+    let route_key = ("81".to_string(), format!("0|{column_binding_uuid}"));
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&route_key)
+            .map(String::as_str),
+        Some("Items.ВыбранныеОтправители.CurrentData.Отправитель")
+    );
+
+    let conflicting = field("150", "ВыбранныеОтправителиДругойОтправитель");
+    let ambiguous = collect_form_child_item_indexes_with_object_refs(
+        &[table.as_str(), sender.as_str(), conflicting.as_str()],
+        &[],
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !ambiguous
+            .type_link_data_path_by_table_column
+            .contains_key(&route_key),
+        "the same table/binding UUID with different child names must fail closed"
+    );
+}
+
+#[test]
 fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional_columns() {
     let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let table_binding = format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#);
@@ -19854,6 +19897,97 @@ fn input_field_choice_parameter_links_resolve_table_current_data_from_form_index
                 == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
                     "1050".to_string()
                 )
+    ));
+}
+
+#[test]
+fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authoritative_route() {
+    let binding_uuid = "461bb43b-8803-4f48-811f-6beef397ee4c";
+    let primary = format!(
+        r#"{{5006,2,"Отбор.ОрганизацияПолучатель",1,{{3}},0,"Отбор.Организация",2,{{81,02023637-7868-4a5f-8576-835a76e0c9ba}},{{0,{binding_uuid}}},0}}"#
+    );
+    let duplicate = format!(
+        r#"{{5007,2,"Отбор.ОрганизацияПолучатель",1,{{3}},0,"","","Отбор.Организация",2,{{81,02023637-7868-4a5f-8576-835a76e0c9ba}},{{0,{binding_uuid}}},0,"",""}}"#
+    );
+    let attribute_names = BTreeMap::from([("3".to_string(), "Организация".to_string())]);
+    let table_routes = BTreeMap::from([(
+        ("81".to_string(), format!("0|{binding_uuid}")),
+        "Items.ВыбранныеОтправители.CurrentData.Отправитель".to_string(),
+    )]);
+
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &attribute_names,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &table_routes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].name(), "Отбор.ОрганизацияПолучатель");
+    assert_eq!(links[0].data_path(), "Организация");
+    assert_eq!(links[1].name(), "Отбор.Организация");
+    assert_eq!(
+        links[1].data_path(),
+        "Items.ВыбранныеОтправители.CurrentData.Отправитель"
+    );
+    assert!(links.iter().all(|link| {
+        link.value_change() == ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+    }));
+
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &attribute_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(
+            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("81".to_string())
+        )
+    );
+
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = &primary;
+    options[duplicate_slot] = &duplicate;
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &attribute_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_routes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 2
     ));
 }
 

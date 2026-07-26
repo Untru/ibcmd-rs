@@ -8,7 +8,7 @@
 ```text
 mode=2,
 owner={positive-table-item-id,02023637-7868-4a5f-8576-835a76e0c9ba},
-terminal={positive-column-or-binding-id}
+terminal={positive-column-id}
 ```
 
 Текущий decoder требует одно поле в owner и поэтому корректно останавливает
@@ -22,6 +22,9 @@ terminal={positive-column-or-binding-id}
   физической схемы, а не разрешается как UUID объекта метаданных.
 - Adapter разрешает table/column ids через существующие индексы элементов
   формы и колонок.
+- Доказанный последующим run вариант terminal `{0,metadata-binding-uuid}`
+  разрешается через отдельный однозначный индекс связи таблицы и её дочернего
+  поля.
 - Зеркала `5006/5007` сравниваются до semantic resolution.
 - Неизвестные table/column ids остаются opaque/fail-closed.
 
@@ -43,3 +46,15 @@ terminal={positive-column-or-binding-id}
   direct-attribute профиля;
 - native XML однозначно связывает table id `1050` / column id `21` и
   table id `785` / column id `12` с каноническими путями.
+
+Последующий run
+`E:\ibcmd_lab\parity\ut_ibcmd_20260726_full_22d9fe6_f_ut` доказал второй
+terminal того же TableCurrentData owner:
+
+```text
+terminal={0,461bb43b-8803-4f48-811f-6beef397ee4c}
+```
+
+Raw child binding той же формы связывает этот UUID с таблицей item `81` и
+полем `Отправитель`; native XML даёт
+`Items.ВыбранныеОтправители.CurrentData.Отправитель`.

@@ -53,13 +53,13 @@ use ibcmd_schema::{
     FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
     FormChoiceListLayoutProfile, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
     FormChoiceParameterClusterMember, FormChoiceParameterLinkReference,
-    FormChoiceParameterLinkStandardTerminal, FormChoiceParameterLinkTerminal,
-    FormChoiceParameterLinks, FormChoiceParameterLinksParseError, FormChoiceParameters,
-    FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError, GeneratedMetadataOwner,
-    GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole, MetadataDataPathRole, SchemaError,
-    WriterPolicy, WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
-    form_choice_parameter_cluster_order, form_text_document_context_menu_owner_fields,
-    parse_form_choice_list,
+    FormChoiceParameterLinkStandardTerminal, FormChoiceParameterLinkTableCurrentDataTerminal,
+    FormChoiceParameterLinkTerminal, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
+    FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
+    GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
+    MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
+    bundled_writer_rules, form_choice_parameter_cluster_order,
+    form_text_document_context_menu_owner_fields, parse_form_choice_list,
     parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
@@ -5211,6 +5211,8 @@ pub(super) struct FormChildItemIndexes {
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
     bound_attribute_id_by_table_id: BTreeMap<String, String>,
     pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
+    table_id_by_binding_key: BTreeMap<String, Option<String>>,
+    table_current_data_name_by_binding_key: BTreeMap<(String, String), Option<String>>,
     trace_table_occurrences: BTreeMap<(String, String, String), Vec<usize>>,
 }
 
@@ -5419,6 +5421,39 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
             &[],
             &mut trace_occurrence,
         );
+    }
+    let mut table_current_data_routes = BTreeMap::new();
+    for ((table_binding_key, column_binding_key), column_name) in
+        &indexes.table_current_data_name_by_binding_key
+    {
+        let Some(table_id) = indexes
+            .table_id_by_binding_key
+            .get(table_binding_key)
+            .and_then(Option::as_ref)
+        else {
+            continue;
+        };
+        let Some(table_name) = indexes.table_name_by_id.get(table_id) else {
+            continue;
+        };
+        let Some(column_name) = column_name.as_ref() else {
+            continue;
+        };
+        insert_unambiguous_form_binding(
+            &mut table_current_data_routes,
+            (table_id.clone(), column_binding_key.clone()),
+            format!(
+                "Items.{table_name}.CurrentData.{}",
+                normalize_form_table_column_name(table_name, column_name)
+            ),
+        );
+    }
+    for (key, data_path) in table_current_data_routes {
+        if let Some(data_path) = data_path {
+            indexes
+                .type_link_data_path_by_table_column
+                .insert(key, data_path);
+        }
     }
     let unresolved_binding_paths = indexes
         .binding_names_by_key
@@ -5757,6 +5792,11 @@ fn collect_form_child_item_indexes_from_field_traced(
             if let Some(binding) = fields.get(11)
                 && let Some((attribute_id, table_key)) = parse_form_table_binding(binding)
             {
+                insert_unambiguous_form_binding(
+                    &mut indexes.table_id_by_binding_key,
+                    table_key.clone(),
+                    id.to_string(),
+                );
                 let metadata_path = resolve_form_owner_scoped_metadata_data_path_status(
                     binding,
                     attribute_metadata_owners_by_id,
@@ -5873,6 +5913,13 @@ fn collect_form_child_item_indexes_from_field_traced(
                         },
                         column_name.clone(),
                     );
+                    if form_metadata_uuid_binding_key(&column_key).is_some() {
+                        insert_unambiguous_form_binding(
+                            &mut indexes.table_current_data_name_by_binding_key,
+                            (table_key.clone(), column_key.clone()),
+                            column_name.clone(),
+                        );
+                    }
                     indexes
                         .table_column_names_by_binding_key
                         .entry(table_key)
@@ -9161,24 +9208,30 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                     }
                 }
             },
-            FormChoiceParameterLinkReference::TableCurrentData {
-                table_id,
-                column_id,
-            } => {
+            FormChoiceParameterLinkReference::TableCurrentData { table_id, terminal } => {
                 let table_id = table_id.to_string();
-                let column_id = column_id.to_string();
-                type_link_data_path_by_table_column
-                    .get(&(table_id.clone(), column_id.clone()))
-                    .cloned()
-                    .or_else(|| {
-                        resolve_form_item_current_data_path(
-                            &table_id,
-                            &column_id,
-                            table_name_by_id,
-                            table_column_names_by_id,
-                            data_path_by_binding_key,
-                        )
-                    })
+                match terminal {
+                    FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(column_id) => {
+                        let column_id = column_id.to_string();
+                        type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), column_id.clone()))
+                            .cloned()
+                            .or_else(|| {
+                                resolve_form_item_current_data_path(
+                                    &table_id,
+                                    &column_id,
+                                    table_name_by_id,
+                                    table_column_names_by_id,
+                                    data_path_by_binding_key,
+                                )
+                            })
+                    }
+                    FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
+                        type_link_data_path_by_table_column
+                            .get(&(table_id, format!("0|{uuid}")))
+                            .cloned()
+                    }
+                }
             }
         },
     )
@@ -12777,6 +12830,15 @@ pub(super) fn normalize_form_standard_data_path_name(name: &str) -> String {
         .iter()
         .find_map(|(source, target)| (*source == name).then_some((*target).to_string()))
         .unwrap_or_else(|| name.to_string())
+}
+
+fn form_metadata_uuid_binding_key(binding_key: &str) -> Option<&str> {
+    let (kind, uuid_text) = binding_key.split_once('|')?;
+    if kind != "0" || uuid_text.contains('|') {
+        return None;
+    }
+    let uuid = Uuid::parse_str(uuid_text).ok()?;
+    (!uuid.is_nil() && uuid.to_string() == uuid_text).then_some(binding_key)
 }
 
 pub(super) fn parse_form_binding_key(field: &str) -> Option<String> {

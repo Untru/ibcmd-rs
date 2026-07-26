@@ -268,8 +268,18 @@ pub enum FormChoiceParameterLinkReference {
     },
     TableCurrentData {
         table_id: u64,
-        column_id: u64,
+        terminal: FormChoiceParameterLinkTableCurrentDataTerminal,
     },
+}
+
+/// Terminal carried by a `TableCurrentData` choice-parameter link.
+///
+/// Binding ids and metadata UUIDs are separate native wire shapes and must not
+/// be conflated with a form-attribute `MetadataUuid` terminal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterLinkTableCurrentDataTerminal {
+    BindingId(u64),
+    MetadataUuid(String),
 }
 
 /// The exact native Form item type used by `TableCurrentData` links.
@@ -1476,14 +1486,27 @@ fn parse_raw_form_choice_parameter_links(
             ("2", [table_id, item_type])
                 if item_type.trim() == FORM_CHOICE_PARAMETER_LINK_TABLE_CURRENT_DATA_ITEM_TYPE =>
             {
-                let column = braced_fields_bounded(fields.get(cursor)?, 1)?;
-                let [column_id] = column.as_slice() else {
-                    return None;
+                let terminal = braced_fields_bounded(fields.get(cursor)?, 2)?;
+                let terminal = match terminal.as_slice() {
+                    [binding_id] => FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(
+                        canonical_positive_id(binding_id)?.parse().ok()?,
+                    ),
+                    [kind, uuid] if kind.trim() == "0" => {
+                        let uuid_text = uuid.trim();
+                        let uuid = Uuid::parse_str(uuid_text).ok()?;
+                        if uuid.is_nil() || uuid.to_string() != uuid_text {
+                            return None;
+                        }
+                        FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(
+                            uuid.to_string(),
+                        )
+                    }
+                    _ => return None,
                 };
                 cursor += 1;
                 FormChoiceParameterLinkReference::TableCurrentData {
                     table_id: canonical_positive_id(table_id)?.parse().ok()?,
-                    column_id: canonical_positive_id(column_id)?.parse().ok()?,
+                    terminal,
                 }
             }
             _ => return None,
@@ -2088,7 +2111,7 @@ mod form_choice_parameters_tests {
 
     #[test]
     fn form_choice_parameter_links_parse_table_current_data_with_typed_reference_resolver() {
-        for (primary, duplicate, table_id, column_id, name, data_path) in [
+        for (primary, duplicate, table_id, binding_id, name, data_path) in [
             (
                 r#"{5006,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0}"#,
                 r#"{5007,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0,"",""}"#,
@@ -2112,8 +2135,11 @@ mod form_choice_parameters_tests {
                 |reference| match reference {
                     FormChoiceParameterLinkReference::TableCurrentData {
                         table_id: actual_table_id,
-                        column_id: actual_column_id,
-                    } if *actual_table_id == table_id && *actual_column_id == column_id => {
+                        terminal:
+                            FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(
+                                actual_binding_id,
+                            ),
+                    } if *actual_table_id == table_id && *actual_binding_id == binding_id => {
                         Some(data_path.to_owned())
                     }
                     _ => None,
@@ -2130,6 +2156,42 @@ mod form_choice_parameters_tests {
             );
         }
 
+        let live_primary = r#"{5006,2,"Отбор.ОрганизацияПолучатель",1,{3},0,"Отбор.Организация",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c},0}"#;
+        let live_duplicate = r#"{5007,2,"Отбор.ОрганизацияПолучатель",1,{3},0,"","","Отбор.Организация",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c},0,"",""}"#;
+        let links = parse_form_choice_parameter_links_with_reference_resolver(
+            live_primary,
+            live_duplicate,
+            |reference| match reference {
+                FormChoiceParameterLinkReference::FormAttribute {
+                    attribute_id,
+                    terminal: FormChoiceParameterLinkTerminal::Absent,
+                } if attribute_id == "3" => Some("resolved.direct".to_owned()),
+                FormChoiceParameterLinkReference::TableCurrentData {
+                    table_id: 81,
+                    terminal: FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid),
+                } if uuid == "461bb43b-8803-4f48-811f-6beef397ee4c" => {
+                    Some("resolved.table_metadata_uuid".to_owned())
+                }
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            links,
+            vec![
+                FormChoiceParameterLink::new(
+                    "Отбор.ОрганизацияПолучатель".to_owned(),
+                    "resolved.direct".to_owned(),
+                    FormChoiceParameterLinkValueChange::Clear,
+                ),
+                FormChoiceParameterLink::new(
+                    "Отбор.Организация".to_owned(),
+                    "resolved.table_metadata_uuid".to_owned(),
+                    FormChoiceParameterLinkValueChange::Clear,
+                ),
+            ]
+        );
+
         // Existing entrypoints retain their established form-attribute-only
         // contract; TableCurrentData is reachable only through its typed API.
         let primary =
@@ -2143,6 +2205,12 @@ mod form_choice_parameters_tests {
             parse_form_choice_parameter_links_with_terminal_resolver(primary, duplicate, |_, _| {
                 Some("x".to_owned())
             },),
+            Err(FormChoiceParameterLinksParseError::PrimaryMalformed)
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links(live_primary, live_duplicate, |_| {
+                Some("x".to_owned())
+            }),
             Err(FormChoiceParameterLinksParseError::PrimaryMalformed)
         );
     }
@@ -2184,6 +2252,43 @@ mod form_choice_parameters_tests {
             parse_form_choice_parameter_links_with_reference_resolver(
                 primary,
                 r#"{5007,1,"Filter.Partner",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0,"x",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::DuplicateMalformed)
+        );
+    }
+
+    #[test]
+    fn form_choice_parameter_links_table_current_data_metadata_uuid_terminal_fail_closed() {
+        let primary = r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c},0}"#;
+        let duplicate = r#"{5007,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c},0,"",""}"#;
+        let resolve = |_: &FormChoiceParameterLinkReference| Some("resolved".to_owned());
+        for malformed in [
+            r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{1,461bb43b-8803-4f48-811f-6beef397ee4c},0}"#,
+            r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,00000000-0000-0000-0000-000000000000},0}"#,
+            r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4C},0}"#,
+            r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c,extra},0}"#,
+        ] {
+            assert_eq!(
+                parse_form_choice_parameter_links_with_reference_resolver(
+                    malformed, duplicate, resolve,
+                ),
+                Err(FormChoiceParameterLinksParseError::PrimaryMalformed),
+                "{malformed}"
+            );
+        }
+        assert_eq!(
+            parse_form_choice_parameter_links_with_reference_resolver(
+                primary,
+                r#"{5007,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4d},0,"",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::MirrorMismatch)
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links_with_reference_resolver(
+                primary,
+                r#"{5007,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c},0,"x",""}"#,
                 resolve,
             ),
             Err(FormChoiceParameterLinksParseError::DuplicateMalformed)

@@ -39,3 +39,20 @@ SHALL NOT read raw form slots or infer paths from application object names.
 - **WHEN** semantic resolution runs
 - **THEN** source export fails closed with an opaque diagnostic
 - **AND** no guessed data path is emitted.
+
+#### Scenario: TableCurrentData metadata binding UUID resolves unambiguously
+
+- **GIVEN** an exact TableCurrentData owner
+- **AND** terminal is `{0,canonical-lowercase-non-nil-uuid}`
+- **AND** the same form proves one table/child binding route for that UUID
+- **WHEN** semantic resolution runs
+- **THEN** the canonical path is
+  `Items.<Table>.CurrentData.<ChildField>`
+- **AND** `object_refs` is not used for this terminal.
+
+#### Scenario: TableCurrentData metadata binding UUID is ambiguous
+
+- **GIVEN** two different child field names for the same table and binding UUID
+- **WHEN** the form indexes are built
+- **THEN** the route is absent from production lookup
+- **AND** ChoiceParameterLinks remains opaque and fails closed.
