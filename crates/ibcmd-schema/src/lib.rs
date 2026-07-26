@@ -520,7 +520,7 @@ mod form_choice_list_tests {
             envelope(&item("0", r#"{"U"}"#, TYPE_ID, "not-a-uuid")),
             format!(r#"{{3,1,"",{exact_item}}}"#),
             format!(r#"{{3,1,"",{exact_item},{{0,{{4,0,{{0}},"",-1,-1,0,0,""}}}}}}"#),
-            format!(r#"{{3,513}}"#),
+            r#"{3,513}"#.to_string(),
             format!(r#"{}suffix"#, envelope(&exact_item)),
         ] {
             assert!(
