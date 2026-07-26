@@ -13961,7 +13961,7 @@ fn format_form_layout_new_text_document_field_item(
     let width = item.width.as_deref().unwrap_or("0");
     let height = item.height.as_deref().unwrap_or("0");
     let mut text = format!(
-        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,{},{},0",
+        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,{},{},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
@@ -34400,7 +34400,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_text_document_field() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
         )?;
         let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
 	<ChildItems>
@@ -34467,10 +34467,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_nested_new_text_document_field_with_context_menu_slots() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><Pages name="Tabs" id="1"><ChildItems><Page name="General" id="2"><ChildItems><TextDocumentField name="Notes" id="3"/></ChildItems></Page></ChildItems></Pages></ChildItems></Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let pages_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let page_fields = super::scan_braced_fields(&parsed.layout, pages_fields[12].start)?;
+        let text_fields = super::scan_braced_fields(&parsed.layout, page_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[text_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[text_fields[5].clone()], "7");
+        assert_eq!(&parsed.layout[text_fields[6].clone()], r#""Notes""#);
+        assert_eq!(text_fields.len(), 43);
+        assert_eq!(&parsed.layout[text_fields[41].clone()], "0");
+        assert_eq!(&parsed.layout[text_fields[42].clone()], "0");
+        let extracted = crate::mssql_dump::extract_form_body_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("nested TextDocumentField must remain exportable");
+        assert!(extracted.contains("<TextDocumentField name=\"Notes\" id=\"3\""));
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_existing_text_document_field_read_only() -> anyhow::Result<()> {
         for (value, expected_code) in [("true", "1"), ("false", "0")] {
             let base = super::deflate_raw(
-                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,2,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,2,2,0,2,{1,0},{1,0},1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
             )?;
             let xml = format!(
                 r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
