@@ -29,7 +29,7 @@ use walkdir::WalkDir;
 
 use crate::adapters::mssql_legacy::{
     MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
-    MssqlLegacyAdapter,
+    MssqlLegacyAdapter, decode_task_internal_uuid_slots,
 };
 use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
 use crate::metadata_owner_graph::{
@@ -23712,10 +23712,12 @@ fn parse_task_properties_from_text(
         choice_data_get_mode_on_input_by_string,
     ) = parse_owner_input_modes(fields.get(47)?)?;
 
-    let internal_uuid_slots = match parse_task_internal_uuid_slots(&fields) {
+    let internal_uuid_slots = match decode_task_internal_uuid_slots(&fields) {
         Ok(slots) => slots,
-        Err(diagnostic) => {
-            *owner_graph_diagnostic = Some(diagnostic);
+        Err(error) => {
+            *owner_graph_diagnostic = Some(malformed_task_internal_uuid_slot_diagnostic(
+                error.field_index(),
+            ));
             return None;
         }
     };
@@ -23743,7 +23745,10 @@ fn parse_task_properties_from_text(
 
     Some(TaskProperties {
         generated_types,
-        internal_uuid_slots,
+        internal_uuid_slots: TaskInternalUuidSlots {
+            field_13: internal_uuid_slots.field_13,
+            field_14: internal_uuid_slots.field_14,
+        },
         use_standard_commands: information_register_bool(fields.get(2)?)?,
         number_type: match fields.get(18)?.trim() {
             "0" => "Number",
@@ -23819,26 +23824,6 @@ fn parse_task_properties_from_text(
     })
 }
 
-fn parse_task_internal_uuid_slots(
-    fields: &[&str],
-) -> std::result::Result<TaskInternalUuidSlots, MetadataSourceExtractionDiagnostic> {
-    Ok(TaskInternalUuidSlots {
-        field_13: parse_task_internal_uuid_slot(fields.get(13), 13)?,
-        field_14: parse_task_internal_uuid_slot(fields.get(14), 14)?,
-    })
-}
-
-fn parse_task_internal_uuid_slot(
-    value: Option<&&str>,
-    field_index: usize,
-) -> std::result::Result<Option<String>, MetadataSourceExtractionDiagnostic> {
-    let Some(uuid) = value.and_then(|value| parse_information_register_uuid(value)) else {
-        return Err(malformed_task_internal_uuid_slot_diagnostic(field_index));
-    };
-    let uuid = uuid.to_ascii_lowercase();
-    Ok((!information_register_uuid_is_zero(&uuid)).then_some(uuid))
-}
-
 fn malformed_task_internal_uuid_slot_diagnostic(
     field_index: usize,
 ) -> MetadataSourceExtractionDiagnostic {
@@ -23850,6 +23835,18 @@ fn malformed_task_internal_uuid_slot_diagnostic(
     );
     diagnostic.field_index = Some(field_index);
     diagnostic
+}
+
+#[cfg(test)]
+fn parse_task_internal_uuid_slots(
+    fields: &[&str],
+) -> std::result::Result<TaskInternalUuidSlots, MetadataSourceExtractionDiagnostic> {
+    let slots = decode_task_internal_uuid_slots(fields)
+        .map_err(|error| malformed_task_internal_uuid_slot_diagnostic(error.field_index()))?;
+    Ok(TaskInternalUuidSlots {
+        field_13: slots.field_13,
+        field_14: slots.field_14,
+    })
 }
 
 fn parse_owner_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {

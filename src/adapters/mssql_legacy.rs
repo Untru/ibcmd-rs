@@ -151,6 +151,60 @@ pub const LEGACY_MSSQL_PROVIDER_ID: &str = "provider:mssql-legacy";
 /// Stable logical identity of its Config/ConfigSave storage boundary.
 pub const LEGACY_MSSQL_STORAGE_PROFILE_ID: &str = "storage:mssql-config-configsave";
 
+/// Strictly decoded physical UUID slots 13 and 14 of a Task owner record.
+///
+/// These slots belong to the legacy MSSQL storage layout, not to the semantic
+/// Task model.  Keep their shape and zero-UUID normalization at this adapter
+/// boundary so the metadata writer receives only the already-decoded value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct MssqlLegacyTaskInternalUuidSlots {
+    pub(crate) field_13: Option<String>,
+    pub(crate) field_14: Option<String>,
+}
+
+/// The exact Task owner slot whose physical UUID payload was malformed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MssqlLegacyTaskInternalUuidSlotError {
+    field_index: usize,
+}
+
+impl MssqlLegacyTaskInternalUuidSlotError {
+    pub(crate) const fn field_index(self) -> usize {
+        self.field_index
+    }
+}
+
+/// Decodes the two observed Task-internal UUID slots without accepting a
+/// partial, non-UUID, or non-canonical payload.
+pub(crate) fn decode_task_internal_uuid_slots(
+    fields: &[&str],
+) -> Result<MssqlLegacyTaskInternalUuidSlots, MssqlLegacyTaskInternalUuidSlotError> {
+    Ok(MssqlLegacyTaskInternalUuidSlots {
+        field_13: decode_task_internal_uuid_slot(fields.get(13), 13)?,
+        field_14: decode_task_internal_uuid_slot(fields.get(14), 14)?,
+    })
+}
+
+fn decode_task_internal_uuid_slot(
+    value: Option<&&str>,
+    field_index: usize,
+) -> Result<Option<String>, MssqlLegacyTaskInternalUuidSlotError> {
+    let uuid = value
+        .map(|value| value.trim())
+        .filter(|value| is_uuid(value))
+        .ok_or(MssqlLegacyTaskInternalUuidSlotError { field_index })?;
+    let uuid = uuid.to_ascii_lowercase();
+    Ok((uuid != "00000000-0000-0000-0000-000000000000").then_some(uuid))
+}
+
+fn is_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
+}
+
 /// Platform-independent descriptor for the existing partial MSSQL adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MssqlLegacyAdapter {
@@ -315,6 +369,31 @@ mod tests {
         let error = MssqlLegacyAdapter::new(axes(Some(actual.clone()))).unwrap_err();
         assert_eq!(error.expected().as_str(), LEGACY_MSSQL_STORAGE_PROFILE_ID);
         assert_eq!(error.actual(), &actual);
+    }
+
+    #[test]
+    fn decodes_task_internal_uuid_slots_strictly_and_normalizes_zero() {
+        let zero = "00000000-0000-0000-0000-000000000000";
+        let uuid = "3BAE698F-934B-414C-A2AC-A10A09D5D428";
+        let mut fields = vec!["0"; 15];
+        fields[13] = zero;
+        fields[14] = uuid;
+
+        assert_eq!(
+            decode_task_internal_uuid_slots(&fields).unwrap(),
+            MssqlLegacyTaskInternalUuidSlots {
+                field_13: None,
+                field_14: Some(uuid.to_ascii_lowercase()),
+            }
+        );
+
+        fields[14] = "not-a-uuid";
+        assert_eq!(
+            decode_task_internal_uuid_slots(&fields)
+                .unwrap_err()
+                .field_index(),
+            14
+        );
     }
 
     #[test]
