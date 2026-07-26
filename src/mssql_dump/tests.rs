@@ -2124,20 +2124,23 @@ fn strict_gate_options_and_inventory_scope_fail_closed() {
     assert!(validate_root_metadata_gate_options(true, true, &selected).is_err());
     assert!(validate_root_metadata_gate_options(true, true, &empty).is_ok());
 
+    let plan = |role, selected, metadata| {
+        MssqlExportInventoryPlan::new(role, selected, metadata, false, false, false)
+    };
     assert_eq!(
-        root_metadata_inventory_scope("Config", &empty, true),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Current, false, true)),
         RootMetadataInventoryScope::Full
     );
     assert_eq!(
-        root_metadata_inventory_scope("Config", &selected, true),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Current, true, true)),
         RootMetadataInventoryScope::Scoped
     );
     assert_eq!(
-        root_metadata_inventory_scope("ConfigSave", &empty, true),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Saved, false, true)),
         RootMetadataInventoryScope::Scoped
     );
     assert_eq!(
-        root_metadata_inventory_scope("Config", &empty, false),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Current, false, false)),
         RootMetadataInventoryScope::Scoped
     );
 
@@ -2147,6 +2150,63 @@ fn strict_gate_options_and_inventory_scope_fail_closed() {
         ..RootMetadataInventoryReport::default()
     };
     assert!(undiscovered.ensure_complete(true).is_err());
+}
+
+#[test]
+fn inventory_plan_has_one_shared_eager_and_streamed_scope_projection() {
+    for (role, selected, metadata, module, binary, allow_dump_info) in [
+        (
+            MssqlConfigurationTableRole::Current,
+            false,
+            true,
+            true,
+            false,
+            true,
+        ),
+        (
+            MssqlConfigurationTableRole::Current,
+            false,
+            true,
+            true,
+            true,
+            true,
+        ),
+        (
+            MssqlConfigurationTableRole::Current,
+            true,
+            true,
+            true,
+            false,
+            true,
+        ),
+        (
+            MssqlConfigurationTableRole::Saved,
+            false,
+            true,
+            true,
+            false,
+            true,
+        ),
+    ] {
+        let plan = MssqlExportInventoryPlan::new(
+            role,
+            selected,
+            metadata,
+            module,
+            binary,
+            allow_dump_info,
+        );
+        // Both boundaries invoke `inventory_scopes` before touching SQL rows.
+        // This test exercises that shared projection, rather than duplicating
+        // the decision in a streamed-only expectation.
+        let scopes = inventory_scopes(plan);
+        if role == MssqlConfigurationTableRole::Saved {
+            assert_eq!(scopes.0, RootMetadataInventoryScope::Scoped);
+            assert_eq!(scopes.1, SourceAssetCompletenessScope::Scoped);
+            assert!(!plan.config_dump_info_eligible());
+            assert!(!plan.is_strict_current_identity());
+        }
+    }
 }
 
 #[test]

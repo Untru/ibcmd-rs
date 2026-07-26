@@ -25,7 +25,10 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
-use crate::adapters::mssql_legacy::MssqlLegacyAdapter;
+use crate::adapters::mssql_legacy::{
+    MssqlConfigurationTableRole, MssqlExportInventoryPlan, MssqlExportInventoryScope,
+    MssqlLegacyAdapter,
+};
 use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
 use crate::metadata_owner_graph::{
     self as owner_graph, CATALOG_ATTRIBUTE_GROUP_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
@@ -881,16 +884,25 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
     )?;
     prepare_output_dir(&args.output_dir, args.overwrite)?;
 
-    let mut table_names = vec!["Config"];
+    let mut table_roles = vec![MssqlConfigurationTableRole::Current];
     if args.include_config_save {
-        table_names.push("ConfigSave");
+        table_roles.push(MssqlConfigurationTableRole::Saved);
     }
 
     let mut reports = Vec::new();
     let mut manifest_tables = Vec::new();
     let mut total_timings = MssqlDumpTimingReport::default();
     let write_binary_rows = args.write_binary_rows && !args.no_binary_rows;
-    for table in table_names {
+    for role in table_roles {
+        let inventory_plan = MssqlExportInventoryPlan::new(
+            role,
+            !selected_file_names.is_empty(),
+            args.extract_metadata_xml,
+            args.extract_module_text,
+            write_binary_rows,
+            !args.include_config_save,
+        );
+        let table = role.sql_name();
         let dumped = dump_table_rows_streamed(
             &args.sqlcmd,
             &args.bcp_executable,
@@ -903,9 +915,8 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             )
             .as_deref(),
             &args.database,
-            table,
             &selected_file_names,
-            !args.include_config_save,
+            inventory_plan,
             &args.output_dir,
             write_binary_rows,
             args.inflate,
@@ -913,11 +924,14 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             args.extract_metadata_xml,
             source_version,
         )?;
-        if table == "Config" && args.require_complete_root_metadata {
+        if inventory_plan.is_strict_current_identity() && args.require_complete_root_metadata {
             dumped
                 .metadata_root_inventory
                 .ensure_complete(true)
-                .context("strict full Config root metadata check failed")?;
+                .context(format!(
+                    "strict full {} root metadata check failed",
+                    MssqlConfigurationTableRole::Current.sql_name()
+                ))?;
         }
         reports.push(MssqlDumpedTableReport {
             table: table.to_string(),
@@ -1024,16 +1038,33 @@ fn validate_root_metadata_gate_options(
     Ok(())
 }
 
-fn root_metadata_inventory_scope(
-    table: &str,
-    selected_file_names: &BTreeSet<String>,
-    extract_metadata_xml: bool,
+const fn root_metadata_inventory_scope(
+    plan: MssqlExportInventoryPlan,
 ) -> RootMetadataInventoryScope {
-    if table == "Config" && selected_file_names.is_empty() && extract_metadata_xml {
-        RootMetadataInventoryScope::Full
-    } else {
-        RootMetadataInventoryScope::Scoped
+    match plan.root_metadata_scope() {
+        MssqlExportInventoryScope::Full => RootMetadataInventoryScope::Full,
+        MssqlExportInventoryScope::Scoped => RootMetadataInventoryScope::Scoped,
     }
+}
+
+const fn source_asset_inventory_scope(
+    plan: MssqlExportInventoryPlan,
+) -> SourceAssetCompletenessScope {
+    match plan.source_asset_scope() {
+        MssqlExportInventoryScope::Full => SourceAssetCompletenessScope::Full,
+        MssqlExportInventoryScope::Scoped => SourceAssetCompletenessScope::Scoped,
+    }
+}
+
+/// Projects an adapter-owned plan once for either row-processing boundary.
+/// Eager and streamed paths must not independently recreate this decision.
+const fn inventory_scopes(
+    plan: MssqlExportInventoryPlan,
+) -> (RootMetadataInventoryScope, SourceAssetCompletenessScope) {
+    (
+        root_metadata_inventory_scope(plan),
+        source_asset_inventory_scope(plan),
+    )
 }
 
 /// Exports a provider-neutral storage image through the same family decoders
@@ -1078,7 +1109,7 @@ pub fn export_storage_image_to_source(
     prepare_output_dir(output_dir, overwrite)?;
     let dumped = dump_table_rows_with_options_mode(
         output_dir,
-        "Config",
+        MssqlConfigurationTableRole::Current.sql_name(),
         rows,
         false,
         false,
@@ -1086,6 +1117,7 @@ pub fn export_storage_image_to_source(
         true,
         source_version,
         RootMetadataInventoryScope::Scoped,
+        SourceAssetCompletenessScope::Scoped,
         true,
     )?;
     let successful = dumped
@@ -1161,7 +1193,7 @@ fn dump_table_rows_eager(
     user: Option<&str>,
     password: Option<&str>,
     database: &str,
-    table: &str,
+    inventory_plan: MssqlExportInventoryPlan,
     selected_file_names: &BTreeSet<String>,
     output_dir: &Path,
     write_binary_rows: bool,
@@ -1169,6 +1201,8 @@ fn dump_table_rows_eager(
     extract_module_text: bool,
     extract_metadata_xml: bool,
 ) -> Result<DumpedTable> {
+    let table = inventory_plan.role().sql_name();
+    let (inventory_scope, source_asset_scope) = inventory_scopes(inventory_plan);
     let rows = fetch_rows(
         sqlcmd,
         server,
@@ -1178,8 +1212,6 @@ fn dump_table_rows_eager(
         table,
         selected_file_names,
     )?;
-    let inventory_scope =
-        root_metadata_inventory_scope(table, selected_file_names, extract_metadata_xml);
     dump_table_rows_with_options_mode(
         output_dir,
         table,
@@ -1190,6 +1222,7 @@ fn dump_table_rows_eager(
         extract_metadata_xml,
         InfobaseConfigSourceVersion::V2_20,
         inventory_scope,
+        source_asset_scope,
         false,
     )
 }
@@ -1324,6 +1357,7 @@ fn dump_table_rows_with_options(
         extract_metadata_xml,
         source_version,
         RootMetadataInventoryScope::Scoped,
+        SourceAssetCompletenessScope::Scoped,
         false,
     )
 }
@@ -1339,6 +1373,7 @@ fn dump_table_rows_with_options_mode(
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
     inventory_scope: RootMetadataInventoryScope,
+    source_asset_scope: SourceAssetCompletenessScope,
     continue_on_row_error: bool,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
@@ -1692,11 +1727,7 @@ fn dump_table_rows_with_options_mode(
         ));
     }
     source_asset_completeness.finish_inventory(
-        if inventory_scope == RootMetadataInventoryScope::Full {
-            SourceAssetCompletenessScope::Full
-        } else {
-            SourceAssetCompletenessScope::Scoped
-        },
+        source_asset_scope,
         source_asset_discovery_misses.is_empty()
             && metadata_audit.misses.is_empty()
             && source_asset_diagnostics.is_empty(),
@@ -1743,9 +1774,8 @@ fn dump_table_rows_streamed(
     user: Option<&str>,
     password: Option<&str>,
     database: &str,
-    table: &str,
     selected_file_names: &BTreeSet<String>,
-    allow_config_dump_info: bool,
+    inventory_plan: MssqlExportInventoryPlan,
     output_dir: &Path,
     write_binary_rows: bool,
     inflate: bool,
@@ -1753,12 +1783,9 @@ fn dump_table_rows_streamed(
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
 ) -> Result<DumpedTable> {
-    let generate_config_dump_info = allow_config_dump_info
-        && table == "Config"
-        && selected_file_names.is_empty()
-        && !write_binary_rows
-        && extract_module_text
-        && extract_metadata_xml;
+    let table = inventory_plan.role().sql_name();
+    let generate_config_dump_info = inventory_plan.config_dump_info_eligible();
+    let (inventory_scope, source_asset_scope) = inventory_scopes(inventory_plan);
     let table_dir = output_dir.join(table);
     if write_binary_rows {
         fs::create_dir_all(&table_dir)
@@ -2717,15 +2744,6 @@ fn dump_table_rows_streamed(
             "source_asset_identity_uncertain",
         ));
     }
-    let source_asset_scope = if table == "Config"
-        && selected_file_names.is_empty()
-        && extract_metadata_xml
-        && !write_binary_rows
-    {
-        SourceAssetCompletenessScope::Full
-    } else {
-        SourceAssetCompletenessScope::Scoped
-    };
     source_asset_completeness.finish_inventory(
         source_asset_scope,
         source_asset_discovery_misses.is_empty()
@@ -2777,8 +2795,6 @@ fn dump_table_rows_streamed(
         timings.source_asset_config_dump_info_cpu_ms += elapsed_ms(started);
     }
 
-    let inventory_scope =
-        root_metadata_inventory_scope(table, selected_file_names, extract_metadata_xml);
     let metadata_root_inventory = if extract_metadata_xml {
         let indexed_roots =
             configuration_root_metadata_file_names_from_texts(&index_metadata_texts);
