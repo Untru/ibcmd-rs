@@ -1737,17 +1737,50 @@ fn audit_owner_graph_row_with_forms_for_test(
     )
 }
 
+fn audit_owner_graph_row_with_object_refs_for_test(
+    row: &MetadataTextRow,
+    object_refs: &BTreeMap<String, String>,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    extract_metadata_source_xml_from_text_row_audited(
+        row,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
 #[test]
-fn audited_catalog_and_document_reject_second_declared_form_from_other_owner() {
-    for expected in &EXPECTED_OWNER_GRAPH_LAYOUTS[..2] {
+fn audited_owner_graph_families_reject_second_declared_form_from_other_owner() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
         let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
         let good = owner_graph_uuid_for_test(80);
         let bad = owner_graph_uuid_for_test(81);
-        collections[4] = format!("{{{},2,{good},{bad}}}", expected.collection_markers[4]);
+        let form_index = expected
+            .family
+            .layout()
+            .collection_layout(owner_graph::OwnerCollectionRole::Form)
+            .unwrap()
+            .index;
+        collections[form_index] = format!(
+            "{{{},2,{good},{bad}}}",
+            expected.collection_markers[form_index]
+        );
         let folder = match expected.family {
             owner_graph::OwnerGraphFamily::Catalog => "Catalogs",
             owner_graph::OwnerGraphFamily::Document => "Documents",
-            _ => unreachable!(),
+            owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                "ChartsOfCharacteristicTypes"
+            }
         };
         let row = MetadataTextRow {
             file_name: header.uuid.clone(),
@@ -1788,6 +1821,265 @@ fn audited_catalog_and_document_reject_second_declared_form_from_other_owner() {
             Some("owned_form")
         );
     }
+}
+
+#[test]
+fn audited_business_process_and_cct_reject_second_duplicate_form_identity() {
+    for expected in &EXPECTED_OWNER_GRAPH_LAYOUTS[2..] {
+        let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
+        let duplicate = owner_graph_uuid_for_test(82);
+        let form_index = expected
+            .family
+            .layout()
+            .collection_layout(owner_graph::OwnerCollectionRole::Form)
+            .unwrap()
+            .index;
+        collections[form_index] = format!(
+            "{{{},2,{duplicate},{duplicate}}}",
+            expected.collection_markers[form_index]
+        );
+        let row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: render_owner_graph_fixture_for_test(&fields, &collections),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(match expected.family {
+                owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                    "ChartsOfCharacteristicTypes"
+                }
+                _ => unreachable!(),
+            }),
+        };
+        let diagnostic = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "duplicate second form was accepted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(diagnostic.family, expected.family.as_str());
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(diagnostic.structural_signature, "ambiguous");
+        assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.offending_reference.as_deref(),
+            Some("owned_form")
+        );
+        assert!(
+            !serde_json::to_string(&diagnostic)
+                .unwrap()
+                .contains(&duplicate)
+        );
+    }
+}
+
+#[test]
+fn audited_document_direct_child_keeps_document_owner_validation() {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
+    let (header, mut fields, mut collections) = owner_graph_fixture_for_test(expected);
+    let zero = "00000000-0000-0000-0000-000000000000";
+    for field_index in [16, 17, 18, 35, 36, 37] {
+        fields[field_index] = zero.to_owned();
+    }
+    let child_uuid = "71717171-7171-4171-8171-717171717171";
+    let wrapper = document_attribute_wrapper_for_test(
+        6,
+        child_uuid,
+        r#"{"Pattern",{"B"}}"#,
+        r#"{"U"}"#,
+        "0",
+        "1",
+    );
+    let direct_index = expected
+        .family
+        .layout()
+        .collection_layout(owner_graph::OwnerCollectionRole::DirectAttribute)
+        .unwrap()
+        .index;
+    collections[direct_index] = format!(
+        "{{{},1,{{{wrapper},0}}}}",
+        expected.collection_markers[direct_index]
+    );
+    let row = MetadataTextRow {
+        file_name: header.uuid.clone(),
+        text: render_owner_graph_fixture_for_test(&fields, &collections),
+        object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+        header: Some(header),
+        kind: Some(expected.family.as_str().to_owned()),
+        folder: Some("Documents"),
+    };
+    let object_refs = BTreeMap::from([(
+        child_uuid.to_owned(),
+        "Document.Owner.Attribute.TrackChanges".to_owned(),
+    )]);
+    let diagnostic = match audit_owner_graph_row_with_object_refs_for_test(&row, &object_refs) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("synthetic Document unexpectedly reached complete extraction"),
+    };
+    assert_eq!(diagnostic.family, "Document");
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.field_index, Some(29));
+    assert_eq!(diagnostic.structural_signature, "header_mismatch");
+    assert_ne!(diagnostic.structural_signature, "wrong_owner");
+}
+
+#[test]
+fn audited_business_process_second_wrong_owner_direct_child_uses_bp_validator() {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[2];
+    let (header, mut fields, mut collections) = owner_graph_fixture_for_test(expected);
+    let zero = "00000000-0000-0000-0000-000000000000";
+    for field_index in [22, 23, 24, 32, 33, 34] {
+        fields[field_index] = zero.to_owned();
+    }
+    let first_uuid = "72727272-7272-4272-8272-727272727272";
+    let second_uuid = "73737373-7373-4373-8373-737373737373";
+    let direct_wrapper = |uuid: &str, name: &str| {
+        document_attribute_wrapper_for_test(8, uuid, r#"{"Pattern",{"B"}}"#, r#"{"U"}"#, "0", "1")
+            .replacen("{8,", "{2,", 1)
+            .replace("\"TrackChanges\"", &format!("\"{name}\""))
+            .replace("\"Track changes\"", &format!("\"{name}\""))
+    };
+    let first = direct_wrapper(first_uuid, "First");
+    let second = direct_wrapper(second_uuid, "Second");
+    let direct_index = expected
+        .family
+        .layout()
+        .collection_layout(owner_graph::OwnerCollectionRole::DirectAttribute)
+        .unwrap()
+        .index;
+    collections[direct_index] = format!(
+        "{{{},2,{{{first},0}},{{{second},0}}}}",
+        expected.collection_markers[direct_index]
+    );
+    let row = MetadataTextRow {
+        file_name: header.uuid.clone(),
+        text: render_owner_graph_fixture_for_test(&fields, &collections),
+        object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+        header: Some(header),
+        kind: Some(expected.family.as_str().to_owned()),
+        folder: Some("BusinessProcesses"),
+    };
+    let object_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "BusinessProcess.Owner.Attribute.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "BusinessProcess.Other.Attribute.Second".to_owned(),
+        ),
+    ]);
+    let diagnostic = match audit_owner_graph_row_with_object_refs_for_test(&row, &object_refs) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("wrong-owner BusinessProcess direct child was accepted"),
+    };
+    assert_eq!(diagnostic.family, "BusinessProcess");
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+}
+
+#[test]
+fn audited_business_process_second_wrong_owner_tabular_section_is_typed() {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[2];
+    let (header, mut fields, mut collections) = owner_graph_fixture_for_test(expected);
+    let zero = "00000000-0000-0000-0000-000000000000";
+    for field_index in [22, 23, 24, 32, 33, 34] {
+        fields[field_index] = zero.to_owned();
+    }
+    let first_uuid = "74747474-7474-4474-8474-747474747474";
+    let second_uuid = "75757575-7575-4575-8575-757575757575";
+    let first_nested = owner_graph_nested_attribute_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        8,
+        "76767676-7676-4676-8676-767676767676",
+    );
+    let second_nested = owner_graph_nested_attribute_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        8,
+        "77777777-7777-4777-8777-777777777777",
+    );
+    let first = owner_graph_tabular_section_item_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        first_uuid,
+        "First",
+        [
+            "81818181-8181-4181-8181-818181818181",
+            "82828282-8282-4282-8282-828282828282",
+            "83838383-8383-4383-8383-838383838383",
+            "84848484-8484-4484-8484-848484848484",
+        ],
+        &[first_nested],
+    );
+    let second = owner_graph_tabular_section_item_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        second_uuid,
+        "Second",
+        [
+            "85858585-8585-4585-8585-858585858585",
+            "86868686-8686-4686-8686-868686868686",
+            "87878787-8787-4787-8787-878787878787",
+            "88888888-8888-4888-8888-888888888888",
+        ],
+        &[second_nested],
+    );
+    let tabular_index = expected
+        .family
+        .layout()
+        .collection_layout(owner_graph::OwnerCollectionRole::TabularSection)
+        .unwrap()
+        .index;
+    collections[tabular_index] = format!(
+        "{{{},2,{first},{second}}}",
+        expected.collection_markers[tabular_index]
+    );
+    let row = MetadataTextRow {
+        file_name: header.uuid.clone(),
+        text: render_owner_graph_fixture_for_test(&fields, &collections),
+        object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+        header: Some(header),
+        kind: Some(expected.family.as_str().to_owned()),
+        folder: Some("BusinessProcesses"),
+    };
+    let object_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "BusinessProcess.Owner.TabularSection.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "BusinessProcess.Other.TabularSection.Second".to_owned(),
+        ),
+    ]);
+    let diagnostic = match audit_owner_graph_row_with_object_refs_for_test(&row, &object_refs) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("wrong-owner BusinessProcess tabular section was accepted"),
+    };
+    assert_eq!(diagnostic.family, "BusinessProcess");
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("tabular_section")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
 }
 
 #[test]
@@ -2011,6 +2303,137 @@ fn owner_graph_decoder_is_table_driven_for_four_exact_family_layouts() {
 }
 
 #[test]
+fn business_process_and_cct_graph_roles_follow_all_five_native_collections() {
+    let expected = [
+        (
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            [
+                owner_graph::OwnerCollectionRole::Template,
+                owner_graph::OwnerCollectionRole::Form,
+                owner_graph::OwnerCollectionRole::Command,
+                owner_graph::OwnerCollectionRole::DirectAttribute,
+                owner_graph::OwnerCollectionRole::TabularSection,
+            ],
+        ),
+        (
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            [
+                owner_graph::OwnerCollectionRole::DirectAttribute,
+                owner_graph::OwnerCollectionRole::Template,
+                owner_graph::OwnerCollectionRole::TabularSection,
+                owner_graph::OwnerCollectionRole::Command,
+                owner_graph::OwnerCollectionRole::Form,
+            ],
+        ),
+    ];
+    for (family, roles) in expected {
+        let layout = family.layout();
+        for (index, role) in roles.into_iter().enumerate() {
+            let role_layout = layout.collection_layout(role).unwrap();
+            assert_eq!(role_layout.index, index, "{family:?} {role:?}");
+            assert_eq!(
+                role_layout.marker, layout.collection_markers[index],
+                "{family:?} {role:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn business_process_and_cct_reject_a_misordered_marker_at_each_native_role() {
+    for expected in &EXPECTED_OWNER_GRAPH_LAYOUTS[2..] {
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        for collection_index in 0..collections.len() {
+            let mut mutated = collections.clone();
+            let wrong_marker =
+                expected.collection_markers[(collection_index + 1) % collections.len()];
+            mutated[collection_index] = format!("{{{wrong_marker},0}}");
+            let diagnostic = match decode_owner_graph(
+                expected.family,
+                &render_owner_graph_fixture_for_test(&fields, &mutated),
+                &header,
+            ) {
+                Err(diagnostic) => diagnostic,
+                Ok(_) => panic!("misordered marker was accepted for {:?}", expected.family),
+            };
+            assert_eq!(diagnostic.family, expected.family.as_str());
+            assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+            assert_eq!(diagnostic.parser_stage, "owner_graph_collection");
+            assert_eq!(diagnostic.structural_signature, "collection_marker");
+            assert_eq!(diagnostic.collection_index, Some(collection_index));
+            assert_eq!(
+                diagnostic.offending_reference.as_deref(),
+                Some("collection_marker")
+            );
+        }
+    }
+}
+
+#[test]
+fn cct_template_and_command_and_bp_template_are_exact_typed_unsupported() {
+    let cases = [
+        (
+            &EXPECTED_OWNER_GRAPH_LAYOUTS[2],
+            owner_graph::OwnerCollectionRole::Template,
+            "owned_template",
+        ),
+        (
+            &EXPECTED_OWNER_GRAPH_LAYOUTS[3],
+            owner_graph::OwnerCollectionRole::Template,
+            "owned_template",
+        ),
+        (
+            &EXPECTED_OWNER_GRAPH_LAYOUTS[3],
+            owner_graph::OwnerCollectionRole::Command,
+            "owned_command",
+        ),
+    ];
+    let secret = "native-payload-must-stay-redacted";
+    for (expected, role, reference) in cases {
+        let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
+        let role_index = expected
+            .family
+            .layout()
+            .collection_layout(role)
+            .unwrap()
+            .index;
+        collections[role_index] =
+            format!("{{{},1,{secret}}}", expected.collection_markers[role_index]);
+        let row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: render_owner_graph_fixture_for_test(&fields, &collections),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(match expected.family {
+                owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                    "ChartsOfCharacteristicTypes"
+                }
+                _ => unreachable!(),
+            }),
+        };
+        let diagnostic = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "unsupported {role:?} payload was accepted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Unsupported);
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(
+            diagnostic.structural_signature,
+            "unsupported_collection_item"
+        );
+        assert_eq!(diagnostic.collection_role.as_deref(), Some(role.as_str()));
+        assert_eq!(diagnostic.collection_index, Some(0));
+        assert_eq!(diagnostic.offending_reference.as_deref(), Some(reference));
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+    }
+}
+
+#[test]
 fn audited_owner_graph_handoff_distinguishes_decode_errors_from_downstream_misses() {
     for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
         let (header, fields, collections) = owner_graph_fixture_for_test(expected);
@@ -2053,16 +2476,16 @@ fn audited_owner_graph_handoff_distinguishes_decode_errors_from_downstream_misse
             ),
         };
         assert_eq!(downstream.family, expected.family.as_str());
+        assert_eq!(downstream.class, MetadataSourceFailureClass::Invariant);
+        assert_eq!(downstream.parser_stage, "owner_graph_owned_child");
+        assert_ne!(downstream.parser_stage, "legacy_option_none");
         if matches!(
             expected.family,
-            owner_graph::OwnerGraphFamily::Catalog | owner_graph::OwnerGraphFamily::Document
+            owner_graph::OwnerGraphFamily::BusinessProcess
+                | owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes
         ) {
-            assert_eq!(downstream.class, MetadataSourceFailureClass::Invariant);
-            assert_eq!(downstream.parser_stage, "owner_graph_owned_child");
-        } else {
-            assert_eq!(downstream.class, MetadataSourceFailureClass::Unknown);
-            assert_eq!(downstream.parser_stage, "legacy_option_none");
-            assert_eq!(downstream.structural_signature, "legacy_option_none");
+            assert_eq!(downstream.collection_role.as_deref(), Some("form"));
+            assert_eq!(downstream.structural_signature, "header_mismatch");
         }
     }
 }
@@ -2197,6 +2620,397 @@ fn owner_graph_post_root_evidence_is_role_based_and_redacted() {
         Some("owned_template")
     );
     assert!(!serde_json::to_string(&evidence).unwrap().contains(secret));
+}
+
+#[test]
+fn business_process_and_cct_ledgers_report_exact_outer_identity_collision() {
+    let duplicate = "11111111-1111-4111-8111-111111111111";
+    let mut bp_identities =
+        owner_graph::OwnerIdentityLedger::new("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned());
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_child_ids(
+            &mut bp_identities,
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            owner_graph::OwnerCollectionRole::DirectAttribute,
+            vec![duplicate.to_owned(), duplicate.to_owned()],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.family, "BusinessProcess");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(diagnostic.parser_stage, "owner_identity_ledger");
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+
+    let root_generated = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let mut cct_identities =
+        owner_graph::OwnerIdentityLedger::new("cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_owned());
+    cct_identities
+        .insert_generated(
+            root_generated.to_owned(),
+            1,
+            owner_graph::GeneratedIdentityRole::Type,
+        )
+        .unwrap();
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_tabular_section_ids(
+            &mut cct_identities,
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            vec![
+                (
+                    "dddddddd-dddd-4ddd-8ddd-dddddddddddd".to_owned(),
+                    vec![
+                        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".to_owned(),
+                        "ffffffff-ffff-4fff-8fff-ffffffffffff".to_owned(),
+                    ],
+                    Vec::new(),
+                ),
+                (
+                    "12121212-1212-4212-8212-121212121212".to_owned(),
+                    vec![root_generated.to_owned()],
+                    Vec::new(),
+                ),
+            ],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.family, "ChartOfCharacteristicTypes");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("tabular_section")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(diagnostic.structural_signature, "ambiguous");
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("generated_type_id")
+    );
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains(root_generated)
+    );
+
+    let mut nested_identities =
+        owner_graph::OwnerIdentityLedger::new("13131313-1313-4313-8313-131313131313".to_owned());
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_tabular_section_ids(
+            &mut nested_identities,
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            vec![(
+                "14141414-1414-4414-8414-141414141414".to_owned(),
+                Vec::new(),
+                vec![duplicate.to_owned(), duplicate.to_owned()],
+            )],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.collection_index, Some(0));
+    assert_eq!(diagnostic.structural_signature, "ambiguous");
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+}
+
+#[test]
+fn cct_direct_item_failure_rolls_back_staged_identity_and_corrected_item_commits() {
+    let first_uuid = "91919191-9191-4191-8191-919191919191";
+    let second_uuid = "92929292-9292-4292-8292-929292929292";
+    let first = cct_attribute_item_for_test(first_uuid, "First", false);
+    let second = cct_attribute_item_for_test(second_uuid, "Second", false);
+    let mut child_ids = BTreeSet::from(["root-seed".to_owned()]);
+    let original = child_ids.clone();
+    let wrong_owner_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.Attribute.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Other.Attribute.Second".to_owned(),
+        ),
+    ]);
+    let failure = match parse_cct_direct_attributes_indexed(
+        &[first.as_str(), second.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &wrong_owner_refs,
+        &BTreeMap::new(),
+        &mut child_ids,
+    ) {
+        Err(failure) => failure,
+        Ok(_) => panic!("wrong-owner second CCT direct item was accepted"),
+    };
+    assert_eq!(failure.item_index, 1, "{failure:?}");
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::WrongOwner
+    );
+    assert_eq!(
+        child_ids,
+        BTreeSet::from([original.into_iter().next().unwrap(), first_uuid.to_owned()])
+    );
+    assert!(!child_ids.contains(second_uuid));
+    let diagnostic = owner_collection_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::DirectAttribute,
+        failure,
+    );
+    assert_eq!(diagnostic.family, "ChartOfCharacteristicTypes");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+
+    let corrected_refs = BTreeMap::from([(
+        second_uuid.to_owned(),
+        "ChartOfCharacteristicTypes.Owner.Attribute.Second".to_owned(),
+    )]);
+    let corrected = parse_cct_direct_attributes_indexed(
+        &[second.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &corrected_refs,
+        &BTreeMap::new(),
+        &mut child_ids,
+    )
+    .unwrap();
+    assert_eq!(corrected.len(), 1);
+    assert!(child_ids.contains(first_uuid));
+    assert!(child_ids.contains(second_uuid));
+}
+
+#[test]
+fn cct_direct_uuid_collisions_are_exact_ambiguous_and_retryable() {
+    let first_uuid = "a1111111-1111-4111-8111-111111111111";
+    let seeded_uuid = "a2222222-2222-4222-8222-222222222222";
+    let corrected_uuid = "a3333333-3333-4333-8333-333333333333";
+
+    for seeded_collision in [false, true] {
+        let collision_uuid = if seeded_collision {
+            seeded_uuid
+        } else {
+            first_uuid
+        };
+        let collision_name = if seeded_collision { "Second" } else { "First" };
+        let first = cct_attribute_item_for_test(first_uuid, "First", false);
+        let collision = cct_attribute_item_for_test(collision_uuid, collision_name, false);
+        let corrected = cct_attribute_item_for_test(corrected_uuid, "Corrected", false);
+        let mut refs = BTreeMap::from([(
+            first_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.Attribute.First".to_owned(),
+        )]);
+        if seeded_collision {
+            refs.insert(
+                seeded_uuid.to_owned(),
+                "ChartOfCharacteristicTypes.Owner.Attribute.Second".to_owned(),
+            );
+        }
+        let mut child_ids = BTreeSet::from(["root-seed".to_owned()]);
+        if seeded_collision {
+            child_ids.insert(seeded_uuid.to_owned());
+        }
+
+        let failure = match parse_cct_direct_attributes_indexed(
+            &[first.as_str(), collision.as_str()],
+            "Owner",
+            &BTreeMap::new(),
+            &refs,
+            &BTreeMap::new(),
+            &mut child_ids,
+        ) {
+            Err(failure) => failure,
+            Ok(_) => panic!("duplicate second CCT direct UUID was accepted"),
+        };
+        assert_eq!(failure.item_index, 1);
+        assert_eq!(
+            failure.reference,
+            owner_graph::OwnerGraphReference::ChildUuid
+        );
+        assert_eq!(
+            failure.reason,
+            owner_graph::OwnerGraphOwnedChildReason::Ambiguous
+        );
+        let diagnostic = owner_collection_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::OwnerCollectionRole::DirectAttribute,
+            failure,
+        );
+        assert_eq!(
+            diagnostic.collection_role.as_deref(),
+            Some("direct_attribute")
+        );
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.offending_reference.as_deref(),
+            Some("child_uuid")
+        );
+        assert_eq!(diagnostic.structural_signature, "ambiguous");
+
+        let mut expected_ids = BTreeSet::from(["root-seed".to_owned(), first_uuid.to_owned()]);
+        if seeded_collision {
+            expected_ids.insert(seeded_uuid.to_owned());
+        }
+        assert_eq!(child_ids, expected_ids);
+        assert!(!child_ids.contains(corrected_uuid));
+
+        let corrected_refs = BTreeMap::from([(
+            corrected_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.Attribute.Corrected".to_owned(),
+        )]);
+        let parsed = parse_cct_direct_attributes_indexed(
+            &[corrected.as_str()],
+            "Owner",
+            &BTreeMap::new(),
+            &corrected_refs,
+            &BTreeMap::new(),
+            &mut child_ids,
+        )
+        .unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert!(child_ids.contains(corrected_uuid));
+    }
+}
+
+#[test]
+fn cct_tabular_late_failure_rolls_back_all_staged_ids_and_corrected_item_commits() {
+    let first_uuid = "93939393-9393-4393-8393-939393939393";
+    let second_uuid = "94949494-9494-4494-8494-949494949494";
+    let first_nested_uuid = "95959595-9595-4595-8595-959595959595";
+    let second_nested_uuid = "96969696-9696-4696-8696-969696969696";
+    let first_generated = [
+        "a1919191-9191-4191-8191-919191919191",
+        "a2929292-9292-4292-8292-929292929292",
+        "a3939393-9393-4393-8393-939393939393",
+        "a4949494-9494-4494-8494-949494949494",
+    ];
+    let second_generated = [
+        "b1919191-9191-4191-8191-919191919191",
+        "b2929292-9292-4292-8292-929292929292",
+        "b3939393-9393-4393-8393-939393939393",
+        "b4949494-9494-4494-8494-949494949494",
+    ];
+    let first_nested = cct_attribute_item_for_test(first_nested_uuid, "FirstNested", true);
+    let second_nested = cct_attribute_item_for_test(second_nested_uuid, "SecondNested", true);
+    let first = cct_tabular_section_item_for_test(
+        first_uuid,
+        "First",
+        first_generated,
+        &[first_nested.clone()],
+        "{0}",
+    );
+    let second_invalid = cct_tabular_section_item_for_test(
+        second_uuid,
+        "Second",
+        second_generated,
+        &[second_nested.clone()],
+        "late-tooltip-shape",
+    );
+    let second_corrected = cct_tabular_section_item_for_test(
+        second_uuid,
+        "Second",
+        second_generated,
+        &[second_nested],
+        "{0}",
+    );
+    let refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.Second".to_owned(),
+        ),
+        (
+            first_nested_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.First.Attribute.FirstNested"
+                .to_owned(),
+        ),
+        (
+            second_nested_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.Second.Attribute.SecondNested"
+                .to_owned(),
+        ),
+    ]);
+    let mut generated_ids = BTreeSet::from(["generated-seed".to_owned()]);
+    let mut child_ids = BTreeSet::from(["child-seed".to_owned()]);
+    let failure = match parse_cct_tabular_sections_indexed(
+        &[first.as_str(), second_invalid.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &mut generated_ids,
+        &mut child_ids,
+    ) {
+        Err(failure) => failure,
+        Ok(_) => panic!("late-invalid second CCT tabular section was accepted"),
+    };
+    assert_eq!(failure.item_index, 1, "{failure:?}");
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch
+    );
+    assert_eq!(
+        failure.reference,
+        owner_graph::OwnerGraphReference::ChildUuid
+    );
+    assert_eq!(
+        generated_ids,
+        BTreeSet::from_iter(
+            std::iter::once("generated-seed".to_owned())
+                .chain(first_generated.into_iter().map(str::to_owned))
+        )
+    );
+    assert_eq!(
+        child_ids,
+        BTreeSet::from([
+            "child-seed".to_owned(),
+            first_uuid.to_owned(),
+            first_nested_uuid.to_owned(),
+        ])
+    );
+    assert!(!generated_ids.contains(second_generated[0]));
+    assert!(!child_ids.contains(second_uuid));
+    assert!(!child_ids.contains(second_nested_uuid));
+
+    let corrected = parse_cct_tabular_sections_indexed(
+        &[second_corrected.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &mut generated_ids,
+        &mut child_ids,
+    )
+    .unwrap();
+    assert_eq!(corrected.len(), 1);
+    assert!(child_ids.contains(second_uuid));
+    assert!(child_ids.contains(second_nested_uuid));
+    assert!(
+        second_generated
+            .iter()
+            .all(|uuid| generated_ids.contains(*uuid))
+    );
 }
 
 #[test]
@@ -2482,6 +3296,61 @@ fn document_field_references_report_second_foreign_attribute() {
 }
 
 #[test]
+fn business_process_field_references_keep_fields_27_and_43_typed() {
+    for (field_index, marker, name) in [(27, "-2", "Number"), (43, "-8", "HeadTask")] {
+        let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{{marker}}}}}");
+        let collection = format!("{{1,{{0,2,{item},{item}}}}}");
+        let mut fields = vec![""; field_index + 1];
+        fields[field_index] = &collection;
+        let diagnostic = parse_business_process_field_references(
+            &fields,
+            field_index,
+            "Owner",
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &[(marker, name)],
+        )
+        .unwrap_err();
+        assert_eq!(diagnostic.family, "BusinessProcess");
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(diagnostic.structural_signature, "ambiguous");
+        assert_eq!(diagnostic.field_index, Some(field_index));
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.collection_role.as_deref(),
+            Some("direct_attribute")
+        );
+    }
+
+    let declared = "44444444-4444-4444-8444-444444444444";
+    let foreign = "55555555-5555-4555-8555-555555555555";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{foreign}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let mut fields = vec![""; 28];
+    fields[27] = &collection;
+    let object_refs = BTreeMap::from([(
+        foreign.to_owned(),
+        "BusinessProcess.Other.Attribute.Foreign".to_owned(),
+    )]);
+    let attribute_references =
+        BTreeSet::from([format!("BusinessProcess.Owner.Attribute.{declared}")]);
+    let diagnostic = parse_business_process_field_references(
+        &fields,
+        27,
+        "Owner",
+        &object_refs,
+        &attribute_references,
+        &[("-2", "Number")],
+    )
+    .unwrap_err();
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(diagnostic.collection_index, Some(0));
+    let serialized = serde_json::to_string(&diagnostic).unwrap();
+    assert!(!serialized.contains(foreign));
+    assert!(!serialized.contains("Foreign"));
+}
+
+#[test]
 fn owner_graph_declared_role_mismatch_does_not_fall_back_to_legacy_option_none() {
     let wrong = owner_graph::DecodedOwnerCollection::new(
         Vec::new(),
@@ -2667,6 +3536,32 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
         .map_err(|failure| failure.item_index),
         Err(1)
     );
+    let duplicate_direct_items = [direct_items[0].as_str(), direct_items[0].as_str()];
+    let duplicate_direct =
+        parse_document_attribute_collection_indexed(&duplicate_direct_items, Some(6)).unwrap_err();
+    assert_eq!(duplicate_direct.item_index, 1);
+    assert_eq!(
+        duplicate_direct.reason,
+        owner_graph::OwnerGraphOwnedChildReason::Ambiguous
+    );
+    let duplicate_direct_diagnostic = declared_owner_child_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        duplicate_direct,
+    );
+    assert_eq!(duplicate_direct_diagnostic.family, "BusinessProcess");
+    assert_eq!(
+        duplicate_direct_diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(duplicate_direct_diagnostic.collection_index, Some(1));
+    let wrong_bp_direct =
+        parse_document_attribute_collection_indexed(&duplicate_direct_items[..1], Some(2))
+            .unwrap_err();
+    assert_eq!(wrong_bp_direct.item_index, 0);
+    assert_eq!(
+        wrong_bp_direct.reason,
+        owner_graph::OwnerGraphOwnedChildReason::WrongKind
+    );
 
     let nested = document_attribute_wrapper_for_test(
         8,
@@ -2734,6 +3629,53 @@ fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
         failure.reason,
         owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch
     );
+    let duplicate = match parse_owner_graph_command_identity_slots_indexed(&[
+        command.as_str(),
+        command.as_str(),
+    ]) {
+        Err(failure) => failure,
+        Ok(_) => panic!("duplicate second command identity was accepted"),
+    };
+    assert_eq!(duplicate.item_index, 1);
+    assert_eq!(
+        duplicate.reason,
+        owner_graph::OwnerGraphOwnedChildReason::Ambiguous
+    );
+    let duplicate_diagnostic = owner_graph_command_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        duplicate,
+    );
+    assert_eq!(duplicate_diagnostic.family, "BusinessProcess");
+    assert_eq!(
+        duplicate_diagnostic.collection_role.as_deref(),
+        Some("command")
+    );
+    assert_eq!(duplicate_diagnostic.collection_index, Some(1));
+    let reordered = command
+        .replace(first, "33333333-3333-4333-8333-333333333333")
+        .replace(second, "44444444-4444-4444-8444-444444444444")
+        .replace("\"Run\"", "\"RunSecond\"");
+    let reordered = match parse_owner_graph_command_identity_slots_indexed(&[
+        command.as_str(),
+        reordered.as_str(),
+    ]) {
+        Err(failure) => failure,
+        Ok(_) => panic!("second command value declaration-order mismatch was accepted"),
+    };
+    assert_eq!(reordered.item_index, 1);
+    assert_eq!(
+        reordered.reason,
+        owner_graph::OwnerGraphOwnedChildReason::DeclarationOrder
+    );
+    let reordered_diagnostic = owner_graph_command_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        reordered,
+    );
+    assert_eq!(
+        reordered_diagnostic.structural_signature,
+        "declaration_order"
+    );
+    assert_eq!(reordered_diagnostic.collection_index, Some(1));
 }
 
 fn owner_graph_nested_attribute_for_test(
@@ -2749,7 +3691,8 @@ fn owner_graph_nested_attribute_for_test(
             r#"{"U"}"#,
             "0",
         ),
-        owner_graph::OwnerGraphFamily::Document => document_attribute_wrapper_for_test(
+        owner_graph::OwnerGraphFamily::Document
+        | owner_graph::OwnerGraphFamily::BusinessProcess => document_attribute_wrapper_for_test(
             wrapper_code,
             uuid,
             r#"{"Pattern",{"B"}}"#,
@@ -2759,6 +3702,46 @@ fn owner_graph_nested_attribute_for_test(
         ),
         _ => unreachable!(),
     }
+}
+
+fn cct_attribute_item_for_test(uuid: &str, name: &str, nested: bool) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let header = format!("{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,{zero},0}}");
+    let detail = format!("{{2,{header},{{\"Pattern\",{{\"B\"}}}}}}");
+    let fill = if nested { r#"{"S",""}"# } else { r#"{"U"}"# };
+    let payload = format!(
+        "{{27,{detail},0,{{0}},{{0}},0,\"\",0,{{\"U\"}},{{\"U\"}},0,{zero},2,0,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},{fill},0,0,0}}"
+    );
+    let wrapper = if nested {
+        format!("{{8,{payload},2,1,0}}")
+    } else {
+        format!("{{2,{payload},2,1,1,0}}")
+    };
+    format!("{{{wrapper},0}}")
+}
+
+fn cct_tabular_section_item_for_test(
+    uuid: &str,
+    name: &str,
+    generated: [&str; 4],
+    nested_items: &[String],
+    tooltip: &str,
+) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let payload = format!(
+        "{{11,{},{},{},{},{{0,{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,{zero},0}}}},0,{{0}},{tooltip}}}",
+        generated[0], generated[1], generated[2], generated[3]
+    );
+    let nested = if nested_items.is_empty() {
+        format!("{{{CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID},0}}")
+    } else {
+        format!(
+            "{{{CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID},{},{}}}",
+            nested_items.len(),
+            nested_items.join(",")
+        )
+    };
+    format!("{{{{0,{payload},0}},1,{nested}}}")
 }
 
 fn owner_graph_tabular_section_item_for_test(
@@ -2788,12 +3771,19 @@ fn owner_graph_tabular_section_item_for_test(
             );
             format!("{{{{1,{payload}}},1,{nested}}}")
         }
+        owner_graph::OwnerGraphFamily::BusinessProcess => {
+            let nested = document_attribute_collection_for_test(
+                CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
+                nested_wrappers,
+            );
+            format!("{{{{0,{payload}}},1,{nested}}}")
+        }
         _ => unreachable!(),
     }
 }
 
 #[test]
-fn catalog_and_document_tabular_sections_report_exact_second_item_matrix() {
+fn catalog_document_and_business_process_tabular_sections_report_exact_second_item_matrix() {
     let section_first = "11111111-1111-4111-8111-111111111111";
     let section_second = "22222222-2222-4222-8222-222222222222";
     let nested_first = "33333333-3333-4333-8333-333333333333";
@@ -2814,6 +3804,7 @@ fn catalog_and_document_tabular_sections_report_exact_second_item_matrix() {
     for family in [
         owner_graph::OwnerGraphFamily::Catalog,
         owner_graph::OwnerGraphFamily::Document,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
     ] {
         let kind = family.as_str();
         let first_nested = owner_graph_nested_attribute_for_test(family, 8, nested_first);
@@ -2958,6 +3949,12 @@ fn catalog_and_document_tabular_sections_report_exact_second_item_matrix() {
                 }
                 owner_graph::OwnerGraphFamily::Document => {
                     match parse_document_tabular_sections_indexed(&items, "Owner", &refs) {
+                        Err(failure) => failure,
+                        Ok(_) => panic!("{kind}: {case} was accepted"),
+                    }
+                }
+                owner_graph::OwnerGraphFamily::BusinessProcess => {
+                    match parse_business_process_tabular_sections_indexed(&items, "Owner", &refs) {
                         Err(failure) => failure,
                         Ok(_) => panic!("{kind}: {case} was accepted"),
                     }

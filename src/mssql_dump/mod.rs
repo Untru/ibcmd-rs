@@ -9754,6 +9754,24 @@ fn owner_graph_owned_child_diagnostic(
     diagnostic
 }
 
+fn owner_graph_unsupported_collection_item_diagnostic(
+    family: owner_graph::OwnerGraphFamily,
+    role: owner_graph::OwnerCollectionRole,
+    item_index: usize,
+    reference: owner_graph::OwnerGraphReference,
+) -> MetadataSourceExtractionDiagnostic {
+    let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
+        MetadataSourceFailureClass::Unsupported,
+        family.as_str(),
+        "owner_graph_owned_child",
+        "unsupported_collection_item",
+    );
+    diagnostic.collection_role = Some(role.as_str().to_owned());
+    diagnostic.collection_index = Some(item_index);
+    diagnostic.offending_reference = Some(reference.as_str().to_owned());
+    diagnostic
+}
+
 fn owner_graph_field_diagnostic(
     family: owner_graph::OwnerGraphFamily,
     role: owner_graph::OwnerCollectionRole,
@@ -18114,20 +18132,167 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         owner_graph_diagnostic,
     )?;
     let fields = &owner_graph.owner_fields;
-    let collections = &owner_graph.collections;
-    let direct_attribute_items = &collections.first()?.items;
-    if !collections.get(1)?.items.is_empty() || !collections.get(3)?.items.is_empty() {
+    let direct_attribute_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::DirectAttribute,
+        owner_graph_diagnostic,
+    )?;
+    let template_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Template,
+        owner_graph_diagnostic,
+    )?;
+    let tabular_section_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::TabularSection,
+        owner_graph_diagnostic,
+    )?;
+    let command_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Command,
+        owner_graph_diagnostic,
+    )?;
+    let form_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Form,
+        owner_graph_diagnostic,
+    )?;
+
+    // Templates and commands have declared roles in the native graph, but
+    // their payload parsers belong to later slices. Reject before mutating the
+    // child identity ledger so unsupported payload cannot affect provenance.
+    if !template_collection.items.is_empty() {
+        *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::OwnerCollectionRole::Template,
+            0,
+            owner_graph::OwnerGraphReference::OwnedTemplate,
+        ));
         return None;
     }
-    let tabular_section_items = &collections.get(2)?.items;
-    let form_uuids = parse_task_form_uuids(&collections.get(4)?.items)?;
+    if !command_collection.items.is_empty() {
+        *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::OwnerCollectionRole::Command,
+            0,
+            owner_graph::OwnerGraphReference::OwnedCommand,
+        ));
+        return None;
+    }
 
     let mut generated_ids = owner_graph.identities.generated_identities();
+    let mut identities = owner_graph.identities.clone();
     let generated_types = owner_graph
         .generated_types
-        .into_iter()
+        .iter()
+        .cloned()
         .map(GeneratedTypeEntry::from)
         .collect::<Vec<_>>();
+    let form_uuids = parse_owner_graph_child_uuid_collection(
+        &form_collection.items,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Form,
+        owner_graph::OwnerGraphReference::OwnedForm,
+        owner_graph_diagnostic,
+    )?;
+    validate_owner_graph_owned_forms(
+        &form_uuids,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        &header.name,
+        form_refs,
+        owner_graph_diagnostic,
+    )?;
+    if let Err(diagnostic) = validate_owner_graph_form_slots(
+        fields,
+        &[26, 27, 28, 29, 30, 39, 40, 41, 42, 43],
+        &form_uuids,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        &header.name,
+        form_refs,
+    ) {
+        *owner_graph_diagnostic = Some(diagnostic);
+        return None;
+    }
+    let child_forms = parse_cct_child_forms(&header.name, &form_uuids, form_refs)?;
+
+    let mut child_ids = BTreeSet::new();
+    let mut child_metadata_objects = parse_cct_direct_attributes_indexed(
+        &direct_attribute_collection.items,
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        &mut child_ids,
+    )
+    .map_err(|failure| {
+        *owner_graph_diagnostic = Some(owner_collection_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::OwnerCollectionRole::DirectAttribute,
+            failure,
+        ));
+    })
+    .ok()?;
+    let tabular_sections = parse_cct_tabular_sections_indexed(
+        &tabular_section_collection.items,
+        &header.name,
+        type_index,
+        object_refs,
+        metadata_object_refs,
+        &mut generated_ids,
+        &mut child_ids,
+    )
+    .map_err(|failure| {
+        *owner_graph_diagnostic = Some(owner_collection_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::OwnerCollectionRole::TabularSection,
+            failure,
+        ));
+    })
+    .ok()?;
+    child_metadata_objects.extend(tabular_sections.iter().cloned());
+
+    record_owner_graph_child_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::DirectAttribute,
+        child_metadata_objects
+            .iter()
+            .filter(|child| child.tag == OWNER_CHILD_ATTRIBUTE_TAG)
+            .map(|child| child.header.uuid.clone()),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_tabular_section_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        tabular_sections.iter().map(|section| {
+            (
+                section.header.uuid.clone(),
+                section
+                    .generated_types
+                    .iter()
+                    .flat_map(|generated| [generated.type_id.clone(), generated.value_id.clone()])
+                    .collect(),
+                section
+                    .child_objects
+                    .iter()
+                    .map(|child| child.header.uuid.clone())
+                    .collect(),
+            )
+        }),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_child_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Form,
+        form_uuids.clone(),
+        owner_graph_diagnostic,
+    )?;
 
     if !cct_pair_is(fields.get(15)?, "0", "0")
         || !cct_based_on_is_empty(fields.get(50)?)
@@ -18146,26 +18311,6 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     {
         return None;
     }
-
-    let child_forms = parse_cct_child_forms(text, &header.name, &form_uuids, form_refs)?;
-    let mut child_ids = BTreeSet::new();
-    let mut child_metadata_objects = parse_cct_direct_attributes(
-        direct_attribute_items,
-        &header.name,
-        type_index,
-        object_refs,
-        metadata_object_refs,
-        &mut child_ids,
-    )?;
-    child_metadata_objects.extend(parse_cct_tabular_sections(
-        tabular_section_items,
-        &header.name,
-        type_index,
-        object_refs,
-        metadata_object_refs,
-        &mut generated_ids,
-        &mut child_ids,
-    )?);
 
     let code_length = fields.get(21)?.trim().parse::<u32>().ok()?;
     Some(ChartOfCharacteristicTypesProperties {
@@ -18387,7 +18532,6 @@ fn parse_cct_owned_form_ref(
 }
 
 fn parse_cct_child_forms(
-    text: &str,
     owner_name: &str,
     form_uuids: &[String],
     form_refs: &BTreeMap<String, FormSourceReference>,
@@ -18408,17 +18552,7 @@ fn parse_cct_child_forms(
         }
         names.push(name.to_string());
     }
-    let owned = owned_metadata_form_names_in_text_order(
-        text,
-        "ChartsOfCharacteristicTypes",
-        owner_name,
-        form_refs,
-    );
-    let owned_set = owned
-        .iter()
-        .map(|name| name.to_ascii_lowercase())
-        .collect::<BTreeSet<_>>();
-    (owned.len() == names.len() && owned_set == seen).then_some(names)
+    Some(names)
 }
 
 const CCT_STANDARD_ATTRIBUTES: [(&str, &str); 9] = [
@@ -18534,32 +18668,57 @@ fn parse_cct_standard_attribute_fill_value(
     }
 }
 
-fn parse_cct_direct_attributes(
+fn parse_cct_direct_attributes_indexed(
     items: &[&str],
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     child_ids: &mut BTreeSet<String>,
-) -> Option<Vec<MetadataChildObject>> {
+) -> Result<Vec<MetadataChildObject>, OwnerCollectionItemFailure> {
     let mut names = BTreeSet::new();
-    items
-        .iter()
-        .map(|item| {
-            let child = parse_cct_attribute(
-                item,
-                false,
-                owner_name,
-                type_index,
-                object_refs,
-                metadata_object_refs,
-                child_ids,
-            )?;
-            names
-                .insert(child.header.name.to_ascii_lowercase())
-                .then_some(child)
-        })
-        .collect()
+    let mut result = Vec::with_capacity(items.len());
+    for (item_index, item) in items.iter().enumerate() {
+        let failure = |reason| {
+            owner_collection_failure(
+                item_index,
+                owner_graph::OwnerGraphReference::ChildUuid,
+                reason,
+            )
+        };
+        let mut staged_child_ids = child_ids.clone();
+        let mut staged_names = names.clone();
+        let mut parsed_child_ids = BTreeSet::new();
+        let child = parse_cct_attribute(
+            item,
+            false,
+            owner_name,
+            type_index,
+            object_refs,
+            metadata_object_refs,
+            &mut parsed_child_ids,
+        )
+        .ok_or_else(|| failure(owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch))?;
+        let expected_reference = format!(
+            "{}.{owner_name}.Attribute.{}",
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            child.header.name
+        );
+        if resolve_exchange_plan_index_reference(&child.header.uuid, object_refs)
+            .is_none_or(|reference| reference != expected_reference)
+        {
+            return Err(failure(owner_graph::OwnerGraphOwnedChildReason::WrongOwner));
+        }
+        if !staged_child_ids.insert(child.header.uuid.to_ascii_lowercase())
+            || !staged_names.insert(child.header.name.to_ascii_lowercase())
+        {
+            return Err(failure(owner_graph::OwnerGraphOwnedChildReason::Ambiguous));
+        }
+        *child_ids = staged_child_ids;
+        names = staged_names;
+        result.push(child);
+    }
+    Ok(result)
 }
 
 fn parse_cct_attribute(
@@ -18765,7 +18924,7 @@ fn parse_business_process_child_properties(
     )
 }
 
-fn parse_cct_tabular_sections(
+fn parse_cct_tabular_sections_indexed(
     items: &[&str],
     owner_name: &str,
     type_index: &BTreeMap<String, String>,
@@ -18773,116 +18932,248 @@ fn parse_cct_tabular_sections(
     metadata_object_refs: &BTreeMap<String, String>,
     generated_ids: &mut BTreeSet<String>,
     child_ids: &mut BTreeSet<String>,
-) -> Option<Vec<MetadataChildObject>> {
+) -> Result<Vec<MetadataChildObject>, OwnerCollectionItemFailure> {
     let mut names = BTreeSet::new();
-    items
-        .iter()
-        .map(|item| {
-            let fields = split_information_register_braced_fields(item)?;
-            if fields.len() != 3 || fields.get(1)?.trim() != "1" {
-                return None;
-            }
-            let wrapper = split_information_register_braced_fields(fields.first()?)?;
-            if !cct_tabular_section_wrapper_is_exact(&wrapper) {
-                return None;
-            }
-            let payload = split_information_register_braced_fields(wrapper.get(1)?)?;
-            if payload.len() != 9 || payload.first()?.trim() != "11" {
-                return None;
-            }
-            let header = parse_wrapped_register_owner_header(payload.get(5)?)?;
-            if !child_ids.insert(header.uuid.to_ascii_lowercase())
-                || !names.insert(header.name.to_ascii_lowercase())
-            {
-                return None;
-            }
-            let ids = payload[1..5]
-                .iter()
-                .map(|field| parse_information_register_non_zero_uuid(field))
-                .collect::<Option<Vec<_>>>()?;
-            if ids
-                .iter()
-                .any(|uuid| !generated_ids.insert(uuid.to_ascii_lowercase()))
-            {
-                return None;
-            }
-            let (line_number_fill_value, line_number_synonym) =
-                match parse_exact_tabular_section_standard_attributes_presence(
-                    "ChartOfCharacteristicTypes",
-                    payload.get(7)?,
-                )? {
-                    Some((fill_value, synonym)) => (Some(fill_value), synonym),
-                    None => (None, Vec::new()),
-                };
-            let nested_items =
-                parse_cct_collection(fields.get(2)?, CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID)?;
-            let mut nested_names = BTreeSet::new();
-            let child_objects = nested_items
-                .into_iter()
-                .map(|nested_item| {
-                    let child = parse_cct_attribute(
-                        nested_item,
-                        true,
-                        owner_name,
-                        type_index,
-                        object_refs,
-                        metadata_object_refs,
-                        child_ids,
-                    )?;
-                    nested_names
-                        .insert(child.header.name.to_ascii_lowercase())
-                        .then_some(child)
-                })
-                .collect::<Option<Vec<_>>>()?;
-            let fill_checking = match payload.get(6)?.trim() {
-                "0" => "DontCheck",
-                "1" => "ShowError",
-                _ => return None,
+    let mut result = Vec::with_capacity(items.len());
+    for (item_index, item) in items.iter().enumerate() {
+        let failure = |reference, reason| owner_collection_failure(item_index, reference, reason);
+        let mut staged_child_ids = child_ids.clone();
+        let mut staged_generated_ids = generated_ids.clone();
+        let mut staged_names = names.clone();
+        let fields = split_information_register_braced_fields(item).ok_or_else(|| {
+            failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+            )
+        })?;
+        if fields.len() != 3
+            || fields
+                .get(1)
+                .is_none_or(|value| value.trim() != NATIVE_COLLECTION_ITEM_PRESENT)
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            ));
+        }
+        let wrapper =
+            split_information_register_braced_fields(fields.first().copied().unwrap_or_default())
+                .ok_or_else(|| {
+                failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                )
+            })?;
+        if !cct_tabular_section_wrapper_is_exact(&wrapper) {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            ));
+        }
+        let payload =
+            split_information_register_braced_fields(wrapper.get(1).copied().unwrap_or_default())
+                .ok_or_else(|| {
+                failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                )
+            })?;
+        if payload.len() != 9
+            || payload
+                .first()
+                .is_none_or(|value| value.trim() != TABULAR_SECTION_PAYLOAD_CODE)
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            ));
+        }
+        let header =
+            parse_wrapped_register_owner_header(payload.get(5).copied().unwrap_or_default())
+                .ok_or_else(|| {
+                    failure(
+                        owner_graph::OwnerGraphReference::ChildUuid,
+                        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                    )
+                })?;
+        let expected_reference = format!(
+            "{}.{owner_name}.TabularSection.{}",
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            header.name
+        );
+        if resolve_exchange_plan_index_reference(&header.uuid, object_refs)
+            .is_none_or(|reference| reference != expected_reference)
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+            ));
+        }
+        if !staged_child_ids.insert(header.uuid.to_ascii_lowercase())
+            || !staged_names.insert(header.name.to_ascii_lowercase())
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+            ));
+        }
+
+        let mut ids = Vec::with_capacity(4);
+        for (generated_index, value) in payload[1..5].iter().enumerate() {
+            let reference = if generated_index % 2 == 0 {
+                owner_graph::OwnerGraphReference::GeneratedType
+            } else {
+                owner_graph::OwnerGraphReference::GeneratedValue
             };
-            Some(MetadataChildObject {
-                tag: "TabularSection",
-                header,
-                generated_types: vec![
-                    GeneratedTypeEntry {
-                        name: format!(
-                            "ChartOfCharacteristicTypesTabularSection.{owner_name}.{}",
-                            parse_wrapped_register_owner_header(payload.get(5)?)?.name
-                        ),
-                        category: "TabularSection",
-                        type_id: ids[0].clone(),
-                        value_id: ids[1].clone(),
-                    },
-                    GeneratedTypeEntry {
-                        name: format!(
-                            "ChartOfCharacteristicTypesTabularSectionRow.{owner_name}.{}",
-                            parse_wrapped_register_owner_header(payload.get(5)?)?.name
-                        ),
-                        category: "TabularSectionRow",
-                        type_id: ids[2].clone(),
-                        value_id: ids[3].clone(),
-                    },
-                ],
-                value_types: Vec::new(),
-                emit_empty_type: false,
-                properties: None,
-                register_properties: None,
-                tabular_section_properties: Some(MetadataTabularSectionProperties {
-                    tooltip: parse_information_register_owner_localized_value(payload.get(8)?)?,
-                    fill_checking,
-                    line_number_fill_checking: if line_number_fill_value.is_some() {
-                        "DontCheck"
-                    } else {
-                        ""
-                    },
-                    line_number_fill_value,
-                    line_number_synonym,
-                    use_mode: Some("ForItem"),
-                    line_number_length: Some(5),
-                }),
-                child_objects,
-            })
-        })
-        .collect()
+            let uuid = parse_information_register_non_zero_uuid(value).ok_or_else(|| {
+                failure(
+                    reference,
+                    owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                )
+            })?;
+            if !staged_generated_ids.insert(uuid.to_ascii_lowercase()) {
+                return Err(failure(
+                    reference,
+                    owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                ));
+            }
+            ids.push(uuid);
+        }
+        let standard_attributes = parse_exact_tabular_section_standard_attributes_presence(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+            payload.get(7).copied().unwrap_or_default(),
+        )
+        .ok_or_else(|| {
+            failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+            )
+        })?;
+        let (line_number_fill_value, line_number_synonym) = match standard_attributes {
+            Some((fill_value, synonym)) => (Some(fill_value), synonym),
+            None => (None, Vec::new()),
+        };
+        let nested_items = parse_cct_collection(
+            fields.get(2).copied().unwrap_or_default(),
+            CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
+        )
+        .ok_or_else(|| {
+            failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            )
+        })?;
+        let mut nested_names = BTreeSet::new();
+        let mut child_objects = Vec::with_capacity(nested_items.len());
+        for nested_item in nested_items {
+            let mut parsed_ids = BTreeSet::new();
+            let child = parse_cct_attribute(
+                nested_item,
+                true,
+                owner_name,
+                type_index,
+                object_refs,
+                metadata_object_refs,
+                &mut parsed_ids,
+            )
+            .ok_or_else(|| {
+                failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                )
+            })?;
+            let expected_reference = format!(
+                "{}.{owner_name}.TabularSection.{}.Attribute.{}",
+                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes.as_str(),
+                header.name,
+                child.header.name
+            );
+            if resolve_exchange_plan_index_reference(&child.header.uuid, object_refs)
+                .is_none_or(|reference| reference != expected_reference)
+            {
+                return Err(failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+                ));
+            }
+            if !staged_child_ids.insert(child.header.uuid.to_ascii_lowercase())
+                || !nested_names.insert(child.header.name.to_ascii_lowercase())
+            {
+                return Err(failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                ));
+            }
+            child_objects.push(child);
+        }
+        let fill_checking_token = payload.get(6).map(|value| value.trim());
+        if !matches!(
+            fill_checking_token,
+            Some(NATIVE_COLLECTION_ITEM_TAIL | NATIVE_COLLECTION_ITEM_PRESENT)
+        ) {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+            ));
+        }
+        let fill_checking = metadata_fill_checking_xml(fill_checking_token);
+        let tooltip = parse_information_register_owner_localized_value(
+            payload.get(8).copied().unwrap_or_default(),
+        )
+        .ok_or_else(|| {
+            failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+            )
+        })?;
+        let child = MetadataChildObject {
+            tag: OWNER_CHILD_TABULAR_SECTION_TAG,
+            header: header.clone(),
+            generated_types: vec![
+                GeneratedTypeEntry {
+                    name: format!(
+                        "ChartOfCharacteristicTypesTabularSection.{owner_name}.{}",
+                        header.name
+                    ),
+                    category: "TabularSection",
+                    type_id: ids[0].clone(),
+                    value_id: ids[1].clone(),
+                },
+                GeneratedTypeEntry {
+                    name: format!(
+                        "ChartOfCharacteristicTypesTabularSectionRow.{owner_name}.{}",
+                        header.name
+                    ),
+                    category: "TabularSectionRow",
+                    type_id: ids[2].clone(),
+                    value_id: ids[3].clone(),
+                },
+            ],
+            value_types: Vec::new(),
+            emit_empty_type: false,
+            properties: None,
+            register_properties: None,
+            tabular_section_properties: Some(MetadataTabularSectionProperties {
+                tooltip,
+                fill_checking,
+                line_number_fill_checking: if line_number_fill_value.is_some() {
+                    "DontCheck"
+                } else {
+                    ""
+                },
+                line_number_fill_value,
+                line_number_synonym,
+                use_mode: Some("ForItem"),
+                line_number_length: Some(5),
+            }),
+            child_objects,
+        };
+        *child_ids = staged_child_ids;
+        *generated_ids = staged_generated_ids;
+        names = staged_names;
+        result.push(child);
+    }
+    Ok(result)
 }
 
 fn cct_tabular_section_wrapper_is_exact(wrapper: &[&str]) -> bool {
@@ -20489,7 +20780,7 @@ fn parse_document_properties_from_text(
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-    ) = parse_task_input_modes(fields.get(48)?)?;
+    ) = parse_owner_input_modes(fields.get(48)?)?;
 
     let mut identities = owner_graph.identities.clone();
     // Document's native layout declares tabular sections before the other
@@ -20776,10 +21067,6 @@ fn parse_document_child_templates(
             .then(|| name.to_string())
         })
         .collect()
-}
-
-fn parse_document_attribute_collection(items: &[&str], code: u32) -> Option<Vec<String>> {
-    parse_document_attribute_collection_indexed(items, Some(code)).ok()
 }
 
 fn parse_document_direct_attribute_collection_indexed(
@@ -21141,49 +21428,6 @@ fn validate_document_owner_graph_child_objects(
         }
     }
     Ok(())
-}
-
-fn validate_document_child_objects(
-    children: &[MetadataChildObject],
-    direct_attribute_uuids: &[String],
-    tabular_sections: &[DocumentTabularSectionLayout],
-) -> bool {
-    let direct = children
-        .iter()
-        .filter(|child| child.tag == "Attribute")
-        .collect::<Vec<_>>();
-    let sections = children
-        .iter()
-        .filter(|child| child.tag == "TabularSection")
-        .collect::<Vec<_>>();
-    children.len() == direct.len() + sections.len()
-        && direct.len() == direct_attribute_uuids.len()
-        && direct
-            .iter()
-            .zip(direct_attribute_uuids)
-            .all(|(child, uuid)| {
-                child.header.uuid.eq_ignore_ascii_case(uuid)
-                    && child.properties.is_some()
-                    && child.child_objects.is_empty()
-            })
-        && sections.len() == tabular_sections.len()
-        && sections
-            .iter()
-            .zip(tabular_sections)
-            .all(|(child, expected)| {
-                child.header.uuid.eq_ignore_ascii_case(&expected.uuid)
-                    && child.tabular_section_properties.is_some()
-                    && child.child_objects.len() == expected.attribute_uuids.len()
-                    && child
-                        .child_objects
-                        .iter()
-                        .zip(&expected.attribute_uuids)
-                        .all(|(attribute, uuid)| {
-                            attribute.tag == "Attribute"
-                                && attribute.header.uuid.eq_ignore_ascii_case(uuid)
-                                && attribute.properties.is_some()
-                        })
-            })
 }
 
 fn parse_document_field_references(
@@ -21548,37 +21792,110 @@ fn parse_business_process_properties_from_text(
     )?;
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = &owner_graph.owner_fields;
-    let collections = &owner_graph.collections;
-    if !collections.first()?.items.is_empty() {
+    let template_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Template,
+        owner_graph_diagnostic,
+    )?;
+    let form_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Form,
+        owner_graph_diagnostic,
+    )?;
+    let command_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Command,
+        owner_graph_diagnostic,
+    )?;
+    let direct_attribute_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::DirectAttribute,
+        owner_graph_diagnostic,
+    )?;
+    let tabular_section_collection = owner_graph_collection_for_family_parser(
+        &owner_graph,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::TabularSection,
+        owner_graph_diagnostic,
+    )?;
+    if !template_collection.items.is_empty() {
+        *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            owner_graph::OwnerCollectionRole::Template,
+            0,
+            owner_graph::OwnerGraphReference::OwnedTemplate,
+        ));
         return None;
     }
 
     let generated_types = owner_graph
         .generated_types
-        .into_iter()
+        .iter()
+        .cloned()
         .map(GeneratedTypeEntry::from)
         .collect::<Vec<_>>();
-    let form_uuids = parse_task_form_uuids(&collections.get(1)?.items)?;
+    let form_uuids = parse_owner_graph_child_uuid_collection(
+        &form_collection.items,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Form,
+        owner_graph::OwnerGraphReference::OwnedForm,
+        owner_graph_diagnostic,
+    )?;
+    validate_owner_graph_owned_forms(
+        &form_uuids,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        &header.name,
+        form_refs,
+        owner_graph_diagnostic,
+    )?;
     let child_forms = parse_business_process_child_forms(&form_uuids, &header.name, form_refs)?;
-    if child_forms
-        != owned_metadata_form_names_in_text_order(
-            text,
-            "BusinessProcesses",
-            &header.name,
-            form_refs,
-        )
-    {
+    if let Err(diagnostic) = validate_owner_graph_form_slots(
+        fields,
+        &[22, 23, 24, 32, 33, 34],
+        &form_uuids,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        &header.name,
+        form_refs,
+    ) {
+        *owner_graph_diagnostic = Some(diagnostic);
         return None;
     }
+
     let direct_attribute_uuids =
-        parse_document_attribute_collection(&collections.get(3)?.items, 2)?;
-    let tabular_sections = parse_business_process_tabular_sections(
-        &collections.get(4)?.items,
+        parse_document_attribute_collection_indexed(&direct_attribute_collection.items, Some(2))
+            .map_err(|failure| {
+                *owner_graph_diagnostic = Some(declared_owner_child_failure_diagnostic(
+                    owner_graph::OwnerGraphFamily::BusinessProcess,
+                    failure,
+                ));
+            })
+            .ok()?;
+    let tabular_sections = parse_business_process_tabular_sections_indexed(
+        &tabular_section_collection.items,
         &header.name,
         object_refs,
-    )?;
-    let child_metadata_objects = parse_attribute_tabular_section_child_objects(
-        "BusinessProcess",
+    )
+    .map_err(|failure| {
+        *owner_graph_diagnostic = Some(owner_collection_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            owner_graph::OwnerCollectionRole::TabularSection,
+            failure,
+        ));
+    })
+    .ok()?;
+    let declared_inventory = DeclaredOwnerChildInventory {
+        direct_attributes: direct_attribute_uuids.clone(),
+        tabular_sections: tabular_sections
+            .iter()
+            .map(|section| (section.uuid.clone(), section.attribute_uuids.clone()))
+            .collect(),
+    };
+    let child_metadata_objects = parse_declared_owner_child_objects(
+        owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
         &header.name,
         text,
         uuid,
@@ -21587,12 +21904,26 @@ fn parse_business_process_properties_from_text(
         object_refs,
         metadata_object_refs,
         form_refs,
-    );
-    if !validate_document_child_objects(
+        &declared_inventory,
+    )
+    .map_err(|failure| {
+        *owner_graph_diagnostic = Some(declared_owner_child_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            failure,
+        ));
+    })
+    .ok()?;
+    if let Err(failure) = validate_business_process_owner_graph_child_objects(
         &child_metadata_objects,
         &direct_attribute_uuids,
         &tabular_sections,
+        &header.name,
+        object_refs,
     ) {
+        *owner_graph_diagnostic = Some(declared_owner_child_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            failure,
+        ));
         return None;
     }
     let mut child_attributes = Vec::new();
@@ -21604,12 +21935,23 @@ fn parse_business_process_properties_from_text(
             _ => return None,
         }
     }
-    let child_commands = parse_task_commands(
-        &collections.get(2)?.items,
+    let command_identity_slots =
+        parse_owner_graph_command_identity_slots_indexed(&command_collection.items)
+            .map_err(|failure| {
+                *owner_graph_diagnostic = Some(owner_graph_command_failure_diagnostic(
+                    owner_graph::OwnerGraphFamily::BusinessProcess,
+                    failure,
+                ));
+            })
+            .ok()?;
+    let child_commands = parse_owner_graph_commands(
+        &command_identity_slots,
         text,
         uuid,
         type_index,
         object_refs,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph_diagnostic,
     )?;
 
     let attribute_references = child_attributes
@@ -21621,50 +21963,88 @@ fn parse_business_process_properties_from_text(
             )
         })
         .collect::<BTreeSet<_>>();
-    let input_by_string = parse_business_process_field_references(
-        fields.get(27)?,
+    let input_by_string = match parse_business_process_field_references(
+        fields,
+        27,
         &header.name,
         object_refs,
         &attribute_references,
         &[("-2", "Number")],
-    )?;
-    let data_lock_fields = parse_business_process_field_references(
-        fields.get(43)?,
+    ) {
+        Ok(references) => references,
+        Err(diagnostic) => {
+            *owner_graph_diagnostic = Some(diagnostic);
+            return None;
+        }
+    };
+    let data_lock_fields = match parse_business_process_field_references(
+        fields,
+        43,
         &header.name,
         object_refs,
         &attribute_references,
         &[("-8", "HeadTask")],
-    )?;
+    ) {
+        Ok(references) => references,
+        Err(diagnostic) => {
+            *owner_graph_diagnostic = Some(diagnostic);
+            return None;
+        }
+    };
     let (
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-    ) = parse_task_input_modes(fields.get(44)?)?;
+    ) = parse_owner_input_modes(fields.get(44)?)?;
 
     if !task_characteristics_is_empty(fields.get(41)?) {
         return None;
     }
-    let mut child_uuids = BTreeSet::new();
-    if generated_types
-        .iter()
-        .flat_map(|generated| [&generated.type_id, &generated.value_id])
-        .chain(&form_uuids)
-        .chain(&direct_attribute_uuids)
-        .chain(child_tabular_sections.iter().flat_map(|section| {
-            std::iter::once(&section.header.uuid)
-                .chain(
-                    section
-                        .generated_types
-                        .iter()
-                        .flat_map(|generated| [&generated.type_id, &generated.value_id]),
-                )
-                .chain(section.child_objects.iter().map(|child| &child.header.uuid))
-        }))
-        .chain(child_commands.iter().map(|command| &command.header.uuid))
-        .any(|child_uuid| !child_uuids.insert(child_uuid.to_ascii_lowercase()))
-    {
-        return None;
-    }
+
+    let mut identities = owner_graph.identities.clone();
+    record_owner_graph_child_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Form,
+        form_uuids.clone(),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_child_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::Command,
+        command_identity_slots
+            .iter()
+            .map(|slot| slot.identity_uuid.clone()),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_command_values(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        command_identity_slots
+            .iter()
+            .map(|slot| slot.value_uuid.clone()),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_child_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_graph::OwnerCollectionRole::DirectAttribute,
+        direct_attribute_uuids.clone(),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_tabular_section_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        tabular_sections.iter().map(|section| {
+            (
+                section.uuid.clone(),
+                section.generated_ids.clone(),
+                section.attribute_uuids.clone(),
+            )
+        }),
+        owner_graph_diagnostic,
+    )?;
 
     Some(BusinessProcessProperties {
         generated_types,
@@ -21737,7 +22117,7 @@ fn parse_business_process_properties_from_text(
             "1" => "Nonperiodical",
             _ => return None,
         },
-        task: parse_task_optional_reference(fields.get(25)?, object_refs, "Task.")??,
+        task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")??,
         create_task_in_privileged_mode: information_register_bool(fields.get(29)?)?,
         data_lock_fields,
         data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(40)?)?,
@@ -21762,6 +22142,76 @@ fn parse_business_process_properties_from_text(
         child_forms,
         child_commands,
     })
+}
+
+fn validate_business_process_owner_graph_child_objects(
+    children: &[MetadataChildObject],
+    direct_attribute_uuids: &[String],
+    tabular_sections: &[DocumentTabularSectionLayout],
+    owner_name: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<(), DeclaredOwnerChildFailure> {
+    validate_document_owner_graph_child_objects(
+        children,
+        direct_attribute_uuids,
+        tabular_sections,
+    )?;
+    let direct = children
+        .iter()
+        .filter(|child| child.tag == OWNER_CHILD_ATTRIBUTE_TAG);
+    for (item_index, child) in direct.enumerate() {
+        let expected_reference = format!(
+            "{}.{owner_name}.Attribute.{}",
+            owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
+            child.header.name
+        );
+        if resolve_exchange_plan_index_reference(&child.header.uuid, object_refs)
+            .is_none_or(|reference| reference != expected_reference)
+        {
+            return Err(DeclaredOwnerChildFailure {
+                role: owner_graph::OwnerCollectionRole::DirectAttribute,
+                item_index,
+                reason: owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+            });
+        }
+    }
+    let sections = children
+        .iter()
+        .filter(|child| child.tag == OWNER_CHILD_TABULAR_SECTION_TAG);
+    for (item_index, section) in sections.enumerate() {
+        let expected_reference = format!(
+            "{}.{owner_name}.TabularSection.{}",
+            owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
+            section.header.name
+        );
+        if resolve_exchange_plan_index_reference(&section.header.uuid, object_refs)
+            .is_none_or(|reference| reference != expected_reference)
+        {
+            return Err(DeclaredOwnerChildFailure {
+                role: owner_graph::OwnerCollectionRole::TabularSection,
+                item_index,
+                reason: owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+            });
+        }
+        for attribute in &section.child_objects {
+            let expected_reference = format!(
+                "{}.{owner_name}.TabularSection.{}.Attribute.{}",
+                owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
+                section.header.name,
+                attribute.header.name
+            );
+            if resolve_exchange_plan_index_reference(&attribute.header.uuid, object_refs)
+                .is_none_or(|reference| reference != expected_reference)
+            {
+                return Err(DeclaredOwnerChildFailure {
+                    role: owner_graph::OwnerCollectionRole::TabularSection,
+                    item_index,
+                    reason: owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn parse_business_process_child_forms(
@@ -21846,37 +22296,22 @@ fn parse_business_process_based_on(
 }
 
 fn parse_business_process_field_references(
-    value: &str,
+    fields: &[&str],
+    field_index: usize,
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
     attribute_references: &BTreeSet<String>,
     standard_attributes: &[(&str, &str)],
-) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    parse_exchange_plan_field_ref_collection(value)?
-        .into_iter()
-        .map(|value| {
-            let payload = parse_exchange_plan_field_ref_payload(value)?;
-            let reference = match payload.as_slice() {
-                [marker] => {
-                    let (_, name) = standard_attributes
-                        .iter()
-                        .find(|(candidate, _)| marker.trim() == *candidate)?;
-                    format!("BusinessProcess.{owner_name}.StandardAttribute.{name}")
-                }
-                [kind, uuid] if kind.trim() == "0" => {
-                    let uuid = parse_information_register_non_zero_uuid(uuid)?;
-                    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-                    attribute_references
-                        .contains(&reference)
-                        .then_some(reference)?
-                }
-                _ => return None,
-            };
-            seen.insert(reference.to_ascii_lowercase())
-                .then_some(reference)
-        })
-        .collect()
+) -> std::result::Result<Vec<String>, MetadataSourceExtractionDiagnostic> {
+    parse_owner_graph_field_references(
+        fields,
+        field_index,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_name,
+        object_refs,
+        attribute_references,
+        standard_attributes,
+    )
 }
 
 const BUSINESS_PROCESS_STANDARD_ATTRIBUTES: [(&str, &str); 7] = [
@@ -21947,73 +22382,172 @@ fn parse_business_process_standard_attributes(
         .collect()
 }
 
-fn parse_business_process_tabular_sections(
+fn parse_business_process_tabular_sections_indexed(
     items: &[&str],
     owner_name: &str,
     object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<DocumentTabularSectionLayout>> {
+) -> Result<Vec<DocumentTabularSectionLayout>, OwnerCollectionItemFailure> {
     let mut seen_uuids = BTreeSet::new();
     let mut seen_names = BTreeSet::new();
-    items
-        .iter()
-        .map(|item| {
-            let item = split_information_register_braced_fields(item)?;
-            if item.len() != 3 || item.get(1)?.trim() != "1" {
-                return None;
-            }
-            let wrapper = split_information_register_braced_fields(item.first()?)?;
-            if wrapper.len() != 2 || wrapper.first()?.trim() != "0" {
-                return None;
-            }
-            let fields = split_information_register_braced_fields(wrapper.get(1)?)?;
-            if fields.len() != 9 || fields.first()?.trim() != "11" {
-                return None;
-            }
-            let header = parse_wrapped_register_owner_header(fields.get(5)?)?;
-            let expected_reference = format!(
-                "BusinessProcess.{owner_name}.TabularSection.{}",
-                header.name
-            );
-            if header.name.is_empty()
-                || header.name.contains('.')
-                || resolve_exchange_plan_index_reference(&header.uuid, object_refs)?
-                    != expected_reference
-                || !seen_uuids.insert(header.uuid.to_ascii_lowercase())
-                || !seen_names.insert(header.name.to_lowercase())
-                || fields[1..5]
-                    .iter()
-                    .map(|value| parse_information_register_non_zero_uuid(value))
-                    .collect::<Option<Vec<_>>>()?
-                    .into_iter()
-                    .any(|uuid| !seen_uuids.insert(uuid.to_ascii_lowercase()))
-                || !matches!(fields.get(6)?.trim(), "0" | "1")
-                || parse_exact_tabular_section_standard_attributes_presence(
-                    "BusinessProcess",
-                    fields.get(7)?,
+    let mut result = Vec::with_capacity(items.len());
+    for (item_index, item) in items.iter().enumerate() {
+        let failure = |reference, reason| owner_collection_failure(item_index, reference, reason);
+        let item = split_information_register_braced_fields(item).ok_or_else(|| {
+            failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+            )
+        })?;
+        if item.len() != 3
+            || item
+                .get(1)
+                .is_none_or(|value| value.trim() != NATIVE_COLLECTION_ITEM_PRESENT)
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            ));
+        }
+        let wrapper =
+            split_information_register_braced_fields(item.first().copied().unwrap_or_default())
+                .ok_or_else(|| {
+                    failure(
+                        owner_graph::OwnerGraphReference::ChildUuid,
+                        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                    )
+                })?;
+        if wrapper.len() != 2
+            || wrapper
+                .first()
+                .is_none_or(|value| value.trim() != NATIVE_COLLECTION_ITEM_TAIL)
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            ));
+        }
+        let fields =
+            split_information_register_braced_fields(wrapper.get(1).copied().unwrap_or_default())
+                .ok_or_else(|| {
+                failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
                 )
-                .is_none()
-                || parse_information_register_owner_localized_value(fields.get(8)?).is_none()
-            {
-                return None;
+            })?;
+        if fields.len() != 9
+            || fields
+                .first()
+                .is_none_or(|value| value.trim() != TABULAR_SECTION_PAYLOAD_CODE)
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            ));
+        }
+        let header =
+            parse_wrapped_register_owner_header(fields.get(5).copied().unwrap_or_default())
+                .ok_or_else(|| {
+                    failure(
+                        owner_graph::OwnerGraphReference::ChildUuid,
+                        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                    )
+                })?;
+        let expected_reference = format!(
+            "{}.{owner_name}.TabularSection.{}",
+            owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
+            header.name
+        );
+        if header.name.is_empty()
+            || header.name.contains(METADATA_NAME_SEPARATOR)
+            || resolve_exchange_plan_index_reference(&header.uuid, object_refs)
+                .is_none_or(|reference| reference != expected_reference)
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+            ));
+        }
+        if !seen_uuids.insert(header.uuid.to_ascii_lowercase())
+            || !seen_names.insert(header.name.to_lowercase())
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+            ));
+        }
+        let mut generated_ids = Vec::with_capacity(4);
+        for (generated_index, value) in fields[1..5].iter().enumerate() {
+            let reference = if generated_index % 2 == 0 {
+                owner_graph::OwnerGraphReference::GeneratedType
+            } else {
+                owner_graph::OwnerGraphReference::GeneratedValue
+            };
+            let uuid = parse_information_register_non_zero_uuid(value).ok_or_else(|| {
+                failure(
+                    reference,
+                    owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                )
+            })?;
+            if !seen_uuids.insert(uuid.to_ascii_lowercase()) {
+                return Err(failure(
+                    reference,
+                    owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                ));
             }
-            let collection = parse_task_root_collection(item.get(2)?)?;
-            if !collection
-                .marker
-                .eq_ignore_ascii_case(CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID)
-            {
-                return None;
+            generated_ids.push(uuid);
+        }
+        if !fields.get(6).is_some_and(|value| {
+            matches!(
+                value.trim(),
+                NATIVE_COLLECTION_ITEM_TAIL | NATIVE_COLLECTION_ITEM_PRESENT
+            )
+        }) || fields.get(7).is_none_or(|value| {
+            parse_exact_tabular_section_standard_attributes_presence(
+                owner_graph::OwnerGraphFamily::BusinessProcess.as_str(),
+                value,
+            )
+            .is_none()
+        }) || fields
+            .get(8)
+            .is_none_or(|value| parse_information_register_owner_localized_value(value).is_none())
+        {
+            return Err(failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+            ));
+        }
+        let nested_items = parse_cct_collection(
+            item.get(2).copied().unwrap_or_default(),
+            CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
+        )
+        .ok_or_else(|| {
+            failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+            )
+        })?;
+        let attribute_uuids = parse_document_attribute_collection_indexed(&nested_items, Some(8))
+            .map_err(|nested_failure| {
+            failure(
+                owner_graph::OwnerGraphReference::ChildUuid,
+                nested_failure.reason,
+            )
+        })?;
+        for uuid in &attribute_uuids {
+            if !seen_uuids.insert(uuid.to_ascii_lowercase()) {
+                return Err(failure(
+                    owner_graph::OwnerGraphReference::ChildUuid,
+                    owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                ));
             }
-            let attribute_uuids = parse_document_attribute_collection(&collection.items, 8)?;
-            Some(DocumentTabularSectionLayout {
-                uuid: header.uuid,
-                generated_ids: fields[1..5]
-                    .iter()
-                    .map(|value| parse_information_register_non_zero_uuid(value))
-                    .collect::<Option<Vec<_>>>()?,
-                attribute_uuids,
-            })
-        })
-        .collect()
+        }
+        result.push(DocumentTabularSectionLayout {
+            uuid: header.uuid,
+            generated_ids,
+            attribute_uuids,
+        });
+    }
+    Ok(result)
 }
 
 fn parse_task_properties_from_text(
@@ -22091,7 +22625,7 @@ fn parse_task_properties_from_text(
     )?;
 
     let addressing =
-        parse_task_optional_reference(fields.get(25)?, object_refs, "InformationRegister.")?;
+        parse_owner_optional_reference(fields.get(25)?, object_refs, "InformationRegister.")?;
     if !validate_task_addressing_dimensions(addressing.as_deref(), &addressing_attributes) {
         return None;
     }
@@ -22148,7 +22682,7 @@ fn parse_task_properties_from_text(
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
-    ) = parse_task_input_modes(fields.get(47)?)?;
+    ) = parse_owner_input_modes(fields.get(47)?)?;
 
     if !settings_storage_uuid_is_zero(fields.get(13)?)
         || !settings_storage_uuid_is_zero(fields.get(14)?)
@@ -22196,7 +22730,7 @@ fn parse_task_properties_from_text(
         description_length: parse_exchange_plan_u32(fields.get(22)?)?,
         addressing,
         main_addressing_attribute,
-        current_performer: parse_task_optional_reference(
+        current_performer: parse_owner_optional_reference(
             fields.get(29)?,
             object_refs,
             "SessionParameter.",
@@ -22250,7 +22784,7 @@ fn parse_task_properties_from_text(
     })
 }
 
-fn parse_task_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
+fn parse_owner_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
     let fields = split_information_register_braced_fields(value)?;
     (fields.len() == 3
         && fields.first()?.trim() == "1"
@@ -22545,7 +23079,7 @@ fn validate_task_addressing_dimensions(
     })
 }
 
-fn parse_task_optional_reference(
+fn parse_owner_optional_reference(
     value: &str,
     object_refs: &BTreeMap<String, String>,
     prefix: &str,
