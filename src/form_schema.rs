@@ -226,42 +226,289 @@ impl FormPopupSchema {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(crate) struct FormNestedAutoCommandBarSchema {
-    horizontal_align: Option<&'static str>,
+    marker: FormAutoCommandBarMarker,
+    empty_shape: bool,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct FormAutoCommandBarMarker {
+    horizontal_align: FormAutoCommandBarHorizontalAlign,
+    autofill: bool,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormAutoCommandBarHorizontalAlign {
+    Default,
+    Center,
+    Right,
+    Auto,
+}
+
+impl FormAutoCommandBarHorizontalAlign {
+    const fn xml_value(self) -> Option<&'static str> {
+        match self {
+            Self::Default => None,
+            Self::Center => Some("Center"),
+            Self::Right => Some("Right"),
+            Self::Auto => Some("Auto"),
+        }
+    }
 }
 
 impl FormNestedAutoCommandBarSchema {
+    pub(crate) const MARKER_SLOT: usize = 20;
+    const MIN_FIELD_COUNT: usize = 29;
+    const MAX_MARKER_BYTES: usize = 128;
+
     pub(crate) fn from_raw_layout(
         wrapper: &str,
-        field_count: usize,
         item_tag: &str,
         item_id: &str,
         direct_discriminator: Option<&str>,
-        marker: &[&str],
+        fields: &[&str],
     ) -> Option<Self> {
         if wrapper != "22"
-            || field_count < 29
-            || (field_count - 29) % 2 != 0
+            || fields.len() < Self::MIN_FIELD_COUNT
+            || !(fields.len() - Self::MIN_FIELD_COUNT).is_multiple_of(2)
             || item_tag != "AutoCommandBar"
             || item_id == "-1"
             || direct_discriminator != Some("9")
-            || marker.len() != 3
-            || marker.first().map(|field| field.trim()) != Some("0")
-            || !matches!(marker.get(2).map(|field| field.trim()), Some("0" | "1"))
         {
             return None;
         }
-        let horizontal_align = match marker.get(1).map(|field| field.trim())? {
-            "0" => None,
-            "1" => Some("Center"),
-            "2" => Some("Right"),
-            "3" => Some("Auto"),
-            _ => return None,
-        };
-        Some(Self { horizontal_align })
+        let marker = parse_nested_auto_command_bar_marker(fields.get(Self::MARKER_SLOT)?)?;
+        let empty_shape = fields.len() == Self::MIN_FIELD_COUNT
+            && marker.horizontal_align == FormAutoCommandBarHorizontalAlign::Default
+            && marker.autofill;
+        Some(Self {
+            marker,
+            empty_shape,
+        })
     }
 
     pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
-        self.horizontal_align
+        self.marker.horizontal_align.xml_value()
+    }
+
+    pub(crate) const fn autofill(self) -> bool {
+        self.marker.autofill
+    }
+
+    pub(crate) const fn is_empty_shape(self) -> bool {
+        self.empty_shape
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct FormRootAutoCommandBarSchema {
+    marker: Option<FormAutoCommandBarMarker>,
+}
+
+impl FormRootAutoCommandBarSchema {
+    pub(crate) fn from_raw_layout(wrapper: &str, item_id: &str, fields: &[&str]) -> Option<Self> {
+        if wrapper != "22" || item_id != "-1" {
+            return None;
+        }
+        let marker = match fields.get(FormNestedAutoCommandBarSchema::MARKER_SLOT) {
+            Some(raw) => Some(parse_root_auto_command_bar_marker(raw)?),
+            None => None,
+        };
+        Some(Self { marker })
+    }
+
+    pub(crate) fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
+        FormChildItemDisplayImportanceSchema::from_raw_layout(
+            "22",
+            fields.len(),
+            "AutoCommandBar",
+            0,
+        )
+        .and_then(|schema| schema.display_importance(fields))
+    }
+
+    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+        match self.marker {
+            Some(marker) => marker.horizontal_align.xml_value(),
+            None => None,
+        }
+    }
+
+    pub(crate) const fn autofill(self) -> Option<bool> {
+        match self.marker {
+            Some(marker) => Some(marker.autofill),
+            None => None,
+        }
+    }
+}
+
+fn parse_auto_command_bar_marker_fields<const N: usize>(raw: &str) -> Option<[&str; N]> {
+    if raw.len() > FormNestedAutoCommandBarSchema::MAX_MARKER_BYTES {
+        return None;
+    }
+    let raw = raw.trim();
+    let inner = raw.strip_prefix('{')?.strip_suffix('}')?;
+    if inner.contains(['{', '}']) {
+        return None;
+    }
+    let mut raw_fields = inner.split(',').map(str::trim);
+    let mut fields = [""; N];
+    for field in &mut fields {
+        *field = raw_fields.next()?;
+    }
+    raw_fields.next().is_none().then_some(fields)
+}
+
+fn parse_nested_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
+    let marker = parse_auto_command_bar_marker_fields::<3>(raw)?;
+    if marker[0] != "0" {
+        return None;
+    }
+    let horizontal_align = match marker[1] {
+        "0" => FormAutoCommandBarHorizontalAlign::Default,
+        "1" => FormAutoCommandBarHorizontalAlign::Center,
+        "2" => FormAutoCommandBarHorizontalAlign::Right,
+        "3" => FormAutoCommandBarHorizontalAlign::Auto,
+        _ => return None,
+    };
+    let autofill = match marker[2] {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+    Some(FormAutoCommandBarMarker {
+        horizontal_align,
+        autofill,
+    })
+}
+
+fn parse_root_auto_command_bar_marker(raw: &str) -> Option<FormAutoCommandBarMarker> {
+    let marker = parse_auto_command_bar_marker_fields::<4>(raw)?;
+    if marker[0] != "1" || marker[3] != "0" {
+        return None;
+    }
+    let horizontal_align = match marker[1] {
+        "0" => FormAutoCommandBarHorizontalAlign::Default,
+        "1" => FormAutoCommandBarHorizontalAlign::Center,
+        "2" => FormAutoCommandBarHorizontalAlign::Right,
+        "3" => FormAutoCommandBarHorizontalAlign::Auto,
+        _ => return None,
+    };
+    let autofill = match marker[2] {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+    Some(FormAutoCommandBarMarker {
+        horizontal_align,
+        autofill,
+    })
+}
+
+#[cfg(test)]
+mod nested_auto_command_bar_tests {
+    use super::*;
+
+    fn fixture(marker: &str, field_count: usize) -> Vec<&str> {
+        let mut fields = vec!["0"; field_count];
+        fields[FormNestedAutoCommandBarSchema::MARKER_SLOT] = marker;
+        fields
+    }
+
+    fn parse(
+        fields: &[&str],
+        discriminator: Option<&str>,
+    ) -> Option<FormNestedAutoCommandBarSchema> {
+        FormNestedAutoCommandBarSchema::from_raw_layout(
+            "22",
+            "AutoCommandBar",
+            "58",
+            discriminator,
+            fields,
+        )
+    }
+
+    #[test]
+    fn extraction_autofill_and_empty_shape_fixtures_are_typed() {
+        let empty = parse(&fixture("{0,0,1}", 29), Some("9")).unwrap();
+        assert_eq!(empty.horizontal_align(), None);
+        assert!(empty.autofill());
+        assert!(empty.is_empty_shape());
+
+        let configured = parse(&fixture("{0,2,0}", 31), Some("9")).unwrap();
+        assert_eq!(configured.horizontal_align(), Some("Right"));
+        assert!(!configured.autofill());
+        assert!(!configured.is_empty_shape());
+    }
+
+    #[test]
+    fn discriminator_length_slot_and_enum_near_misses_fail_closed() {
+        assert!(parse(&fixture("{0,0,1}", 29), Some("8")).is_none());
+        assert!(parse(&fixture("{0,0,1}", 28), Some("9")).is_none());
+        assert!(parse(&fixture("{0,0,1}", 30), Some("9")).is_none());
+        for marker in [
+            "{0,4,1}",
+            "{0,0,2}",
+            "{1,0,1}",
+            "{0,0}",
+            "{0,0,1,0}",
+            "{0,0,1}tail",
+        ] {
+            assert!(parse(&fixture(marker, 29), Some("9")).is_none(), "{marker}");
+        }
+        let mut wrong_slot = fixture("{0,0,1}", 29);
+        wrong_slot[FormNestedAutoCommandBarSchema::MARKER_SLOT] = "0";
+        wrong_slot[19] = "{0,0,1}";
+        assert!(parse(&wrong_slot, Some("9")).is_none());
+
+        let huge_comma_marker = format!("{{0,0,1{}}}", ",".repeat(129));
+        assert!(parse(&fixture(&huge_comma_marker, 29), Some("9")).is_none());
+        let huge_whitespace_marker = format!("{{0,{},1}}", " ".repeat(129));
+        assert!(parse(&fixture(&huge_whitespace_marker, 29), Some("9")).is_none());
+        let huge_outer_whitespace_marker = format!("{}{{0,0,1}}", " ".repeat(129));
+        assert!(parse(&fixture(&huge_outer_whitespace_marker, 29), Some("9")).is_none());
+    }
+
+    #[test]
+    fn root_profile_marker_is_typed_and_present_malformed_marker_is_rejected() {
+        let fields = fixture("{1,2,0,0}", 29);
+        let schema = FormRootAutoCommandBarSchema::from_raw_layout("22", "-1", &fields).unwrap();
+        assert_eq!(schema.horizontal_align(), Some("Right"));
+        assert_eq!(schema.autofill(), Some(false));
+
+        for marker in ["{1,4,0,0}", "{1,2,2,0}", "{0,2,0,0}", "{1,2,0}"] {
+            let fields = fixture(marker, 29);
+            assert!(
+                FormRootAutoCommandBarSchema::from_raw_layout("22", "-1", &fields).is_none(),
+                "{marker}"
+            );
+        }
+        let huge_comma_marker = format!("{{1,2,0,0{}}}", ",".repeat(129));
+        assert!(
+            FormRootAutoCommandBarSchema::from_raw_layout(
+                "22",
+                "-1",
+                &fixture(&huge_comma_marker, 29),
+            )
+            .is_none()
+        );
+        let huge_whitespace_marker = format!("{{1,{},0,0}}", " ".repeat(129));
+        assert!(
+            FormRootAutoCommandBarSchema::from_raw_layout(
+                "22",
+                "-1",
+                &fixture(&huge_whitespace_marker, 29),
+            )
+            .is_none()
+        );
+        assert!(FormRootAutoCommandBarSchema::from_raw_layout("22", "58", &fields).is_none());
+    }
+
+    #[test]
+    fn root_profile_preserves_genuinely_absent_marker_semantics() {
+        let fields = vec!["0"; FormNestedAutoCommandBarSchema::MARKER_SLOT];
+        let schema = FormRootAutoCommandBarSchema::from_raw_layout("22", "-1", &fields).unwrap();
+        assert_eq!(schema.horizontal_align(), None);
+        assert_eq!(schema.autofill(), None);
     }
 }
 

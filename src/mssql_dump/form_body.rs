@@ -28,7 +28,7 @@ use crate::form_schema::{
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
-    FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
+    FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalAlign,
     FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
@@ -2080,14 +2080,10 @@ pub(super) fn parse_form_auto_command_bar_fields(
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
-    if fields.first().map(|value| value.trim()) != Some("22") {
-        return None;
-    }
+    let wrapper = fields.first()?.trim();
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
-    if id != "-1" {
-        return None;
-    }
+    let schema = FormRootAutoCommandBarSchema::from_raw_layout(wrapper, id, fields)?;
     let (name, _) = parse_1c_quoted_string_with_len(fields.get(6)?.trim())?;
     if name.trim().is_empty() {
         return None;
@@ -2095,19 +2091,9 @@ pub(super) fn parse_form_auto_command_bar_fields(
     Some(FormAutoCommandBar {
         id: id.to_string(),
         name,
-        display_importance: FormChildItemDisplayImportanceSchema::from_raw_layout(
-            "22",
-            fields.len(),
-            "AutoCommandBar",
-            0,
-        )
-        .and_then(|schema| schema.display_importance(fields)),
-        horizontal_align: fields
-            .get(20)
-            .and_then(|field| parse_form_auto_command_bar_horizontal_align(field)),
-        autofill: fields
-            .get(20)
-            .and_then(|field| parse_form_auto_command_bar_autofill(field)),
+        display_importance: schema.display_importance(fields),
+        horizontal_align: schema.horizontal_align(),
+        autofill: schema.autofill(),
         child_items: parse_form_child_item_pairs(
             fields,
             None,
@@ -2141,36 +2127,6 @@ pub(super) fn parse_form_auto_command_bar_horizontal_align(field: &str) -> Optio
         "3" => Some("Auto"),
         _ => None,
     }
-}
-
-pub(super) fn parse_form_auto_command_bar_autofill(field: &str) -> Option<bool> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    match fields.get(2).map(|value| value.trim())? {
-        "0" => Some(false),
-        "1" => Some(true),
-        _ => None,
-    }
-}
-
-fn is_raw_empty_nested_auto_command_bar(
-    wrapper: &str,
-    tag: &str,
-    id: &str,
-    fields: &[&str],
-) -> bool {
-    if wrapper != "22" || tag != "AutoCommandBar" || id == "-1" || fields.len() != 29 {
-        return false;
-    }
-    let Some(marker_text) = fields.get(20).map(|field| field.trim()) else {
-        return false;
-    };
-    if scan_1c_braced_value(marker_text, 0) != Some(marker_text.len()) {
-        return false;
-    }
-    let Some(marker) = split_1c_braced_fields(marker_text, 0) else {
-        return false;
-    };
-    marker.len() == 3 && marker.iter().map(|field| field.trim()).eq(["0", "0", "1"])
 }
 
 pub(super) fn parse_form_context_menu_autofill(field: &str) -> Option<bool> {
@@ -6384,23 +6340,13 @@ fn parse_form_child_item_with_metadata_owners(
             )
         })
         .flatten();
-    let nested_auto_command_bar_schema = (tag == "AutoCommandBar")
-        .then(|| {
-            let marker_text = fields.get(20)?.trim();
-            if scan_1c_braced_value(marker_text, 0) != Some(marker_text.len()) {
-                return None;
-            }
-            let marker = split_1c_braced_fields(marker_text, 0)?;
-            FormNestedAutoCommandBarSchema::from_raw_layout(
-                wrapper,
-                fields.len(),
-                tag,
-                id,
-                direct_discriminator,
-                &marker,
-            )
-        })
-        .flatten();
+    let nested_auto_command_bar_schema = FormNestedAutoCommandBarSchema::from_raw_layout(
+        wrapper,
+        tag,
+        id,
+        direct_discriminator,
+        &fields,
+    );
     let page_schema = show_title_options.as_deref().and_then(|options| {
         FormPageSchema::from_raw_layout(wrapper, fields.len(), tag, direct_discriminator, options)
     });
@@ -6661,19 +6607,16 @@ fn parse_form_child_item_with_metadata_owners(
         name,
         display_importance: display_importance_schema
             .and_then(|schema| schema.display_importance(&fields)),
-        auto_command_bar_empty_element: is_raw_empty_nested_auto_command_bar(
-            wrapper, tag, id, &fields,
-        ),
+        auto_command_bar_empty_element: nested_auto_command_bar_schema
+            .is_some_and(FormNestedAutoCommandBarSchema::is_empty_shape),
         autofill: if let Some(schema) = table_schema {
             schema.autofill(&fields)
         } else if tag == "ContextMenu" {
             fields
                 .get(20)
                 .and_then(|field| parse_form_context_menu_autofill(field))
-        } else if tag == "AutoCommandBar" {
-            fields
-                .get(20)
-                .and_then(|field| parse_form_auto_command_bar_autofill(field))
+        } else if let Some(schema) = nested_auto_command_bar_schema {
+            Some(schema.autofill())
         } else {
             None
         },
