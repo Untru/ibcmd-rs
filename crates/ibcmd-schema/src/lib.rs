@@ -1115,6 +1115,11 @@ pub const BUNDLED_METADATA_ORDER_JSON: &str =
 /// Embedded, verified writer behaviour rules.
 pub const BUNDLED_WRITER_RULES_JSON: &str = include_str!("../data/edt-2025.2.3-writer-rules.json");
 
+/// Embedded, exact EDT writer evidence for empty string values in a Form
+/// `ChoiceList`.
+const BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON: &str =
+    include_str!("../data/edt-2025.2.3-form-choice-list-string-writer-evidence.json");
+
 /// Embedded, exact EDT writer evidence for the bounded DCS settings tail.
 pub const BUNDLED_DCS_WRITER_EVIDENCE_JSON: &str =
     include_str!("../data/edt-2025.2.3-dcs-writer-evidence.json");
@@ -1514,6 +1519,99 @@ pub enum FormChoiceListEmptyCollection {
 #[serde(rename_all = "kebab-case")]
 pub enum FormChoiceListEmptyStringValue {
     SelfClosing,
+}
+
+const MAX_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_BYTES: usize = 16 * 1024;
+const FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_SHA256: &str =
+    "394b38699352b707682bdfe267537bef318b8535eeed7d112fd9a07a3079e042";
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FormChoiceListStringWriterEvidence {
+    schema_version: u32,
+    source: FormChoiceListStringEvidenceSource,
+    verified_facts: Vec<FormChoiceListStringEvidenceFact>,
+    missing_keys: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceSource {
+    product: String,
+    release: String,
+    root_identity: FormChoiceListStringEvidenceRootIdentity,
+    validated_bundles: Vec<FormChoiceListStringEvidenceBundle>,
+    derivation: String,
+    input_contract: String,
+    invocation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceRootIdentity {
+    leaf: String,
+    product_version: String,
+    build_id: String,
+    product: String,
+    application: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceBundle {
+    symbolic_name: String,
+    version: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceFact {
+    key: String,
+    value: FormChoiceListStringEvidenceValue,
+    evidence: FormChoiceListStringEvidenceProof,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceValue {
+    model_value_type: String,
+    empty_predicate: String,
+    element: String,
+    xsi_type: String,
+    emission: FormChoiceListEmptyStringValue,
+    delegate_chain: Vec<String>,
+    branch: FormChoiceListStringEvidenceBranch,
+    method_envelopes: Vec<FormChoiceListStringEvidenceMethodEnvelope>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceBranch {
+    string_type_offset: u32,
+    empty_predicate_offset: u32,
+    non_empty_target_offset: u32,
+    empty_element_offset: u32,
+    xsi_type_attribute_offset: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceMethodEnvelope {
+    method: String,
+    descriptor: String,
+    instruction_count: usize,
+    first_offset: u32,
+    last_offset: u32,
+    branch_graph: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringEvidenceProof {
+    kind: String,
+    status: String,
+    sources: Vec<String>,
+    note: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -2469,6 +2567,7 @@ pub enum SchemaError {
     },
     CoverageDerivedDataMismatch(&'static str),
     InvalidDcsWriterEvidence(String),
+    InvalidFormChoiceListStringWriterEvidence(String),
     InvalidFormChoiceParametersWriterEvidence(String),
     InvalidFormChoiceParametersQName(String),
 }
@@ -2528,6 +2627,12 @@ impl Display for SchemaError {
             }
             Self::InvalidDcsWriterEvidence(reason) => {
                 write!(formatter, "invalid DCS writer evidence: {reason}")
+            }
+            Self::InvalidFormChoiceListStringWriterEvidence(reason) => {
+                write!(
+                    formatter,
+                    "invalid Form choice-list string writer evidence: {reason}"
+                )
             }
             Self::InvalidFormChoiceParametersWriterEvidence(reason) => {
                 write!(
@@ -2999,6 +3104,127 @@ fn exact_form_choice_parameters_policy() -> WriterPolicy {
             ],
         }),
     }
+}
+
+impl FormChoiceListStringWriterEvidence {
+    pub fn parse(json: &str) -> Result<Self, SchemaError> {
+        let invalid = |reason: &str| {
+            SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned())
+        };
+        if json.len() > MAX_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_BYTES {
+            return Err(invalid("evidence exceeds the bounded JSON size"));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| invalid(&format!("invalid JSON: {error}")))?;
+        let digest = format!("{:x}", Sha256::digest(json.as_bytes()));
+        if digest != FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_SHA256 {
+            return Err(invalid("exact evidence artifact SHA-256 differs"));
+        }
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        let invalid = |reason: &str| {
+            SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned())
+        };
+        if self.schema_version != 1
+            || self.source.product != "1C:EDT"
+            || self.source.release != "2025.2.3+30"
+            || self.source.root_identity.leaf != "1c-edt-2025.2.3+30-x86_64"
+            || self.source.root_identity.product_version != "2025.2.3"
+            || self.source.root_identity.build_id != "2025.2.3.30"
+            || self.source.root_identity.product != "com._1c.g5.v8.dt.product.application.rcp"
+            || self.source.root_identity.application != "org.eclipse.ui.ide.workbench"
+        {
+            return Err(invalid("exact release identity differs"));
+        }
+        let expected_bundles = [
+            ("com._1c.g5.v8.dt.form.export.xml", "10.1.0.v202602241426"),
+            ("com._1c.g5.v8.dt.export.xml", "13.0.100.v202602241426"),
+        ];
+        let actual_bundles = self
+            .source
+            .validated_bundles
+            .iter()
+            .map(|bundle| (bundle.symbolic_name.as_str(), bundle.version.as_str()))
+            .collect::<Vec<_>>();
+        if actual_bundles != expected_bundles
+            || self.source.derivation.trim().is_empty()
+            || self.source.input_contract.trim().is_empty()
+            || self.source.invocation
+                != "pwsh tools/report-edt-form-choice-list-string-writer-evidence.ps1 -EdtRoot <installed-exact-release-edt-root> -EdtRelease <release> -OutputReport <portable-report.json>"
+            || !self.missing_keys.is_empty()
+            || self.verified_facts.len() != 1
+        {
+            return Err(invalid("exact evidence envelope differs"));
+        }
+        let fact = &self.verified_facts[0];
+        if fact.key != "form.FormChoiceListDesTimeValue.value.empty-string"
+            || fact.value.model_value_type != "mcore:StringValue"
+            || fact.value.empty_predicate != "Strings.isNullOrEmpty"
+            || fact.value.element != "feature QName"
+            || fact.value.xsi_type != "xs:string"
+            || fact.value.emission != FormChoiceListEmptyStringValue::SelfClosing
+            || fact.evidence.kind != "javap-v-exact-method-control-flow-constant-pool"
+            || fact.evidence.status != "verified"
+            || fact.evidence.note.trim().is_empty()
+        {
+            return Err(invalid("verified empty-string fact differs"));
+        }
+        Ok(())
+    }
+
+    fn emission(&self) -> FormChoiceListEmptyStringValue {
+        self.verified_facts[0].value.emission
+    }
+}
+
+pub fn bundled_form_choice_list_string_writer_evidence()
+-> Result<FormChoiceListStringWriterEvidence, SchemaError> {
+    FormChoiceListStringWriterEvidence::parse(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON)
+}
+
+pub fn bind_form_choice_list_string_writer_evidence(
+    json: &str,
+    corpus: &WriterRuleCorpus,
+) -> Result<(), SchemaError> {
+    let invalid =
+        |reason: &str| SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned());
+    let evidence = FormChoiceListStringWriterEvidence::parse(json)?;
+    if corpus.source.release != evidence.source.release {
+        return Err(invalid("writer corpus and evidence releases differ"));
+    }
+    let mut matching = corpus
+        .rules
+        .iter()
+        .filter(|rule| rule.model_type == "FormChoiceList" && rule.feature == "values");
+    let rule = matching
+        .next()
+        .ok_or_else(|| invalid("matching writer rule is absent"))?;
+    if matching.next().is_some() {
+        return Err(invalid("matching writer rule is ambiguous"));
+    }
+    let Some(WriterPolicy::FormChoiceList {
+        empty_string_value, ..
+    }) = rule.policy.as_ref()
+    else {
+        return Err(invalid("matching typed writer policy is absent"));
+    };
+    if rule.id != "form.choice-list.design-time-value"
+        || rule.source_class
+            != "com._1c.g5.v8.dt.form.export.xml.writer.FormChoiceListDesTimeValueWriter"
+        || rule.delegate.as_deref()
+            != Some("com._1c.g5.v8.dt.form.export.xml.writer.FormSmartFeatureWriter")
+        || rule.evidence.kind != "javap-v-exact-method-control-flow-constant-pool"
+        || rule.evidence.status != "verified"
+        || *empty_string_value != evidence.emission()
+    {
+        return Err(invalid(
+            "writer rule and exact empty-string evidence are not cross-bound",
+        ));
+    }
+    Ok(())
 }
 
 impl FormChoiceParametersWriterEvidence {
@@ -3792,6 +4018,10 @@ pub fn bundled_metadata_order() -> Result<MetadataOrderCorpus, SchemaError> {
 
 pub fn bundled_writer_rules() -> Result<WriterRuleCorpus, SchemaError> {
     let corpus = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON)?;
+    bind_form_choice_list_string_writer_evidence(
+        BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON,
+        &corpus,
+    )?;
     bind_form_choice_parameters_writer_evidence(
         BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON,
         &corpus,
@@ -4003,9 +4233,6 @@ fn validate_count(field: &'static str, expected: usize, actual: usize) -> Result
 mod tests {
     use super::*;
 
-    const FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON: &str =
-        include_str!("../data/edt-2025.2.3-form-choice-list-string-writer-evidence.json");
-
     #[test]
     fn generated_metadata_reference_owner_parses_all_supported_kinds_exactly() {
         let cases = [
@@ -4074,112 +4301,6 @@ mod tests {
         );
         assert_eq!(catalog_named_enum.name(), "Enum");
         assert_eq!(catalog_named_enum.owner_reference(), "Catalog.Enum");
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceReport {
-        schema_version: u32,
-        source: FormChoiceListStringEvidenceSource,
-        verified_facts: Vec<FormChoiceListStringEvidenceFact>,
-        missing_keys: Vec<serde_json::Value>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceSource {
-        product: String,
-        release: String,
-        root_identity: FormChoiceListStringEvidenceRootIdentity,
-        validated_bundles: Vec<FormChoiceListStringEvidenceBundle>,
-        derivation: String,
-        input_contract: String,
-        invocation: String,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceRootIdentity {
-        leaf: String,
-        product_version: String,
-        build_id: String,
-        product: String,
-        application: String,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceBundle {
-        symbolic_name: String,
-        version: String,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceFact {
-        key: String,
-        value: FormChoiceListStringEvidenceValue,
-        evidence: FormChoiceListStringEvidenceProof,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceValue {
-        model_value_type: String,
-        empty_predicate: String,
-        element: String,
-        xsi_type: String,
-        emission: FormChoiceListEmptyStringValue,
-        delegate_chain: Vec<String>,
-        branch: FormChoiceListStringEvidenceBranch,
-        method_envelopes: Vec<FormChoiceListStringEvidenceMethodEnvelope>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceBranch {
-        string_type_offset: u32,
-        empty_predicate_offset: u32,
-        non_empty_target_offset: u32,
-        empty_element_offset: u32,
-        xsi_type_attribute_offset: u32,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceMethodEnvelope {
-        method: String,
-        descriptor: String,
-        instruction_count: usize,
-        first_offset: u32,
-        last_offset: u32,
-        branch_graph: Vec<String>,
-    }
-
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct FormChoiceListStringEvidenceProof {
-        kind: String,
-        status: String,
-        sources: Vec<String>,
-        note: String,
-    }
-
-    fn parse_exact_form_choice_list_string_evidence(
-        json: &str,
-    ) -> Result<FormChoiceListStringEvidenceReport, String> {
-        let report: FormChoiceListStringEvidenceReport =
-            serde_json::from_str(json).map_err(|error| error.to_string())?;
-        if report.schema_version != 1
-            || report.source.product != "1C:EDT"
-            || report.source.release != "2025.2.3+30"
-            || !report.missing_keys.is_empty()
-            || report.verified_facts.len() != 1
-            || report.verified_facts[0].key != "form.FormChoiceListDesTimeValue.value.empty-string"
-        {
-            return Err("evidence does not have the exact verified fact envelope".to_owned());
-        }
-        Ok(report)
     }
 
     #[test]
@@ -4447,10 +4568,8 @@ mod tests {
 
     #[test]
     fn form_choice_list_empty_string_policy_matches_exact_research_evidence() {
-        let report = parse_exact_form_choice_list_string_evidence(
-            FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON,
-        )
-        .expect("strict Form choice-list string evidence");
+        let report = bundled_form_choice_list_string_writer_evidence()
+            .expect("strict Form choice-list string evidence");
         assert_eq!(report.schema_version, 1);
         assert_eq!(report.source.product, "1C:EDT");
         assert_eq!(report.source.release, "2025.2.3+30");
@@ -4591,11 +4710,11 @@ mod tests {
         assert_eq!(*empty_string_value, fact.value.emission);
 
         let raw: serde_json::Value =
-            serde_json::from_str(FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON).unwrap();
+            serde_json::from_str(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON).unwrap();
         let mut extra_field = raw.clone();
         extra_field["unexpected"] = serde_json::json!(true);
         assert!(
-            parse_exact_form_choice_list_string_evidence(
+            FormChoiceListStringWriterEvidence::parse(
                 &serde_json::to_string(&extra_field).unwrap()
             )
             .is_err()
@@ -4607,7 +4726,7 @@ mod tests {
             .unwrap()
             .remove("emission");
         assert!(
-            parse_exact_form_choice_list_string_evidence(
+            FormChoiceListStringWriterEvidence::parse(
                 &serde_json::to_string(&missing_emission).unwrap()
             )
             .is_err()
@@ -4616,7 +4735,7 @@ mod tests {
         let mut other_emission = raw.clone();
         other_emission["verifiedFacts"][0]["value"]["emission"] = serde_json::json!("paired");
         assert!(
-            parse_exact_form_choice_list_string_evidence(
+            FormChoiceListStringWriterEvidence::parse(
                 &serde_json::to_string(&other_emission).unwrap()
             )
             .is_err()
@@ -4629,11 +4748,57 @@ mod tests {
             .unwrap()
             .push(duplicate);
         assert!(
-            parse_exact_form_choice_list_string_evidence(
-                &serde_json::to_string(&extra_fact).unwrap()
-            )
-            .is_err()
+            FormChoiceListStringWriterEvidence::parse(&serde_json::to_string(&extra_fact).unwrap())
+                .is_err()
         );
+    }
+
+    #[test]
+    fn form_choice_list_empty_string_evidence_is_production_bound_and_fails_closed() {
+        let corpus = WriterRuleCorpus::parse(BUNDLED_WRITER_RULES_JSON).unwrap();
+        bind_form_choice_list_string_writer_evidence(
+            BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON,
+            &corpus,
+        )
+        .unwrap();
+
+        let mut corrupted: serde_json::Value =
+            serde_json::from_str(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON).unwrap();
+        corrupted["verifiedFacts"][0]["value"]["xsiType"] = serde_json::json!("xs:anyType");
+        assert!(matches!(
+            FormChoiceListStringWriterEvidence::parse(&serde_json::to_string(&corrupted).unwrap()),
+            Err(SchemaError::InvalidFormChoiceListStringWriterEvidence(_))
+        ));
+        assert!(matches!(
+            FormChoiceListStringWriterEvidence::parse(
+                &" ".repeat(MAX_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_BYTES + 1)
+            ),
+            Err(SchemaError::InvalidFormChoiceListStringWriterEvidence(_))
+        ));
+
+        let corruptions: [fn(&mut WriterRule); 5] = [
+            |rule: &mut WriterRule| rule.id = "form.choice-list.wrong".to_owned(),
+            |rule: &mut WriterRule| rule.source_class = "wrong.Source".to_owned(),
+            |rule: &mut WriterRule| rule.delegate = Some("wrong.Delegate".to_owned()),
+            |rule: &mut WriterRule| rule.evidence.status = "pending".to_owned(),
+            |rule: &mut WriterRule| rule.policy = None,
+        ];
+        for corrupt_rule in corruptions {
+            let mut corrupted_corpus = corpus.clone();
+            let rule = corrupted_corpus
+                .rules
+                .iter_mut()
+                .find(|rule| rule.model_type == "FormChoiceList" && rule.feature == "values")
+                .unwrap();
+            corrupt_rule(rule);
+            assert!(matches!(
+                bind_form_choice_list_string_writer_evidence(
+                    BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON,
+                    &corrupted_corpus,
+                ),
+                Err(SchemaError::InvalidFormChoiceListStringWriterEvidence(_))
+            ));
+        }
     }
 
     #[test]

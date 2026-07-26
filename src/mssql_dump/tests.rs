@@ -16557,15 +16557,46 @@ fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_paylo
             FormChoiceListItem {
                 presentation_present: true,
                 presentation: Vec::new(),
-                value: FormChoiceListValue::String("text".to_owned()),
+                value: FormChoiceListValue::String(" ".to_owned()),
+            },
+            FormChoiceListItem {
+                presentation_present: true,
+                presentation: Vec::new(),
+                value: FormChoiceListValue::String("a<&>\"'".to_owned()),
             },
         ],
         provenance,
     };
     let string_xml = format_form_choice_list_xml(&string_choice_list, 1).unwrap();
-    assert!(string_xml.contains("\t\t\t\t<Value xsi:type=\"xs:string\"/>\r\n"));
-    assert!(string_xml.contains("\t\t\t\t<Value xsi:type=\"xs:string\">text</Value>\r\n"));
-    assert!(!string_xml.contains("<Value xsi:type=\"xs:string\"></Value>"));
+    assert_eq!(
+        string_xml,
+        "\t<ChoiceList>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:string\"/>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:string\"> </Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:string\">a&lt;&amp;&gt;&quot;'</Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t</ChoiceList>\r\n"
+    );
 
     let empty = CanonicalFormChoiceList::Empty { provenance };
     validate_canonical_form_choice_list(&empty).unwrap();
