@@ -46332,6 +46332,35 @@ fn empty_ref_data_processor_fixture(
     }
 }
 
+fn empty_ref_data_processor_fixture_with_pattern(
+    base: &EmptyRefDataProcessorFixture,
+    pattern_type_ids: &[&str],
+    selected_type_id: &str,
+) -> EmptyRefDataProcessorFixture {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let original_pattern = format!(r##"{{"Pattern",{{"#",{}}}}}"##, base.owner_type_id);
+    let original_fill = format!(
+        r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}}}}"##,
+        base.owner_type_id
+    );
+    let members = pattern_type_ids
+        .iter()
+        .map(|type_id| format!(r##"{{"#",{type_id}}}"##))
+        .collect::<Vec<_>>()
+        .join(",");
+    let pattern = format!(r#"{{"Pattern",{members}}}"#);
+    let fill = format!(r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{selected_type_id},{zero}}}}}"##);
+    EmptyRefDataProcessorFixture {
+        raw: base
+            .raw
+            .replacen(&original_pattern, &pattern, 1)
+            .replacen(&original_fill, &fill, 1),
+        owner_uuid: base.owner_uuid.clone(),
+        attribute_uuid: base.attribute_uuid.clone(),
+        owner_type_id: base.owner_type_id.clone(),
+    }
+}
+
 fn extract_empty_ref_data_processor(
     fixture: &EmptyRefDataProcessorFixture,
     type_index: &BTreeMap<String, String>,
@@ -46381,6 +46410,69 @@ fn derives_empty_ref_for_saved_data_processor_tabular_attribute() {
         1,
         "{xml}"
     );
+}
+
+#[test]
+fn derives_selected_empty_ref_from_two_document_references_in_both_orders() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        "",
+        "0",
+    );
+    let second_type_id = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+    let first_reference = "cfg:DocumentRef.SyntheticFirst";
+    let second_reference = "cfg:DocumentRef.SyntheticSecond";
+    let type_index = BTreeMap::from([
+        (base.owner_type_id.clone(), first_reference.to_string()),
+        (second_type_id.to_string(), second_reference.to_string()),
+    ]);
+    for (pattern_type_ids, expected_type_order) in [
+        (
+            [base.owner_type_id.as_str(), second_type_id],
+            [first_reference, second_reference],
+        ),
+        (
+            [second_type_id, base.owner_type_id.as_str()],
+            [second_reference, first_reference],
+        ),
+    ] {
+        for (selected_type_id, selected_owner) in [
+            (base.owner_type_id.as_str(), "Document.SyntheticFirst"),
+            (second_type_id, "Document.SyntheticSecond"),
+        ] {
+            let fixture = empty_ref_data_processor_fixture_with_pattern(
+                &base,
+                &pattern_type_ids,
+                selected_type_id,
+            );
+            let extracted = extract_empty_ref_data_processor(
+                &fixture,
+                &type_index,
+                &BTreeSet::new(),
+                &BTreeMap::new(),
+            )
+            .expect("either selected member in either Pattern order must be emitted");
+            let xml = String::from_utf8(extracted.xml).unwrap();
+            let first_type = format!("<v8:Type>{}</v8:Type>", expected_type_order[0]);
+            let second_type = format!("<v8:Type>{}</v8:Type>", expected_type_order[1]);
+            let fill_value = format!(
+                r#"<FillValue xsi:type="xr:DesignTimeRef">{selected_owner}.EmptyRef</FillValue>"#
+            );
+            let first_offset = xml.find(&first_type).unwrap();
+            let second_offset = xml.find(&second_type).unwrap();
+            let fill_offset = xml.find(&fill_value).unwrap();
+
+            assert!(
+                first_offset < second_offset && second_offset < fill_offset,
+                "{xml}"
+            );
+            assert_eq!(xml.matches(&first_type).count(), 1, "{xml}");
+            assert_eq!(xml.matches(&second_type).count(), 1, "{xml}");
+            assert_eq!(xml.matches(&fill_value).count(), 1, "{xml}");
+        }
+    }
 }
 
 #[test]
@@ -46560,6 +46652,153 @@ fn rejects_missing_ambiguous_and_malformed_empty_ref_owners_atomically() {
 }
 
 #[test]
+fn rejects_absent_or_ambiguous_selected_empty_ref_union_member_atomically() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        "",
+        "0",
+    );
+    let second_type_id = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+    let absent_type_id = "ffffffff-6666-4666-8666-ffffffffffff";
+    let selected_fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        second_type_id,
+    );
+    let complete_index = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_string(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    let first_selected_fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        &base.owner_type_id,
+    );
+    let unselected_ambiguous_index = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_lowercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_uppercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    let unselected_object_refs = BTreeMap::from([(
+        second_type_id.to_ascii_uppercase(),
+        "Document.SyntheticSecond".to_string(),
+    )]);
+    let extracted = extract_empty_ref_data_processor(
+        &first_selected_fixture,
+        &unselected_ambiguous_index,
+        &BTreeSet::from([second_type_id.to_string()]),
+        &unselected_object_refs,
+    )
+    .expect("unselected collisions must not suppress the selected EmptyRef");
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert_eq!(
+        xml.matches(
+            r#"<FillValue xsi:type="xr:DesignTimeRef">Document.SyntheticFirst.EmptyRef</FillValue>"#
+        )
+        .count(),
+        1,
+        "{xml}"
+    );
+
+    let missing_selected = BTreeMap::from([(
+        base.owner_type_id.clone(),
+        "cfg:DocumentRef.SyntheticFirst".to_string(),
+    )]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &selected_fixture,
+            &missing_selected,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "selected TypeId must resolve"
+    );
+
+    let ambiguous_selected = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_lowercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_uppercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &selected_fixture,
+            &ambiguous_selected,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "case-insensitive selected mapping must be unique"
+    );
+    assert!(
+        extract_empty_ref_data_processor(
+            &selected_fixture,
+            &complete_index,
+            &BTreeSet::from([second_type_id.to_string()]),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "selected collision ledger entry must fail closed"
+    );
+
+    let absent_fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        absent_type_id,
+    );
+    let index_with_absent = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_string(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+        (
+            absent_type_id.to_string(),
+            "cfg:DocumentRef.SyntheticAbsent".to_string(),
+        ),
+    ]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &absent_fixture,
+            &index_with_absent,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "selected TypeId absent from Pattern must fail closed"
+    );
+}
+
+#[test]
 fn rejects_malformed_empty_ref_protocol_fields_atomically() {
     let base = empty_ref_data_processor_fixture(
         EmptyRefDataProcessorLayout::SavedTabular,
@@ -46571,18 +46810,39 @@ fn rejects_malformed_empty_ref_protocol_fields_atomically() {
     let zero = "00000000-0000-0000-0000-000000000000";
     let nonzero = "ffffffff-6666-4666-8666-ffffffffffff";
     let pattern = format!(r##"{{"Pattern",{{"#",{}}}}}"##, base.owner_type_id);
-    let multi_pattern = format!(
-        r##"{{"Pattern",{{"#",{0}}},{{"#",{0}}}}}"##,
-        base.owner_type_id
+    let duplicate_pattern = format!(
+        r##"{{"Pattern",{{"#",{0}}},{{"#",{1}}}}}"##,
+        base.owner_type_id,
+        base.owner_type_id.to_ascii_uppercase()
     );
+    let mixed_pattern = format!(r##"{{"Pattern",{{"#",{}}},{{"S"}}}}"##, base.owner_type_id);
+    let malformed_member_pattern = format!(r##"{{"Pattern",{{"#",{},0}}}}"##, base.owner_type_id);
+    let zero_member_pattern = format!(r##"{{"Pattern",{{"#",{zero}}}}}"##);
+    let empty_pattern = r#"{"Pattern"}"#;
     let fill = format!(
         r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}}}}"##,
         base.owner_type_id
     );
     let cases = [
         (
-            "multi-member Pattern",
-            base.raw.replacen(&pattern, &multi_pattern, 1),
+            "case-insensitive duplicate Pattern member",
+            base.raw.replacen(&pattern, &duplicate_pattern, 1),
+        ),
+        (
+            "mixed scalar Pattern member",
+            base.raw.replacen(&pattern, &mixed_pattern, 1),
+        ),
+        (
+            "reference Pattern member extra arity",
+            base.raw.replacen(&pattern, &malformed_member_pattern, 1),
+        ),
+        (
+            "zero reference Pattern member",
+            base.raw.replacen(&pattern, &zero_member_pattern, 1),
+        ),
+        (
+            "empty reference Pattern",
+            base.raw.replacen(&pattern, empty_pattern, 1),
         ),
         (
             "wrong reference inner tag",
@@ -46809,6 +47069,101 @@ fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
         .and_then(|child| child.properties.as_ref())
         .unwrap();
     assert!(properties.fill_value.is_none());
+}
+
+#[test]
+fn refuses_selected_empty_ref_when_child_reference_membership_mismatches() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        "",
+        "0",
+    );
+    let second_type_id = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+    let fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        second_type_id,
+    );
+    let first_reference = "cfg:DocumentRef.SyntheticFirst";
+    let second_reference = "cfg:DocumentRef.SyntheticSecond";
+    let type_index = BTreeMap::from([
+        (base.owner_type_id.clone(), first_reference.to_string()),
+        (second_type_id.to_string(), second_reference.to_string()),
+    ]);
+    let owner_header = parse_metadata_header_from_text(&fixture.raw, &fixture.owner_uuid).unwrap();
+    let expectations = parse_data_processor_empty_ref_fill_values(
+        &fixture.raw,
+        &owner_header,
+        &type_index,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let child_objects = parse_attribute_tabular_section_child_objects(
+        "DataProcessor",
+        &owner_header.name,
+        &fixture.raw,
+        &fixture.owner_uuid,
+        None,
+        &type_index,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+
+    let mismatches = [
+        vec![ConstantValueType::Reference {
+            reference: first_reference.to_string(),
+        }],
+        vec![ConstantValueType::String {
+            length: None,
+            allowed_length_flag: 0,
+        }],
+        vec![
+            ConstantValueType::Reference {
+                reference: second_reference.to_string(),
+            },
+            ConstantValueType::Reference {
+                reference: second_reference.to_string(),
+            },
+        ],
+    ];
+    for value_types in mismatches {
+        let mut candidate = child_objects.clone();
+        let attribute = candidate
+            .iter_mut()
+            .flat_map(|child| child.child_objects.iter_mut())
+            .find(|child| {
+                child
+                    .header
+                    .uuid
+                    .eq_ignore_ascii_case(&fixture.attribute_uuid)
+            })
+            .unwrap();
+        attribute.value_types = value_types;
+
+        assert!(!apply_data_processor_empty_ref_fill_values(
+            &mut candidate,
+            &expectations
+        ));
+        let properties = candidate
+            .iter()
+            .flat_map(|child| child.child_objects.iter())
+            .find(|child| {
+                child
+                    .header
+                    .uuid
+                    .eq_ignore_ascii_case(&fixture.attribute_uuid)
+            })
+            .and_then(|child| child.properties.as_ref())
+            .unwrap();
+        assert!(
+            properties.fill_value.is_none(),
+            "failed apply must not retain a FillValue"
+        );
+    }
 }
 
 #[test]

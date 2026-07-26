@@ -14394,9 +14394,13 @@ fn parse_data_processor_empty_ref_fill_values(
             return None;
         }
         let pattern = data_processor_code27_type_pattern(&fields, &header)?;
-        let pattern_type_id = data_processor_single_reference_pattern_type_id(pattern)?;
+        let pattern_type_ids = data_processor_reference_pattern_type_ids(pattern)?;
         let fill_owner_type_id = parse_data_processor_empty_ref_fill_owner(fill_value)?;
-        if !pattern_type_id.eq_ignore_ascii_case(&fill_owner_type_id)
+        let selected_count = pattern_type_ids
+            .iter()
+            .filter(|type_id| type_id.eq_ignore_ascii_case(&fill_owner_type_id))
+            .count();
+        if selected_count != 1
             || object_refs
                 .keys()
                 .any(|key| key.eq_ignore_ascii_case(&fill_owner_type_id))
@@ -14491,16 +14495,30 @@ fn has_exact_data_processor_tabular_attribute_wrappers(
     matching_wrappers == 1
 }
 
-fn data_processor_single_reference_pattern_type_id(pattern: &str) -> Option<String> {
-    let pattern = split_information_register_braced_fields(pattern)?;
-    if pattern.len() != 2 || pattern.first()?.trim() != r#""Pattern""# {
+fn data_processor_reference_pattern_type_ids(pattern: &str) -> Option<Vec<String>> {
+    let fields = split_information_register_braced_fields(pattern)?;
+    if fields.len() < 2
+        || !owner_graph::DataProcessorPhysicalSchema::reference_pattern(fields.first()?.trim())
+    {
         return None;
     }
-    let member = split_information_register_braced_fields(pattern.get(1)?)?;
-    if member.len() != 2 || member.first()?.trim() != r##""#""## {
-        return None;
-    }
-    parse_information_register_non_zero_uuid(member.get(1)?)
+    let mut seen = BTreeSet::new();
+    fields
+        .iter()
+        .skip(1)
+        .map(|member| {
+            let member = split_information_register_braced_fields(member)?;
+            if member.len() != 2
+                || !owner_graph::DataProcessorPhysicalSchema::reference_member(
+                    member.first()?.trim(),
+                )
+            {
+                return None;
+            }
+            let type_id = parse_information_register_non_zero_uuid(member.get(1)?)?;
+            seen.insert(type_id.to_ascii_lowercase()).then_some(type_id)
+        })
+        .collect()
 }
 
 fn parse_data_processor_empty_ref_fill_owner(value: &str) -> Option<String> {
@@ -14543,11 +14561,18 @@ fn apply_data_processor_empty_ref_fill_values_inner(
     for child in child_objects {
         let uuid = child.header.uuid.to_ascii_lowercase();
         if let Some(expected) = expected_attributes.get(&uuid) {
-            let value_type_matches = matches!(
-                child.value_types.as_slice(),
-                [ConstantValueType::Reference { reference }]
-                    if reference == &expected.type_reference
-            );
+            let value_type_matches = child
+                .value_types
+                .iter()
+                .filter(|value_type| {
+                    matches!(
+                        value_type,
+                        ConstantValueType::Reference { reference }
+                            if reference == &expected.type_reference
+                    )
+                })
+                .count()
+                == 1;
             let Some(properties) = child.properties.as_mut() else {
                 return false;
             };

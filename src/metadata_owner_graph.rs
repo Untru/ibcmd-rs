@@ -217,6 +217,19 @@ impl CctPhysicalSchema {
     }
 }
 
+/// Exact lexical facts for DataProcessor type-pattern wrappers.
+pub(crate) struct DataProcessorPhysicalSchema;
+
+impl DataProcessorPhysicalSchema {
+    pub(crate) fn reference_pattern(value: &str) -> bool {
+        value == r#""Pattern""#
+    }
+
+    pub(crate) fn reference_member(value: &str) -> bool {
+        value == r##""#""##
+    }
+}
+
 pub(crate) const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 pub(crate) const CATALOG_COMMAND_COLLECTION_UUID: &str = "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6";
 pub(crate) const CATALOG_TABULAR_SECTION_COLLECTION_UUID: &str =
@@ -1689,6 +1702,20 @@ mod tests {
         assert!(CctPhysicalSchema::binary_flag("1"));
         for value in ["00", "01", " 0 ", "0 "] {
             assert!(!CctPhysicalSchema::binary_flag(value));
+        }
+    }
+
+    #[test]
+    fn data_processor_physical_schema_closes_reference_pattern_tokens() {
+        assert!(DataProcessorPhysicalSchema::reference_pattern(
+            r#""Pattern""#
+        ));
+        assert!(DataProcessorPhysicalSchema::reference_member(r##""#""##));
+        for value in ["Pattern", "\"pattern\"", "\"Pattern\" "] {
+            assert!(!DataProcessorPhysicalSchema::reference_pattern(value));
+        }
+        for value in ["#", "\"Reference\"", "\"#\" "] {
+            assert!(!DataProcessorPhysicalSchema::reference_member(value));
         }
     }
 }
