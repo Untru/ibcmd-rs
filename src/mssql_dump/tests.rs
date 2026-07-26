@@ -45993,12 +45993,6 @@ fn extracts_document_child_attribute_data_history_tail() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let owner_fields = [
-        "1", zero_uuid, "1", "9", "1", "4", "0", "0", "0", "0", "0", "0", "0", zero_uuid,
-        zero_uuid, zero_uuid, zero_uuid, zero_uuid, zero_uuid, "0",
-    ]
-    .join(",");
     let attribute_wrapper = document_attribute_wrapper_for_test(
         6,
         attribute_uuid,
@@ -46009,15 +46003,27 @@ fn extracts_document_child_attribute_data_history_tail() {
     );
     let attribute_collection =
         document_attribute_collection_for_test(DOCUMENT_ATTRIBUTE_GROUP_UUID, &[attribute_wrapper]);
-    let document_blob = deflate_for_test(
-        format!(
-            "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},\
-{owner_fields},{manager_type_id},{manager_value_id}}},\
-{attribute_collection}\r\n}}"
-        )
-        .as_bytes(),
-    );
+    let (_header, mut fields, mut collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
+    for marker in ["-7", "-5", "-4", "-3", "-2"] {
+        standard_attribute_payload.push(format!("{{{marker}}}"));
+        standard_attribute_payload
+            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
+            "Active", true, false,
+        ));
+    }
+    fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
+    collections[2] = attribute_collection;
+    let document_blob =
+        deflate_for_test(render_owner_graph_fixture_for_test(&fields, &collections).as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
