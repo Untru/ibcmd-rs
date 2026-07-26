@@ -43569,15 +43569,24 @@ fn strict_document_journal_text_for_test(
         manager_type_id,
         manager_value_id,
     ] = generated_type_ids;
-    let [forms, templates, commands, other] = root_collections;
+    let [templates, columns, commands, forms] = root_collections;
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
     format!(
         "{{1,{{26,{list_type_id},{list_value_id},\
 {{0,{{3,{{1,0,{journal_uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,{zero_uuid},0}}}},\
-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,{{0}},0,{manager_type_id},{manager_value_id},\
+{zero_uuid},1,{{0,0}},0,{manager_type_id},{manager_value_id},\
 {selection_type_id},{selection_value_id},{{0}},{zero_uuid},{{0}},{{0}},{{0}}}},\
-4,{forms},{templates},{commands},{other}}}"
+4,{templates},{columns},{commands},{forms}}}"
     )
+}
+
+fn empty_document_journal_root_collections_for_test() -> [&'static str; 4] {
+    [
+        "{3daea016-69b7-4ed4-9453-127911372fe6,0}",
+        "{5aee69df-0513-4c6c-9815-103102471712,0}",
+        "{a49a35ce-120a-4c80-8eea-b0618479cd70,0}",
+        "{ec81ad10-ca07-11d5-b9a5-0050bae0a95d,0}",
+    ]
 }
 
 #[test]
@@ -43636,7 +43645,7 @@ fn extracts_four_document_journal_generated_type_cohorts_in_native_order() {
             journal_uuid,
             name,
             ids,
-            ["{0}", "{0}", "{0}", "{0}"],
+            empty_document_journal_root_collections_for_test(),
         );
         let blob = deflate_for_test(text.as_bytes());
         let extracted = extract_metadata_source_xml(
@@ -43691,18 +43700,19 @@ fn extracts_four_document_journal_generated_type_cohorts_in_native_order() {
             );
         }
         assert!(xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap());
-        for unrelated in [
-            "<UseStandardCommands>",
-            "<DefaultListForm>",
-            "<RegisteredDocuments>",
-            "<StandardAttributes>",
-            "<Column ",
-        ] {
-            assert!(
-                !xml.contains(unrelated),
-                "unexpected {unrelated} in {name}: {xml}"
-            );
-        }
+        assert!(xml.contains("<DefaultForm/>"), "{name}: {xml}");
+        assert!(xml.contains("<AuxiliaryForm/>"), "{name}: {xml}");
+        assert!(
+            xml.contains("<UseStandardCommands>true</UseStandardCommands>"),
+            "{name}: {xml}"
+        );
+        assert!(xml.contains("<RegisteredDocuments/>"), "{name}: {xml}");
+        assert!(
+            xml.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"),
+            "{name}: {xml}"
+        );
+        assert!(!xml.contains("<StandardAttributes>"), "{name}: {xml}");
+        assert!(!xml.contains("<Column "), "{name}: {xml}");
     }
 }
 
@@ -43721,7 +43731,7 @@ fn derives_document_journal_generated_type_names_from_renamed_header() {
             "50000000-0000-4000-8000-000000000005",
             "50000000-0000-4000-8000-000000000006",
         ],
-        ["{0}", "{0}", "{0}", "{0}"],
+        empty_document_journal_root_collections_for_test(),
     );
     let blob = deflate_for_test(text.as_bytes());
     let extracted = extract_metadata_source_xml(
@@ -43764,15 +43774,15 @@ fn rejects_non_exact_document_journal_generated_type_cohorts_atomically() {
         journal_uuid,
         "Interactions",
         ids,
-        ["{0}", "{0}", "{0}", "{0}"],
+        empty_document_journal_root_collections_for_test(),
     );
     let owner_header = format!(
         "{{0,{{3,{{1,0,{journal_uuid}}},\"Interactions\",{{1,\"en\",\"Interactions\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}}"
     );
-    let owner_marker = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let default_form = "00000000-0000-0000-0000-000000000000";
     let wrong_header_slot = valid.replacen(
-        &format!("{owner_header},{owner_marker}"),
-        &format!("{owner_marker},{owner_header}"),
+        &format!("{owner_header},{default_form}"),
+        &format!("{default_form},{owner_header}"),
         1,
     );
     let wrong_owner_len = valid.replacen("{26,", "{26,0,", 1);
@@ -43798,7 +43808,14 @@ fn rejects_non_exact_document_journal_generated_type_cohorts_atomically() {
 
     for (case, text) in [
         ("root tag", valid.replacen("{1,", "{2,", 1)),
-        (", root count", valid.replacen("},4,{0}", "},3,{0}", 1)),
+        (
+            ", root count",
+            valid.replacen(
+                "},4,{3daea016-69b7-4ed4-9453-127911372fe6,0}",
+                "},3,{3daea016-69b7-4ed4-9453-127911372fe6,0}",
+                1,
+            ),
+        ),
         ("root length", wrong_root_len),
         ("owner code", valid.replacen("{26,", "{25,", 1)),
         ("owner length", wrong_owner_len),
@@ -43883,7 +43900,6 @@ fn extracts_document_journal_child_form_template_and_command_refs_from_current_i
     let form_uuid = "22222222-2222-4222-8222-222222222222";
     let template_uuid = "33333333-3333-4333-8333-333333333333";
     let command_uuid = "44444444-4444-4444-8444-444444444444";
-    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let generated_type_ids = [
         "50000000-0000-4000-8000-000000000001",
         "50000000-0000-4000-8000-000000000002",
@@ -43892,13 +43908,23 @@ fn extracts_document_journal_child_form_template_and_command_refs_from_current_i
         "50000000-0000-4000-8000-000000000005",
         "50000000-0000-4000-8000-000000000006",
     ];
-    let forms = format!("{{{form_list_marker},1,{form_uuid}}}");
-    let command = format!("{{9,{{3,{{1,0,{command_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}}");
+    let templates = format!("{{3daea016-69b7-4ed4-9453-127911372fe6,1,{template_uuid}}}");
+    let columns = "{5aee69df-0513-4c6c-9815-103102471712,0}";
+    let forms = format!("{{ec81ad10-ca07-11d5-b9a5-0050bae0a95d,1,{form_uuid}}}");
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let command_header = format!(
+        "{{3,{{1,0,{command_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\",0,0,{zero_uuid},0}}"
+    );
+    let command_properties =
+        format!("{{9,{{4,0,0,0,0,0,0}},0,{{0}},0,{{0,0,0}},0,{{0}},{{0}},{command_header},0,0,0}}");
+    let command = format!(
+        "{{a49a35ce-120a-4c80-8eea-b0618479cd70,1,{{{{0,{{1,{{2,{command_uuid},{command_uuid}}},{command_properties}}}}},0}}}}"
+    );
     let journal_text = strict_document_journal_text_for_test(
         journal_uuid,
         "Interactions",
         generated_type_ids,
-        [&forms, template_uuid, &command, "{0}"],
+        [&templates, columns, &command, &forms],
     );
     let journal_blob = deflate_for_test(journal_text.as_bytes());
     let form_blob = deflate_for_test(
