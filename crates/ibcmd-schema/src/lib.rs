@@ -84,6 +84,44 @@ const MAX_FORM_CHOICE_PARAMETERS_ITEMS: usize = 512;
 const MAX_FORM_CHOICE_PARAMETERS_PRESENTATION_ITEMS: usize = 128;
 const MAX_FORM_CHOICE_PARAMETERS_FIXED_ARRAY_ITEMS: usize = 512;
 
+/// Render a verified Form choice-parameters QName from strict Clark notation.
+///
+/// Only namespaces used by the committed writer policy are accepted. The
+/// local name remains deliberately generic, but is restricted to portable XML
+/// name characters so policy data cannot introduce markup or a foreign prefix.
+pub fn canonical_form_choice_parameters_qname(qname: &str) -> Result<String, SchemaError> {
+    let Some(rest) = qname.strip_prefix('{') else {
+        return Err(SchemaError::InvalidFormChoiceParametersQName(
+            qname.to_owned(),
+        ));
+    };
+    let Some((namespace, local_name)) = rest.split_once('}') else {
+        return Err(SchemaError::InvalidFormChoiceParametersQName(
+            qname.to_owned(),
+        ));
+    };
+    let mut characters = local_name.chars();
+    if !matches!(characters.next(), Some(character) if character.is_ascii_alphabetic() || character == '_')
+        || !characters
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return Err(SchemaError::InvalidFormChoiceParametersQName(
+            qname.to_owned(),
+        ));
+    }
+    let prefix = match namespace {
+        "" | "http://v8.1c.ru/8.3/xcf/logform" => "",
+        "http://v8.1c.ru/8.2/managed-application/core" => "app:",
+        "http://v8.1c.ru/8.1/data/core" => "v8:",
+        _ => {
+            return Err(SchemaError::InvalidFormChoiceParametersQName(
+                qname.to_owned(),
+            ));
+        }
+    };
+    Ok(format!("{prefix}{local_name}"))
+}
+
 /// Decode the raw `ChoiceParameters` envelope. `resolve_design_time_ref` is
 /// deliberately the only domain hook: it receives the raw type/value IDs and
 /// must return a canonical reference. A missing resolution rejects the entire
@@ -493,6 +531,58 @@ mod form_choice_parameters_tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn form_choice_parameters_qname_maps_exact_namespaces() {
+        assert_eq!(
+            canonical_form_choice_parameters_qname("{}ChoiceParameters").unwrap(),
+            "ChoiceParameters"
+        );
+        assert_eq!(
+            canonical_form_choice_parameters_qname(
+                "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameters"
+            )
+            .unwrap(),
+            "ChoiceParameters"
+        );
+        assert_eq!(
+            canonical_form_choice_parameters_qname(
+                "{http://v8.1c.ru/8.2/managed-application/core}item"
+            )
+            .unwrap(),
+            "app:item"
+        );
+        assert_eq!(
+            canonical_form_choice_parameters_qname("{http://v8.1c.ru/8.1/data/core}_Value-1")
+                .unwrap(),
+            "v8:_Value-1"
+        );
+    }
+
+    #[test]
+    fn form_choice_parameters_qname_fails_closed_on_near_misses() {
+        for qname in [
+            "",
+            "ChoiceParameters",
+            " {}ChoiceParameters",
+            "{}ChoiceParameters ",
+            "{http://v8.1c.ru/8.3/xcf/logform/}ChoiceParameters",
+            "{HTTP://v8.1c.ru/8.3/xcf/logform}ChoiceParameters",
+            "{http://v8.1c.ru/8.3/xcf/logform}1ChoiceParameters",
+            "{http://v8.1c.ru/8.3/xcf/logform}-ChoiceParameters",
+            "{http://v8.1c.ru/8.3/xcf/logform}:ChoiceParameters",
+            "{http://v8.1c.ru/8.3/xcf/logform}Choice/Parameters",
+            "{http://v8.1c.ru/8.3/xcf/logform}Choice Parameters",
+            "{http://v8.1c.ru/8.3/xcf/logform}Choice{Parameters}",
+            "{http://v8.1c.ru/8.3/xcf/logform}Имя",
+            "{http://example.invalid/form}ChoiceParameters",
+        ] {
+            assert!(matches!(
+                canonical_form_choice_parameters_qname(qname),
+                Err(SchemaError::InvalidFormChoiceParametersQName(value)) if value == qname
+            ));
+        }
     }
 }
 
@@ -1883,6 +1973,7 @@ pub enum SchemaError {
     CoverageDerivedDataMismatch(&'static str),
     InvalidDcsWriterEvidence(String),
     InvalidFormChoiceParametersWriterEvidence(String),
+    InvalidFormChoiceParametersQName(String),
 }
 
 impl Display for SchemaError {
@@ -1946,6 +2037,9 @@ impl Display for SchemaError {
                     formatter,
                     "invalid Form choice-parameters writer evidence: {reason}"
                 )
+            }
+            Self::InvalidFormChoiceParametersQName(value) => {
+                write!(formatter, "invalid Form choice-parameters QName '{value}'")
             }
         }
     }

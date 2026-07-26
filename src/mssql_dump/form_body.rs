@@ -47,7 +47,8 @@ use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue, FormChoiceListItemPart,
     FormChoiceParameterValue as SchemaFormChoiceParameterValue, FormChoiceParameterValuePart,
     FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy, WriterRuleKey,
-    WriterRuleLookupError, bundled_writer_rules, parse_form_choice_parameters,
+    WriterRuleLookupError, bundled_writer_rules, canonical_form_choice_parameters_qname,
+    parse_form_choice_parameters,
 };
 use ibcmd_xml::{DcsListSettingsTailError, emit_form_list_settings_tail};
 use sha2::{Digest, Sha256};
@@ -17392,7 +17393,7 @@ fn format_form_choice_parameter_cluster_xml(
     };
     let mut xml = String::new();
     for qname in [owner_predecessor_qname, owner_qname, owner_successor_qname] {
-        let tag = render_form_choice_parameters_qname(qname)?;
+        let tag = canonical_form_choice_parameters_qname(qname)?;
         match tag.as_str() {
             "ChoiceParameterLinks" => {
                 if !item.choice_parameter_links.is_empty() {
@@ -17442,13 +17443,13 @@ pub(super) fn format_form_choice_parameters_xml(
     if items.is_empty() {
         return Ok(String::new());
     }
-    let owner_tag = render_form_choice_parameters_qname(owner_qname)?;
-    let item_tag = render_form_choice_parameters_qname(&item.item_qname)?;
-    let name_attribute = render_form_choice_parameters_qname(&item.name_attribute_qname)?;
-    let value_tag = render_form_choice_parameters_qname(&item.value_qname)?;
-    let presentation_tag = render_form_choice_parameters_qname(&item.presentation_qname)?;
-    let scalar_value_tag = render_form_choice_parameters_qname(&item.scalar_value_qname)?;
-    let fixed_array_item_tag = render_form_choice_parameters_qname(&fixed_array.item_qname)?;
+    let owner_tag = canonical_form_choice_parameters_qname(owner_qname)?;
+    let item_tag = canonical_form_choice_parameters_qname(&item.item_qname)?;
+    let name_attribute = canonical_form_choice_parameters_qname(&item.name_attribute_qname)?;
+    let value_tag = canonical_form_choice_parameters_qname(&item.value_qname)?;
+    let presentation_tag = canonical_form_choice_parameters_qname(&item.presentation_qname)?;
+    let scalar_value_tag = canonical_form_choice_parameters_qname(&item.scalar_value_qname)?;
+    let fixed_array_item_tag = canonical_form_choice_parameters_qname(&fixed_array.item_qname)?;
     let tab = "\t".repeat(indent);
     let mut xml = format!("{tab}<{owner_tag}>\r\n");
     for parameter in items {
@@ -17551,29 +17552,6 @@ fn unexpected_form_choice_parameters_policy() -> FormSchemaWriteError {
         rule_id: "form.input-field-ext-info.choice-parameters".to_owned(),
         expected: "form-choice-parameters",
     }
-}
-
-fn render_form_choice_parameters_qname(qname: &str) -> Result<String, FormSchemaWriteError> {
-    let Some(rest) = qname.strip_prefix('{') else {
-        return Err(unexpected_form_choice_parameters_policy());
-    };
-    let Some((namespace, local_name)) = rest.split_once('}') else {
-        return Err(unexpected_form_choice_parameters_policy());
-    };
-    if local_name.is_empty()
-        || !local_name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
-    {
-        return Err(unexpected_form_choice_parameters_policy());
-    }
-    let prefix = match namespace {
-        "" | "http://v8.1c.ru/8.3/xcf/logform" => "",
-        "http://v8.1c.ru/8.2/managed-application/core" => "app:",
-        "http://v8.1c.ru/8.1/data/core" => "v8:",
-        _ => return Err(unexpected_form_choice_parameters_policy()),
-    };
-    Ok(format!("{prefix}{local_name}"))
 }
 
 fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String {
