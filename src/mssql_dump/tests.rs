@@ -1829,6 +1829,48 @@ fn owner_graph_fixture_for_test(
     (header, fields, collections)
 }
 
+fn exact_document_owner_fixture_for_test(
+    document_uuid: &str,
+    name: &str,
+    comment: &str,
+) -> (MetadataHeader, Vec<String>, Vec<String>) {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
+    let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    header.uuid = document_uuid.to_owned();
+    header.name = name.to_owned();
+    header.comment = comment.to_owned();
+    fields[9] = format!(
+        "{{0,{{3,{{1,0,{document_uuid}}},\"{name}\",{{0}},\"{comment}\",0,0,{zero_uuid},0}}}}"
+    );
+    fields[10] = zero_uuid.to_owned();
+    fields[11] = "0".to_owned();
+    fields[12] = "0".to_owned();
+    fields[13] = "0".to_owned();
+    fields[14] = "0".to_owned();
+    fields[15] = "0".to_owned();
+    for field_index in [16, 17, 18, 35, 36, 37] {
+        fields[field_index] = zero_uuid.to_owned();
+    }
+    for field_index in [
+        19, 20, 21, 23, 25, 28, 30, 31, 33, 34, 43, 44, 46, 49, 50, 51, 52,
+    ] {
+        fields[field_index] = "0".to_owned();
+    }
+    for field_index in [22, 24] {
+        fields[field_index] = "{0,0}".to_owned();
+    }
+    for field_index in [29, 47] {
+        fields[field_index] = "{1,{0,0}}".to_owned();
+    }
+    fields[32] = "{0}".to_owned();
+    for field_index in [38, 39, 40, 41, 42] {
+        fields[field_index] = "{0}".to_owned();
+    }
+    fields[48] = "{1,2,0}".to_owned();
+    (header, fields, collections)
+}
+
 fn render_owner_graph_fixture_for_test(fields: &[String], collections: &[String]) -> String {
     format!("{{1,{{{}}},5,{}}}", fields.join(","), collections.join(","))
 }
@@ -45473,50 +45515,20 @@ fn extracts_document_generated_types_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
-    let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    header.uuid = document_uuid.to_owned();
-    header.name = "Invoice".to_owned();
+    let (header, mut fields, collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
     fields[1] = object_type_id.to_owned();
     fields[2] = object_value_id.to_owned();
     fields[3] = ref_type_id.to_owned();
     fields[4] = ref_value_id.to_owned();
     fields[26] = manager_type_id.to_owned();
     fields[27] = manager_value_id.to_owned();
-    fields[9] =
-        format!("{{0,{{3,{{1,0,{document_uuid}}},\"Invoice\",{{0}},\"\",0,0,{zero_uuid},0}}}}");
-    fields[10] = zero_uuid.to_owned();
-    fields[11] = "0".to_owned();
-    fields[12] = "0".to_owned();
-    fields[13] = "0".to_owned();
-    fields[14] = "0".to_owned();
-    fields[15] = "0".to_owned();
-    for field_index in [16, 17, 18, 35, 36, 37] {
-        fields[field_index] = zero_uuid.to_owned();
-    }
-    for field_index in [
-        19, 20, 21, 23, 25, 28, 30, 31, 33, 34, 43, 44, 46, 49, 50, 51, 52,
-    ] {
-        fields[field_index] = "0".to_owned();
-    }
-    for field_index in [22, 24] {
-        fields[field_index] = "{0,0}".to_owned();
-    }
-    for field_index in [29, 47] {
-        fields[field_index] = "{1,{0,0}}".to_owned();
-    }
-    fields[32] = "{0}".to_owned();
-    for field_index in [38, 39, 40, 41, 42] {
-        fields[field_index] = "{0}".to_owned();
-    }
-    fields[48] = "{1,2,0}".to_owned();
     let text = render_owner_graph_fixture_for_test(&fields, &collections);
     let row = MetadataTextRow {
         file_name: document_uuid.to_owned(),
         text: text.clone(),
         object_code: Some(40),
-        header: Some(header.clone()),
+        header: Some(header),
         kind: Some("Document".to_owned()),
         folder: Some("Documents"),
     };
@@ -45569,7 +45581,6 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
     let standard_attribute_details = |number_type: &str| {
         let attributes = [
             ("-7", "{\"B\",0}", None),
@@ -45612,43 +45623,18 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
         format!("{{1,{{{}}}}}", payload.join(","))
     };
     let document_blob = |number_type: &str| {
-        let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
-        let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
-        header.uuid = document_uuid.to_owned();
-        header.name = "Invoice".to_owned();
-        header.comment = "document comment".to_owned();
+        let (header, mut fields, collections) =
+            exact_document_owner_fixture_for_test(document_uuid, "Invoice", "document comment");
         fields[1] = object_type_id.to_owned();
         fields[2] = object_value_id.to_owned();
         fields[3] = ref_type_id.to_owned();
         fields[4] = ref_value_id.to_owned();
         fields[26] = manager_type_id.to_owned();
         fields[27] = manager_value_id.to_owned();
-        fields[9] = format!(
-            "{{0,{{3,{{1,0,{document_uuid}}},\"Invoice\",{{0}},\"document comment\",0,0,{zero_uuid},0}}}}"
-        );
-        fields[10] = zero_uuid.to_owned();
         fields[11] = number_type.to_owned();
         fields[12] = "11".to_owned();
-        for field_index in [
-            13, 14, 19, 20, 21, 23, 25, 28, 30, 31, 33, 34, 43, 44, 46, 49, 50, 51, 52,
-        ] {
-            fields[field_index] = "0".to_owned();
-        }
         fields[15] = "1".to_owned();
-        for field_index in [16, 17, 18, 35, 36, 37] {
-            fields[field_index] = zero_uuid.to_owned();
-        }
-        for field_index in [22, 24] {
-            fields[field_index] = "{0,0}".to_owned();
-        }
-        for field_index in [29, 47] {
-            fields[field_index] = "{1,{0,0}}".to_owned();
-        }
         fields[32] = standard_attribute_details(number_type);
-        for field_index in [38, 39, 40, 41, 42] {
-            fields[field_index] = "{0}".to_owned();
-        }
-        fields[48] = "{1,2,0}".to_owned();
         let text = render_owner_graph_fixture_for_test(&fields, &collections);
         let row = MetadataTextRow {
             file_name: document_uuid.to_owned(),
@@ -45739,35 +45725,39 @@ fn extracts_document_numbering_commands_and_default_forms_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let owner_fields = [
-        "0",
-        numerator_uuid,
-        "1",
-        "11",
-        "0",
-        "0",
-        "1",
-        "1",
-        "0",
-        "1",
-        "0",
-        "0",
-        "0",
-        object_form_uuid,
-        list_form_uuid,
-        choice_form_uuid,
-        auxiliary_form_uuid,
-        "00000000-0000-0000-0000-000000000000",
-        "00000000-0000-0000-0000-000000000000",
-        "0",
-    ]
-    .join(",");
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, mut collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[10] = numerator_uuid.to_owned();
+    fields[11] = "1".to_owned();
+    fields[12] = "11".to_owned();
+    fields[13] = "1".to_owned();
+    fields[14] = "1".to_owned();
+    fields[15] = "1".to_owned();
+    fields[16] = object_form_uuid.to_owned();
+    fields[17] = list_form_uuid.to_owned();
+    fields[18] = choice_form_uuid.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    fields[35] = auxiliary_form_uuid.to_owned();
+    let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
+    for marker in ["-7", "-5", "-4", "-3", "-2"] {
+        standard_attribute_payload.push(format!("{{{marker}}}"));
+        standard_attribute_payload
+            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
+            "Active", true, false,
+        ));
+    }
+    fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
+    collections[4] = format!(
+        "{{{},4,{object_form_uuid},{list_form_uuid},{choice_form_uuid},{auxiliary_form_uuid}}}",
+        EXPECTED_OWNER_GRAPH_LAYOUTS[1].collection_markers[4]
+    );
+    let text = render_owner_graph_fixture_for_test(&fields, &collections);
     let object_refs = BTreeMap::from([(
         numerator_uuid.to_string(),
         "DocumentNumerator.CompanyDocuments".to_string(),
@@ -45802,6 +45792,7 @@ fn extracts_document_numbering_commands_and_default_forms_to_metadata_xml() {
             },
         ),
     ]);
+    let document_blob = deflate_for_test(text.as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
