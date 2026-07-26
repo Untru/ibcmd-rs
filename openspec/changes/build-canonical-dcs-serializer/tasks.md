@@ -18,11 +18,12 @@
 
 **Статус:** `[ ]`
 
-- [ ] Standalone settings и Form ListSettings используют один путь.
+- [ ] Standalone settings и Form ListSettings используют один production-путь
+  (bounded emitter готов, интеграция production callers остаётся отдельным slice).
 - [x] Picture/color/type qualification не угадывается.
-- [ ] Physical wrapper QName, TypeId and opaque-placement evidence are still
-  incomplete; `edt-2025.2.3-dcs-writer-evidence.json` records the four exact
-  missing keys, so byte emission remains fail-closed.
+- [x] Physical wrapper QName и отсутствие TypeId подтверждены для EDT
+  2025.2.3+30; opaque-placement явно unsupported (lossless placement отсутствует),
+  поэтому emission с opaque facets fail-closed.
 
 ## Задача 4: Расширить schema/template
 

@@ -2391,6 +2391,26 @@ const MAX_DCS_WRITER_EVIDENCE_MISSING_KEYS: usize = 8;
 const MAX_DCS_WRITER_EVIDENCE_SOURCES: usize = 8;
 const DCS_SETTINGS_MODEL_NAMESPACE: &str = "http://g5.1c.ru/v8/dt/data-composition-system/settings";
 const DCS_SETTINGS_CLASSIFIER: &str = "DataCompositionSettings";
+const DCS_STANDALONE_QNAME_EVIDENCE_SOURCES: &[&str] = &[
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.dcs/com._1c.g5.v8.dt.dcs.resource.DcssResource#doSave:139-157",
+];
+const DCS_FORM_QNAME_EVIDENCE_SOURCES: &[&str] = &[
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.form.export.xml/com._1c.g5.v8.dt.form.export.xml.writer.ListSettingsWriter#write:92-103",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.form.export.xml/com._1c.g5.v8.dt.internal.form.export.xml.FormFeatureNameProvider#fillSpecifiedPackageNsUri:0-10",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.form.export.xml/com._1c.g5.v8.dt.internal.form.export.xml.FormFeatureNameProvider#fillSpecifiedFeatureNames",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.export.xml/com._1c.g5.v8.dt.export.xml.BaseQNameProvider#getElementQName:0-57",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.export.xml/com._1c.g5.v8.dt.export.xml.BaseQNameProvider#needToCapitalizeFirstLetterOfFeatureName:0-1",
+];
+const DCS_NO_TYPE_ID_EVIDENCE_SOURCES: &[&str] = &[
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.dcs/com._1c.g5.v8.dt.dcs.resource.DcssResource#doSave:139-157",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.form.export.xml/com._1c.g5.v8.dt.form.export.xml.writer.ListSettingsWriter#write:92-103",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.dcs/com._1c.g5.v8.dt.dcs.util.DcsV8Serializer#writeSettings(ExportContextXmlStreamWriter,DataCompositionSettings,QName,IDtProject):0-52",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.dcs/com._1c.g5.v8.dt.dcs.util.DcsV8Serializer#writeSettings(ExportContextXmlStreamWriter,DataCompositionSettings,QName,Version,Map):0-392",
+];
+const DCS_OPAQUE_NEGATIVE_EVIDENCE_SOURCES: &[&str] = &[
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.dcs/com._1c.g5.v8.dt.dcs.util.DcsV8Serializer#readSettings:24-483",
+    "edt-derived://2025.2.3+30/com._1c.g5.v8.dt.dcs/com._1c.g5.v8.dt.dcs.util.DcsV8Serializer#readSettings:445-455",
+];
 
 /// Verified field identity for the only schema-driven Form `ListSettings` tail.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2408,6 +2428,29 @@ pub struct DcsListSettingsTailPolicy {
     items_view_mode_default: String,
     items_user_setting_id_qname: String,
     items_user_setting_id_default: String,
+}
+
+/// Exact physical wrappers and type-qualification rule for bounded DCS output.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsSettingsSerializationPolicy {
+    standalone_document_qname: String,
+    form_list_settings_qname: String,
+}
+
+impl DcsSettingsSerializationPolicy {
+    pub fn standalone_document_qname(&self) -> &str {
+        &self.standalone_document_qname
+    }
+
+    pub fn form_list_settings_qname(&self) -> &str {
+        &self.form_list_settings_qname
+    }
+
+    /// EDT's exact standalone/Form caller chains and both settings-writer
+    /// bodies emit no TypeId or `xsi:type` for the settings wrapper.
+    pub const fn type_id_is_absent(&self) -> bool {
+        true
+    }
 }
 
 impl DcsListSettingsTailPolicy {
@@ -2469,10 +2512,32 @@ struct DcsWriterEvidenceFact {
 enum DcsWriterEvidenceValue {
     Text(String),
     TailOrder(Vec<String>),
+    StandaloneQName(DcsStandaloneQNameEvidence),
+    FormWrapperQName(DcsFormWrapperQNameEvidence),
+    NoTypeId(DcsNoTypeIdEvidence),
     EnumNotDefault(DcsEnumNotDefaultEvidence),
     StringNotDefault(DcsStringNotDefaultEvidence),
     DefaultValue(DcsDefaultValueEvidence),
     FormDelegate(DcsFormDelegateEvidence),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsStandaloneQNameEvidence {
+    qname: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFormWrapperQNameEvidence {
+    qname: String,
+    qname_source: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsNoTypeIdEvidence {
+    emission: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -2529,6 +2594,7 @@ struct DcsWriterEvidenceMissingKey {
     key: String,
     status: String,
     reason: String,
+    evidence: DcsWriterEvidenceProof,
 }
 
 /// A structured subset of verified writer behaviour.  Free-form operations remain useful
@@ -3913,6 +3979,17 @@ impl DcsWriterEvidenceCorpus {
                 "source product or release does not match the verified evidence",
             ));
         }
+        if self.source.derivation
+            != "mixed provenance: deterministic extractor for writer-tail and delegation facts; manual exact javap bytecode review for wrapper QNames, no-TypeId call chains, and readSettings unknown-child rejection; no JAR, bytecode, source, Xcore, or machine path retained"
+            || self.source.input_contract
+                != "the deterministic base extractor requires exact-release dcs and form-export bundle JARs; supplemental manual review used exact-release dcs, form-export, and export-xml bundle classes named in each fact"
+            || self.source.invocation
+                != "base: pwsh tools/report-edt-dcs-writer-evidence.ps1 -InputInventory <external-version-matched-inventory.json> -EdtRelease <release> -OutputReport <portable-report.json>; supplemental: javap -v -p -c -constants on the exact classes and methods listed in fact provenance"
+        {
+            return Err(invalid_dcs_writer_evidence(
+                "source derivation, input contract, or invocation does not match mixed provenance",
+            ));
+        }
         for (field, value) in [
             ("source product", self.source.product.as_str()),
             ("source release", self.source.release.as_str()),
@@ -3934,6 +4011,9 @@ impl DcsWriterEvidenceCorpus {
         }
 
         let expected_fact_keys = BTreeSet::from([
+            "dcs.settings.document.qname",
+            "form.DynamicListExtInfo.listSettings.qname",
+            "dcs.DataCompositionSettings.type-id",
             "dcs.DataCompositionSettings.namespace",
             "dcs.DataCompositionSettings.verified-tail-order",
             "dcs.DataCompositionSettings.itemsViewMode",
@@ -3942,6 +4022,11 @@ impl DcsWriterEvidenceCorpus {
             "form.DynamicListExtInfo.listSettings.delegate",
         ]);
         let mut fact_keys = BTreeSet::new();
+        let manually_reviewed_fact_keys = BTreeSet::from([
+            "dcs.settings.document.qname",
+            "form.DynamicListExtInfo.listSettings.qname",
+            "dcs.DataCompositionSettings.type-id",
+        ]);
         for fact in &self.verified_facts {
             validate_dcs_writer_evidence_text("verified fact key", &fact.key)?;
             if !fact_keys.insert(fact.key.as_str()) {
@@ -3950,11 +4035,17 @@ impl DcsWriterEvidenceCorpus {
                     fact.key
                 )));
             }
+            let manual = manually_reviewed_fact_keys.contains(fact.key.as_str());
+            let expected_kind = if manual {
+                "manually-reviewed-javap-bytecode-exact"
+            } else {
+                "javap-v-exact-method-control-flow-constant-pool"
+            };
             if fact.evidence.status != EvidenceStatus::Verified
-                || fact.evidence.kind != "javap-v-exact-method-control-flow-constant-pool"
+                || fact.evidence.kind != expected_kind
             {
                 return Err(invalid_dcs_writer_evidence(format!(
-                    "fact `{}` is not backed by the exact verified extractor",
+                    "fact `{}` is not backed by its exact provenance kind",
                     fact.key
                 )));
             }
@@ -3971,6 +4062,45 @@ impl DcsWriterEvidenceCorpus {
             for source in &fact.evidence.sources {
                 validate_dcs_writer_evidence_text("evidence source", source)?;
             }
+            let has_script_source = fact
+                .evidence
+                .sources
+                .iter()
+                .any(|source| source == "tools/report-edt-dcs-writer-evidence.ps1");
+            let all_edt_derived = fact
+                .evidence
+                .sources
+                .iter()
+                .all(|source| source.starts_with("edt-derived://2025.2.3+30/"));
+            if (manual && (!all_edt_derived || has_script_source))
+                || (!manual && !has_script_source)
+            {
+                return Err(invalid_dcs_writer_evidence(format!(
+                    "fact `{}` provenance sources do not match its derivation",
+                    fact.key
+                )));
+            }
+            let exact_manual_sources = match fact.key.as_str() {
+                "dcs.settings.document.qname" => Some(DCS_STANDALONE_QNAME_EVIDENCE_SOURCES),
+                "form.DynamicListExtInfo.listSettings.qname" => {
+                    Some(DCS_FORM_QNAME_EVIDENCE_SOURCES)
+                }
+                "dcs.DataCompositionSettings.type-id" => Some(DCS_NO_TYPE_ID_EVIDENCE_SOURCES),
+                _ => None,
+            };
+            if let Some(expected) = exact_manual_sources
+                && !fact
+                    .evidence
+                    .sources
+                    .iter()
+                    .map(String::as_str)
+                    .eq(expected.iter().copied())
+            {
+                return Err(invalid_dcs_writer_evidence(format!(
+                    "fact `{}` exact bytecode coordinates drifted",
+                    fact.key
+                )));
+            }
         }
         if fact_keys != expected_fact_keys {
             return Err(invalid_dcs_writer_evidence(
@@ -3978,12 +4108,8 @@ impl DcsWriterEvidenceCorpus {
             ));
         }
 
-        let expected_missing_keys = BTreeSet::from([
-            "dcs.settings.document.qname",
-            "form.DynamicListExtInfo.listSettings.qname",
-            "dcs.DataCompositionSettings.type-id",
-            "dcs.DataCompositionSettings.opaque-extension.placement",
-        ]);
+        let expected_missing_keys =
+            BTreeSet::from(["dcs.DataCompositionSettings.opaque-extension.placement"]);
         let mut missing_keys = BTreeSet::new();
         for missing in &self.missing_keys {
             for (field, value) in [
@@ -3993,21 +4119,47 @@ impl DcsWriterEvidenceCorpus {
             ] {
                 validate_dcs_writer_evidence_text(field, value)?;
             }
-            if missing.status != "not-proven-by-this-extractor"
+            if missing.status != "unsupported-no-lossless-placement"
                 || !missing_keys.insert(missing.key.as_str())
             {
                 return Err(invalid_dcs_writer_evidence(
                     "missing evidence keys are duplicate or have an unexpected status",
                 ));
             }
+            if missing.evidence.status != EvidenceStatus::Verified
+                || missing.evidence.kind != "manually-reviewed-javap-bytecode-exact"
+                || missing.evidence.sources.is_empty()
+                || missing.evidence.sources.len() > MAX_DCS_WRITER_EVIDENCE_SOURCES
+                || !missing
+                    .evidence
+                    .sources
+                    .iter()
+                    .all(|source| source.starts_with("edt-derived://2025.2.3+30/"))
+                || !missing
+                    .evidence
+                    .sources
+                    .iter()
+                    .map(String::as_str)
+                    .eq(DCS_OPAQUE_NEGATIVE_EVIDENCE_SOURCES.iter().copied())
+            {
+                return Err(invalid_dcs_writer_evidence(
+                    "unsupported opaque placement lacks exact negative bytecode evidence",
+                ));
+            }
+            validate_dcs_writer_evidence_text("missing-key evidence kind", &missing.evidence.kind)?;
+            validate_dcs_writer_evidence_text("missing-key evidence note", &missing.evidence.note)?;
+            for source in &missing.evidence.sources {
+                validate_dcs_writer_evidence_text("missing-key evidence source", source)?;
+            }
         }
         if missing_keys != expected_missing_keys {
             return Err(invalid_dcs_writer_evidence(
-                "missing evidence keys differ from the exact four blocked facts",
+                "missing evidence keys differ from the exact unsupported no-lossless-placement fact",
             ));
         }
 
-        self.verified_form_list_settings_tail_evidence().map(|_| ())
+        self.verified_form_list_settings_tail_evidence()?;
+        self.verified_settings_envelope_evidence().map(|_| ())
     }
 
     pub fn form_list_settings_tail_policy(
@@ -4059,6 +4211,62 @@ impl DcsWriterEvidenceCorpus {
             items_view_mode_default: model_default.to_owned(),
             items_user_setting_id_qname: user_id.qname.clone(),
             items_user_setting_id_default: user_id.default_string.clone(),
+        })
+    }
+
+    pub fn settings_serialization_policy(
+        &self,
+        feature_semantics: &FeatureSemanticsCorpus,
+    ) -> Result<DcsSettingsSerializationPolicy, SchemaError> {
+        // Keep the typed-tail/model-default join as part of the same evidence
+        // boundary; an envelope is not usable if either projection drifts.
+        self.form_list_settings_tail_policy(feature_semantics)?;
+        self.verified_settings_envelope_evidence()
+    }
+
+    fn verified_settings_envelope_evidence(
+        &self,
+    ) -> Result<DcsSettingsSerializationPolicy, SchemaError> {
+        let standalone_document_qname = match self.fact_value("dcs.settings.document.qname")? {
+            DcsWriterEvidenceValue::StandaloneQName(value)
+                if value.qname
+                    == "{http://v8.1c.ru/8.1/data-composition-system/settings}Settings" =>
+            {
+                value.qname.clone()
+            }
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "standalone Settings QName drifted",
+                ));
+            }
+        };
+        let form_list_settings_qname = match self
+            .fact_value("form.DynamicListExtInfo.listSettings.qname")?
+        {
+            DcsWriterEvidenceValue::FormWrapperQName(value)
+                if value.qname == "{http://v8.1c.ru/8.3/xcf/logform}ListSettings"
+                    && value.qname_source
+                        == "ListSettingsWriter -> FormFeatureNameProvider/BaseQNameProvider fallback" =>
+            {
+                value.qname.clone()
+            }
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "Form ListSettings wrapper QName drifted",
+                ));
+            }
+        };
+        match self.fact_value("dcs.DataCompositionSettings.type-id")? {
+            DcsWriterEvidenceValue::NoTypeId(value) if value.emission == "absent" => {}
+            _ => {
+                return Err(invalid_dcs_writer_evidence(
+                    "DataCompositionSettings TypeId absence drifted",
+                ));
+            }
+        }
+        Ok(DcsSettingsSerializationPolicy {
+            standalone_document_qname,
+            form_list_settings_qname,
         })
     }
 
@@ -5236,6 +5444,18 @@ pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPoli
             let evidence = bundled_dcs_writer_evidence()?;
             let feature_semantics = bundled_dcs_list_settings_feature_semantics()?;
             evidence.form_list_settings_tail_policy(&feature_semantics)
+        })
+        .clone()
+}
+
+pub fn bundled_dcs_settings_serialization_policy()
+-> Result<DcsSettingsSerializationPolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsSettingsSerializationPolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            let evidence = bundled_dcs_writer_evidence()?;
+            let semantics = bundled_dcs_list_settings_feature_semantics()?;
+            evidence.settings_serialization_policy(&semantics)
         })
         .clone()
 }
@@ -6879,7 +7099,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_dcs_writer_evidence_exposes_only_the_verified_tail() {
+    fn bundled_dcs_writer_evidence_exposes_verified_envelopes_and_typed_tail() {
         let corpus = bundled_dcs_writer_evidence().unwrap();
         let feature_semantics = bundled_dcs_list_settings_feature_semantics().unwrap();
         let policy = corpus
@@ -6898,7 +7118,23 @@ mod tests {
         );
         assert_eq!(policy.items_view_mode_default(), "QuickAccess");
         assert_eq!(policy.items_user_setting_id_default(), "");
-        assert_eq!(corpus.missing_keys.len(), 4);
+        let envelopes = corpus
+            .settings_serialization_policy(&feature_semantics)
+            .unwrap();
+        assert_eq!(
+            envelopes.standalone_document_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}Settings"
+        );
+        assert_eq!(
+            envelopes.form_list_settings_qname(),
+            "{http://v8.1c.ru/8.3/xcf/logform}ListSettings"
+        );
+        assert!(envelopes.type_id_is_absent());
+        assert_eq!(corpus.missing_keys.len(), 1);
+        assert_eq!(
+            corpus.missing_keys[0].status,
+            "unsupported-no-lossless-placement"
+        );
     }
 
     #[test]
@@ -7028,8 +7264,15 @@ mod tests {
     fn dcs_tail_writer_constant_other_fails_closed() {
         let mut writer_evidence =
             serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
-        writer_evidence["verifiedFacts"][2]["value"]["defaultModelConstant"] =
-            serde_json::json!("OTHER");
+        let items_view_mode_fact = writer_evidence["verifiedFacts"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|fact| {
+                fact["key"].as_str() == Some("dcs.DataCompositionSettings.itemsViewMode")
+            })
+            .unwrap();
+        items_view_mode_fact["value"]["defaultModelConstant"] = serde_json::json!("OTHER");
 
         assert!(matches!(
             DcsWriterEvidenceCorpus::parse(
@@ -7068,6 +7311,59 @@ mod tests {
             DcsWriterEvidenceCorpus::parse(&serde_json::to_string(&duplicate).unwrap()),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("duplicate verified fact")
+        ));
+
+        let mut corrupt_wrapper =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        corrupt_wrapper["verifiedFacts"][0]["value"]["qname"] =
+            serde_json::json!("{urn:forged}Settings");
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(&serde_json::to_string(&corrupt_wrapper).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("standalone Settings QName drifted")
+        ));
+
+        let mut corrupt_type =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        corrupt_type["verifiedFacts"][2]["value"]["emission"] = serde_json::json!("xsi:type");
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(&serde_json::to_string(&corrupt_type).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("TypeId absence drifted")
+        ));
+
+        let mut corrupt_opaque =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        corrupt_opaque["missingKeys"][0]["status"] =
+            serde_json::json!("not-proven-by-this-extractor");
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(&serde_json::to_string(&corrupt_opaque).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("unexpected status")
+        ));
+
+        let mut corrupt_manual_source =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        corrupt_manual_source["verifiedFacts"][0]["evidence"]["sources"][0] =
+            serde_json::json!("tools/report-edt-dcs-writer-evidence.ps1");
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(
+                &serde_json::to_string(&corrupt_manual_source).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("provenance sources")
+        ));
+
+        let mut corrupt_negative_source =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_WRITER_EVIDENCE_JSON).unwrap();
+        corrupt_negative_source["missingKeys"][0]["evidence"]["sources"][1] =
+            serde_json::json!("edt-derived://2025.2.3+30/forged/reader#acceptUnknown");
+        assert!(matches!(
+            DcsWriterEvidenceCorpus::parse(
+                &serde_json::to_string(&corrupt_negative_source).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("lacks exact negative bytecode evidence")
         ));
     }
 

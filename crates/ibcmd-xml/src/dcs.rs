@@ -1,9 +1,8 @@
 //! Evidence-gated serialization boundary for canonical DCS settings.
 //!
-//! The bundled EDT corpus proves the Form `ListSettings` delegation boundary
-//! and the final two typed settings children. A narrow tail emitter consumes
-//! only those facts. Full standalone/Form serialization remains fail-closed
-//! because wrapper QNames, TypeId, and opaque placement are still unproven.
+//! The bundled EDT corpus proves both physical wrappers, the absence of a
+//! settings TypeId, and the final two typed settings children. Opaque facets
+//! remain deliberately non-emittable because EDT provides no lossless slot.
 
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
@@ -13,16 +12,23 @@ use ibcmd_core::dcs::DcsSettingsEnvelope;
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
 use ibcmd_schema::{
     DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
-    WriterRuleCorpus, WriterRuleKey, bundled_dcs_list_settings_tail_policy, bundled_writer_rules,
+    WriterRuleCorpus, WriterRuleKey, bundled_dcs_list_settings_tail_policy,
+    bundled_dcs_settings_serialization_policy, bundled_writer_rules,
 };
 use quick_xml::escape::escape;
 
 /// EDT release against which the DCS writer boundary was inspected.
 pub const DCS_WRITER_EVIDENCE_RELEASE: &str = "2025.2.3+30";
-/// Stable diagnostic emitted before XML generation when an exact rule is pending.
+/// Legacy diagnostic identifier retained for source compatibility. The bounded
+/// EDT 2025.2.3+30 slice has no pending typed-envelope decision.
 pub const DCS_WRITER_EVIDENCE_PENDING_CODE: &str = "dcs.writer-evidence-pending";
 /// Stable diagnostic emitted when the embedded corpus cannot prove a claimed rule.
 pub const DCS_WRITER_EVIDENCE_INVALID_CODE: &str = "dcs.writer-evidence-invalid";
+/// Stable diagnostic emitted when opaque DCS XML cannot be placed losslessly.
+pub const DCS_OPAQUE_NO_LOSSLESS_PLACEMENT_CODE: &str =
+    "dcs.opaque-extension-no-lossless-placement";
+/// Stable diagnostic emitted when a canonical scalar is not XML 1.0 text.
+pub const DCS_INVALID_XML_VALUE_CODE: &str = "dcs.invalid-xml-value";
 
 /// One XML decision that must be evidence-backed before DCS bytes are emitted.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -101,18 +107,18 @@ pub struct DcsWriterEvidence {
 pub const DCS_WRITER_EVIDENCE: &[DcsWriterEvidence] = &[
     DcsWriterEvidence {
         decision: DcsWriterDecision::StandaloneDocumentQName,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "standalone DCS document writer inspection pending",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:dcs.settings.document.qname",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::FormListSettingsWrapperQName,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "Form ListSettings wrapper QName inspection pending",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:form.DynamicListExtInfo.listSettings.qname",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::SettingsTypeId,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "DCS settings TypeId inspection pending",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:DataCompositionSettings/type-id-absent",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::ItemsUserSettingIdQName,
@@ -146,8 +152,8 @@ pub const DCS_WRITER_EVIDENCE: &[DcsWriterEvidence] = &[
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::OpaqueExtensionPlacement,
-        status: DcsWriterEvidenceStatus::Pending,
-        source: "DCS opaque-to-typed child placement inspection pending",
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "dcs-writer-evidence:opaque-extension:no-lossless-placement",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::FormListSettingsDelegate,
@@ -188,10 +194,10 @@ impl Display for DcsSerializationError {
 
 impl Error for DcsSerializationError {}
 
-/// Proof that all decisions required by the shared DCS boundary were resolved.
+/// Proof that all typed decisions required by the shared DCS boundary resolved.
 ///
-/// There is intentionally no public constructor. With the current corpus this
-/// permit cannot be obtained because QName/TypeId/order rules are pending.
+/// There is intentionally no public constructor; opaque settings never receive
+/// this permit because their lossless physical placement is unsupported.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DcsSerializationPermit {
     target_profile: ProfileId,
@@ -360,50 +366,128 @@ fn is_xml_1_0_char(character: char) -> bool {
 /// Runs the single schema/evidence boundary shared by standalone settings and
 /// Form `ListSettings`.
 ///
-/// The function verifies same-profile opaque emission before consulting writer
-/// evidence. It never returns a permit while any QName, TypeId, ordering,
-/// default-emission, or placement decision is pending.
+/// The function never returns a permit for opaque settings. EDT rejects and
+/// discards unknown `readSettings` children, so emitting retained facets would
+/// fabricate a placement and lose source semantics.
 pub fn preflight_dcs_settings_serialization(
     envelope: &DcsSettingsEnvelope,
     target_profile: &ProfileId,
 ) -> Result<DcsSerializationPermit, DcsSerializationError> {
     let settings = envelope.as_settings();
 
-    for facet in settings.opaque_extensions().as_slice() {
-        facet
-            .emit_permit(target_profile)
-            .map_err(|error| DcsSerializationError {
-                diagnostic: Box::new(error.into_diagnostic()),
-                missing_decisions: Vec::new(),
-            })?;
+    if !settings.opaque_extensions().is_empty() {
+        return Err(unsupported_opaque_placement(envelope, target_profile));
     }
 
     let writer_rules = bundled_writer_rules()
         .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
-    bundled_dcs_list_settings_tail_policy()
+    bundled_dcs_settings_serialization_policy()
         .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
 
     if matches!(envelope, DcsSettingsEnvelope::ListSettings(_)) {
         verify_form_list_settings_delegate(envelope, target_profile, &writer_rules)?;
     }
 
-    let mut missing = vec![match envelope {
-        DcsSettingsEnvelope::Settings(_) => DcsWriterDecision::StandaloneDocumentQName,
-        DcsSettingsEnvelope::ListSettings(_) => DcsWriterDecision::FormListSettingsWrapperQName,
-    }];
-    missing.push(DcsWriterDecision::SettingsTypeId);
-    if !settings.opaque_extensions().is_empty() {
-        missing.push(DcsWriterDecision::OpaqueExtensionPlacement);
-    }
-
-    if !missing.is_empty() {
-        return Err(pending_evidence(envelope, target_profile, missing));
-    }
-
     Ok(DcsSerializationPermit {
         target_profile: target_profile.clone(),
         form_list_settings: matches!(envelope, DcsSettingsEnvelope::ListSettings(_)),
     })
+}
+
+/// Emits the complete bounded standalone or Form `ListSettings` envelope.
+///
+/// This deliberately has no extension hook: a nonempty opaque facet is a
+/// stable unsupported decision, not an invitation to choose a guessed slot.
+pub fn emit_dcs_settings_envelope(
+    envelope: &DcsSettingsEnvelope,
+    target_profile: &ProfileId,
+) -> Result<String, DcsSerializationError> {
+    preflight_dcs_settings_serialization(envelope, target_profile)?;
+    let wrappers = bundled_dcs_settings_serialization_policy()
+        .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    let tail = bundled_dcs_list_settings_tail_policy()
+        .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    let (wrapper_qname, form_wrapper) = match envelope {
+        DcsSettingsEnvelope::Settings(_) => (wrappers.standalone_document_qname(), false),
+        DcsSettingsEnvelope::ListSettings(_) => (wrappers.form_list_settings_qname(), true),
+    };
+    let (wrapper_namespace, wrapper_name) = expanded_qname(wrapper_qname).ok_or_else(|| {
+        invalid_evidence(envelope, target_profile, &"invalid verified wrapper QName")
+    })?;
+    let settings = envelope.as_settings();
+    for (field, value) in [
+        (
+            "itemsViewMode",
+            settings.items_view_mode().map(|value| value.as_str()),
+        ),
+        (
+            "itemsUserSettingID",
+            settings.items_user_setting_id().map(|value| value.as_str()),
+        ),
+    ] {
+        if let Some(value) = value
+            && value.chars().any(|character| !is_xml_1_0_char(character))
+        {
+            return Err(invalid_xml_value(envelope, target_profile, field));
+        }
+    }
+    let emits_view_mode = settings
+        .items_view_mode()
+        .is_some_and(|value| value.as_str() != tail.items_view_mode_default());
+    let emits_user_setting_id = settings
+        .items_user_setting_id()
+        .is_some_and(|value| value.as_str() != tail.items_user_setting_id_default());
+    if !emits_view_mode && !emits_user_setting_id {
+        return Ok(format!(
+            "<{wrapper_name} xmlns=\"{wrapper_namespace}\"/>\r\n"
+        ));
+    }
+    let mut output = format!("<{wrapper_name} xmlns=\"{wrapper_namespace}\">\r\n");
+    for field in tail.tail_order() {
+        let (qname, value, default) = match field {
+            DcsListSettingsTailField::ItemsViewMode => (
+                tail.items_view_mode_qname(),
+                settings.items_view_mode().map(|value| value.as_str()),
+                tail.items_view_mode_default(),
+            ),
+            DcsListSettingsTailField::ItemsUserSettingId => (
+                tail.items_user_setting_id_qname(),
+                settings.items_user_setting_id().map(|value| value.as_str()),
+                tail.items_user_setting_id_default(),
+            ),
+        };
+        let Some(value) = value.filter(|value| *value != default) else {
+            continue;
+        };
+        let (namespace, local_name) = expanded_qname(qname).ok_or_else(|| {
+            invalid_evidence(
+                envelope,
+                target_profile,
+                &"invalid verified settings child QName",
+            )
+        })?;
+        output.push_str("\t<");
+        output.push_str(local_name);
+        if form_wrapper {
+            output.push_str(" xmlns=\"");
+            output.push_str(namespace);
+            output.push('"');
+        }
+        output.push('>');
+        output.push_str(&escape(value));
+        output.push_str("</");
+        output.push_str(local_name);
+        output.push_str(">\r\n");
+    }
+    output.push_str("</");
+    output.push_str(wrapper_name);
+    output.push_str(">\r\n");
+    Ok(output)
+}
+
+fn expanded_qname(value: &str) -> Option<(&str, &str)> {
+    let (namespace, local_name) = value.strip_prefix('{')?.split_once('}')?;
+    (!namespace.is_empty() && !local_name.is_empty()).then_some((namespace, local_name))
 }
 
 fn verify_form_list_settings_delegate(
@@ -435,24 +519,18 @@ fn verify_form_list_settings_delegate(
     }
 }
 
-fn pending_evidence(
+fn unsupported_opaque_placement(
     envelope: &DcsSettingsEnvelope,
     target_profile: &ProfileId,
-    missing_decisions: Vec<DcsWriterDecision>,
 ) -> DcsSerializationError {
     let settings = envelope.as_settings();
-    let missing_keys = missing_decisions
-        .iter()
-        .map(|decision| decision.schema_key())
-        .collect::<Vec<_>>()
-        .join(",");
     let diagnostic = Diagnostic::new(
-        DiagnosticCode::new(DCS_WRITER_EVIDENCE_PENDING_CODE)
+        DiagnosticCode::new(DCS_OPAQUE_NO_LOSSLESS_PLACEMENT_CODE)
             .expect("static DCS diagnostic code is valid"),
         Severity::Error,
         settings.provenance().anchor().object_path().clone(),
         settings.provenance().anchor().property_path().clone(),
-        "DCS XML serialization requires exact writer evidence that is still pending",
+        "DCS opaque extensions have no EDT-verified lossless XML placement",
     )
     .expect("static DCS diagnostic is bounded")
     .with_profiles(
@@ -461,11 +539,41 @@ fn pending_evidence(
     )
     .with_context("schema.release", DCS_WRITER_EVIDENCE_RELEASE)
     .expect("static context is bounded")
-    .with_context("schema.missing-keys", &missing_keys)
-    .expect("bounded DCS decision set fits diagnostic context");
+    .with_context(
+        "schema.unsupported-key",
+        DcsWriterDecision::OpaqueExtensionPlacement.schema_key(),
+    )
+    .expect("static unsupported decision fits diagnostic context");
     DcsSerializationError {
         diagnostic: Box::new(diagnostic),
-        missing_decisions,
+        missing_decisions: vec![DcsWriterDecision::OpaqueExtensionPlacement],
+    }
+}
+
+fn invalid_xml_value(
+    envelope: &DcsSettingsEnvelope,
+    target_profile: &ProfileId,
+    field: &'static str,
+) -> DcsSerializationError {
+    let settings = envelope.as_settings();
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::new(DCS_INVALID_XML_VALUE_CODE)
+            .expect("static DCS diagnostic code is valid"),
+        Severity::Error,
+        settings.provenance().anchor().object_path().clone(),
+        settings.provenance().anchor().property_path().clone(),
+        "DCS settings contain a character forbidden by XML 1.0",
+    )
+    .expect("static DCS diagnostic is bounded")
+    .with_profiles(
+        Some(settings.provenance().source_profile().clone()),
+        Some(target_profile.clone()),
+    )
+    .with_context("dcs.field", field)
+    .expect("static DCS field name fits diagnostic context");
+    DcsSerializationError {
+        diagnostic: Box::new(diagnostic),
+        missing_decisions: Vec::new(),
     }
 }
 
@@ -551,25 +659,39 @@ mod tests {
         }
     }
 
+    fn empty_envelope(list_settings: bool) -> DcsSettingsEnvelope {
+        let settings = ibcmd_core::dcs::DcsSettings::new(
+            None,
+            Some(EnumToken::new("QuickAccess").unwrap()),
+            OpaqueFacets::new(Vec::new()).unwrap(),
+            provenance("platform:8.3.24", "settings"),
+        )
+        .unwrap();
+        if list_settings {
+            DcsSettingsEnvelope::list_settings(settings)
+        } else {
+            DcsSettingsEnvelope::settings(settings)
+        }
+    }
+
+    fn invalid_text_envelope(list_settings: bool, invalid: char) -> DcsSettingsEnvelope {
+        let settings = ibcmd_core::dcs::DcsSettings::new(
+            Some(CanonicalText::new(&format!("bad{invalid}value")).unwrap()),
+            None,
+            OpaqueFacets::new(Vec::new()).unwrap(),
+            provenance("platform:8.3.24", "settings"),
+        )
+        .unwrap();
+        if list_settings {
+            DcsSettingsEnvelope::list_settings(settings)
+        } else {
+            DcsSettingsEnvelope::settings(settings)
+        }
+    }
+
     #[test]
     fn every_dcs_writer_decision_is_explicitly_verified_or_pending() {
         assert_eq!(DCS_WRITER_EVIDENCE.len(), 11);
-        assert_eq!(
-            DCS_WRITER_EVIDENCE
-                .iter()
-                .filter(|entry| entry.status == DcsWriterEvidenceStatus::Verified)
-                .map(|entry| entry.decision)
-                .collect::<Vec<_>>(),
-            vec![
-                DcsWriterDecision::ItemsUserSettingIdQName,
-                DcsWriterDecision::ItemsUserSettingIdOrder,
-                DcsWriterDecision::ItemsUserSettingIdDefaultEmission,
-                DcsWriterDecision::ItemsViewModeQName,
-                DcsWriterDecision::ItemsViewModeOrder,
-                DcsWriterDecision::ItemsViewModeDefaultEmission,
-                DcsWriterDecision::FormListSettingsDelegate,
-            ]
-        );
         assert!(
             DCS_WRITER_EVIDENCE
                 .iter()
@@ -578,86 +700,53 @@ mod tests {
         assert_eq!(
             DCS_WRITER_EVIDENCE
                 .iter()
-                .filter(|entry| entry.status == DcsWriterEvidenceStatus::Pending)
+                .filter(|entry| entry.status == DcsWriterEvidenceStatus::Verified)
                 .map(|entry| entry.decision)
                 .collect::<Vec<_>>(),
             vec![
                 DcsWriterDecision::StandaloneDocumentQName,
                 DcsWriterDecision::FormListSettingsWrapperQName,
                 DcsWriterDecision::SettingsTypeId,
+                DcsWriterDecision::ItemsUserSettingIdQName,
+                DcsWriterDecision::ItemsUserSettingIdOrder,
+                DcsWriterDecision::ItemsUserSettingIdDefaultEmission,
+                DcsWriterDecision::ItemsViewModeQName,
+                DcsWriterDecision::ItemsViewModeOrder,
+                DcsWriterDecision::ItemsViewModeDefaultEmission,
                 DcsWriterDecision::OpaqueExtensionPlacement,
+                DcsWriterDecision::FormListSettingsDelegate,
             ]
         );
     }
 
     #[test]
-    fn full_preflight_reports_only_context_and_input_relevant_missing_facts() {
+    fn known_settings_preflight_yields_context_exact_permits() {
         let target = ProfileId::parse("platform:8.3.24").unwrap();
         let standalone =
-            preflight_dcs_settings_serialization(&envelope(false, None), &target).unwrap_err();
-        let form =
-            preflight_dcs_settings_serialization(&envelope(true, None), &target).unwrap_err();
-
-        assert_eq!(
-            standalone.diagnostic().code().as_str(),
-            DCS_WRITER_EVIDENCE_PENDING_CODE
-        );
-        assert_eq!(
-            form.diagnostic().code().as_str(),
-            DCS_WRITER_EVIDENCE_PENDING_CODE
-        );
-        assert_eq!(
-            standalone.missing_decisions(),
-            [
-                DcsWriterDecision::StandaloneDocumentQName,
-                DcsWriterDecision::SettingsTypeId,
-            ]
-        );
-        assert_eq!(
-            form.missing_decisions(),
-            [
-                DcsWriterDecision::FormListSettingsWrapperQName,
-                DcsWriterDecision::SettingsTypeId,
-            ]
-        );
-        assert!(
-            !standalone
-                .missing_decisions()
-                .contains(&DcsWriterDecision::FormListSettingsWrapperQName)
-        );
-        assert!(
-            !form
-                .missing_decisions()
-                .contains(&DcsWriterDecision::StandaloneDocumentQName)
-        );
-        assert!(
-            !standalone
-                .missing_decisions()
-                .contains(&DcsWriterDecision::OpaqueExtensionPlacement)
-        );
-        assert!(
-            !form
-                .missing_decisions()
-                .contains(&DcsWriterDecision::OpaqueExtensionPlacement)
-        );
+            preflight_dcs_settings_serialization(&envelope(false, None), &target).unwrap();
+        let form = preflight_dcs_settings_serialization(&envelope(true, None), &target).unwrap();
+        assert!(!standalone.is_form_list_settings());
+        assert!(form.is_form_list_settings());
+        assert_eq!(standalone.target_profile(), &target);
+        assert_eq!(form.target_profile(), &target);
     }
 
     #[test]
-    fn aggregate_evidence_matrix_still_contains_the_four_exact_missing_facts() {
-        let expected = [
-            DcsWriterDecision::StandaloneDocumentQName,
-            DcsWriterDecision::FormListSettingsWrapperQName,
-            DcsWriterDecision::SettingsTypeId,
-            DcsWriterDecision::OpaqueExtensionPlacement,
-        ];
+    fn aggregate_evidence_matrix_has_no_pending_fact_and_explicit_negative_opaque_source() {
         assert_eq!(
             DCS_WRITER_EVIDENCE
                 .iter()
                 .filter(|entry| entry.status == DcsWriterEvidenceStatus::Pending)
                 .map(|entry| entry.decision)
                 .collect::<Vec<_>>(),
-            expected
+            []
         );
+        let opaque = DCS_WRITER_EVIDENCE
+            .iter()
+            .find(|entry| entry.decision == DcsWriterDecision::OpaqueExtensionPlacement)
+            .unwrap();
+        assert_eq!(opaque.status, DcsWriterEvidenceStatus::Verified);
+        assert!(opaque.source.contains("no-lossless-placement"));
     }
 
     #[test]
@@ -707,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn same_profile_opaque_is_accepted_but_placement_stays_evidence_gated() {
+    fn opaque_settings_fail_closed_with_a_stable_unsupported_decision() {
         let target = ProfileId::parse("platform:8.3.24").unwrap();
         let error = preflight_dcs_settings_serialization(
             &envelope(false, Some("platform:8.3.24")),
@@ -715,50 +804,105 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(
+            error.diagnostic().code().as_str(),
+            DCS_OPAQUE_NO_LOSSLESS_PLACEMENT_CODE
+        );
+        assert_eq!(
             error.missing_decisions(),
-            [
-                DcsWriterDecision::StandaloneDocumentQName,
-                DcsWriterDecision::SettingsTypeId,
-                DcsWriterDecision::OpaqueExtensionPlacement,
-            ]
+            [DcsWriterDecision::OpaqueExtensionPlacement]
+        );
+        assert_eq!(
+            error
+                .diagnostic()
+                .context()
+                .get("schema.unsupported-key")
+                .unwrap(),
+            DcsWriterDecision::OpaqueExtensionPlacement.schema_key()
+        );
+        assert_eq!(
+            emit_dcs_settings_envelope(&envelope(false, Some("platform:8.3.24")), &target)
+                .unwrap_err()
+                .diagnostic()
+                .code()
+                .as_str(),
+            DCS_OPAQUE_NO_LOSSLESS_PLACEMENT_CODE
         );
     }
 
     #[test]
-    fn cross_profile_opaque_fails_before_schema_decisions_and_never_yields_a_permit() {
+    fn opaque_settings_never_fall_back_to_cross_profile_replay() {
         let target = ProfileId::parse("platform:8.3.25").unwrap();
         let error =
             preflight_dcs_settings_serialization(&envelope(true, Some("platform:8.3.24")), &target)
                 .unwrap_err();
         assert_eq!(
             error.diagnostic().code().as_str(),
-            "opaque.cross-profile-emit-forbidden"
+            DCS_OPAQUE_NO_LOSSLESS_PLACEMENT_CODE
         );
-        assert!(error.missing_decisions().is_empty());
+        assert_eq!(
+            error.missing_decisions(),
+            [DcsWriterDecision::OpaqueExtensionPlacement]
+        );
     }
 
     #[test]
-    fn pending_schema_keys_have_stable_sorted_diagnostic_context() {
+    fn exact_standalone_and_form_envelopes_have_no_xsi_type() {
         let target = ProfileId::parse("platform:8.3.24").unwrap();
-        let error =
-            preflight_dcs_settings_serialization(&envelope(false, None), &target).unwrap_err();
-        let expected = error
-            .missing_decisions()
-            .iter()
-            .map(|decision| decision.schema_key())
-            .collect::<Vec<_>>()
-            .join(",");
+        let standalone = emit_dcs_settings_envelope(&envelope(false, None), &target).unwrap();
+        let form = emit_dcs_settings_envelope(&envelope(true, None), &target).unwrap();
         assert_eq!(
-            error
-                .diagnostic()
-                .context()
-                .get("schema.missing-keys")
-                .unwrap(),
-            &expected
+            standalone,
+            concat!(
+                "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">\r\n",
+                "\t<itemsUserSettingID>main-settings</itemsUserSettingID>\r\n",
+                "</Settings>\r\n",
+            )
         );
         assert_eq!(
-            error.diagnostic().context().get("schema.release").unwrap(),
-            DCS_WRITER_EVIDENCE_RELEASE
+            form,
+            concat!(
+                "<ListSettings xmlns=\"http://v8.1c.ru/8.3/xcf/logform\">\r\n",
+                "\t<itemsUserSettingID xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">main-settings</itemsUserSettingID>\r\n",
+                "</ListSettings>\r\n",
+            )
         );
+        assert!(!standalone.contains("xsi:type"));
+        assert!(!form.contains("xsi:type"));
+    }
+
+    #[test]
+    fn default_settings_use_the_verified_empty_element_shape_in_both_contexts() {
+        let target = ProfileId::parse("platform:8.3.24").unwrap();
+        assert_eq!(
+            emit_dcs_settings_envelope(&empty_envelope(false), &target).unwrap(),
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>\r\n"
+        );
+        assert_eq!(
+            emit_dcs_settings_envelope(&empty_envelope(true), &target).unwrap(),
+            "<ListSettings xmlns=\"http://v8.1c.ru/8.3/xcf/logform\"/>\r\n"
+        );
+    }
+
+    #[test]
+    fn invalid_xml_text_is_rejected_before_any_envelope_is_returned() {
+        let target = ProfileId::parse("platform:8.3.24").unwrap();
+        for list_settings in [false, true] {
+            for invalid in ['\0', '\u{1f}', '\u{fffe}', '\u{ffff}'] {
+                let error = emit_dcs_settings_envelope(
+                    &invalid_text_envelope(list_settings, invalid),
+                    &target,
+                )
+                .unwrap_err();
+                assert_eq!(
+                    error.diagnostic().code().as_str(),
+                    DCS_INVALID_XML_VALUE_CODE
+                );
+                assert_eq!(
+                    error.diagnostic().context().get("dcs.field").unwrap(),
+                    "itemsUserSettingID"
+                );
+                assert!(error.missing_decisions().is_empty());
+            }
+        }
     }
 }
