@@ -2,6 +2,7 @@
 
 mod business_objects;
 mod characteristics;
+mod children;
 mod common;
 mod common_objects;
 mod constant;
@@ -23,6 +24,7 @@ pub use characteristics::{
     CharacteristicsXmlError, render_cct_characteristics_xml, render_characteristics_xml,
     render_metadata_characteristics_xml,
 };
+pub use children::{CctTemplateChildrenError, append_cct_template_children};
 pub use common::{
     MetadataDecodeError, MetadataEnvelope, decode_configuration_envelope, decode_metadata_envelope,
     decode_metadata_envelope_with_dialect,

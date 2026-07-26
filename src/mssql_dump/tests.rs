@@ -2507,15 +2507,10 @@ fn business_process_and_cct_reject_a_misordered_marker_at_each_native_role() {
 }
 
 #[test]
-fn cct_template_and_command_and_bp_template_are_exact_typed_unsupported() {
+fn cct_command_and_bp_template_are_exact_typed_unsupported() {
     let cases = [
         (
             &EXPECTED_OWNER_GRAPH_LAYOUTS[2],
-            owner_graph::OwnerCollectionRole::Template,
-            "owned_template",
-        ),
-        (
-            &EXPECTED_OWNER_GRAPH_LAYOUTS[3],
             owner_graph::OwnerCollectionRole::Template,
             "owned_template",
         ),
@@ -2566,6 +2561,136 @@ fn cct_template_and_command_and_bp_template_are_exact_typed_unsupported() {
         assert_eq!(diagnostic.collection_role.as_deref(), Some(role.as_str()));
         assert_eq!(diagnostic.collection_index, Some(0));
         assert_eq!(diagnostic.offending_reference.as_deref(), Some(reference));
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+    }
+}
+
+#[test]
+fn parse_cct_child_templates_validates_paths_identity_and_names() {
+    let first = "11111111-1111-4111-8111-111111111111".to_string();
+    let second = "22222222-2222-4222-8222-222222222222".to_string();
+    let owner = "Characteristics";
+    let template = |name: &str| TemplateSourceReference {
+        relative_path: PathBuf::from(format!(
+            "ChartsOfCharacteristicTypes/{owner}/Templates/{name}.xml"
+        )),
+        kind: "Template",
+        template_type: "SpreadsheetDocument",
+    };
+    let refs = BTreeMap::from([
+        (first.clone(), template("First")),
+        (second.clone(), template("Second")),
+    ]);
+
+    assert_eq!(
+        parse_cct_child_templates(owner, &[second.clone(), first.clone()], &refs),
+        Some(vec!["Second".to_string(), "First".to_string()])
+    );
+    assert_eq!(
+        parse_cct_child_templates(owner, &["missing".to_string()], &refs),
+        None
+    );
+
+    let mut wrong_kind = BTreeMap::from([(first.clone(), template("First"))]);
+    wrong_kind.get_mut(&first).unwrap().kind = "Form";
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone()], &wrong_kind),
+        None
+    );
+
+    let mut wrong_owner = BTreeMap::from([(first.clone(), template("First"))]);
+    wrong_owner.get_mut(&first).unwrap().relative_path =
+        PathBuf::from("ChartsOfCharacteristicTypes/Other/Templates/First.xml");
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone()], &wrong_owner),
+        None
+    );
+
+    let mut wrong_path = BTreeMap::from([(first.clone(), template("First"))]);
+    wrong_path.get_mut(&first).unwrap().relative_path =
+        PathBuf::from("ChartsOfCharacteristicTypes/Characteristics/Forms/First.xml");
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone()], &wrong_path),
+        None
+    );
+
+    let ambiguous_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string();
+    let ambiguous = BTreeMap::from([
+        (ambiguous_uuid.clone(), template("First")),
+        (ambiguous_uuid.to_ascii_uppercase(), template("First")),
+    ]);
+    assert_eq!(
+        parse_cct_child_templates(owner, &[ambiguous_uuid], &ambiguous),
+        None
+    );
+
+    let duplicate_names = BTreeMap::from([
+        (first.clone(), template("Duplicate")),
+        (second.clone(), template("dUpLiCaTe")),
+    ]);
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone(), second.clone()], &duplicate_names),
+        None
+    );
+
+    let unicode_duplicate_names = BTreeMap::from([
+        (first.clone(), template("Шаблон")),
+        (second.clone(), template("шаблон")),
+    ]);
+    assert_eq!(
+        parse_cct_child_templates(
+            owner,
+            &[first.clone(), second.clone()],
+            &unicode_duplicate_names
+        ),
+        None
+    );
+
+    let mut header_mismatch = BTreeMap::from([(first.clone(), template("First"))]);
+    header_mismatch.get_mut(&first).unwrap().relative_path =
+        PathBuf::from("ChartsOfCharacteristicTypes/Characteristics/Templates/First.bad");
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first], &header_mismatch),
+        None
+    );
+}
+
+#[test]
+fn task_internal_uuid_slots_normalize_zero_and_report_typed_malformed_slots() {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let first = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+    let second = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB";
+    for (field_13, field_14, expected_13, expected_14) in [
+        (zero, zero, None, None),
+        (first, zero, Some(first.to_ascii_lowercase()), None),
+        (zero, second, None, Some(second.to_ascii_lowercase())),
+        (
+            first,
+            second,
+            Some(first.to_ascii_lowercase()),
+            Some(second.to_ascii_lowercase()),
+        ),
+    ] {
+        let mut fields = vec![zero; 15];
+        fields[13] = field_13;
+        fields[14] = field_14;
+        let slots = parse_task_internal_uuid_slots(&fields).unwrap();
+        assert_eq!(slots.field_13, expected_13);
+        assert_eq!(slots.field_14, expected_14);
+    }
+
+    for field_index in [13, 14] {
+        let secret = "malformed-uuid-must-not-leak";
+        let mut fields = vec![zero; 15];
+        fields[field_index] = secret;
+        let diagnostic = parse_task_internal_uuid_slots(&fields).unwrap_err();
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Malformed);
+        assert_eq!(diagnostic.family, "Task");
+        assert_eq!(diagnostic.parser_stage, "task_internal_uuid_slot");
+        assert_eq!(diagnostic.structural_signature, "uuid_syntax");
+        assert_eq!(diagnostic.field_index, Some(field_index));
+        assert_eq!(diagnostic.offending_reference, None);
+        assert_eq!(diagnostic.reference_uuid, None);
         assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
     }
 }

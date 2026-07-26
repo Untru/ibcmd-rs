@@ -5,11 +5,80 @@
 //! and verified EDT produced-type order.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{MetadataOrderError, order_metadata_features};
 
 pub(crate) const ROOT_DISCRIMINATOR: &str = "1";
+
+/// Schema-neutral view of a physical owned-template reference.
+pub(crate) struct OwnedTemplateReference<'a> {
+    pub(crate) uuid: &'a str,
+    pub(crate) kind: &'a str,
+    pub(crate) relative_path: &'a Path,
+    pub(crate) canonical_reference: Option<String>,
+}
+
+/// Resolves a declared owned-template UUID collection into canonical child
+/// names without putting name/path policy in a physical adapter.
+pub(crate) fn resolve_owned_template_names(
+    owner_kind: &str,
+    owner_folder: &str,
+    owner_name: &str,
+    child_folder: &str,
+    template_kind: &str,
+    template_uuids: &[String],
+    references: &[OwnedTemplateReference<'_>],
+) -> Option<Vec<String>> {
+    let expected_prefix = format!("{owner_kind}.{owner_name}.{template_kind}.");
+    let mut seen_names = BTreeSet::new();
+    let mut names = Vec::with_capacity(template_uuids.len());
+    for uuid in template_uuids {
+        let mut matches = references
+            .iter()
+            .filter(|reference| reference.uuid.eq_ignore_ascii_case(uuid));
+        let reference = matches.next()?;
+        if matches.next().is_some() || reference.kind != template_kind {
+            return None;
+        }
+        let parts = reference
+            .relative_path
+            .iter()
+            .filter_map(|part| part.to_str())
+            .collect::<Vec<_>>();
+        if parts.len() != 4
+            || parts.first().copied() != Some(owner_folder)
+            || parts.get(1).copied() != Some(owner_name)
+            || parts.get(2).copied() != Some(child_folder)
+        {
+            return None;
+        }
+        let file_name = reference.relative_path.file_name()?.to_str()?;
+        let path_name = file_name.strip_suffix(".xml")?;
+        let canonical_name = reference
+            .canonical_reference
+            .as_deref()?
+            .strip_prefix(&expected_prefix)?;
+        if path_name != canonical_name
+            || canonical_name.is_empty()
+            || canonical_name.contains('.')
+            || !seen_names.insert(canonical_name.to_lowercase())
+        {
+            return None;
+        }
+        names.push(canonical_name.to_string());
+    }
+    Some(names)
+}
+
+/// Verifies the four currently reserved Task owner slots as a schema-owned
+/// invariant instead of a physical-adapter name/value special case.
+pub(crate) fn task_reserved_tail_is_zero(fields: &[&str]) -> bool {
+    fields
+        .get(48..52)
+        .is_some_and(|reserved| reserved.iter().all(|field| field.trim() == "0"))
+}
 
 // Characteristics vocabulary is schema data recovered from the EDT model.
 // The physical adapter consumes these closed tables and keeps parsing logic

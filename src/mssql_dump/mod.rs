@@ -6311,6 +6311,7 @@ struct ChartOfCharacteristicTypesProperties {
     execute_after_write_data_history_version_processing: bool,
     child_metadata_objects: Vec<MetadataChildObject>,
     child_forms: Vec<String>,
+    child_templates: Vec<String>,
 }
 
 struct DocumentJournalProperties {
@@ -6864,6 +6865,7 @@ struct BusinessProcessProperties {
 
 struct TaskProperties {
     generated_types: Vec<GeneratedTypeEntry>,
+    internal_uuid_slots: TaskInternalUuidSlots,
     use_standard_commands: bool,
     number_type: &'static str,
     number_length: u32,
@@ -6907,6 +6909,26 @@ struct TaskProperties {
     child_forms: Vec<String>,
     addressing_attributes: Vec<TaskAddressingAttribute>,
     child_commands: Vec<MetadataChildCommand>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TaskInternalUuidSlots {
+    /// Native owner field 13. EDT/native XML does not expose this field, so
+    /// the schema model retains its validated identity without inventing an
+    /// XML property name or placement.
+    field_13: Option<String>,
+    /// Native owner field 14. Its semantic label is not proven by the current
+    /// corpus; only the canonical UUID/absence contract is known.
+    field_14: Option<String>,
+}
+
+impl TaskInternalUuidSlots {
+    fn acknowledge_internal_only(&self) {
+        // Reading the retained identities here makes the serialization
+        // boundary explicit: both slots were decoded and validated, while
+        // native/EDT XML provides no element into which either value belongs.
+        let _ = (&self.field_13, &self.field_14);
+    }
 }
 
 struct MetadataStandardAttribute {
@@ -8912,6 +8934,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             object_refs,
             metadata_object_refs,
             form_refs,
+            template_refs,
             owner_graph_diagnostic,
         )?;
         format_chart_of_characteristic_types_source_xml(header, &chart, source_version)?
@@ -8949,6 +8972,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             object_refs,
             metadata_object_refs,
             form_refs,
+            owner_graph_diagnostic,
         )?;
         format_task_source_xml(&header, &task, source_version).into_bytes()
     } else if kind == "SettingsStorage" {
@@ -10971,7 +10995,7 @@ fn validate_owner_graph_owned_forms(
         }
         let resolved =
             parse_exact_register_owned_form_ref(uuid, family.as_str(), owner_name, form_refs)??;
-        if !resolved_names.insert(resolved.to_ascii_lowercase()) {
+        if !resolved_names.insert(resolved.to_lowercase()) {
             *diagnostic = Some(owner_graph_owned_child_diagnostic(
                 family,
                 owner_graph::OwnerCollectionRole::Form,
@@ -11036,7 +11060,7 @@ fn validate_owner_graph_owned_templates(
             .find(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid))?
             .1;
         let resolved = template_source_reference_name(template)?;
-        if !resolved_names.insert(resolved.to_ascii_lowercase()) {
+        if !resolved_names.insert(resolved.to_lowercase()) {
             *diagnostic = Some(owner_graph_owned_child_diagnostic(
                 family,
                 owner_graph::OwnerCollectionRole::Template,
@@ -19335,6 +19359,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
     owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<ChartOfCharacteristicTypesProperties> {
     let owner_graph = decode_owner_graph_for_family_parser(
@@ -19375,18 +19400,8 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         owner_graph_diagnostic,
     )?;
 
-    // Templates and commands have declared roles in the native graph, but
-    // their payload parsers belong to later slices. Reject before mutating the
-    // child identity ledger so unsupported payload cannot affect provenance.
-    if !template_collection.items.is_empty() {
-        *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
-            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
-            owner_graph::OwnerCollectionRole::Template,
-            0,
-            owner_graph::OwnerGraphReference::OwnedTemplate,
-        ));
-        return None;
-    }
+    // Commands still have no proven CCT payload parser. Templates are handled
+    // below through the shared owner/path/kind validator.
     if !command_collection.items.is_empty() {
         *owner_graph_diagnostic = Some(owner_graph_unsupported_collection_item_diagnostic(
             owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
@@ -19431,6 +19446,21 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         return None;
     }
     let child_forms = parse_cct_child_forms(&header.name, &form_uuids, form_refs)?;
+    let template_uuids = parse_owner_graph_child_uuid_collection(
+        &template_collection.items,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Template,
+        owner_graph::OwnerGraphReference::OwnedTemplate,
+        owner_graph_diagnostic,
+    )?;
+    validate_owner_graph_owned_templates(
+        &template_uuids,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        &header.name,
+        template_refs,
+        owner_graph_diagnostic,
+    )?;
+    let child_templates = parse_cct_child_templates(&header.name, &template_uuids, template_refs)?;
 
     let mut child_ids = BTreeSet::new();
     let mut child_metadata_objects = parse_cct_direct_attributes_indexed(
@@ -19503,6 +19533,13 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
         owner_graph::OwnerCollectionRole::Form,
         form_uuids.clone(),
+        owner_graph_diagnostic,
+    )?;
+    record_owner_graph_child_ids(
+        &mut identities,
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::Template,
+        template_uuids,
         owner_graph_diagnostic,
     )?;
 
@@ -19659,6 +19696,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         )?,
         child_metadata_objects,
         child_forms,
+        child_templates,
         characteristics,
     })
 }
@@ -19787,6 +19825,31 @@ fn parse_cct_child_forms(
         names.push(name.to_string());
     }
     Some(names)
+}
+
+fn parse_cct_child_templates(
+    owner_name: &str,
+    template_uuids: &[String],
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> Option<Vec<String>> {
+    let references = template_refs
+        .iter()
+        .map(|(uuid, template_ref)| owner_graph::OwnedTemplateReference {
+            uuid,
+            kind: template_ref.kind,
+            relative_path: &template_ref.relative_path,
+            canonical_reference: template_source_reference_name(template_ref),
+        })
+        .collect::<Vec<_>>();
+    owner_graph::resolve_owned_template_names(
+        "ChartOfCharacteristicTypes",
+        "ChartsOfCharacteristicTypes",
+        owner_name,
+        OWNER_GRAPH_TEMPLATE_FOLDER,
+        OWNER_GRAPH_TEMPLATE_KIND,
+        template_uuids,
+        &references,
+    )
 }
 
 const CCT_STANDARD_ATTRIBUTES: [(&str, &str); 9] = [
@@ -23521,6 +23584,7 @@ fn parse_task_properties_from_text(
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<TaskProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
@@ -23648,10 +23712,16 @@ fn parse_task_properties_from_text(
         choice_data_get_mode_on_input_by_string,
     ) = parse_owner_input_modes(fields.get(47)?)?;
 
-    if !settings_storage_uuid_is_zero(fields.get(13)?)
-        || !settings_storage_uuid_is_zero(fields.get(14)?)
-        || !task_characteristics_is_empty(fields.get(44)?)
-        || fields[48..52].iter().any(|field| field.trim() != "0")
+    let internal_uuid_slots = match parse_task_internal_uuid_slots(&fields) {
+        Ok(slots) => slots,
+        Err(diagnostic) => {
+            *owner_graph_diagnostic = Some(diagnostic);
+            return None;
+        }
+    };
+
+    if !task_characteristics_is_empty(fields.get(44)?)
+        || !owner_graph::task_reserved_tail_is_zero(&fields)
     {
         return None;
     }
@@ -23673,6 +23743,7 @@ fn parse_task_properties_from_text(
 
     Some(TaskProperties {
         generated_types,
+        internal_uuid_slots,
         use_standard_commands: information_register_bool(fields.get(2)?)?,
         number_type: match fields.get(18)?.trim() {
             "0" => "Number",
@@ -23746,6 +23817,39 @@ fn parse_task_properties_from_text(
         addressing_attributes,
         child_commands,
     })
+}
+
+fn parse_task_internal_uuid_slots(
+    fields: &[&str],
+) -> std::result::Result<TaskInternalUuidSlots, MetadataSourceExtractionDiagnostic> {
+    Ok(TaskInternalUuidSlots {
+        field_13: parse_task_internal_uuid_slot(fields.get(13), 13)?,
+        field_14: parse_task_internal_uuid_slot(fields.get(14), 14)?,
+    })
+}
+
+fn parse_task_internal_uuid_slot(
+    value: Option<&&str>,
+    field_index: usize,
+) -> std::result::Result<Option<String>, MetadataSourceExtractionDiagnostic> {
+    let Some(uuid) = value.and_then(|value| parse_information_register_uuid(value)) else {
+        return Err(malformed_task_internal_uuid_slot_diagnostic(field_index));
+    };
+    let uuid = uuid.to_ascii_lowercase();
+    Ok((!information_register_uuid_is_zero(&uuid)).then_some(uuid))
+}
+
+fn malformed_task_internal_uuid_slot_diagnostic(
+    field_index: usize,
+) -> MetadataSourceExtractionDiagnostic {
+    let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
+        MetadataSourceFailureClass::Malformed,
+        "Task",
+        "task_internal_uuid_slot",
+        "uuid_syntax",
+    );
+    diagnostic.field_index = Some(field_index);
+    diagnostic
 }
 
 fn parse_owner_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
@@ -30491,6 +30595,8 @@ fn format_chart_of_characteristic_types_source_xml(
         }
         children.push_str("\t\t</ChildObjects>\r\n");
     }
+    let children =
+        ibcmd_xml::append_cct_template_children(children, &chart.child_templates).ok()?;
     if let Some(index) = xml.find("\t</ChartOfCharacteristicTypes>\r\n") {
         xml.insert_str(index, &children);
     }
@@ -31282,6 +31388,7 @@ fn format_task_source_xml(
     task: &TaskProperties,
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
+    task.internal_uuid_slots.acknowledge_internal_only();
     let mut xml = format_full_metadata_source_xml("Task", header, source_version);
     let internal_info = format_generated_types_internal_info_xml(&task.generated_types);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
