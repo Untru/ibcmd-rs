@@ -45473,16 +45473,55 @@ fn extracts_document_generated_types_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_fields = std::iter::repeat("0")
-        .take(20)
-        .collect::<Vec<_>>()
-        .join(",");
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{zero_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
+    let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    header.uuid = document_uuid.to_owned();
+    header.name = "Invoice".to_owned();
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    fields[9] =
+        format!("{{0,{{3,{{1,0,{document_uuid}}},\"Invoice\",{{0}},\"\",0,0,{zero_uuid},0}}}}");
+    fields[10] = zero_uuid.to_owned();
+    fields[11] = "0".to_owned();
+    fields[12] = "0".to_owned();
+    fields[13] = "0".to_owned();
+    fields[14] = "0".to_owned();
+    fields[15] = "0".to_owned();
+    for field_index in [16, 17, 18, 35, 36, 37] {
+        fields[field_index] = zero_uuid.to_owned();
+    }
+    for field_index in [
+        19, 20, 21, 23, 25, 28, 30, 31, 33, 34, 43, 44, 46, 49, 50, 51, 52,
+    ] {
+        fields[field_index] = "0".to_owned();
+    }
+    for field_index in [22, 24] {
+        fields[field_index] = "{0,0}".to_owned();
+    }
+    for field_index in [29, 47] {
+        fields[field_index] = "{1,{0,0}}".to_owned();
+    }
+    fields[32] = "{0}".to_owned();
+    for field_index in [38, 39, 40, 41, 42] {
+        fields[field_index] = "{0}".to_owned();
+    }
+    fields[48] = "{1,2,0}".to_owned();
+    let text = render_owner_graph_fixture_for_test(&fields, &collections);
+    let row = MetadataTextRow {
+        file_name: document_uuid.to_owned(),
+        text: text.clone(),
+        object_code: Some(40),
+        header: Some(header.clone()),
+        kind: Some("Document".to_owned()),
+        folder: Some("Documents"),
+    };
+    audit_owner_graph_row_for_test(&row).unwrap();
+    let document_blob = deflate_for_test(text.as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
