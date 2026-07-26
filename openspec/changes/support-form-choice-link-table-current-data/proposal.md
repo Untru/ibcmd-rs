@@ -25,6 +25,8 @@ terminal={positive-column-id}
 - Доказанный последующим run вариант terminal `{0,metadata-binding-uuid}`
   разрешается через отдельный однозначный индекс связи таблицы и её дочернего
   поля.
+- Вариант `{positive-binding-id,metadata-binding-uuid}` использует тот же
+  индекс и при наличии numeric route требует совпадения канонических путей.
 - Зеркала `5006/5007` сравниваются до semantic resolution.
 - Неизвестные table/column ids остаются opaque/fail-closed.
 
@@ -58,3 +60,6 @@ terminal={0,461bb43b-8803-4f48-811f-6beef397ee4c}
 Raw child binding той же формы связывает этот UUID с таблицей item `81` и
 полем `Отправитель`; native XML даёт
 `Items.ВыбранныеОтправители.CurrentData.Отправитель`.
+
+Run `E:\ibcmd_lab\parity\ut_ibcmd_20260726_full_54ca4ee_g_ut` доказал три
+варианта `{positive-binding-id,uuid}` для таблиц формы `НастройкиРМК`.

@@ -4,15 +4,16 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 use ibcmd_schema::{
-    FormChoiceParameterLink, FormChoiceParameterValue, FormChoiceParameterValuePart,
-    FormChoiceParameters, FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy,
-    WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+    FormChoiceParameterArrayItemValue, FormChoiceParameterLink, FormChoiceParameterValue,
+    FormChoiceParameterValuePart, FormChoiceParameters, FormChoiceParametersEmptyCollection,
+    SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
     canonical_form_choice_parameters_qname, form_choice_parameter_cluster_order,
 };
 
 const MAX_INDENT: usize = 64;
 const MAX_VALUE_BYTES: usize = 32 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+const XML_SCHEMA_STRING_TYPE: &str = "xs:string";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormChoiceParametersEmitError {
@@ -232,7 +233,14 @@ fn preflight(
             FormChoiceParameterValue::FixedArray(values) => {
                 for value in values {
                     validate_presentation(value.presentation())?;
-                    validate_value("design-time reference", value.value_ref())?;
+                    match value.value() {
+                        FormChoiceParameterArrayItemValue::DesignTimeRef(reference) => {
+                            validate_value("design-time reference", reference)?;
+                        }
+                        FormChoiceParameterArrayItemValue::String(value) => {
+                            validate_value("string", value)?;
+                        }
+                    }
                 }
             }
         }
@@ -394,13 +402,17 @@ fn emit_value(
                             sink.push("<")?;
                             sink.push(&policy.scalar_value)?;
                             sink.push(" xsi:type=\"")?;
-                            push_escaped(
-                                sink,
-                                &policy.design_time_ref_xsi_type,
-                                EscapeMode::Attribute,
-                            )?;
+                            let (xsi_type, value) = match entry.value() {
+                                FormChoiceParameterArrayItemValue::DesignTimeRef(reference) => {
+                                    (policy.design_time_ref_xsi_type.as_str(), reference.as_str())
+                                }
+                                FormChoiceParameterArrayItemValue::String(value) => {
+                                    (XML_SCHEMA_STRING_TYPE, value.as_str())
+                                }
+                            };
+                            push_escaped(sink, xsi_type, EscapeMode::Attribute)?;
                             sink.push("\">")?;
-                            push_escaped(sink, entry.value_ref(), EscapeMode::Text)?;
+                            push_escaped(sink, value, EscapeMode::Text)?;
                             sink.push("</")?;
                             sink.push(&policy.scalar_value)?;
                             sink.push(">\r\n")?;
@@ -602,6 +614,24 @@ mod tests {
         )
     }
 
+    fn mixed_fixed_array() -> FormChoiceParameters {
+        let reference = format!(
+            "{{\"#\",{DISCRIMINATOR},{{0,0,{{\"U\"}},{TYPE_ID},{VALUE_ID},{}}}}}",
+            presentation(&[])
+        );
+        let string = format!(
+            "{{\"#\",{DISCRIMINATOR},{{0,1,{{\"S\",\"ПринтерЧеков\"}},{NIL},{NIL},{}}}}}",
+            presentation(&[])
+        );
+        parameter(
+            "Mixed",
+            &format!(
+                "{{\"#\",{DISCRIMINATOR},{{0,1,{{\"#\",{ARRAY_TYPE},{{2,{reference},{string}}}}},{NIL},{NIL},{}}}}}",
+                presentation(&[])
+            ),
+        )
+    }
+
     #[test]
     fn empty_model_is_omitted() {
         let parameters = parse_form_choice_parameters("{0,0}", |_, _| None).unwrap();
@@ -671,6 +701,23 @@ mod tests {
             .unwrap();
         assert!(presentation < value);
         assert!(nonempty.contains("<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">"));
+    }
+
+    #[test]
+    fn mixed_fixed_array_emits_reference_then_schema_string_in_source_order() {
+        let xml = emit_form_choice_parameters(&mixed_fixed_array(), 0).unwrap();
+        let reference = xml
+            .find("<Value xsi:type=\"xr:DesignTimeRef\">Enum.Kind.EnumValue.Value</Value>")
+            .unwrap();
+        let string = xml
+            .find("<Value xsi:type=\"xs:string\">ПринтерЧеков</Value>")
+            .unwrap();
+        assert!(reference < string, "{xml}");
+        assert_eq!(
+            xml.matches("<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">")
+                .count(),
+            2
+        );
     }
 
     #[test]

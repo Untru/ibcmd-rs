@@ -4,6 +4,7 @@
 
 - [x] Добавить typed `TableCurrentData(table_id, terminal)`.
 - [x] Разделить terminal на `BindingId` и `MetadataUuid`.
+- [x] Добавить `BindingUuid { binding_id, uuid }`.
 - [x] Проверить exact platform form-item UUID и canonical positive ids.
 - [x] Сравнивать полностью разобранные 5006/5007 до resolver.
 - [x] Сохранить прежние public API и профили.
@@ -25,11 +26,13 @@
 - [x] Missing table/column остаётся opaque.
 - [x] Exact live hybrid pair direct + table UUID terminal проходит.
 - [x] Wrong UUID kind/nil/case/arity и ambiguous route fail closed.
+- [x] BindingUuid route согласуется с numeric route либо fail closed.
 - [x] Старые direct, standard и metadata UUID профили не регрессируют.
 
 ## Задача 4: Production proof
 
 - [x] Focused schema/form tests проходят.
 - [x] Новый candidate export проходит source form `09ae274e-...`.
+- [x] Новый candidate export проходит UUID-binding source form `0a35aae5-...`.
 - [x] Следующий blocker либо полный diff зафиксирован новым immutable run.
 - [ ] OpenSpec strict validation проходит.

@@ -162,7 +162,14 @@ pub enum FormChoiceParameterValue {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FormChoiceParameterArrayItem {
     presentation: Vec<(String, String)>,
-    value_ref: String,
+    value: FormChoiceParameterArrayItemValue,
+}
+
+/// Typed value of a FixedArray element.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterArrayItemValue {
+    DesignTimeRef(String),
+    String(String),
 }
 
 /// Canonical EDT Form choice-parameter link. Physical source slots are
@@ -280,6 +287,7 @@ pub enum FormChoiceParameterLinkReference {
 pub enum FormChoiceParameterLinkTableCurrentDataTerminal {
     BindingId(u64),
     MetadataUuid(String),
+    BindingUuid { binding_id: u64, uuid: String },
 }
 
 /// The exact native Form item type used by `TableCurrentData` links.
@@ -1088,7 +1096,13 @@ impl FormChoiceParameterArrayItem {
         &self.presentation
     }
     pub fn value_ref(&self) -> &str {
-        &self.value_ref
+        match &self.value {
+            FormChoiceParameterArrayItemValue::DesignTimeRef(value)
+            | FormChoiceParameterArrayItemValue::String(value) => value,
+        }
+    }
+    pub fn value(&self) -> &FormChoiceParameterArrayItemValue {
+        &self.value
     }
 }
 
@@ -1501,6 +1515,18 @@ fn parse_raw_form_choice_parameter_links(
                             uuid.to_string(),
                         )
                     }
+                    [binding_id, uuid] => {
+                        let binding_id = canonical_positive_id(binding_id)?.parse().ok()?;
+                        let uuid_text = uuid.trim();
+                        let uuid = Uuid::parse_str(uuid_text).ok()?;
+                        if uuid.is_nil() || uuid.to_string() != uuid_text {
+                            return None;
+                        }
+                        FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
+                            binding_id,
+                            uuid: uuid.to_string(),
+                        }
+                    }
                     _ => return None,
                 };
                 cursor += 1;
@@ -1601,14 +1627,44 @@ where
     if fields.len() != count.checked_add(1)? {
         return None;
     }
-    fields[1..].iter().map(|item| {
-        let fields = braced_fields_bounded(item, 3)?;
-        if fields.len() != 3 || exact_1c_string(fields[0]).as_deref() != Some("#") || fields[1].trim() != FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR { return None; }
-        let payload = braced_fields_bounded(fields[2], 6)?;
-        let [zero, mode, typed, type_id, value_id, presentation] = payload.as_slice() else { return None; };
-        if zero.trim() != "0" || mode.trim() != "0" || !matches!(braced_fields_bounded(typed, 1)?.as_slice(), [kind] if kind.trim() == r#""U""#) || !non_nil_pair(type_id, value_id) { return None; }
-        Some(FormChoiceParameterArrayItem { presentation: parse_choice_parameter_presentation(presentation)?, value_ref: resolve(type_id.trim(), value_id.trim())? })
-    }).collect()
+    fields[1..]
+        .iter()
+        .map(|item| {
+            let fields = braced_fields_bounded(item, 3)?;
+            if fields.len() != 3
+                || exact_1c_string(fields[0]).as_deref() != Some("#")
+                || fields[1].trim() != FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR
+            {
+                return None;
+            }
+            let payload = braced_fields_bounded(fields[2], 6)?;
+            let [zero, mode, typed, type_id, value_id, presentation] = payload.as_slice() else {
+                return None;
+            };
+            if zero.trim() != "0" {
+                return None;
+            }
+            let typed = braced_fields_bounded(typed, 2)?;
+            let value = match (mode.trim(), typed.as_slice()) {
+                ("0", [kind]) if kind.trim() == r#""U""# && non_nil_pair(type_id, value_id) => {
+                    FormChoiceParameterArrayItemValue::DesignTimeRef(resolve(
+                        type_id.trim(),
+                        value_id.trim(),
+                    )?)
+                }
+                ("1", [kind, value])
+                    if kind.trim() == r#""S""# && exact_nil_pair(type_id, value_id) =>
+                {
+                    FormChoiceParameterArrayItemValue::String(exact_1c_string(value)?)
+                }
+                _ => return None,
+            };
+            Some(FormChoiceParameterArrayItem {
+                presentation: parse_choice_parameter_presentation(presentation)?,
+                value,
+            })
+        })
+        .collect()
 }
 
 fn nil_ids(payload: &[&str]) -> bool {
@@ -1627,6 +1683,10 @@ fn non_nil_ids(payload: &[&str]) -> bool {
 fn non_nil_pair(type_id: &str, value_id: &str) -> bool {
     Uuid::parse_str(type_id.trim()).is_ok_and(|id| !id.is_nil())
         && Uuid::parse_str(value_id.trim()).is_ok_and(|id| !id.is_nil())
+}
+
+fn exact_nil_pair(type_id: &str, value_id: &str) -> bool {
+    type_id.trim() == NIL_UUID && value_id.trim() == NIL_UUID
 }
 
 fn parse_choice_parameter_presentation(raw: &str) -> Option<Vec<(String, String)>> {
@@ -1803,6 +1863,48 @@ mod form_choice_parameters_tests {
         assert!(
             matches!(parse_form_choice_parameters(&envelope(&fixed), resolver).unwrap().items()[0].value(), FormChoiceParameterValue::FixedArray(values) if values.len() == 1)
         );
+    }
+
+    #[test]
+    fn form_choice_parameters_fixed_array_preserves_mixed_reference_and_string_items() {
+        let string_item = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"S\",\"Printer\"}},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        let array = format!("{{2,{},{}}}", reference(), string_item);
+        let fixed_array = format!("{{\"#\",{FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE},{array}}}");
+        let fixed = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{fixed_array},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        let parsed = parse_form_choice_parameters(&envelope(&fixed), resolver).unwrap();
+        let FormChoiceParameterValue::FixedArray(values) = parsed.items()[0].value() else {
+            panic!("expected fixed array");
+        };
+        assert_eq!(values.len(), 2);
+        assert!(matches!(
+            values[0].value(),
+            FormChoiceParameterArrayItemValue::DesignTimeRef(value)
+                if value == "Enum.Status.EnumValue.Active"
+        ));
+        assert!(matches!(
+            values[1].value(),
+            FormChoiceParameterArrayItemValue::String(value) if value == "Printer"
+        ));
+
+        for malformed in [
+            string_item.replace("{\"S\",\"Printer\"}", "{\"S\"}"),
+            string_item.replace(NIL, "00000000-0000-0000-0000-000000000001"),
+            string_item.replace(NIL, "00000000-0000-0000-0000-00000000000A"),
+        ] {
+            let array = format!("{{1,{malformed}}}");
+            let fixed_array = format!("{{\"#\",{FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE},{array}}}");
+            let fixed = format!(
+                "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{fixed_array},{NIL},{NIL},{}}}}}",
+                presentation()
+            );
+            assert!(parse_form_choice_parameters(&envelope(&fixed), resolver).is_none());
+        }
     }
 
     #[test]
@@ -2264,7 +2366,7 @@ mod form_choice_parameters_tests {
         let duplicate = r#"{5007,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c},0,"",""}"#;
         let resolve = |_: &FormChoiceParameterLinkReference| Some("resolved".to_owned());
         for malformed in [
-            r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{1,461bb43b-8803-4f48-811f-6beef397ee4c},0}"#,
+            r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{00,461bb43b-8803-4f48-811f-6beef397ee4c},0}"#,
             r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,00000000-0000-0000-0000-000000000000},0}"#,
             r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4C},0}"#,
             r#"{5006,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c,extra},0}"#,
@@ -2289,6 +2391,69 @@ mod form_choice_parameters_tests {
             parse_form_choice_parameter_links_with_reference_resolver(
                 primary,
                 r#"{5007,1,"Filter.Organization",2,{81,02023637-7868-4a5f-8576-835a76e0c9ba},{0,461bb43b-8803-4f48-811f-6beef397ee4c},0,"x",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::DuplicateMalformed)
+        );
+    }
+
+    #[test]
+    fn form_choice_parameter_links_table_current_data_binding_uuid_is_typed_and_fail_closed() {
+        let primary = r#"{5006,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{18,5bdad865-f2c5-434b-8041-ba4aad3b6687},0}"#;
+        let duplicate = r#"{5007,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{18,5bdad865-f2c5-434b-8041-ba4aad3b6687},0,"",""}"#;
+        let links = parse_form_choice_parameter_links_with_reference_resolver(
+            primary,
+            duplicate,
+            |reference| match reference {
+                FormChoiceParameterLinkReference::TableCurrentData {
+                    table_id: 94,
+                    terminal:
+                        FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
+                            binding_id: 18,
+                            uuid,
+                        },
+                } if uuid == "5bdad865-f2c5-434b-8041-ba4aad3b6687" => {
+                    Some("resolved.binding_uuid".to_owned())
+                }
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].data_path(), "resolved.binding_uuid");
+        assert_eq!(
+            parse_form_choice_parameter_links(primary, duplicate, |_| Some("x".to_owned())),
+            Err(FormChoiceParameterLinksParseError::PrimaryMalformed)
+        );
+
+        let resolve = |_: &FormChoiceParameterLinkReference| Some("resolved".to_owned());
+        for malformed in [
+            r#"{5006,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{018,5bdad865-f2c5-434b-8041-ba4aad3b6687},0}"#,
+            r#"{5006,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{-18,5bdad865-f2c5-434b-8041-ba4aad3b6687},0}"#,
+            r#"{5006,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{18,00000000-0000-0000-0000-000000000000},0}"#,
+            r#"{5006,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{18,5bdad865-f2c5-434b-8041-ba4aad3b668A},0}"#,
+            r#"{5006,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{18,5bdad865-f2c5-434b-8041-ba4aad3b6687,extra},0}"#,
+        ] {
+            assert_eq!(
+                parse_form_choice_parameter_links_with_reference_resolver(
+                    malformed, duplicate, resolve,
+                ),
+                Err(FormChoiceParameterLinksParseError::PrimaryMalformed),
+                "{malformed}"
+            );
+        }
+        assert_eq!(
+            parse_form_choice_parameter_links_with_reference_resolver(
+                primary,
+                r#"{5007,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{18,5bdad865-f2c5-434b-8041-ba4aad3b6688},0,"",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::MirrorMismatch)
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links_with_reference_resolver(
+                primary,
+                r#"{5007,1,"Отбор.Организация",2,{94,02023637-7868-4a5f-8576-835a76e0c9ba},{18,5bdad865-f2c5-434b-8041-ba4aad3b6687},0,"x",""}"#,
                 resolve,
             ),
             Err(FormChoiceParameterLinksParseError::DuplicateMalformed)

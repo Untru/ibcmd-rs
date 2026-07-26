@@ -56,3 +56,11 @@ SHALL NOT read raw form slots or infer paths from application object names.
 - **WHEN** the form indexes are built
 - **THEN** the route is absent from production lookup
 - **AND** ChoiceParameterLinks remains opaque and fails closed.
+
+#### Scenario: Numeric binding id and UUID identify the same column
+
+- **GIVEN** terminal is `{positive-binding-id,canonical UUID}`
+- **AND** the authoritative UUID route exists
+- **WHEN** a numeric route also exists
+- **THEN** both routes SHALL be equal before the link is emitted
+- **AND** disagreement leaves the complete link collection opaque.

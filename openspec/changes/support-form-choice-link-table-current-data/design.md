@@ -5,7 +5,7 @@
 ```text
 raw 5006/5007
   -> ibcmd-schema exact physical decoder
-  -> typed TableCurrentData(table_id, BindingId | MetadataUuid)
+  -> typed TableCurrentData(table_id, BindingId | MetadataUuid | BindingUuid)
   -> mssql form-index resolver
   -> canonical FormChoiceParameterLink
   -> ibcmd-xml writer
@@ -17,7 +17,7 @@ Schema-layer принимает новый профиль только при т
 - owner содержит canonical positive table id и exact
   `02023637-7868-4a5f-8576-835a76e0c9ba`;
 - terminal содержит либо один canonical positive column id, либо точную пару
-  `{0,canonical-lowercase-non-nil-uuid}`;
+  `{canonical-binding-id,canonical-lowercase-non-nil-uuid}`;
 - duplicate имеет два пустых хвостовых значения;
 - полностью разобранные primary и duplicate равны.
 
@@ -48,6 +48,10 @@ owner={form-attribute-id}, terminal={0,metadata-uuid}
 
 В TableCurrentData UUID означает binding дочернего поля формы и не проходит
 через `object_refs`.
+
+Для `BindingUuid` UUID route обязателен. Если одновременно существует numeric
+route для binding id, оба пути обязаны совпадать; расхождение возвращает
+unresolved/opaque.
 
 ## Совместимость
 

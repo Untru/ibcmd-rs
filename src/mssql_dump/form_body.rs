@@ -5913,7 +5913,7 @@ fn collect_form_child_item_indexes_from_field_traced(
                         },
                         column_name.clone(),
                     );
-                    if form_metadata_uuid_binding_key(&column_key).is_some() {
+                    if form_table_uuid_binding_key(&column_key).is_some() {
                         insert_unambiguous_form_binding(
                             &mut indexes.table_current_data_name_by_binding_key,
                             (table_key.clone(), column_key.clone()),
@@ -9230,6 +9230,36 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                         type_link_data_path_by_table_column
                             .get(&(table_id, format!("0|{uuid}")))
                             .cloned()
+                    }
+                    FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
+                        binding_id,
+                        uuid,
+                    } => {
+                        let binding_id = binding_id.to_string();
+                        let uuid_route = type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), format!("{binding_id}|{uuid}")))
+                            .cloned();
+                        let numeric_route = type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), binding_id.clone()))
+                            .cloned()
+                            .or_else(|| {
+                                resolve_form_item_current_data_path(
+                                    &table_id,
+                                    &binding_id,
+                                    table_name_by_id,
+                                    table_column_names_by_id,
+                                    data_path_by_binding_key,
+                                )
+                            });
+                        match (uuid_route, numeric_route) {
+                            (Some(uuid_route), Some(numeric_route))
+                                if uuid_route != numeric_route =>
+                            {
+                                None
+                            }
+                            (Some(uuid_route), _) => Some(uuid_route),
+                            (None, _) => None,
+                        }
                     }
                 }
             }
@@ -12832,9 +12862,10 @@ pub(super) fn normalize_form_standard_data_path_name(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
-fn form_metadata_uuid_binding_key(binding_key: &str) -> Option<&str> {
+fn form_table_uuid_binding_key(binding_key: &str) -> Option<&str> {
     let (kind, uuid_text) = binding_key.split_once('|')?;
-    if kind != "0" || uuid_text.contains('|') {
+    let kind_number = kind.parse::<u64>().ok()?;
+    if kind != kind_number.to_string() || uuid_text.contains('|') {
         return None;
     }
     let uuid = Uuid::parse_str(uuid_text).ok()?;

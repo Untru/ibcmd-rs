@@ -12882,7 +12882,7 @@ fn indexes_table_current_data_metadata_uuid_bindings_per_table_and_rejects_colli
         .replace("{1,{6}}", &table_binding);
     let field = |id: &str, name: &str| {
         format!(
-            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,1,"{name}",1,0,{{1,0}},{{1,0}},{{3,{{1}},{{0,{table_binding_uuid}}},{{0,{column_binding_uuid}}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,1,"{name}",1,0,{{1,0}},{{1,0}},{{3,{{1}},{{0,{table_binding_uuid}}},{{18,{column_binding_uuid}}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
         )
     };
     let sender = field("149", "ВыбранныеОтправителиОтправитель");
@@ -12892,7 +12892,7 @@ fn indexes_table_current_data_metadata_uuid_bindings_per_table_and_rejects_colli
         &BTreeMap::new(),
         None,
     );
-    let route_key = ("81".to_string(), format!("0|{column_binding_uuid}"));
+    let route_key = ("81".to_string(), format!("18|{column_binding_uuid}"));
     assert_eq!(
         indexes
             .type_link_data_path_by_table_column
@@ -19989,6 +19989,70 @@ fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authorita
         ),
         CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 2
     ));
+}
+
+#[test]
+fn input_field_choice_parameter_links_require_authoritative_binding_uuid_route_agreement() {
+    let binding_uuid = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let primary = format!(
+        r#"{{5006,1,"Отбор.Организация",2,{{94,02023637-7868-4a5f-8576-835a76e0c9ba}},{{18,{binding_uuid}}},0}}"#
+    );
+    let duplicate = format!(
+        r#"{{5007,1,"Отбор.Организация",2,{{94,02023637-7868-4a5f-8576-835a76e0c9ba}},{{18,{binding_uuid}}},0,"",""}}"#
+    );
+    let expected = "Items.КассыККМ.CurrentData.Организация";
+    let agreeing_routes = BTreeMap::from([
+        (
+            ("94".to_string(), format!("18|{binding_uuid}")),
+            expected.to_string(),
+        ),
+        (("94".to_string(), "18".to_string()), expected.to_string()),
+    ]);
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &agreeing_routes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].data_path(), expected);
+    assert_eq!(
+        links[0].value_change(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+    );
+
+    let disagreeing_routes = BTreeMap::from([
+        (
+            ("94".to_string(), format!("18|{binding_uuid}")),
+            expected.to_string(),
+        ),
+        (
+            ("94".to_string(), "18".to_string()),
+            "Items.КассыККМ.CurrentData.ДругаяОрганизация".to_string(),
+        ),
+    ]);
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &disagreeing_routes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(
+            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("94".to_string())
+        )
+    );
 }
 
 #[test]
