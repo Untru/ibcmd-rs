@@ -20165,39 +20165,6 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
 }
 
 #[test]
-fn probe_ut_group_processing_choice_link_from_saved_bcp() {
-    let bcp = std::fs::read(r"C:\tmp\ut_group_processing_form_09ae274e.bcp")
-        .expect("saved UT form BCP probe");
-    let body = parse_form_body_blob(&bcp[8..]).expect("form body");
-    let type_index = BTreeMap::new();
-    let type_index_collisions = BTreeSet::new();
-    let dcs_type_index = DcsTypeIndex::new();
-    let object_refs = BTreeMap::new();
-    let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
-    let context = FormParseContext::new(
-        &type_index,
-        &type_index_collisions,
-        &dcs_type_index,
-        &object_refs,
-        &information_register_field_refs,
-        None,
-    );
-    match extract_form_body_xml_from_body_detailed_timed(&body, &context, None)
-        .expect("detailed form extraction")
-    {
-        DetailedFormBodyExtraction::Emitted { xml, .. } => assert!(xml.contains(
-            "<xr:DataPath xsi:type=\"xs:string\">Items.ТаблицаСумм.CurrentData.СтранаПроисхождения</xr:DataPath>"
-        )),
-        DetailedFormBodyExtraction::Rejected { diagnostics, error } => {
-            panic!("rejected: {error:?}; diagnostics: {diagnostics:?}")
-        }
-        DetailedFormBodyExtraction::OpaqueNotEmitted { diagnostics } => {
-            panic!("opaque: {diagnostics:?}")
-        }
-    }
-}
-
-#[test]
 fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
     let base_field = r#"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
     let primary = r#"{5006,1,"Filter.Owner",1,{3},0}"#;
