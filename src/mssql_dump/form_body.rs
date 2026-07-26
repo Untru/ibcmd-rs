@@ -447,22 +447,18 @@ pub(super) fn collect_opaque_choice_list_diagnostics(
 ) {
     for item in items {
         if let CanonicalFormChoiceList::OpaqueSameProfile { raw, provenance } = &item.choice_list {
-            let property_profile = match provenance.layout {
-                FormChoiceListRawLayout::InputFieldExtendedOptions => {
-                    "input_field_extended_options"
-                }
-                FormChoiceListRawLayout::RadioButtonOptions => "radio_button_options",
-            };
+            let opaque_diagnostic = provenance.layout.opaque_diagnostic(raw);
+            let identity = opaque_diagnostic.identity();
             diagnostics.push(FormSourceAssetDiagnostic {
-                code: "source_asset.form.choice_list.opaque_asset_not_emitted",
-                classification: "opaque_asset_not_emitted",
-                property: "ChoiceList",
-                property_profile,
+                code: identity.code(),
+                classification: identity.classification(),
+                property: identity.property(),
+                property_profile: identity.profile(),
                 property_slot: provenance.slot,
                 form_item_id: item.id.clone(),
                 form_item_tag: item.tag,
-                raw_length: raw.len(),
-                raw_sha256: format!("{:x}", Sha256::digest(raw.as_bytes())),
+                raw_length: opaque_diagnostic.raw_length(),
+                raw_sha256: opaque_diagnostic.raw_sha256().to_owned(),
             });
         }
         collect_opaque_choice_list_diagnostics(&item.child_items, diagnostics);

@@ -16264,6 +16264,41 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
     );
     assert_eq!(opaque_choice_list_diagnostics[0].raw_sha256.len(), 64);
 
+    let mut nested_parent = item.clone();
+    nested_parent.choice_list = CanonicalFormChoiceList::Absent;
+    nested_parent.child_items = vec![opaque_auto_command_item.clone()];
+    let mut nested_diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(
+        std::slice::from_ref(&nested_parent),
+        &mut nested_diagnostics,
+    );
+    assert_eq!(nested_diagnostics.len(), 1);
+    assert_eq!(
+        nested_diagnostics[0].form_item_id,
+        opaque_auto_command_item.id
+    );
+
+    let typed_item = item.clone();
+    let mut absent_item = item.clone();
+    absent_item.choice_list = CanonicalFormChoiceList::Absent;
+    let empty_provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+    };
+    let non_opaque_items = vec![
+        typed_item,
+        absent_item,
+        FormChildItem {
+            choice_list: CanonicalFormChoiceList::Empty {
+                provenance: empty_provenance,
+            },
+            ..item.clone()
+        },
+    ];
+    let mut non_opaque_diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(&non_opaque_items, &mut non_opaque_diagnostics);
+    assert!(non_opaque_diagnostics.is_empty());
+
     let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
     assert!(xml.contains("<ToolTip>"));
     assert!(!xml.contains("<InputHint>"), "{xml}");

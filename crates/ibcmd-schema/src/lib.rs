@@ -321,6 +321,77 @@ pub enum FormChoiceListLayoutProfile {
     RadioButtonOptions,
 }
 
+/// Stable schema-owned identity for an opaque ChoiceList source diagnostic.
+/// The raw payload is intentionally excluded from this value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceListOpaqueDiagnosticIdentity {
+    code: &'static str,
+    classification: &'static str,
+    property: &'static str,
+    profile: &'static str,
+}
+
+impl FormChoiceListOpaqueDiagnosticIdentity {
+    pub const fn code(&self) -> &'static str {
+        self.code
+    }
+
+    pub const fn classification(&self) -> &'static str {
+        self.classification
+    }
+
+    pub const fn property(&self) -> &'static str {
+        self.property
+    }
+
+    pub const fn profile(&self) -> &'static str {
+        self.profile
+    }
+}
+
+/// Bounded opaque ChoiceList diagnostic evidence without raw payload storage.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceListOpaqueDiagnostic {
+    identity: FormChoiceListOpaqueDiagnosticIdentity,
+    raw_length: usize,
+    raw_sha256: String,
+}
+
+impl FormChoiceListOpaqueDiagnostic {
+    pub const fn identity(&self) -> &FormChoiceListOpaqueDiagnosticIdentity {
+        &self.identity
+    }
+
+    pub const fn raw_length(&self) -> usize {
+        self.raw_length
+    }
+
+    pub fn raw_sha256(&self) -> &str {
+        &self.raw_sha256
+    }
+}
+
+impl FormChoiceListLayoutProfile {
+    /// Produce deterministic, non-recoverable diagnostic evidence for an
+    /// opaque raw ChoiceList value in this physical layout.
+    pub fn opaque_diagnostic(self, raw: &str) -> FormChoiceListOpaqueDiagnostic {
+        let profile = match self {
+            Self::InputFieldExtendedOptions => "input_field_extended_options",
+            Self::RadioButtonOptions => "radio_button_options",
+        };
+        FormChoiceListOpaqueDiagnostic {
+            identity: FormChoiceListOpaqueDiagnosticIdentity {
+                code: "source_asset.form.choice_list.opaque_asset_not_emitted",
+                classification: "opaque_asset_not_emitted",
+                property: "ChoiceList",
+                profile,
+            },
+            raw_length: raw.len(),
+            raw_sha256: format!("{:x}", Sha256::digest(raw.as_bytes())),
+        }
+    }
+}
+
 /// Schema-owned, fully decoded ChoiceList model.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FormChoiceList {
@@ -5458,6 +5529,42 @@ mod tests {
         ] {
             assert!(parse_metadata_data_path(hostile).is_none(), "{hostile:?}");
         }
+    }
+
+    #[test]
+    fn opaque_choice_list_diagnostic_is_profile_exact_and_nonrecoverable() {
+        let raw = "{9,2}";
+        let input = FormChoiceListLayoutProfile::InputFieldExtendedOptions.opaque_diagnostic(raw);
+        let radio = FormChoiceListLayoutProfile::RadioButtonOptions.opaque_diagnostic(raw);
+        for diagnostic in [&input, &radio] {
+            assert_eq!(
+                diagnostic.identity().code(),
+                "source_asset.form.choice_list.opaque_asset_not_emitted"
+            );
+            assert_eq!(
+                diagnostic.identity().classification(),
+                "opaque_asset_not_emitted"
+            );
+            assert_eq!(diagnostic.identity().property(), "ChoiceList");
+            assert_eq!(diagnostic.raw_length(), 5);
+            assert_eq!(
+                diagnostic.raw_sha256(),
+                "fc5a90866629ef9f896b3530012f5ff3aae4d21ca25a51c44347e937c75e6926"
+            );
+            assert!(!format!("{diagnostic:?}").contains(raw));
+        }
+        assert_eq!(input.identity().profile(), "input_field_extended_options");
+        assert_eq!(radio.identity().profile(), "radio_button_options");
+        assert_eq!(input.raw_length(), radio.raw_length());
+        assert_eq!(input.raw_sha256(), radio.raw_sha256());
+        assert_eq!(
+            input,
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions.opaque_diagnostic(raw)
+        );
+        let mutated =
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions.opaque_diagnostic("{9,3}");
+        assert_eq!(mutated.raw_length(), input.raw_length());
+        assert_ne!(mutated.raw_sha256(), input.raw_sha256());
     }
 
     #[test]
