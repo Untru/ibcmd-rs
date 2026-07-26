@@ -5622,8 +5622,8 @@ pub(super) fn extend_form_choice_parameter_link_table_current_data_routes_from_a
     for (key, values) in candidates {
         let values = values.into_iter().collect::<Vec<_>>();
         let [value] = values.as_slice() else {
-            // Ambiguous source mappings stay unresolved.
-            indexes.type_link_data_path_by_table_column.remove(&key);
+            // AdditionalColumns is supplemental. An ambiguous addition must not
+            // erase a direct child-item route already established from layout.
             continue;
         };
         match indexes.type_link_data_path_by_table_column.get(&key) {
@@ -5634,8 +5634,8 @@ pub(super) fn extend_form_choice_parameter_link_table_current_data_routes_from_a
             }
             Some(existing) if existing == value => {}
             Some(_) => {
-                // The two authoritative representations disagree; fail closed.
-                indexes.type_link_data_path_by_table_column.remove(&key);
+                // The direct child-item route has precedence over the
+                // supplemental AdditionalColumns representation.
             }
         }
     }

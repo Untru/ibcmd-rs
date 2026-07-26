@@ -30,6 +30,8 @@
 - [x] Wrong UUID kind/nil/case/arity и ambiguous route fail closed.
 - [x] BindingUuid route согласуется с numeric route либо fail closed.
 - [x] AdditionalColumns route имеет exact positive и collision-negative тест.
+- [x] Direct child-item route имеет приоритет над конфликтующим supplemental
+      AdditionalColumns route.
 - [x] Старые direct, standard и metadata UUID профили не регрессируют.
 
 ## Задача 4: Production proof

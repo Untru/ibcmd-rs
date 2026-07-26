@@ -20061,63 +20061,140 @@ fn choice_parameter_table_current_data_routes_use_exact_additional_column_bindin
     let mut indexes = FormChildItemIndexes::default();
     indexes
         .table_name_by_id
+        .insert("785".to_string(), "ТаблицаСумм".to_string());
+    indexes
+        .table_name_by_id
         .insert("94".to_string(), "КассыККМ".to_string());
-    indexes.insert_bound_attribute_for_table_for_test("94", "1");
-    let attributes = vec![FormAttribute {
-        id: "1".to_string(),
-        name: "Объект".to_string(),
+    indexes.insert_bound_attribute_for_table_for_test("785", "1");
+    indexes.insert_bound_attribute_for_table_for_test("94", "2");
+    indexes.type_link_data_path_by_table_column.insert(
+        ("785".to_string(), "12".to_string()),
+        "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения".to_string(),
+    );
+    let additional_column = |id: &str, name: &str| FormAttributeColumn {
+        id: id.to_string(),
+        name: name.to_string(),
         title: Vec::new(),
         value_types: Vec::new(),
-        exact_single_type_uuid: None,
         explicit_empty_type: false,
-        columns: Vec::new(),
-        additional_columns: vec![FormAttributeAdditionalColumns {
-            table: "Объект.КассыККМ".to_string(),
-            columns: vec![FormAttributeColumn {
-                id: "18".to_string(),
-                name: "Организация".to_string(),
-                title: Vec::new(),
-                value_types: Vec::new(),
-                explicit_empty_type: false,
-                functional_options: Vec::new(),
-            }],
-        }],
-        main_attribute: true,
-        saved_data: false,
-        fill_check: None,
-        save_fields: Vec::new(),
-        use_always: Vec::new(),
         functional_options: Vec::new(),
-        settings: None,
-        spreadsheet_document_settings: None,
-        type_description_settings: None,
-    }];
+    };
+    let attributes = vec![
+        FormAttribute {
+            id: "1".to_string(),
+            name: "Отбор".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            exact_single_type_uuid: None,
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: vec![FormAttributeAdditionalColumns {
+                table: "Отбор.ТаблицаСумм".to_string(),
+                columns: vec![
+                    additional_column("12", "ДругаяСтрана"),
+                    additional_column("13", "ПервоеНеоднозначное"),
+                    additional_column("13", "ВтороеНеоднозначное"),
+                ],
+            }],
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        },
+        FormAttribute {
+            id: "2".to_string(),
+            name: "Объект".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            exact_single_type_uuid: None,
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: vec![FormAttributeAdditionalColumns {
+                table: "Объект.КассыККМ".to_string(),
+                columns: vec![additional_column("18", "Организация")],
+            }],
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        },
+    ];
     extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
         &mut indexes,
         &attributes,
     );
-    let expected = "Items.КассыККМ.CurrentData.Организация";
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("785".to_string(), "12".to_string())),
+        Some(&"Items.ТаблицаСумм.CurrentData.СтранаПроисхождения".to_string())
+    );
+    let expected = "Items.КассыККМ.CurrentData.Организация".to_string();
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("94".to_string(), "18".to_string())),
+        Some(&expected)
+    );
     assert_eq!(
         indexes
             .type_link_data_path_by_table_column
             .get(&("94".to_string(), format!("18|{binding_uuid}"))),
-        Some(&expected.to_string())
-    );
-
-    indexes.type_link_data_path_by_table_column.insert(
-        ("94".to_string(), "18".to_string()),
-        "Items.КассыККМ.CurrentData.ДругаяОрганизация".to_string(),
-    );
-    extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
-        &mut indexes,
-        &attributes,
+        Some(&expected)
     );
     assert!(
         !indexes
             .type_link_data_path_by_table_column
-            .contains_key(&("94".to_string(), "18".to_string())),
-        "conflicting authoritative routes must remain unresolved"
+            .contains_key(&("785".to_string(), "13".to_string()))
     );
+    assert!(
+        !indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("785".to_string(), format!("13|{binding_uuid}")))
+    );
+}
+
+#[test]
+fn probe_ut_group_processing_choice_link_from_saved_bcp() {
+    let bcp = std::fs::read(r"C:\tmp\ut_group_processing_form_09ae274e.bcp")
+        .expect("saved UT form BCP probe");
+    let body = parse_form_body_blob(&bcp[8..]).expect("form body");
+    let type_index = BTreeMap::new();
+    let type_index_collisions = BTreeSet::new();
+    let dcs_type_index = DcsTypeIndex::new();
+    let object_refs = BTreeMap::new();
+    let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let context = FormParseContext::new(
+        &type_index,
+        &type_index_collisions,
+        &dcs_type_index,
+        &object_refs,
+        &information_register_field_refs,
+        None,
+    );
+    match extract_form_body_xml_from_body_detailed_timed(&body, &context, None)
+        .expect("detailed form extraction")
+    {
+        DetailedFormBodyExtraction::Emitted { xml, .. } => assert!(xml.contains(
+            "<xr:DataPath xsi:type=\"xs:string\">Items.ТаблицаСумм.CurrentData.СтранаПроисхождения</xr:DataPath>"
+        )),
+        DetailedFormBodyExtraction::Rejected { diagnostics, error } => {
+            panic!("rejected: {error:?}; diagnostics: {diagnostics:?}")
+        }
+        DetailedFormBodyExtraction::OpaqueNotEmitted { diagnostics } => {
+            panic!("opaque: {diagnostics:?}")
+        }
+    }
 }
 
 #[test]

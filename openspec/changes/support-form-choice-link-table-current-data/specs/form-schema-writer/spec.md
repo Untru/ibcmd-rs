@@ -64,3 +64,11 @@ SHALL NOT read raw form slots or infer paths from application object names.
 - **WHEN** a numeric route also exists
 - **THEN** both routes SHALL be equal before the link is emitted
 - **AND** disagreement leaves the complete link collection opaque.
+
+#### Scenario: Supplemental AdditionalColumns disagrees with a direct route
+
+- **GIVEN** a direct child-item route already proves a numeric table/column path
+- **AND** AdditionalColumns offers a different path for the same numeric key
+- **WHEN** indexes are merged
+- **THEN** the direct child-item route SHALL be retained
+- **AND** the supplemental route SHALL NOT overwrite or erase it.
