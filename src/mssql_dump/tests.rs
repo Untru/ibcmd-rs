@@ -19616,6 +19616,10 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         &duplicate,
         &attribute_names,
         &attribute_owners,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
         &object_refs,
     )
     .unwrap();
@@ -19640,6 +19644,10 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
             &attribute_names,
             &attribute_owners,
             &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
         ),
         Err(ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("1".to_string()))
     );
@@ -19649,6 +19657,10 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
             &duplicate,
             &attribute_names,
             &attribute_owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &BTreeMap::from([
                 (
                     organization_uuid.to_string(),
@@ -19688,6 +19700,10 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
             &options,
             &attribute_names,
             &attribute_owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
             &object_refs,
         ),
         CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 2
@@ -19698,6 +19714,10 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
         &attribute_names,
         &attribute_owners,
         &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
     );
     assert!(matches!(
         opaque,
@@ -19705,6 +19725,134 @@ fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_termina
             if value.error
                 == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
                     "1".to_string()
+                )
+    ));
+}
+
+#[test]
+fn input_field_choice_parameter_links_resolve_table_current_data_from_form_indexes() {
+    let table_names = BTreeMap::from([
+        ("1050".to_string(), "ТаблицаДопРеквизитов".to_string()),
+        ("785".to_string(), "ТаблицаСумм".to_string()),
+    ]);
+    let table_columns = BTreeMap::from([
+        (
+            "1050".to_string(),
+            BTreeMap::from([("21".to_string(), "Партнер".to_string())]),
+        ),
+        (
+            "785".to_string(),
+            BTreeMap::from([("12".to_string(), "СтранаПроисхождения".to_string())]),
+        ),
+    ]);
+
+    for (primary, duplicate, name, data_path) in [
+        (
+            r#"{5006,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0}"#,
+            r#"{5007,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0,"",""}"#,
+            "Отбор.Партнер",
+            "Items.ТаблицаДопРеквизитов.CurrentData.Партнер",
+        ),
+        (
+            r#"{5006,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0}"#,
+            r#"{5007,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0,"",""}"#,
+            "Отбор.СтранаПроисхождения",
+            "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения",
+        ),
+    ] {
+        let links = parse_form_input_field_choice_parameter_links_with_metadata(
+            primary,
+            duplicate,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &table_columns,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].name(), name);
+        assert_eq!(links[0].data_path(), data_path);
+        assert_eq!(
+            links[0].value_change(),
+            ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+        );
+    }
+
+    let primary =
+        r#"{5006,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0}"#;
+    let duplicate =
+        r#"{5007,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0,"",""}"#;
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            primary,
+            duplicate,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(
+            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                "1050".to_string()
+            )
+        )
+    );
+
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = primary;
+    options[duplicate_slot] = duplicate;
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &table_columns,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 1
+    ));
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Opaque(value)
+            if value.error
+                == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                    "1050".to_string()
                 )
     ));
 }

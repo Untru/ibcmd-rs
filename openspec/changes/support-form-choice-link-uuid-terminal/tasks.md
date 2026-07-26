@@ -31,6 +31,6 @@
 ## Задача 5: Проверить production blocker
 
 - [x] Focused schema/form tests проходят.
-- [ ] Полный candidate export УТ проходит этот source asset без special case.
-- [ ] Следующий blocker либо полный diff зафиксирован новым immutable run.
+- [x] Полный candidate export УТ проходит этот source asset без special case.
+- [x] Следующий blocker либо полный diff зафиксирован новым immutable run.
 - [ ] OpenSpec strict validation проходит.

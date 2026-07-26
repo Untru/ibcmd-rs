@@ -52,14 +52,15 @@ use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue,
     FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
     FormChoiceListLayoutProfile, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
-    FormChoiceParameterClusterMember, FormChoiceParameterLinkStandardTerminal,
-    FormChoiceParameterLinkTerminal, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
-    FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
-    GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
-    MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
-    bundled_writer_rules, form_choice_parameter_cluster_order,
-    form_text_document_context_menu_owner_fields, parse_form_choice_list,
-    parse_form_choice_parameter_links_with_terminal_resolver as parse_schema_form_choice_parameter_links_with_terminal_resolver,
+    FormChoiceParameterClusterMember, FormChoiceParameterLinkReference,
+    FormChoiceParameterLinkStandardTerminal, FormChoiceParameterLinkTerminal,
+    FormChoiceParameterLinks, FormChoiceParameterLinksParseError, FormChoiceParameters,
+    FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError, GeneratedMetadataOwner,
+    GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole, MetadataDataPathRole, SchemaError,
+    WriterPolicy, WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+    form_choice_parameter_cluster_order, form_text_document_context_menu_owner_fields,
+    parse_form_choice_list,
+    parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
     parse_generated_metadata_owner, parse_metadata_data_path,
@@ -8126,6 +8127,10 @@ fn parse_form_child_item_with_metadata_owners(
                         options,
                         attribute_names_by_id,
                         attribute_metadata_owners_by_id,
+                        table_name_by_id,
+                        table_column_names_by_id,
+                        type_link_data_path_by_table_column,
+                        data_path_by_binding_key,
                         object_refs,
                     ),
                     canonical_form_input_field_choice_parameters(
@@ -9114,38 +9119,66 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
     duplicate: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Result<Vec<ibcmd_schema::FormChoiceParameterLink>, FormChoiceParameterLinksParseError> {
-    parse_schema_form_choice_parameter_links_with_terminal_resolver(
+    parse_schema_form_choice_parameter_links_with_reference_resolver(
         primary,
         duplicate,
-        |attribute_id, terminal| match terminal {
-            FormChoiceParameterLinkTerminal::Absent => {
-                attribute_names_by_id.get(attribute_id).cloned()
-            }
-            FormChoiceParameterLinkTerminal::Standard(
-                FormChoiceParameterLinkStandardTerminal::Owner,
-            ) => attribute_names_by_id
-                .get(attribute_id)
-                .map(|attribute| format!("{attribute}.Owner")),
-            FormChoiceParameterLinkTerminal::Standard(
-                FormChoiceParameterLinkStandardTerminal::Ref,
-            ) => attribute_names_by_id
-                .get(attribute_id)
-                .map(|attribute| format!("{attribute}.Ref")),
-            FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
-                match resolve_form_owner_scoped_metadata_uuid_data_path_status(
-                    attribute_id,
-                    "0",
-                    uuid,
-                    attribute_metadata_owners_by_id,
-                    object_refs,
-                ) {
-                    FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
-                    FormMetadataDataPathResolution::NotMetadata
-                    | FormMetadataDataPathResolution::ReferenceAbsent
-                    | FormMetadataDataPathResolution::Invalid => None,
+        |reference| match reference {
+            FormChoiceParameterLinkReference::FormAttribute {
+                attribute_id,
+                terminal,
+            } => match terminal {
+                FormChoiceParameterLinkTerminal::Absent => {
+                    attribute_names_by_id.get(attribute_id).cloned()
                 }
+                FormChoiceParameterLinkTerminal::Standard(
+                    FormChoiceParameterLinkStandardTerminal::Owner,
+                ) => attribute_names_by_id
+                    .get(attribute_id)
+                    .map(|attribute| format!("{attribute}.Owner")),
+                FormChoiceParameterLinkTerminal::Standard(
+                    FormChoiceParameterLinkStandardTerminal::Ref,
+                ) => attribute_names_by_id
+                    .get(attribute_id)
+                    .map(|attribute| format!("{attribute}.Ref")),
+                FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
+                    match resolve_form_owner_scoped_metadata_uuid_data_path_status(
+                        attribute_id,
+                        "0",
+                        uuid,
+                        attribute_metadata_owners_by_id,
+                        object_refs,
+                    ) {
+                        FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+                        FormMetadataDataPathResolution::NotMetadata
+                        | FormMetadataDataPathResolution::ReferenceAbsent
+                        | FormMetadataDataPathResolution::Invalid => None,
+                    }
+                }
+            },
+            FormChoiceParameterLinkReference::TableCurrentData {
+                table_id,
+                column_id,
+            } => {
+                let table_id = table_id.to_string();
+                let column_id = column_id.to_string();
+                type_link_data_path_by_table_column
+                    .get(&(table_id.clone(), column_id.clone()))
+                    .cloned()
+                    .or_else(|| {
+                        resolve_form_item_current_data_path(
+                            &table_id,
+                            &column_id,
+                            table_name_by_id,
+                            table_column_names_by_id,
+                            data_path_by_binding_key,
+                        )
+                    })
             }
         },
     )
@@ -9193,6 +9226,10 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
     options: &[&str],
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> CanonicalFormChoiceParameterLinks {
     let primary_slot = InputFieldSlot::ChoiceParameterLinks.index();
@@ -9218,6 +9255,10 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
         duplicate,
         attribute_names_by_id,
         attribute_metadata_owners_by_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        data_path_by_binding_key,
         object_refs,
     ) {
         Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,

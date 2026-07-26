@@ -1,0 +1,41 @@
+## ADDED Requirements
+
+### Requirement: TableCurrentData ChoiceParameterLinks is schema-owned
+
+The system SHALL decode the exact mirrored native TableCurrentData profile
+into a canonical `FormChoiceParameterLink` before XML emission. XML writers
+SHALL NOT read raw form slots or infer paths from application object names.
+
+#### Scenario: Table and column ids resolve in the same form
+
+- **GIVEN** exact mirrored `5006/5007` collections with `mode=2`
+- **AND** owner is `{positive-table-id, exact-form-item-type-uuid}`
+- **AND** terminal is `{positive-column-id}`
+- **WHEN** both ids resolve through the form indexes
+- **THEN** the canonical data path is
+  `Items.<Table>.CurrentData.<Column>`
+- **AND** writer order remains `Name`, `DataPath`, `ValueChange`.
+
+#### Scenario: TableCurrentData mirror differs
+
+- **GIVEN** independently valid primary and duplicate collections
+- **BUT** their table id, type UUID, or column id differs
+- **WHEN** the collections are decoded
+- **THEN** the whole value is rejected as `MirrorMismatch`
+- **AND** no partial links are emitted.
+
+#### Scenario: Platform type UUID is not exact
+
+- **GIVEN** a two-field owner
+- **BUT** its UUID is nil, non-canonical, or not the exact form-item type UUID
+- **WHEN** physical decoding runs
+- **THEN** the corresponding collection is malformed
+- **AND** semantic resolution is not called.
+
+#### Scenario: Table or column id is unresolved
+
+- **GIVEN** an exact TableCurrentData envelope
+- **BUT** either id is absent from the form indexes
+- **WHEN** semantic resolution runs
+- **THEN** source export fails closed with an opaque diagnostic
+- **AND** no guessed data path is emitted.
