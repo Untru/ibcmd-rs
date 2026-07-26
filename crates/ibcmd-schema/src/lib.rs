@@ -1780,6 +1780,291 @@ pub fn parse_generated_metadata_reference_owner(
     Some(GeneratedMetadataReferenceOwner { kind, name })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GeneratedMetadataOwnerRole {
+    Ref,
+    Object,
+    Record,
+    RecordManager,
+    RecordSet,
+    RecordKey,
+}
+
+/// Metadata families which have generated owner type QNames.
+///
+/// `Ref` remains deliberately narrower: it is accepted only for the existing
+/// reference-owner families, while the remaining roles are accepted for the
+/// exact platform families below.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GeneratedMetadataOwnerFamily {
+    AccountingRegister,
+    AccumulationRegister,
+    BusinessProcess,
+    CalculationRegister,
+    Catalog,
+    ChartOfAccounts,
+    ChartOfCalculationTypes,
+    ChartOfCharacteristicTypes,
+    DataProcessor,
+    Document,
+    Enum,
+    ExchangePlan,
+    InformationRegister,
+    Recalculation,
+    Report,
+    Sequence,
+    Task,
+}
+
+impl GeneratedMetadataOwnerFamily {
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::AccountingRegister => "AccountingRegister",
+            Self::AccumulationRegister => "AccumulationRegister",
+            Self::BusinessProcess => "BusinessProcess",
+            Self::CalculationRegister => "CalculationRegister",
+            Self::Catalog => "Catalog",
+            Self::ChartOfAccounts => "ChartOfAccounts",
+            Self::ChartOfCalculationTypes => "ChartOfCalculationTypes",
+            Self::ChartOfCharacteristicTypes => "ChartOfCharacteristicTypes",
+            Self::DataProcessor => "DataProcessor",
+            Self::Document => "Document",
+            Self::Enum => "Enum",
+            Self::ExchangePlan => "ExchangePlan",
+            Self::InformationRegister => "InformationRegister",
+            Self::Recalculation => "Recalculation",
+            Self::Report => "Report",
+            Self::Sequence => "Sequence",
+            Self::Task => "Task",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        [
+            Self::AccountingRegister,
+            Self::AccumulationRegister,
+            Self::BusinessProcess,
+            Self::CalculationRegister,
+            Self::Catalog,
+            Self::ChartOfAccounts,
+            Self::ChartOfCalculationTypes,
+            Self::ChartOfCharacteristicTypes,
+            Self::DataProcessor,
+            Self::Document,
+            Self::Enum,
+            Self::ExchangePlan,
+            Self::InformationRegister,
+            Self::Recalculation,
+            Self::Report,
+            Self::Sequence,
+            Self::Task,
+        ]
+        .into_iter()
+        .find(|family| family.token() == value)
+    }
+
+    /// Whether this family emits the given non-reference generated owner role.
+    /// This is intentionally a compatibility matrix, not a family×role
+    /// product: accepting a plausible-looking but unproduced QName would make
+    /// downstream form owner resolution over-broad.
+    const fn allows_role(self, role: GeneratedMetadataOwnerRole) -> bool {
+        matches!(
+            (self, role),
+            (
+                Self::AccountingRegister,
+                GeneratedMetadataOwnerRole::Object
+                    | GeneratedMetadataOwnerRole::Record
+                    | GeneratedMetadataOwnerRole::RecordSet
+                    | GeneratedMetadataOwnerRole::RecordKey
+            ) | (
+                Self::AccumulationRegister,
+                GeneratedMetadataOwnerRole::Object
+                    | GeneratedMetadataOwnerRole::RecordSet
+                    | GeneratedMetadataOwnerRole::RecordKey
+            ) | (Self::BusinessProcess, GeneratedMetadataOwnerRole::Object)
+                | (
+                    Self::CalculationRegister,
+                    GeneratedMetadataOwnerRole::Object
+                        | GeneratedMetadataOwnerRole::Record
+                        | GeneratedMetadataOwnerRole::RecordSet
+                        | GeneratedMetadataOwnerRole::RecordKey
+                )
+                | (Self::Catalog, GeneratedMetadataOwnerRole::Object)
+                | (Self::ChartOfAccounts, GeneratedMetadataOwnerRole::Object)
+                | (
+                    Self::ChartOfCalculationTypes,
+                    GeneratedMetadataOwnerRole::Object
+                )
+                | (
+                    Self::ChartOfCharacteristicTypes,
+                    GeneratedMetadataOwnerRole::Object
+                )
+                | (Self::DataProcessor, GeneratedMetadataOwnerRole::Object)
+                | (Self::Document, GeneratedMetadataOwnerRole::Object)
+                | (
+                    Self::InformationRegister,
+                    GeneratedMetadataOwnerRole::Record
+                        | GeneratedMetadataOwnerRole::RecordManager
+                        | GeneratedMetadataOwnerRole::RecordSet
+                        | GeneratedMetadataOwnerRole::RecordKey
+                )
+                | (
+                    Self::Recalculation,
+                    GeneratedMetadataOwnerRole::Record | GeneratedMetadataOwnerRole::RecordSet
+                )
+                | (
+                    Self::Sequence,
+                    GeneratedMetadataOwnerRole::Record | GeneratedMetadataOwnerRole::RecordSet
+                )
+                | (Self::ExchangePlan, GeneratedMetadataOwnerRole::Object)
+                | (Self::Report, GeneratedMetadataOwnerRole::Object)
+                | (Self::Task, GeneratedMetadataOwnerRole::Object)
+        )
+    }
+}
+
+impl GeneratedMetadataOwnerRole {
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Ref => "Ref",
+            Self::Object => "Object",
+            Self::Record => "Record",
+            Self::RecordManager => "RecordManager",
+            Self::RecordSet => "RecordSet",
+            Self::RecordKey => "RecordKey",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        [
+            Self::Ref,
+            Self::Object,
+            Self::Record,
+            Self::RecordManager,
+            Self::RecordSet,
+            Self::RecordKey,
+        ]
+        .into_iter()
+        .find(|role| role.token() == value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GeneratedMetadataOwner<'a> {
+    family: GeneratedMetadataOwnerFamily,
+    role: GeneratedMetadataOwnerRole,
+    name: &'a str,
+}
+impl<'a> GeneratedMetadataOwner<'a> {
+    pub const fn family(self) -> GeneratedMetadataOwnerFamily {
+        self.family
+    }
+    pub const fn role(self) -> GeneratedMetadataOwnerRole {
+        self.role
+    }
+    pub const fn name(self) -> &'a str {
+        self.name
+    }
+    pub fn owner_reference(self) -> String {
+        format!("{}.{}", self.family.token(), self.name)
+    }
+}
+pub fn parse_generated_metadata_owner(value: &str) -> Option<GeneratedMetadataOwner<'_>> {
+    let value = value.strip_prefix("cfg:")?;
+    let (generated, name) = value.split_once('.')?;
+    let role = [
+        GeneratedMetadataOwnerRole::RecordManager,
+        GeneratedMetadataOwnerRole::RecordSet,
+        GeneratedMetadataOwnerRole::RecordKey,
+        GeneratedMetadataOwnerRole::Object,
+        GeneratedMetadataOwnerRole::Record,
+        GeneratedMetadataOwnerRole::Ref,
+    ]
+    .into_iter()
+    .find(|role| generated.ends_with(role.token()))?;
+    let family_token = generated.strip_suffix(role.token())?;
+    // Reference QNames have an intentionally smaller supported family set.
+    if role == GeneratedMetadataOwnerRole::Ref
+        && GeneratedMetadataReferenceOwnerKind::parse(family_token).is_none()
+    {
+        return None;
+    }
+    let family = GeneratedMetadataOwnerFamily::parse(family_token)?;
+    if role != GeneratedMetadataOwnerRole::Ref && !family.allows_role(role) {
+        return None;
+    }
+    (!name.is_empty() && name.trim() == name && !name.contains('.'))
+        .then_some(GeneratedMetadataOwner { family, role, name })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MetadataDataPathRole {
+    Attribute,
+    Dimension,
+    Resource,
+    TabularSection,
+    TabularAttribute,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MetadataDataPath<'a> {
+    family: GeneratedMetadataOwnerFamily,
+    owner_name: &'a str,
+    role: MetadataDataPathRole,
+    table_name: Option<&'a str>,
+    member_name: &'a str,
+}
+
+impl<'a> MetadataDataPath<'a> {
+    pub fn owner_reference(self) -> String {
+        format!("{}.{}", self.family.token(), self.owner_name)
+    }
+    pub const fn role(self) -> MetadataDataPathRole {
+        self.role
+    }
+    pub const fn table_name(self) -> Option<&'a str> {
+        self.table_name
+    }
+    pub const fn member_name(self) -> &'a str {
+        self.member_name
+    }
+}
+
+/// Parse one exact metadata data path used by form bindings.
+pub fn parse_metadata_data_path(value: &str) -> Option<MetadataDataPath<'_>> {
+    let parts = value.split('.').collect::<Vec<_>>();
+    let valid_name = |name: &&str| !name.is_empty() && name.trim() == *name;
+    let (family, owner_name) = match parts.as_slice() {
+        [family, owner, ..] if valid_name(family) && valid_name(owner) => {
+            (GeneratedMetadataOwnerFamily::parse(family)?, *owner)
+        }
+        _ => return None,
+    };
+    let (role, table_name, member_name) = match &parts[2..] {
+        ["Attribute", name] | ["Dimension", name] | ["Resource", name] if valid_name(name) => {
+            let role = match parts[2] {
+                "Attribute" => MetadataDataPathRole::Attribute,
+                "Dimension" => MetadataDataPathRole::Dimension,
+                _ => MetadataDataPathRole::Resource,
+            };
+            (role, None, *name)
+        }
+        ["TabularSection", table] if valid_name(table) => {
+            (MetadataDataPathRole::TabularSection, Some(*table), *table)
+        }
+        ["TabularSection", table, "Attribute", name] if valid_name(table) && valid_name(name) => {
+            (MetadataDataPathRole::TabularAttribute, Some(*table), *name)
+        }
+        _ => return None,
+    };
+    Some(MetadataDataPath {
+        family,
+        owner_name,
+        role,
+        table_name,
+        member_name,
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CorpusSource {
@@ -5054,6 +5339,125 @@ mod tests {
         );
         assert_eq!(catalog_named_enum.name(), "Enum");
         assert_eq!(catalog_named_enum.owner_reference(), "Catalog.Enum");
+    }
+
+    #[test]
+    fn generated_metadata_owner_and_data_paths_are_exact_and_role_aware() {
+        for (reference, family, role, owner) in [
+            (
+                "cfg:CatalogRef.Products",
+                GeneratedMetadataOwnerFamily::Catalog,
+                GeneratedMetadataOwnerRole::Ref,
+                "Catalog.Products",
+            ),
+            (
+                "cfg:DocumentObject.Invoice",
+                GeneratedMetadataOwnerFamily::Document,
+                GeneratedMetadataOwnerRole::Object,
+                "Document.Invoice",
+            ),
+            (
+                "cfg:InformationRegisterRecord.Prices",
+                GeneratedMetadataOwnerFamily::InformationRegister,
+                GeneratedMetadataOwnerRole::Record,
+                "InformationRegister.Prices",
+            ),
+            (
+                "cfg:InformationRegisterRecordManager.Prices",
+                GeneratedMetadataOwnerFamily::InformationRegister,
+                GeneratedMetadataOwnerRole::RecordManager,
+                "InformationRegister.Prices",
+            ),
+            (
+                "cfg:InformationRegisterRecordSet.Prices",
+                GeneratedMetadataOwnerFamily::InformationRegister,
+                GeneratedMetadataOwnerRole::RecordSet,
+                "InformationRegister.Prices",
+            ),
+            (
+                "cfg:AccountingRegisterRecordKey.Ledger",
+                GeneratedMetadataOwnerFamily::AccountingRegister,
+                GeneratedMetadataOwnerRole::RecordKey,
+                "AccountingRegister.Ledger",
+            ),
+            (
+                "cfg:AccumulationRegisterObject.Totals",
+                GeneratedMetadataOwnerFamily::AccumulationRegister,
+                GeneratedMetadataOwnerRole::Object,
+                "AccumulationRegister.Totals",
+            ),
+            (
+                "cfg:AccumulationRegisterRecordKey.Totals",
+                GeneratedMetadataOwnerFamily::AccumulationRegister,
+                GeneratedMetadataOwnerRole::RecordKey,
+                "AccumulationRegister.Totals",
+            ),
+            (
+                "cfg:CalculationRegisterRecord.Payroll",
+                GeneratedMetadataOwnerFamily::CalculationRegister,
+                GeneratedMetadataOwnerRole::Record,
+                "CalculationRegister.Payroll",
+            ),
+            (
+                "cfg:CalculationRegisterRecordSet.Payroll",
+                GeneratedMetadataOwnerFamily::CalculationRegister,
+                GeneratedMetadataOwnerRole::RecordSet,
+                "CalculationRegister.Payroll",
+            ),
+            (
+                "cfg:InformationRegisterRecordKey.Prices",
+                GeneratedMetadataOwnerFamily::InformationRegister,
+                GeneratedMetadataOwnerRole::RecordKey,
+                "InformationRegister.Prices",
+            ),
+            (
+                "cfg:ExchangePlanObject.Sync",
+                GeneratedMetadataOwnerFamily::ExchangePlan,
+                GeneratedMetadataOwnerRole::Object,
+                "ExchangePlan.Sync",
+            ),
+            (
+                "cfg:ReportObject.PurchaseBook",
+                GeneratedMetadataOwnerFamily::Report,
+                GeneratedMetadataOwnerRole::Object,
+                "Report.PurchaseBook",
+            ),
+        ] {
+            let parsed = parse_generated_metadata_owner(reference).unwrap();
+            assert_eq!(parsed.family(), family);
+            assert_eq!(parsed.role(), role);
+            assert_eq!(parsed.owner_reference(), owner);
+        }
+        for hostile in [
+            "cfg:UnknownRef.Owner",
+            "cfg:DocumentObject.",
+            "cfg:DocumentObject.Invoice.Child",
+            "cfg:EnumObject.Status",
+            "cfg:ReportRecord.Sales",
+            "cfg:DataProcessorRecordKey.Loader",
+            "cfg:DocumentUnknown.Invoice",
+        ] {
+            assert!(
+                parse_generated_metadata_owner(hostile).is_none(),
+                "{hostile:?}"
+            );
+        }
+
+        let nested =
+            parse_metadata_data_path("Document.Invoice.TabularSection.Lines.Attribute.Amount")
+                .unwrap();
+        assert_eq!(nested.role(), MetadataDataPathRole::TabularAttribute);
+        assert_eq!(nested.owner_reference(), "Document.Invoice");
+        assert_eq!(nested.table_name(), Some("Lines"));
+        assert_eq!(nested.member_name(), "Amount");
+        for hostile in [
+            "Document.Invoice.Dimension.Region.More",
+            "Document.Invoice.TabularSection.Lines.Dimension.Region",
+            "Unknown.Invoice.Attribute.Value",
+            "Document.Invoice.Attribute.",
+        ] {
+            assert!(parse_metadata_data_path(hostile).is_none(), "{hostile:?}");
+        }
     }
 
     #[test]

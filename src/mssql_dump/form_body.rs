@@ -53,12 +53,14 @@ use ibcmd_schema::{
     FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
     FormChoiceParameterClusterMember, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
     FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
-    SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
-    form_choice_parameter_cluster_order, form_text_document_context_menu_owner_fields,
-    parse_form_choice_list,
+    GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
+    MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
+    bundled_writer_rules, form_choice_parameter_cluster_order,
+    form_text_document_context_menu_owner_fields, parse_form_choice_list,
     parse_form_choice_parameter_links as parse_schema_form_choice_parameter_links,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
+    parse_generated_metadata_owner, parse_metadata_data_path,
 };
 use ibcmd_xml::{
     DcsListSettingsTailError, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
@@ -12290,17 +12292,21 @@ pub(super) fn resolve_form_strict_field_model_data_path(
     }
 }
 
-fn resolve_form_owner_scoped_standard_attribute_data_path(
+pub(super) fn resolve_form_owner_scoped_standard_attribute_data_path(
     attribute: &FormAttributeMetadataOwner,
     marker: &str,
 ) -> Option<String> {
     let reference = attribute.exact_single_type_reference.as_deref()?;
-    let (generated_type, _) = form_generated_owner_type_from_type_reference(reference)?;
-    let attribute_name = match generated_type {
-        "DocumentObject" => DOCUMENT_STANDARD_ATTRIBUTES
-            .iter()
-            .find_map(|(candidate, name)| (*candidate == marker).then_some(*name)),
-        "ChartOfAccountsObject" => chart_of_accounts_standard_attribute_name(marker),
+    let owner = form_generated_owner_type_from_type_reference(reference)?;
+    let attribute_name = match (owner.family(), owner.role()) {
+        (GeneratedMetadataOwnerFamily::Document, GeneratedMetadataOwnerRole::Object) => {
+            DOCUMENT_STANDARD_ATTRIBUTES
+                .iter()
+                .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+        }
+        (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Object) => {
+            chart_of_accounts_standard_attribute_name(marker)
+        }
         _ => None,
     }?;
     Some(format!("{}.{}", attribute.name, attribute_name))
@@ -12320,25 +12326,18 @@ fn resolve_form_constants_set_data_path(
     Some(format!("{}.{}", attribute.name, constant_name))
 }
 
-fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
-    let mut parts = reference.split('.');
-    let owner_kind = parts.next()?;
-    let owner_name = parts.next()?;
-    if owner_kind.is_empty() || owner_name.is_empty() {
-        return None;
-    }
-    let owner_base = format!("{owner_kind}.{owner_name}");
-    let relative = reference.strip_prefix(&format!("{owner_base}."))?;
-    let route = relative.split('.').collect::<Vec<_>>();
-    let relative_path = match route.as_slice() {
-        ["Attribute" | "Dimension" | "Resource", name] if !name.is_empty() => (*name).to_string(),
-        ["TabularSection", table] if !table.is_empty() => (*table).to_string(),
-        ["TabularSection", table, "Attribute", name] if !table.is_empty() && !name.is_empty() => {
-            format!("{table}.{name}")
+pub(super) fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
+    let path = parse_metadata_data_path(reference)?;
+    let relative_path = match path.role() {
+        MetadataDataPathRole::Attribute
+        | MetadataDataPathRole::Dimension
+        | MetadataDataPathRole::Resource => path.member_name().to_string(),
+        MetadataDataPathRole::TabularSection => path.table_name()?.to_string(),
+        MetadataDataPathRole::TabularAttribute => {
+            format!("{}.{}", path.table_name()?, path.member_name())
         }
-        _ => return None,
     };
-    Some((owner_base, relative_path))
+    Some((path.owner_reference(), relative_path))
 }
 
 fn form_attribute_matches_metadata_owner(
@@ -12444,53 +12443,27 @@ fn resolve_form_title_rows_count_path(
 ) -> Option<String> {
     let attribute = attribute_metadata_owners_by_id.get(attribute_id)?;
     let reference = object_refs.get(uuid)?;
-    let route = reference.split('.').collect::<Vec<_>>();
-    let (owner_kind, owner_name, table_name) = match route.as_slice() {
-        [owner_kind, owner_name, "TabularSection", table_name]
-            if !owner_kind.is_empty() && !owner_name.is_empty() && !table_name.is_empty() =>
-        {
-            (*owner_kind, *owner_name, *table_name)
-        }
-        _ => return None,
-    };
-    let owner_base = format!("{owner_kind}.{owner_name}");
-    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
+    let path = parse_metadata_data_path(reference)?;
+    if path.role() != MetadataDataPathRole::TabularSection
+        || !form_attribute_matches_metadata_owner(attribute, &path.owner_reference())
+    {
         return None;
     }
-    Some(format!("{}.{}.RowsCount", attribute.name, table_name))
+    Some(format!(
+        "{}.{}.RowsCount",
+        attribute.name,
+        path.table_name()?
+    ))
 }
 
 pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
-    if let Some(owner) = parse_generated_metadata_reference_owner(reference) {
-        return Some(owner.owner_reference());
-    }
-    let (generated_type, owner_name) = form_generated_owner_type_from_type_reference(reference)?;
-    let owner_kind = [
-        "RecordManager",
-        "RecordSet",
-        "RecordKey",
-        "Object",
-        "Record",
-        "Ref",
-    ]
-    .into_iter()
-    .find_map(|role| generated_type.strip_suffix(role))
-    .filter(|owner_kind| !owner_kind.is_empty())?;
-    // `Ref` is the only three-byte role above. Supported reference families
-    // returned through the schema parser, so reaching this branch must fail.
-    if generated_type.len().checked_sub(owner_kind.len()) == Some(3) {
-        return None;
-    }
-    Some(format!("{owner_kind}.{owner_name}"))
+    Some(form_generated_owner_type_from_type_reference(reference)?.owner_reference())
 }
 
-fn form_generated_owner_type_from_type_reference(reference: &str) -> Option<(&str, &str)> {
-    let reference = reference.strip_prefix("cfg:")?;
-    let (generated_type, owner_name) = reference.split_once('.')?;
-    if owner_name.is_empty() || owner_name.contains('.') {
-        return None;
-    }
-    Some((generated_type, owner_name))
+fn form_generated_owner_type_from_type_reference(
+    reference: &str,
+) -> Option<GeneratedMetadataOwner<'_>> {
+    parse_generated_metadata_owner(reference)
 }
 
 pub(super) fn parse_form_bound_data_path(

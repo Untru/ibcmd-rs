@@ -10341,6 +10341,65 @@ fn form_metadata_owner_base_uses_typed_reference_kinds() {
 }
 
 #[test]
+fn typed_form_metadata_paths_cover_members_and_fail_closed() {
+    for (reference, expected) in [
+        ("Document.Invoice.Attribute.Comment", "Comment"),
+        ("InformationRegister.Prices.Dimension.Period", "Period"),
+        ("InformationRegister.Prices.Resource.Amount", "Amount"),
+        ("Document.Invoice.TabularSection.Lines", "Lines"),
+        (
+            "Document.Invoice.TabularSection.Lines.Attribute.Quantity",
+            "Lines.Quantity",
+        ),
+    ] {
+        assert_eq!(
+            form_metadata_data_path_route(reference),
+            Some((
+                reference.split('.').take(2).collect::<Vec<_>>().join("."),
+                expected.to_string(),
+            )),
+            "{reference}"
+        );
+    }
+    for invalid in [
+        "Unknown.Invoice.Attribute.Comment",
+        "Document.Invoice.TabularSection.Lines.Dimension.Period",
+        "Document.Invoice.Attribute.Comment.More",
+    ] {
+        assert!(
+            form_metadata_data_path_route(invalid).is_none(),
+            "{invalid}"
+        );
+    }
+
+    let chart_owner = form_attribute_metadata_owner(&FormAttribute {
+        id: "1".to_string(),
+        name: "Plan".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:ChartOfAccountsObject.Main".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    });
+    assert_eq!(
+        resolve_form_owner_scoped_standard_attribute_data_path(&chart_owner, "-8").as_deref(),
+        Some("Plan.Description")
+    );
+}
+
+#[test]
 fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional_columns() {
     let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let table_binding = format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#);
