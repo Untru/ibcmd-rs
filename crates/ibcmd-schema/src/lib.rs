@@ -17,6 +17,104 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// The optional direct `ContextMenu` owned exclusively by a serialized
+/// `TextDocumentField`.  The physical adapter supplies the decoded payload so
+/// this schema rule owns the wire contract without depending on form parsing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormTextDocumentContextMenu<T> {
+    Absent,
+    Present(T),
+}
+
+/// Closed failure modes for the `TextDocumentField` direct context-menu slots.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormTextDocumentContextMenuParseError {
+    WrongWrapper,
+    WrongDiscriminator,
+    InvalidMultiplicity,
+    MissingPayload,
+    Duplicate,
+    ForeignChild,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormTextDocumentContextMenuMultiplicity {
+    Absent,
+    Present,
+}
+
+pub fn parse_form_text_document_context_menu_multiplicity(
+    value: &str,
+) -> Result<FormTextDocumentContextMenuMultiplicity, FormTextDocumentContextMenuParseError> {
+    match value.trim() {
+        "0" => Ok(FormTextDocumentContextMenuMultiplicity::Absent),
+        "1" => Ok(FormTextDocumentContextMenuMultiplicity::Present),
+        value if value.parse::<u64>().is_ok_and(|count| count > 1) && !value.starts_with('0') => {
+            Err(FormTextDocumentContextMenuParseError::Duplicate)
+        }
+        _ => Err(FormTextDocumentContextMenuParseError::InvalidMultiplicity),
+    }
+}
+
+pub fn form_text_document_context_menu_owner_fields(fields: &[&str]) -> bool {
+    fields.first().map(|field| field.trim()) == Some("48")
+        && fields.get(5).map(|field| field.trim()) == Some("7")
+}
+
+/// Return the count/payload slots for direct, schema-owned form children.
+///
+/// Wrapper 48 exposes these slots only for a `TextDocumentField`
+/// (discriminator 7). Wrapper 6 is the existing direct-child layout used by a
+/// search addition. Keeping this table in the schema layer prevents the binary
+/// packer from applying wrapper-48 slots to unrelated field kinds.
+pub fn form_layout_single_child_item_slot_indices(
+    wrapper: &str,
+    discriminator: Option<&str>,
+) -> Option<(usize, usize)> {
+    match (wrapper.trim(), discriminator.map(str::trim)) {
+        ("48", Some("7")) => Some((41, 42)),
+        ("6", _) => Some((15, 16)),
+        _ => None,
+    }
+}
+
+/// Decode the direct `ContextMenu` slots of a `TextDocumentField` (`48`, `7`).
+///
+/// Slot 41 is a strict 0/1 multiplicity, slot 42 is required only for the
+/// present state, and the adapter-provided resolver must accept only a genuine
+/// `ContextMenu` child.  This deliberately rejects the similarly-shaped slots
+/// of every other wrapper-48 item.
+pub fn parse_form_text_document_context_menu<T, F>(
+    fields: &[&str],
+    mut resolve_context_menu: F,
+) -> Result<FormTextDocumentContextMenu<T>, FormTextDocumentContextMenuParseError>
+where
+    F: FnMut(&str) -> Option<T>,
+{
+    if fields.first().map(|field| field.trim()) != Some("48") {
+        return Err(FormTextDocumentContextMenuParseError::WrongWrapper);
+    }
+    if fields.get(5).map(|field| field.trim()) != Some("7") {
+        return Err(FormTextDocumentContextMenuParseError::WrongDiscriminator);
+    }
+    match parse_form_text_document_context_menu_multiplicity(
+        fields
+            .get(41)
+            .map(|field| field.trim())
+            .ok_or(FormTextDocumentContextMenuParseError::InvalidMultiplicity)?,
+    )? {
+        FormTextDocumentContextMenuMultiplicity::Absent => Ok(FormTextDocumentContextMenu::Absent),
+        FormTextDocumentContextMenuMultiplicity::Present => {
+            let payload = fields
+                .get(42)
+                .ok_or(FormTextDocumentContextMenuParseError::MissingPayload)?;
+            resolve_context_menu(payload)
+                .map(FormTextDocumentContextMenu::Present)
+                .ok_or(FormTextDocumentContextMenuParseError::ForeignChild)
+        }
+    }
+}
+
 /// Parsed, schema-owned representation of a Form `InputField.choiceParameters`
 /// raw slot.  The grammar is intentionally closed: values which are not one of
 /// the documented boolean, design-time-reference, or fixed-array shapes are
@@ -4827,6 +4925,66 @@ fn validate_count(field: &'static str, expected: usize, actual: usize) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_document_context_menu_slots_are_owner_scoped_and_fail_closed() {
+        let mut fields = vec!["0"; 43];
+        fields[0] = "48";
+        fields[5] = "7";
+        fields[41] = "0";
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| Some("menu")),
+            Ok(FormTextDocumentContextMenu::Absent)
+        );
+
+        fields[41] = "1";
+        fields[42] = "payload";
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |payload| {
+                (payload == "payload").then_some("menu")
+            }),
+            Ok(FormTextDocumentContextMenu::Present("menu"))
+        );
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| None::<()>),
+            Err(FormTextDocumentContextMenuParseError::ForeignChild)
+        );
+
+        fields[41] = "2";
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| Some("menu")),
+            Err(FormTextDocumentContextMenuParseError::Duplicate)
+        );
+        fields[41] = "3";
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| Some("menu")),
+            Err(FormTextDocumentContextMenuParseError::Duplicate)
+        );
+        fields[41] = "02";
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| Some("menu")),
+            Err(FormTextDocumentContextMenuParseError::InvalidMultiplicity)
+        );
+        fields[41] = "1";
+        fields.truncate(42);
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| Some("menu")),
+            Err(FormTextDocumentContextMenuParseError::MissingPayload)
+        );
+
+        fields.resize(43, "0");
+        fields[0] = "48";
+        fields[5] = "2";
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| Some("menu")),
+            Err(FormTextDocumentContextMenuParseError::WrongDiscriminator)
+        );
+        fields[0] = "37";
+        assert_eq!(
+            parse_form_text_document_context_menu(&fields, |_| Some("menu")),
+            Err(FormTextDocumentContextMenuParseError::WrongWrapper)
+        );
+    }
 
     #[test]
     fn generated_metadata_reference_owner_parses_all_supported_kinds_exactly() {

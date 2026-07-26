@@ -4,10 +4,15 @@ use std::io::{Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use crate::form_schema::form_text_document_context_menu_child_is_valid;
 use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
+use ibcmd_schema::{
+    FormTextDocumentContextMenuMultiplicity, form_layout_single_child_item_slot_indices,
+    parse_form_text_document_context_menu_multiplicity,
+};
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
@@ -16561,14 +16566,52 @@ fn patch_form_layout_single_child_items(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let is_text_document_context_menu_owner = fields.first().and_then(|range| {
+        form_layout_single_child_item_slot_indices(
+            text[range.clone()].trim(),
+            fields.get(5).map(|field| text[field.clone()].trim()),
+        )
+    }) == Some((41, 42));
+    if is_text_document_context_menu_owner
+        && (item.child_items.len() > 1
+            || item
+                .child_items
+                .iter()
+                .any(|child| !form_text_document_context_menu_child_is_valid(&child.tag)))
+    {
+        return Err(anyhow!(
+            "TextDocumentField accepts at most one direct ContextMenu child"
+        ));
+    }
+    if is_text_document_context_menu_owner
+        && form_layout_single_child_item_slot(text, &fields).is_none()
+    {
+        return Err(anyhow!(
+            "TextDocumentField ContextMenu slots have invalid multiplicity or payload"
+        ));
+    }
+    if is_text_document_context_menu_owner
+        && let Some((_, Some(item_range))) = form_layout_single_child_item_slot(text, &fields)
+    {
+        let child_fields = scan_braced_fields(text, item_range.start)?;
+        let child_tag = child_fields.first().and_then(|range| {
+            form_layout_child_item_tag(text[range.clone()].trim(), text, &child_fields)
+        });
+        if !child_tag.is_some_and(form_text_document_context_menu_child_is_valid) {
+            return Err(anyhow!(
+                "TextDocumentField ContextMenu payload is not a ContextMenu"
+            ));
+        }
+    }
     if item.child_items_present {
         retain_form_layout_single_child_items(text, &item.child_items)?;
     }
     for child in &item.child_items {
-        if child.tag != "ContextMenu" {
+        if !form_text_document_context_menu_child_is_valid(&child.tag) {
             continue;
         }
-        let _ = patch_or_append_form_layout_single_child_item(
+        let patched = patch_or_append_form_layout_single_child_item(
             text,
             child,
             commands,
@@ -16584,6 +16627,11 @@ fn patch_form_layout_single_child_items(
                 child.name
             )
         })?;
+        if is_text_document_context_menu_owner && !patched {
+            return Err(anyhow!(
+                "failed to patch TextDocumentField ContextMenu child"
+            ));
+        }
     }
     Ok(())
 }
@@ -16593,22 +16641,21 @@ fn form_layout_single_child_item_slot(
     fields: &[Range<usize>],
 ) -> Option<(Range<usize>, Option<Range<usize>>)> {
     let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    let (count_index, item_index) = match wrapper {
-        "48" => (41, 42),
-        "6" => (15, 16),
-        _ => return None,
-    };
+    let discriminator = fields.get(5).map(|range| text[range.clone()].trim());
+    let (count_index, item_index) =
+        form_layout_single_child_item_slot_indices(wrapper, discriminator)?;
     let count_range = fields.get(count_index)?.clone();
-    let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
-    match count {
-        0 => Some((count_range, None)),
-        1 => fields.get(item_index).cloned().and_then(|item_range| {
-            text[item_range.clone()]
-                .trim_start()
-                .starts_with('{')
-                .then_some((count_range, Some(item_range)))
-        }),
-        _ => None,
+    match parse_form_text_document_context_menu_multiplicity(&text[count_range.clone()]) {
+        Ok(FormTextDocumentContextMenuMultiplicity::Absent) => Some((count_range, None)),
+        Ok(FormTextDocumentContextMenuMultiplicity::Present) => {
+            fields.get(item_index).cloned().and_then(|item_range| {
+                text[item_range.clone()]
+                    .trim_start()
+                    .starts_with('{')
+                    .then_some((count_range, Some(item_range)))
+            })
+        }
+        Err(_) => None,
     }
 }
 
@@ -30890,7 +30937,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn packs_form_body_xml_existing_input_field_context_menu() -> anyhow::Result<()> {
+    fn does_not_inject_text_document_context_menu_slots_into_input_field() -> anyhow::Result<()> {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let mut field_parts = vec!["0".to_string(); 43];
         field_parts[0] = "48".to_string();
@@ -30925,14 +30972,86 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
         let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
-        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
-
         assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
-        assert_eq!(&parsed.layout[context_fields[0].clone()], "22");
-        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
-        assert!(!parsed.layout.contains("OldMenu"));
+        assert!(parsed.layout.contains("OldMenu"));
+        assert!(!parsed.layout.contains("NewMenu"));
         assert_eq!(parsed.module_text, "Old module");
 
+        Ok(())
+    }
+
+    #[test]
+    fn patches_existing_text_document_field_context_menu() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "7".to_string();
+        field_parts[6] = r#""Editor""#.to_string();
+        field_parts[41] = "1".to_string();
+        field_parts[42] =
+            format!(r#"{{22,{{23,{form_uuid}}},0,0,0,8,"OldMenu",{{1,0}},{{1,0}},0,1,0}}"#);
+        let base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><ContextMenu name="NewMenu" id="23"/></TextDocumentField></ChildItems></Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
+        assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
+        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
+        assert!(!parsed.layout.contains("OldMenu"));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_text_document_field_direct_children_before_packing() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "7".to_string();
+        field_parts[6] = r#""Editor""#.to_string();
+        field_parts[41] = "0".to_string();
+        let base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let original = super::parse_form_body_blob(&base)?.layout;
+        for xml in [
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><ContextMenu name="First" id="23"/><ContextMenu name="Second" id="24"/></TextDocumentField></ChildItems></Form>"#
+                .as_slice(),
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><AutoCommandBar name="Foreign" id="23"/></TextDocumentField></ChildItems></Form>"#
+                .as_slice(),
+        ] {
+            assert!(super::pack_form_body_blob_from_form_xml(&base, xml, None).is_err());
+            assert_eq!(super::parse_form_body_blob(&base)?.layout, original);
+        }
+        field_parts[41] = "01".to_string();
+        let malformed_base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let malformed_original = super::parse_form_body_blob(&malformed_base)?.layout;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"/></ChildItems></Form>"#;
+        assert!(super::pack_form_body_blob_from_form_xml(&malformed_base, xml, None).is_err());
+        assert_eq!(
+            super::parse_form_body_blob(&malformed_base)?.layout,
+            malformed_original
+        );
         Ok(())
     }
 

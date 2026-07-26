@@ -41,7 +41,8 @@ use crate::form_schema::{
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
 #[cfg(test)]
 use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_item;
@@ -51,10 +52,13 @@ use ibcmd_schema::{
     FormChoiceListLayoutProfile, FormChoiceListValue as SchemaFormChoiceListValue,
     FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
     FormChoiceParameterClusterMember, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
-    FormChoiceParameters, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
-    bundled_writer_rules, form_choice_parameter_cluster_order, parse_form_choice_list,
+    FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
+    SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+    form_choice_parameter_cluster_order, form_text_document_context_menu_owner_fields,
+    parse_form_choice_list,
     parse_form_choice_parameter_links as parse_schema_form_choice_parameter_links,
     parse_form_choice_parameters,
+    parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
 };
 use ibcmd_xml::{
     DcsListSettingsTailError, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
@@ -6534,7 +6538,9 @@ fn parse_form_child_item_with_metadata_owners(
             type_index_collisions,
             object_refs,
         );
-    } else if is_form_field_direct_service_parent(tag) {
+    } else if is_form_field_direct_service_parent(tag)
+        && !form_text_document_context_menu_owner_fields(&fields)
+    {
         append_form_child_items_by_tag(
             &mut child_items,
             &fields,
@@ -6583,31 +6589,34 @@ fn parse_form_child_item_with_metadata_owners(
             object_refs,
         );
     }
-    if tag == "TextDocumentField"
-        && child_items.iter().all(|item| item.tag != "ContextMenu")
-        && let Some(context_menu) = parse_form_text_document_context_menu(
-            &fields,
-            main_data_path,
-            child_parent_data_path,
-            Some(tag),
-            attribute_names_by_id,
-            attribute_metadata_owners_by_id,
-            table_name_by_id,
-            standard_command_owner_name_by_id,
-            item_name_by_id,
-            table_column_names_by_id,
-            type_link_data_path_by_table_column,
-            data_path_by_binding_key,
-            bound_table_path_by_binding_key,
-            table_column_names_by_binding_key,
-            owner_scoped_bindings,
-            commands,
-            type_index,
-            type_index_collisions,
-            object_refs,
-        )
-    {
-        child_items.push(context_menu);
+    match parse_form_text_document_context_menu(
+        &fields,
+        main_data_path,
+        child_parent_data_path,
+        Some(tag),
+        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
+        table_name_by_id,
+        standard_command_owner_name_by_id,
+        item_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
+        owner_scoped_bindings,
+        commands,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
+        Ok(Some(context_menu)) => child_items.push(context_menu),
+        Ok(None) => {}
+        Err(
+            FormTextDocumentContextMenuParseError::WrongWrapper
+            | FormTextDocumentContextMenuParseError::WrongDiscriminator,
+        ) => {}
+        Err(_) => return None,
     }
     let extended_group_options = (tag == "UsualGroup")
         .then(|| parse_form_usual_group_extended_options(&fields))
@@ -8370,31 +8379,34 @@ pub(super) fn parse_form_text_document_context_menu(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<FormChildItem> {
-    if fields.get(41).map(|field| field.trim()) != Some("1") {
-        return None;
+) -> Result<Option<FormChildItem>, FormTextDocumentContextMenuParseError> {
+    match parse_schema_form_text_document_context_menu(fields, |payload| {
+        parse_form_child_item_with_metadata_owners(
+            payload,
+            main_data_path,
+            parent_data_path,
+            parent_tag,
+            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
+            table_name_by_id,
+            standard_command_owner_name_by_id,
+            item_name_by_id,
+            table_column_names_by_id,
+            type_link_data_path_by_table_column,
+            data_path_by_binding_key,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
+            owner_scoped_bindings,
+            commands,
+            type_index,
+            type_index_collisions,
+            object_refs,
+        )
+        .filter(|item| form_text_document_context_menu_child_is_valid(&item.tag))
+    })? {
+        FormTextDocumentContextMenu::Absent => Ok(None),
+        FormTextDocumentContextMenu::Present(context_menu) => Ok(Some(context_menu)),
     }
-    parse_form_child_item_with_metadata_owners(
-        fields.get(42)?,
-        main_data_path,
-        parent_data_path,
-        parent_tag,
-        attribute_names_by_id,
-        attribute_metadata_owners_by_id,
-        table_name_by_id,
-        standard_command_owner_name_by_id,
-        item_name_by_id,
-        table_column_names_by_id,
-        type_link_data_path_by_table_column,
-        data_path_by_binding_key,
-        bound_table_path_by_binding_key,
-        table_column_names_by_binding_key,
-        owner_scoped_bindings,
-        commands,
-        type_index,
-        type_index_collisions,
-        object_refs,
-    )
 }
 
 pub(super) struct FormUsualGroupExtendedOptions {

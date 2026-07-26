@@ -8274,7 +8274,10 @@ fn extracts_text_document_field_child_item() {
     );
     assert_eq!(item.events[0].name, "OnChange");
     assert_eq!(item.events[0].handler, "ProcedureChanged");
+    assert_eq!(item.child_items.len(), 1);
     assert_eq!(item.child_items[0].tag, "ContextMenu");
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert_eq!(xml.matches("<ContextMenu ").count(), 1);
 }
 
 #[test]

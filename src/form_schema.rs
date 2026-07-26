@@ -41,6 +41,11 @@ pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) 
     )
 }
 
+/// Schema bridge for the sole direct child admitted by a TextDocumentField.
+pub(crate) fn form_text_document_context_menu_child_is_valid(tag: &str) -> bool {
+    tag == "ContextMenu"
+}
+
 // Platform type ID used by serialized Form column patterns for a DCS filter.
 const FORM_DATA_COMPOSITION_FILTER_TYPE_UUID: &str = "f6841c6b-6c71-4c82-ae9e-d08b49db326c";
 
