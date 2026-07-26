@@ -45,12 +45,13 @@ use crate::form_schema::{
 };
 use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue, FormChoiceListItemPart,
-    FormChoiceParameterValue as SchemaFormChoiceParameterValue, FormChoiceParameterValuePart,
-    FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy, WriterRuleKey,
-    WriterRuleLookupError, bundled_writer_rules, canonical_form_choice_parameters_qname,
-    parse_form_choice_parameters,
+    FormChoiceParameters, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
+    bundled_writer_rules, canonical_form_choice_parameters_qname, parse_form_choice_parameters,
 };
-use ibcmd_xml::{DcsListSettingsTailError, emit_form_list_settings_tail};
+use ibcmd_xml::{
+    DcsListSettingsTailError, FormChoiceParametersEmitError, emit_form_choice_parameters,
+    emit_form_list_settings_tail,
+};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -1062,26 +1063,6 @@ impl CanonicalFormChoiceList {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormChoiceParameter {
-    pub(super) name: String,
-    pub(super) presentation: Vec<(String, String)>,
-    pub(super) value: FormChoiceParameterValue,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) enum FormChoiceParameterValue {
-    Boolean(bool),
-    DesignTimeRef(String),
-    FixedArray(Vec<FormChoiceParameterArrayItem>),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormChoiceParameterArrayItem {
-    pub(super) presentation: Vec<(String, String)>,
-    pub(super) value_ref: String,
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub(super) enum CanonicalFormChoiceParameters {
     #[default]
@@ -1090,7 +1071,7 @@ pub(super) enum CanonicalFormChoiceParameters {
         slot: usize,
     },
     Typed {
-        items: Vec<FormChoiceParameter>,
+        parameters: FormChoiceParameters,
         slot: usize,
     },
     OpaqueSameProfile {
@@ -1101,7 +1082,7 @@ pub(super) enum CanonicalFormChoiceParameters {
 
 impl CanonicalFormChoiceParameters {
     pub(super) fn should_emit(&self) -> bool {
-        matches!(self, Self::Typed { items, .. } if !items.is_empty())
+        matches!(self, Self::Typed { parameters, .. } if !parameters.is_empty())
     }
 
     /// MSSQL source-parity extraction keeps undecoded same-profile payloads non-emitting.
@@ -1109,17 +1090,7 @@ impl CanonicalFormChoiceParameters {
     pub(super) fn is_non_emitting(&self) -> bool {
         match self {
             Self::Absent | Self::Empty { .. } | Self::OpaqueSameProfile { .. } => true,
-            Self::Typed { items, .. } => items.is_empty(),
-        }
-    }
-
-    pub(super) fn items(&self) -> Result<&[FormChoiceParameter], FormSchemaWriteError> {
-        match self {
-            Self::Typed { items, .. } => Ok(items),
-            Self::Absent | Self::Empty { .. } => Ok(&[]),
-            Self::OpaqueSameProfile { slot, .. } => {
-                Err(FormSchemaWriteError::OpaqueChoiceParameters { slot: *slot })
-            }
+            Self::Typed { parameters, .. } => parameters.is_empty(),
         }
     }
 }
@@ -1140,6 +1111,7 @@ pub(super) enum FormSchemaWriteError {
     OpaqueChoiceParameters {
         slot: usize,
     },
+    ChoiceParametersEmit(FormChoiceParametersEmitError),
     #[allow(dead_code)]
     CanonicalDcsSerializerPending {
         rule_id: String,
@@ -1162,6 +1134,12 @@ impl From<SchemaError> for FormSchemaWriteError {
 impl From<DcsListSettingsTailError> for FormSchemaWriteError {
     fn from(error: DcsListSettingsTailError) -> Self {
         Self::DcsTail(error)
+    }
+}
+
+impl From<FormChoiceParametersEmitError> for FormSchemaWriteError {
+    fn from(error: FormChoiceParametersEmitError) -> Self {
+        Self::ChoiceParametersEmit(error)
     }
 }
 
@@ -9158,8 +9136,8 @@ pub(super) fn canonical_form_input_field_choice_parameters(
         type_index_collisions,
         object_refs,
     ) {
-        Some(items) if items.is_empty() => CanonicalFormChoiceParameters::Empty { slot },
-        Some(items) => CanonicalFormChoiceParameters::Typed { items, slot },
+        Some(parameters) if parameters.is_empty() => CanonicalFormChoiceParameters::Empty { slot },
+        Some(parameters) => CanonicalFormChoiceParameters::Typed { parameters, slot },
         None => CanonicalFormChoiceParameters::OpaqueSameProfile {
             raw: raw.to_owned(),
             slot,
@@ -9172,7 +9150,7 @@ pub(super) fn parse_form_input_field_choice_parameters(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<FormChoiceParameter>> {
+) -> Option<FormChoiceParameters> {
     let parameters = parse_form_choice_parameters(field, |type_id, value_id| {
         parse_form_enum_design_time_reference(
             type_id,
@@ -9182,36 +9160,7 @@ pub(super) fn parse_form_input_field_choice_parameters(
             object_refs,
         )
     })?;
-    parameters
-        .items()
-        .iter()
-        .map(|parameter| {
-            let value = match parameter.value() {
-                SchemaFormChoiceParameterValue::Boolean(value) => {
-                    FormChoiceParameterValue::Boolean(*value)
-                }
-                SchemaFormChoiceParameterValue::DesignTimeRef(value) => {
-                    FormChoiceParameterValue::DesignTimeRef(value.clone())
-                }
-                SchemaFormChoiceParameterValue::FixedArray(values) => {
-                    FormChoiceParameterValue::FixedArray(
-                        values
-                            .iter()
-                            .map(|value| FormChoiceParameterArrayItem {
-                                presentation: value.presentation().to_vec(),
-                                value_ref: value.value_ref().to_owned(),
-                            })
-                            .collect(),
-                    )
-                }
-            };
-            Some(FormChoiceParameter {
-                name: parameter.name().to_owned(),
-                presentation: parameter.presentation().to_vec(),
-                value,
-            })
-        })
-        .collect()
+    Some(parameters)
 }
 
 pub(super) fn parse_form_enum_design_time_reference(
@@ -17427,123 +17376,16 @@ pub(super) fn format_form_choice_parameters_xml(
     parameters: &CanonicalFormChoiceParameters,
     indent: usize,
 ) -> Result<String, FormSchemaWriteError> {
-    let policy = verified_form_choice_parameters_policy()?;
-    let WriterPolicy::FormChoiceParameters {
-        owner_qname,
-        owner_predecessor_qname: _,
-        owner_successor_qname: _,
-        empty_collection: FormChoiceParametersEmptyCollection::OmitWhenWriteDefaultFalse,
-        item,
-        fixed_array,
-    } = &policy
-    else {
-        return Err(unexpected_form_choice_parameters_policy());
-    };
-    let items = parameters.items()?;
-    if items.is_empty() {
-        return Ok(String::new());
-    }
-    let owner_tag = canonical_form_choice_parameters_qname(owner_qname)?;
-    let item_tag = canonical_form_choice_parameters_qname(&item.item_qname)?;
-    let name_attribute = canonical_form_choice_parameters_qname(&item.name_attribute_qname)?;
-    let value_tag = canonical_form_choice_parameters_qname(&item.value_qname)?;
-    let presentation_tag = canonical_form_choice_parameters_qname(&item.presentation_qname)?;
-    let scalar_value_tag = canonical_form_choice_parameters_qname(&item.scalar_value_qname)?;
-    let fixed_array_item_tag = canonical_form_choice_parameters_qname(&fixed_array.item_qname)?;
-    let tab = "\t".repeat(indent);
-    let mut xml = format!("{tab}<{owner_tag}>\r\n");
-    for parameter in items {
-        xml.push_str(&format!(
-            "{tab}\t<{item_tag} {name_attribute}=\"{}\">\r\n",
-            escape_xml_text(&parameter.name)
-        ));
-        xml.push_str(&format!(
-            "{tab}\t\t<{value_tag} xsi:type=\"{}\">\r\n",
-            escape_xml_text(&item.value_xsi_type)
-        ));
-        for part in &item.value_order {
-            match part {
-                FormChoiceParameterValuePart::Presentation => {
-                    xml.push_str(&format_form_choice_parameter_presentation_xml(
-                        &parameter.presentation,
-                        &presentation_tag,
-                        indent + 3,
-                    ));
-                }
-                FormChoiceParameterValuePart::Value => match &parameter.value {
-                    FormChoiceParameterValue::Boolean(value) => {
-                        xml.push_str(&format!(
-                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\">{}</{scalar_value_tag}>\r\n",
-                            escape_xml_text(&item.boolean_xsi_type),
-                            xml_bool(*value)
-                        ));
-                    }
-                    FormChoiceParameterValue::DesignTimeRef(value_ref) => {
-                        xml.push_str(&format!(
-                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\">{}</{scalar_value_tag}>\r\n",
-                            escape_xml_text(&item.design_time_ref_xsi_type),
-                            escape_xml_text(value_ref)
-                        ));
-                    }
-                    FormChoiceParameterValue::FixedArray(values) if values.is_empty() => {
-                        xml.push_str(&format!(
-                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\"/>\r\n",
-                            escape_xml_text(&fixed_array.xsi_type)
-                        ));
-                    }
-                    FormChoiceParameterValue::FixedArray(values) => {
-                        xml.push_str(&format!(
-                            "{tab}\t\t\t<{scalar_value_tag} xsi:type=\"{}\">\r\n",
-                            escape_xml_text(&fixed_array.xsi_type)
-                        ));
-                        for value in values {
-                            xml.push_str(&format!(
-                                "{tab}\t\t\t\t<{fixed_array_item_tag} xsi:type=\"{}\">\r\n",
-                                escape_xml_text(&fixed_array.item_xsi_type)
-                            ));
-                            for part in &fixed_array.item_order {
-                                match part {
-                                    FormChoiceParameterValuePart::Presentation => {
-                                        xml.push_str(
-                                            &format_form_choice_parameter_presentation_xml(
-                                                &value.presentation,
-                                                &presentation_tag,
-                                                indent + 5,
-                                            ),
-                                        );
-                                    }
-                                    FormChoiceParameterValuePart::Value => {
-                                        xml.push_str(&format!(
-                                            "{tab}\t\t\t\t\t<{scalar_value_tag} xsi:type=\"{}\">{}</{scalar_value_tag}>\r\n",
-                                            escape_xml_text(&item.design_time_ref_xsi_type),
-                                            escape_xml_text(&value.value_ref)
-                                        ));
-                                    }
-                                }
-                            }
-                            xml.push_str(&format!("{tab}\t\t\t\t</{fixed_array_item_tag}>\r\n"));
-                        }
-                        xml.push_str(&format!("{tab}\t\t\t</{scalar_value_tag}>\r\n"));
-                    }
-                },
-            }
+    match parameters {
+        CanonicalFormChoiceParameters::Absent | CanonicalFormChoiceParameters::Empty { .. } => {
+            Ok(String::new())
         }
-        xml.push_str(&format!("{tab}\t\t</{value_tag}>\r\n"));
-        xml.push_str(&format!("{tab}\t</{item_tag}>\r\n"));
-    }
-    xml.push_str(&format!("{tab}</{owner_tag}>\r\n"));
-    Ok(xml)
-}
-
-fn format_form_choice_parameter_presentation_xml(
-    presentation: &[(String, String)],
-    presentation_tag: &str,
-    indent: usize,
-) -> String {
-    if presentation.is_empty() {
-        format!("{}<{presentation_tag}/>\r\n", "\t".repeat(indent))
-    } else {
-        format_form_localized_section(presentation_tag, presentation, indent)
+        CanonicalFormChoiceParameters::Typed { parameters, .. } => {
+            emit_form_choice_parameters(parameters, indent).map_err(Into::into)
+        }
+        CanonicalFormChoiceParameters::OpaqueSameProfile { slot, .. } => {
+            Err(FormSchemaWriteError::OpaqueChoiceParameters { slot: *slot })
+        }
     }
 }
 

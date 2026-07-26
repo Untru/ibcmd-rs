@@ -501,6 +501,107 @@ pub struct RootMetadataInventoryEntry {
     pub expected_path: String,
     pub emitted_path: Option<String>,
     pub reason: Option<MetadataExtractionMissReason>,
+    /// A bounded, non-payload diagnostic captured at the source XML boundary.
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<MetadataSourceExtractionDiagnostic>,
+}
+
+/// Coarse class of a source XML extraction failure.  These names are part of
+/// the dump-manifest contract, so do not derive them from parser error text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MetadataSourceExtractionFailureClass {
+    Unknown,
+    Unsupported,
+    Malformed,
+    Unresolved,
+    Ambiguous,
+    Invariant,
+}
+
+impl MetadataSourceExtractionFailureClass {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Unsupported => "unsupported",
+            Self::Malformed => "malformed",
+            Self::Unresolved => "unresolved",
+            Self::Ambiguous => "ambiguous",
+            Self::Invariant => "invariant",
+        }
+    }
+}
+
+/// Provenance for a failed source XML extraction.
+///
+/// Values are deliberately tokens rather than parser payload: this report is
+/// written to disk and must not disclose metadata text, names, or references.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MetadataSourceExtractionDiagnostic {
+    pub code: String,
+    pub class: MetadataSourceExtractionFailureClass,
+    pub family: String,
+    pub parser_stage: String,
+    pub structural_signature: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offending_reference: Option<String>,
+}
+
+impl MetadataSourceExtractionDiagnostic {
+    fn legacy_option_none(
+        class: MetadataSourceExtractionFailureClass,
+        family: &str,
+        structural_signature: &str,
+    ) -> Self {
+        Self::new(class, family, "legacy_option_none", structural_signature)
+    }
+
+    fn audit_missing_provenance(family: &str) -> Self {
+        Self::new(
+            MetadataSourceExtractionFailureClass::Unknown,
+            family,
+            "audit_missing_provenance",
+            "missing_reason_and_extraction_provenance",
+        )
+    }
+
+    fn new(
+        class: MetadataSourceExtractionFailureClass,
+        family: &str,
+        parser_stage: &str,
+        structural_signature: &str,
+    ) -> Self {
+        let family = bounded_diagnostic_token(family);
+        let parser_stage = bounded_diagnostic_token(parser_stage);
+        let structural_signature = bounded_diagnostic_token(structural_signature);
+        let code_family = family.to_ascii_lowercase();
+        Self {
+            code: format!(
+                "metadata_source.{code_family}.{}.{}",
+                class.as_str(),
+                parser_stage
+            ),
+            class,
+            family,
+            parser_stage,
+            structural_signature,
+            field_index: None,
+            collection_index: None,
+            offending_reference: None,
+        }
+    }
+}
+
+fn bounded_diagnostic_token(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        .take(96)
+        .collect()
 }
 
 /// Serializable audit result for the root metadata XML contract.
@@ -550,8 +651,10 @@ impl RootMetadataInventoryReport {
                 .find(|entry| entry.emitted_path.is_none())
                 .map(|entry| {
                     let reason = entry
-                        .reason
-                        .map(MetadataExtractionMissReason::as_str)
+                        .diagnostic
+                        .as_ref()
+                        .map(|diagnostic| diagnostic.code.as_str())
+                        .or_else(|| entry.reason.map(MetadataExtractionMissReason::as_str))
                         .unwrap_or("unknown");
                     format!("{} ({}, reason={reason})", entry.uuid, entry.family)
                 })
@@ -572,6 +675,7 @@ fn audit_root_metadata_inventory(
     candidates: &BTreeSet<String>,
     metadata: &MetadataTextRowsAudit,
     manifests: &[MssqlDumpRowManifest],
+    extraction_diagnostics: &BTreeMap<String, MetadataSourceExtractionDiagnostic>,
     scope: RootMetadataInventoryScope,
     candidate_set_complete: bool,
 ) -> RootMetadataInventoryReport {
@@ -610,28 +714,38 @@ fn audit_root_metadata_inventory(
             let emitted_path = emitted_by_uuid
                 .get(uuid.as_str())
                 .map(|path| (*path).to_owned());
-            let reason = emitted_path.is_none().then(|| {
-                metadata
-                    .misses
-                    .get(uuid)
-                    .copied()
-                    .unwrap_or(MetadataExtractionMissReason::Formatter)
-            });
-            if let Some(reason) = reason {
-                *misses_by_reason
-                    .entry(reason.as_str().to_string())
-                    .or_default() += 1;
+            let family = if is_configuration {
+                "Configuration".to_string()
+            } else {
+                row.and_then(|row| row.kind.clone())
+                    .unwrap_or_else(|| "unknown".to_string())
+            };
+            let reason = emitted_path
+                .is_none()
+                .then(|| metadata.misses.get(uuid).copied())
+                .flatten();
+            let diagnostic = emitted_path
+                .is_none()
+                .then(|| extraction_diagnostics.get(uuid).cloned())
+                .flatten();
+            let diagnostic = if emitted_path.is_none() && reason.is_none() && diagnostic.is_none() {
+                Some(MetadataSourceExtractionDiagnostic::audit_missing_provenance(&family))
+            } else {
+                diagnostic
+            };
+            if let Some(code) = diagnostic
+                .as_ref()
+                .map(|diagnostic| diagnostic.code.as_str())
+                .or_else(|| reason.map(MetadataExtractionMissReason::as_str))
+            {
+                *misses_by_reason.entry(code.to_string()).or_default() += 1;
             }
             RootMetadataInventoryEntry {
                 uuid: uuid.clone(),
-                family: if is_configuration {
-                    "Configuration".to_string()
-                } else {
-                    row.and_then(|row| row.kind.clone())
-                        .unwrap_or_else(|| "unknown".to_string())
-                },
+                family,
                 expected_path,
                 reason,
+                diagnostic,
                 emitted_path,
             }
         })
@@ -1120,6 +1234,7 @@ struct DumpedRow {
     metadata_xml_rows: usize,
     source_asset_rows: usize,
     source_assets: SourceAssetCompletenessReport,
+    metadata_xml_diagnostic: Option<MetadataSourceExtractionDiagnostic>,
     timings: MssqlDumpTimingReport,
 }
 
@@ -1535,6 +1650,7 @@ fn dump_table_rows_with_options_mode(
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
     let mut source_asset_completeness = SourceAssetCompletenessReport::default();
+    let mut metadata_extraction_diagnostics = BTreeMap::new();
     let mut failed_rows = Vec::new();
     for (row, dumped) in rows.iter().zip(dumped_rows) {
         let dumped = match dumped {
@@ -1554,6 +1670,9 @@ fn dump_table_rows_with_options_mode(
         metadata_xml_rows += dumped.metadata_xml_rows;
         source_asset_rows += dumped.source_asset_rows;
         source_asset_completeness.merge(&dumped.source_assets);
+        if let Some(diagnostic) = dumped.metadata_xml_diagnostic {
+            metadata_extraction_diagnostics.insert(row.file_name.clone(), diagnostic);
+        }
         manifests.push(dumped.manifest);
     }
     for (source_row_id, reason) in &source_asset_discovery_misses {
@@ -1610,6 +1729,7 @@ fn dump_table_rows_with_options_mode(
             &candidates,
             &metadata_audit,
             &manifests,
+            &metadata_extraction_diagnostics,
             inventory_scope,
             candidate_set_complete,
         )
@@ -2517,6 +2637,7 @@ fn dump_table_rows_streamed(
     let mut metadata_xml_rows = 0;
     let mut source_asset_rows = 0;
     let mut source_asset_completeness = SourceAssetCompletenessReport::default();
+    let mut metadata_extraction_diagnostics = BTreeMap::new();
     let mut versions_blob = None;
     let file_name_batches = build_dump_file_name_batches(&headers, &file_names);
     for chunk in file_name_batches {
@@ -2572,6 +2693,10 @@ fn dump_table_rows_streamed(
             metadata_xml_rows += dumped.metadata_xml_rows;
             source_asset_rows += dumped.source_asset_rows;
             source_asset_completeness.merge(&dumped.source_assets);
+            if let Some(diagnostic) = dumped.metadata_xml_diagnostic {
+                metadata_extraction_diagnostics
+                    .insert(dumped.manifest.file_name.clone(), diagnostic);
+            }
             timings.add_assign(&dumped.timings);
             manifests.push(dumped.manifest);
         }
@@ -2681,6 +2806,7 @@ fn dump_table_rows_streamed(
             &candidates,
             &selected_metadata_audit,
             &manifests,
+            &metadata_extraction_diagnostics,
             inventory_scope,
             candidate_set_complete,
         )
@@ -3235,10 +3361,11 @@ fn dump_table_row_bytes(
     };
 
     let mut metadata_xml_rows = 0;
+    let mut metadata_xml_diagnostic = None;
     let metadata_xml_relative = if context.extract_metadata_xml {
         let started = Instant::now();
         let extracted = if let Some(row) = context.metadata_texts_by_file_name.get(file_name) {
-            extract_metadata_source_xml_from_text_row(
+            extract_metadata_source_xml_from_text_row_audited(
                 row,
                 context.type_index,
                 context.type_index_collisions,
@@ -3270,9 +3397,16 @@ fn dump_table_row_bytes(
                 context.subsystem_refs,
                 context.source_version,
             )
+            .ok_or_else(|| {
+                MetadataSourceExtractionDiagnostic::legacy_option_none(
+                    MetadataSourceExtractionFailureClass::Unknown,
+                    "unknown",
+                    "metadata_row_unavailable",
+                )
+            })
         };
         match extracted {
-            Some(extracted) => {
+            Ok(extracted) => {
                 let path = context.output_dir.join(&extracted.relative_path);
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent)
@@ -3283,7 +3417,8 @@ fn dump_table_row_bytes(
                 timings.metadata_xml_cpu_ms += elapsed_ms(started);
                 Some(extracted.relative_path.to_string_lossy().replace('\\', "/"))
             }
-            None => {
+            Err(diagnostic) => {
+                metadata_xml_diagnostic = Some(diagnostic);
                 timings.metadata_xml_cpu_ms += elapsed_ms(started);
                 None
             }
@@ -3391,6 +3526,7 @@ fn dump_table_row_bytes(
         metadata_xml_rows,
         source_asset_rows,
         source_assets,
+        metadata_xml_diagnostic,
         timings,
     })
 }
@@ -7888,6 +8024,89 @@ fn extract_metadata_source_xml_from_text_row(
     }
 
     Some(ExtractedMetadataSourceXml { relative_path, xml })
+}
+
+/// Preserve the legacy Option-based family decoders while making their loss of
+/// detail observable at the export/audit boundary.  Until individual parsers
+/// return typed errors, `legacy_option_none` intentionally does not pretend to
+/// identify an inner branch.
+fn extract_metadata_source_xml_from_text_row_audited(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    configuration_root_object_refs: &BTreeMap<String, String>,
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
+    functional_option_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    if let Some(extracted) = extract_metadata_source_xml_from_text_row(
+        row,
+        type_index,
+        type_index_collisions,
+        object_refs,
+        metadata_object_refs,
+        configuration_root_object_refs,
+        recalculation_refs,
+        root_recalculation_refs,
+        functional_option_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+        source_version,
+    ) {
+        return Ok(extracted);
+    }
+
+    let (class, family, signature) = if row.file_name.contains('.') {
+        (
+            MetadataSourceExtractionFailureClass::Unsupported,
+            "unknown",
+            "file_name_separator",
+        )
+    } else if row.object_code.is_none() {
+        (
+            MetadataSourceExtractionFailureClass::Malformed,
+            "unknown",
+            "object_code_missing",
+        )
+    } else if row.header.is_none() {
+        (
+            MetadataSourceExtractionFailureClass::Malformed,
+            row.kind.as_deref().unwrap_or("unknown"),
+            "header_missing",
+        )
+    } else if row.kind.is_none() || row.folder.is_none() {
+        (
+            MetadataSourceExtractionFailureClass::Unsupported,
+            "unknown",
+            "family_unrecognized",
+        )
+    } else if is_direct_code14_form_metadata_text(&row.text, &row.file_name)
+        && !form_refs
+            .get(&row.file_name)
+            .is_some_and(|form_ref| form_ref.kind == "Form")
+    {
+        (
+            MetadataSourceExtractionFailureClass::Unresolved,
+            "Form",
+            "direct_form_owner_missing",
+        )
+    } else {
+        (
+            MetadataSourceExtractionFailureClass::Unknown,
+            row.kind.as_deref().unwrap_or("unknown"),
+            "legacy_option_none",
+        )
+    };
+    Err(MetadataSourceExtractionDiagnostic::legacy_option_none(
+        class, family, signature,
+    ))
 }
 
 fn route_constant_source_xml_through_canonical_ir(

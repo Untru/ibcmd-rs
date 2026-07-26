@@ -4,6 +4,7 @@
 
 pub mod dcs;
 mod dialect;
+mod form_choice_parameters;
 pub mod metadata;
 mod node;
 mod reader;
@@ -23,6 +24,7 @@ pub use dialect::{
     NamespaceMatcher, ParseDialectIdError, PropertyOrderRule, RootSignature, RuleProvenance,
     XmlEncoding, bundled_dialect_registry,
 };
+pub use form_choice_parameters::{FormChoiceParametersEmitError, emit_form_choice_parameters};
 pub use metadata::{
     MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
     MetadataOrderError, MetadataRegistry, MetadataRegistryError, bundled_metadata_registry,

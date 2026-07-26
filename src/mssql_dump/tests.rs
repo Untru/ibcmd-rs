@@ -1245,7 +1245,7 @@ fn metadata_text_audit_classifies_decode_and_structure_misses() {
 }
 
 #[test]
-fn root_metadata_inventory_reports_formatter_miss_and_strict_gate() {
+fn root_metadata_inventory_reports_typed_extraction_miss_and_strict_gate() {
     let uuid = "22222222-2222-4222-8222-222222222222";
     let row = MetadataTextRow {
         file_name: uuid.to_string(),
@@ -1266,28 +1266,219 @@ fn root_metadata_inventory_reports_formatter_miss_and_strict_gate() {
         misses: BTreeMap::new(),
     };
     let candidates = BTreeSet::from([uuid.to_string()]);
+    let diagnostics = BTreeMap::from([(
+        uuid.to_string(),
+        MetadataSourceExtractionDiagnostic::legacy_option_none(
+            MetadataSourceExtractionFailureClass::Unknown,
+            "Catalog",
+            "legacy_option_none",
+        ),
+    )]);
     let full = audit_root_metadata_inventory(
         &candidates,
         &metadata,
         &[],
+        &diagnostics,
         RootMetadataInventoryScope::Full,
         true,
     );
     assert_eq!(full.expected, 1);
     assert_eq!(full.emitted, 0);
     assert_eq!(full.missing, 1);
+    assert_eq!(full.entries[0].reason, None);
     assert_eq!(
-        full.entries[0].reason,
-        Some(MetadataExtractionMissReason::Formatter)
+        full.entries[0]
+            .diagnostic
+            .as_ref()
+            .map(|diagnostic| diagnostic.code.as_str()),
+        Some("metadata_source.catalog.unknown.legacy_option_none")
     );
     assert!(full.ensure_complete(false).is_ok());
-    assert!(full.ensure_complete(true).is_err());
+    assert!(
+        full.ensure_complete(true)
+            .unwrap_err()
+            .to_string()
+            .contains("metadata_source.catalog.unknown.legacy_option_none")
+    );
 
     let scoped = RootMetadataInventoryReport {
         scope: RootMetadataInventoryScope::Scoped,
         ..full
     };
     assert!(scoped.ensure_complete(true).is_ok());
+}
+
+#[test]
+fn source_extraction_diagnostic_has_stable_bounded_non_payload_contract() {
+    for class in [
+        MetadataSourceExtractionFailureClass::Unknown,
+        MetadataSourceExtractionFailureClass::Unsupported,
+        MetadataSourceExtractionFailureClass::Malformed,
+        MetadataSourceExtractionFailureClass::Unresolved,
+        MetadataSourceExtractionFailureClass::Ambiguous,
+        MetadataSourceExtractionFailureClass::Invariant,
+    ] {
+        let diagnostic = MetadataSourceExtractionDiagnostic::legacy_option_none(
+            class,
+            &"Catalog".repeat(32),
+            &"legacy-option-none".repeat(32),
+        );
+        let json = serde_json::to_string(&diagnostic).unwrap();
+        assert!(
+            diagnostic
+                .code
+                .starts_with("metadata_source.catalogcatalog")
+        );
+        assert!(diagnostic.family.len() <= 96);
+        assert!(diagnostic.structural_signature.len() <= 96);
+        assert!(json.contains(class.as_str()));
+        assert!(!json.contains("formatter"));
+    }
+}
+
+#[test]
+fn audited_source_extraction_preserves_success_bytes_and_reports_family_on_failure() {
+    let successful =
+        calculation_recalculation_row("42000000-0000-4000-8000-000000000001", "Recalculation");
+    let refs = BTreeMap::from([(
+        successful.file_name.clone(),
+        CalculationRecalculationReference {
+            owner_name: "Owner".to_string(),
+            recalculation_name: "Recalculation".to_string(),
+        },
+    )]);
+    let legacy = extract_metadata_source_xml_from_text_row(
+        &successful,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let audited = extract_metadata_source_xml_from_text_row_audited(
+        &successful,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    assert_eq!(audited.relative_path, legacy.relative_path);
+    assert_eq!(audited.xml, legacy.xml);
+
+    let secret = "raw-secret-payload-must-not-appear";
+    let failed = MetadataTextRow {
+        file_name: "42000000-0000-4000-8000-000000000002".to_string(),
+        text: secret.to_string(),
+        object_code: Some(56),
+        header: Some(MetadataHeader {
+            uuid: "42000000-0000-4000-8000-000000000002".to_string(),
+            name: "Products".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("Catalog".to_string()),
+        folder: Some("Catalogs"),
+    };
+    let diagnostic = match extract_metadata_source_xml_from_text_row_audited(
+        &failed,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    ) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("malformed Catalog row unexpectedly extracted"),
+    };
+    assert_eq!(diagnostic.family, "Catalog");
+    assert_eq!(
+        diagnostic.class,
+        MetadataSourceExtractionFailureClass::Unknown
+    );
+    assert_eq!(diagnostic.parser_stage, "legacy_option_none");
+    assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+}
+
+#[test]
+fn root_inventory_synthesizes_missing_provenance_and_drops_hostile_diagnostics_on_read() {
+    let uuid = "22222222-2222-4222-8222-222222222223";
+    let report = audit_root_metadata_inventory(
+        &BTreeSet::from([uuid.to_string()]),
+        &MetadataTextRowsAudit::default(),
+        &[],
+        &BTreeMap::new(),
+        RootMetadataInventoryScope::Full,
+        true,
+    );
+    let diagnostic = report.entries[0].diagnostic.as_ref().unwrap();
+    assert_eq!(
+        diagnostic.class,
+        MetadataSourceExtractionFailureClass::Unknown
+    );
+    assert_eq!(diagnostic.parser_stage, "audit_missing_provenance");
+    assert_eq!(
+        report
+            .misses_by_reason
+            .get("metadata_source.unknown.unknown.audit_missing_provenance"),
+        Some(&1)
+    );
+    assert!(
+        report
+            .ensure_complete(true)
+            .unwrap_err()
+            .to_string()
+            .contains("audit_missing_provenance")
+    );
+
+    let hostile = serde_json::json!({
+        "scope": "full",
+        "candidate_set_complete": true,
+        "expected": 1,
+        "emitted": 0,
+        "missing": 1,
+        "misses_by_reason": {},
+        "entries": [{
+            "uuid": uuid,
+            "family": "Catalog",
+            "expected_path": "Catalogs/Products.xml",
+            "emitted_path": null,
+            "reason": null,
+            "diagnostic": {
+                "code": "x".repeat(4096),
+                "family": "секрет".repeat(1024),
+                "parser_stage": "payload-must-not-be-read",
+                "structural_signature": "raw-secret-payload",
+                "class": "unknown"
+            }
+        }]
+    });
+    let decoded: RootMetadataInventoryReport = serde_json::from_value(hostile).unwrap();
+    assert!(decoded.entries[0].diagnostic.is_none());
 }
 
 #[test]
@@ -1361,6 +1552,7 @@ fn root_inventory_serializes_exact_extraction_causes() {
         &candidates,
         &metadata,
         &[],
+        &BTreeMap::new(),
         RootMetadataInventoryScope::Full,
         true,
     );
@@ -1399,7 +1591,7 @@ fn scoped_inventory_ignores_broad_dependency_rows() {
         ],
         misses: BTreeMap::from([(
             dependency_uuid.to_string(),
-            MetadataExtractionMissReason::Formatter,
+            MetadataExtractionMissReason::Family,
         )]),
     };
     let selected = BTreeSet::from([selected_uuid.to_string(), dependency_uuid.to_string()]);
@@ -15972,12 +16164,15 @@ fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
         &object_refs,
     )
     .unwrap();
-    assert_eq!(parameters.len(), 2);
-    assert_eq!(parameters[0].value, FormChoiceParameterValue::Boolean(true));
+    assert_eq!(parameters.items().len(), 2);
+    assert_eq!(
+        parameters.items()[0].value(),
+        &ibcmd_schema::FormChoiceParameterValue::Boolean(true)
+    );
     assert!(matches!(
-        &parameters[1].value,
-        FormChoiceParameterValue::FixedArray(values)
-            if values.iter().map(|value| value.value_ref.as_str()).collect::<Vec<_>>()
+        parameters.items()[1].value(),
+        ibcmd_schema::FormChoiceParameterValue::FixedArray(values)
+            if values.iter().map(|value| value.value_ref()).collect::<Vec<_>>()
                 == ["Enum.SyntheticKind.EnumValue.First", "Enum.SyntheticKind.EnumValue.Second"]
     ));
 
@@ -16042,8 +16237,8 @@ fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
     )
     .unwrap();
     assert!(matches!(
-        &scalar_parameters[0].value,
-        FormChoiceParameterValue::DesignTimeRef(value)
+        scalar_parameters.items()[0].value(),
+        ibcmd_schema::FormChoiceParameterValue::DesignTimeRef(value)
             if value == "Enum.SyntheticKind.EnumValue.First"
     ));
     let scalar_wrong_mode = scalar_reference.replacen("{0,0,", "{0,1,", 1);
@@ -16135,6 +16330,21 @@ fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
         Err(FormSchemaWriteError::OpaqueChoiceParameters {
             slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
         })
+    );
+    assert_eq!(
+        format_form_choice_parameters_xml(&CanonicalFormChoiceParameters::Absent, 1).unwrap(),
+        ""
+    );
+    assert_eq!(
+        format_form_choice_parameters_xml(
+            &CanonicalFormChoiceParameters::Empty {
+                slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters
+                    .index(),
+            },
+            1,
+        )
+        .unwrap(),
+        ""
     );
 }
 
@@ -16269,14 +16479,15 @@ fn live_slot27_choice_parameters_slice_matches_native_xml_exactly() {
         &BTreeSet::new(),
         &fixture.object_refs,
     );
-    let CanonicalFormChoiceParameters::Typed { items, slot } = &canonical else {
+    let CanonicalFormChoiceParameters::Typed { parameters, slot } = &canonical else {
         panic!("live slot-27 value must be fully typed");
     };
     assert_eq!(*slot, 27);
     assert_eq!(
-        items
+        parameters
+            .items()
             .iter()
-            .map(|item| item.name.as_str())
+            .map(|item| item.name())
             .collect::<Vec<_>>(),
         [
             "Отбор.Статус",
@@ -16285,15 +16496,18 @@ fn live_slot27_choice_parameters_slice_matches_native_xml_exactly() {
         ]
     );
     assert!(matches!(
-        &items[0].value,
-        FormChoiceParameterValue::DesignTimeRef(value)
+        parameters.items()[0].value(),
+        ibcmd_schema::FormChoiceParameterValue::DesignTimeRef(value)
             if value == "Enum.СтатусыДоговоровКонтрагентов.EnumValue.Действует"
     ));
     assert!(matches!(
-        &items[1].value,
-        FormChoiceParameterValue::FixedArray(values) if values.len() == 2
+        parameters.items()[1].value(),
+        ibcmd_schema::FormChoiceParameterValue::FixedArray(values) if values.len() == 2
     ));
-    assert_eq!(items[2].value, FormChoiceParameterValue::Boolean(false));
+    assert_eq!(
+        parameters.items()[2].value(),
+        &ibcmd_schema::FormChoiceParameterValue::Boolean(false)
+    );
 
     // This is the production preflight: it resolves the dedicated exact rule and
     // its cross-bound evidence before the formatter can emit any XML.
