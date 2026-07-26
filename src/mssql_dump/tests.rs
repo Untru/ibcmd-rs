@@ -45570,26 +45570,96 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let standard_attribute_details = r##"{1,{1,2,{-3},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Дата документа"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Дата"}}},{-2},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Номер документа"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Номер"}}}}}"##;
-    let document_blob = |number_type: &str| {
-        let mut owner_fields = vec![
-            "0".to_string(),
-            zero_uuid.to_string(),
-            number_type.to_string(),
-            "11".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "1".to_string(),
-            "1".to_string(),
+    let standard_attribute_details = |number_type: &str| {
+        let attributes = [
+            ("-7", "{\"B\",0}", None),
+            ("-5", "{\"U\"}", None),
+            ("-4", "{\"B\",0}", None),
+            (
+                "-3",
+                "{\"D\",00010101000000}",
+                Some(("Дата документа", "Дата")),
+            ),
+            (
+                "-2",
+                if number_type == "1" {
+                    "{\"S\",\"\"}"
+                } else {
+                    "{\"N\",0}"
+                },
+                Some(("Номер документа", "Номер")),
+            ),
         ];
-        owner_fields.extend(std::iter::repeat("0".to_string()).take(12));
-        let owner_fields = owner_fields.join(",");
-        deflate_for_test(
-                format!(
-                    "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"document comment\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id},{standard_attribute_details}}}\r\n}}"
-                )
-                .as_bytes(),
-            )
+        let mut payload = vec!["1".to_owned(), attributes.len().to_string()];
+        for (marker, fill_value, presentation) in attributes {
+            let mut values =
+                information_register_standard_attribute_values_for_test("Active", false);
+            values[22] = fill_value.to_owned();
+            if let Some((tooltip, synonym)) = presentation {
+                values[7] = format!(
+                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{tooltip}\"}}}}"
+                );
+                values[18] = format!(
+                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{synonym}\"}}}}"
+                );
+            }
+            payload.push(format!("{{{marker}}}"));
+            payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+            payload.push(
+                information_register_standard_attribute_bag_from_values_for_test(&values, true),
+            );
+        }
+        format!("{{1,{{{}}}}}", payload.join(","))
+    };
+    let document_blob = |number_type: &str| {
+        let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
+        let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
+        header.uuid = document_uuid.to_owned();
+        header.name = "Invoice".to_owned();
+        header.comment = "document comment".to_owned();
+        fields[1] = object_type_id.to_owned();
+        fields[2] = object_value_id.to_owned();
+        fields[3] = ref_type_id.to_owned();
+        fields[4] = ref_value_id.to_owned();
+        fields[26] = manager_type_id.to_owned();
+        fields[27] = manager_value_id.to_owned();
+        fields[9] = format!(
+            "{{0,{{3,{{1,0,{document_uuid}}},\"Invoice\",{{0}},\"document comment\",0,0,{zero_uuid},0}}}}"
+        );
+        fields[10] = zero_uuid.to_owned();
+        fields[11] = number_type.to_owned();
+        fields[12] = "11".to_owned();
+        for field_index in [
+            13, 14, 19, 20, 21, 23, 25, 28, 30, 31, 33, 34, 43, 44, 46, 49, 50, 51, 52,
+        ] {
+            fields[field_index] = "0".to_owned();
+        }
+        fields[15] = "1".to_owned();
+        for field_index in [16, 17, 18, 35, 36, 37] {
+            fields[field_index] = zero_uuid.to_owned();
+        }
+        for field_index in [22, 24] {
+            fields[field_index] = "{0,0}".to_owned();
+        }
+        for field_index in [29, 47] {
+            fields[field_index] = "{1,{0,0}}".to_owned();
+        }
+        fields[32] = standard_attribute_details(number_type);
+        for field_index in [38, 39, 40, 41, 42] {
+            fields[field_index] = "{0}".to_owned();
+        }
+        fields[48] = "{1,2,0}".to_owned();
+        let text = render_owner_graph_fixture_for_test(&fields, &collections);
+        let row = MetadataTextRow {
+            file_name: document_uuid.to_owned(),
+            text: text.clone(),
+            object_code: Some(40),
+            header: Some(header),
+            kind: Some("Document".to_owned()),
+            folder: Some("Documents"),
+        };
+        audit_owner_graph_row_for_test(&row).unwrap();
+        deflate_for_test(text.as_bytes())
     };
 
     let extracted = extract_metadata_source_xml_with_refs(
