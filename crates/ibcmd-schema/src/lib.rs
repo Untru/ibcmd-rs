@@ -7268,9 +7268,7 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .iter_mut()
-            .find(|fact| {
-                fact["key"].as_str() == Some("dcs.DataCompositionSettings.itemsViewMode")
-            })
+            .find(|fact| fact["key"].as_str() == Some("dcs.DataCompositionSettings.itemsViewMode"))
             .unwrap();
         items_view_mode_fact["value"]["defaultModelConstant"] = serde_json::json!("OTHER");
 
