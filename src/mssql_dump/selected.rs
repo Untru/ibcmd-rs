@@ -475,9 +475,14 @@ pub(super) fn selected_command_owner_metadata_rows(
     rows: &[ConfigRow],
     unresolved_command_refs: &BTreeSet<String>,
 ) -> Option<Vec<ConfigRow>> {
-    let mut found = BTreeSet::new();
+    // Resolve only structurally declared command headers.  A raw UUID substring
+    // may occur in an unrelated property or payload and is not proof that the
+    // metadata row owns a command.  Each unresolved command must have exactly
+    // one owner: a duplicate declaration is ambiguous and therefore fails
+    // closed instead of widening the selected export.
+    let mut owner_index_by_command = BTreeMap::new();
     let mut owner_rows = Vec::new();
-    for row in rows {
+    for (row_index, row) in rows.iter().enumerate() {
         let Ok(bytes) = decode_hex(&row.binary_hex) else {
             continue;
         };
@@ -488,12 +493,6 @@ pub(super) fn selected_command_owner_metadata_rows(
             continue;
         };
         let text = text.trim_start_matches('\u{feff}').to_string();
-        if !unresolved_command_refs
-            .iter()
-            .any(|uuid| text.contains(uuid))
-        {
-            continue;
-        }
         let Some(text_row) = metadata_text_row_from_text(&row.file_name, text) else {
             continue;
         };
@@ -504,10 +503,20 @@ pub(super) fn selected_command_owner_metadata_rows(
         if matching_refs.is_empty() {
             continue;
         }
-        found.extend(matching_refs);
+        for command_uuid in matching_refs {
+            if owner_index_by_command
+                .insert(command_uuid, row_index)
+                .is_some()
+            {
+                return None;
+            }
+        }
         owner_rows.push(row.clone());
     }
-    if unresolved_command_refs.is_subset(&found) {
+    if unresolved_command_refs
+        .iter()
+        .all(|uuid| owner_index_by_command.contains_key(uuid))
+    {
         Some(owner_rows)
     } else {
         None

@@ -112,6 +112,24 @@ pub(super) fn parse_command_interface_sectioned_fields(
         commands_visibility.push(CommandInterfaceVisibilityEntry { name, common });
     }
 
+    // The legacy visibility-only profile terminates after exactly three empty
+    // trailing sections. It is a distinct, complete wire shape rather than a
+    // permissive prefix: missing, additional, or non-zero tail atoms continue
+    // through the regular decoder and fail closed there.
+    if fields[index..]
+        .iter()
+        .map(|field| field.trim())
+        .eq(["0", "0", "0"])
+    {
+        return Some(CommandInterface {
+            commands_order: Vec::new(),
+            commands_placement: Vec::new(),
+            groups_order: Vec::new(),
+            commands_visibility,
+            subsystems_order: Vec::new(),
+        });
+    }
+
     let count = parse_command_interface_section_count(fields, &mut index)?;
     let mut commands_placement = Vec::with_capacity(count);
     for _ in 0..count {
@@ -713,4 +731,69 @@ pub(super) fn push_client_application_interface_group_xml(
         }
     }
     xml.push_str(&format!("{tab}</group>\r\n"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const COMMAND_UUID: &str = "11111111-1111-4111-8111-111111111111";
+    const COMMON_FLAG: &str = r#"{0,{{0,{{"B",1}},0}}}"#;
+
+    fn visibility_only_fields<'a>(tail: &[&'a str]) -> Vec<&'a str> {
+        let mut fields = vec![
+            "7",
+            "1",
+            "1",
+            "{0,11111111-1111-4111-8111-111111111111}",
+            COMMON_FLAG,
+        ];
+        fields.extend_from_slice(tail);
+        fields
+    }
+
+    #[test]
+    fn legacy_visibility_only_tail_is_exact_and_complete() {
+        let fields = visibility_only_fields(&["0", "0", "0"]);
+
+        let parsed = parse_command_interface_sectioned_fields(
+            &fields,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("exact legacy visibility-only tail");
+
+        assert_eq!(parsed.commands_visibility.len(), 1);
+        assert_eq!(
+            parsed.commands_visibility[0].name,
+            format!("0:{COMMAND_UUID}")
+        );
+        assert!(parsed.commands_placement.is_empty());
+        assert!(parsed.commands_order.is_empty());
+        assert!(parsed.subsystems_order.is_empty());
+        assert!(parsed.groups_order.is_empty());
+    }
+
+    #[test]
+    fn legacy_visibility_only_tail_rejects_non_exact_shapes() {
+        for tail in [
+            ["0", "0"].as_slice(),
+            ["0", "0", "0", "0"].as_slice(),
+            ["0", "1", "0"].as_slice(),
+            ["0", "0", "2"].as_slice(),
+        ] {
+            let fields = visibility_only_fields(tail);
+            assert!(
+                parse_command_interface_sectioned_fields(
+                    &fields,
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                )
+                .is_none(),
+                "accepted non-exact legacy tail {tail:?}"
+            );
+        }
+    }
 }
