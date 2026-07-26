@@ -9,7 +9,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
 use ibcmd_cf::export::{StorageExportEntryReport, StorageExportPlan, StorageExportReport};
 use ibcmd_core::artifact::ProfileId;
-use ibcmd_core::diagnostic::ObjectPath;
+use ibcmd_core::diagnostic::{MetadataSourceFailureClass, ObjectPath};
 use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::StorageImage;
 use ibcmd_schema::{GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner};
@@ -421,7 +421,7 @@ impl SourceAssetCompletenessReport {
                     entry.raw_sha256
                 )
             })
-            .unwrap_or_else(|| "<unknown>".to_string());
+            .unwrap_or_else(unknown_diagnostic_placeholder);
         bail!(
             "source asset extraction is partial: {} opaque properties; first affected {first}",
             self.opaque
@@ -495,32 +495,6 @@ pub struct RootMetadataInventoryEntry {
     pub diagnostic: Option<MetadataSourceExtractionDiagnostic>,
 }
 
-/// Coarse class of a source XML extraction failure.  These names are part of
-/// the dump-manifest contract, so do not derive them from parser error text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MetadataSourceExtractionFailureClass {
-    Unknown,
-    Unsupported,
-    Malformed,
-    Unresolved,
-    Ambiguous,
-    Invariant,
-}
-
-impl MetadataSourceExtractionFailureClass {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Unsupported => "unsupported",
-            Self::Malformed => "malformed",
-            Self::Unresolved => "unresolved",
-            Self::Ambiguous => "ambiguous",
-            Self::Invariant => "invariant",
-        }
-    }
-}
-
 /// Provenance for a failed source XML extraction.
 ///
 /// Values are deliberately tokens rather than parser payload: this report is
@@ -528,7 +502,7 @@ impl MetadataSourceExtractionFailureClass {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MetadataSourceExtractionDiagnostic {
     pub code: String,
-    pub class: MetadataSourceExtractionFailureClass,
+    pub class: MetadataSourceFailureClass,
     pub family: String,
     pub parser_stage: String,
     pub structural_signature: String,
@@ -547,7 +521,7 @@ pub struct MetadataSourceExtractionDiagnostic {
 
 impl MetadataSourceExtractionDiagnostic {
     fn legacy_option_none(
-        class: MetadataSourceExtractionFailureClass,
+        class: MetadataSourceFailureClass,
         family: &str,
         structural_signature: &str,
     ) -> Self {
@@ -556,7 +530,7 @@ impl MetadataSourceExtractionDiagnostic {
 
     fn audit_missing_provenance(family: &str) -> Self {
         Self::new(
-            MetadataSourceExtractionFailureClass::Unknown,
+            MetadataSourceFailureClass::Unknown,
             family,
             "audit_missing_provenance",
             "missing_reason_and_extraction_provenance",
@@ -564,7 +538,7 @@ impl MetadataSourceExtractionDiagnostic {
     }
 
     fn new(
-        class: MetadataSourceExtractionFailureClass,
+        class: MetadataSourceFailureClass,
         family: &str,
         parser_stage: &str,
         structural_signature: &str,
@@ -594,9 +568,21 @@ impl MetadataSourceExtractionDiagnostic {
 fn bounded_diagnostic_token(value: &str) -> String {
     value
         .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        .filter(|ch| ch.is_ascii_alphanumeric() || DIAGNOSTIC_TOKEN_SEPARATORS.contains(ch))
         .take(96)
         .collect()
+}
+
+fn unknown_diagnostic_placeholder() -> String {
+    format!(
+        "{}{}>",
+        char::from(60),
+        MetadataSourceFailureClass::Unknown.as_str()
+    )
+}
+
+fn password_source_marker(source: &str) -> String {
+    format!("{}password-source:{source}>", char::from(60))
 }
 
 /// Serializable audit result for the root metadata XML contract.
@@ -650,10 +636,10 @@ impl RootMetadataInventoryReport {
                         .as_ref()
                         .map(|diagnostic| diagnostic.code.as_str())
                         .or_else(|| entry.reason.map(MetadataExtractionMissReason::as_str))
-                        .unwrap_or("unknown");
+                        .unwrap_or(MetadataSourceFailureClass::Unknown.as_str());
                     format!("{} ({}, reason={reason})", entry.uuid, entry.family)
                 })
-                .unwrap_or_else(|| "<unknown>".to_string());
+                .unwrap_or_else(unknown_diagnostic_placeholder);
             bail!(
                 "root metadata inventory is incomplete: {} of {} missing; first missing {first}",
                 self.missing,
@@ -839,14 +825,14 @@ struct MssqlDumpRowManifest {
 
 pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
     let password_marker = if args.sql_user.is_none() {
-        "<password-source:none>"
+        password_source_marker(PASSWORD_SOURCE_NONE)
     } else if args.sql_pwd.as_ref().is_some_and(|value| !value.is_empty()) {
-        "<password-source:inline>"
+        password_source_marker(PASSWORD_SOURCE_INLINE)
     } else {
-        "<password-source:environment>"
+        password_source_marker(PASSWORD_SOURCE_ENVIRONMENT)
     };
     let subprocess_journal = begin_subprocess_journal(
-        password_marker,
+        &password_marker,
         &args.server,
         &args.database,
         args.runtime_journal.as_deref(),
@@ -3407,7 +3393,7 @@ fn dump_table_row_bytes(
             )
             .ok_or_else(|| {
                 MetadataSourceExtractionDiagnostic::legacy_option_none(
-                    MetadataSourceExtractionFailureClass::Unknown,
+                    MetadataSourceFailureClass::Unknown,
                     "unknown",
                     "metadata_row_unavailable",
                 )
@@ -8127,37 +8113,37 @@ fn extract_metadata_source_xml_from_text_row_audited(
         return Ok(extracted);
     }
 
-    let (class, family, signature) = if row.file_name.contains('.') {
+    let (class, family, signature) = if row.file_name.contains(METADATA_NAME_SEPARATOR) {
         (
-            MetadataSourceExtractionFailureClass::Unsupported,
+            MetadataSourceFailureClass::Unsupported,
             "unknown",
             "file_name_separator",
         )
     } else if row.object_code.is_none() {
         (
-            MetadataSourceExtractionFailureClass::Malformed,
+            MetadataSourceFailureClass::Malformed,
             "unknown",
             "object_code_missing",
         )
     } else if row.header.is_none() {
         (
-            MetadataSourceExtractionFailureClass::Malformed,
+            MetadataSourceFailureClass::Malformed,
             row.kind.as_deref().unwrap_or("unknown"),
             "header_missing",
         )
     } else if row.kind.is_none() || row.folder.is_none() {
         (
-            MetadataSourceExtractionFailureClass::Unsupported,
+            MetadataSourceFailureClass::Unsupported,
             "unknown",
             "family_unrecognized",
         )
     } else if is_direct_code14_form_metadata_text(&row.text, &row.file_name)
         && !form_refs
             .get(&row.file_name)
-            .is_some_and(|form_ref| form_ref.kind == "Form")
+            .is_some_and(|form_ref| form_ref.kind == OWNER_GRAPH_FORM_KIND)
     {
         (
-            MetadataSourceExtractionFailureClass::Unresolved,
+            MetadataSourceFailureClass::Unresolved,
             "Form",
             "direct_form_owner_missing",
         )
@@ -8165,7 +8151,7 @@ fn extract_metadata_source_xml_from_text_row_audited(
         return Err(diagnostic);
     } else {
         (
-            MetadataSourceExtractionFailureClass::Unknown,
+            MetadataSourceFailureClass::Unknown,
             row.kind.as_deref().unwrap_or("unknown"),
             "legacy_option_none",
         )
@@ -10264,15 +10250,11 @@ fn owner_graph_extraction_diagnostic(
 ) -> MetadataSourceExtractionDiagnostic {
     let (class, parser_stage, structural_signature) = kind.facts();
     let class = match class {
-        owner_graph::OwnerGraphDiagnosticClass::Malformed => {
-            MetadataSourceExtractionFailureClass::Malformed
-        }
+        owner_graph::OwnerGraphDiagnosticClass::Malformed => MetadataSourceFailureClass::Malformed,
         owner_graph::OwnerGraphDiagnosticClass::Unsupported => {
-            MetadataSourceExtractionFailureClass::Unsupported
+            MetadataSourceFailureClass::Unsupported
         }
-        owner_graph::OwnerGraphDiagnosticClass::Invariant => {
-            MetadataSourceExtractionFailureClass::Invariant
-        }
+        owner_graph::OwnerGraphDiagnosticClass::Invariant => MetadataSourceFailureClass::Invariant,
     };
     let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
         class,
@@ -12849,6 +12831,10 @@ const TABULAR_SECTION_PAYLOAD_CODE: &str = "11";
 const TABULAR_SECTION_EXTENDED_WRAPPER_CODE: &str = "2";
 const TABULAR_SECTION_EXTENDED_WRAPPER_TAIL: &str = "5";
 const METADATA_NAME_SEPARATOR: char = '.';
+const DIAGNOSTIC_TOKEN_SEPARATORS: [char; 3] = ['_', '-', METADATA_NAME_SEPARATOR];
+const PASSWORD_SOURCE_NONE: &str = "none";
+const PASSWORD_SOURCE_INLINE: &str = "inline";
+const PASSWORD_SOURCE_ENVIRONMENT: &str = "environment";
 const OWNER_KIND_BUSINESS_PROCESS: &str = "BusinessProcess";
 
 impl DeclaredOwnerChildInventory {

@@ -1269,7 +1269,7 @@ fn root_metadata_inventory_reports_typed_extraction_miss_and_strict_gate() {
     let diagnostics = BTreeMap::from([(
         uuid.to_string(),
         MetadataSourceExtractionDiagnostic::legacy_option_none(
-            MetadataSourceExtractionFailureClass::Unknown,
+            MetadataSourceFailureClass::Unknown,
             "Catalog",
             "legacy_option_none",
         ),
@@ -1310,30 +1310,39 @@ fn root_metadata_inventory_reports_typed_extraction_miss_and_strict_gate() {
 
 #[test]
 fn source_extraction_diagnostic_has_stable_bounded_non_payload_contract() {
-    for class in [
-        MetadataSourceExtractionFailureClass::Unknown,
-        MetadataSourceExtractionFailureClass::Unsupported,
-        MetadataSourceExtractionFailureClass::Malformed,
-        MetadataSourceExtractionFailureClass::Unresolved,
-        MetadataSourceExtractionFailureClass::Ambiguous,
-        MetadataSourceExtractionFailureClass::Invariant,
+    for (class, token) in [
+        (MetadataSourceFailureClass::Unknown, "unknown"),
+        (MetadataSourceFailureClass::Unsupported, "unsupported"),
+        (MetadataSourceFailureClass::Malformed, "malformed"),
+        (MetadataSourceFailureClass::Unresolved, "unresolved"),
+        (MetadataSourceFailureClass::Ambiguous, "ambiguous"),
+        (MetadataSourceFailureClass::Invariant, "invariant"),
     ] {
         let diagnostic = MetadataSourceExtractionDiagnostic::legacy_option_none(
             class,
-            &"Catalog".repeat(32),
-            &"legacy-option-none".repeat(32),
+            "Catalog",
+            "bounded_contract",
         );
         let json = serde_json::to_string(&diagnostic).unwrap();
-        assert!(
-            diagnostic
-                .code
-                .starts_with("metadata_source.catalogcatalog")
+        assert_eq!(
+            diagnostic.code,
+            format!("metadata_source.catalog.{token}.legacy_option_none")
         );
-        assert!(diagnostic.family.len() <= 96);
-        assert!(diagnostic.structural_signature.len() <= 96);
-        assert!(json.contains(class.as_str()));
-        assert!(!json.contains("formatter"));
+        assert_eq!(
+            json,
+            format!(
+                r#"{{"code":"metadata_source.catalog.{token}.legacy_option_none","class":"{token}","family":"Catalog","parser_stage":"legacy_option_none","structural_signature":"bounded_contract"}}"#
+            )
+        );
     }
+
+    let bounded = MetadataSourceExtractionDiagnostic::legacy_option_none(
+        MetadataSourceFailureClass::Unknown,
+        &"Catalog".repeat(32),
+        &"legacy-option-none".repeat(32),
+    );
+    assert!(bounded.family.len() <= 96);
+    assert!(bounded.structural_signature.len() <= 96);
 }
 
 #[test]
@@ -1416,10 +1425,7 @@ fn audited_source_extraction_preserves_success_bytes_and_reports_family_on_failu
         Ok(_) => panic!("malformed Catalog row unexpectedly extracted"),
     };
     assert_eq!(diagnostic.family, "Catalog");
-    assert_eq!(
-        diagnostic.class,
-        MetadataSourceExtractionFailureClass::Malformed
-    );
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Malformed);
     assert_eq!(diagnostic.parser_stage, "owner_graph_root");
     assert_eq!(diagnostic.structural_signature, "root_braced_shape");
     assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
@@ -1772,10 +1778,7 @@ fn audited_catalog_and_document_reject_second_declared_form_from_other_owner() {
             Ok(_) => panic!("wrong-owner form was accepted for {:?}", expected.family),
         };
         assert_eq!(diagnostic.family, expected.family.as_str());
-        assert_eq!(
-            diagnostic.class,
-            MetadataSourceExtractionFailureClass::Invariant
-        );
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
         assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
         assert_eq!(diagnostic.structural_signature, "wrong_owner");
         assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
@@ -2036,10 +2039,7 @@ fn audited_owner_graph_handoff_distinguishes_decode_errors_from_downstream_misse
             ),
         };
         assert_eq!(invalid.family, expected.family.as_str());
-        assert_eq!(
-            invalid.class,
-            MetadataSourceExtractionFailureClass::Malformed
-        );
+        assert_eq!(invalid.class, MetadataSourceFailureClass::Malformed);
         assert_eq!(invalid.parser_stage, "owner_graph_root");
         assert_eq!(invalid.structural_signature, "root_collection_count");
         assert_eq!(invalid.field_index, Some(2));
@@ -2057,16 +2057,10 @@ fn audited_owner_graph_handoff_distinguishes_decode_errors_from_downstream_misse
             expected.family,
             owner_graph::OwnerGraphFamily::Catalog | owner_graph::OwnerGraphFamily::Document
         ) {
-            assert_eq!(
-                downstream.class,
-                MetadataSourceExtractionFailureClass::Invariant
-            );
+            assert_eq!(downstream.class, MetadataSourceFailureClass::Invariant);
             assert_eq!(downstream.parser_stage, "owner_graph_owned_child");
         } else {
-            assert_eq!(
-                downstream.class,
-                MetadataSourceExtractionFailureClass::Unknown
-            );
+            assert_eq!(downstream.class, MetadataSourceFailureClass::Unknown);
             assert_eq!(downstream.parser_stage, "legacy_option_none");
             assert_eq!(downstream.structural_signature, "legacy_option_none");
         }
@@ -2084,10 +2078,7 @@ fn owner_graph_decoder_rejects_noncanonical_root_collection_count_for_all_famili
             Err(diagnostic) => diagnostic,
             Ok(_) => panic!("noncanonical collection count was accepted for {family:?}"),
         };
-        assert_eq!(
-            diagnostic.class,
-            MetadataSourceExtractionFailureClass::Malformed
-        );
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Malformed);
         assert_eq!(diagnostic.parser_stage, "owner_graph_root");
         assert_eq!(diagnostic.structural_signature, "root_collection_count");
         assert_eq!(diagnostic.field_index, Some(2));
@@ -2103,7 +2094,7 @@ fn owner_graph_decoder_reports_exact_identity_failures_without_payload_disclosur
     let cases = [
         (
             secret.to_owned(),
-            MetadataSourceExtractionFailureClass::Malformed,
+            MetadataSourceFailureClass::Malformed,
             "generated_type_id",
             "uuid_syntax",
             1,
@@ -2112,7 +2103,7 @@ fn owner_graph_decoder_reports_exact_identity_failures_without_payload_disclosur
         ),
         (
             "00000000-0000-0000-0000-000000000000".to_owned(),
-            MetadataSourceExtractionFailureClass::Invariant,
+            MetadataSourceFailureClass::Invariant,
             "generated_type_id",
             "nil_uuid",
             1,
@@ -2121,7 +2112,7 @@ fn owner_graph_decoder_reports_exact_identity_failures_without_payload_disclosur
         ),
         (
             fields[2].clone(),
-            MetadataSourceExtractionFailureClass::Invariant,
+            MetadataSourceFailureClass::Invariant,
             "owner_identity_ledger",
             "duplicate_identity",
             2,
@@ -2130,7 +2121,7 @@ fn owner_graph_decoder_reports_exact_identity_failures_without_payload_disclosur
         ),
         (
             header.uuid.clone(),
-            MetadataSourceExtractionFailureClass::Invariant,
+            MetadataSourceFailureClass::Invariant,
             "owner_identity_ledger",
             "duplicate_identity",
             1,
@@ -2333,10 +2324,7 @@ fn owner_graph_form_slots_report_exact_field_and_second_declared_item() {
     )
     .unwrap_err();
 
-    assert_eq!(
-        diagnostic.class,
-        MetadataSourceExtractionFailureClass::Invariant
-    );
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
     assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
     assert_eq!(diagnostic.structural_signature, "wrong_owner");
     assert_eq!(diagnostic.field_index, Some(23));
@@ -2408,10 +2396,7 @@ fn catalog_field_references_report_unknown_second_item_without_payload() {
     )
     .unwrap_err();
 
-    assert_eq!(
-        diagnostic.class,
-        MetadataSourceExtractionFailureClass::Invariant
-    );
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
     assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
     assert_eq!(diagnostic.structural_signature, "unexpected");
     assert_eq!(diagnostic.field_index, Some(42));
@@ -2998,10 +2983,7 @@ fn root_inventory_synthesizes_missing_provenance_and_drops_hostile_diagnostics_o
         true,
     );
     let diagnostic = report.entries[0].diagnostic.as_ref().unwrap();
-    assert_eq!(
-        diagnostic.class,
-        MetadataSourceExtractionFailureClass::Unknown
-    );
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Unknown);
     assert_eq!(diagnostic.parser_stage, "audit_missing_provenance");
     assert_eq!(
         report
