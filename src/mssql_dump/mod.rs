@@ -9564,7 +9564,7 @@ fn parse_subsystem_child_references(
         .take(count)
         .filter_map(|field| parse_uuid_field(field.trim()))
         .filter_map(|uuid| subsystem_refs.get(&uuid))
-        .filter_map(|subsystem_ref| source_path_file_stem(&subsystem_ref.relative_path))
+        .filter_map(subsystem_source_reference_name)
         .collect()
 }
 

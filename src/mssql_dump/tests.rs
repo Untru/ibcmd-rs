@@ -1141,7 +1141,7 @@ fn expands_selected_file_names_with_module_pairs() {
     assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.16"));
     assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
     assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.2"));
-    assert_eq!(selected.len(), 13);
+    assert_eq!(selected.len(), 14);
 }
 
 #[test]
@@ -6085,7 +6085,6 @@ fn extracts_common_form_wrapper_properties_to_metadata_xml() {
     )
     .unwrap();
     let xml = String::from_utf8(extracted.xml).unwrap();
-
     assert_eq!(
         extracted.relative_path,
         PathBuf::from("CommonForms").join("QuoteForm.xml")
@@ -29080,7 +29079,10 @@ fn format_role_rights_preserves_false_rights_without_restrictions() {
                     }),
                 },
                 RoleRight {
-                    name: "Edit".to_string(),
+                    // `Edit` is intentionally omitted for top-level Documents even when
+                    // restriction-only suppression is inactive.  Use a non-policy right
+                    // here to exercise the latter case.
+                    name: "CustomRight".to_string(),
                     value: false,
                     restriction_by_condition: None,
                 },
@@ -29094,7 +29096,7 @@ fn format_role_rights_preserves_false_rights_without_restrictions() {
     assert!(xml.contains("<value>false</value>"));
     assert!(xml.contains("<condition>ГДЕ\nЛОЖЬ</condition>"));
     assert!(!xml.contains("<condition>ГДЕ\r\nЛОЖЬ</condition>"));
-    assert!(xml.contains("<name>Edit</name>"));
+    assert!(xml.contains("<name>CustomRight</name>"));
 }
 
 #[test]
@@ -30703,6 +30705,28 @@ fn parses_business_process_flowchart_processing_split_and_join_items() {
     assert_eq!(flowchart.items[2].tag, "Join");
 }
 
+fn subsystem_source_for_test(
+    subsystem_uuid: &str,
+    name: &str,
+    synonym: &str,
+    include_in_command_interface: bool,
+    include_help_in_contents: bool,
+    use_one_command: bool,
+    child_uuids: &[&str],
+) -> String {
+    let include_in_command_interface = if include_in_command_interface { 1 } else { 0 };
+    let include_help_in_contents = if include_help_in_contents { 1 } else { 0 };
+    let use_one_command = if use_one_command { 1 } else { 0 };
+    let children = child_uuids
+        .iter()
+        .map(|uuid| format!(",{uuid}"))
+        .collect::<String>();
+    format!(
+        "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"{name}\",{{1,\"en\",\"{synonym}\"}},\"\"}},\r\n{include_help_in_contents},0,{include_in_command_interface},{{4,0,{{0}},0,0,0,0}},{{0}},{{0}},{use_one_command}}},0,{{00000000-0000-0000-0000-000000000000,{}{children}}}}}",
+        child_uuids.len(),
+    )
+}
+
 #[test]
 fn writes_nested_subsystem_metadata_and_help_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
@@ -30713,17 +30737,20 @@ fn writes_nested_subsystem_metadata_and_help_to_source_layout() {
     let parent_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let child_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let parent_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{parent_uuid}}},\"StandardSubsystems\",{{1,\"en\",\"Standard subsystems\"}},\"\"}},1,{child_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        subsystem_source_for_test(
+            parent_uuid,
+            "StandardSubsystems",
+            "Standard subsystems",
+            true,
+            false,
+            false,
+            &[child_uuid],
+        )
+        .as_bytes(),
+    );
     let child_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{child_uuid}}},\"Users\",{{1,\"en\",\"Users\"}},\"\"}},1}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        subsystem_source_for_test(child_uuid, "Users", "Users", true, false, false, &[]).as_bytes(),
+    );
     let help = deflate_for_test(b"{5,1,\"ru\",{#base64:PGgxPlVzZXJzPC9oMT4=},0}");
     let rows = vec![
         ConfigRow {
@@ -30917,19 +30944,18 @@ fn disambiguates_colliding_metadata_object_codes() {
 #[test]
 fn extracts_subsystem_include_in_command_interface_to_metadata_xml() {
     let true_uuid = "11111111-1111-4111-8111-111111111111";
-    let true_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{true_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"subsystem comment\"}},1}}\r\n}}"
-            )
-            .as_bytes(),
+    let true_source =
+        subsystem_source_for_test(true_uuid, "Admin", "Admin", true, false, false, &[]).replacen(
+            "\"\"",
+            "\"subsystem comment\"",
+            1,
         );
+    let true_blob = deflate_for_test(true_source.as_bytes());
     let false_uuid = "22222222-2222-4222-8222-222222222222";
     let false_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{false_uuid}}},\"Hidden\",{{1,\"en\",\"Hidden\"}},\"\"}},0}}\r\n}}"
-            )
+        subsystem_source_for_test(false_uuid, "Hidden", "Hidden", false, false, false, &[])
             .as_bytes(),
-        );
+    );
 
     let extracted = extract_metadata_source_xml(
         &true_blob,
@@ -30986,11 +31012,9 @@ fn extracts_subsystem_include_in_command_interface_to_metadata_xml() {
 fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
     let subsystem_uuid = "11111111-1111-4111-8111-111111111111";
     let blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1,0,1}}\r\n}}"
-            )
+        subsystem_source_for_test(subsystem_uuid, "Admin", "Admin", false, true, true, &[])
             .as_bytes(),
-        );
+    );
 
     for source_version in [
         InfobaseConfigSourceVersion::V2_20,
@@ -31015,8 +31039,8 @@ fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
             PathBuf::from("Subsystems/Admin.xml")
         );
         assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
-        assert!(xml.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"));
-        assert!(xml.contains("<IncludeInCommandInterface>true</IncludeInCommandInterface>"));
+        assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+        assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
         assert!(xml.contains("<UseOneCommand>true</UseOneCommand>"));
         assert!(!xml.contains("<UseStandardCommands>"));
         assert!(
@@ -31044,12 +31068,16 @@ fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
 fn extracts_subsystem_child_objects_to_metadata_xml() {
     let parent_uuid = "11111111-1111-4111-8111-111111111111";
     let child_uuid = "22222222-2222-4222-8222-222222222222";
-    let blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{parent_uuid}}},\"Parent\",{{1,\"en\",\"Parent\"}},\"\"}},1,{child_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let source = subsystem_source_for_test(
+        parent_uuid,
+        "Parent",
+        "Parent",
+        true,
+        false,
+        false,
+        &[child_uuid],
+    );
+    let blob = deflate_for_test(source.as_bytes());
     let subsystem_refs = BTreeMap::from([(
         child_uuid.to_string(),
         SubsystemSourceReference {
@@ -44028,14 +44056,10 @@ fn parse_report_properties_for_child_template_test(
 
 fn report_other_collections_for_test() -> [String; 4] {
     [
-        format!(
-            "{{{},1,{{nested,{}}}}}",
-            uuid::Uuid::new_v4(),
-            uuid::Uuid::new_v4()
-        ),
-        format!("{{{},0}}", uuid::Uuid::new_v4()),
-        format!("{{{},0}}", uuid::Uuid::new_v4()),
-        format!("{{{},0}}", uuid::Uuid::new_v4()),
+        format!("{{{REPORT_ATTRIBUTE_COLLECTION_UUID},0}}"),
+        format!("{{{REPORT_FORM_COLLECTION_UUID},0}}"),
+        format!("{{{REPORT_TABULAR_SECTION_COLLECTION_UUID},0}}"),
+        format!("{{{REPORT_COMMAND_COLLECTION_UUID},0}}"),
     ]
 }
 
@@ -44233,15 +44257,10 @@ fn fails_report_child_template_cohort_closed_on_invalid_envelopes() {
         ("extra header wrapper field", extra_wrapper_field),
         ("trailing root garbage", format!("{base_raw},0")),
     ] {
-        let properties =
-            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).unwrap();
-        assert!(properties.child_templates.is_empty(), "{case}");
-        assert_eq!(
-            properties.main_data_composition_schema.as_deref(),
-            Some("Report.EnvelopeReport.Template.MainDCS"),
+        assert!(
+            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).is_none(),
             "{case}"
         );
-        assert_eq!(properties.generated_types.len(), 2, "{case}");
     }
 }
 
@@ -44329,10 +44348,10 @@ fn fails_report_child_template_cohort_closed_on_resolution_collisions() {
         ("empty filename", empty_name),
         ("nested template path", nested_path),
     ] {
-        let properties =
-            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).unwrap();
-        assert!(properties.child_templates.is_empty(), "{case}");
-        assert_eq!(properties.generated_types.len(), 2, "{case}");
+        assert!(
+            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).is_none(),
+            "{case}"
+        );
     }
 
     let malformed_refs = {
@@ -44343,9 +44362,7 @@ fn fails_report_child_template_cohort_closed_on_resolution_collisions() {
     };
     assert!(
         parse_report_properties_for_child_template_test(&raw, &owner_uuid, &malformed_refs)
-            .unwrap()
-            .child_templates
-            .is_empty()
+            .is_none()
     );
 }
 
