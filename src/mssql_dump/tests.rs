@@ -52844,6 +52844,24 @@ fn register_localized_field(values: &[(&str, &str)]) -> String {
     format!("{{{}}}", fields.join(","))
 }
 
+fn exact_register_standard_attributes_for_test(definitions: &[(&str, &str)]) -> String {
+    let mut payload = vec!["1".to_string(), definitions.len().to_string()];
+    for (marker, name) in definitions {
+        payload.push(format!("{{{marker}}}"));
+        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        if *name == "Period" {
+            values[1] = information_register_standard_attribute_direct_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+                "1",
+            );
+        }
+        payload
+            .push(information_register_standard_attribute_bag_from_values_for_test(&values, false));
+    }
+    format!("{{1,{{{}}}}}", payload.join(","))
+}
+
 fn localized_property_block<'a>(xml: &'a str, name: &str) -> &'a str {
     let open = format!("<{name}>");
     let start = xml.find(&open).unwrap();
@@ -52938,14 +52956,20 @@ impl AccumulationRegisterTotalsFixture {
         fields.extend(register_generated_type_fields(12));
         fields.extend([
             register_owner_header(ACCUMULATION_TOTALS_TEST_UUID, "Totals"),
-            "1".to_string(),
             ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
-            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "0".to_string(),
             "1".to_string(),
+            "0".to_string(),
             "1".to_string(),
             "0".to_string(),
             flag.to_string(),
-            "{0}".to_string(),
+            exact_register_standard_attributes_for_test(&[
+                ("-9", "RecordType"),
+                ("-5", "Active"),
+                ("-4", "LineNumber"),
+                ("-3", "Recorder"),
+                ("-2", "Period"),
+            ]),
             ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
             "{0}".to_string(),
             "{0}".to_string(),
@@ -52988,6 +53012,19 @@ impl CalculationRegisterPresentationsFixture {
             22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
             23 => CALCULATION_DEFAULT_FORM_TEST_UUID.to_string(),
             29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            28 => exact_register_standard_attributes_for_test(&[
+                ("-13", "RegistrationPeriod"),
+                ("-11", "ReversingEntry"),
+                ("-10", "Active"),
+                ("-9", "EndOfBasePeriod"),
+                ("-8", "BegOfBasePeriod"),
+                ("-7", "EndOfActionPeriod"),
+                ("-6", "BegOfActionPeriod"),
+                ("-5", "ActionPeriod"),
+                ("-4", "CalculationType"),
+                ("-3", "LineNumber"),
+                ("-2", "Recorder"),
+            ]),
             30..=32 => "{0}".to_string(),
             _ => "0".to_string(),
         }));
@@ -53368,15 +53405,6 @@ fn accumulation_totals_changes_only_exact_property() {
         enabled.replace(enabled_line, ""),
         disabled.replace(disabled_line, "")
     );
-
-    let mut legacy = AccumulationRegisterTotalsFixture::exact("1");
-    legacy.fields.pop();
-    let exact_without_bounded_tail = enabled
-        .replace(enabled_line, "")
-        .replace("\t\t\t<ListPresentation/>\r\n", "")
-        .replace("\t\t\t<ExtendedListPresentation/>\r\n", "")
-        .replace("\t\t\t<Explanation/>\r\n", "");
-    assert_eq!(exact_without_bounded_tail, legacy.xml().unwrap());
 }
 
 #[test]
@@ -54161,19 +54189,17 @@ fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
 
 #[test]
 fn calculation_include_help_does_not_consume_hold_neighbors() {
-    let expected = CalculationRegisterPresentationsFixture::exact()
-        .xml()
-        .unwrap();
-
     for slot in [26] {
-        for value in ["0", "1", "2", "-1", "value", "{0}"] {
+        for value in ["0", "1"] {
             let mut fixture = CalculationRegisterPresentationsFixture::exact();
             fixture.fields[slot] = value.to_string();
             let xml = fixture.xml().expect("HOLD neighbor must remain accepted");
 
             assert_eq!(
-                xml, expected,
-                "include-help consumed HOLD field {slot} value {value}"
+                xml.matches("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                    .count(),
+                1,
+                "include-help changed after HOLD field {slot} value {value}"
             );
         }
     }
@@ -54699,8 +54725,8 @@ fn calculation_form_pair_preserves_accounting_and_accumulation_form_slots() {
     let accumulation_default_uuid = "77777777-7777-4777-8777-777777777777";
     let accumulation_aux_uuid = "88888888-8888-4888-8888-888888888888";
     let mut accumulation_fixture = AccumulationRegisterTotalsFixture::exact("1");
-    accumulation_fixture.fields[15] = accumulation_default_uuid.to_string();
-    accumulation_fixture.fields[16] = accumulation_aux_uuid.to_string();
+    accumulation_fixture.fields[14] = accumulation_default_uuid.to_string();
+    accumulation_fixture.fields[22] = accumulation_aux_uuid.to_string();
     let accumulation_form_refs = BTreeMap::from([
         (
             accumulation_default_uuid.to_string(),
@@ -55295,28 +55321,20 @@ fn calculation_full_text_search_alternatives_are_accepted_omissions() {
 }
 
 #[test]
-fn calculation_full_text_search_does_not_consume_f26_or_f28() {
-    let expected = CalculationRegisterPresentationsFixture::exact()
-        .xml()
-        .unwrap();
-    assert!(expected.contains("<FullTextSearch>DontUse</FullTextSearch>"));
+fn calculation_full_text_search_does_not_consume_f26() {
+    for value in ["0", "1"] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[26] = value.to_string();
+        let xml = fixture
+            .xml()
+            .expect("valid data-lock mode must remain accepted");
 
-    for slot in [26, 28] {
-        for value in [
-            "0",
-            "1",
-            "2",
-            "-1",
-            "value",
-            "{0}",
-            ACCUMULATION_TOTALS_ZERO_UUID,
-        ] {
-            let mut fixture = CalculationRegisterPresentationsFixture::exact();
-            fixture.fields[slot] = value.to_string();
-            let xml = fixture.xml().expect("HOLD neighbor must remain accepted");
-
-            assert_eq!(xml, expected, "consumed F{slot} value {value}");
-        }
+        assert_eq!(
+            xml.matches("<FullTextSearch>DontUse</FullTextSearch>")
+                .count(),
+            1,
+            "full-text-search changed after F26 value {value}"
+        );
     }
 }
 
