@@ -9,6 +9,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use flate2::read::DeflateDecoder;
 use ibcmd_cf::export::{StorageExportEntryReport, StorageExportPlan, StorageExportReport};
 use ibcmd_core::artifact::ProfileId;
+use ibcmd_core::characteristics::Characteristics;
 use ibcmd_core::diagnostic::{MetadataSourceFailureClass, ObjectPath};
 use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::StorageImage;
@@ -16,7 +17,8 @@ use ibcmd_schema::{GeneratedMetadataReferenceOwnerKind, parse_generated_metadata
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{
     MetadataOrderError, XmlReader, bundled_metadata_registry, order_metadata_features,
-    order_produced_type_values,
+    order_produced_type_values, render_cct_characteristics_xml,
+    render_metadata_characteristics_xml,
 };
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
@@ -39,6 +41,814 @@ use crate::module_blob::{LocalizedString, SpreadsheetNumberFormatHint};
 use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
 use crate::parallel;
 
+mod characteristics {
+    //! Strict physical decoder for the shared canonical Characteristics model.
+
+    use std::collections::BTreeMap;
+
+    use ibcmd_core::characteristics::{
+        Characteristic, CharacteristicField, CharacteristicFieldSentinel,
+        CharacteristicFilterValue, CharacteristicReference, CharacteristicTypes,
+        CharacteristicValues, Characteristics,
+    };
+    use ibcmd_core::identity::ObjectUuid;
+
+    use super::{
+        CATALOG_STANDARD_ATTRIBUTES, CCT_STANDARD_ATTRIBUTES, DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        information_register_uuid_is_zero, information_register_uuid_matches,
+        parse_information_register_design_time_ref, parse_information_register_design_time_ref_ids,
+        parse_information_register_non_zero_uuid, parse_information_register_quoted_string,
+        parse_information_register_usize, resolve_exchange_plan_index_reference,
+        split_information_register_braced_fields,
+    };
+    pub(super) use crate::metadata_owner_graph::CharacteristicsFieldRole as CharacteristicRole;
+    use crate::metadata_owner_graph::{
+        CHARACTERISTICS_REASON_TOKENS, CHARACTERISTICS_REFERENCE_KIND_TOKENS,
+        CHARACTERISTICS_STAGE_TOKENS, CharacteristicsPhysicalSchema, CharacteristicsSentinelKind,
+        CharacteristicsStandardAttributeKind, CharacteristicsTagKind, OwnerGraphFamily,
+    };
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(super) enum CharacteristicsStage {
+        Outer,
+        Count,
+        TypedItem,
+        Body,
+        Source,
+        Field,
+        FilterValue,
+        CanonicalModel,
+    }
+
+    impl CharacteristicsStage {
+        pub(super) const fn as_str(self) -> &'static str {
+            CHARACTERISTICS_STAGE_TOKENS[self as usize]
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(super) enum CharacteristicsReason {
+        UnsupportedFamily,
+        InvalidEnvelope,
+        InvalidCount,
+        InvalidTypeTag,
+        InvalidBodyShape,
+        UnresolvedReference,
+        ReferenceOutsideSource,
+        UnsupportedMarker,
+        UnsupportedFilterUnion,
+        InvalidCanonicalModel,
+    }
+
+    impl CharacteristicsReason {
+        pub(super) const fn as_str(self) -> &'static str {
+            CHARACTERISTICS_REASON_TOKENS[self as usize]
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(super) enum CharacteristicsReferenceKind {
+        SourceUuid,
+        FieldUuid,
+        StandardAttribute,
+        DesignTimeRef,
+    }
+
+    impl CharacteristicsReferenceKind {
+        pub(super) const fn as_str(self) -> &'static str {
+            CHARACTERISTICS_REFERENCE_KIND_TOKENS[self as usize]
+        }
+    }
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub(super) struct CharacteristicsDiagnostic {
+        pub(super) family: OwnerGraphFamily,
+        pub(super) stage: CharacteristicsStage,
+        pub(super) field_index: usize,
+        pub(super) item_index: Option<usize>,
+        pub(super) role: CharacteristicRole,
+        pub(super) reference_kind: Option<CharacteristicsReferenceKind>,
+        pub(super) reason: CharacteristicsReason,
+    }
+
+    impl CharacteristicsDiagnostic {
+        fn new(
+            family: OwnerGraphFamily,
+            stage: CharacteristicsStage,
+            item_index: Option<usize>,
+            role: CharacteristicRole,
+            reference_kind: Option<CharacteristicsReferenceKind>,
+            reason: CharacteristicsReason,
+        ) -> Self {
+            Self {
+                family,
+                stage,
+                field_index: characteristics_slot(family).unwrap_or(0),
+                item_index,
+                role,
+                reference_kind,
+                reason,
+            }
+        }
+    }
+
+    pub(super) fn characteristics_slot(
+        family: OwnerGraphFamily,
+    ) -> Result<usize, CharacteristicsDiagnostic> {
+        match family {
+            OwnerGraphFamily::Catalog => Ok(52),
+            OwnerGraphFamily::Document => Ok(45),
+            OwnerGraphFamily::ChartOfCharacteristicTypes => Ok(50),
+            OwnerGraphFamily::BusinessProcess => Err(CharacteristicsDiagnostic {
+                family,
+                stage: CharacteristicsStage::Outer,
+                field_index: 0,
+                item_index: None,
+                role: CharacteristicRole::Collection,
+                reference_kind: None,
+                reason: CharacteristicsReason::UnsupportedFamily,
+            }),
+        }
+    }
+
+    pub(super) fn decode_characteristics(
+        family: OwnerGraphFamily,
+        value: &str,
+        type_index: &BTreeMap<String, String>,
+        metadata_object_refs: &BTreeMap<String, String>,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Result<Characteristics, CharacteristicsDiagnostic> {
+        let _ = characteristics_slot(family)?;
+        let outer = split_information_register_braced_fields(value).ok_or_else(|| {
+            diagnostic(
+                family,
+                CharacteristicsStage::Outer,
+                None,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidEnvelope,
+            )
+        })?;
+        if !CharacteristicsPhysicalSchema::outer(
+            outer
+                .first()
+                .and_then(|value| parse_information_register_usize(value)),
+            outer.len(),
+        ) {
+            return Err(diagnostic(
+                family,
+                CharacteristicsStage::Outer,
+                None,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidEnvelope,
+            ));
+        }
+        let payload = split_information_register_braced_fields(outer[1]).ok_or_else(|| {
+            diagnostic(
+                family,
+                CharacteristicsStage::Count,
+                None,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidCount,
+            )
+        })?;
+        let count = payload
+            .first()
+            .and_then(|value| parse_information_register_usize(value))
+            .ok_or_else(|| {
+                diagnostic(
+                    family,
+                    CharacteristicsStage::Count,
+                    None,
+                    CharacteristicRole::Collection,
+                    None,
+                    CharacteristicsReason::InvalidCount,
+                )
+            })?;
+        if payload.len() != count.saturating_add(1) {
+            return Err(diagnostic(
+                family,
+                CharacteristicsStage::Count,
+                None,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidCount,
+            ));
+        }
+        let mut items = Vec::with_capacity(count);
+        for (item_index, value) in payload[1..].iter().enumerate() {
+            items.push(decode_item(
+                family,
+                item_index,
+                value,
+                type_index,
+                metadata_object_refs,
+                object_refs,
+            )?);
+        }
+        Characteristics::new(items).map_err(|_| {
+            diagnostic(
+                family,
+                CharacteristicsStage::CanonicalModel,
+                None,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidCanonicalModel,
+            )
+        })
+    }
+
+    fn decode_item(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        value: &str,
+        type_index: &BTreeMap<String, String>,
+        metadata_object_refs: &BTreeMap<String, String>,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Result<Characteristic, CharacteristicsDiagnostic> {
+        let typed = split_information_register_braced_fields(value).ok_or_else(|| {
+            item_diagnostic(
+                family,
+                item_index,
+                CharacteristicsStage::TypedItem,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidTypeTag,
+            )
+        })?;
+        if typed.len() != 3
+            || parse_information_register_quoted_string(typed[0])
+                .as_deref()
+                .and_then(CharacteristicsPhysicalSchema::tag)
+                != Some(CharacteristicsTagKind::Item)
+            || !information_register_uuid_matches(typed[1], DOCUMENT_CHARACTERISTIC_TYPE_UUID)
+        {
+            return Err(item_diagnostic(
+                family,
+                item_index,
+                CharacteristicsStage::TypedItem,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidTypeTag,
+            ));
+        }
+        let fields = split_information_register_braced_fields(typed[2]).ok_or_else(|| {
+            item_diagnostic(
+                family,
+                item_index,
+                CharacteristicsStage::Body,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidBodyShape,
+            )
+        })?;
+        if !CharacteristicsPhysicalSchema::body(
+            fields
+                .first()
+                .and_then(|value| parse_information_register_usize(value)),
+            fields.len(),
+        ) {
+            return Err(item_diagnostic(
+                family,
+                item_index,
+                CharacteristicsStage::Body,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidBodyShape,
+            ));
+        }
+        let types_from = decode_source(
+            family,
+            item_index,
+            fields[1],
+            CharacteristicRole::TypesFrom,
+            object_refs,
+        )?;
+        let values_from = decode_source(
+            family,
+            item_index,
+            fields[2],
+            CharacteristicRole::ValuesFrom,
+            object_refs,
+        )?;
+        let object_field = decode_field(
+            family,
+            item_index,
+            fields[3],
+            CharacteristicRole::ObjectField,
+            &values_from,
+            object_refs,
+        )?;
+        let type_field = decode_field(
+            family,
+            item_index,
+            fields[4],
+            CharacteristicRole::TypeField,
+            &values_from,
+            object_refs,
+        )?;
+        let value_field = decode_field(
+            family,
+            item_index,
+            fields[5],
+            CharacteristicRole::ValueField,
+            &values_from,
+            object_refs,
+        )?;
+        let types_filter_field = decode_field(
+            family,
+            item_index,
+            fields[6],
+            CharacteristicRole::TypesFilterField,
+            &types_from,
+            object_refs,
+        )?;
+        let types_filter_value = decode_filter_value(
+            family,
+            item_index,
+            fields[7],
+            type_index,
+            metadata_object_refs,
+        )?;
+        let key_field = decode_field(
+            family,
+            item_index,
+            fields[8],
+            CharacteristicRole::KeyField,
+            &types_from,
+            object_refs,
+        )?;
+        let data_path_field = decode_field(
+            family,
+            item_index,
+            fields[9],
+            CharacteristicRole::DataPathField,
+            &types_from,
+            object_refs,
+        )?;
+        let multiple_values_use_field = decode_field(
+            family,
+            item_index,
+            fields[10],
+            CharacteristicRole::MultipleValuesUseField,
+            &types_from,
+            object_refs,
+        )?;
+        let multiple_values_key_field = decode_field(
+            family,
+            item_index,
+            fields[11],
+            CharacteristicRole::MultipleValuesKeyField,
+            &values_from,
+            object_refs,
+        )?;
+        let multiple_values_order_field = decode_field(
+            family,
+            item_index,
+            fields[12],
+            CharacteristicRole::MultipleValuesOrderField,
+            &values_from,
+            object_refs,
+        )?;
+        let types = CharacteristicTypes::new(
+            types_from,
+            key_field,
+            types_filter_field,
+            types_filter_value,
+            data_path_field,
+            multiple_values_use_field,
+        )
+        .map_err(|_| {
+            item_diagnostic(
+                family,
+                item_index,
+                CharacteristicsStage::CanonicalModel,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidCanonicalModel,
+            )
+        })?;
+        let values = CharacteristicValues::new(
+            values_from,
+            object_field,
+            type_field,
+            value_field,
+            multiple_values_key_field,
+            multiple_values_order_field,
+        )
+        .map_err(|_| {
+            item_diagnostic(
+                family,
+                item_index,
+                CharacteristicsStage::CanonicalModel,
+                CharacteristicRole::Collection,
+                None,
+                CharacteristicsReason::InvalidCanonicalModel,
+            )
+        })?;
+        Ok(Characteristic::new(types, values))
+    }
+
+    fn decode_source(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        value: &str,
+        role: CharacteristicRole,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Result<CharacteristicReference, CharacteristicsDiagnostic> {
+        let fields = split_information_register_braced_fields(value).ok_or_else(|| {
+            unresolved(
+                family,
+                item_index,
+                CharacteristicsStage::Source,
+                role,
+                CharacteristicsReferenceKind::SourceUuid,
+            )
+        })?;
+        if !CharacteristicsPhysicalSchema::source(
+            fields
+                .first()
+                .and_then(|value| parse_information_register_usize(value)),
+            fields.len(),
+        ) {
+            return Err(unresolved(
+                family,
+                item_index,
+                CharacteristicsStage::Source,
+                role,
+                CharacteristicsReferenceKind::SourceUuid,
+            ));
+        }
+        let uuid = parse_information_register_non_zero_uuid(fields[1]).ok_or_else(|| {
+            unresolved(
+                family,
+                item_index,
+                CharacteristicsStage::Source,
+                role,
+                CharacteristicsReferenceKind::SourceUuid,
+            )
+        })?;
+        let path = resolve_exchange_plan_index_reference(&uuid, object_refs).ok_or_else(|| {
+            unresolved(
+                family,
+                item_index,
+                CharacteristicsStage::Source,
+                role,
+                CharacteristicsReferenceKind::SourceUuid,
+            )
+        })?;
+        let uuid = ObjectUuid::parse(&uuid).map_err(|_| {
+            unresolved(
+                family,
+                item_index,
+                CharacteristicsStage::Source,
+                role,
+                CharacteristicsReferenceKind::SourceUuid,
+            )
+        })?;
+        CharacteristicReference::new(&path, Some(uuid)).map_err(|_| {
+            item_diagnostic(
+                family,
+                item_index,
+                CharacteristicsStage::Source,
+                role,
+                Some(CharacteristicsReferenceKind::SourceUuid),
+                CharacteristicsReason::InvalidCanonicalModel,
+            )
+        })
+    }
+
+    pub(super) fn decode_field(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        value: &str,
+        role: CharacteristicRole,
+        source: &CharacteristicReference,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Result<CharacteristicField, CharacteristicsDiagnostic> {
+        let fields = split_information_register_braced_fields(value).ok_or_else(|| {
+            malformed_field(
+                family,
+                item_index,
+                role,
+                None,
+                CharacteristicsReason::InvalidEnvelope,
+            )
+        })?;
+        if !CharacteristicsPhysicalSchema::field(
+            fields
+                .first()
+                .and_then(|value| parse_information_register_usize(value)),
+            fields
+                .get(2)
+                .and_then(|value| parse_information_register_usize(value)),
+            fields.len(),
+        ) {
+            return Err(malformed_field(
+                family,
+                item_index,
+                role,
+                None,
+                CharacteristicsReason::InvalidEnvelope,
+            ));
+        }
+        let payload = split_information_register_braced_fields(fields[1]).ok_or_else(|| {
+            malformed_field(
+                family,
+                item_index,
+                role,
+                None,
+                CharacteristicsReason::InvalidEnvelope,
+            )
+        })?;
+        match payload.as_slice() {
+            [marker]
+                if CharacteristicsPhysicalSchema::sentinel(marker.trim().parse::<i32>().ok())
+                    == Some(CharacteristicsSentinelKind::Undefined) =>
+            {
+                Ok(CharacteristicField::Sentinel(
+                    CharacteristicFieldSentinel::Undefined,
+                ))
+            }
+            [marker]
+                if CharacteristicsPhysicalSchema::sentinel(marker.trim().parse::<i32>().ok())
+                    == Some(CharacteristicsSentinelKind::Empty) =>
+            {
+                Ok(CharacteristicField::Sentinel(
+                    CharacteristicFieldSentinel::Empty,
+                ))
+            }
+            [marker] => {
+                let marker = marker.trim().parse::<i32>().ok().ok_or_else(|| {
+                    malformed_field(
+                        family,
+                        item_index,
+                        role,
+                        Some(CharacteristicsReferenceKind::StandardAttribute),
+                        CharacteristicsReason::UnsupportedMarker,
+                    )
+                })?;
+                let path = standard_attribute_reference(family, role, source.path(), marker)
+                    .ok_or_else(|| {
+                        malformed_field(
+                            family,
+                            item_index,
+                            role,
+                            Some(CharacteristicsReferenceKind::StandardAttribute),
+                            CharacteristicsReason::UnsupportedMarker,
+                        )
+                    })?;
+                CharacteristicReference::new(&path, None)
+                    .map(CharacteristicField::Reference)
+                    .map_err(|_| {
+                        malformed_field(
+                            family,
+                            item_index,
+                            role,
+                            Some(CharacteristicsReferenceKind::StandardAttribute),
+                            CharacteristicsReason::InvalidCanonicalModel,
+                        )
+                    })
+            }
+            [kind, uuid]
+                if CharacteristicsPhysicalSchema::uuid_field(
+                    parse_information_register_usize(kind),
+                    payload.len(),
+                ) =>
+            {
+                let uuid = parse_information_register_non_zero_uuid(uuid).ok_or_else(|| {
+                    unresolved(
+                        family,
+                        item_index,
+                        CharacteristicsStage::Field,
+                        role,
+                        CharacteristicsReferenceKind::FieldUuid,
+                    )
+                })?;
+                let path =
+                    resolve_exchange_plan_index_reference(&uuid, object_refs).ok_or_else(|| {
+                        unresolved(
+                            family,
+                            item_index,
+                            CharacteristicsStage::Field,
+                            role,
+                            CharacteristicsReferenceKind::FieldUuid,
+                        )
+                    })?;
+                if !CharacteristicsPhysicalSchema::owns_field(source.path(), &path) {
+                    return Err(malformed_field(
+                        family,
+                        item_index,
+                        role,
+                        Some(CharacteristicsReferenceKind::FieldUuid),
+                        CharacteristicsReason::ReferenceOutsideSource,
+                    ));
+                }
+                let uuid = ObjectUuid::parse(&uuid).map_err(|_| {
+                    unresolved(
+                        family,
+                        item_index,
+                        CharacteristicsStage::Field,
+                        role,
+                        CharacteristicsReferenceKind::FieldUuid,
+                    )
+                })?;
+                CharacteristicReference::new(&path, Some(uuid))
+                    .map(CharacteristicField::Reference)
+                    .map_err(|_| {
+                        malformed_field(
+                            family,
+                            item_index,
+                            role,
+                            Some(CharacteristicsReferenceKind::FieldUuid),
+                            CharacteristicsReason::InvalidCanonicalModel,
+                        )
+                    })
+            }
+            _ => Err(malformed_field(
+                family,
+                item_index,
+                role,
+                None,
+                CharacteristicsReason::InvalidEnvelope,
+            )),
+        }
+    }
+
+    fn standard_attribute_reference(
+        owner_family: OwnerGraphFamily,
+        role: CharacteristicRole,
+        source: &str,
+        marker: i32,
+    ) -> Option<String> {
+        let shape = CharacteristicsPhysicalSchema::source_shape(source)?;
+        let kind =
+            CharacteristicsPhysicalSchema::standard_attribute(owner_family, role, shape, marker)?;
+        if kind == CharacteristicsStandardAttributeKind::Ref {
+            return Some(CharacteristicsPhysicalSchema::standard_ref_path(source));
+        }
+        let attributes = match owner_family {
+            OwnerGraphFamily::Catalog => CATALOG_STANDARD_ATTRIBUTES.as_slice(),
+            OwnerGraphFamily::ChartOfCharacteristicTypes => CCT_STANDARD_ATTRIBUTES.as_slice(),
+            _ => return None,
+        };
+        attributes.iter().find_map(|(raw, name)| {
+            (raw.parse::<i32>().ok() == Some(marker))
+                .then(|| CharacteristicsPhysicalSchema::standard_attribute_path(source, name))
+        })
+    }
+
+    pub(super) fn decode_filter_value(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        value: &str,
+        type_index: &BTreeMap<String, String>,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Result<CharacteristicFilterValue, CharacteristicsDiagnostic> {
+        let fields = split_information_register_braced_fields(value)
+            .ok_or_else(|| unsupported_filter(family, item_index, None))?;
+        let tag = fields
+            .first()
+            .and_then(|value| parse_information_register_quoted_string(value));
+        match tag.as_deref().and_then(CharacteristicsPhysicalSchema::tag) {
+            Some(CharacteristicsTagKind::StringFill) if fields.len() == 2 => {
+                let value = parse_information_register_quoted_string(fields[1])
+                    .ok_or_else(|| unsupported_filter(family, item_index, None))?;
+                CharacteristicFilterValue::string(&value)
+                    .map_err(|_| unsupported_filter(family, item_index, None))
+            }
+            Some(CharacteristicsTagKind::Item) if fields.len() == 3 => {
+                let (owner_uuid, value_uuid) =
+                    parse_information_register_design_time_ref_ids(value).ok_or_else(|| {
+                        unsupported_filter(
+                            family,
+                            item_index,
+                            Some(CharacteristicsReferenceKind::DesignTimeRef),
+                        )
+                    })?;
+                let path =
+                    parse_information_register_design_time_ref(value, type_index, object_refs)
+                        .ok_or_else(|| {
+                            unsupported_filter(
+                                family,
+                                item_index,
+                                Some(CharacteristicsReferenceKind::DesignTimeRef),
+                            )
+                        })?;
+                if path.is_empty() {
+                    Ok(CharacteristicFilterValue::DesignTimeRef(None))
+                } else {
+                    let provenance = if !information_register_uuid_is_zero(&value_uuid) {
+                        Some(value_uuid)
+                    } else if !information_register_uuid_is_zero(&owner_uuid) {
+                        Some(owner_uuid)
+                    } else {
+                        None
+                    }
+                    .map(|uuid| ObjectUuid::parse(&uuid))
+                    .transpose()
+                    .map_err(|_| {
+                        unsupported_filter(
+                            family,
+                            item_index,
+                            Some(CharacteristicsReferenceKind::DesignTimeRef),
+                        )
+                    })?;
+                    CharacteristicReference::new(&path, provenance)
+                        .map(|reference| CharacteristicFilterValue::DesignTimeRef(Some(reference)))
+                        .map_err(|_| {
+                            unsupported_filter(
+                                family,
+                                item_index,
+                                Some(CharacteristicsReferenceKind::DesignTimeRef),
+                            )
+                        })
+                }
+            }
+            _ => Err(unsupported_filter(family, item_index, None)),
+        }
+    }
+
+    fn diagnostic(
+        family: OwnerGraphFamily,
+        stage: CharacteristicsStage,
+        item_index: Option<usize>,
+        role: CharacteristicRole,
+        reference_kind: Option<CharacteristicsReferenceKind>,
+        reason: CharacteristicsReason,
+    ) -> CharacteristicsDiagnostic {
+        CharacteristicsDiagnostic::new(family, stage, item_index, role, reference_kind, reason)
+    }
+
+    fn item_diagnostic(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        stage: CharacteristicsStage,
+        role: CharacteristicRole,
+        reference_kind: Option<CharacteristicsReferenceKind>,
+        reason: CharacteristicsReason,
+    ) -> CharacteristicsDiagnostic {
+        diagnostic(
+            family,
+            stage,
+            Some(item_index),
+            role,
+            reference_kind,
+            reason,
+        )
+    }
+
+    fn unresolved(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        stage: CharacteristicsStage,
+        role: CharacteristicRole,
+        reference_kind: CharacteristicsReferenceKind,
+    ) -> CharacteristicsDiagnostic {
+        item_diagnostic(
+            family,
+            item_index,
+            stage,
+            role,
+            Some(reference_kind),
+            CharacteristicsReason::UnresolvedReference,
+        )
+    }
+
+    fn malformed_field(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        role: CharacteristicRole,
+        reference_kind: Option<CharacteristicsReferenceKind>,
+        reason: CharacteristicsReason,
+    ) -> CharacteristicsDiagnostic {
+        item_diagnostic(
+            family,
+            item_index,
+            CharacteristicsStage::Field,
+            role,
+            reference_kind,
+            reason,
+        )
+    }
+
+    fn unsupported_filter(
+        family: OwnerGraphFamily,
+        item_index: usize,
+        reference_kind: Option<CharacteristicsReferenceKind>,
+    ) -> CharacteristicsDiagnostic {
+        item_diagnostic(
+            family,
+            item_index,
+            CharacteristicsStage::FilterValue,
+            CharacteristicRole::TypesFilterValue,
+            reference_kind,
+            CharacteristicsReason::UnsupportedFilterUnion,
+        )
+    }
+}
 mod command_interface;
 mod config_dump_info;
 mod config_rows;
@@ -510,6 +1320,8 @@ pub struct MetadataSourceExtractionDiagnostic {
     pub field_index: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub collection_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_index: Option<usize>,
     /// Semantic role of the collection that caused the failure.  This is a
     /// schema token (never a native marker, UUID, or object name), so it is
     /// safe to include in the persisted diagnostic ledger.
@@ -559,6 +1371,7 @@ impl MetadataSourceExtractionDiagnostic {
             structural_signature,
             field_index: None,
             collection_index: None,
+            item_index: None,
             collection_role: None,
             offending_reference: None,
         }
@@ -5449,6 +6262,7 @@ struct ChartOfCharacteristicTypesProperties {
     autonumbering: bool,
     default_presentation: &'static str,
     standard_attributes: Vec<RegisterStandardAttribute>,
+    characteristics: Characteristics,
     predefined_data_update: &'static str,
     edit_type: &'static str,
     quick_choice: bool,
@@ -5852,7 +6666,7 @@ struct CatalogProperties {
     autonumbering: bool,
     default_presentation: Option<&'static str>,
     standard_attributes: Option<Vec<MetadataStandardAttribute>>,
-    characteristics: Vec<DocumentCharacteristic>,
+    characteristics: Characteristics,
     predefined_data_update: &'static str,
     edit_type: &'static str,
     quick_choice: bool,
@@ -5934,7 +6748,7 @@ struct DocumentProperties {
     use_standard_commands: bool,
     numbering: DocumentNumberingProperties,
     standard_attributes: Option<Vec<MetadataStandardAttribute>>,
-    characteristics: Vec<DocumentCharacteristic>,
+    characteristics: Characteristics,
     based_on: Vec<String>,
     input_by_string: Vec<String>,
     create_on_input: &'static str,
@@ -5982,21 +6796,6 @@ struct DocumentNumberingProperties {
     number_periodicity: &'static str,
     check_unique: bool,
     autonumbering: bool,
-}
-
-struct DocumentCharacteristic {
-    types_from: String,
-    key_field: String,
-    types_filter_field: String,
-    types_filter_value: MetadataChildFillValue,
-    data_path_field: String,
-    multiple_values_use_field: String,
-    values_from: String,
-    object_field: String,
-    type_field: String,
-    value_field: String,
-    multiple_values_key_field: String,
-    multiple_values_order_field: String,
 }
 
 struct BusinessProcessProperties {
@@ -7841,7 +8640,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             form_refs,
             owner_graph_diagnostic,
         )?;
-        format_chart_of_characteristic_types_source_xml(header, &chart, source_version).into_bytes()
+        format_chart_of_characteristic_types_source_xml(header, &chart, source_version)?
+            .into_bytes()
     } else if kind == "DocumentJournal" {
         let document_journal = parse_document_journal_properties_from_text(
             text,
@@ -10284,6 +11084,74 @@ fn owner_graph_extraction_diagnostic(
     diagnostic.collection_index = collection_index;
     diagnostic.offending_reference = reference.map(|value| value.as_str().to_owned());
     diagnostic
+}
+
+fn characteristics_extraction_diagnostic(
+    failure: characteristics::CharacteristicsDiagnostic,
+) -> MetadataSourceExtractionDiagnostic {
+    let class = match failure.reason {
+        characteristics::CharacteristicsReason::UnsupportedFamily
+        | characteristics::CharacteristicsReason::UnsupportedMarker
+        | characteristics::CharacteristicsReason::UnsupportedFilterUnion => {
+            MetadataSourceFailureClass::Unsupported
+        }
+        characteristics::CharacteristicsReason::UnresolvedReference => {
+            MetadataSourceFailureClass::Unresolved
+        }
+        characteristics::CharacteristicsReason::ReferenceOutsideSource
+        | characteristics::CharacteristicsReason::InvalidCanonicalModel => {
+            MetadataSourceFailureClass::Invariant
+        }
+        characteristics::CharacteristicsReason::InvalidEnvelope
+        | characteristics::CharacteristicsReason::InvalidCount
+        | characteristics::CharacteristicsReason::InvalidTypeTag
+        | characteristics::CharacteristicsReason::InvalidBodyShape => {
+            MetadataSourceFailureClass::Malformed
+        }
+    };
+    let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
+        class,
+        failure.family.as_str(),
+        failure.stage.as_str(),
+        failure.reason.as_str(),
+    );
+    diagnostic.field_index = Some(failure.field_index);
+    diagnostic.item_index = failure.item_index;
+    diagnostic.collection_role = Some(failure.role.token().to_owned());
+    diagnostic.offending_reference = failure
+        .reference_kind
+        .map(|reference| reference.as_str().to_owned());
+    diagnostic
+}
+
+fn decode_owner_characteristics(
+    family: owner_graph::OwnerGraphFamily,
+    fields: &[&str],
+    type_index: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
+) -> Option<Characteristics> {
+    let slot = match characteristics::characteristics_slot(family) {
+        Ok(slot) => slot,
+        Err(failure) => {
+            *diagnostic = Some(characteristics_extraction_diagnostic(failure));
+            return None;
+        }
+    };
+    match characteristics::decode_characteristics(
+        family,
+        fields.get(slot)?,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+    ) {
+        Ok(model) => Some(model),
+        Err(failure) => {
+            *diagnostic = Some(characteristics_extraction_diagnostic(failure));
+            None
+        }
+    }
 }
 
 fn parse_information_register_non_zero_uuid(value: &str) -> Option<String> {
@@ -18294,11 +19162,15 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         owner_graph_diagnostic,
     )?;
 
-    if !cct_pair_is(fields.get(15)?, "0", "0")
-        || !cct_based_on_is_empty(fields.get(50)?)
-        || !cct_data_lock_fields_are_empty(fields.get(52)?)
-        || !matches!(fields.get(36)?.trim(), "0" | "1")
-    {
+    let characteristics = decode_owner_characteristics(
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        owner_graph_diagnostic,
+    )?;
+    if !cct_characteristics_preconditions(&fields) {
         return None;
     }
     let input_modes = split_information_register_braced_fields(fields.get(54)?)?;
@@ -18443,6 +19315,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         )?,
         child_metadata_objects,
         child_forms,
+        characteristics,
     })
 }
 
@@ -18459,6 +19332,23 @@ fn cct_pair_is(value: &str, first: &str, second: &str) -> bool {
     split_information_register_braced_fields(value).is_some_and(|fields| {
         fields.len() == 2 && fields[0].trim() == first && fields[1].trim() == second
     })
+}
+
+fn cct_pair_matches(value: &str, predicate: fn(&str, &str) -> bool) -> bool {
+    split_information_register_braced_fields(value)
+        .is_some_and(|fields| fields.len() == 2 && predicate(fields[0].trim(), fields[1].trim()))
+}
+
+fn cct_characteristics_preconditions(fields: &[&str]) -> bool {
+    fields
+        .get(15)
+        .is_some_and(|value| cct_pair_matches(value, owner_graph::CctPhysicalSchema::zero_pair))
+        && fields
+            .get(52)
+            .is_some_and(|value| cct_data_lock_fields_are_empty(value))
+        && fields
+            .get(36)
+            .is_some_and(|value| owner_graph::CctPhysicalSchema::binary_flag(value.trim()))
 }
 
 fn cct_based_on_is_empty(value: &str) -> bool {
@@ -19471,6 +20361,14 @@ fn parse_strict_catalog_properties_from_text(
     )?;
     let based_on =
         parse_document_reference_collection(fields.get(32)?, object_refs, &["Document."])?;
+    let characteristics = decode_owner_characteristics(
+        owner_graph::OwnerGraphFamily::Catalog,
+        fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        owner_graph_diagnostic,
+    )?;
 
     Some(CatalogProperties {
         generated_types,
@@ -19512,12 +20410,7 @@ fn parse_strict_catalog_properties_from_text(
             metadata_object_refs,
             object_refs,
         )?,
-        characteristics: parse_catalog_characteristics(
-            fields.get(52)?,
-            type_index,
-            metadata_object_refs,
-            object_refs,
-        )?,
+        characteristics,
         predefined_data_update: match fields.get(55)?.trim() {
             "0" => "Auto",
             "1" => "AutoUpdate",
@@ -20245,162 +21138,6 @@ fn parse_catalog_standard_attributes(
         .map(Some)
 }
 
-fn parse_catalog_characteristics(
-    value: &str,
-    type_index: &BTreeMap<String, String>,
-    metadata_object_refs: &BTreeMap<String, String>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<DocumentCharacteristic>> {
-    let outer = split_information_register_braced_fields(value)?;
-    if outer.len() != 2 || outer.first()?.trim() != "0" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    let count = parse_information_register_usize(payload.first()?)?;
-    if payload.len() != count.checked_add(1)? {
-        return None;
-    }
-    payload[1..]
-        .iter()
-        .map(|value| {
-            let typed = split_information_register_braced_fields(value)?;
-            if typed.len() != 3
-                || typed.first()?.trim() != r##""#""##
-                || !information_register_uuid_matches(
-                    typed.get(1)?,
-                    DOCUMENT_CHARACTERISTIC_TYPE_UUID,
-                )
-            {
-                return None;
-            }
-            let fields = split_information_register_braced_fields(typed.get(2)?)?;
-            if fields.len() != 13 || fields.first()?.trim() != "4" {
-                return None;
-            }
-            let types_from = parse_catalog_characteristic_source(fields.get(1)?, object_refs)?;
-            let values_from = parse_catalog_characteristic_source(fields.get(2)?, object_refs)?;
-            Some(DocumentCharacteristic {
-                object_field: parse_catalog_characteristic_field(
-                    fields.get(3)?,
-                    object_refs,
-                    &values_from,
-                )?,
-                type_field: parse_catalog_characteristic_field(
-                    fields.get(4)?,
-                    object_refs,
-                    &values_from,
-                )?,
-                value_field: parse_catalog_characteristic_field(
-                    fields.get(5)?,
-                    object_refs,
-                    &values_from,
-                )?,
-                types_filter_field: parse_catalog_characteristic_field(
-                    fields.get(6)?,
-                    object_refs,
-                    &types_from,
-                )?,
-                types_filter_value: parse_information_register_fill_value(
-                    fields.get(7)?,
-                    type_index,
-                    metadata_object_refs,
-                )?,
-                key_field: parse_catalog_characteristic_field(
-                    fields.get(8)?,
-                    object_refs,
-                    &types_from,
-                )?,
-                data_path_field: parse_catalog_characteristic_field(
-                    fields.get(9)?,
-                    object_refs,
-                    &types_from,
-                )?,
-                multiple_values_use_field: parse_catalog_characteristic_field(
-                    fields.get(10)?,
-                    object_refs,
-                    &types_from,
-                )?,
-                multiple_values_key_field: parse_catalog_characteristic_field(
-                    fields.get(11)?,
-                    object_refs,
-                    &values_from,
-                )?,
-                multiple_values_order_field: parse_catalog_characteristic_field(
-                    fields.get(12)?,
-                    object_refs,
-                    &values_from,
-                )?,
-                types_from,
-                values_from,
-            })
-        })
-        .collect()
-}
-
-fn parse_catalog_characteristic_source(
-    value: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 2 || fields.first()?.trim() != "1" {
-        return None;
-    }
-    let uuid = parse_information_register_non_zero_uuid(fields.get(1)?)?;
-    let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-    catalog_characteristic_source_is_valid(&reference).then_some(reference)
-}
-
-fn catalog_characteristic_source_is_valid(reference: &str) -> bool {
-    let parts = reference.split('.').collect::<Vec<_>>();
-    match parts.as_slice() {
-        [kind, owner] => !kind.is_empty() && !owner.is_empty(),
-        [kind, owner, "TabularSection", section] => {
-            !kind.is_empty() && !owner.is_empty() && !section.is_empty()
-        }
-        _ => false,
-    }
-}
-
-fn parse_catalog_characteristic_field(
-    value: &str,
-    object_refs: &BTreeMap<String, String>,
-    source: &str,
-) -> Option<String> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3 || fields.first()?.trim() != "1" || fields.get(2)?.trim() != "0" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(fields.get(1)?)?;
-    match payload.as_slice() {
-        [marker] if matches!(marker.trim(), "-1" | "0") => Some(marker.trim().to_string()),
-        [marker] => {
-            match source.split('.').collect::<Vec<_>>().as_slice() {
-                ["Catalog", owner] if !owner.is_empty() => CATALOG_STANDARD_ATTRIBUTES
-                    .iter()
-                    .find_map(|(raw_marker, name)| {
-                        (marker.trim() == *raw_marker)
-                            .then(|| format!("{source}.StandardAttribute.{name}"))
-                    }),
-                ["Catalog", owner, "TabularSection", section]
-                    if !owner.is_empty() && !section.is_empty() && marker.trim() == "-8" =>
-                {
-                    Some(format!("{source}.StandardAttribute.Ref"))
-                }
-                _ => None,
-            }
-        }
-        [kind, uuid] if kind.trim() == "0" => {
-            let uuid = parse_information_register_non_zero_uuid(uuid)?;
-            let reference = resolve_exchange_plan_index_reference(&uuid, object_refs)?;
-            reference
-                .strip_prefix(source)
-                .is_some_and(|suffix| suffix.starts_with('.') && suffix.len() > 1)
-                .then_some(reference)
-        }
-        _ => None,
-    }
-}
-
 fn parse_report_properties_from_text(
     text: &str,
     uuid: &str,
@@ -20835,6 +21572,14 @@ fn parse_document_properties_from_text(
         form_uuids.clone(),
         owner_graph_diagnostic,
     )?;
+    let characteristics = decode_owner_characteristics(
+        owner_graph::OwnerGraphFamily::Document,
+        fields,
+        type_index,
+        metadata_object_refs,
+        object_refs,
+        owner_graph_diagnostic,
+    )?;
 
     Some(DocumentProperties {
         generated_types,
@@ -20865,12 +21610,7 @@ fn parse_document_properties_from_text(
             type_index,
             metadata_object_refs,
         )?,
-        characteristics: parse_document_characteristics(
-            fields.get(45)?,
-            type_index,
-            metadata_object_refs,
-            object_refs,
-        )?,
+        characteristics,
         based_on: parse_document_reference_collection(
             fields.get(22)?,
             object_refs,
@@ -21652,126 +22392,6 @@ fn parse_document_standard_attributes(
         })
         .collect::<Option<Vec<_>>>()?;
     Some(Some(attributes))
-}
-
-fn parse_document_characteristics(
-    value: &str,
-    type_index: &BTreeMap<String, String>,
-    metadata_object_refs: &BTreeMap<String, String>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<DocumentCharacteristic>> {
-    let outer = split_information_register_braced_fields(value)?;
-    if outer.len() != 2 || outer.first()?.trim() != "0" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
-    let count = parse_information_register_usize(payload.first()?)?;
-    if payload.len() != count.checked_add(1)? {
-        return None;
-    }
-    payload[1..]
-        .iter()
-        .map(|value| {
-            let typed = split_information_register_braced_fields(value)?;
-            if typed.len() != 3
-                || typed.first()?.trim() != r##""#""##
-                || !information_register_uuid_matches(
-                    typed.get(1)?,
-                    DOCUMENT_CHARACTERISTIC_TYPE_UUID,
-                )
-            {
-                return None;
-            }
-            let fields = split_information_register_braced_fields(typed.get(2)?)?;
-            if fields.len() != 13 || fields.first()?.trim() != "4" {
-                return None;
-            }
-            let types_from = parse_document_characteristic_source(fields.get(1)?, object_refs)?;
-            let values_from = parse_document_characteristic_source(fields.get(2)?, object_refs)?;
-            Some(DocumentCharacteristic {
-                object_field: parse_document_characteristic_field(
-                    fields.get(3)?,
-                    object_refs,
-                    Some(&values_from),
-                )?,
-                type_field: parse_document_characteristic_field(fields.get(4)?, object_refs, None)?,
-                value_field: parse_document_characteristic_field(
-                    fields.get(5)?,
-                    object_refs,
-                    None,
-                )?,
-                types_filter_field: parse_document_characteristic_field(
-                    fields.get(6)?,
-                    object_refs,
-                    None,
-                )?,
-                types_filter_value: parse_information_register_fill_value(
-                    fields.get(7)?,
-                    type_index,
-                    metadata_object_refs,
-                )?,
-                key_field: parse_document_characteristic_field(fields.get(8)?, object_refs, None)?,
-                data_path_field: parse_document_characteristic_field(
-                    fields.get(9)?,
-                    object_refs,
-                    None,
-                )?,
-                multiple_values_use_field: parse_document_characteristic_field(
-                    fields.get(10)?,
-                    object_refs,
-                    None,
-                )?,
-                multiple_values_key_field: parse_document_characteristic_field(
-                    fields.get(11)?,
-                    object_refs,
-                    None,
-                )?,
-                multiple_values_order_field: parse_document_characteristic_field(
-                    fields.get(12)?,
-                    object_refs,
-                    None,
-                )?,
-                types_from,
-                values_from,
-            })
-        })
-        .collect()
-}
-
-fn parse_document_characteristic_source(
-    value: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 2 || fields.first()?.trim() != "1" {
-        return None;
-    }
-    let uuid = parse_information_register_non_zero_uuid(fields.get(1)?)?;
-    resolve_exchange_plan_index_reference(&uuid, object_refs)
-}
-
-fn parse_document_characteristic_field(
-    value: &str,
-    object_refs: &BTreeMap<String, String>,
-    standard_attribute_owner: Option<&str>,
-) -> Option<String> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 3 || fields.first()?.trim() != "1" || fields.get(2)?.trim() != "0" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(fields.get(1)?)?;
-    match payload.as_slice() {
-        [marker] if matches!(marker.trim(), "-1" | "0") => Some(marker.trim().to_string()),
-        [marker] if marker.trim() == "-5" => Some(format!(
-            "{}.StandardAttribute.Ref",
-            standard_attribute_owner?
-        )),
-        [kind, uuid] if kind.trim() == "0" => {
-            let uuid = parse_information_register_non_zero_uuid(uuid)?;
-            resolve_exchange_plan_index_reference(&uuid, object_refs)
-        }
-        _ => None,
-    }
 }
 
 fn parse_business_process_properties_from_text(
@@ -29373,7 +29993,7 @@ fn format_chart_of_characteristic_types_source_xml(
     header: &MetadataHeader,
     chart: &ChartOfCharacteristicTypesProperties,
     source_version: InfobaseConfigSourceVersion,
-) -> String {
+) -> Option<String> {
     let mut xml =
         format_full_metadata_source_xml("ChartOfCharacteristicTypes", header, source_version);
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
@@ -29421,16 +30041,15 @@ fn format_chart_of_characteristic_types_source_xml(
         chart.default_presentation,
     ));
     push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
-    properties.push_str(&format!(
-        "\t\t\t<Characteristics/>\r\n\
-\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
-\t\t\t<EditType>{}</EditType>\r\n\
-\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
-\t\t\t<ChoiceMode>BothWays</ChoiceMode>\r\n",
-        chart.predefined_data_update,
-        chart.edit_type,
-        xml_bool(chart.quick_choice),
-    ));
+    properties.push_str(
+        &render_cct_characteristics_xml(
+            &chart.characteristics,
+            &chart.predefined_data_update,
+            &chart.edit_type,
+            xml_bool(chart.quick_choice),
+        )
+        .ok()?,
+    );
     push_catalog_input_by_string_xml(&mut properties, &chart.input_by_string);
     properties.push_str(&format!(
         "\t\t\t<CreateOnInput>{}</CreateOnInput>\r\n\
@@ -29531,7 +30150,7 @@ fn format_chart_of_characteristic_types_source_xml(
     if let Some(index) = xml.find("\t</ChartOfCharacteristicTypes>\r\n") {
         xml.insert_str(index, &children);
     }
-    xml
+    Some(xml)
 }
 
 fn format_catalog_source_xml(
@@ -29654,7 +30273,7 @@ fn format_catalog_source_xml(
     if let Some(standard_attributes) = &catalog.standard_attributes {
         push_metadata_standard_attributes_xml(&mut xml, standard_attributes);
     }
-    push_document_characteristics_xml(&mut xml, &catalog.characteristics);
+    xml.push_str(&render_metadata_characteristics_xml(&catalog.characteristics).ok()?);
     xml.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
 \t\t\t<EditType>{}</EditType>\r\n",
@@ -29962,7 +30581,7 @@ fn format_document_source_xml(
         if let Some(standard_attributes) = &document.standard_attributes {
             push_metadata_standard_attributes_xml(&mut properties, standard_attributes);
         }
-        push_document_characteristics_xml(&mut properties, &document.characteristics);
+        properties.push_str(&render_metadata_characteristics_xml(&document.characteristics).ok()?);
         push_task_based_on_xml(&mut properties, &document.based_on);
         push_catalog_input_by_string_xml(&mut properties, &document.input_by_string);
         properties.push_str(&format!(
@@ -30140,62 +30759,6 @@ fn push_document_reference_collection_xml(xml: &mut String, name: &str, referenc
         ));
     }
     xml.push_str(&format!("\t\t\t</{name}>\r\n"));
-}
-
-fn push_document_characteristics_xml(xml: &mut String, characteristics: &[DocumentCharacteristic]) {
-    if characteristics.is_empty() {
-        xml.push_str("\t\t\t<Characteristics/>\r\n");
-        return;
-    }
-    xml.push_str("\t\t\t<Characteristics>\r\n");
-    for characteristic in characteristics {
-        xml.push_str(&format!(
-            "\t\t\t\t<xr:Characteristic>\r\n\
-\t\t\t\t\t<xr:CharacteristicTypes from=\"{}\">\r\n\
-\t\t\t\t\t\t<xr:KeyField>{}</xr:KeyField>\r\n\
-\t\t\t\t\t\t<xr:TypesFilterField>{}</xr:TypesFilterField>\r\n",
-            escape_xml_text(&characteristic.types_from),
-            escape_xml_element_text(&characteristic.key_field),
-            escape_xml_element_text(&characteristic.types_filter_field),
-        ));
-        push_document_characteristic_value_xml(
-            xml,
-            &characteristic.types_filter_value,
-            "\t\t\t\t\t\t",
-        );
-        xml.push_str(&format!(
-            "\t\t\t\t\t\t<xr:DataPathField>{}</xr:DataPathField>\r\n\
-\t\t\t\t\t\t<xr:MultipleValuesUseField>{}</xr:MultipleValuesUseField>\r\n\
-\t\t\t\t\t</xr:CharacteristicTypes>\r\n\
-\t\t\t\t\t<xr:CharacteristicValues from=\"{}\">\r\n\
-\t\t\t\t\t\t<xr:ObjectField>{}</xr:ObjectField>\r\n\
-\t\t\t\t\t\t<xr:TypeField>{}</xr:TypeField>\r\n\
-\t\t\t\t\t\t<xr:ValueField>{}</xr:ValueField>\r\n\
-\t\t\t\t\t\t<xr:MultipleValuesKeyField>{}</xr:MultipleValuesKeyField>\r\n\
-\t\t\t\t\t\t<xr:MultipleValuesOrderField>{}</xr:MultipleValuesOrderField>\r\n\
-\t\t\t\t\t</xr:CharacteristicValues>\r\n\
-\t\t\t\t</xr:Characteristic>\r\n",
-            escape_xml_element_text(&characteristic.data_path_field),
-            escape_xml_element_text(&characteristic.multiple_values_use_field),
-            escape_xml_text(&characteristic.values_from),
-            escape_xml_element_text(&characteristic.object_field),
-            escape_xml_element_text(&characteristic.type_field),
-            escape_xml_element_text(&characteristic.value_field),
-            escape_xml_element_text(&characteristic.multiple_values_key_field),
-            escape_xml_element_text(&characteristic.multiple_values_order_field),
-        ));
-    }
-    xml.push_str("\t\t\t</Characteristics>\r\n");
-}
-
-fn push_document_characteristic_value_xml(
-    xml: &mut String,
-    value: &MetadataChildFillValue,
-    indent: &str,
-) {
-    let value_xml = format_register_standard_attribute_fill_value_xml(value)
-        .replace("xr:FillValue", "xr:TypesFilterValue");
-    xml.push_str(&format!("{indent}{value_xml}\r\n"));
 }
 
 fn format_business_process_source_xml(

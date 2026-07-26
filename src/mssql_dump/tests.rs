@@ -1,6 +1,10 @@
+use super::characteristics::*;
 use super::*;
+use crate::metadata_owner_graph::OwnerGraphFamily;
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
+use ibcmd_core::characteristics::{CharacteristicFilterValue, CharacteristicReference};
+use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::semantic::semantic_digest;
 use ibcmd_core::validate::validate_configuration;
 use sha2::{Digest, Sha256};
@@ -1813,6 +1817,9 @@ fn owner_graph_fixture_for_test(
     }
     for (field_index, value) in expected.owner_reserved_fields {
         fields[*field_index] = (*value).to_owned();
+    }
+    if let Ok(slot) = characteristics::characteristics_slot(expected.family) {
+        fields[slot] = "{0,{0}}".to_owned();
     }
     let collections = expected
         .collection_markers
@@ -49906,7 +49913,7 @@ fn document_formatter_stably_orders_root_child_groups() {
             autonumbering: true,
         },
         standard_attributes: None,
-        characteristics: Vec::new(),
+        characteristics: Characteristics::default(),
         based_on: Vec::new(),
         input_by_string: Vec::new(),
         create_on_input: "Use",
@@ -55666,4 +55673,396 @@ fn calculation_recalculation_root_has_one_line_target_and_no_corpus_literals() {
     ] {
         assert!(!source.contains(forbidden));
     }
+}
+
+const TYPES_UUID: &str = "10000000-0000-4000-8000-000000000001";
+const VALUES_UUID: &str = "10000000-0000-4000-8000-000000000002";
+const FIELD_UUID: &str = "10000000-0000-4000-8000-000000000003";
+const DTR_OWNER_UUID: &str = "10000000-0000-4000-8000-000000000004";
+const DTR_VALUE_UUID: &str = "10000000-0000-4000-8000-000000000005";
+
+fn source(uuid: &str) -> String {
+    format!("{{1,{uuid}}}")
+}
+
+fn field(marker: &str) -> String {
+    format!("{{1,{{{marker}}},0}}")
+}
+
+fn item(body_discriminator: &str, type_uuid: &str, filter: &str) -> String {
+    let fields = [
+        source(TYPES_UUID),
+        source(VALUES_UUID),
+        field("0"),
+        field("-1"),
+        field("0"),
+        field("-1"),
+        filter.to_owned(),
+        field("0"),
+        field("-1"),
+        field("0"),
+        field("-1"),
+        field("0"),
+    ]
+    .join(",");
+    format!("{{\"#\",{type_uuid},{{{body_discriminator},{fields}}}}}")
+}
+
+fn collection(item: &str) -> String {
+    format!("{{0,{{1,{item}}}}}")
+}
+
+fn references() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (TYPES_UUID.to_owned(), "Catalog.Types".to_owned()),
+        (VALUES_UUID.to_owned(), "Catalog.Values".to_owned()),
+        (
+            FIELD_UUID.to_owned(),
+            "Catalog.Types.Attribute.Field".to_owned(),
+        ),
+    ])
+}
+
+fn decode(value: &str) -> Result<Characteristics, CharacteristicsDiagnostic> {
+    decode_characteristics(
+        OwnerGraphFamily::Catalog,
+        value,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &references(),
+    )
+}
+
+#[test]
+fn characteristics_strict_synthetic_collection_decodes_without_payload_fallback() {
+    let raw = collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"S","safe"}"#,
+    ));
+    let model = decode(&raw).unwrap();
+    assert_eq!(model.items().len(), 1);
+    assert_eq!(
+        model.items()[0].types().source().source_uuid(),
+        Some(ObjectUuid::parse(TYPES_UUID).unwrap())
+    );
+}
+
+#[test]
+fn characteristics_mutation_matrix_reports_typed_stage_role_and_reason() {
+    let valid_item = item("4", DOCUMENT_CHARACTERISTIC_TYPE_UUID, r#"{"S","safe"}"#);
+    let wrong_outer = collection(&valid_item).replacen("{0,", "{1,", 1);
+    let wrong_count = collection(&valid_item).replacen("{1,", "{2,", 1);
+    let wrong_type = collection(&item(
+        "4",
+        "00000000-0000-0000-0000-000000000000",
+        r#"{"S","safe"}"#,
+    ));
+    let wrong_body = collection(&item(
+        "5",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"S","safe"}"#,
+    ));
+    let wrong_filter = collection(&item("4", DOCUMENT_CHARACTERISTIC_TYPE_UUID, r#"{"N",1}"#));
+    for (raw, stage, reason) in [
+        (
+            wrong_outer,
+            CharacteristicsStage::Outer,
+            CharacteristicsReason::InvalidEnvelope,
+        ),
+        (
+            wrong_count,
+            CharacteristicsStage::Count,
+            CharacteristicsReason::InvalidCount,
+        ),
+        (
+            wrong_type,
+            CharacteristicsStage::TypedItem,
+            CharacteristicsReason::InvalidTypeTag,
+        ),
+        (
+            wrong_body,
+            CharacteristicsStage::Body,
+            CharacteristicsReason::InvalidBodyShape,
+        ),
+        (
+            wrong_filter,
+            CharacteristicsStage::FilterValue,
+            CharacteristicsReason::UnsupportedFilterUnion,
+        ),
+    ] {
+        let diagnostic = decode(&raw).unwrap_err();
+        assert_eq!(diagnostic.stage, stage);
+        assert_eq!(diagnostic.reason, reason);
+        assert_eq!(diagnostic.field_index, 52);
+    }
+}
+
+#[test]
+fn characteristics_slot_matrix_is_closed_to_three_owner_families() {
+    assert_eq!(characteristics_slot(OwnerGraphFamily::Catalog), Ok(52));
+    assert_eq!(characteristics_slot(OwnerGraphFamily::Document), Ok(45));
+    assert_eq!(
+        characteristics_slot(OwnerGraphFamily::ChartOfCharacteristicTypes),
+        Ok(50)
+    );
+    assert_eq!(
+        characteristics_slot(OwnerGraphFamily::BusinessProcess)
+            .unwrap_err()
+            .reason,
+        CharacteristicsReason::UnsupportedFamily
+    );
+}
+
+#[test]
+fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes() {
+    let mut fields = vec![""; 59];
+    fields[15] = "{0,0}";
+    fields[36] = "0";
+    fields[52] = "{1,{0,0}}";
+    assert!(cct_characteristics_preconditions(&fields));
+    fields[36] = "1";
+    assert!(cct_characteristics_preconditions(&fields));
+    for valid in [" 0 ", "1 "] {
+        fields[36] = valid;
+        assert!(
+            cct_characteristics_preconditions(&fields),
+            "rejected baseline-compatible padded flag {valid:?}"
+        );
+    }
+
+    for invalid in ["00", "01"] {
+        fields[36] = invalid;
+        assert!(!cct_characteristics_preconditions(&fields));
+    }
+    fields[36] = "0";
+    for valid in ["{ 0 ,0 }", "{0, 0}"] {
+        fields[15] = valid;
+        assert!(
+            cct_characteristics_preconditions(&fields),
+            "rejected baseline-compatible padded pair {valid:?}"
+        );
+    }
+    for invalid in ["{1,1}", "{00,0}", "{0,00}", "{0}", "{0,0,0}", "0,0", "{0,0"] {
+        fields[15] = invalid;
+        assert!(
+            !cct_characteristics_preconditions(&fields),
+            "accepted invalid pair {invalid:?}"
+        );
+    }
+}
+
+#[test]
+fn characteristics_document_schema_marker_is_closed_to_object_field() {
+    let values = CharacteristicReference::new("Document.Values", None).unwrap();
+    assert!(
+        decode_field(
+            OwnerGraphFamily::Document,
+            0,
+            &field("-5"),
+            CharacteristicRole::ObjectField,
+            &values,
+            &BTreeMap::new(),
+        )
+        .is_ok()
+    );
+    let failure = decode_field(
+        OwnerGraphFamily::Document,
+        0,
+        &field("-5"),
+        CharacteristicRole::TypeField,
+        &values,
+        &BTreeMap::new(),
+    )
+    .unwrap_err();
+    assert_eq!(failure.reason, CharacteristicsReason::UnsupportedMarker);
+}
+
+#[test]
+fn characteristics_uuid_field_outside_source_fails_ancestry() {
+    let source = CharacteristicReference::new("Catalog.Values", None).unwrap();
+    let raw = format!("{{1,{{0,{FIELD_UUID}}},0}}");
+    let failure = decode_field(
+        OwnerGraphFamily::Catalog,
+        0,
+        &raw,
+        CharacteristicRole::ValueField,
+        &source,
+        &references(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        failure.reason,
+        CharacteristicsReason::ReferenceOutsideSource
+    );
+}
+
+#[test]
+fn characteristics_nonempty_design_time_ref_retains_value_uuid_provenance() {
+    let raw = format!(
+        "{{\"#\",{},{{0,{DTR_OWNER_UUID},{DTR_VALUE_UUID}}}}}",
+        DESIGN_TIME_REF_TYPE_UUID
+    );
+    let refs = BTreeMap::from([
+        (DTR_OWNER_UUID.to_owned(), "Catalog.Filter".to_owned()),
+        (
+            format!("owner-value:Catalog.Filter:{DTR_VALUE_UUID}"),
+            "Catalog.Filter.Item".to_owned(),
+        ),
+    ]);
+    let value =
+        decode_filter_value(OwnerGraphFamily::Catalog, 0, &raw, &BTreeMap::new(), &refs).unwrap();
+    let CharacteristicFilterValue::DesignTimeRef(Some(reference)) = value else {
+        panic!("expected nonempty design-time reference");
+    };
+    assert_eq!(reference.path(), "Catalog.Filter.Item");
+    assert_eq!(
+        reference.source_uuid(),
+        Some(ObjectUuid::parse(DTR_VALUE_UUID).unwrap())
+    );
+}
+
+#[test]
+fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed() {
+    let raw = collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"S","safe"}"#,
+    ));
+    for family in [
+        OwnerGraphFamily::Catalog,
+        OwnerGraphFamily::Document,
+        OwnerGraphFamily::ChartOfCharacteristicTypes,
+    ] {
+        let slot = characteristics_slot(family).unwrap();
+        let mut owned_fields = vec!["0".to_owned(); family.layout().owner_field_count];
+        owned_fields[slot] = raw.clone();
+        let fields = owned_fields.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut diagnostic = None;
+        let model = decode_owner_characteristics(
+            family,
+            &fields,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &references(),
+            &mut diagnostic,
+        )
+        .unwrap();
+        assert!(diagnostic.is_none());
+        let xml = ibcmd_xml::render_characteristics_xml(&model, "\t\t\t").unwrap();
+        let ordered = [
+            "CharacteristicTypes",
+            "KeyField",
+            "TypesFilterField",
+            "TypesFilterValue",
+            "DataPathField",
+            "MultipleValuesUseField",
+            "CharacteristicValues",
+            "ObjectField",
+            "TypeField",
+            "ValueField",
+            "MultipleValuesKeyField",
+            "MultipleValuesOrderField",
+        ];
+        let mut cursor = 0;
+        for name in ordered {
+            cursor += xml[cursor..].find(name).unwrap();
+        }
+    }
+
+    let family = OwnerGraphFamily::ChartOfCharacteristicTypes;
+    let slot = characteristics_slot(family).unwrap();
+    let invalid = collection(&item(
+        "4",
+        "00000000-0000-0000-0000-000000000000",
+        r#"{"S","must-not-leak"}"#,
+    ));
+    let mut owned_fields = vec!["0".to_owned(); family.layout().owner_field_count];
+    owned_fields[slot] = invalid;
+    let fields = owned_fields.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut diagnostic = None;
+    assert!(
+        decode_owner_characteristics(
+            family,
+            &fields,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &references(),
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.family, "ChartOfCharacteristicTypes");
+    assert_eq!(diagnostic.parser_stage, "characteristics_typed_item");
+    assert_eq!(diagnostic.field_index, Some(50));
+    assert_eq!(diagnostic.item_index, Some(0));
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("collection"));
+    assert_eq!(diagnostic.offending_reference.as_deref(), None,);
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains("must-not-leak")
+    );
+}
+
+#[test]
+fn characteristics_three_family_call_sites_share_decoder_and_xml_writer_seams() {
+    let production = include_str!("mod.rs");
+    for (start, end, family) in [
+        (
+            "fn parse_strict_catalog_properties_from_text",
+            "fn parse_catalog_attribute_collection_indexed",
+            "OwnerGraphFamily::Catalog",
+        ),
+        (
+            "fn parse_document_properties_from_text",
+            "fn parse_document_optional_object_reference",
+            "OwnerGraphFamily::Document",
+        ),
+        (
+            "fn parse_chart_of_characteristic_types_properties_from_text",
+            "fn cct_pair_is",
+            "OwnerGraphFamily::ChartOfCharacteristicTypes",
+        ),
+    ] {
+        let start = production.find(start).unwrap();
+        let end = production[start..]
+            .find(end)
+            .map(|offset| start + offset)
+            .unwrap();
+        let implementation = &production[start..end];
+        assert!(implementation.contains("decode_owner_characteristics("));
+        assert!(implementation.contains(family));
+    }
+    for (start, end, model, renderer) in [
+        (
+            "fn format_chart_of_characteristic_types_source_xml",
+            "fn format_catalog_source_xml",
+            "&chart.characteristics",
+            "render_cct_characteristics_xml(",
+        ),
+        (
+            "fn format_catalog_source_xml",
+            "fn format_document_source_xml",
+            "&catalog.characteristics",
+            "render_metadata_characteristics_xml(",
+        ),
+        (
+            "fn format_document_source_xml",
+            "fn push_document_reference_collection_xml",
+            "&document.characteristics",
+            "render_metadata_characteristics_xml(",
+        ),
+    ] {
+        let start = production.find(start).unwrap();
+        let end = production[start..]
+            .find(end)
+            .map(|offset| start + offset)
+            .unwrap();
+        let writer = &production[start..end];
+        assert!(writer.contains(renderer));
+        assert!(writer.contains(model));
+    }
+    assert!(!production.contains("fn push_document_characteristics_xml"));
 }

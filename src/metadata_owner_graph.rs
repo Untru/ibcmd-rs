@@ -11,6 +11,212 @@ use ibcmd_xml::{MetadataOrderError, order_metadata_features};
 
 pub(crate) const ROOT_DISCRIMINATOR: &str = "1";
 
+// Characteristics vocabulary is schema data recovered from the EDT model.
+// The physical adapter consumes these closed tables and keeps parsing logic
+// separate from the canonical model and the XML projection.
+pub(crate) const CHARACTERISTICS_STAGE_TOKENS: [&str; 8] = [
+    "characteristics_outer",
+    "characteristics_count",
+    "characteristics_typed_item",
+    "characteristics_body",
+    "characteristics_source",
+    "characteristics_field",
+    "characteristics_filter_value",
+    "characteristics_canonical_model",
+];
+pub(crate) const CHARACTERISTICS_ROLE_TOKENS: [&str; 13] = [
+    "collection",
+    "types_from",
+    "values_from",
+    "object_field",
+    "type_field",
+    "value_field",
+    "types_filter_field",
+    "types_filter_value",
+    "key_field",
+    "data_path_field",
+    "multiple_values_use_field",
+    "multiple_values_key_field",
+    "multiple_values_order_field",
+];
+pub(crate) const CHARACTERISTICS_REASON_TOKENS: [&str; 10] = [
+    "unsupported_family",
+    "invalid_envelope",
+    "invalid_count",
+    "invalid_type_tag",
+    "invalid_body_shape",
+    "unresolved_reference",
+    "reference_outside_source",
+    "unsupported_marker",
+    "unsupported_filter_union",
+    "invalid_canonical_model",
+];
+pub(crate) const CHARACTERISTICS_REFERENCE_KIND_TOKENS: [&str; 4] = [
+    "source_uuid",
+    "field_uuid",
+    "standard_attribute",
+    "design_time_ref",
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CharacteristicsFieldRole {
+    Collection,
+    TypesFrom,
+    ValuesFrom,
+    ObjectField,
+    TypeField,
+    ValueField,
+    TypesFilterField,
+    TypesFilterValue,
+    KeyField,
+    DataPathField,
+    MultipleValuesUseField,
+    MultipleValuesKeyField,
+    MultipleValuesOrderField,
+}
+
+impl CharacteristicsFieldRole {
+    pub(crate) const fn token(self) -> &'static str {
+        CHARACTERISTICS_ROLE_TOKENS[self as usize]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CharacteristicsTagKind {
+    Item,
+    StringFill,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CharacteristicsSentinelKind {
+    Undefined,
+    Empty,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CharacteristicsSourceShape {
+    Object,
+    TabularSection,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CharacteristicsStandardAttributeKind {
+    Ref,
+    FamilyTable,
+}
+
+pub(crate) struct CharacteristicsPhysicalSchema;
+
+impl CharacteristicsPhysicalSchema {
+    pub(crate) fn outer(discriminator: Option<usize>, field_count: usize) -> bool {
+        discriminator == Some(0) && field_count == 2
+    }
+
+    pub(crate) fn body(discriminator: Option<usize>, field_count: usize) -> bool {
+        discriminator == Some(4) && field_count == 13
+    }
+
+    pub(crate) fn source(discriminator: Option<usize>, field_count: usize) -> bool {
+        discriminator == Some(1) && field_count == 2
+    }
+
+    pub(crate) fn field(
+        discriminator: Option<usize>,
+        tail: Option<usize>,
+        field_count: usize,
+    ) -> bool {
+        discriminator == Some(1) && tail == Some(0) && field_count == 3
+    }
+
+    pub(crate) fn uuid_field(kind: Option<usize>, field_count: usize) -> bool {
+        kind == Some(0) && field_count == 2
+    }
+
+    pub(crate) fn tag(decoded: &str) -> Option<CharacteristicsTagKind> {
+        match decoded {
+            "#" => Some(CharacteristicsTagKind::Item),
+            "S" => Some(CharacteristicsTagKind::StringFill),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn sentinel(marker: Option<i32>) -> Option<CharacteristicsSentinelKind> {
+        match marker {
+            Some(-1) => Some(CharacteristicsSentinelKind::Undefined),
+            Some(0) => Some(CharacteristicsSentinelKind::Empty),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn source_shape(source: &str) -> Option<CharacteristicsSourceShape> {
+        match source.split('.').collect::<Vec<_>>().as_slice() {
+            [family, owner] if !family.is_empty() && !owner.is_empty() => {
+                Some(CharacteristicsSourceShape::Object)
+            }
+            [family, owner, "TabularSection", section]
+                if !family.is_empty() && !owner.is_empty() && !section.is_empty() =>
+            {
+                Some(CharacteristicsSourceShape::TabularSection)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn standard_attribute(
+        family: OwnerGraphFamily,
+        role: CharacteristicsFieldRole,
+        shape: CharacteristicsSourceShape,
+        marker: i32,
+    ) -> Option<CharacteristicsStandardAttributeKind> {
+        if matches!(family, OwnerGraphFamily::Document) {
+            if matches!(role, CharacteristicsFieldRole::ObjectField) && marker == -5 {
+                return Some(CharacteristicsStandardAttributeKind::Ref);
+            }
+            return None;
+        }
+        if matches!(shape, CharacteristicsSourceShape::TabularSection) {
+            return if marker == -8 {
+                Some(CharacteristicsStandardAttributeKind::Ref)
+            } else {
+                None
+            };
+        }
+        Some(CharacteristicsStandardAttributeKind::FamilyTable)
+    }
+
+    pub(crate) fn standard_attribute_path(source: &str, name: &str) -> String {
+        let mut path =
+            String::with_capacity(source.len() + ".StandardAttribute.".len() + name.len());
+        path.push_str(source);
+        path.push_str(".StandardAttribute.");
+        path.push_str(name);
+        path
+    }
+
+    pub(crate) fn standard_ref_path(source: &str) -> String {
+        Self::standard_attribute_path(source, "Ref")
+    }
+
+    pub(crate) fn owns_field(source: &str, field: &str) -> bool {
+        field
+            .strip_prefix(source)
+            .is_some_and(|suffix| suffix.starts_with('.') && suffix.len() > 1)
+    }
+}
+
+/// Exact lexical facts for CCT root properties that gate Characteristics.
+pub(crate) struct CctPhysicalSchema;
+
+impl CctPhysicalSchema {
+    pub(crate) fn zero_pair(first: &str, second: &str) -> bool {
+        first == "0" && second == "0"
+    }
+
+    pub(crate) fn binary_flag(value: &str) -> bool {
+        matches!(value, "0" | "1")
+    }
+}
+
 pub(crate) const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 pub(crate) const CATALOG_COMMAND_COLLECTION_UUID: &str = "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6";
 pub(crate) const CATALOG_TABULAR_SECTION_COLLECTION_UUID: &str =
@@ -1434,6 +1640,55 @@ mod tests {
         ];
         for (reason, token) in tokens {
             assert_eq!(reason.as_str(), token);
+        }
+    }
+
+    #[test]
+    fn characteristics_physical_schema_classifies_only_closed_edt_facts() {
+        assert!(CharacteristicsPhysicalSchema::outer(Some(0), 2));
+        assert!(CharacteristicsPhysicalSchema::body(Some(4), 13));
+        assert!(CharacteristicsPhysicalSchema::source(Some(1), 2));
+        assert!(CharacteristicsPhysicalSchema::field(Some(1), Some(0), 3));
+        assert_eq!(
+            CharacteristicsPhysicalSchema::tag("#"),
+            Some(CharacteristicsTagKind::Item)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::tag("S"),
+            Some(CharacteristicsTagKind::StringFill)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::sentinel(Some(-1)),
+            Some(CharacteristicsSentinelKind::Undefined)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::source_shape("Catalog.Values.TabularSection.Rows"),
+            Some(CharacteristicsSourceShape::TabularSection)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::standard_attribute(
+                OwnerGraphFamily::Document,
+                CharacteristicsFieldRole::ObjectField,
+                CharacteristicsSourceShape::Object,
+                -5,
+            ),
+            Some(CharacteristicsStandardAttributeKind::Ref)
+        );
+        assert!(!CharacteristicsPhysicalSchema::outer(Some(1), 2));
+        assert_eq!(CharacteristicsPhysicalSchema::tag("unknown"), None);
+        assert_eq!(CharacteristicsPhysicalSchema::sentinel(Some(1)), None);
+    }
+
+    #[test]
+    fn cct_physical_schema_preserves_exact_zero_pair_and_binary_lexemes() {
+        assert!(CctPhysicalSchema::zero_pair("0", "0"));
+        for pair in [("1", "1"), ("00", "0"), ("0", "00")] {
+            assert!(!CctPhysicalSchema::zero_pair(pair.0, pair.1));
+        }
+        assert!(CctPhysicalSchema::binary_flag("0"));
+        assert!(CctPhysicalSchema::binary_flag("1"));
+        for value in ["00", "01", " 0 ", "0 "] {
+            assert!(!CctPhysicalSchema::binary_flag(value));
         }
     }
 }
