@@ -17,6 +17,9 @@ fixtures используют доказанный compact root `{1,{owner field
   пустые коллекции с обычным provenance.
 - Input/history tail декодируется по schema-owned layout, без UUID или имён
   прикладных объектов.
+- Полный root `8/61` отделён от compact legacy `2/60..62`: полный профиль
+  сохраняет самостоятельное поле `DataHistory`, compact выводит его только из
+  доказанного shared mode.
 - Все другие family/root/count варианты по-прежнему fail closed.
 
 ## Evidence
@@ -24,4 +27,5 @@ fixtures используют доказанный compact root `{1,{owner field
 - baseline: `1810 passed / 100 failed`;
 - после среза: `1814 passed / 97 failed`;
 - `catalog_input_history_tail`: 7/7;
+- `extracts_catalog_create_and_data_history_tail_to_metadata_xml`: passed;
 - physical-adapter policy gate: passed.

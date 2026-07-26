@@ -10628,10 +10628,15 @@ fn decode_owner_graph<'a>(
             None,
         )
     })?;
-    let compact_catalog_field_count = matches!(family, owner_graph::OwnerGraphFamily::Catalog)
-        && root.len() == 2
-        && matches!(fields.len(), 60..=62);
-    if fields.len() != layout.owner_field_count && !compact_catalog_field_count {
+    let catalog_root_layout = matches!(family, owner_graph::OwnerGraphFamily::Catalog)
+        .then(|| owner_graph::CatalogPhysicalSchema::root_layout(root.len(), fields.len()))
+        .flatten();
+    if fields.len() != layout.owner_field_count
+        && !matches!(
+            catalog_root_layout,
+            Some(owner_graph::CatalogRootLayout::CompactLegacy)
+        )
+    {
         return Err(owner_graph_extraction_diagnostic(
             family,
             owner_graph::OwnerGraphDiagnosticKind::OwnerFieldCount,
@@ -20844,7 +20849,18 @@ fn parse_strict_catalog_properties_from_text(
         choice_data_get_mode_on_input_by_string,
     ) = parse_catalog_input_modes(fields.get(56)?)?;
     let (create_on_input, choice_history_on_input, data_history) =
-        parse_catalog_input_history_tail(owner_code, fields)?;
+        parse_catalog_input_history_tail(
+            owner_code,
+            fields,
+            matches!(
+                owner_graph::CatalogPhysicalSchema::root_layout(
+                    split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?
+                        .len(),
+                    fields.len(),
+                ),
+                Some(owner_graph::CatalogRootLayout::CompactLegacy)
+            ),
+        )?;
 
     let owners = parse_document_reference_collection(
         fields.get(12)?,
@@ -21654,33 +21670,38 @@ fn parse_catalog_standard_attributes(
 
 /// Version 56 with exactly 61 Catalog owner fields has two explicit input
 /// flags. Other compact Catalog layouts retain the legacy CreateOnInput
-/// source, while DataHistory is always projected from the shared field-53
-/// mode. This is a closed compatibility route for observed source layouts.
+/// source. Complete owner graphs keep their independently encoded
+/// DataHistory field, while compact layouts derive it from field 53.
 fn parse_catalog_input_history_tail(
     owner_code: &str,
     fields: &[&str],
+    compact_legacy_layout: bool,
 ) -> Option<(&'static str, &'static str, &'static str)> {
     let layout = owner_graph::CharacteristicsPhysicalSchema::catalog_input_history_layout(
         owner_code,
         fields.len(),
     )?;
     let shared_mode = fields.get(53)?.trim();
-    let data_history =
+    let data_history = if compact_legacy_layout {
         match owner_graph::CharacteristicsPhysicalSchema::catalog_data_history_mode(shared_mode)? {
             owner_graph::CatalogDataHistoryMode::Use => "Use",
             owner_graph::CatalogDataHistoryMode::DontUse => "DontUse",
-        };
-    let create_on_input = if matches!(layout, owner_graph::CatalogInputHistoryLayout::Exact56) {
+        }
+    } else {
+        metadata_data_history_xml(fields.get(58)?.trim())?
+    };
+    let exact_tail =
+        !compact_legacy_layout || matches!(layout, owner_graph::CatalogInputHistoryLayout::Exact56);
+    let create_on_input = if exact_tail {
         metadata_create_on_input_xml(shared_mode)?
     } else {
         metadata_create_on_input_xml(fields.get(51)?.trim())?
     };
-    let choice_history_on_input =
-        if matches!(layout, owner_graph::CatalogInputHistoryLayout::Exact56) {
-            metadata_choice_history_on_input_xml(fields.get(57)?.trim())?
-        } else {
-            "Auto"
-        };
+    let choice_history_on_input = if exact_tail {
+        metadata_choice_history_on_input_xml(fields.get(57)?.trim())?
+    } else {
+        "Auto"
+    };
     Some((create_on_input, choice_history_on_input, data_history))
 }
 

@@ -1,6 +1,7 @@
 # План реализации
 
 - [x] Добавить schema-owned классификацию compact Catalog layouts и tail.
+- [x] Разделить complete `8/61` и compact legacy `2/60..62` projections.
 - [x] Добавить Catalog-only compact owner-graph route с provenance.
 - [x] Сохранить строгий decoder Characteristics для всех иных профилей.
 - [x] Восстановить точные input/history tests: 7/7.

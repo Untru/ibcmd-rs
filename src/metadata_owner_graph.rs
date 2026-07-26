@@ -12,6 +12,30 @@ use ibcmd_xml::{MetadataOrderError, order_metadata_features};
 
 pub(crate) const ROOT_DISCRIMINATOR: &str = "1";
 
+/// Closed physical layouts for the Catalog root record.  The compact layout
+/// is a legacy source profile with no declared child collections; its tail
+/// has different field semantics from the complete owner graph.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CatalogRootLayout {
+    CompleteOwnerGraph,
+    CompactLegacy,
+}
+
+pub(crate) struct CatalogPhysicalSchema;
+
+impl CatalogPhysicalSchema {
+    pub(crate) const fn root_layout(
+        root_field_count: usize,
+        owner_field_count: usize,
+    ) -> Option<CatalogRootLayout> {
+        match (root_field_count, owner_field_count) {
+            (8, 61) => Some(CatalogRootLayout::CompleteOwnerGraph),
+            (2, 60..=62) => Some(CatalogRootLayout::CompactLegacy),
+            _ => None,
+        }
+    }
+}
+
 /// Schema-neutral view of a physical owned-template reference.
 pub(crate) struct OwnedTemplateReference<'a> {
     pub(crate) uuid: &'a str,
@@ -1894,6 +1918,16 @@ mod tests {
 
     #[test]
     fn characteristics_physical_schema_classifies_only_closed_edt_facts() {
+        assert_eq!(
+            CatalogPhysicalSchema::root_layout(8, 61),
+            Some(CatalogRootLayout::CompleteOwnerGraph)
+        );
+        assert_eq!(
+            CatalogPhysicalSchema::root_layout(2, 61),
+            Some(CatalogRootLayout::CompactLegacy)
+        );
+        assert_eq!(CatalogPhysicalSchema::root_layout(2, 59), None);
+        assert_eq!(CatalogPhysicalSchema::root_layout(3, 61), None);
         assert!(CharacteristicsPhysicalSchema::outer(Some(0), 2));
         assert!(CharacteristicsPhysicalSchema::catalog_57_legacy_empty(
             "57",
