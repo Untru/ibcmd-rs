@@ -45849,18 +45849,17 @@ fn extracts_document_include_help_in_contents_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let owner_fields = [
-        "1", "0", "1", "9", "1", "4", "0", "0", "0", "0", "0", "0", "0", zero_uuid, zero_uuid,
-        zero_uuid, zero_uuid, zero_uuid, zero_uuid, "1",
-    ]
-    .join(",");
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[25] = "1".to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    let document_blob =
+        deflate_for_test(render_owner_graph_fixture_for_test(&fields, &collections).as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
@@ -45905,17 +45904,24 @@ fn extracts_document_child_forms_and_templates_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_fields = std::iter::repeat("0")
-        .take(20)
-        .collect::<Vec<_>>()
-        .join(",");
-    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{zero_fields},{manager_type_id},{manager_value_id}}},{{{form_list_marker},3,{list_form_uuid},{common_form_uuid},{main_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{print_template_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, mut collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    collections[1] = format!(
+        "{{{},1,{print_template_uuid}}}",
+        EXPECTED_OWNER_GRAPH_LAYOUTS[1].collection_markers[1]
+    );
+    collections[4] = format!(
+        "{{{},2,{list_form_uuid},{main_form_uuid}}}",
+        EXPECTED_OWNER_GRAPH_LAYOUTS[1].collection_markers[4]
+    );
+    let document_blob =
+        deflate_for_test(render_owner_graph_fixture_for_test(&fields, &collections).as_bytes());
     let form_refs = BTreeMap::from([
         (
             main_form_uuid.to_string(),
