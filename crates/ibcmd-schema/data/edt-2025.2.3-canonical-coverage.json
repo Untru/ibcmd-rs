@@ -7,9 +7,9 @@
   },
   "summary": {
     "entries": 4966,
-    "typed": 2,
+    "typed": 3,
     "opaqueLossless": 0,
-    "unsupported": 4964,
+    "unsupported": 4963,
     "platformOnly": 0
   },
   "familyAggregates": [
@@ -24,9 +24,9 @@
     {
       "family": "forms",
       "entries": 2314,
-      "typed": 0,
+      "typed": 1,
       "opaqueLossless": 0,
-      "unsupported": 2314,
+      "unsupported": 2313,
       "platformOnly": 0
     },
     {
@@ -301,7 +301,7 @@
       "package": "com._1c.g5.v8.dt.form.model",
       "classifierKind": "class",
       "featureKind": "reference",
-      "features": 33
+      "features": 32
     },
     {
       "rule": "unsupported/schema.unmapped",
@@ -33364,19 +33364,21 @@
         "feature": "listSettings"
       },
       "family": "forms",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsSettingsEnvelope",
+      "canonicalField": "settings",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "edt-derived-writer-rule-and-canonical-model",
         "sources": [
-          "model/Form.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/edt-2025.2.3-dcs-writer-evidence.json",
+          "crates/ibcmd-schema/data/edt-2025.2.3-writer-rules.json",
+          "model/Form.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "The verified optional DataCompositionSettings reference is delegated unchanged by EDT ListSettingsWriter; DcsSettingsEnvelope::ListSettings retains that canonical settings payload."
       }
     },
     {

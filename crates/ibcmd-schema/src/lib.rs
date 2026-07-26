@@ -6698,9 +6698,9 @@ mod tests {
         let corpus = bundled_canonical_coverage().unwrap();
         assert_eq!(corpus.source.release, "2025.2.3+30");
         assert_eq!(corpus.summary.entries, 4_966);
-        assert_eq!(corpus.summary.typed, 2);
+        assert_eq!(corpus.summary.typed, 3);
         assert_eq!(corpus.summary.opaque_lossless, 0);
-        assert_eq!(corpus.summary.unsupported, 4_964);
+        assert_eq!(corpus.summary.unsupported, 4_963);
         assert_eq!(corpus.summary.platform_only, 0);
 
         let family_count = |family: &str| {
@@ -6732,7 +6732,7 @@ mod tests {
                 .iter()
                 .map(|item| item.features)
                 .sum::<usize>(),
-            4_964
+            4_963
         );
         assert!(
             corpus
@@ -6762,6 +6762,31 @@ mod tests {
                     "itemsViewMode",
                     "items_view_mode"
                 ),
+                ("DynamicListExtInfo", "listSettings", "settings"),
+            ]
+        );
+        let list_settings = corpus
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.key.namespace_uri == "http://g5.1c.ru/v8/dt/form"
+                    && entry.key.classifier == "DynamicListExtInfo"
+                    && entry.key.feature == "listSettings"
+            })
+            .unwrap();
+        assert_eq!(list_settings.status, CoverageStatus::Typed);
+        assert_eq!(
+            list_settings.canonical_type.as_deref(),
+            Some("DcsSettingsEnvelope")
+        );
+        assert_eq!(list_settings.canonical_field.as_deref(), Some("settings"));
+        assert_eq!(
+            list_settings.evidence.sources,
+            [
+                "crates/ibcmd-core/src/dcs.rs",
+                "crates/ibcmd-schema/data/edt-2025.2.3-dcs-writer-evidence.json",
+                "crates/ibcmd-schema/data/edt-2025.2.3-writer-rules.json",
+                "model/Form.xcore",
             ]
         );
         assert!(corpus.entries.iter().all(|entry| {
