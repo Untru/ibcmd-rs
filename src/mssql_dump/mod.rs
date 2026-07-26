@@ -1329,6 +1329,10 @@ pub struct MetadataSourceExtractionDiagnostic {
     pub collection_role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offending_reference: Option<String>,
+    /// Canonical lowercase UUID retained only after syntactic UUID validation.
+    /// Raw native values are never copied into this field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_uuid: Option<String>,
 }
 
 impl MetadataSourceExtractionDiagnostic {
@@ -1374,6 +1378,7 @@ impl MetadataSourceExtractionDiagnostic {
             item_index: None,
             collection_role: None,
             offending_reference: None,
+            reference_uuid: None,
         }
     }
 }
@@ -2079,6 +2084,7 @@ struct DumpRowContext<'a> {
     type_index_collisions: &'a BTreeSet<String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
+    object_ref_resolutions: &'a BTreeMap<String, MetadataObjectReferenceResolution>,
     metadata_object_refs: &'a BTreeMap<String, String>,
     configuration_root_object_refs: &'a BTreeMap<String, String>,
     recalculation_refs: &'a BTreeMap<String, CalculationRecalculationReference>,
@@ -2273,18 +2279,23 @@ fn dump_table_rows_with_options_mode(
     } else {
         BTreeMap::new()
     };
-    let object_refs = if extract_metadata_xml || needs_source_layout_refs {
-        build_metadata_object_reference_index_from_texts(&metadata_texts)
+    let MetadataObjectReferenceIndexes {
+        references: object_refs,
+        resolutions: object_ref_resolutions,
+    } = if extract_metadata_xml || needs_source_layout_refs {
+        build_metadata_object_reference_indexes_from_texts(&metadata_texts)
     } else if needs_standalone_refs {
-        build_standalone_object_reference_index_from_texts(
-            &metadata_texts,
-            &standalone_required_refs,
-            &form_refs,
-            &template_refs,
-            &subsystem_refs,
+        MetadataObjectReferenceIndexes::from_legacy(
+            &build_standalone_object_reference_index_from_texts(
+                &metadata_texts,
+                &standalone_required_refs,
+                &form_refs,
+                &template_refs,
+                &subsystem_refs,
+            ),
         )
     } else {
-        BTreeMap::new()
+        MetadataObjectReferenceIndexes::default()
     };
     let configuration_root_object_refs = if extract_metadata_xml {
         build_configuration_root_object_reference_index_from_texts(&metadata_texts, &object_refs)
@@ -2444,6 +2455,7 @@ fn dump_table_rows_with_options_mode(
         type_index_collisions: &type_index_collisions,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        object_ref_resolutions: &object_ref_resolutions,
         metadata_object_refs: &metadata_object_refs,
         configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
@@ -3180,20 +3192,25 @@ fn dump_table_rows_streamed(
     };
     timings.prepare_subsystem_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
-    let object_refs = if (extract_metadata_xml || needs_source_layout_refs)
+    let MetadataObjectReferenceIndexes {
+        references: object_refs,
+        resolutions: object_ref_resolutions,
+    } = if (extract_metadata_xml || needs_source_layout_refs)
         && (source_reference_needs.object_refs || build_selected_local_refs)
     {
-        build_metadata_object_reference_index_from_texts(&index_metadata_texts)
+        build_metadata_object_reference_indexes_from_texts(&index_metadata_texts)
     } else if needs_standalone_refs {
-        build_standalone_object_reference_index_from_texts(
-            &index_metadata_texts,
-            &standalone_required_refs,
-            &form_refs,
-            &template_refs,
-            &subsystem_refs,
+        MetadataObjectReferenceIndexes::from_legacy(
+            &build_standalone_object_reference_index_from_texts(
+                &index_metadata_texts,
+                &standalone_required_refs,
+                &form_refs,
+                &template_refs,
+                &subsystem_refs,
+            ),
         )
     } else {
-        BTreeMap::new()
+        MetadataObjectReferenceIndexes::default()
     };
     let configuration_root_object_refs = if extract_metadata_xml {
         build_configuration_root_object_reference_index_from_texts(
@@ -3428,6 +3445,7 @@ fn dump_table_rows_streamed(
         type_index_collisions: &type_index_collisions,
         dcs_type_index: &dcs_type_index,
         object_refs: &object_refs,
+        object_ref_resolutions: &object_ref_resolutions,
         metadata_object_refs: &metadata_object_refs,
         configuration_root_object_refs: &configuration_root_object_refs,
         recalculation_refs: &recalculation_refs,
@@ -4172,11 +4190,12 @@ fn dump_table_row_bytes(
     let metadata_xml_relative = if context.extract_metadata_xml {
         let started = Instant::now();
         let extracted = if let Some(row) = context.metadata_texts_by_file_name.get(file_name) {
-            extract_metadata_source_xml_from_text_row_audited(
+            extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions(
                 row,
                 context.type_index,
                 context.type_index_collisions,
                 context.object_refs,
+                context.object_ref_resolutions,
                 context.metadata_object_refs,
                 context.configuration_root_object_refs,
                 context.recalculation_refs,
@@ -4188,12 +4207,13 @@ fn dump_table_row_bytes(
                 context.source_version,
             )
         } else {
-            extract_metadata_source_xml_with_recalculation_refs(
+            extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
                 &bytes,
                 file_name,
                 context.type_index,
                 context.type_index_collisions,
                 context.object_refs,
+                context.object_ref_resolutions,
                 context.metadata_object_refs,
                 context.configuration_root_object_refs,
                 context.recalculation_refs,
@@ -6919,6 +6939,133 @@ struct FilterCriterionFullProperties {
     content: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FilterCriterionDecodeStage {
+    Root,
+    Owner,
+    Pattern,
+    Content,
+    Tail,
+    Resolver,
+}
+
+impl FilterCriterionDecodeStage {
+    const fn token(self) -> &'static str {
+        match self {
+            Self::Root => owner_graph::FilterCriterionDiagnosticTokens::root_stage(),
+            Self::Owner => owner_graph::FilterCriterionDiagnosticTokens::owner_stage(),
+            Self::Pattern => owner_graph::FilterCriterionDiagnosticTokens::pattern_stage(),
+            Self::Content => owner_graph::FilterCriterionDiagnosticTokens::content_stage(),
+            Self::Tail => owner_graph::FilterCriterionDiagnosticTokens::tail_stage(),
+            Self::Resolver => owner_graph::FilterCriterionDiagnosticTokens::resolver_stage(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FilterCriterionDecodeReason {
+    Shape,
+    Count,
+    UuidSyntax,
+    ZeroUuid,
+    DuplicateUuid,
+    HeaderMismatch,
+    MissingReference,
+    AmbiguousReference,
+    InvalidReference,
+    DuplicateReference,
+}
+
+impl FilterCriterionDecodeReason {
+    const fn class(self) -> MetadataSourceFailureClass {
+        match self {
+            Self::Shape | Self::Count | Self::UuidSyntax => MetadataSourceFailureClass::Malformed,
+            Self::MissingReference => MetadataSourceFailureClass::Unresolved,
+            Self::AmbiguousReference => MetadataSourceFailureClass::Ambiguous,
+            Self::ZeroUuid
+            | Self::DuplicateUuid
+            | Self::HeaderMismatch
+            | Self::InvalidReference
+            | Self::DuplicateReference => MetadataSourceFailureClass::Invariant,
+        }
+    }
+
+    const fn token(self) -> &'static str {
+        match self {
+            Self::Shape => owner_graph::FilterCriterionDiagnosticTokens::shape(),
+            Self::Count => owner_graph::FilterCriterionDiagnosticTokens::count(),
+            Self::UuidSyntax => owner_graph::FilterCriterionDiagnosticTokens::uuid_syntax(),
+            Self::ZeroUuid => owner_graph::FilterCriterionDiagnosticTokens::zero_uuid(),
+            Self::DuplicateUuid => owner_graph::FilterCriterionDiagnosticTokens::duplicate_uuid(),
+            Self::HeaderMismatch => owner_graph::FilterCriterionDiagnosticTokens::header_mismatch(),
+            Self::MissingReference => {
+                owner_graph::FilterCriterionDiagnosticTokens::missing_reference()
+            }
+            Self::AmbiguousReference => {
+                owner_graph::FilterCriterionDiagnosticTokens::ambiguous_reference()
+            }
+            Self::InvalidReference => {
+                owner_graph::FilterCriterionDiagnosticTokens::invalid_reference()
+            }
+            Self::DuplicateReference => {
+                owner_graph::FilterCriterionDiagnosticTokens::duplicate_reference()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FilterCriterionCollectionRole {
+    Pattern,
+    Content,
+}
+
+impl FilterCriterionCollectionRole {
+    const fn token(self) -> &'static str {
+        match self {
+            Self::Pattern => owner_graph::FilterCriterionDiagnosticTokens::pattern_role(),
+            Self::Content => owner_graph::FilterCriterionDiagnosticTokens::content_role(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FilterCriterionDecodeError {
+    stage: FilterCriterionDecodeStage,
+    reason: FilterCriterionDecodeReason,
+    role: Option<FilterCriterionCollectionRole>,
+    item_index: Option<usize>,
+    reference_uuid: Option<String>,
+}
+
+impl FilterCriterionDecodeError {
+    fn new(stage: FilterCriterionDecodeStage, reason: FilterCriterionDecodeReason) -> Self {
+        Self {
+            stage,
+            reason,
+            role: None,
+            item_index: None,
+            reference_uuid: None,
+        }
+    }
+
+    fn item(
+        stage: FilterCriterionDecodeStage,
+        reason: FilterCriterionDecodeReason,
+        role: FilterCriterionCollectionRole,
+        item_index: usize,
+        reference_uuid: Option<String>,
+    ) -> Self {
+        Self {
+            stage,
+            reason,
+            role: Some(role),
+            item_index: Some(item_index),
+            reference_uuid,
+        }
+    }
+}
+
 struct EnumProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     use_standard_commands: bool,
@@ -7311,6 +7458,52 @@ struct MetadataTypeIndexes {
     references: BTreeMap<String, String>,
     reference_collisions: BTreeSet<String>,
     dcs: DcsTypeIndex,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum MetadataObjectReferenceResolution {
+    Unique(String),
+    Ambiguous,
+}
+
+#[derive(Default)]
+struct MetadataObjectReferenceIndexes {
+    references: BTreeMap<String, String>,
+    resolutions: BTreeMap<String, MetadataObjectReferenceResolution>,
+}
+
+impl MetadataObjectReferenceIndexes {
+    fn observe(&mut self, uuid: &str, reference: &str) {
+        let key = uuid.to_ascii_lowercase();
+        match self.resolutions.entry(key) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(MetadataObjectReferenceResolution::Unique(
+                    reference.to_string(),
+                ));
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                entry.insert(MetadataObjectReferenceResolution::Ambiguous);
+            }
+        }
+    }
+
+    fn insert(&mut self, uuid: String, reference: String) {
+        self.observe(&uuid, &reference);
+        self.references.insert(uuid, reference);
+    }
+
+    fn or_insert(&mut self, uuid: String, reference: String) {
+        self.observe(&uuid, &reference);
+        self.references.entry(uuid).or_insert(reference);
+    }
+
+    fn from_legacy(references: &BTreeMap<String, String>) -> Self {
+        let mut indexes = Self::default();
+        for (uuid, reference) in references {
+            indexes.insert(uuid.clone(), reference.clone());
+        }
+        indexes
+    }
 }
 
 // Platform reference-family TypeIds are protocol identifiers, not metadata UUIDs.
@@ -8211,12 +8404,14 @@ fn extract_metadata_source_xml_with_refs(
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
 ) -> Option<ExtractedMetadataSourceXml> {
-    extract_metadata_source_xml_with_recalculation_refs(
+    let object_ref_indexes = MetadataObjectReferenceIndexes::from_legacy(object_refs);
+    extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
         blob,
         uuid,
         type_index,
         &BTreeSet::new(),
         object_refs,
+        &object_ref_indexes.resolutions,
         object_refs,
         object_refs,
         &BTreeMap::new(),
@@ -8237,12 +8432,14 @@ fn extract_metadata_source_xml_with_type_collisions(
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<ExtractedMetadataSourceXml> {
-    extract_metadata_source_xml_with_recalculation_refs(
+    let object_ref_indexes = MetadataObjectReferenceIndexes::from_legacy(object_refs);
+    extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
         blob,
         uuid,
         type_index,
         type_index_collisions,
         object_refs,
+        &object_ref_indexes.resolutions,
         object_refs,
         object_refs,
         &BTreeMap::new(),
@@ -8255,6 +8452,7 @@ fn extract_metadata_source_xml_with_type_collisions(
     )
 }
 
+#[allow(dead_code)] // Compatibility wrapper for callers that only expose the legacy BTreeMap.
 fn extract_metadata_source_xml_with_recalculation_refs(
     blob: &[u8],
     uuid: &str,
@@ -8271,15 +8469,14 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
 ) -> Option<ExtractedMetadataSourceXml> {
-    if uuid.contains('.') {
-        return None;
-    }
-    let row = metadata_text_row_from_blob(uuid, blob)?;
-    extract_metadata_source_xml_from_text_row(
-        &row,
+    let indexes = MetadataObjectReferenceIndexes::from_legacy(object_refs);
+    extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
+        blob,
+        uuid,
         type_index,
         type_index_collisions,
         object_refs,
+        &indexes.resolutions,
         metadata_object_refs,
         configuration_root_object_refs,
         recalculation_refs,
@@ -8292,11 +8489,86 @@ fn extract_metadata_source_xml_with_recalculation_refs(
     )
 }
 
+fn extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
+    blob: &[u8],
+    uuid: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+    object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    configuration_root_object_refs: &BTreeMap<String, String>,
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
+    functional_option_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<ExtractedMetadataSourceXml> {
+    if uuid.contains('.') {
+        return None;
+    }
+    let row = metadata_text_row_from_blob(uuid, blob)?;
+    extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
+        &row,
+        type_index,
+        type_index_collisions,
+        object_refs,
+        object_ref_resolutions,
+        metadata_object_refs,
+        configuration_root_object_refs,
+        recalculation_refs,
+        root_recalculation_refs,
+        functional_option_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+        source_version,
+    )
+}
+
+#[allow(dead_code)] // Compatibility wrapper for callers that only expose the legacy BTreeMap.
 fn extract_metadata_source_xml_from_text_row(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    configuration_root_object_refs: &BTreeMap<String, String>,
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
+    functional_option_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<ExtractedMetadataSourceXml> {
+    let indexes = MetadataObjectReferenceIndexes::from_legacy(object_refs);
+    extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
+        row,
+        type_index,
+        type_index_collisions,
+        object_refs,
+        &indexes.resolutions,
+        metadata_object_refs,
+        configuration_root_object_refs,
+        recalculation_refs,
+        root_recalculation_refs,
+        functional_option_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+        source_version,
+    )
+}
+
+fn extract_metadata_source_xml_from_text_row_with_object_ref_resolutions(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+    object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
     metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
@@ -8313,6 +8585,7 @@ fn extract_metadata_source_xml_from_text_row(
         type_index,
         type_index_collisions,
         object_refs,
+        object_ref_resolutions,
         metadata_object_refs,
         configuration_root_object_refs,
         recalculation_refs,
@@ -8331,6 +8604,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
+    object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
     metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
@@ -8755,13 +9029,21 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             parse_common_attribute_properties_from_text(text, header, type_index, object_refs)?;
         format_common_attribute_source_xml(&header, &common_attribute, source_version).into_bytes()
     } else if kind == "FilterCriterion" {
-        let filter_criterion = parse_filter_criterion_properties_from_text(
+        let filter_criterion = match parse_filter_criterion_properties_from_text(
             text,
             header,
             type_index,
-            object_refs,
+            type_index_collisions,
+            object_ref_resolutions,
             source_version,
-        )?;
+        ) {
+            Ok(Some(properties)) => properties,
+            Ok(None) => return None,
+            Err(error) => {
+                *owner_graph_diagnostic = Some(filter_criterion_extraction_diagnostic(error));
+                return None;
+            }
+        };
         format_filter_criterion_source_xml(&header, &filter_criterion, source_version).into_bytes()
     } else if kind == "ChartOfAccounts" {
         match parse_chart_of_accounts_properties_from_text(
@@ -8878,11 +9160,47 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
 /// detail observable at the export/audit boundary.  Until individual parsers
 /// return typed errors, `legacy_option_none` intentionally does not pretend to
 /// identify an inner branch.
+#[allow(dead_code)] // Compatibility wrapper for callers that only expose the legacy BTreeMap.
 fn extract_metadata_source_xml_from_text_row_audited(
     row: &MetadataTextRow,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    configuration_root_object_refs: &BTreeMap<String, String>,
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
+    functional_option_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    let indexes = MetadataObjectReferenceIndexes::from_legacy(object_refs);
+    extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions(
+        row,
+        type_index,
+        type_index_collisions,
+        object_refs,
+        &indexes.resolutions,
+        metadata_object_refs,
+        configuration_root_object_refs,
+        recalculation_refs,
+        root_recalculation_refs,
+        functional_option_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+        source_version,
+    )
+}
+
+fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+    object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
     metadata_object_refs: &BTreeMap<String, String>,
     configuration_root_object_refs: &BTreeMap<String, String>,
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
@@ -8899,6 +9217,7 @@ fn extract_metadata_source_xml_from_text_row_audited(
         type_index,
         type_index_collisions,
         object_refs,
+        object_ref_resolutions,
         metadata_object_refs,
         configuration_root_object_refs,
         recalculation_refs,
@@ -33604,77 +33923,210 @@ fn parse_filter_criterion_properties_from_text(
     text: &str,
     expected_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
-    object_refs: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
     source_version: InfobaseConfigSourceVersion,
-) -> Option<FilterCriterionProperties> {
-    let root_fields = split_information_register_braced_fields(text)?;
-    if root_fields.first()?.trim() != "1" {
-        return None;
+) -> std::result::Result<Option<FilterCriterionProperties>, FilterCriterionDecodeError> {
+    let root_fields = split_information_register_braced_fields(text).ok_or_else(|| {
+        FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Root,
+            FilterCriterionDecodeReason::Shape,
+        )
+    })?;
+    if !root_fields
+        .first()
+        .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::root(value.trim()))
+    {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Root,
+            FilterCriterionDecodeReason::Shape,
+        ));
     }
-    let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
+    let Some(owner_fields) = root_fields
+        .get(1)
+        .and_then(|value| split_information_register_braced_fields(value))
+    else {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Owner,
+            FilterCriterionDecodeReason::Shape,
+        ));
+    };
 
-    if root_fields.len() == 3 && root_fields.get(2)?.trim() == "0" {
+    if root_fields.len() == 3
+        && root_fields
+            .get(2)
+            .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::zero(value.trim()))
+    {
         if filter_criterion_legacy_direct_header_is_valid(&owner_fields, expected_header)
             || filter_criterion_legacy_wrapped_header_is_valid(&owner_fields, expected_header)
         {
-            return Some(FilterCriterionProperties::LegacyMinimal);
+            return Ok(Some(FilterCriterionProperties::LegacyMinimal));
         }
-        return None;
+        return Ok(None);
     }
 
-    if source_version != InfobaseConfigSourceVersion::V2_20
-        || root_fields.len() != 5
-        || root_fields.get(2)?.trim() != "2"
+    if source_version != InfobaseConfigSourceVersion::V2_20 {
+        return Ok(None);
+    }
+    if root_fields.len() != 5
+        || !root_fields
+            .get(2)
+            .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::two(value.trim()))
         || owner_fields.len() != 13
-        || owner_fields.first()?.trim() != "14"
+        || !owner_fields
+            .first()
+            .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::owner(value.trim()))
     {
-        return None;
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Root,
+            FilterCriterionDecodeReason::Shape,
+        ));
     }
 
     let generated_ids = owner_fields[1..5]
         .iter()
-        .map(|value| parse_information_register_non_zero_uuid(value))
-        .collect::<Option<Vec<_>>>()?;
+        .map(|value| {
+            parse_filter_criterion_uuid(value, FilterCriterionDecodeStage::Owner, None, None, true)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     let mut unique_generated_ids = BTreeSet::new();
     if !generated_ids
         .iter()
         .all(|uuid| unique_generated_ids.insert(uuid.to_ascii_lowercase()))
     {
-        return None;
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Owner,
+            FilterCriterionDecodeReason::DuplicateUuid,
+        ));
     }
 
-    let header_wrapper = split_information_register_braced_fields(owner_fields.get(5)?)?;
-    if header_wrapper.len() != 3 || header_wrapper.first()?.trim() != "2" {
-        return None;
+    let header_wrapper = owner_fields
+        .get(5)
+        .and_then(|value| split_information_register_braced_fields(value))
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?;
+    if header_wrapper.len() != 3
+        || !header_wrapper
+            .first()
+            .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::two(value.trim()))
+    {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Owner,
+            FilterCriterionDecodeReason::Shape,
+        ));
     }
-    let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
+    let parsed_header = header_wrapper
+        .get(1)
+        .and_then(|value| parse_information_register_owner_header(value))
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?;
     if !filter_criterion_headers_match(&parsed_header, expected_header) {
-        return None;
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Owner,
+            FilterCriterionDecodeReason::HeaderMismatch,
+        ));
     }
-    let value_types = parse_filter_criterion_type_pattern(header_wrapper.get(2)?, type_index)?;
-    let content = parse_filter_criterion_content(owner_fields.get(6)?, object_refs)?;
-    let use_standard_commands = parse_1c_bool_flag(owner_fields.get(7)?.trim())?;
+    let value_types = parse_filter_criterion_type_pattern(
+        header_wrapper.get(2).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Pattern,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        type_index,
+        type_index_collisions,
+    )?;
+    let content = parse_filter_criterion_content(
+        owner_fields.get(6).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Content,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        object_ref_resolutions,
+    )?;
+    let use_standard_commands = owner_fields
+        .get(7)
+        .and_then(|value| parse_1c_bool_flag(value.trim()))
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?;
 
     for index in [8usize, 9] {
-        let uuid = parse_information_register_uuid(owner_fields.get(index)?)?;
+        let uuid = parse_filter_criterion_uuid(
+            owner_fields.get(index).ok_or_else(|| {
+                FilterCriterionDecodeError::new(
+                    FilterCriterionDecodeStage::Owner,
+                    FilterCriterionDecodeReason::Shape,
+                )
+            })?,
+            FilterCriterionDecodeStage::Owner,
+            None,
+            None,
+            false,
+        )?;
         if !information_register_uuid_is_zero(&uuid) {
-            return None;
+            return Err(FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            ));
         }
     }
     for index in [10usize, 11, 12] {
-        let fields = split_information_register_braced_fields(owner_fields.get(index)?)?;
-        if fields.len() != 1 || fields.first()?.trim() != "0" {
-            return None;
+        let fields = owner_fields
+            .get(index)
+            .and_then(|value| split_information_register_braced_fields(value))
+            .ok_or_else(|| {
+                FilterCriterionDecodeError::new(
+                    FilterCriterionDecodeStage::Owner,
+                    FilterCriterionDecodeReason::Shape,
+                )
+            })?;
+        if fields.len() != 1
+            || !fields
+                .first()
+                .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::zero(value.trim()))
+        {
+            return Err(FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Owner,
+                FilterCriterionDecodeReason::Shape,
+            ));
         }
     }
 
-    let first_collection = parse_filter_criterion_empty_collection(root_fields.get(3)?)?;
-    let second_collection = parse_filter_criterion_empty_collection(root_fields.get(4)?)?;
+    let first_collection =
+        parse_filter_criterion_empty_collection(root_fields.get(3).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?)?;
+    let second_collection =
+        parse_filter_criterion_empty_collection(root_fields.get(4).ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?)?;
     if first_collection.eq_ignore_ascii_case(&second_collection) {
-        return None;
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::DuplicateUuid,
+        ));
     }
 
-    Some(FilterCriterionProperties::StrictFull(
+    Ok(Some(FilterCriterionProperties::StrictFull(
         FilterCriterionFullProperties {
             generated_types: vec![
                 GeneratedTypeEntry {
@@ -33694,7 +34146,7 @@ fn parse_filter_criterion_properties_from_text(
             use_standard_commands,
             content,
         },
-    ))
+    )))
 }
 
 fn filter_criterion_legacy_direct_header_is_valid(
@@ -33765,90 +34217,351 @@ fn filter_criterion_headers_match(left: &MetadataHeader, right: &MetadataHeader)
 fn parse_filter_criterion_type_pattern(
     value: &str,
     type_index: &BTreeMap<String, String>,
-) -> Option<Vec<ConstantValueType>> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() < 2 || fields.first()?.trim() != r#""Pattern""# {
-        return None;
+    type_index_collisions: &BTreeSet<String>,
+) -> std::result::Result<Vec<ConstantValueType>, FilterCriterionDecodeError> {
+    let fields = split_information_register_braced_fields(value).ok_or_else(|| {
+        FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Pattern,
+            FilterCriterionDecodeReason::Shape,
+        )
+    })?;
+    if fields.len() < 2
+        || !fields
+            .first()
+            .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::pattern(value.trim()))
+    {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Pattern,
+            FilterCriterionDecodeReason::Shape,
+        ));
     }
     let mut ids = BTreeSet::new();
     let mut references = BTreeSet::new();
     let mut value_types = Vec::with_capacity(fields.len().saturating_sub(1));
-    for value in fields.iter().skip(1) {
-        let member = split_information_register_braced_fields(value)?;
-        if member.len() != 2 || member.first()?.trim() != r##""#""## {
-            return None;
+    for (item_index, value) in fields.iter().skip(1).enumerate() {
+        let member = split_information_register_braced_fields(value).ok_or_else(|| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Pattern,
+                FilterCriterionDecodeReason::Shape,
+                FilterCriterionCollectionRole::Pattern,
+                item_index,
+                None,
+            )
+        })?;
+        if member.len() != 2
+            || !member.first().is_some_and(|value| {
+                owner_graph::FilterCriterionPhysicalSchema::reference_member(value.trim())
+            })
+        {
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Pattern,
+                FilterCriterionDecodeReason::Shape,
+                FilterCriterionCollectionRole::Pattern,
+                item_index,
+                None,
+            ));
         }
-        let uuid = parse_information_register_non_zero_uuid(member.get(1)?)?;
+        let uuid = parse_filter_criterion_uuid(
+            member.get(1).ok_or_else(|| {
+                FilterCriterionDecodeError::item(
+                    FilterCriterionDecodeStage::Pattern,
+                    FilterCriterionDecodeReason::Shape,
+                    FilterCriterionCollectionRole::Pattern,
+                    item_index,
+                    None,
+                )
+            })?,
+            FilterCriterionDecodeStage::Pattern,
+            Some(FilterCriterionCollectionRole::Pattern),
+            Some(item_index),
+            true,
+        )?;
         if !ids.insert(uuid.to_ascii_lowercase()) {
-            return None;
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Pattern,
+                FilterCriterionDecodeReason::DuplicateUuid,
+                FilterCriterionCollectionRole::Pattern,
+                item_index,
+                Some(uuid),
+            ));
         }
-        let reference = resolve_filter_criterion_index_reference(type_index, &uuid)?;
+        let reference = resolve_filter_criterion_type_reference(
+            type_index,
+            type_index_collisions,
+            &uuid,
+            item_index,
+        )?;
         if !filter_criterion_type_reference_is_valid(&reference)
             || !references.insert(reference.to_lowercase())
         {
-            return None;
+            let reason = if filter_criterion_type_reference_is_valid(&reference) {
+                FilterCriterionDecodeReason::DuplicateReference
+            } else {
+                FilterCriterionDecodeReason::InvalidReference
+            };
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                reason,
+                FilterCriterionCollectionRole::Pattern,
+                item_index,
+                Some(uuid),
+            ));
         }
         value_types.push(ConstantValueType::Reference { reference });
     }
-    Some(value_types)
+    Ok(value_types)
 }
 
 fn parse_filter_criterion_content(
     value: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<String>> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() < 3 || fields.first()?.trim() != "0" {
-        return None;
+    object_ref_resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
+) -> std::result::Result<Vec<String>, FilterCriterionDecodeError> {
+    let fields = split_information_register_braced_fields(value).ok_or_else(|| {
+        FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Content,
+            FilterCriterionDecodeReason::Shape,
+        )
+    })?;
+    if fields.len() < 3
+        || !fields
+            .first()
+            .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::zero(value.trim()))
+    {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Content,
+            FilterCriterionDecodeReason::Shape,
+        ));
     }
-    let count = parse_information_register_usize(fields.get(1)?)?;
+    let count = fields
+        .get(1)
+        .and_then(|value| parse_information_register_usize(value))
+        .ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Content,
+                FilterCriterionDecodeReason::Count,
+            )
+        })?;
     if count.checked_add(2) != Some(fields.len()) {
-        return None;
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Content,
+            FilterCriterionDecodeReason::Count,
+        ));
     }
 
     let mut ids = BTreeSet::new();
     let mut references = BTreeSet::new();
     let mut content = Vec::with_capacity(count);
-    for value in fields.iter().skip(2) {
-        let member = split_information_register_braced_fields(value)?;
+    for (item_index, value) in fields.iter().skip(2).enumerate() {
+        let member = split_information_register_braced_fields(value).ok_or_else(|| {
+            FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Content,
+                FilterCriterionDecodeReason::Shape,
+                FilterCriterionCollectionRole::Content,
+                item_index,
+                None,
+            )
+        })?;
+        let marker_is_valid = member
+            .get(1)
+            .and_then(|value| parse_information_register_uuid(value))
+            .is_some_and(|uuid| uuid.eq_ignore_ascii_case(METADATA_OBJECT_REF_TYPE_UUID));
         if member.len() != 3
-            || member.first()?.trim() != r##""#""##
-            || !parse_information_register_uuid(member.get(1)?)?
-                .eq_ignore_ascii_case(METADATA_OBJECT_REF_TYPE_UUID)
+            || !member.first().is_some_and(|value| {
+                owner_graph::FilterCriterionPhysicalSchema::reference_member(value.trim())
+            })
+            || !marker_is_valid
         {
-            return None;
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Content,
+                FilterCriterionDecodeReason::Shape,
+                FilterCriterionCollectionRole::Content,
+                item_index,
+                None,
+            ));
         }
-        let payload = split_information_register_braced_fields(member.get(2)?)?;
-        if payload.len() != 2 || payload.first()?.trim() != "1" {
-            return None;
+        let payload = member
+            .get(2)
+            .and_then(|value| split_information_register_braced_fields(value))
+            .ok_or_else(|| {
+                FilterCriterionDecodeError::item(
+                    FilterCriterionDecodeStage::Content,
+                    FilterCriterionDecodeReason::Shape,
+                    FilterCriterionCollectionRole::Content,
+                    item_index,
+                    None,
+                )
+            })?;
+        if payload.len() != 2
+            || !payload
+                .first()
+                .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::root(value.trim()))
+        {
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Content,
+                FilterCriterionDecodeReason::Shape,
+                FilterCriterionCollectionRole::Content,
+                item_index,
+                None,
+            ));
         }
-        let uuid = parse_information_register_non_zero_uuid(payload.get(1)?)?;
+        let uuid = parse_filter_criterion_uuid(
+            payload.get(1).ok_or_else(|| {
+                FilterCriterionDecodeError::item(
+                    FilterCriterionDecodeStage::Content,
+                    FilterCriterionDecodeReason::Shape,
+                    FilterCriterionCollectionRole::Content,
+                    item_index,
+                    None,
+                )
+            })?,
+            FilterCriterionDecodeStage::Content,
+            Some(FilterCriterionCollectionRole::Content),
+            Some(item_index),
+            true,
+        )?;
         if !ids.insert(uuid.to_ascii_lowercase()) {
-            return None;
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Content,
+                FilterCriterionDecodeReason::DuplicateUuid,
+                FilterCriterionCollectionRole::Content,
+                item_index,
+                Some(uuid),
+            ));
         }
-        let reference = resolve_filter_criterion_index_reference(object_refs, &uuid)?;
+        let reference =
+            resolve_filter_criterion_object_reference(object_ref_resolutions, &uuid, item_index)?;
         if !filter_criterion_content_reference_is_valid(&reference)
             || !references.insert(reference.to_lowercase())
         {
-            return None;
+            let reason = if filter_criterion_content_reference_is_valid(&reference) {
+                FilterCriterionDecodeReason::DuplicateReference
+            } else {
+                FilterCriterionDecodeReason::InvalidReference
+            };
+            return Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                reason,
+                FilterCriterionCollectionRole::Content,
+                item_index,
+                Some(uuid),
+            ));
         }
         content.push(reference);
     }
-    Some(content)
+    Ok(content)
 }
 
-fn resolve_filter_criterion_index_reference(
+fn parse_filter_criterion_uuid(
+    value: &str,
+    stage: FilterCriterionDecodeStage,
+    role: Option<FilterCriterionCollectionRole>,
+    item_index: Option<usize>,
+    non_zero: bool,
+) -> std::result::Result<String, FilterCriterionDecodeError> {
+    let uuid =
+        parse_information_register_uuid(value).ok_or_else(|| FilterCriterionDecodeError {
+            stage,
+            reason: FilterCriterionDecodeReason::UuidSyntax,
+            role,
+            item_index,
+            reference_uuid: None,
+        })?;
+    let uuid = uuid.to_ascii_lowercase();
+    if non_zero && information_register_uuid_is_zero(&uuid) {
+        return Err(FilterCriterionDecodeError {
+            stage,
+            reason: FilterCriterionDecodeReason::ZeroUuid,
+            role,
+            item_index,
+            reference_uuid: Some(uuid),
+        });
+    }
+    Ok(uuid)
+}
+
+fn resolve_filter_criterion_type_reference(
     index: &BTreeMap<String, String>,
+    collisions: &BTreeSet<String>,
     uuid: &str,
-) -> Option<String> {
+    item_index: usize,
+) -> std::result::Result<String, FilterCriterionDecodeError> {
+    if collisions.contains(&uuid.to_ascii_lowercase()) {
+        return Err(FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Resolver,
+            FilterCriterionDecodeReason::AmbiguousReference,
+            FilterCriterionCollectionRole::Pattern,
+            item_index,
+            Some(uuid.to_string()),
+        ));
+    }
     let mut matches = index
         .iter()
         .filter(|(candidate, _)| candidate.eq_ignore_ascii_case(uuid));
-    let (_, reference) = matches.next()?;
-    if matches.next().is_some() || reference.is_empty() {
-        return None;
+    let Some((_, reference)) = matches.next() else {
+        return Err(FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Resolver,
+            FilterCriterionDecodeReason::MissingReference,
+            FilterCriterionCollectionRole::Pattern,
+            item_index,
+            Some(uuid.to_string()),
+        ));
+    };
+    if matches.next().is_some() {
+        return Err(FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Resolver,
+            FilterCriterionDecodeReason::AmbiguousReference,
+            FilterCriterionCollectionRole::Pattern,
+            item_index,
+            Some(uuid.to_string()),
+        ));
     }
-    Some(reference.clone())
+    if reference.is_empty() {
+        return Err(FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Resolver,
+            FilterCriterionDecodeReason::InvalidReference,
+            FilterCriterionCollectionRole::Pattern,
+            item_index,
+            Some(uuid.to_string()),
+        ));
+    }
+    Ok(reference.clone())
+}
+
+fn resolve_filter_criterion_object_reference(
+    resolutions: &BTreeMap<String, MetadataObjectReferenceResolution>,
+    uuid: &str,
+    item_index: usize,
+) -> std::result::Result<String, FilterCriterionDecodeError> {
+    match resolutions.get(&uuid.to_ascii_lowercase()) {
+        Some(MetadataObjectReferenceResolution::Unique(reference)) if !reference.is_empty() => {
+            Ok(reference.clone())
+        }
+        Some(MetadataObjectReferenceResolution::Unique(_)) => {
+            Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                FilterCriterionDecodeReason::InvalidReference,
+                FilterCriterionCollectionRole::Content,
+                item_index,
+                Some(uuid.to_string()),
+            ))
+        }
+        Some(MetadataObjectReferenceResolution::Ambiguous) => {
+            Err(FilterCriterionDecodeError::item(
+                FilterCriterionDecodeStage::Resolver,
+                FilterCriterionDecodeReason::AmbiguousReference,
+                FilterCriterionCollectionRole::Content,
+                item_index,
+                Some(uuid.to_string()),
+            ))
+        }
+        None => Err(FilterCriterionDecodeError::item(
+            FilterCriterionDecodeStage::Resolver,
+            FilterCriterionDecodeReason::MissingReference,
+            FilterCriterionCollectionRole::Content,
+            item_index,
+            Some(uuid.to_string()),
+        )),
+    }
 }
 
 fn filter_criterion_type_reference_is_valid(reference: &str) -> bool {
@@ -33867,12 +34580,51 @@ fn filter_criterion_content_reference_is_valid(reference: &str) -> bool {
         )
 }
 
-fn parse_filter_criterion_empty_collection(value: &str) -> Option<String> {
-    let fields = split_information_register_braced_fields(value)?;
-    if fields.len() != 2 || parse_information_register_usize(fields.get(1)?)? != 0 {
-        return None;
+fn parse_filter_criterion_empty_collection(
+    value: &str,
+) -> std::result::Result<String, FilterCriterionDecodeError> {
+    let fields = split_information_register_braced_fields(value).ok_or_else(|| {
+        FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Shape,
+        )
+    })?;
+    let count = fields
+        .get(1)
+        .and_then(|value| parse_information_register_usize(value));
+    if fields.len() != 2 || count != Some(0) {
+        return Err(FilterCriterionDecodeError::new(
+            FilterCriterionDecodeStage::Tail,
+            FilterCriterionDecodeReason::Shape,
+        ));
     }
-    parse_information_register_non_zero_uuid(fields.first()?)
+    parse_filter_criterion_uuid(
+        fields.first().ok_or_else(|| {
+            FilterCriterionDecodeError::new(
+                FilterCriterionDecodeStage::Tail,
+                FilterCriterionDecodeReason::Shape,
+            )
+        })?,
+        FilterCriterionDecodeStage::Tail,
+        None,
+        None,
+        true,
+    )
+}
+
+fn filter_criterion_extraction_diagnostic(
+    error: FilterCriterionDecodeError,
+) -> MetadataSourceExtractionDiagnostic {
+    let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
+        error.reason.class(),
+        "FilterCriterion",
+        error.stage.token(),
+        error.reason.token(),
+    );
+    diagnostic.item_index = error.item_index;
+    diagnostic.collection_role = error.role.map(|role| role.token().to_string());
+    diagnostic.reference_uuid = error.reference_uuid;
+    diagnostic
 }
 
 fn format_filter_criterion_source_xml(

@@ -230,6 +230,110 @@ impl DataProcessorPhysicalSchema {
     }
 }
 
+pub(crate) struct FilterCriterionPhysicalSchema;
+
+impl FilterCriterionPhysicalSchema {
+    pub(crate) fn root(value: &str) -> bool {
+        value == "1"
+    }
+
+    pub(crate) fn zero(value: &str) -> bool {
+        value == "0"
+    }
+
+    pub(crate) fn two(value: &str) -> bool {
+        value == "2"
+    }
+
+    pub(crate) fn owner(value: &str) -> bool {
+        value == "14"
+    }
+
+    pub(crate) fn pattern(value: &str) -> bool {
+        value == r#""Pattern""#
+    }
+
+    pub(crate) fn reference_member(value: &str) -> bool {
+        value == r##""#""##
+    }
+}
+
+pub(crate) struct FilterCriterionDiagnosticTokens;
+
+impl FilterCriterionDiagnosticTokens {
+    pub(crate) const fn root_stage() -> &'static str {
+        "filter_criterion_root"
+    }
+
+    pub(crate) const fn owner_stage() -> &'static str {
+        "filter_criterion_owner"
+    }
+
+    pub(crate) const fn pattern_stage() -> &'static str {
+        "filter_criterion_pattern"
+    }
+
+    pub(crate) const fn content_stage() -> &'static str {
+        "filter_criterion_content"
+    }
+
+    pub(crate) const fn tail_stage() -> &'static str {
+        "filter_criterion_tail"
+    }
+
+    pub(crate) const fn resolver_stage() -> &'static str {
+        "filter_criterion_resolver"
+    }
+
+    pub(crate) const fn shape() -> &'static str {
+        "shape"
+    }
+
+    pub(crate) const fn count() -> &'static str {
+        "count"
+    }
+
+    pub(crate) const fn uuid_syntax() -> &'static str {
+        "uuid_syntax"
+    }
+
+    pub(crate) const fn zero_uuid() -> &'static str {
+        "zero_uuid"
+    }
+
+    pub(crate) const fn duplicate_uuid() -> &'static str {
+        "duplicate_uuid"
+    }
+
+    pub(crate) const fn header_mismatch() -> &'static str {
+        "header_mismatch"
+    }
+
+    pub(crate) const fn missing_reference() -> &'static str {
+        "missing_reference"
+    }
+
+    pub(crate) const fn ambiguous_reference() -> &'static str {
+        "ambiguous_reference"
+    }
+
+    pub(crate) const fn invalid_reference() -> &'static str {
+        "invalid_reference"
+    }
+
+    pub(crate) const fn duplicate_reference() -> &'static str {
+        "duplicate_reference"
+    }
+
+    pub(crate) const fn pattern_role() -> &'static str {
+        "pattern"
+    }
+
+    pub(crate) const fn content_role() -> &'static str {
+        "content"
+    }
+}
+
 pub(crate) const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 pub(crate) const CATALOG_COMMAND_COLLECTION_UUID: &str = "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6";
 pub(crate) const CATALOG_TABULAR_SECTION_COLLECTION_UUID: &str =

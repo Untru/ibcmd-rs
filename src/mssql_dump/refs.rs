@@ -38,7 +38,13 @@ pub(super) fn build_metadata_object_reference_index(
 pub(super) fn build_metadata_object_reference_index_from_texts(
     rows: &[MetadataTextRow],
 ) -> BTreeMap<String, String> {
-    let mut index = BTreeMap::new();
+    build_metadata_object_reference_indexes_from_texts(rows).references
+}
+
+pub(super) fn build_metadata_object_reference_indexes_from_texts(
+    rows: &[MetadataTextRow],
+) -> MetadataObjectReferenceIndexes {
+    let mut index = MetadataObjectReferenceIndexes::default();
     let empty_form_refs = BTreeMap::new();
     let empty_template_refs = BTreeMap::new();
     let subsystem_refs = build_subsystem_source_reference_index_from_texts(rows);
@@ -87,7 +93,7 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
                 &empty_form_refs,
                 &empty_template_refs,
             ) {
-                index.entry(child.uuid).or_insert(reference);
+                index.or_insert(child.uuid, reference);
             }
         }
         if kind == "WebService" {
@@ -111,11 +117,9 @@ pub(super) fn build_metadata_object_reference_index_from_texts(
             insert_http_service_child_role_refs(&mut index, &row.text, &header.uuid, &header.name);
         }
     }
-    index.extend(
-        recalculation_refs
-            .iter()
-            .map(|(uuid, recalculation)| (uuid.clone(), recalculation.object_reference())),
-    );
+    for (uuid, recalculation) in &recalculation_refs {
+        index.insert(uuid.clone(), recalculation.object_reference());
+    }
     insert_recalculation_dimension_refs(&mut index, rows, &recalculation_refs);
     index
 }
@@ -209,7 +213,7 @@ pub(super) fn build_calculation_recalculation_reference_index(
 }
 
 fn insert_web_service_parameter_refs(
-    index: &mut BTreeMap<String, String>,
+    index: &mut MetadataObjectReferenceIndexes,
     text: &str,
     owner_uuid: &str,
     owner_name: &str,
@@ -259,7 +263,7 @@ fn insert_web_service_parameter_refs(
 }
 
 fn insert_recalculation_dimension_refs(
-    index: &mut BTreeMap<String, String>,
+    index: &mut MetadataObjectReferenceIndexes,
     rows: &[MetadataTextRow],
     recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
 ) {
@@ -368,7 +372,7 @@ pub(super) fn parse_configuration_header_uuid(text: &str) -> Option<String> {
 }
 
 pub(super) fn insert_http_service_child_role_refs(
-    index: &mut BTreeMap<String, String>,
+    index: &mut MetadataObjectReferenceIndexes,
     text: &str,
     owner_uuid: &str,
     owner_name: &str,

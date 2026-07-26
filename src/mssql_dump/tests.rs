@@ -40927,12 +40927,14 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
     source_version: InfobaseConfigSourceVersion,
 ) -> Option<ExtractedMetadataSourceXml> {
     let blob = deflate_for_test(raw.as_bytes());
-    extract_metadata_source_xml_with_recalculation_refs(
+    let object_ref_indexes = MetadataObjectReferenceIndexes::from_legacy(object_refs);
+    extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
         &blob,
         &fixture.owner_uuid,
         type_index,
         &BTreeSet::new(),
         object_refs,
+        &object_ref_indexes.resolutions,
         metadata_object_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -40942,6 +40944,32 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
         &BTreeMap::new(),
         &BTreeMap::new(),
         source_version,
+    )
+}
+
+fn audit_strict_filter_criterion(
+    fixture: &StrictFilterCriterionFixture,
+    raw: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_ref_indexes: &MetadataObjectReferenceIndexes,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    let row = metadata_text_row_from_text(&fixture.owner_uuid, raw.to_string()).unwrap();
+    extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions(
+        &row,
+        type_index,
+        type_index_collisions,
+        &object_ref_indexes.references,
+        &object_ref_indexes.resolutions,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
     )
 }
 
@@ -41076,6 +41104,238 @@ fn extracts_strict_v20_filter_criterion_in_native_order_from_base_indexes() {
         )
         .is_none(),
         "Content must not resolve from the expanded metadata-object map"
+    );
+}
+
+#[test]
+fn extracts_strict_v20_filter_criterion_with_two_types_and_448_ordered_content_items() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let generated_ids = (0..4)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let type_ids = (0..2)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let content_ids = (0..448)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let tail_ids = (0..2)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let raw = strict_filter_criterion_raw_for_test(
+        &owner_uuid,
+        "SyntheticCriterion",
+        &generated_ids,
+        &type_ids,
+        &content_ids,
+        &tail_ids,
+    );
+    let type_index = BTreeMap::from([
+        (
+            type_ids[0].clone(),
+            "cfg:CatalogRef.SyntheticFirst".to_string(),
+        ),
+        (
+            type_ids[1].clone(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    let object_refs = content_ids
+        .iter()
+        .enumerate()
+        .map(|(index, uuid)| {
+            (
+                uuid.clone(),
+                format!("Document.Synthetic.Attribute.Field{index:03}"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let fixture = StrictFilterCriterionFixture {
+        raw,
+        owner_uuid,
+        generated_ids,
+        type_ids,
+        content_ids,
+        tail_ids,
+        type_index,
+        object_refs,
+    };
+
+    let extracted = extract_filter_criterion_with_distinct_object_ref_indexes(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &fixture.object_refs,
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("FilterCriteria/SyntheticCriterion.xml")
+    );
+    assert!(xml.contains(r#"version="2.20""#));
+    assert_eq!(xml.matches("<v8:Type>").count(), 2);
+    assert_eq!(
+        xml.matches(r#"<xr:Item xsi:type="xr:MDObjectRef">"#)
+            .count(),
+        448
+    );
+    assert_eq!(xml.matches("<xr:GeneratedType ").count(), 2);
+    for generated_id in &fixture.generated_ids {
+        assert!(xml.contains(generated_id));
+    }
+    let ordered = [
+        "Document.Synthetic.Attribute.Field000",
+        "Document.Synthetic.Attribute.Field224",
+        "Document.Synthetic.Attribute.Field447",
+    ]
+    .map(|reference| xml.find(reference).unwrap());
+    assert!(ordered.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn filter_criterion_diagnostics_are_typed_bounded_and_atomic() {
+    let fixture = strict_filter_criterion_fixture();
+    let base_indexes = MetadataObjectReferenceIndexes::from_legacy(&fixture.object_refs);
+    let first_content_member = format!(
+        r##"{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{}}}}}"##,
+        fixture.content_ids[0]
+    );
+    let malformed = replace_filter_criterion_test_value(
+        &fixture.raw,
+        &first_content_member,
+        &first_content_member.replacen(r##"{"#","##, r##"{"Ref","##, 1),
+    );
+    let malformed_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &malformed,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &base_indexes,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        malformed_diagnostic.class,
+        MetadataSourceFailureClass::Malformed
+    );
+    assert_eq!(malformed_diagnostic.family, "FilterCriterion");
+    assert_eq!(
+        malformed_diagnostic.parser_stage,
+        "filter_criterion_content"
+    );
+    assert_eq!(malformed_diagnostic.structural_signature, "shape");
+    assert_eq!(
+        malformed_diagnostic.collection_role.as_deref(),
+        Some("content")
+    );
+    assert_eq!(malformed_diagnostic.item_index, Some(0));
+    assert_eq!(malformed_diagnostic.reference_uuid, None);
+    assert_eq!(malformed_diagnostic.offending_reference, None);
+    assert_ne!(malformed_diagnostic.parser_stage, "legacy_option_none");
+
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let zero_raw =
+        replace_filter_criterion_test_value(&fixture.raw, &fixture.content_ids[0], zero_uuid);
+    let zero_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &zero_raw,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &base_indexes,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(zero_diagnostic.class, MetadataSourceFailureClass::Invariant);
+    assert_eq!(zero_diagnostic.parser_stage, "filter_criterion_content");
+    assert_eq!(zero_diagnostic.structural_signature, "zero_uuid");
+    assert_eq!(zero_diagnostic.item_index, Some(0));
+    assert_eq!(zero_diagnostic.reference_uuid.as_deref(), Some(zero_uuid));
+
+    let mut missing_refs = fixture.object_refs.clone();
+    missing_refs.remove(&fixture.content_ids[0]);
+    let missing_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &MetadataObjectReferenceIndexes::from_legacy(&missing_refs),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        missing_diagnostic.class,
+        MetadataSourceFailureClass::Unresolved
+    );
+    assert_eq!(missing_diagnostic.parser_stage, "filter_criterion_resolver");
+    assert_eq!(missing_diagnostic.structural_signature, "missing_reference");
+    assert_eq!(
+        missing_diagnostic.collection_role.as_deref(),
+        Some("content")
+    );
+    assert_eq!(missing_diagnostic.item_index, Some(0));
+    assert_eq!(
+        missing_diagnostic.reference_uuid.as_deref(),
+        Some(fixture.content_ids[0].as_str())
+    );
+
+    let type_collision_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &BTreeSet::from([fixture.type_ids[0].to_ascii_lowercase()]),
+        &base_indexes,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        type_collision_diagnostic.class,
+        MetadataSourceFailureClass::Ambiguous
+    );
+    assert_eq!(
+        type_collision_diagnostic.parser_stage,
+        "filter_criterion_resolver"
+    );
+    assert_eq!(
+        type_collision_diagnostic.structural_signature,
+        "ambiguous_reference"
+    );
+    assert_eq!(
+        type_collision_diagnostic.collection_role.as_deref(),
+        Some("pattern")
+    );
+    assert_eq!(type_collision_diagnostic.item_index, Some(0));
+
+    let serialized = serde_json::to_string(&missing_diagnostic).unwrap();
+    assert!(serialized.contains(&format!(r#""reference_uuid":"{}""#, fixture.content_ids[0])));
+    assert!(!serialized.contains("DynamicCriterion"));
+    assert!(!serialized.contains(METADATA_OBJECT_REF_TYPE_UUID));
+    assert!(!serialized.contains(&fixture.raw));
+    assert!(!serialized.contains(&fixture.generated_ids[0]));
+}
+
+#[test]
+fn filter_criterion_object_reference_ledger_marks_every_reinsertion_ambiguous() {
+    let uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let reference = "Document.Synthetic.Attribute.Field".to_string();
+
+    let mut inserted = MetadataObjectReferenceIndexes::default();
+    inserted.insert(uuid.clone(), reference.clone());
+    inserted.insert(uuid.clone(), reference.clone());
+    assert_eq!(
+        inserted.resolutions.get(&uuid),
+        Some(&MetadataObjectReferenceResolution::Ambiguous)
+    );
+
+    let mut retained = MetadataObjectReferenceIndexes::default();
+    retained.or_insert(uuid.clone(), reference.clone());
+    retained.or_insert(uuid.to_ascii_uppercase(), reference);
+    assert_eq!(
+        retained.resolutions.get(&uuid),
+        Some(&MetadataObjectReferenceResolution::Ambiguous)
     );
 }
 
@@ -41409,10 +41669,11 @@ fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
             &fixture.raw,
             &mismatched_header,
             &fixture.type_index,
-            &fixture.object_refs,
+            &BTreeSet::new(),
+            &MetadataObjectReferenceIndexes::from_legacy(&fixture.object_refs).resolutions,
             InfobaseConfigSourceVersion::V2_20,
         )
-        .is_none(),
+        .is_err(),
         "strict full owner header must match the selected metadata header"
     );
 
