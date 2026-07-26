@@ -1536,11 +1536,19 @@ const FORM_CHOICE_LIST_STRING_WRITER_FULL_EVIDENCE_SHA256: &str =
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FormChoiceListStringWriterProof {
     schema_version: u32,
-    release: String,
+    source: FormChoiceListStringWriterProofSource,
     rule: FormChoiceListStringWriterProofRule,
     emission: FormChoiceListEmptyStringValue,
     full_evidence_sha256: String,
     provenance_ids: [String; 2],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormChoiceListStringWriterProofSource {
+    product: String,
+    release: String,
+    derivation: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -3163,7 +3171,9 @@ impl FormChoiceListStringWriterProof {
             SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned())
         };
         if self.schema_version != 1
-            || self.release != "2025.2.3+30"
+            || self.source.product != "1C:EDT"
+            || self.source.release != "2025.2.3+30"
+            || self.source.derivation != "compact-full-artifact-digest-bound-semantic-projection-v1"
             || self.rule.id != "form.choice-list.design-time-value"
             || self.rule.model_type != "FormChoiceList"
             || self.rule.feature != "values"
@@ -3190,7 +3200,7 @@ fn bind_form_choice_list_string_writer_proof(
     let invalid =
         |reason: &str| SchemaError::InvalidFormChoiceListStringWriterEvidence(reason.to_owned());
     let proof = FormChoiceListStringWriterProof::parse(json)?;
-    if corpus.source.release != proof.release {
+    if corpus.source.release != proof.source.release {
         return Err(invalid("writer corpus and compact proof releases differ"));
     }
     let mut matching = corpus.rules.iter().filter(|rule| {
@@ -4703,7 +4713,8 @@ mod tests {
             compact.full_evidence_sha256,
             FORM_CHOICE_LIST_STRING_WRITER_FULL_EVIDENCE_SHA256
         );
-        assert_eq!(compact.release, report.source.release);
+        assert_eq!(compact.source.product, report.source.product);
+        assert_eq!(compact.source.release, report.source.release);
         assert_eq!(compact.rule.id, "form.choice-list.design-time-value");
         assert_eq!(compact.rule.model_type, "FormChoiceList");
         assert_eq!(compact.rule.feature, "values");
@@ -4927,7 +4938,9 @@ mod tests {
             serde_json::from_str(BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_PROOF_JSON).unwrap();
         for (pointer, replacement) in [
             ("/schemaVersion", serde_json::json!(2)),
-            ("/release", serde_json::json!("2025.2.3+31")),
+            ("/source/product", serde_json::json!("wrong")),
+            ("/source/release", serde_json::json!("2025.2.3+31")),
+            ("/source/derivation", serde_json::json!("wrong")),
             ("/rule/id", serde_json::json!("form.choice-list.wrong")),
             ("/rule/modelType", serde_json::json!("Wrong")),
             ("/rule/feature", serde_json::json!("wrong")),
