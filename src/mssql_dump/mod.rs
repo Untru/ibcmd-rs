@@ -27,6 +27,10 @@ use walkdir::WalkDir;
 
 use crate::adapters::mssql_legacy::MssqlLegacyAdapter;
 use crate::cli::{InfobaseConfigSourceVersion, MssqlDumpConfigArgs};
+use crate::metadata_owner_graph::{
+    self as owner_graph, CATALOG_ATTRIBUTE_GROUP_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
+    METADATA_TEMPLATE_COLLECTION_UUID,
+};
 #[cfg(all(test, feature = "mssql-live-tests"))]
 use crate::module_blob::{LocalizedString, SpreadsheetNumberFormatHint};
 use crate::module_blob::{ParsedFormBodyBlob, parse_form_body_blob, unpack_module_blob_text};
@@ -149,22 +153,10 @@ const DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
 ];
 const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
-const CATALOG_ATTRIBUTE_GROUP_UUID: &str = "cf4abea7-37b2-11d4-940f-008048da11f9";
 const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
-const CATALOG_COMMAND_COLLECTION_UUID: &str = "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6";
-const CATALOG_TABULAR_SECTION_COLLECTION_UUID: &str = "932159f9-95b2-4e76-a8dd-8849fe5c5ded";
-const CATALOG_FORM_COLLECTION_UUID: &str = "fdf816d2-1ead-11d5-b975-0050bae0a95d";
 // Document collection and descriptor IDs below are platform schema IDs, not infobase object IDs.
-const DOCUMENT_ATTRIBUTE_GROUP_UUID: &str = "45e46cbc-3e24-4165-8b7b-cc98a6f80211";
 const DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
-const DOCUMENT_TABULAR_SECTION_COLLECTION_UUID: &str = "21c53e09-8950-4b5e-a6a0-1054f1bbc274";
-const DOCUMENT_COMMAND_COLLECTION_UUID: &str = "b544fc6a-2ba3-4885-8fb2-cb289fb6d65e";
-const DOCUMENT_FORM_COLLECTION_UUID: &str = "fb880e93-47d7-4127-9357-a20e69c17545";
 const DOCUMENT_CHARACTERISTIC_TYPE_UUID: &str = "fe839d42-d094-40ba-b903-75bccc21ba30";
-const CCT_ATTRIBUTE_COLLECTION_UUID: &str = "31182525-9346-4595-81f8-6f91a72ebe06";
-const CCT_TABULAR_SECTION_COLLECTION_UUID: &str = "54e36536-7863-42fd-bea3-c5edd3122fdc";
-const CCT_COMMAND_COLLECTION_UUID: &str = "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73";
-const CCT_FORM_COLLECTION_UUID: &str = "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94";
 const CHART_OF_ACCOUNTS_RESERVED_COLLECTION_UUID: &str = "0df30176-6865-4787-9fc8-609eb144174f";
 const CHART_OF_ACCOUNTS_COMMAND_COLLECTION_UUID: &str = "4c7fec95-d1bd-4508-8a01-f1db090d9af8";
 const CHART_OF_ACCOUNTS_FORM_COLLECTION_UUID: &str = "5372e285-03db-4f8c-8565-fe56f1aea40e";
@@ -192,11 +184,6 @@ const CHART_OF_CALCULATION_TYPES_RESERVED_COLLECTION_UUIDS: [&str; 3] = [
 ];
 const CHART_OF_CALCULATION_TYPES_FORM_COLLECTION_UUID: &str =
     "a7f8f92a-7a4b-484b-937e-42d242e64144";
-const BUSINESS_PROCESS_FORM_COLLECTION_UUID: &str = "3f7a8120-b71a-4265-98bf-4d9bc09b7719";
-const BUSINESS_PROCESS_COMMAND_COLLECTION_UUID: &str = "7a3e533c-f232-40d5-a932-6a311d2480bf";
-const BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID: &str = "87c988de-ecbf-413b-87b0-b9516df05e28";
-const BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID: &str =
-    "a3fe6537-d787-40f7-8a06-419d2f0c1cfd";
 const REPORT_ATTRIBUTE_COLLECTION_UUID: &str = "7e7123e0-29e2-11d6-a3c7-0050bae0a776";
 const REPORT_FORM_COLLECTION_UUID: &str = "a3b368c0-29e2-11d6-a3c7-0050bae0a776";
 const REPORT_TABULAR_SECTION_COLLECTION_UUID: &str = "b077d780-29e2-11d6-a3c7-0050bae0a776";
@@ -205,7 +192,6 @@ const REPORT_COMMAND_COLLECTION_UUID: &str = "e7ff38c0-ec3c-47a0-ae90-20c73ca722
 const TYPE_DESCRIPTION_TYPE_UUID: &str = "f5c65050-3bbb-11d5-b988-0050bae0a95d";
 const WEB_SERVICE_OPERATION_COLLECTION_UUID: &str = "36186084-c23a-43bd-876c-a3a8ba1a9622";
 const WEB_SERVICE_PARAMETER_COLLECTION_UUID: &str = "b78a00b2-2260-4ef5-a70c-17889cfee695";
-const METADATA_TEMPLATE_COLLECTION_UUID: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
 const DOCUMENT_JOURNAL_COLUMN_COLLECTION_UUID: &str = "5aee69df-0513-4c6c-9815-103102471712";
 const DOCUMENT_JOURNAL_COMMAND_COLLECTION_UUID: &str = "a49a35ce-120a-4c80-8eea-b0618479cd70";
 const DOCUMENT_JOURNAL_FORM_COLLECTION_UUID: &str = "ec81ad10-ca07-11d5-b9a5-0050bae0a95d";
@@ -6153,6 +6139,18 @@ struct GeneratedTypeEntry {
     value_id: String,
 }
 
+impl From<owner_graph::DecodedGeneratedType> for GeneratedTypeEntry {
+    fn from(value: owner_graph::DecodedGeneratedType) -> Self {
+        let (name, category, type_id, value_id) = value.into_parts();
+        Self {
+            name,
+            category,
+            type_id,
+            value_id,
+        }
+    }
+}
+
 struct ConstantProperties {
     generated_types: Vec<GeneratedTypeEntry>,
     value_type: ConstantValueType,
@@ -7502,6 +7500,41 @@ fn extract_metadata_source_xml_from_text_row(
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
 ) -> Option<ExtractedMetadataSourceXml> {
+    let mut owner_graph_diagnostic = None;
+    extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
+        row,
+        type_index,
+        type_index_collisions,
+        object_refs,
+        metadata_object_refs,
+        configuration_root_object_refs,
+        recalculation_refs,
+        root_recalculation_refs,
+        functional_option_refs,
+        form_refs,
+        template_refs,
+        subsystem_refs,
+        source_version,
+        &mut owner_graph_diagnostic,
+    )
+}
+
+fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+    metadata_object_refs: &BTreeMap<String, String>,
+    configuration_root_object_refs: &BTreeMap<String, String>,
+    recalculation_refs: &BTreeMap<String, CalculationRecalculationReference>,
+    root_recalculation_refs: &CalculationRootRecalculationReferences,
+    functional_option_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    source_version: InfobaseConfigSourceVersion,
+    owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
+) -> Option<ExtractedMetadataSourceXml> {
     let uuid = row.file_name.as_str();
     if uuid.contains('.') {
         return None;
@@ -7747,11 +7780,13 @@ fn extract_metadata_source_xml_from_text_row(
         let catalog = parse_strict_catalog_properties_from_text(
             text,
             uuid,
+            header,
             type_index,
             object_refs,
             metadata_object_refs,
             form_refs,
             template_refs,
+            owner_graph_diagnostic,
         )?;
         format_catalog_source_xml(&header, &catalog, source_version)?.into_bytes()
     } else if kind == "Report" {
@@ -7779,11 +7814,13 @@ fn extract_metadata_source_xml_from_text_row(
         let document = parse_document_properties_from_text(
             text,
             uuid,
+            header,
             type_index,
             object_refs,
             metadata_object_refs,
             form_refs,
             template_refs,
+            owner_graph_diagnostic,
         )?;
         format_document_source_xml(&header, &document, source_version)?.into_bytes()
     } else if kind == "ChartOfCharacteristicTypes" {
@@ -7794,6 +7831,7 @@ fn extract_metadata_source_xml_from_text_row(
             object_refs,
             metadata_object_refs,
             form_refs,
+            owner_graph_diagnostic,
         )?;
         format_chart_of_characteristic_types_source_xml(header, &chart, source_version).into_bytes()
     } else if kind == "DocumentJournal" {
@@ -7813,10 +7851,12 @@ fn extract_metadata_source_xml_from_text_row(
         let business_process = parse_business_process_properties_from_text(
             text,
             uuid,
+            header,
             type_index,
             object_refs,
             metadata_object_refs,
             form_refs,
+            owner_graph_diagnostic,
         )?;
         format_business_process_source_xml(&header, &business_process, source_version).into_bytes()
     } else if kind == "Task" {
@@ -8045,7 +8085,8 @@ fn extract_metadata_source_xml_from_text_row_audited(
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
     source_version: InfobaseConfigSourceVersion,
 ) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
-    if let Some(extracted) = extract_metadata_source_xml_from_text_row(
+    let mut owner_graph_diagnostic = None;
+    if let Some(extracted) = extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         row,
         type_index,
         type_index_collisions,
@@ -8059,6 +8100,7 @@ fn extract_metadata_source_xml_from_text_row_audited(
         template_refs,
         subsystem_refs,
         source_version,
+        &mut owner_graph_diagnostic,
     ) {
         return Ok(extracted);
     }
@@ -8097,6 +8139,8 @@ fn extract_metadata_source_xml_from_text_row_audited(
             "Form",
             "direct_form_owner_missing",
         )
+    } else if let Some(diagnostic) = owner_graph_diagnostic {
+        return Err(diagnostic);
     } else {
         (
             MetadataSourceExtractionFailureClass::Unknown,
@@ -9296,6 +9340,350 @@ fn parse_information_register_uuid(value: &str) -> Option<String> {
         return None;
     }
     Some(value.to_string())
+}
+
+fn decode_owner_graph<'a>(
+    family: owner_graph::OwnerGraphFamily,
+    text: &'a str,
+    expected_header: &MetadataHeader,
+) -> std::result::Result<owner_graph::DecodedOwnerGraph<'a>, MetadataSourceExtractionDiagnostic> {
+    let layout = family.layout();
+    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))
+        .ok_or_else(|| {
+            owner_graph_extraction_diagnostic(
+                family,
+                owner_graph::OwnerGraphDiagnosticKind::RootBracedShape,
+                None,
+                None,
+                None,
+            )
+        })?;
+    if root.len() != layout.collection_markers.len() + 3
+        || root.first().map(|value| value.trim()) != Some(owner_graph::ROOT_DISCRIMINATOR)
+    {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::RootShape,
+            None,
+            None,
+            None,
+        ));
+    }
+    if root[2].trim() != layout.root_collection_count_token {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::RootCollectionCount,
+            Some(2),
+            None,
+            None,
+        ));
+    }
+    let collections = root[3..]
+        .iter()
+        .zip(layout.collection_markers)
+        .enumerate()
+        .map(|(collection_index, (raw, expected_marker))| {
+            decode_owner_graph_collection(family, raw, expected_marker, collection_index)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let fields = split_information_register_braced_fields(root[1]).ok_or_else(|| {
+        owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::OwnerFieldsBracedShape,
+            None,
+            None,
+            None,
+        )
+    })?;
+    if fields.len() != layout.owner_field_count {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::OwnerFieldCount,
+            None,
+            None,
+            None,
+        ));
+    }
+    if !fields.first().is_some_and(|value| {
+        layout
+            .owner_discriminators
+            .iter()
+            .any(|candidate| value.trim() == *candidate)
+    }) {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::OwnerDiscriminator,
+            Some(0),
+            None,
+            None,
+        ));
+    }
+    if let Some((field_index, _)) =
+        layout
+            .owner_reserved_fields
+            .iter()
+            .find(|(field_index, expected)| {
+                fields.get(*field_index).map(|value| value.trim()) != Some(*expected)
+            })
+    {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::OwnerReservedField,
+            Some(*field_index),
+            None,
+            None,
+        ));
+    }
+
+    let parsed_header = match layout.owner_header_encoding {
+        owner_graph::OwnerHeaderEncoding::Direct => {
+            parse_information_register_owner_header(fields[layout.owner_header_slot])
+        }
+        owner_graph::OwnerHeaderEncoding::Wrapped => {
+            parse_wrapped_register_owner_header(fields[layout.owner_header_slot])
+        }
+    }
+    .ok_or_else(|| {
+        owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::OwnerHeaderShape,
+            Some(layout.owner_header_slot),
+            None,
+            Some(owner_graph::OwnerGraphReference::OwnerHeader),
+        )
+    })?;
+    if !parsed_header
+        .uuid
+        .eq_ignore_ascii_case(&expected_header.uuid)
+        || parsed_header.name != expected_header.name
+        || parsed_header.synonyms != expected_header.synonyms
+        || parsed_header.comment != expected_header.comment
+    {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::OwnerHeaderMismatch,
+            Some(layout.owner_header_slot),
+            None,
+            Some(owner_graph::OwnerGraphReference::OwnerHeader),
+        ));
+    }
+    if metadata_header_field_index(&fields, &expected_header.uuid) != Some(layout.owner_header_slot)
+        || layout.owner_header_unique
+            && fields
+                .iter()
+                .filter(|field| {
+                    metadata_header_field_index(&[**field], &expected_header.uuid) == Some(0)
+                })
+                .count()
+                != 1
+    {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::OwnerHeaderPlacement,
+            Some(layout.owner_header_slot),
+            None,
+            Some(owner_graph::OwnerGraphReference::OwnerHeader),
+        ));
+    }
+
+    let mut identities = owner_graph::OwnerIdentityLedger::new(parsed_header.uuid.clone());
+    let mut generated_types = Vec::with_capacity(layout.generated_types.len());
+    for generated in layout.generated_types {
+        let type_id = decode_owner_graph_uuid(
+            fields[generated.type_slot],
+            family,
+            generated.type_slot,
+            owner_graph::OwnerGraphDiagnosticKind::GeneratedTypeUuidSyntax,
+            owner_graph::OwnerGraphDiagnosticKind::GeneratedTypeNilUuid,
+            owner_graph::OwnerGraphReference::GeneratedType,
+        )?;
+        identities
+            .insert_generated(
+                type_id.clone(),
+                generated.type_slot,
+                owner_graph::OwnerIdentityRole::GeneratedType,
+            )
+            .map_err(|collision| owner_graph_collision_diagnostic(family, collision))?;
+        let value_id = decode_owner_graph_uuid(
+            fields[generated.value_slot],
+            family,
+            generated.value_slot,
+            owner_graph::OwnerGraphDiagnosticKind::GeneratedValueUuidSyntax,
+            owner_graph::OwnerGraphDiagnosticKind::GeneratedValueNilUuid,
+            owner_graph::OwnerGraphReference::GeneratedValue,
+        )?;
+        identities
+            .insert_generated(
+                value_id.clone(),
+                generated.value_slot,
+                owner_graph::OwnerIdentityRole::GeneratedValue,
+            )
+            .map_err(|collision| owner_graph_collision_diagnostic(family, collision))?;
+        generated_types.push(owner_graph::DecodedGeneratedType::new(
+            *generated,
+            &parsed_header.name,
+            type_id,
+            value_id,
+        ));
+    }
+    let generated_types =
+        owner_graph::order_generated_types(family, generated_types).map_err(|_| {
+            owner_graph_extraction_diagnostic(
+                family,
+                owner_graph::OwnerGraphDiagnosticKind::EdtFeatureOrder,
+                None,
+                None,
+                None,
+            )
+        })?;
+    Ok(owner_graph::DecodedOwnerGraph {
+        generated_types,
+        identities,
+        owner_fields: fields,
+        collections,
+    })
+}
+
+fn decode_owner_graph_for_family_parser<'a>(
+    family: owner_graph::OwnerGraphFamily,
+    text: &'a str,
+    expected_header: &MetadataHeader,
+    diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
+) -> Option<owner_graph::DecodedOwnerGraph<'a>> {
+    match decode_owner_graph(family, text, expected_header) {
+        Ok(decoded) => Some(decoded),
+        Err(error) => {
+            *diagnostic = Some(error);
+            None
+        }
+    }
+}
+
+fn decode_owner_graph_collection<'a>(
+    family: owner_graph::OwnerGraphFamily,
+    raw: &'a str,
+    expected_marker: &str,
+    collection_index: usize,
+) -> std::result::Result<owner_graph::DecodedOwnerCollection<'a>, MetadataSourceExtractionDiagnostic>
+{
+    let fields = split_information_register_braced_fields(raw).ok_or_else(|| {
+        owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::CollectionBracedShape,
+            None,
+            Some(collection_index),
+            None,
+        )
+    })?;
+    if fields.len() < 2 {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::CollectionMinimumShape,
+            None,
+            Some(collection_index),
+            None,
+        ));
+    }
+    if !fields[0].trim().eq_ignore_ascii_case(expected_marker) {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::CollectionMarker,
+            None,
+            Some(collection_index),
+            Some(owner_graph::OwnerGraphReference::CollectionMarker),
+        ));
+    }
+    let count = parse_information_register_usize(fields[1]).ok_or_else(|| {
+        owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::CollectionCount,
+            None,
+            Some(collection_index),
+            None,
+        )
+    })?;
+    if count.checked_add(2) != Some(fields.len()) {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            owner_graph::OwnerGraphDiagnosticKind::CollectionCountMismatch,
+            None,
+            Some(collection_index),
+            None,
+        ));
+    }
+    Ok(owner_graph::DecodedOwnerCollection {
+        items: fields[2..].to_vec(),
+    })
+}
+
+fn decode_owner_graph_uuid(
+    raw: &str,
+    family: owner_graph::OwnerGraphFamily,
+    field_index: usize,
+    syntax: owner_graph::OwnerGraphDiagnosticKind,
+    nil: owner_graph::OwnerGraphDiagnosticKind,
+    reference: owner_graph::OwnerGraphReference,
+) -> std::result::Result<String, MetadataSourceExtractionDiagnostic> {
+    let uuid = parse_information_register_uuid(raw).ok_or_else(|| {
+        owner_graph_extraction_diagnostic(family, syntax, Some(field_index), None, Some(reference))
+    })?;
+    if information_register_uuid_is_zero(&uuid) {
+        return Err(owner_graph_extraction_diagnostic(
+            family,
+            nil,
+            Some(field_index),
+            None,
+            Some(reference),
+        ));
+    }
+    Ok(uuid)
+}
+
+fn owner_graph_collision_diagnostic(
+    family: owner_graph::OwnerGraphFamily,
+    collision: owner_graph::OwnerIdentityCollision,
+) -> MetadataSourceExtractionDiagnostic {
+    let mut diagnostic = owner_graph_extraction_diagnostic(
+        family,
+        owner_graph::OwnerGraphDiagnosticKind::DuplicateIdentity,
+        Some(collision.field_index),
+        None,
+        None,
+    );
+    diagnostic.offending_reference = Some(collision.previous.diagnostic_reference().to_owned());
+    diagnostic
+}
+
+fn owner_graph_extraction_diagnostic(
+    family: owner_graph::OwnerGraphFamily,
+    kind: owner_graph::OwnerGraphDiagnosticKind,
+    field_index: Option<usize>,
+    collection_index: Option<usize>,
+    reference: Option<owner_graph::OwnerGraphReference>,
+) -> MetadataSourceExtractionDiagnostic {
+    let (class, parser_stage, structural_signature) = kind.facts();
+    let class = match class {
+        owner_graph::OwnerGraphDiagnosticClass::Malformed => {
+            MetadataSourceExtractionFailureClass::Malformed
+        }
+        owner_graph::OwnerGraphDiagnosticClass::Unsupported => {
+            MetadataSourceExtractionFailureClass::Unsupported
+        }
+        owner_graph::OwnerGraphDiagnosticClass::Invariant => {
+            MetadataSourceExtractionFailureClass::Invariant
+        }
+    };
+    let mut diagnostic = MetadataSourceExtractionDiagnostic::new(
+        class,
+        family.as_str(),
+        parser_stage,
+        structural_signature,
+    );
+    diagnostic.field_index = field_index;
+    diagnostic.collection_index = collection_index;
+    diagnostic.offending_reference = reference.map(|value| value.as_str().to_owned());
+    diagnostic
 }
 
 fn parse_information_register_non_zero_uuid(value: &str) -> Option<String> {
@@ -16766,63 +17154,29 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<ChartOfCharacteristicTypesProperties> {
-    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
-    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        text,
+        header,
+        owner_graph_diagnostic,
+    )?;
+    let fields = &owner_graph.owner_fields;
+    let collections = &owner_graph.collections;
+    let direct_attribute_items = &collections.first()?.items;
+    if !collections.get(1)?.items.is_empty() || !collections.get(3)?.items.is_empty() {
         return None;
     }
-    let direct_attribute_items = parse_cct_collection(root.get(3)?, CCT_ATTRIBUTE_COLLECTION_UUID)?;
-    if !parse_cct_collection(root.get(4)?, METADATA_TEMPLATE_COLLECTION_UUID)?.is_empty()
-        || !parse_cct_collection(root.get(6)?, CCT_COMMAND_COLLECTION_UUID)?.is_empty()
-    {
-        return None;
-    }
-    let tabular_section_items =
-        parse_cct_collection(root.get(5)?, CCT_TABULAR_SECTION_COLLECTION_UUID)?;
-    let form_uuids = parse_cct_uuid_collection(root.get(7)?, CCT_FORM_COLLECTION_UUID)?;
+    let tabular_section_items = &collections.get(2)?.items;
+    let form_uuids = parse_task_form_uuids(&collections.get(4)?.items)?;
 
-    let fields = split_information_register_braced_fields(root.get(1)?)?;
-    let parsed_header = parse_wrapped_register_owner_header(fields.get(13)?)?;
-    let header_occurrences = fields
-        .iter()
-        .filter(|field| metadata_header_field_index(&[**field], &header.uuid) == Some(0))
-        .count();
-    if fields.len() != 59
-        || fields.first()?.trim() != "34"
-        || metadata_header_field_index(&fields, &header.uuid) != Some(13)
-        || header_occurrences != 1
-        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
-        || parsed_header.name != header.name
-        || parsed_header.synonyms != header.synonyms
-        || parsed_header.comment != header.comment
-    {
-        return None;
-    }
-
-    let mut generated_ids = BTreeSet::new();
-    let mut generated_types = Vec::with_capacity(6);
-    for (type_slot, value_slot, prefix, category) in [
-        (1, 2, "ChartOfCharacteristicTypesObject", "Object"),
-        (3, 4, "ChartOfCharacteristicTypesRef", "Ref"),
-        (5, 6, "ChartOfCharacteristicTypesSelection", "Selection"),
-        (7, 8, "ChartOfCharacteristicTypesList", "List"),
-        (9, 10, "Characteristic", "Characteristic"),
-        (11, 12, "ChartOfCharacteristicTypesManager", "Manager"),
-    ] {
-        let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
-        let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
-        if !generated_ids.insert(type_id.to_ascii_lowercase())
-            || !generated_ids.insert(value_id.to_ascii_lowercase())
-        {
-            return None;
-        }
-        generated_types.push(GeneratedTypeEntry {
-            name: format!("{prefix}.{}", header.name),
-            category,
-            type_id,
-            value_id,
-        });
-    }
+    let mut generated_ids = owner_graph.identities.generated_identities();
+    let generated_types = owner_graph
+        .generated_types
+        .into_iter()
+        .map(GeneratedTypeEntry::from)
+        .collect::<Vec<_>>();
 
     if !cct_pair_is(fields.get(15)?, "0", "0")
         || !cct_based_on_is_empty(fields.get(50)?)
@@ -16845,7 +17199,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
     let child_forms = parse_cct_child_forms(text, &header.name, &form_uuids, form_refs)?;
     let mut child_ids = BTreeSet::new();
     let mut child_metadata_objects = parse_cct_direct_attributes(
-        &direct_attribute_items,
+        direct_attribute_items,
         &header.name,
         type_index,
         object_refs,
@@ -16853,7 +17207,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
         &mut child_ids,
     )?;
     child_metadata_objects.extend(parse_cct_tabular_sections(
-        &tabular_section_items,
+        tabular_section_items,
         &header.name,
         type_index,
         object_refs,
@@ -17003,17 +17357,6 @@ fn parse_cct_collection<'a>(value: &'a str, expected_uuid: &str) -> Option<Vec<&
     }
     let count = parse_information_register_usize(fields.get(1)?)?;
     (fields.len() == count.checked_add(2)?).then(|| fields[2..].to_vec())
-}
-
-fn parse_cct_uuid_collection(value: &str, expected_uuid: &str) -> Option<Vec<String>> {
-    let mut seen = BTreeSet::new();
-    parse_cct_collection(value, expected_uuid)?
-        .into_iter()
-        .map(|field| {
-            let uuid = parse_information_register_non_zero_uuid(field)?.to_ascii_lowercase();
-            seen.insert(uuid.clone()).then_some(uuid)
-        })
-        .collect()
 }
 
 fn cct_pair_is(value: &str, first: &str, second: &str) -> bool {
@@ -17605,59 +17948,31 @@ fn cct_tabular_section_wrapper_is_exact(wrapper: &[&str]) -> bool {
 fn parse_strict_catalog_properties_from_text(
     text: &str,
     uuid: &str,
+    expected_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
+    owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<CatalogProperties> {
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        text,
+        expected_header,
+        owner_graph_diagnostic,
+    )?;
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
-    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
-        return None;
-    }
-    let fields = split_information_register_braced_fields(root.get(1)?)?;
+    let fields = &owner_graph.owner_fields;
+    let collections = &owner_graph.collections;
     let owner_code = fields.first()?.trim();
-    let parsed_header = parse_wrapped_register_owner_header(fields.get(9)?)?;
-    let header_occurrences = fields
-        .iter()
-        .filter(|field| metadata_header_field_index(&[**field], uuid) == Some(0))
-        .count();
-    if fields.len() != 61
-        || !matches!(owner_code, "56" | "57")
-        || metadata_header_field_index(&fields, uuid) != Some(9)
-        || header_occurrences != 1
-        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
-        || parsed_header.name != header.name
-        || parsed_header.synonyms != header.synonyms
-        || parsed_header.comment != header.comment
-        || fields.get(39)?.trim() != "0"
-    {
-        return None;
-    }
 
-    let collections = root[3..]
-        .iter()
-        .map(|value| parse_task_root_collection(value))
-        .collect::<Option<Vec<_>>>()?;
-    let expected_markers = [
-        METADATA_TEMPLATE_COLLECTION_UUID,
-        CATALOG_COMMAND_COLLECTION_UUID,
-        CATALOG_TABULAR_SECTION_COLLECTION_UUID,
-        CATALOG_ATTRIBUTE_GROUP_UUID,
-        CATALOG_FORM_COLLECTION_UUID,
-    ];
-    if collections.len() != expected_markers.len()
-        || collections
-            .iter()
-            .zip(expected_markers)
-            .any(|(collection, expected)| !collection.marker.eq_ignore_ascii_case(expected))
-    {
-        return None;
-    }
-
-    let mut generated_ids = BTreeSet::new();
-    let generated_types = parse_catalog_generated_types(&fields, &header.name, &mut generated_ids)?;
+    let mut generated_ids = owner_graph.identities.generated_identities();
+    let generated_types = owner_graph
+        .generated_types
+        .into_iter()
+        .map(GeneratedTypeEntry::from)
+        .collect::<Vec<_>>();
     let direct_wrapper_code = catalog_direct_attribute_wrapper_code(owner_code)?;
     let direct_attribute_uuids =
         parse_catalog_attribute_collection(&collections.get(3)?.items, direct_wrapper_code)?;
@@ -17691,7 +18006,7 @@ fn parse_strict_catalog_properties_from_text(
     if child_forms != owned_catalog_form_names_in_text_order(text, &header.name, form_refs) {
         return None;
     }
-    let template_uuids = parse_task_form_uuids(&collections.get(0)?.items)?;
+    let template_uuids = parse_task_form_uuids(&collections.first()?.items)?;
     let child_templates =
         parse_catalog_child_templates(&template_uuids, &header.name, template_refs)?;
     if child_templates
@@ -17912,36 +18227,6 @@ fn parse_strict_catalog_properties_from_text(
         child_templates,
         child_commands,
     })
-}
-
-fn parse_catalog_generated_types(
-    fields: &[&str],
-    owner_name: &str,
-    seen: &mut BTreeSet<String>,
-) -> Option<Vec<GeneratedTypeEntry>> {
-    [
-        (1, 2, "CatalogObject", "Object"),
-        (3, 4, "CatalogRef", "Ref"),
-        (5, 6, "CatalogSelection", "Selection"),
-        (7, 8, "CatalogList", "List"),
-        (34, 35, "CatalogManager", "Manager"),
-    ]
-    .into_iter()
-    .map(|(type_slot, value_slot, prefix, category)| {
-        let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
-        let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
-        if !seen.insert(type_id.to_ascii_lowercase()) || !seen.insert(value_id.to_ascii_lowercase())
-        {
-            return None;
-        }
-        Some(GeneratedTypeEntry {
-            name: format!("{prefix}.{owner_name}"),
-            category,
-            type_id,
-            value_id,
-        })
-    })
-    .collect()
 }
 
 fn parse_catalog_attribute_collection(items: &[&str], expected_code: u32) -> Option<Vec<String>> {
@@ -18644,51 +18929,28 @@ fn parse_report_attribute(
 fn parse_document_properties_from_text(
     text: &str,
     uuid: &str,
+    expected_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
     template_refs: &BTreeMap<String, TemplateSourceReference>,
+    owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<DocumentProperties> {
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Document,
+        text,
+        expected_header,
+        owner_graph_diagnostic,
+    )?;
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
-    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
-        return None;
-    }
-    let fields = split_information_register_braced_fields(root.get(1)?)?;
-    let parsed_header = parse_wrapped_register_owner_header(fields.get(9)?)?;
-    if fields.len() != 53
-        || fields.first()?.trim() != "40"
-        || metadata_header_field_index(&fields, uuid) != Some(9)
-        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
-        || parsed_header.name != header.name
-        || parsed_header.synonyms != header.synonyms
-        || parsed_header.comment != header.comment
-    {
-        return None;
-    }
-
-    let collections = root[3..]
-        .iter()
-        .map(|value| parse_task_root_collection(value))
-        .collect::<Option<Vec<_>>>()?;
-    let expected_markers = [
-        DOCUMENT_TABULAR_SECTION_COLLECTION_UUID,
-        METADATA_TEMPLATE_COLLECTION_UUID,
-        DOCUMENT_ATTRIBUTE_GROUP_UUID,
-        DOCUMENT_COMMAND_COLLECTION_UUID,
-        DOCUMENT_FORM_COLLECTION_UUID,
-    ];
-    if collections.len() != expected_markers.len()
-        || collections
-            .iter()
-            .zip(expected_markers)
-            .any(|(collection, expected)| !collection.marker.eq_ignore_ascii_case(expected))
-    {
-        return None;
-    }
-
-    let generated_types = parse_document_generated_types(&fields, &header.name)?;
+    let fields = &owner_graph.owner_fields;
+    let collections = &owner_graph.collections;
+    let generated_types = owner_graph
+        .generated_types
+        .into_iter()
+        .map(GeneratedTypeEntry::from)
+        .collect::<Vec<_>>();
     let form_uuids = parse_task_form_uuids(&collections.get(4)?.items)?;
     let child_forms = parse_document_child_forms(&form_uuids, &header.name, form_refs)?;
     if child_forms
@@ -18713,7 +18975,7 @@ fn parse_document_properties_from_text(
     let direct_attribute_uuids =
         parse_document_direct_attribute_collection(&collections.get(2)?.items)?;
     let tabular_sections =
-        parse_document_tabular_sections(&collections.get(0)?.items, &header.name, object_refs)?;
+        parse_document_tabular_sections(&collections.first()?.items, &header.name, object_refs)?;
     let child_metadata_objects = parse_attribute_tabular_section_child_objects(
         "Document",
         &header.name,
@@ -18922,38 +19184,6 @@ fn parse_document_properties_from_text(
         child_templates,
         child_commands,
     })
-}
-
-fn parse_document_generated_types(
-    fields: &[&str],
-    owner_name: &str,
-) -> Option<Vec<GeneratedTypeEntry>> {
-    let definitions = [
-        (1, 2, "DocumentObject", "Object"),
-        (3, 4, "DocumentRef", "Ref"),
-        (5, 6, "DocumentSelection", "Selection"),
-        (7, 8, "DocumentList", "List"),
-        (26, 27, "DocumentManager", "Manager"),
-    ];
-    let mut seen = BTreeSet::new();
-    definitions
-        .into_iter()
-        .map(|(type_slot, value_slot, prefix, category)| {
-            let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
-            let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
-            if !seen.insert(type_id.to_ascii_lowercase())
-                || !seen.insert(value_id.to_ascii_lowercase())
-            {
-                return None;
-            }
-            Some(GeneratedTypeEntry {
-                name: format!("{prefix}.{owner_name}"),
-                category,
-                type_id,
-                value_id,
-            })
-        })
-        .collect()
 }
 
 fn parse_document_optional_object_reference(
@@ -19458,51 +19688,31 @@ fn parse_document_characteristic_field(
 fn parse_business_process_properties_from_text(
     text: &str,
     uuid: &str,
+    expected_header: &MetadataHeader,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
     metadata_object_refs: &BTreeMap<String, String>,
     form_refs: &BTreeMap<String, FormSourceReference>,
+    owner_graph_diagnostic: &mut Option<MetadataSourceExtractionDiagnostic>,
 ) -> Option<BusinessProcessProperties> {
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        text,
+        expected_header,
+        owner_graph_diagnostic,
+    )?;
     let header = parse_metadata_header_from_text(text, uuid)?;
-    let root = split_information_register_braced_fields(text.trim_start_matches('\u{feff}'))?;
-    if root.len() != 8 || root.first()?.trim() != "1" || root.get(2)?.trim() != "5" {
-        return None;
-    }
-    let fields = split_information_register_braced_fields(root.get(1)?)?;
-    let parsed_header = parse_information_register_owner_header(fields.get(1)?)?;
-    if fields.len() != 49
-        || fields.first()?.trim() != "30"
-        || metadata_header_field_index(&fields, uuid) != Some(1)
-        || !parsed_header.uuid.eq_ignore_ascii_case(&header.uuid)
-        || parsed_header.name != header.name
-        || parsed_header.synonyms != header.synonyms
-        || parsed_header.comment != header.comment
-    {
+    let fields = &owner_graph.owner_fields;
+    let collections = &owner_graph.collections;
+    if !collections.first()?.items.is_empty() {
         return None;
     }
 
-    let collections = root[3..]
-        .iter()
-        .map(|value| parse_task_root_collection(value))
-        .collect::<Option<Vec<_>>>()?;
-    let expected_markers = [
-        METADATA_TEMPLATE_COLLECTION_UUID,
-        BUSINESS_PROCESS_FORM_COLLECTION_UUID,
-        BUSINESS_PROCESS_COMMAND_COLLECTION_UUID,
-        BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID,
-        BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID,
-    ];
-    if collections.len() != expected_markers.len()
-        || collections
-            .iter()
-            .zip(expected_markers)
-            .any(|(collection, expected)| !collection.marker.eq_ignore_ascii_case(expected))
-        || !collections.first()?.items.is_empty()
-    {
-        return None;
-    }
-
-    let generated_types = parse_business_process_generated_types(&fields, &header.name)?;
+    let generated_types = owner_graph
+        .generated_types
+        .into_iter()
+        .map(GeneratedTypeEntry::from)
+        .collect::<Vec<_>>();
     let form_uuids = parse_task_form_uuids(&collections.get(1)?.items)?;
     let child_forms = parse_business_process_child_forms(&form_uuids, &header.name, form_refs)?;
     if child_forms
@@ -19707,39 +19917,6 @@ fn parse_business_process_properties_from_text(
         child_forms,
         child_commands,
     })
-}
-
-fn parse_business_process_generated_types(
-    fields: &[&str],
-    owner_name: &str,
-) -> Option<Vec<GeneratedTypeEntry>> {
-    let definitions = [
-        (3, 4, "BusinessProcessObject", "Object"),
-        (5, 6, "BusinessProcessRef", "Ref"),
-        (7, 8, "BusinessProcessSelection", "Selection"),
-        (9, 10, "BusinessProcessList", "List"),
-        (11, 12, "BusinessProcessManager", "Manager"),
-        (13, 14, "BusinessProcessRoutePointRef", "RoutePointRef"),
-    ];
-    let mut seen = BTreeSet::new();
-    definitions
-        .into_iter()
-        .map(|(type_slot, value_slot, prefix, category)| {
-            let type_id = parse_information_register_non_zero_uuid(fields.get(type_slot)?)?;
-            let value_id = parse_information_register_non_zero_uuid(fields.get(value_slot)?)?;
-            if !seen.insert(type_id.to_ascii_lowercase())
-                || !seen.insert(value_id.to_ascii_lowercase())
-            {
-                return None;
-            }
-            Some(GeneratedTypeEntry {
-                name: format!("{prefix}.{owner_name}"),
-                category,
-                type_id,
-                value_id,
-            })
-        })
-        .collect()
 }
 
 fn parse_business_process_child_forms(
@@ -20025,7 +20202,7 @@ fn parse_task_properties_from_text(
         .map(|collection| collection.marker.clone())
         .collect::<BTreeSet<_>>();
     if collection_markers.len() != collections.len()
-        || !collections.get(0)?.items.is_empty()
+        || !collections.first()?.items.is_empty()
         || !collections.get(4)?.items.is_empty()
     {
         return None;

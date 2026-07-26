@@ -1418,10 +1418,497 @@ fn audited_source_extraction_preserves_success_bytes_and_reports_family_on_failu
     assert_eq!(diagnostic.family, "Catalog");
     assert_eq!(
         diagnostic.class,
-        MetadataSourceExtractionFailureClass::Unknown
+        MetadataSourceExtractionFailureClass::Malformed
     );
-    assert_eq!(diagnostic.parser_stage, "legacy_option_none");
+    assert_eq!(diagnostic.parser_stage, "owner_graph_root");
+    assert_eq!(diagnostic.structural_signature, "root_braced_shape");
     assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+}
+
+fn owner_graph_uuid_for_test(seed: usize) -> String {
+    format!("00000000-0000-4000-8000-{seed:012x}")
+}
+
+#[derive(Clone, Copy)]
+struct ExpectedOwnerGraphGeneratedType {
+    type_slot: usize,
+    value_slot: usize,
+    name_prefix: &'static str,
+    category: &'static str,
+}
+
+struct ExpectedOwnerGraphLayout {
+    family: owner_graph::OwnerGraphFamily,
+    owner_field_count: usize,
+    owner_discriminators: &'static [&'static str],
+    owner_header_slot: usize,
+    owner_header_encoding: owner_graph::OwnerHeaderEncoding,
+    owner_reserved_fields: &'static [(usize, &'static str)],
+    generated_types: &'static [ExpectedOwnerGraphGeneratedType],
+    collection_markers: &'static [&'static str],
+}
+
+const EXPECTED_OWNER_GRAPH_LAYOUTS: &[ExpectedOwnerGraphLayout] = &[
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::Catalog,
+        owner_field_count: 61,
+        owner_discriminators: &["56", "57"],
+        owner_header_slot: 9,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
+        owner_reserved_fields: &[(39, "0")],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 1,
+                value_slot: 2,
+                name_prefix: "CatalogObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "CatalogRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "CatalogSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "CatalogList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 34,
+                value_slot: 35,
+                name_prefix: "CatalogManager",
+                category: "Manager",
+            },
+        ],
+        collection_markers: &[
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6",
+            "932159f9-95b2-4e76-a8dd-8849fe5c5ded",
+            "cf4abea7-37b2-11d4-940f-008048da11f9",
+            "fdf816d2-1ead-11d5-b975-0050bae0a95d",
+        ],
+    },
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::Document,
+        owner_field_count: 53,
+        owner_discriminators: &["40"],
+        owner_header_slot: 9,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
+        owner_reserved_fields: &[],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 1,
+                value_slot: 2,
+                name_prefix: "DocumentObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "DocumentRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "DocumentSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "DocumentList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 26,
+                value_slot: 27,
+                name_prefix: "DocumentManager",
+                category: "Manager",
+            },
+        ],
+        collection_markers: &[
+            "21c53e09-8950-4b5e-a6a0-1054f1bbc274",
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "45e46cbc-3e24-4165-8b7b-cc98a6f80211",
+            "b544fc6a-2ba3-4885-8fb2-cb289fb6d65e",
+            "fb880e93-47d7-4127-9357-a20e69c17545",
+        ],
+    },
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_field_count: 49,
+        owner_discriminators: &["30"],
+        owner_header_slot: 1,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Direct,
+        owner_reserved_fields: &[],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "BusinessProcessObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "BusinessProcessRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "BusinessProcessSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 9,
+                value_slot: 10,
+                name_prefix: "BusinessProcessList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 11,
+                value_slot: 12,
+                name_prefix: "BusinessProcessManager",
+                category: "Manager",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 13,
+                value_slot: 14,
+                name_prefix: "BusinessProcessRoutePointRef",
+                category: "RoutePointRef",
+            },
+        ],
+        collection_markers: &[
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
+            "7a3e533c-f232-40d5-a932-6a311d2480bf",
+            "87c988de-ecbf-413b-87b0-b9516df05e28",
+            "a3fe6537-d787-40f7-8a06-419d2f0c1cfd",
+        ],
+    },
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_field_count: 59,
+        owner_discriminators: &["34"],
+        owner_header_slot: 13,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
+        owner_reserved_fields: &[],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 1,
+                value_slot: 2,
+                name_prefix: "ChartOfCharacteristicTypesObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "ChartOfCharacteristicTypesRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "ChartOfCharacteristicTypesSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "ChartOfCharacteristicTypesList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 9,
+                value_slot: 10,
+                name_prefix: "Characteristic",
+                category: "Characteristic",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 11,
+                value_slot: 12,
+                name_prefix: "ChartOfCharacteristicTypesManager",
+                category: "Manager",
+            },
+        ],
+        collection_markers: &[
+            "31182525-9346-4595-81f8-6f91a72ebe06",
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "54e36536-7863-42fd-bea3-c5edd3122fdc",
+            "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73",
+            "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
+        ],
+    },
+];
+
+fn owner_graph_fixture_for_test(
+    expected: &ExpectedOwnerGraphLayout,
+) -> (MetadataHeader, Vec<String>, Vec<String>) {
+    let header = MetadataHeader {
+        uuid: owner_graph_uuid_for_test(1),
+        name: "Owner".to_owned(),
+        synonyms: Vec::new(),
+        comment: String::new(),
+        template_type_code: None,
+    };
+    let mut fields = vec!["0".to_owned(); expected.owner_field_count];
+    fields[0] = expected.owner_discriminators[0].to_owned();
+    let header_raw = format!(
+        "{{3,{{1,0,{}}},\"{}\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}",
+        header.uuid, header.name
+    );
+    fields[expected.owner_header_slot] = match expected.owner_header_encoding {
+        owner_graph::OwnerHeaderEncoding::Direct => header_raw,
+        owner_graph::OwnerHeaderEncoding::Wrapped => format!("{{0,{header_raw}}}"),
+    };
+    for (index, generated) in expected.generated_types.iter().enumerate() {
+        fields[generated.type_slot] = owner_graph_uuid_for_test(index * 2 + 2);
+        fields[generated.value_slot] = owner_graph_uuid_for_test(index * 2 + 3);
+    }
+    for (field_index, value) in expected.owner_reserved_fields {
+        fields[*field_index] = (*value).to_owned();
+    }
+    let collections = expected
+        .collection_markers
+        .iter()
+        .map(|marker| format!("{{{marker},0}}"))
+        .collect();
+    (header, fields, collections)
+}
+
+fn render_owner_graph_fixture_for_test(fields: &[String], collections: &[String]) -> String {
+    format!("{{1,{{{}}},5,{}}}", fields.join(","), collections.join(","))
+}
+
+fn audit_owner_graph_row_for_test(
+    row: &MetadataTextRow,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    extract_metadata_source_xml_from_text_row_audited(
+        row,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
+#[test]
+fn owner_graph_decoder_is_table_driven_for_four_exact_family_layouts() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
+        let family = expected.family;
+        let layout = family.layout();
+        assert_eq!(layout.owner_field_count, expected.owner_field_count);
+        assert_eq!(layout.owner_discriminators, expected.owner_discriminators);
+        assert_eq!(layout.owner_header_slot, expected.owner_header_slot);
+        assert_eq!(layout.owner_header_encoding, expected.owner_header_encoding);
+        assert_eq!(layout.owner_reserved_fields, expected.owner_reserved_fields);
+        assert_eq!(layout.root_collection_count_token, "5");
+        assert_eq!(layout.collection_markers, expected.collection_markers);
+        assert_eq!(
+            layout
+                .generated_types
+                .iter()
+                .map(|generated| (generated.type_slot, generated.value_slot))
+                .collect::<Vec<_>>(),
+            expected
+                .generated_types
+                .iter()
+                .map(|generated| (generated.type_slot, generated.value_slot))
+                .collect::<Vec<_>>()
+        );
+
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        let text = render_owner_graph_fixture_for_test(&fields, &collections);
+        let decoded = decode_owner_graph(family, &text, &header).unwrap();
+        assert_eq!(decoded.owner_fields.len(), expected.owner_field_count);
+        assert_eq!(decoded.collections.len(), 5);
+        let actual_generated_types = decoded
+            .generated_types
+            .clone()
+            .into_iter()
+            .map(owner_graph::DecodedGeneratedType::into_parts)
+            .collect::<Vec<_>>();
+        let expected_generated_types = expected
+            .generated_types
+            .iter()
+            .enumerate()
+            .map(|(index, generated)| {
+                (
+                    format!("{}.Owner", generated.name_prefix),
+                    generated.category,
+                    owner_graph_uuid_for_test(index * 2 + 2),
+                    owner_graph_uuid_for_test(index * 2 + 3),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual_generated_types, expected_generated_types);
+        assert_eq!(
+            decoded.identities.generated_identities().len(),
+            expected.generated_types.len() * 2
+        );
+    }
+}
+
+#[test]
+fn audited_owner_graph_handoff_distinguishes_decode_errors_from_downstream_misses() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        let valid_text = render_owner_graph_fixture_for_test(&fields, &collections);
+        let folder = match expected.family {
+            owner_graph::OwnerGraphFamily::Catalog => "Catalogs",
+            owner_graph::OwnerGraphFamily::Document => "Documents",
+            owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                "ChartsOfCharacteristicTypes"
+            }
+        };
+        let mut row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: valid_text.replacen(",5,", ",05,", 1),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(folder),
+        };
+        let invalid = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "invalid owner graph unexpectedly extracted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(invalid.family, expected.family.as_str());
+        assert_eq!(
+            invalid.class,
+            MetadataSourceExtractionFailureClass::Malformed
+        );
+        assert_eq!(invalid.parser_stage, "owner_graph_root");
+        assert_eq!(invalid.structural_signature, "root_collection_count");
+        assert_eq!(invalid.field_index, Some(2));
+
+        row.text = valid_text;
+        let downstream = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "synthetic downstream-miss fixture unexpectedly extracted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(downstream.family, expected.family.as_str());
+        assert_eq!(
+            downstream.class,
+            MetadataSourceExtractionFailureClass::Unknown
+        );
+        assert_eq!(downstream.parser_stage, "legacy_option_none");
+        assert_eq!(downstream.structural_signature, "legacy_option_none");
+    }
+}
+
+#[test]
+fn owner_graph_decoder_rejects_noncanonical_root_collection_count_for_all_families() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
+        let family = expected.family;
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        let text =
+            render_owner_graph_fixture_for_test(&fields, &collections).replacen(",5,", ",05,", 1);
+        let diagnostic = match decode_owner_graph(family, &text, &header) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!("noncanonical collection count was accepted for {family:?}"),
+        };
+        assert_eq!(
+            diagnostic.class,
+            MetadataSourceExtractionFailureClass::Malformed
+        );
+        assert_eq!(diagnostic.parser_stage, "owner_graph_root");
+        assert_eq!(diagnostic.structural_signature, "root_collection_count");
+        assert_eq!(diagnostic.field_index, Some(2));
+    }
+}
+
+#[test]
+fn owner_graph_decoder_reports_exact_identity_failures_without_payload_disclosure() {
+    let family = owner_graph::OwnerGraphFamily::Catalog;
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[0];
+    let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+    let secret = "secret-owner-reference";
+    let cases = [
+        (
+            secret.to_owned(),
+            MetadataSourceExtractionFailureClass::Malformed,
+            "generated_type_id",
+            "uuid_syntax",
+            1,
+            "metadata_source.catalog.malformed.generated_type_id",
+            "generated_type_id",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000000".to_owned(),
+            MetadataSourceExtractionFailureClass::Invariant,
+            "generated_type_id",
+            "nil_uuid",
+            1,
+            "metadata_source.catalog.invariant.generated_type_id",
+            "generated_type_id",
+        ),
+        (
+            fields[2].clone(),
+            MetadataSourceExtractionFailureClass::Invariant,
+            "owner_identity_ledger",
+            "duplicate_identity",
+            2,
+            "metadata_source.catalog.invariant.owner_identity_ledger",
+            "generated_type_id",
+        ),
+        (
+            header.uuid.clone(),
+            MetadataSourceExtractionFailureClass::Invariant,
+            "owner_identity_ledger",
+            "duplicate_identity",
+            1,
+            "metadata_source.catalog.invariant.owner_identity_ledger",
+            "root_uuid",
+        ),
+    ];
+    for (replacement, class, stage, signature, field_index, code, reference) in cases {
+        let mut mutated = fields.clone();
+        mutated[1] = replacement;
+        let diagnostic = match decode_owner_graph(
+            family,
+            &render_owner_graph_fixture_for_test(&mutated, &collections),
+            &header,
+        ) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!("invalid owner identity was accepted"),
+        };
+        assert_eq!(diagnostic.class, class);
+        assert_eq!(diagnostic.parser_stage, stage);
+        assert_eq!(diagnostic.structural_signature, signature);
+        assert_eq!(diagnostic.field_index, Some(field_index));
+        assert_eq!(diagnostic.code, code);
+        assert_eq!(diagnostic.offending_reference.as_deref(), Some(reference));
+        let serialized = serde_json::to_string(&diagnostic).unwrap();
+        assert!(!serialized.contains(secret));
+        assert!(!serialized.contains(&header.uuid));
+        assert!(!serialized.contains(&header.name));
+    }
 }
 
 #[test]

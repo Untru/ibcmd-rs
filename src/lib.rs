@@ -12,6 +12,7 @@ pub(crate) mod form_schema;
 #[cfg(feature = "platform-oracle")]
 pub mod infobase;
 pub mod legacy_version;
+pub(crate) mod metadata_owner_graph;
 pub mod module_blob;
 pub mod mssql;
 pub mod mssql_dump;
