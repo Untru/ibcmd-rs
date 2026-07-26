@@ -16,6 +16,8 @@
 - [x] Отклонять missing table/column без fallback по имени.
 - [x] Построить однозначный `(table item, binding UUID)` route из form
       bindings.
+- [x] Построить те же routes из доказанных `AdditionalColumns`, связанных с
+      таблицей через точный source binding.
 - [x] Отклонять конфликтующие UUID routes.
 
 ## Задача 3: Тесты
@@ -27,6 +29,7 @@
 - [x] Exact live hybrid pair direct + table UUID terminal проходит.
 - [x] Wrong UUID kind/nil/case/arity и ambiguous route fail closed.
 - [x] BindingUuid route согласуется с numeric route либо fail closed.
+- [x] AdditionalColumns route имеет exact positive и collision-negative тест.
 - [x] Старые direct, standard и metadata UUID профили не регрессируют.
 
 ## Задача 4: Production proof

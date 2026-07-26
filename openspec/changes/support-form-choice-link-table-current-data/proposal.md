@@ -63,3 +63,15 @@ Raw child binding той же формы связывает этот UUID с т�
 
 Run `E:\ibcmd_lab\parity\ut_ibcmd_20260726_full_54ca4ee_g_ut` доказал три
 варианта `{positive-binding-id,uuid}` для таблиц формы `НастройкиРМК`.
+
+Run `E:\ibcmd_lab\parity\ut_ibcmd_20260726_full_e63d244_h_ut` подтвердил,
+что эти три колонки объявлены не как обычные дочерние элементы таблицы, а в
+`FormAttribute.AdditionalColumns`. Точный source binding связывает таблицу с
+атрибутом, а записи additional columns задают id и имя без эвристики:
+
+- `(94,18)` → `Items.КассыККМ.CurrentData.Организация`;
+- `(212,17)` → `Items.Кассы.CurrentData.Организация`;
+- `(143,2)` → `Items.ЭквайринговыеТерминалы.CurrentData.Организация`.
+
+Adapter добавляет эти маршруты только после разбора обоих структурных
+источников и удаляет маршрут при любом конфликте.

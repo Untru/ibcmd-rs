@@ -284,7 +284,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     }
 
     let started = Instant::now();
-    let child_item_indexes = collect_form_child_item_indexes_with_object_refs(
+    let mut child_item_indexes = collect_form_child_item_indexes_with_object_refs(
         &form_fields,
         &attributes,
         context.object_refs,
@@ -326,6 +326,10 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         context.type_index,
         context.object_refs,
         &child_item_indexes,
+    );
+    extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
+        &mut child_item_indexes,
+        &attributes,
     );
     apply_form_attribute_save_field_bindings(
         &mut attributes,
@@ -5218,6 +5222,16 @@ pub(super) struct FormChildItemIndexes {
 
 #[cfg(test)]
 impl FormChildItemIndexes {
+    #[cfg(test)]
+    pub(super) fn insert_bound_attribute_for_table_for_test(
+        &mut self,
+        table_id: &str,
+        attribute_id: &str,
+    ) {
+        self.bound_attribute_id_by_table_id
+            .insert(table_id.to_string(), attribute_id.to_string());
+    }
+
     pub(super) fn insert_owner_scoped_table_path_for_test(
         &mut self,
         attribute_id: &str,
@@ -5565,6 +5579,68 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
     indexes
 }
 
+/// Adds only exact `AdditionalColumns` routes needed by table-current-data
+/// choice links. The parent attribute, table element and column identifier are
+/// all carried by the source representation; a name is never guessed.
+pub(super) fn extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
+    indexes: &mut FormChildItemIndexes,
+    attributes: &[FormAttribute],
+) {
+    let mut candidates = BTreeMap::<(String, String), BTreeSet<String>>::new();
+    for (table_id, attribute_id) in &indexes.bound_attribute_id_by_table_id {
+        let (Some(table_name), Some(attribute)) = (
+            indexes.table_name_by_id.get(table_id),
+            attributes
+                .iter()
+                .find(|attribute| attribute.id == *attribute_id),
+        ) else {
+            continue;
+        };
+        let attribute_table_path = format!("{}.{}", attribute.name, table_name);
+        for additional in attribute
+            .additional_columns
+            .iter()
+            .filter(|additional| additional.table == attribute_table_path)
+        {
+            for column in &additional.columns {
+                let path = format!(
+                    "Items.{table_name}.CurrentData.{}",
+                    normalize_form_table_column_name(table_name, &column.name)
+                );
+                for key in [
+                    column.id.clone(),
+                    format!("{}|{FORM_VALUE_TABLE_COLUMN_BINDING_UUID}", column.id),
+                ] {
+                    candidates
+                        .entry((table_id.clone(), key))
+                        .or_default()
+                        .insert(path.clone());
+                }
+            }
+        }
+    }
+    for (key, values) in candidates {
+        let values = values.into_iter().collect::<Vec<_>>();
+        let [value] = values.as_slice() else {
+            // Ambiguous source mappings stay unresolved.
+            indexes.type_link_data_path_by_table_column.remove(&key);
+            continue;
+        };
+        match indexes.type_link_data_path_by_table_column.get(&key) {
+            None => {
+                indexes
+                    .type_link_data_path_by_table_column
+                    .insert(key, value.clone());
+            }
+            Some(existing) if existing == value => {}
+            Some(_) => {
+                // The two authoritative representations disagree; fail closed.
+                indexes.type_link_data_path_by_table_column.remove(&key);
+            }
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub(super) fn collect_form_child_item_indexes_from_field(
     field: &str,
@@ -5781,10 +5857,9 @@ fn collect_form_child_item_indexes_from_field_traced(
             indexes
                 .table_name_by_id
                 .insert(id.to_string(), name.clone());
-            if let Some(attribute_id) = fields
-                .get(11)
-                .and_then(|field| parse_exact_form_attribute_binding_id(field))
-            {
+            if let Some(attribute_id) = fields.get(11).and_then(|field| {
+                parse_form_table_binding(field).map(|(attribute_id, _)| attribute_id)
+            }) {
                 indexes
                     .bound_attribute_id_by_table_id
                     .insert(id.to_string(), attribute_id);

@@ -20056,6 +20056,71 @@ fn input_field_choice_parameter_links_require_authoritative_binding_uuid_route_a
 }
 
 #[test]
+fn choice_parameter_table_current_data_routes_use_exact_additional_column_binding() {
+    let binding_uuid = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let mut indexes = FormChildItemIndexes::default();
+    indexes
+        .table_name_by_id
+        .insert("94".to_string(), "КассыККМ".to_string());
+    indexes.insert_bound_attribute_for_table_for_test("94", "1");
+    let attributes = vec![FormAttribute {
+        id: "1".to_string(),
+        name: "Объект".to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: vec![FormAttributeAdditionalColumns {
+            table: "Объект.КассыККМ".to_string(),
+            columns: vec![FormAttributeColumn {
+                id: "18".to_string(),
+                name: "Организация".to_string(),
+                title: Vec::new(),
+                value_types: Vec::new(),
+                explicit_empty_type: false,
+                functional_options: Vec::new(),
+            }],
+        }],
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }];
+    extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
+        &mut indexes,
+        &attributes,
+    );
+    let expected = "Items.КассыККМ.CurrentData.Организация";
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("94".to_string(), format!("18|{binding_uuid}"))),
+        Some(&expected.to_string())
+    );
+
+    indexes.type_link_data_path_by_table_column.insert(
+        ("94".to_string(), "18".to_string()),
+        "Items.КассыККМ.CurrentData.ДругаяОрганизация".to_string(),
+    );
+    extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
+        &mut indexes,
+        &attributes,
+    );
+    assert!(
+        !indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("94".to_string(), "18".to_string())),
+        "conflicting authoritative routes must remain unresolved"
+    );
+}
+
+#[test]
 fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
     let base_field = r#"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
     let primary = r#"{5006,1,"Filter.Owner",1,{3},0}"#;
