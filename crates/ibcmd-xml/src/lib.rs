@@ -24,7 +24,9 @@ pub use dialect::{
     NamespaceMatcher, ParseDialectIdError, PropertyOrderRule, RootSignature, RuleProvenance,
     XmlEncoding, bundled_dialect_registry,
 };
-pub use form_choice_parameters::{FormChoiceParametersEmitError, emit_form_choice_parameters};
+pub use form_choice_parameters::{
+    FormChoiceParametersEmitError, emit_form_choice_parameter_links, emit_form_choice_parameters,
+};
 pub use metadata::{
     MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
     MetadataOrderError, MetadataRegistry, MetadataRegistryError, bundled_metadata_registry,
@@ -56,14 +58,18 @@ pub mod schema {
         DcsWriterEvidenceCorpus, EvidenceStatus, EvidenceValue, FeatureClassifierKind,
         FeatureEvidence, FeatureKind, FeatureSemanticKey, FeatureSemantics,
         FeatureSemanticsClassifier, FeatureSemanticsCorpus, FeatureSemanticsPackage,
-        FeatureSemanticsSummary, InventorySummary, MetadataOrderOperation,
+        FeatureSemanticsSummary, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
+        FormChoiceParameterClusterMember, FormChoiceParameterLink,
+        FormChoiceParameterLinkValueChange, FormChoiceParameterLinks,
+        FormChoiceParameterLinksParseError, InventorySummary, MetadataOrderOperation,
         MetadataOrderOperationKind, MetadataOrderRecord, MetadataOrderSection,
         MetadataOrderVersionPredicate, ModelClassifier, ModelInventory, ModelMember, ModelPackage,
         PackageFeatureCorpus, PackageFeatureSummary, RuleEvidence, SchemaError, WriterRule,
         WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior,
         bundled_dcs_list_settings_tail_policy, bundled_dcs_writer_evidence,
         bundled_feature_semantics, bundled_metadata_order, bundled_model_inventory,
-        bundled_package_features, bundled_writer_rules,
+        bundled_package_features, bundled_writer_rules, form_choice_parameter_cluster_order,
+        parse_form_choice_parameter_links,
     };
 }
 

@@ -1364,6 +1364,19 @@ pub(super) fn write_source_asset(
                     diagnostics = extraction_diagnostics;
                     opaque_not_emitted = true;
                 }
+                DetailedFormBodyExtraction::Rejected {
+                    diagnostics: extraction_diagnostics,
+                    error,
+                } => {
+                    let diagnostic_codes = extraction_diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.code)
+                        .collect::<Vec<_>>();
+                    bail!(
+                        "form source asset {} was rejected: {error:?}; diagnostics={diagnostic_codes:?}",
+                        asset.primary_path.display()
+                    );
+                }
             }
             timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
         }

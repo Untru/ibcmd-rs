@@ -14685,8 +14685,7 @@ fn formats_table_search_additions_as_direct_sections() {
         tooltip: Vec::new(),
         input_hint: Vec::new(),
         choice_list: CanonicalFormChoiceList::Absent,
-        choice_parameter_links: Vec::new(),
-        choice_parameters: CanonicalFormChoiceParameters::Absent,
+        choice_parameter_cluster: None,
         type_link: None,
         extended_tooltip: None,
         events: Vec::new(),
@@ -14871,8 +14870,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 tooltip: Vec::new(),
                 input_hint: Vec::new(),
                 choice_list: CanonicalFormChoiceList::Absent,
-                choice_parameter_links: Vec::new(),
-                choice_parameters: CanonicalFormChoiceParameters::Absent,
+                choice_parameter_cluster: None,
                 type_link: None,
                 extended_tooltip: None,
                 events: Vec::new(),
@@ -15058,8 +15056,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 tooltip: Vec::new(),
                 input_hint: Vec::new(),
                 choice_list: CanonicalFormChoiceList::Absent,
-                choice_parameter_links: Vec::new(),
-                choice_parameters: CanonicalFormChoiceParameters::Absent,
+                choice_parameter_cluster: None,
                 type_link: None,
                 extended_tooltip: None,
                 events: Vec::new(),
@@ -16218,14 +16215,25 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
     );
 
     let mut opaque_parameters_item = item;
-    opaque_parameters_item.choice_parameters = CanonicalFormChoiceParameters::OpaqueSameProfile {
-        raw: "{unsupported-choice-parameters}".to_string(),
-        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
-    };
+    opaque_parameters_item.choice_parameter_cluster =
+        Some(CanonicalFormChoiceParameterCluster::new(
+            CanonicalFormChoiceParameterLinks::Empty,
+            CanonicalFormChoiceParameters::OpaqueSameProfile {
+                raw: "{unsupported-choice-parameters}".to_string(),
+                slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters
+                    .index(),
+            },
+            CanonicalFormChoiceParameterAvailableTypes::Absent,
+        ));
     opaque_parameters_item.input_hint =
         vec![("en".to_string(), "Emitted after parameters".to_string())];
-    assert!(!opaque_parameters_item.choice_parameters.should_emit());
-    assert!(opaque_parameters_item.choice_parameters.is_non_emitting());
+    let opaque_parameters = opaque_parameters_item
+        .choice_parameter_cluster
+        .as_ref()
+        .unwrap()
+        .parameters();
+    assert!(!opaque_parameters.should_emit());
+    assert!(opaque_parameters.is_non_emitting());
     validate_form_choice_list_writer_trees(std::slice::from_ref(&opaque_parameters_item), None)
         .unwrap();
     let opaque_parameters_xml =
@@ -16254,6 +16262,29 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
     );
     assert_eq!(diagnostics[0].raw_length, 31);
     assert_eq!(diagnostics[0].raw_sha256.len(), 64);
+
+    *opaque_parameters_item
+        .choice_parameter_cluster
+        .as_mut()
+        .unwrap()
+        .available_types_mut() =
+        CanonicalFormChoiceParameterAvailableTypes::Opaque(OpaqueFormChoiceParameterClusterValue {
+            raw: "{opaque-available-types}".to_owned(),
+            slot: 63,
+        });
+    diagnostics.clear();
+    collect_opaque_choice_parameters_diagnostics(
+        std::slice::from_ref(&opaque_parameters_item),
+        &mut diagnostics,
+    );
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(
+        diagnostics[1].code,
+        "source_asset.form.available_types.opaque_omitted"
+    );
+    assert_eq!(diagnostics[1].property, "AvailableTypes");
+    assert_eq!(diagnostics[1].property_slot, 63);
+    assert_eq!(diagnostics[1].raw_sha256.len(), 64);
 }
 
 #[test]
@@ -16834,6 +16865,206 @@ fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
 }
 
 #[test]
+fn choice_parameter_cluster_emits_exact_typed_order_and_rejects_available_types_guessing() {
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let boolean = format!(r##"{{"#",{discriminator},{{0,1,{{"B",1}},{nil},{nil},{{1,0}}}}}}"##);
+    let parameters = ibcmd_schema::parse_form_choice_parameters(
+        &format!(r#"{{0,1,"Filter.Enabled",{boolean}}}"#),
+        |_, _| None,
+    )
+    .unwrap();
+    let link = ibcmd_schema::FormChoiceParameterLink::new(
+        "Filter.Owner".to_owned(),
+        "Object.Ref".to_owned(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::DontChange,
+    );
+    let mut cluster = CanonicalFormChoiceParameterCluster::new(
+        CanonicalFormChoiceParameterLinks::Typed(vec![link]),
+        CanonicalFormChoiceParameters::Typed {
+            parameters,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        },
+        CanonicalFormChoiceParameterAvailableTypes::Absent,
+    );
+
+    assert_eq!(
+        format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap(),
+        "\t<ChoiceParameterLinks>\r\n\
+\t\t<xr:Link>\r\n\
+\t\t\t<xr:Name>Filter.Owner</xr:Name>\r\n\
+\t\t\t<xr:DataPath xsi:type=\"xs:string\">Object.Ref</xr:DataPath>\r\n\
+\t\t\t<xr:ValueChange>DontChange</xr:ValueChange>\r\n\
+\t\t</xr:Link>\r\n\
+\t</ChoiceParameterLinks>\r\n\
+\t<ChoiceParameters>\r\n\
+\t\t<app:item name=\"Filter.Enabled\">\r\n\
+\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:boolean\">true</Value>\r\n\
+\t\t\t</app:value>\r\n\
+\t\t</app:item>\r\n\
+\t</ChoiceParameters>\r\n"
+    );
+
+    *cluster.available_types_mut() = CanonicalFormChoiceParameterAvailableTypes::Typed(());
+    assert_eq!(
+        validate_canonical_form_choice_parameter_available_types(cluster.available_types()),
+        Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+    );
+    assert_eq!(
+        format_form_choice_parameter_cluster_xml(&cluster, 1),
+        Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+    );
+
+    *cluster.available_types_mut() =
+        CanonicalFormChoiceParameterAvailableTypes::Opaque(OpaqueFormChoiceParameterClusterValue {
+            raw: "{unconfirmed-available-types}".to_owned(),
+            slot: 63,
+        });
+    assert_eq!(
+        validate_canonical_form_choice_parameter_available_types(cluster.available_types()),
+        Err(FormSchemaWriteError::OpaqueChoiceParameterAvailableTypes { slot: 63 })
+    );
+    let opaque_xml = format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap();
+    assert!(!opaque_xml.contains("AvailableTypes"));
+    assert!(opaque_xml.contains("<ChoiceParameterLinks>"));
+    assert!(opaque_xml.contains("<ChoiceParameters>"));
+}
+
+#[test]
+fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct() {
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = "{5006,0}";
+    options[duplicate_slot] = "{5007,0}";
+    assert_eq!(
+        canonical_form_input_field_choice_parameter_links(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Empty
+    );
+
+    options[primary_slot] = r#"{5006,1,"Filter.Owner",1,{27},0}"#;
+    options[duplicate_slot] = r#"{5007,1,"Filter.Other",1,{27},0,"",""}"#;
+    let opaque = canonical_form_input_field_choice_parameter_links(
+        make_schema(&options),
+        &options,
+        &BTreeMap::from([("27".to_owned(), "Owner".to_owned())]),
+    );
+    assert!(matches!(
+        &opaque,
+        CanonicalFormChoiceParameterLinks::Opaque(value)
+            if value.error == ibcmd_schema::FormChoiceParameterLinksParseError::MirrorMismatch
+    ));
+    assert_eq!(
+        validate_canonical_form_choice_parameter_links(&opaque),
+        Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
+            primary_slot,
+            duplicate_slot,
+        })
+    );
+    let cluster = CanonicalFormChoiceParameterCluster::new(
+        opaque,
+        CanonicalFormChoiceParameters::Absent,
+        CanonicalFormChoiceParameterAvailableTypes::Absent,
+    );
+    assert_eq!(
+        format_form_choice_parameter_cluster_xml(&cluster, 1),
+        Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
+            primary_slot,
+            duplicate_slot,
+        })
+    );
+}
+
+#[test]
+fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
+    let base_field = r#"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+    let primary = r#"{5006,1,"Filter.Owner",1,{3},0}"#;
+    let duplicate = r#"{5007,1,"Filter.Other",1,{3},0,"",""}"#;
+    let field = base_field
+        .replacen("{36,{3,0},", "{36,{3,1,0},", 1)
+        .replacen("{5006,0}", primary, 1)
+        .replacen("{5007,0}", duplicate, 1);
+    let body = ParsedFormBodyBlob {
+        layout: format!("{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{field}}}"),
+        module_text: String::new(),
+        trailing: Vec::new(),
+        trailing_fields: 0,
+    };
+    let type_index = BTreeMap::new();
+    let type_index_collisions = BTreeSet::new();
+    let dcs_type_index = DcsTypeIndex::new();
+    let object_refs = BTreeMap::new();
+    let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let context = FormParseContext::new(
+        &type_index,
+        &type_index_collisions,
+        &dcs_type_index,
+        &object_refs,
+        &information_register_field_refs,
+        None,
+    );
+
+    let extraction = extract_form_body_xml_from_body_detailed_timed(&body, &context, None).unwrap();
+    let DetailedFormBodyExtraction::Rejected { diagnostics, error } = extraction else {
+        panic!("malformed mirrored links must reject detailed extraction");
+    };
+    assert_eq!(
+        error,
+        FormSchemaWriteError::OpaqueChoiceParameterLinks {
+            primary_slot:
+                crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index(),
+            duplicate_slot:
+                crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate
+                    .index(),
+        }
+    );
+    assert_eq!(diagnostics.len(), 2);
+    let link_diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code == "source_asset.form.choice_parameter_links.opaque_rejected"
+        })
+        .unwrap();
+    assert_eq!(link_diagnostic.classification, "opaque_property_rejected");
+    assert_eq!(link_diagnostic.property, "ChoiceParameterLinks");
+    assert_eq!(link_diagnostic.raw_length, primary.len() + duplicate.len());
+    assert_eq!(
+        link_diagnostic.raw_sha256,
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{primary}{duplicate}").as_bytes())
+        )
+    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "source_asset.form.choice_list.opaque_asset_not_emitted"
+    }));
+    assert!(
+        extract_form_body_xml_from_body_timed(&body, &context, None).is_none(),
+        "ordinary extraction must not emit rejected form XML"
+    );
+}
+
+#[test]
 fn input_field_enum_reference_uses_schema_owner_kind_not_owner_name() {
     let type_id = "11111111-1111-4111-8111-111111111111";
     let value_id = "22222222-2222-4222-8222-222222222222";
@@ -17001,6 +17232,119 @@ fn live_slot27_choice_parameters_slice_matches_native_xml_exactly() {
         format_form_choice_parameters_xml(&canonical, 1).unwrap(),
         fixture.expected_xml
     );
+}
+
+#[test]
+fn native_choice_parameter_cluster_matches_exact_boundaries_and_absent_available_types() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        source: FixtureSource,
+        links: Vec<FixtureLink>,
+        raw_choice_parameter_links_primary: String,
+        raw_choice_parameter_links_duplicate: String,
+        attribute_names_by_id: BTreeMap<String, String>,
+        raw_choice_parameters: String,
+        type_index: BTreeMap<String, String>,
+        object_refs: BTreeMap<String, String>,
+        available_types: String,
+        expected_xml: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FixtureSource {
+        run: String,
+        raw_row: String,
+        raw_source: String,
+        raw_source_sha256: String,
+        native_source: String,
+        native_source_sha256: String,
+        item_name: String,
+        item_id: String,
+        native_predecessor_qname: String,
+        native_successor_qname: String,
+        native_start_line: usize,
+        native_end_line: usize,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FixtureLink {
+        name: String,
+        data_path: String,
+        value_change: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_choice_parameter_cluster_native.json"
+    ))
+    .unwrap();
+    assert!(
+        fixture
+            .source
+            .run
+            .ends_with("ut_ibcmd_ut_full_33a9baf_20260724_a")
+    );
+    assert_eq!(
+        fixture.source.raw_row,
+        "34accda9-6211-4bc3-be8d-e42a24260653.0"
+    );
+    assert!(fixture.source.raw_source.ends_with("__part0.txt"));
+    assert_eq!(
+        fixture.source.raw_source_sha256,
+        "77a99cffaa0b5c81ccccafa3a5fa01dec56342b49d1cce2e56f97f28b62785b1"
+    );
+    assert!(fixture.source.native_source.ends_with("/Ext/Form.xml"));
+    assert_eq!(
+        fixture.source.native_source_sha256,
+        "30cf0689522d6b74408da77426a178df282361f36d3787c0cfaf456c85cb8b03"
+    );
+    assert_eq!(fixture.source.item_name, "ТорговаяПлощадкаСоглашение1");
+    assert_eq!(fixture.source.item_id, "971");
+    assert_eq!(
+        fixture.source.native_predecessor_qname,
+        "AutoMarkIncomplete"
+    );
+    assert_eq!(fixture.source.native_successor_qname, "ContextMenu");
+    assert_eq!(
+        (
+            fixture.source.native_start_line,
+            fixture.source.native_end_line
+        ),
+        (3118, 3138)
+    );
+    assert_eq!(fixture.available_types, "absent");
+
+    let links = parse_form_input_field_choice_parameter_links(
+        &fixture.raw_choice_parameter_links_primary,
+        &fixture.raw_choice_parameter_links_duplicate,
+        &fixture.attribute_names_by_id,
+    )
+    .unwrap();
+    assert_eq!(links.len(), fixture.links.len());
+    for (parsed, expected) in links.iter().zip(&fixture.links) {
+        assert_eq!(parsed.name(), expected.name);
+        assert_eq!(parsed.data_path(), expected.data_path);
+        assert_eq!(parsed.value_change().xml_value(), expected.value_change);
+    }
+    let parameters = parse_form_input_field_choice_parameters(
+        &fixture.raw_choice_parameters,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &fixture.object_refs,
+    )
+    .unwrap();
+    let cluster = CanonicalFormChoiceParameterCluster::new(
+        CanonicalFormChoiceParameterLinks::Typed(links),
+        CanonicalFormChoiceParameters::Typed {
+            parameters,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        },
+        CanonicalFormChoiceParameterAvailableTypes::Absent,
+    );
+    let xml = format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap();
+    assert_eq!(xml, fixture.expected_xml);
+    assert!(xml.find("<ChoiceParameterLinks>").unwrap() < xml.find("<ChoiceParameters>").unwrap());
+    assert!(!xml.contains("<AvailableTypes"));
 }
 
 #[test]

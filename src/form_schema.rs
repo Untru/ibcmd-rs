@@ -5334,6 +5334,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
     MaxWidth,
     AutoMaxHeight,
     MaxHeight,
+    ChoiceParameterLinksDuplicate,
     ExtendedEditMultipleValues,
 }
 
@@ -5383,6 +5384,7 @@ impl FormInputFieldExtendedOptionSlot {
             Self::MaxWidth => 50,
             Self::AutoMaxHeight => 52,
             Self::MaxHeight => 53,
+            Self::ChoiceParameterLinksDuplicate => 64,
             Self::ExtendedEditMultipleValues => 65,
         }
     }

@@ -4,9 +4,10 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 use ibcmd_schema::{
-    FormChoiceParameterValue, FormChoiceParameterValuePart, FormChoiceParameters,
-    FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy, WriterRuleKey,
-    WriterRuleLookupError, bundled_writer_rules, canonical_form_choice_parameters_qname,
+    FormChoiceParameterLink, FormChoiceParameterValue, FormChoiceParameterValuePart,
+    FormChoiceParameters, FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy,
+    WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+    canonical_form_choice_parameters_qname, form_choice_parameter_cluster_order,
 };
 
 const MAX_INDENT: usize = 64;
@@ -81,6 +82,46 @@ pub fn emit_form_choice_parameters(
     Ok(output)
 }
 
+/// Emits the verified `ChoiceParameterLinks` predecessor fragment from typed
+/// links. The wrapper name and its position are resolved from the same exact
+/// EDT policy as `ChoiceParameters`.
+pub fn emit_form_choice_parameter_links(
+    links: &[FormChoiceParameterLink],
+    indent: usize,
+) -> Result<String, FormChoiceParametersEmitError> {
+    if links.is_empty() {
+        return Ok(String::new());
+    }
+    if indent > MAX_INDENT {
+        return Err(FormChoiceParametersEmitError::LimitExceeded("indent"));
+    }
+    for link in links {
+        validate_value("link name", link.name())?;
+        validate_value("link data path", link.data_path())?;
+    }
+    let policy = choice_parameters_policy()?;
+    let wrapper = form_choice_parameter_cluster_order(&policy)?[0].xml_local_name();
+
+    let mut counter = CountingSink::default();
+    emit_links_into(&mut counter, links, indent, wrapper)?;
+    let mut output = String::with_capacity(counter.len);
+    emit_links_into(&mut output, links, indent, wrapper)?;
+    debug_assert_eq!(output.len(), counter.len);
+    Ok(output)
+}
+
+fn choice_parameters_policy() -> Result<WriterPolicy, FormChoiceParametersEmitError> {
+    let corpus = bundled_writer_rules()?;
+    let rule = corpus.exact_rule(WriterRuleKey {
+        source_release: "2025.2.3+30",
+        model_type: "InputFieldExtInfo",
+        feature: "choiceParameters",
+    })?;
+    rule.policy
+        .clone()
+        .ok_or(FormChoiceParametersEmitError::InvalidPolicy)
+}
+
 struct ResolvedPolicy {
     owner: String,
     item: String,
@@ -99,19 +140,14 @@ struct ResolvedPolicy {
 }
 
 fn resolved_policy() -> Result<ResolvedPolicy, FormChoiceParametersEmitError> {
-    let corpus = bundled_writer_rules()?;
-    let rule = corpus.exact_rule(WriterRuleKey {
-        source_release: "2025.2.3+30",
-        model_type: "InputFieldExtInfo",
-        feature: "choiceParameters",
-    })?;
+    let policy = choice_parameters_policy()?;
     let Some(WriterPolicy::FormChoiceParameters {
         owner_qname,
         empty_collection: FormChoiceParametersEmptyCollection::OmitWhenWriteDefaultFalse,
         item,
         fixed_array,
         ..
-    }) = rule.policy.as_ref()
+    }) = Some(&policy)
     else {
         return Err(FormChoiceParametersEmitError::InvalidPolicy);
     };
@@ -132,6 +168,40 @@ fn resolved_policy() -> Result<ResolvedPolicy, FormChoiceParametersEmitError> {
         fixed_array_item_xsi_type: fixed_array.item_xsi_type.clone(),
         fixed_array_item_order: fixed_array.item_order.clone(),
     })
+}
+
+fn emit_links_into(
+    sink: &mut impl Sink,
+    links: &[FormChoiceParameterLink],
+    indent: usize,
+    wrapper: &str,
+) -> Result<(), FormChoiceParametersEmitError> {
+    push_indent(sink, indent, 0)?;
+    sink.push("<")?;
+    sink.push(wrapper)?;
+    sink.push(">\r\n")?;
+    for link in links {
+        push_indent(sink, indent, 1)?;
+        sink.push("<xr:Link>\r\n")?;
+        push_indent(sink, indent, 2)?;
+        sink.push("<xr:Name>")?;
+        push_escaped(sink, link.name(), EscapeMode::Text)?;
+        sink.push("</xr:Name>\r\n")?;
+        push_indent(sink, indent, 2)?;
+        sink.push("<xr:DataPath xsi:type=\"xs:string\">")?;
+        push_escaped(sink, link.data_path(), EscapeMode::Text)?;
+        sink.push("</xr:DataPath>\r\n")?;
+        push_indent(sink, indent, 2)?;
+        sink.push("<xr:ValueChange>")?;
+        sink.push(link.value_change().xml_value())?;
+        sink.push("</xr:ValueChange>\r\n")?;
+        push_indent(sink, indent, 1)?;
+        sink.push("</xr:Link>\r\n")?;
+    }
+    push_indent(sink, indent, 0)?;
+    sink.push("</")?;
+    sink.push(wrapper)?;
+    sink.push(">\r\n")
 }
 
 fn preflight(
@@ -448,7 +518,7 @@ fn is_xml_1_0(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ibcmd_schema::parse_form_choice_parameters;
+    use ibcmd_schema::{FormChoiceParameterLinkValueChange, parse_form_choice_parameters};
 
     const DISCRIMINATOR: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
     const ARRAY_TYPE: &str = "4500381b-db30-4a10-9db4-990038032acf";
@@ -536,6 +606,37 @@ mod tests {
     fn empty_model_is_omitted() {
         let parameters = parse_form_choice_parameters("{0,0}", |_, _| None).unwrap();
         assert_eq!(emit_form_choice_parameters(&parameters, 0).unwrap(), "");
+    }
+
+    #[test]
+    fn typed_links_use_exact_schema_lexicals_and_order() {
+        let links = [
+            FormChoiceParameterLink::new(
+                "Owner".to_owned(),
+                "Object.Ref".to_owned(),
+                FormChoiceParameterLinkValueChange::Clear,
+            ),
+            FormChoiceParameterLink::new(
+                "Keep".to_owned(),
+                "Object.Kind".to_owned(),
+                FormChoiceParameterLinkValueChange::DontChange,
+            ),
+        ];
+        assert_eq!(
+            emit_form_choice_parameter_links(&links, 1).unwrap(),
+            "\t<ChoiceParameterLinks>\r\n\
+\t\t<xr:Link>\r\n\
+\t\t\t<xr:Name>Owner</xr:Name>\r\n\
+\t\t\t<xr:DataPath xsi:type=\"xs:string\">Object.Ref</xr:DataPath>\r\n\
+\t\t\t<xr:ValueChange>Clear</xr:ValueChange>\r\n\
+\t\t</xr:Link>\r\n\
+\t\t<xr:Link>\r\n\
+\t\t\t<xr:Name>Keep</xr:Name>\r\n\
+\t\t\t<xr:DataPath xsi:type=\"xs:string\">Object.Kind</xr:DataPath>\r\n\
+\t\t\t<xr:ValueChange>DontChange</xr:ValueChange>\r\n\
+\t\t</xr:Link>\r\n\
+\t</ChoiceParameterLinks>\r\n"
+        );
     }
 
     #[test]

@@ -67,6 +67,155 @@ pub struct FormChoiceParameterArrayItem {
     value_ref: String,
 }
 
+/// Canonical EDT Form choice-parameter link. Physical source slots are
+/// deliberately excluded from this model.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceParameterLink {
+    name: String,
+    data_path: String,
+    value_change: FormChoiceParameterLinkValueChange,
+}
+
+impl FormChoiceParameterLink {
+    pub fn new(
+        name: String,
+        data_path: String,
+        value_change: FormChoiceParameterLinkValueChange,
+    ) -> Self {
+        Self {
+            name,
+            data_path,
+            value_change,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn data_path(&self) -> &str {
+        &self.data_path
+    }
+
+    pub fn value_change(&self) -> FormChoiceParameterLinkValueChange {
+        self.value_change
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterLinkValueChange {
+    Clear,
+    DontChange,
+}
+
+impl FormChoiceParameterLinkValueChange {
+    pub const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Clear => "Clear",
+            Self::DontChange => "DontChange",
+        }
+    }
+
+    fn from_raw_code(value: &str) -> Option<Self> {
+        match value {
+            "0" => Some(Self::Clear),
+            "1" => Some(Self::DontChange),
+            _ => None,
+        }
+    }
+}
+
+/// Fail-closed result of decoding the mirrored raw choice-parameter-link
+/// collections. `Opaque` is selected by the physical adapter and preserves its
+/// provenance without exposing physical slots through the canonical link type.
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub enum FormChoiceParameterLinks<O> {
+    #[default]
+    Absent,
+    Empty,
+    Typed(Vec<FormChoiceParameterLink>),
+    Opaque(O),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterLinksParseError {
+    PrimaryMalformed,
+    DuplicateMalformed,
+    MirrorMismatch,
+    UnresolvedAttribute(String),
+}
+
+/// The three EDT-owned members of the Form choice-parameter cluster.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterClusterMember {
+    Links,
+    Parameters,
+    AvailableTypes,
+}
+
+impl FormChoiceParameterClusterMember {
+    pub const fn xml_local_name(self) -> &'static str {
+        match self {
+            Self::Links => "ChoiceParameterLinks",
+            Self::Parameters => "ChoiceParameters",
+            Self::AvailableTypes => "AvailableTypes",
+        }
+    }
+}
+
+/// Explicit state for `AvailableTypes`. The `Typed` payload is intentionally
+/// generic because no native wire-format mapping is currently proven.
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub enum FormChoiceParameterAvailableTypes<T, O> {
+    #[default]
+    Absent,
+    Typed(T),
+    Opaque(O),
+}
+
+/// Schema-owned Form orchestration model. Physical provenance belongs in the
+/// caller-selected parameter and opaque payload types, not in the link model.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceParameterCluster<L, P, A> {
+    links: L,
+    parameters: P,
+    available_types: A,
+}
+
+impl<L, P, A> FormChoiceParameterCluster<L, P, A> {
+    pub fn new(links: L, parameters: P, available_types: A) -> Self {
+        Self {
+            links,
+            parameters,
+            available_types,
+        }
+    }
+
+    pub fn links(&self) -> &L {
+        &self.links
+    }
+
+    pub fn links_mut(&mut self) -> &mut L {
+        &mut self.links
+    }
+
+    pub fn parameters(&self) -> &P {
+        &self.parameters
+    }
+
+    pub fn parameters_mut(&mut self) -> &mut P {
+        &mut self.parameters
+    }
+
+    pub fn available_types(&self) -> &A {
+        &self.available_types
+    }
+
+    pub fn available_types_mut(&mut self) -> &mut A {
+        &mut self.available_types
+    }
+}
+
 /// Physical envelope profile for a Form ChoiceList raw value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FormChoiceListLayoutProfile {
@@ -580,6 +729,7 @@ const MAX_FORM_CHOICE_PARAMETERS_RAW_BYTES: usize = 64 * 1024;
 const MAX_FORM_CHOICE_PARAMETERS_ITEMS: usize = 512;
 const MAX_FORM_CHOICE_PARAMETERS_PRESENTATION_ITEMS: usize = 128;
 const MAX_FORM_CHOICE_PARAMETERS_FIXED_ARRAY_ITEMS: usize = 512;
+const MAX_FORM_CHOICE_PARAMETER_LINKS: usize = 512;
 
 /// Render a verified Form choice-parameters QName from strict Clark notation.
 ///
@@ -619,6 +769,53 @@ pub fn canonical_form_choice_parameters_qname(qname: &str) -> Result<String, Sch
     Ok(format!("{prefix}{local_name}"))
 }
 
+/// Resolve and verify the EDT-owned cluster order from the exact writer policy.
+///
+/// Known QNames in a mutated order are rejected instead of being silently
+/// reordered, keeping the committed evidence fail-closed.
+pub fn form_choice_parameter_cluster_order(
+    policy: &WriterPolicy,
+) -> Result<[FormChoiceParameterClusterMember; 3], SchemaError> {
+    let WriterPolicy::FormChoiceParameters {
+        owner_qname,
+        owner_predecessor_qname,
+        owner_successor_qname,
+        ..
+    } = policy
+    else {
+        return Err(SchemaError::InvalidFormChoiceParameterClusterPolicy(
+            "writer policy kind".to_owned(),
+        ));
+    };
+    let member = |qname: &str| {
+        let local_name = canonical_form_choice_parameters_qname(qname)?;
+        match local_name.as_str() {
+            "ChoiceParameterLinks" => Ok(FormChoiceParameterClusterMember::Links),
+            "ChoiceParameters" => Ok(FormChoiceParameterClusterMember::Parameters),
+            "AvailableTypes" => Ok(FormChoiceParameterClusterMember::AvailableTypes),
+            _ => Err(SchemaError::InvalidFormChoiceParameterClusterPolicy(
+                local_name,
+            )),
+        }
+    };
+    let order = [
+        member(owner_predecessor_qname)?,
+        member(owner_qname)?,
+        member(owner_successor_qname)?,
+    ];
+    let expected = [
+        FormChoiceParameterClusterMember::Links,
+        FormChoiceParameterClusterMember::Parameters,
+        FormChoiceParameterClusterMember::AvailableTypes,
+    ];
+    if order != expected {
+        return Err(SchemaError::InvalidFormChoiceParameterClusterPolicy(
+            "owner feature order".to_owned(),
+        ));
+    }
+    Ok(order)
+}
+
 /// Decode the raw `ChoiceParameters` envelope. `resolve_design_time_ref` is
 /// deliberately the only domain hook: it receives the raw type/value IDs and
 /// must return a canonical reference. A missing resolution rejects the entire
@@ -656,6 +853,136 @@ where
         });
     }
     Some(FormChoiceParameters { items })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RawFormChoiceParameterLink {
+    name: String,
+    attribute_id: String,
+    terminal: Option<&'static str>,
+    value_change: FormChoiceParameterLinkValueChange,
+}
+
+/// Decode and compare the native mirrored `5006`/`5007` link collections.
+///
+/// Both collections are parsed independently with exact count, arity, wrapper,
+/// terminal, and value-change grammar. Attribute resolution is the only caller
+/// hook. Any malformed, foreign, or mismatched input rejects the whole value.
+pub fn parse_form_choice_parameter_links<F>(
+    primary: &str,
+    duplicate: &str,
+    mut resolve_attribute: F,
+) -> Result<Vec<FormChoiceParameterLink>, FormChoiceParameterLinksParseError>
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let primary = parse_raw_form_choice_parameter_links(primary, "5006", false)
+        .ok_or(FormChoiceParameterLinksParseError::PrimaryMalformed)?;
+    let duplicate = parse_raw_form_choice_parameter_links(duplicate, "5007", true)
+        .ok_or(FormChoiceParameterLinksParseError::DuplicateMalformed)?;
+    if primary != duplicate {
+        return Err(FormChoiceParameterLinksParseError::MirrorMismatch);
+    }
+    primary
+        .into_iter()
+        .map(|link| {
+            let attribute_name = resolve_attribute(&link.attribute_id).ok_or_else(|| {
+                FormChoiceParameterLinksParseError::UnresolvedAttribute(link.attribute_id.clone())
+            })?;
+            let data_path = link
+                .terminal
+                .map(|terminal| format!("{attribute_name}.{terminal}"))
+                .unwrap_or(attribute_name);
+            Ok(FormChoiceParameterLink::new(
+                link.name,
+                data_path,
+                link.value_change,
+            ))
+        })
+        .collect()
+}
+
+fn parse_raw_form_choice_parameter_links(
+    raw: &str,
+    marker: &str,
+    duplicate: bool,
+) -> Option<Vec<RawFormChoiceParameterLink>> {
+    if raw.len() > MAX_FORM_CHOICE_PARAMETERS_RAW_BYTES {
+        return None;
+    }
+    let fields = braced_fields_bounded(
+        raw,
+        MAX_FORM_CHOICE_PARAMETER_LINKS
+            .checked_mul(if duplicate { 7 } else { 5 })?
+            .checked_add(2)?,
+    )?;
+    if fields.first()?.trim() != marker {
+        return None;
+    }
+    let count_token = fields.get(1)?.trim();
+    let count = count_token.parse::<usize>().ok()?;
+    if count_token != count.to_string() {
+        return None;
+    }
+    if count > MAX_FORM_CHOICE_PARAMETER_LINKS {
+        return None;
+    }
+    let mut cursor = 2usize;
+    let mut links = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name = exact_1c_string(fields.get(cursor)?)?;
+        if name.is_empty() {
+            return None;
+        }
+        cursor += 1;
+        let mode = fields.get(cursor)?.trim();
+        cursor += 1;
+        let owner = braced_fields_bounded(fields.get(cursor)?, 1)?;
+        let [attribute_id] = owner.as_slice() else {
+            return None;
+        };
+        let attribute_id = attribute_id.trim();
+        let attribute_number = attribute_id.parse::<u64>().ok()?;
+        if attribute_number == 0 || attribute_id != attribute_number.to_string() {
+            return None;
+        }
+        cursor += 1;
+        let terminal = match mode {
+            "1" => None,
+            "2" => {
+                let terminal = braced_fields_bounded(fields.get(cursor)?, 1)?;
+                let [terminal] = terminal.as_slice() else {
+                    return None;
+                };
+                cursor += 1;
+                match terminal.trim() {
+                    "-5" => Some("Owner"),
+                    "-8" => Some("Ref"),
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        let value_change =
+            FormChoiceParameterLinkValueChange::from_raw_code(fields.get(cursor)?.trim())?;
+        cursor += 1;
+        if duplicate {
+            if exact_1c_string(fields.get(cursor)?)?.is_empty()
+                && exact_1c_string(fields.get(cursor + 1)?)?.is_empty()
+            {
+                cursor += 2;
+            } else {
+                return None;
+            }
+        }
+        links.push(RawFormChoiceParameterLink {
+            name,
+            attribute_id: attribute_id.to_owned(),
+            terminal,
+            value_change,
+        });
+    }
+    (cursor == fields.len()).then_some(links)
 }
 
 fn parse_form_choice_parameter_value<F>(
@@ -1080,6 +1407,139 @@ mod form_choice_parameters_tests {
                 Err(SchemaError::InvalidFormChoiceParametersQName(value)) if value == qname
             ));
         }
+    }
+
+    #[test]
+    fn form_choice_parameter_cluster_order_is_schema_owned_and_exact() {
+        let policy = exact_form_choice_parameters_policy();
+        assert_eq!(
+            form_choice_parameter_cluster_order(&policy).unwrap(),
+            [
+                FormChoiceParameterClusterMember::Links,
+                FormChoiceParameterClusterMember::Parameters,
+                FormChoiceParameterClusterMember::AvailableTypes,
+            ]
+        );
+        assert_eq!(
+            FormChoiceParameterClusterMember::Links.xml_local_name(),
+            "ChoiceParameterLinks"
+        );
+        assert_eq!(
+            FormChoiceParameterClusterMember::Parameters.xml_local_name(),
+            "ChoiceParameters"
+        );
+        assert_eq!(
+            FormChoiceParameterClusterMember::AvailableTypes.xml_local_name(),
+            "AvailableTypes"
+        );
+        assert_eq!(
+            FormChoiceParameterLinkValueChange::Clear.xml_value(),
+            "Clear"
+        );
+        assert_eq!(
+            FormChoiceParameterLinkValueChange::DontChange.xml_value(),
+            "DontChange"
+        );
+    }
+
+    #[test]
+    fn form_choice_parameter_cluster_order_rejects_mutations() {
+        let mut mutated = exact_form_choice_parameters_policy();
+        let WriterPolicy::FormChoiceParameters {
+            owner_qname,
+            owner_predecessor_qname,
+            ..
+        } = &mut mutated
+        else {
+            unreachable!()
+        };
+        std::mem::swap(owner_qname, owner_predecessor_qname);
+        assert!(matches!(
+            form_choice_parameter_cluster_order(&mutated),
+            Err(SchemaError::InvalidFormChoiceParameterClusterPolicy(reason))
+                if reason == "owner feature order"
+        ));
+    }
+
+    #[test]
+    fn form_choice_parameter_links_parse_exact_mirrors_and_value_changes() {
+        let primary = r#"{5006,2,"Filter.Organization",1,{27},0,"Filter.Partner",2,{9},{-8},1}"#;
+        let duplicate =
+            r#"{5007,2,"Filter.Organization",1,{27},0,"","","Filter.Partner",2,{9},{-8},1,"",""}"#;
+        let links = parse_form_choice_parameter_links(primary, duplicate, |id| match id {
+            "27" => Some("Organization".to_owned()),
+            "9" => Some("Partner".to_owned()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].name(), "Filter.Organization");
+        assert_eq!(links[0].data_path(), "Organization");
+        assert_eq!(
+            links[0].value_change(),
+            FormChoiceParameterLinkValueChange::Clear
+        );
+        assert_eq!(links[1].data_path(), "Partner.Ref");
+        assert_eq!(
+            links[1].value_change(),
+            FormChoiceParameterLinkValueChange::DontChange
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links("{5006,0}", "{5007,0}", |_| None).unwrap(),
+            Vec::<FormChoiceParameterLink>::new()
+        );
+    }
+
+    #[test]
+    fn form_choice_parameter_links_reject_malformed_foreign_and_mismatched_mirrors() {
+        let primary = r#"{5006,2,"Filter.Organization",1,{27},0,"Filter.Partner",1,{9},1}"#;
+        let duplicate =
+            r#"{5007,2,"Filter.Organization",1,{27},0,"","","Filter.Partner",1,{9},1,"",""}"#;
+        let resolve = |id: &str| match id {
+            "27" => Some("Organization".to_owned()),
+            "9" => Some("Partner".to_owned()),
+            _ => None,
+        };
+        for malformed in [
+            r#"{5006,02,"Filter.Organization",1,{27},0,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,1,"Filter.Organization",1,{27},0,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,2,"Filter.Organization",1,{27},2,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,2,"Filter.Organization",2,{27},{-7},0,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,2,"Filter.Organization",1,{27,28},0,"Filter.Partner",1,{9},1}"#,
+            r#"{5006,2,"Filter.Organization",1,{27},0,"Filter.Partner",1,{9},1}garbage"#,
+        ] {
+            assert_eq!(
+                parse_form_choice_parameter_links(malformed, duplicate, resolve),
+                Err(FormChoiceParameterLinksParseError::PrimaryMalformed),
+                "{malformed}"
+            );
+        }
+        assert_eq!(
+            parse_form_choice_parameter_links(
+                primary,
+                r#"{5007,2,"Filter.Organization",1,{27},0,"","x","Filter.Partner",1,{9},1,"",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::DuplicateMalformed)
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links(
+                primary,
+                r#"{5007,2,"Filter.Organization",1,{27},0,"","","Filter.Other",1,{9},1,"",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::MirrorMismatch)
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links(
+                r#"{5006,1,"Filter.Foreign",1,{99},0}"#,
+                r#"{5007,1,"Filter.Foreign",1,{99},0,"",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                "99".to_owned()
+            ))
+        );
     }
 }
 
@@ -2616,6 +3076,7 @@ pub enum SchemaError {
     InvalidFormChoiceListStringWriterEvidence(String),
     InvalidFormChoiceParametersWriterEvidence(String),
     InvalidFormChoiceParametersQName(String),
+    InvalidFormChoiceParameterClusterPolicy(String),
 }
 
 impl Display for SchemaError {
@@ -2688,6 +3149,12 @@ impl Display for SchemaError {
             }
             Self::InvalidFormChoiceParametersQName(value) => {
                 write!(formatter, "invalid Form choice-parameters QName '{value}'")
+            }
+            Self::InvalidFormChoiceParameterClusterPolicy(reason) => {
+                write!(
+                    formatter,
+                    "invalid Form choice-parameter cluster policy: {reason}"
+                )
             }
         }
     }
