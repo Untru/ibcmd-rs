@@ -461,6 +461,86 @@ pub enum FormChoiceListValue {
     DesignTimeRef(String),
 }
 
+/// Canonical XML leaf shape for a decoded `FormChoiceListValue`.
+///
+/// This is deliberately a data-only wire contract: the physical form adapter
+/// may escape and serialize it, but it must not decide which QName, nil form,
+/// or empty-element form belongs to a source value variant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FormChoiceListValueWireShape<'a> {
+    xml_opening: &'static str,
+    xml_closing: &'static str,
+    text: Option<&'a str>,
+}
+
+impl<'a> FormChoiceListValueWireShape<'a> {
+    pub const fn xml_opening(&self) -> &'static str {
+        self.xml_opening
+    }
+
+    pub const fn xml_closing(&self) -> &'static str {
+        self.xml_closing
+    }
+
+    pub const fn text(&self) -> Option<&'a str> {
+        self.text
+    }
+
+    /// Append the canonical element using the caller's XML escaping function.
+    /// Escaping is transport-specific; tag names and element shape are not.
+    pub fn append_xml_escaped<F>(&self, output: &mut String, escape: F)
+    where
+        F: FnOnce(&str) -> String,
+    {
+        output.push_str(self.xml_opening);
+        if let Some(text) = self.text {
+            output.push_str(&escape(text));
+        }
+        output.push_str(self.xml_closing);
+    }
+}
+
+impl FormChoiceListValue {
+    /// Return the exhaustive, verified XML wire shape for this source value.
+    /// All reference source variants intentionally share one DesignTimeRef
+    /// shape: their distinction is parser provenance, not XML syntax.
+    pub fn wire_shape(&self) -> FormChoiceListValueWireShape<'_> {
+        match self {
+            Self::Boolean(value) => FormChoiceListValueWireShape {
+                xml_opening: "<Value xsi:type=\"xs:boolean\">",
+                xml_closing: "</Value>",
+                text: Some(if *value { "true" } else { "false" }),
+            },
+            Self::Decimal(value) => FormChoiceListValueWireShape {
+                xml_opening: "<Value xsi:type=\"xs:decimal\">",
+                xml_closing: "</Value>",
+                text: Some(value),
+            },
+            Self::Nil => FormChoiceListValueWireShape {
+                xml_opening: "<Value xsi:nil=\"true\"/>",
+                xml_closing: "",
+                text: None,
+            },
+            Self::String(value) => FormChoiceListValueWireShape {
+                xml_opening: if value.is_empty() {
+                    "<Value xsi:type=\"xs:string\"/>"
+                } else {
+                    "<Value xsi:type=\"xs:string\">"
+                },
+                xml_closing: if value.is_empty() { "" } else { "</Value>" },
+                text: (!value.is_empty()).then_some(value),
+            },
+            Self::EmptyRef(value)
+            | Self::LiteralDesignTimeRef(value)
+            | Self::DesignTimeRef(value) => FormChoiceListValueWireShape {
+                xml_opening: "<Value xsi:type=\"xr:DesignTimeRef\">",
+                xml_closing: "</Value>",
+                text: Some(value),
+            },
+        }
+    }
+}
+
 const FORM_CHOICE_LIST_ITEM_DISCRIMINATOR: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
 const MAX_FORM_CHOICE_LIST_RAW_BYTES: usize = 64 * 1024;
 const MAX_FORM_CHOICE_LIST_ITEMS: usize = 512;
@@ -825,6 +905,68 @@ mod form_choice_list_tests {
         assert_eq!(
             literal.items()[0].value(),
             &FormChoiceListValue::LiteralDesignTimeRef(format!("{TYPE_ID}.{VALUE_ID}"))
+        );
+    }
+
+    #[test]
+    fn choice_list_value_wire_shapes_are_exhaustive_and_reference_variants_match() {
+        let cases = [
+            (
+                FormChoiceListValue::Boolean(false),
+                "<Value xsi:type=\"xs:boolean\">",
+                Some("false"),
+                "</Value>",
+            ),
+            (
+                FormChoiceListValue::Boolean(true),
+                "<Value xsi:type=\"xs:boolean\">",
+                Some("true"),
+                "</Value>",
+            ),
+            (
+                FormChoiceListValue::Decimal("-12.50".to_owned()),
+                "<Value xsi:type=\"xs:decimal\">",
+                Some("-12.50"),
+                "</Value>",
+            ),
+            (
+                FormChoiceListValue::Nil,
+                "<Value xsi:nil=\"true\"/>",
+                None,
+                "",
+            ),
+            (
+                FormChoiceListValue::String(String::new()),
+                "<Value xsi:type=\"xs:string\"/>",
+                None,
+                "",
+            ),
+            (
+                FormChoiceListValue::String("text".to_owned()),
+                "<Value xsi:type=\"xs:string\">",
+                Some("text"),
+                "</Value>",
+            ),
+        ];
+        for (value, opening, text, closing) in cases {
+            let shape = value.wire_shape();
+            assert_eq!(shape.xml_opening(), opening);
+            assert_eq!(shape.text(), text);
+            assert_eq!(shape.xml_closing(), closing);
+        }
+
+        let reference_shapes = [
+            FormChoiceListValue::EmptyRef("Catalog.Status.EmptyRef".to_owned()),
+            FormChoiceListValue::LiteralDesignTimeRef("type.value".to_owned()),
+            FormChoiceListValue::DesignTimeRef("Catalog.Status.EnumValue.Active".to_owned()),
+        ]
+        .map(|value| {
+            let shape = value.wire_shape();
+            (shape.xml_opening(), shape.xml_closing())
+        });
+        assert_eq!(
+            reference_shapes,
+            [("<Value xsi:type=\"xr:DesignTimeRef\">", "</Value>"); 3]
         );
     }
 

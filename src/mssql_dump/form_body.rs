@@ -49,8 +49,7 @@ use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_i
 use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue,
     FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
-    FormChoiceListLayoutProfile, FormChoiceListValue as SchemaFormChoiceListValue,
-    FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
+    FormChoiceListLayoutProfile, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
     FormChoiceParameterClusterMember, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
     FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
     GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
@@ -89,6 +88,8 @@ const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
     ("ВидДвижения", "RecordType"),
     ("ТипЗначения", "ValueType"),
 ];
+const FORM_CHOICE_LIST_VALUE_INDENT: &str = "\t\t\t";
+const FORM_XML_LINE_ENDING: &str = "\r\n";
 
 const MAX_FORM_SERVER_STATE_XML_BYTES: usize = 64 * 1_048_576;
 
@@ -1065,7 +1066,8 @@ pub(super) struct FormChildItem {
 
 pub(super) type FormChoiceListRawLayout = FormChoiceListLayoutProfile;
 pub(super) type FormChoiceListItem = SchemaFormChoiceListItem;
-pub(super) type FormChoiceListValue = SchemaFormChoiceListValue;
+#[cfg(test)]
+pub(super) type FormChoiceListValue = ibcmd_schema::FormChoiceListValue;
 
 /// Physical provenance is retained for diagnostics only.  It deliberately contains no XML
 /// QName, ordering, default-emission or target-version policy.
@@ -16930,32 +16932,12 @@ pub(super) fn format_form_choice_list_xml(
                             indent + 3,
                         ));
                     }
-                    match &item.value {
-                        FormChoiceListValue::Boolean(value) => xml.push_str(&format!(
-                            "{tab}\t\t\t<Value xsi:type=\"xs:boolean\">{}</Value>\r\n",
-                            xml_bool(*value)
-                        )),
-                        FormChoiceListValue::Decimal(value) => xml.push_str(&format!(
-                            "{tab}\t\t\t<Value xsi:type=\"xs:decimal\">{}</Value>\r\n",
-                            escape_xml_text(value)
-                        )),
-                        FormChoiceListValue::Nil => {
-                            xml.push_str(&format!("{tab}\t\t\t<Value xsi:nil=\"true\"/>\r\n"))
-                        }
-                        FormChoiceListValue::String(value) if value.is_empty() => {
-                            xml.push_str(&format!("{tab}\t\t\t<Value xsi:type=\"xs:string\"/>\r\n"))
-                        }
-                        FormChoiceListValue::String(value) => xml.push_str(&format!(
-                            "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",
-                            escape_xml_text(value)
-                        )),
-                        FormChoiceListValue::EmptyRef(value)
-                        | FormChoiceListValue::LiteralDesignTimeRef(value)
-                        | FormChoiceListValue::DesignTimeRef(value) => xml.push_str(&format!(
-                            "{tab}\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">{}</Value>\r\n",
-                            escape_xml_text(value)
-                        )),
-                    }
+                    xml.push_str(&tab);
+                    xml.push_str(FORM_CHOICE_LIST_VALUE_INDENT);
+                    item.value
+                        .wire_shape()
+                        .append_xml_escaped(&mut xml, escape_xml_text);
+                    xml.push_str(FORM_XML_LINE_ENDING);
                     xml.push_str(&format!("{tab}\t\t</xr:Value>\r\n"));
                 }
             }

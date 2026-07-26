@@ -17526,6 +17526,33 @@ fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_paylo
 \t</ChoiceList>\r\n"
     );
 
+    let ref_xml = [
+        FormChoiceListValue::EmptyRef("Catalog.Status.EmptyRef".to_owned()),
+        FormChoiceListValue::LiteralDesignTimeRef("Catalog.Status.EmptyRef".to_owned()),
+        FormChoiceListValue::DesignTimeRef("Catalog.Status.EmptyRef".to_owned()),
+    ]
+    .map(|value| {
+        format_form_choice_list_xml(
+            &CanonicalFormChoiceList::Typed {
+                items: vec![FormChoiceListItem {
+                    presentation_present: true,
+                    presentation: Vec::new(),
+                    value,
+                }],
+                provenance,
+            },
+            1,
+        )
+        .unwrap()
+    });
+    assert!(ref_xml.windows(2).all(|pair| pair[0] == pair[1]));
+    assert!(
+        ref_xml[0]
+            .contains(r#"<Value xsi:type="xr:DesignTimeRef">Catalog.Status.EmptyRef</Value>"#),
+        "{}",
+        ref_xml[0]
+    );
+
     let empty = CanonicalFormChoiceList::Empty { provenance };
     validate_canonical_form_choice_list(&empty).unwrap();
     assert_eq!(format_form_choice_list_xml(&empty, 1).unwrap(), "");
