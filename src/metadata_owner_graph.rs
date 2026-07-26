@@ -174,6 +174,18 @@ pub(crate) enum CharacteristicsStandardAttributeKind {
     FamilyTable,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CatalogInputHistoryLayout {
+    Exact56,
+    Legacy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CatalogDataHistoryMode {
+    Use,
+    DontUse,
+}
+
 pub(crate) struct CharacteristicsPhysicalSchema;
 
 impl CharacteristicsPhysicalSchema {
@@ -183,6 +195,57 @@ impl CharacteristicsPhysicalSchema {
 
     pub(crate) fn body(discriminator: Option<usize>, field_count: usize) -> bool {
         discriminator == Some(4) && field_count == 13
+    }
+
+    /// Catalog layout 57 stores its legacy choice-history state in the slot
+    /// later reused for Characteristics. The exact `{0,{2,{0},{1}}}` profile
+    /// means that no canonical Characteristics are declared.
+    pub(crate) fn catalog_57_legacy_empty(
+        owner_code: &str,
+        outer_discriminator: Option<usize>,
+        outer_field_count: usize,
+        payload_count: Option<usize>,
+        payload_field_count: usize,
+        first_marker: Option<i32>,
+        second_marker: Option<i32>,
+    ) -> bool {
+        owner_code == "57"
+            && outer_discriminator == Some(0)
+            && outer_field_count == 2
+            && payload_count == Some(2)
+            && payload_field_count == 3
+            && first_marker == Some(0)
+            && second_marker == Some(1)
+    }
+
+    pub(crate) fn catalog_compact_reference_collection_is_empty(
+        field_index: usize,
+        value: &str,
+    ) -> bool {
+        value == "{0}" || (field_index == 54 && value == "0")
+    }
+
+    pub(crate) fn catalog_compact_input_modes_are_default(value: &str) -> bool {
+        value == "0"
+    }
+
+    pub(crate) fn catalog_input_history_layout(
+        owner_code: &str,
+        field_count: usize,
+    ) -> Option<CatalogInputHistoryLayout> {
+        match owner_code {
+            "56" if field_count == 61 => Some(CatalogInputHistoryLayout::Exact56),
+            "56" | "57" => Some(CatalogInputHistoryLayout::Legacy),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn catalog_data_history_mode(value: &str) -> Option<CatalogDataHistoryMode> {
+        match value {
+            "1" => Some(CatalogDataHistoryMode::Use),
+            "2" => Some(CatalogDataHistoryMode::DontUse),
+            _ => None,
+        }
     }
 
     pub(crate) fn source(discriminator: Option<usize>, field_count: usize) -> bool {
@@ -1832,6 +1895,42 @@ mod tests {
     #[test]
     fn characteristics_physical_schema_classifies_only_closed_edt_facts() {
         assert!(CharacteristicsPhysicalSchema::outer(Some(0), 2));
+        assert!(CharacteristicsPhysicalSchema::catalog_57_legacy_empty(
+            "57",
+            Some(0),
+            2,
+            Some(2),
+            3,
+            Some(0),
+            Some(1),
+        ));
+        assert!(!CharacteristicsPhysicalSchema::catalog_57_legacy_empty(
+            "56",
+            Some(0),
+            2,
+            Some(2),
+            3,
+            Some(0),
+            Some(1),
+        ));
+        assert!(
+            CharacteristicsPhysicalSchema::catalog_compact_reference_collection_is_empty(42, "{0}",)
+        );
+        assert!(
+            CharacteristicsPhysicalSchema::catalog_compact_reference_collection_is_empty(54, "0")
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::catalog_input_history_layout("56", 61),
+            Some(CatalogInputHistoryLayout::Exact56)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::catalog_input_history_layout("57", 61),
+            Some(CatalogInputHistoryLayout::Legacy)
+        );
+        assert_eq!(
+            CharacteristicsPhysicalSchema::catalog_data_history_mode("1"),
+            Some(CatalogDataHistoryMode::Use)
+        );
         assert!(CharacteristicsPhysicalSchema::body(Some(4), 13));
         assert!(CharacteristicsPhysicalSchema::source(Some(1), 2));
         assert!(CharacteristicsPhysicalSchema::field(Some(1), Some(0), 3));

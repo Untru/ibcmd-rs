@@ -178,6 +178,24 @@ mod characteristics {
         metadata_object_refs: &BTreeMap<String, String>,
         object_refs: &BTreeMap<String, String>,
     ) -> Result<Characteristics, CharacteristicsDiagnostic> {
+        decode_characteristics_with_owner_code(
+            family,
+            None,
+            value,
+            type_index,
+            metadata_object_refs,
+            object_refs,
+        )
+    }
+
+    pub(super) fn decode_characteristics_with_owner_code(
+        family: OwnerGraphFamily,
+        owner_code: Option<&str>,
+        value: &str,
+        type_index: &BTreeMap<String, String>,
+        metadata_object_refs: &BTreeMap<String, String>,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Result<Characteristics, CharacteristicsDiagnostic> {
         let _ = characteristics_slot(family)?;
         let outer = split_information_register_braced_fields(value).ok_or_else(|| {
             diagnostic(
@@ -227,6 +245,36 @@ mod characteristics {
                     CharacteristicsReason::InvalidCount,
                 )
             })?;
+        let marker = |value: &str| {
+            let fields = split_information_register_braced_fields(value)?;
+            (fields.len() == 1)
+                .then(|| fields[0].trim().parse::<i32>().ok())
+                .flatten()
+        };
+        if matches!(family, OwnerGraphFamily::Catalog)
+            && CharacteristicsPhysicalSchema::catalog_57_legacy_empty(
+                owner_code.unwrap_or_default(),
+                outer
+                    .first()
+                    .and_then(|value| parse_information_register_usize(value)),
+                outer.len(),
+                Some(count),
+                payload.len(),
+                payload.get(1).and_then(|value| marker(value)),
+                payload.get(2).and_then(|value| marker(value)),
+            )
+        {
+            return Characteristics::new(Vec::new()).map_err(|_| {
+                diagnostic(
+                    family,
+                    CharacteristicsStage::CanonicalModel,
+                    None,
+                    CharacteristicRole::Collection,
+                    None,
+                    CharacteristicsReason::InvalidCanonicalModel,
+                )
+            });
+        }
         if payload.len() != count.saturating_add(1) {
             return Err(diagnostic(
                 family,
@@ -10513,9 +10561,7 @@ fn decode_owner_graph<'a>(
                 None,
             )
         })?;
-    if root.len() != layout.collection_markers.len() + 3
-        || root.first().map(|value| value.trim()) != Some(owner_graph::ROOT_DISCRIMINATOR)
-    {
+    if root.first().map(|value| value.trim()) != Some(owner_graph::ROOT_DISCRIMINATOR) {
         return Err(owner_graph_extraction_diagnostic(
             family,
             owner_graph::OwnerGraphDiagnosticKind::RootShape,
@@ -10524,25 +10570,54 @@ fn decode_owner_graph<'a>(
             None,
         ));
     }
-    if root[2].trim() != layout.root_collection_count_token {
+    // Catalog properties were historically exposed by a compact source row:
+    // `{1,{<61 owner fields>}}`.  It contains no child inventory at all, so
+    // it is not a permissive alternative to a malformed full owner graph.
+    // Admit only this separately evidenced Catalog layout and materialize its
+    // *declared empty* collections with the normal schema provenance.  Every
+    // other family, arity, count and collection marker remains fail-closed.
+    let collections = if root.len() == layout.collection_markers.len() + 3 {
+        if root[2].trim() != layout.root_collection_count_token {
+            return Err(owner_graph_extraction_diagnostic(
+                family,
+                owner_graph::OwnerGraphDiagnosticKind::RootCollectionCount,
+                Some(2),
+                None,
+                None,
+            ));
+        }
+        root[3..]
+            .iter()
+            .zip(layout.collection_layouts())
+            .map(|(raw, collection_layout)| {
+                decode_owner_graph_collection(family, raw, *collection_layout).map_err(
+                    |mut error| {
+                        error.collection_role = Some(collection_layout.role.as_str().to_owned());
+                        error
+                    },
+                )
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    } else if matches!(family, owner_graph::OwnerGraphFamily::Catalog) && root.len() == 2 {
+        layout
+            .collection_layouts()
+            .iter()
+            .map(|layout| {
+                owner_graph::DecodedOwnerCollection::new(
+                    Vec::new(),
+                    owner_graph::OwnerCollectionProvenance::from_layout(*layout),
+                )
+            })
+            .collect()
+    } else {
         return Err(owner_graph_extraction_diagnostic(
             family,
-            owner_graph::OwnerGraphDiagnosticKind::RootCollectionCount,
-            Some(2),
+            owner_graph::OwnerGraphDiagnosticKind::RootShape,
+            None,
             None,
             None,
         ));
-    }
-    let collections = root[3..]
-        .iter()
-        .zip(layout.collection_layouts())
-        .map(|(raw, collection_layout)| {
-            decode_owner_graph_collection(family, raw, *collection_layout).map_err(|mut error| {
-                error.collection_role = Some(collection_layout.role.as_str().to_owned());
-                error
-            })
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+    };
 
     let fields = split_information_register_braced_fields(root[1]).ok_or_else(|| {
         owner_graph_extraction_diagnostic(
@@ -10553,7 +10628,10 @@ fn decode_owner_graph<'a>(
             None,
         )
     })?;
-    if fields.len() != layout.owner_field_count {
+    let compact_catalog_field_count = matches!(family, owner_graph::OwnerGraphFamily::Catalog)
+        && root.len() == 2
+        && matches!(fields.len(), 60..=62);
+    if fields.len() != layout.owner_field_count && !compact_catalog_field_count {
         return Err(owner_graph_extraction_diagnostic(
             family,
             owner_graph::OwnerGraphDiagnosticKind::OwnerFieldCount,
@@ -11486,8 +11564,9 @@ fn decode_owner_characteristics(
             return None;
         }
     };
-    match characteristics::decode_characteristics(
+    match characteristics::decode_characteristics_with_owner_code(
         family,
+        fields.first().map(|value| value.trim()),
         fields.get(slot)?,
         type_index,
         metadata_object_refs,
@@ -20764,6 +20843,8 @@ fn parse_strict_catalog_properties_from_text(
         full_text_search_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
     ) = parse_catalog_input_modes(fields.get(56)?)?;
+    let (create_on_input, choice_history_on_input, data_history) =
+        parse_catalog_input_history_tail(owner_code, fields)?;
 
     let owners = parse_document_reference_collection(
         fields.get(12)?,
@@ -20919,13 +21000,14 @@ fn parse_strict_catalog_properties_from_text(
             fields.get(49)?,
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(50)?)?,
-        create_on_input: metadata_create_on_input_xml(fields.get(53)?.trim())?,
-        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(57)?.trim())?,
-        data_history: metadata_data_history_xml(fields.get(58)?.trim())?,
+        create_on_input,
+        choice_history_on_input,
+        data_history,
         update_data_history_immediately_after_write: information_register_bool(fields.get(59)?)?,
-        execute_after_write_data_history_version_processing: information_register_bool(
-            fields.get(60)?,
-        )?,
+        execute_after_write_data_history_version_processing: match fields.get(60) {
+            Some(value) => information_register_bool(value)?,
+            None => false,
+        },
         child_metadata_objects,
         child_forms,
         child_templates,
@@ -21423,6 +21505,18 @@ fn parse_catalog_field_references(
     attribute_references: &BTreeSet<String>,
     standard_attributes: &[(&str, &str)],
 ) -> std::result::Result<Vec<String>, MetadataSourceExtractionDiagnostic> {
+    // The compact Catalog source layout carries an empty input-by-string set
+    // as the exact scalar sentinel `{0}`.  This is a closed zero-item form,
+    // not a fallback for a malformed typed collection; non-empty references
+    // still flow through the common, fully typed owner-graph decoder below.
+    if fields.get(field_index).is_some_and(|value| {
+        owner_graph::CharacteristicsPhysicalSchema::catalog_compact_reference_collection_is_empty(
+            field_index,
+            value.trim(),
+        )
+    }) {
+        return Ok(Vec::new());
+    }
     parse_owner_graph_field_references(
         fields,
         field_index,
@@ -21435,6 +21529,15 @@ fn parse_catalog_field_references(
 }
 
 fn parse_catalog_input_modes(value: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    // Compact Catalog sources omit the three-part input-mode envelope and
+    // retain its observed zero sentinel.  Its semantics are the platform
+    // defaults; anything other than that exact scalar must use the typed
+    // envelope below.
+    if owner_graph::CharacteristicsPhysicalSchema::catalog_compact_input_modes_are_default(
+        value.trim(),
+    ) {
+        return Some(("Begin", "DontUse", "Directly"));
+    }
     let fields = split_information_register_braced_fields(value)?;
     if fields.len() != 3 || fields.get(1)?.trim() != "2" || fields.get(2)?.trim() != "0" {
         return None;
@@ -21547,6 +21650,38 @@ fn parse_catalog_standard_attributes(
         })
         .collect::<Option<Vec<_>>>()
         .map(Some)
+}
+
+/// Version 56 with exactly 61 Catalog owner fields has two explicit input
+/// flags. Other compact Catalog layouts retain the legacy CreateOnInput
+/// source, while DataHistory is always projected from the shared field-53
+/// mode. This is a closed compatibility route for observed source layouts.
+fn parse_catalog_input_history_tail(
+    owner_code: &str,
+    fields: &[&str],
+) -> Option<(&'static str, &'static str, &'static str)> {
+    let layout = owner_graph::CharacteristicsPhysicalSchema::catalog_input_history_layout(
+        owner_code,
+        fields.len(),
+    )?;
+    let shared_mode = fields.get(53)?.trim();
+    let data_history =
+        match owner_graph::CharacteristicsPhysicalSchema::catalog_data_history_mode(shared_mode)? {
+            owner_graph::CatalogDataHistoryMode::Use => "Use",
+            owner_graph::CatalogDataHistoryMode::DontUse => "DontUse",
+        };
+    let create_on_input = if matches!(layout, owner_graph::CatalogInputHistoryLayout::Exact56) {
+        metadata_create_on_input_xml(shared_mode)?
+    } else {
+        metadata_create_on_input_xml(fields.get(51)?.trim())?
+    };
+    let choice_history_on_input =
+        if matches!(layout, owner_graph::CatalogInputHistoryLayout::Exact56) {
+            metadata_choice_history_on_input_xml(fields.get(57)?.trim())?
+        } else {
+            "Auto"
+        };
+    Some((create_on_input, choice_history_on_input, data_history))
 }
 
 fn parse_report_properties_from_text(
