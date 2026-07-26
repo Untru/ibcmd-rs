@@ -1865,7 +1865,10 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
     if let Some(print_settings) = &spreadsheet.print_settings {
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings)?);
     }
-    fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
+    fields.extend(format_spreadsheet_drawings_for_moxel(
+        &spreadsheet,
+        column_format_slots,
+    ));
     let line_fields = format_spreadsheet_lines_for_moxel(&spreadsheet.lines);
     let (mut format_fields, number_format_refs) =
         format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots, number_format_hint);
@@ -3600,14 +3603,37 @@ fn normalize_canonical_spreadsheet_format_order(spreadsheet: &mut SpreadsheetDoc
     if spreadsheet.formats.is_empty() {
         return;
     }
-    let should_normalize = spreadsheet.default_format_index.is_some();
-    if !should_normalize {
-        return;
-    }
     let offset = spreadsheet_column_format_offset(spreadsheet);
     if offset == 0 || offset >= spreadsheet.formats.len() {
         return;
     }
+
+    // MOXEL stores the column format block first.  Rotating only the format
+    // bodies changes the meaning of every global reference and makes the next
+    // XML -> blob -> XML pass non-idempotent.  Move the references together
+    // with the bodies so the resulting document uses the canonical indexes.
+    let remap = |index: usize| match index {
+        0 => 0,
+        index if index <= spreadsheet.formats.len() => {
+            ((index - 1 + spreadsheet.formats.len() - offset) % spreadsheet.formats.len()) + 1
+        }
+        index => index,
+    };
+    for column_set in &mut spreadsheet.column_sets {
+        for column in &mut column_set.columns {
+            column.format_index = remap(column.format_index);
+        }
+    }
+    for row in &mut spreadsheet.rows {
+        row.format_index = remap(row.format_index);
+        for cell in &mut row.cells {
+            cell.format_index = remap(cell.format_index);
+        }
+    }
+    for drawing in &mut spreadsheet.drawings {
+        drawing.format_index = remap(drawing.format_index);
+    }
+    spreadsheet.default_format_index = spreadsheet.default_format_index.map(remap);
     spreadsheet.formats.rotate_left(offset);
 }
 
@@ -4165,6 +4191,52 @@ fn format_spreadsheet_formats_for_moxel(
     (fields, number_format_refs)
 }
 
+fn spreadsheet_format_physical_index_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_format_slots: usize,
+    global_index: usize,
+) -> usize {
+    if global_index == 0 {
+        return 0;
+    }
+    let source_format_count = spreadsheet
+        .formats
+        .len()
+        .max(spreadsheet.default_format_index.unwrap_or(0))
+        .max(column_format_slots);
+    let column_placeholder_count = column_format_slots.max(1);
+    let is_drawing_format = |index: usize| {
+        spreadsheet
+            .formats
+            .get(index.saturating_sub(1))
+            .is_some_and(|format| format.drawing_border.is_some())
+    };
+    let mut physical_index = 0usize;
+    for index in column_format_slots + 1..=source_format_count {
+        if !is_drawing_format(index) {
+            physical_index += 1;
+            if index == global_index {
+                return physical_index;
+            }
+        }
+    }
+    for index in 1..=column_placeholder_count {
+        physical_index += 1;
+        if index == global_index {
+            return physical_index;
+        }
+    }
+    for index in column_format_slots + 1..=source_format_count {
+        if is_drawing_format(index) {
+            physical_index += 1;
+            if index == global_index {
+                return physical_index;
+            }
+        }
+    }
+    global_index
+}
+
 fn format_spreadsheet_format_index_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     global_index: usize,
@@ -4636,15 +4708,29 @@ fn spreadsheet_line_style_code(value: &str) -> Option<i32> {
 }
 
 fn format_spreadsheet_drawings_for_moxel(
-    drawings: &[SpreadsheetDocumentXmlDrawing],
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_format_slots: usize,
 ) -> Vec<String> {
-    drawings
+    spreadsheet
+        .drawings
         .iter()
-        .filter_map(format_spreadsheet_drawing_for_moxel)
+        .filter_map(|drawing| {
+            format_spreadsheet_drawing_for_moxel(
+                drawing,
+                spreadsheet_format_physical_index_for_moxel(
+                    spreadsheet,
+                    column_format_slots,
+                    drawing.format_index,
+                ),
+            )
+        })
         .collect()
 }
 
-fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing) -> Option<String> {
+fn format_spreadsheet_drawing_for_moxel(
+    drawing: &SpreadsheetDocumentXmlDrawing,
+    format_index: usize,
+) -> Option<String> {
     match &drawing.kind {
         SpreadsheetDocumentXmlDrawingKind::Picture {
             picture_size,
@@ -4656,7 +4742,7 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
             let auto_size = if drawing.auto_size { 0 } else { 1 };
             Some(format!(
                 "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
-                drawing.format_index,
+                format_index,
                 drawing.begin_column.max(0),
                 drawing.begin_row.max(0),
                 drawing.begin_column_offset.max(0),
@@ -4670,7 +4756,7 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
             ))
         }
         SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) => {
-            format_spreadsheet_chart_drawing_for_moxel(drawing, chart)
+            format_spreadsheet_chart_drawing_for_moxel(drawing, format_index, chart)
         }
         SpreadsheetDocumentXmlDrawingKind::Chart(None) => None,
     }
@@ -4678,6 +4764,7 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
 
 fn format_spreadsheet_chart_drawing_for_moxel(
     drawing: &SpreadsheetDocumentXmlDrawing,
+    format_index: usize,
     chart: &SpreadsheetDocumentXmlChart,
 ) -> Option<String> {
     const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
@@ -4730,7 +4817,7 @@ fn format_spreadsheet_chart_drawing_for_moxel(
     let payload = format!("{{{{11}},{{{}}}}}", data.join(","));
     Some(format!(
         "{{{{0,{}}},10,{},{},{},{},{},{},{},{},{},{CHART_TYPE_UUID},{payload},0}}",
-        drawing.format_index,
+        format_index,
         drawing.begin_column.max(0),
         drawing.begin_row.max(0),
         drawing.begin_column_offset.max(0),
@@ -12651,10 +12738,17 @@ fn form_scaling_mode_code(value: FormXmlScalingMode) -> &'static str {
 }
 
 fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
-    let mut output = format!("{{{}", commands.len());
-    for command in commands {
+    // The platform stores standard command identifiers in UUID order, not in
+    // the source XML element order.  This keeps a re-packed layout canonical.
+    let mut command_uuids = commands
+        .iter()
+        .map(|command| form_excluded_command_uuid(*command))
+        .collect::<Vec<_>>();
+    command_uuids.sort_unstable();
+    let mut output = format!("{{{}", command_uuids.len());
+    for command in command_uuids {
         output.push(',');
-        output.push_str(form_excluded_command_uuid(*command));
+        output.push_str(command);
     }
     output.push('}');
     output
@@ -15424,7 +15518,7 @@ fn patch_form_layout_child_item_entry(
             replacements.push((initial_tree_view_range.clone(), code.to_string()));
         }
         if let Some(choice_folders_and_items) = item.choice_folders_and_items {
-            let choice_range = form_layout_table_counted_property_bag_value_range(
+            let choice_range = form_layout_table_property_bag_value_range(
                 text,
                 fields,
                 TableBagKey::ChoiceFoldersAndItems,
@@ -17232,18 +17326,6 @@ fn form_layout_table_property_bag_value_range(
             && text[value_range.clone()].trim_start().starts_with('{'))
         .then(|| value_range.clone())
     })
-}
-
-fn form_layout_table_counted_property_bag_value_range(
-    text: &str,
-    fields: &[Range<usize>],
-    key: TableBagKey,
-) -> Option<Range<usize>> {
-    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
-        schema.counted_property_bag_value_slot(normalized_fields, key)
-    })?;
-    let range = fields.get(slot)?.clone();
-    (scan_1c_braced_value_range(text, range.start) == Some(range.clone())).then_some(range)
 }
 
 fn is_form_property_bag_number_value(value: &str) -> bool {
@@ -26023,7 +26105,12 @@ mod tests {
         };
 
         assert!(
-            super::format_spreadsheet_chart_drawing_for_moxel(&drawing, chart).is_none(),
+            super::format_spreadsheet_chart_drawing_for_moxel(
+                &drawing,
+                drawing.format_index,
+                chart,
+            )
+            .is_none(),
             "unsupported multi-series charts must not produce partial MOXCEL"
         );
     }
