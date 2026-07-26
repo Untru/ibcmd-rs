@@ -89,19 +89,17 @@ public static class PhysicalAdapterPolicyScanner
             foreach (Match match in Uuid.Matches(literal.Value))
                 Add(counts, "uuid-literal", context, match.Value.ToLowerInvariant());
 
-        bool nameTrigger = unit.Any(token => token.Text == "==" || token.Text == "!=" || token.Text == "=>");
-        nameTrigger |= HasMethod(unit, "eq", "ne", "contains", "starts_with", "ends_with");
-        nameTrigger |= HasMacro(unit, identifier => identifier.IndexOf("match", StringComparison.OrdinalIgnoreCase) >= 0);
-        bool hasLet = unit.Any(token => token.Kind == "identifier" && token.Text == "let");
-        bool hasIfOrWhile = unit.Any(token => token.Kind == "identifier" && (token.Text == "if" || token.Text == "while"));
-        bool hasEquals = unit.Any(token => token.Text == "=");
-        bool hasElse = unit.Any(token => token.Kind == "identifier" && token.Text == "else");
-        nameTrigger |= hasLet && ((hasIfOrWhile && hasEquals) || (hasEquals && hasElse));
-        nameTrigger |= literals.Count > 0 && unit.Any(token => token.Text == "|" || token.Text == ".." || token.Text == "..=");
-        if (nameTrigger)
-            foreach (var literal in literals)
-                if (!Uuid.IsMatch(literal.Value))
-                    Add(counts, "name-special-case", context, literal.Text);
+        // A policy violation is a string used as an input to a name-routing
+        // decision.  Do not classify every literal in the surrounding Rust unit:
+        // the same unit may also contain diagnostic labels and formatted output
+        // paths, neither of which selects a physical metadata name.
+        for (int index = 0; index < unit.Count; index++)
+        {
+            var literal = unit[index];
+            if (literal.Kind == "string" && !Uuid.IsMatch(literal.Value) &&
+                IsNameRoutingLiteral(unit, index))
+                Add(counts, "name-special-case", context, literal.Text);
+        }
 
         var identifiers = unit.Where(token => token.Kind == "identifier")
             .Select(token => token.Text.ToLowerInvariant()).ToArray();
@@ -140,6 +138,29 @@ public static class PhysicalAdapterPolicyScanner
         var accepted = new HashSet<string>(names, StringComparer.Ordinal);
         for (int index = 0; index + 2 < tokens.Count; index++)
             if (tokens[index].Text == "." && accepted.Contains(tokens[index + 1].Text) && tokens[index + 2].Text == "(")
+                return true;
+        return false;
+    }
+
+    private static bool IsNameRoutingLiteral(List<Token> tokens, int index)
+    {
+        string previous = index > 0 ? tokens[index - 1].Text : "";
+        string next = index + 1 < tokens.Count ? tokens[index + 1].Text : "";
+        if (previous == "==" || previous == "!=" || next == "==" || next == "!=")
+            return true;
+        if (previous == "|" || next == "|" || previous == ".." || next == ".." ||
+            previous == "..=" || next == "..=")
+            return true;
+        if (next == "=>" || (previous == "let" && next == "="))
+            return true;
+        if (previous == "(" && index >= 3 && tokens[index - 3].Text == "." &&
+            new[] { "eq", "ne", "contains", "starts_with", "ends_with" }
+                .Contains(tokens[index - 2].Text))
+            return true;
+        for (int tokenIndex = 0; tokenIndex + 1 < index; tokenIndex++)
+            if (tokens[tokenIndex].Kind == "identifier" &&
+                tokens[tokenIndex].Text.IndexOf("match", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                tokens[tokenIndex + 1].Text == "!")
                 return true;
         return false;
     }
@@ -884,6 +905,22 @@ fn multiline(xml: &mut String) {
         Assert-InventoryAllowed -Baseline (Read-Baseline $root) -Current (New-InventoryDocument $root)
         if (@(Get-FileInventory $formBody | Where-Object category -eq 'uuid-literal').Count -ne 0) {
             throw 'Synthetic test-code or schema-accessor exclusion failed.'
+        }
+        $delimiterOnlySpecialCases = @(
+            [PhysicalAdapterPolicyScanner]::Scan(
+                'fn canonical_binding_key(kind: &str, uuid: &str) -> bool { kind != uuid && !uuid.contains(''|'') }'
+            ) | Where-Object { $_ -like 'name-special-case|*' }
+        )
+        if ($delimiterOnlySpecialCases.Count -ne 0) {
+            throw 'Character delimiters were incorrectly classified as name special cases.'
+        }
+        $diagnosticErrorSpecialCases = @(
+            [PhysicalAdapterPolicyScanner]::Scan(
+                'fn error_class(error: ParseError) -> &''static str { match error { ParseError::Broken => "broken_payload", } }'
+            ) | Where-Object { $_ -like 'name-special-case|*' }
+        )
+        if ($diagnosticErrorSpecialCases.Count -ne 0) {
+            throw 'Enum error labels were incorrectly classified as name special cases.'
         }
 
         Add-Content -LiteralPath $moduleBlob 'const EXTRA: &str = "33333333-3333-4333-8333-333333333333";'
