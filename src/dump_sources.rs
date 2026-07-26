@@ -16,6 +16,7 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::cli::DumpSourcesArgs;
+use crate::runtime_evidence_schema::{SanitizedRuntimeArgumentKind, SubprocessJournalSchema};
 
 #[derive(Debug, Serialize)]
 pub struct DumpSourcesReport {
@@ -94,10 +95,8 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
         arguments.push(format!("--db-user={db_user}"));
         arguments.push(format!("--db-pwd={}", config.db_pwd));
         sanitized_arguments.push(format!("--db-user={db_user}"));
-        sanitized_arguments.push(format!(
-            "--db-pwd={}",
-            password_source_marker(&config.password_source)
-        ));
+        sanitized_arguments.push("--db-pwd".to_owned());
+        sanitized_arguments.push(password_source_marker(&config.password_source).to_owned());
     }
 
     if let Some(user) = &config.infobase_user {
@@ -106,15 +105,16 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
     }
     if let Some(password) = &config.infobase_password {
         arguments.push(format!("--password={password}"));
-        sanitized_arguments.push(format!(
-            "--password={}",
+        sanitized_arguments.push("--password".to_owned());
+        sanitized_arguments.push(
             password_source_marker(
                 config
                     .infobase_password_source
                     .as_deref()
                     .unwrap_or("unknown"),
             )
-        ));
+            .to_owned(),
+        );
     }
 
     if let Some(extension) = &config.extension {
@@ -160,12 +160,26 @@ pub fn dump_sources(args: &DumpSourcesArgs) -> Result<DumpSourcesReport> {
 
     let mut command = Command::new(&config.ibcmd);
     command.args(&arguments);
-    let output = run_with_runtime_journal(
+    let mut output = run_with_runtime_journal(
         command,
         config.timeout,
         args.runtime_journal.as_deref(),
         &mut runtime_call,
     )?;
+    redact_runtime_output(
+        &mut output.stdout,
+        &[
+            config.db_pwd.as_str(),
+            config.infobase_password.as_deref().unwrap_or_default(),
+        ],
+    );
+    redact_runtime_output(
+        &mut output.stderr,
+        &[
+            config.db_pwd.as_str(),
+            config.infobase_password.as_deref().unwrap_or_default(),
+        ],
+    );
     let duration_ms = started.elapsed().as_millis();
 
     if output.timed_out {
@@ -373,10 +387,29 @@ fn redact_password_values(arguments: &mut [String], values: &[(&str, &str)]) {
     values.sort_by(|left, right| right.0.len().cmp(&left.0.len()).then(left.0.cmp(right.0)));
     for (value, marker) in values {
         for argument in arguments.iter_mut() {
-            if !argument.contains("<password-source:") {
-                *argument = argument.replace(value, marker);
+            if SubprocessJournalSchema::argument_kind(argument)
+                == SanitizedRuntimeArgumentKind::Ordinary
+                && argument.contains(value)
+            {
+                // Preserve only schema-recognized evidence verbatim.  An
+                // ordinary argument containing a secret collapses to the
+                // standalone marker, preventing prefix/suffix or mixed-marker
+                // strings from acquiring evidence semantics in the journal.
+                *argument = marker.to_owned();
             }
         }
+    }
+}
+
+fn redact_runtime_output(text: &mut String, values: &[&str]) {
+    let mut values = values
+        .iter()
+        .copied()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| right.len().cmp(&left.len()).then(left.cmp(right)));
+    for value in values {
+        *text = text.replace(value, "<redacted-sensitive-runtime-value>");
     }
 }
 
@@ -841,6 +874,89 @@ mod tests {
         assert!(!joined.contains("alpha"));
         assert!(joined.contains("<password-source:settings>"));
         assert!(joined.contains("<password-source:environment>"));
+    }
+
+    #[test]
+    fn runtime_journal_accepts_only_exact_evidence_and_redacts_hostile_marker_shapes() {
+        let raw_password = "top-secret-password";
+        let exact_password_markers = [
+            "<password-source:none>".to_owned(),
+            "<password-source:inline>".to_owned(),
+            "<password-source:settings>".to_owned(),
+            "<password-source:environment>".to_owned(),
+        ];
+        let replacement_marker = exact_password_markers[3].clone();
+        let exact_query_marker =
+            SubprocessJournalSchema::query_digest_marker("SELECT top-secret-query");
+        let mut arguments = exact_password_markers.to_vec();
+        arguments.extend([
+            exact_query_marker.clone(),
+            format!("<password-source:environment>{raw_password}"),
+            format!("prefix<password-source:settings>{raw_password}"),
+            format!("<password-source:<query-sha256:{raw_password}"),
+            format!("<query-sha256:{raw_password}>"),
+            format!("<query-sha256:{}>{raw_password}", "a".repeat(63)),
+            format!("<query-sha256:{}>{raw_password}", "A".repeat(64)),
+            format!(
+                "prefix<query-sha256:{}>suffix-{raw_password}",
+                "a".repeat(64)
+            ),
+        ]);
+
+        redact_password_values(
+            &mut arguments,
+            &[(raw_password, replacement_marker.as_str())],
+        );
+
+        assert_eq!(
+            &arguments[..exact_password_markers.len()],
+            &exact_password_markers
+        );
+        assert_eq!(arguments[exact_password_markers.len()], exact_query_marker);
+        assert!(
+            arguments
+                .iter()
+                .skip(exact_password_markers.len() + 1)
+                .all(|argument| {
+                    SubprocessJournalSchema::argument_kind(argument)
+                        == SanitizedRuntimeArgumentKind::PasswordSourceMarker
+                })
+        );
+
+        let runtime_call = SanitizedRuntimeCall {
+            executable: PathBuf::from("ibcmd"),
+            arguments,
+            started_unix_ms: 1,
+            ended_unix_ms: Some(2),
+            status: "failed".to_owned(),
+            exit_code: Some(1),
+            timed_out: false,
+            exception: Some("nested ibcmd exited without exposing arguments".to_owned()),
+        };
+        let serialized = serde_json::to_string(&runtime_call).unwrap();
+        let journal_path = env::temp_dir().join(format!(
+            "ibcmd-rs-native-runtime-hostile-marker-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        persist_runtime_journal(Some(&journal_path), &runtime_call).unwrap();
+        let persisted = fs::read_to_string(&journal_path).unwrap();
+        assert!(!serialized.contains(raw_password));
+        assert!(!persisted.contains(raw_password));
+        assert!(!serialized.contains("SELECT top-secret-query"));
+        assert!(!persisted.contains("SELECT top-secret-query"));
+        for marker in exact_password_markers {
+            assert!(serialized.contains(&marker));
+            assert!(persisted.contains(&marker));
+        }
+        assert!(serialized.contains(&exact_query_marker));
+        assert!(persisted.contains(&exact_query_marker));
+        assert!(!serialized.contains("prefix<password-source:"));
+        assert!(!serialized.contains("prefix<query-sha256:"));
+
+        let mut child_output = format!("command echoed password={raw_password}");
+        redact_runtime_output(&mut child_output, &[raw_password]);
+        assert!(!child_output.contains(raw_password));
+        let _ = fs::remove_file(journal_path);
     }
 
     #[test]
