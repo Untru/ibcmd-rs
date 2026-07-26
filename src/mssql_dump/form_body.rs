@@ -45,8 +45,9 @@ use crate::form_schema::{
 };
 use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue, FormChoiceListItemPart,
-    FormChoiceParameterValuePart, FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy,
-    WriterRuleKey, WriterRuleLookupError, bundled_writer_rules,
+    FormChoiceParameterValue as SchemaFormChoiceParameterValue, FormChoiceParameterValuePart,
+    FormChoiceParametersEmptyCollection, SchemaError, WriterPolicy, WriterRuleKey,
+    WriterRuleLookupError, bundled_writer_rules, parse_form_choice_parameters,
 };
 use ibcmd_xml::{DcsListSettingsTailError, emit_form_list_settings_tail};
 use sha2::{Digest, Sha256};
@@ -9171,203 +9172,45 @@ pub(super) fn parse_form_input_field_choice_parameters(
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChoiceParameter>> {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    if fields.first()?.trim() != "0" {
-        return None;
-    }
-    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if fields.len() != count.checked_mul(2)?.checked_add(2)? {
-        return None;
-    }
-    fields[2..]
-        .chunks_exact(2)
-        .map(|pair| {
-            let (presentation, value) = parse_form_choice_parameter_value(
-                pair[1],
-                type_index,
-                type_index_collisions,
-                object_refs,
-            )?;
-            Some(FormChoiceParameter {
-                name: parse_exact_1c_quoted_string(pair[0].trim())?,
-                presentation,
-                value,
-            })
-        })
-        .collect()
-}
-
-fn parse_form_choice_parameter_value(
-    field: &str,
-    type_index: &BTreeMap<String, String>,
-    type_index_collisions: &BTreeSet<String>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<(Vec<(String, String)>, FormChoiceParameterValue)> {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    if fields.len() != 3
-        || parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() != Some("#")
-        || fields.get(1)?.trim() != FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
-    {
-        return None;
-    }
-
-    let payload = fields.get(2)?.trim();
-    if scan_1c_braced_value(payload, 0) != Some(payload.len()) {
-        return None;
-    }
-    let payload = split_1c_braced_fields(payload, 0)?;
-    if payload.len() != 6
-        || payload.first()?.trim() != "0"
-        || !matches!(payload.get(1)?.trim(), "0" | "1")
-    {
-        return None;
-    }
-    let presentation = parse_form_input_field_choice_list_presentation(payload.get(5)?)?;
-    let typed = payload.get(2)?.trim();
-    if scan_1c_braced_value(typed, 0) != Some(typed.len()) {
-        return None;
-    }
-    let typed = split_1c_braced_fields(typed, 0)?;
-    let value = match typed.as_slice() {
-        [kind, value]
-            if kind.trim() == r#""B""#
-                && payload.get(1)?.trim() == "1"
-                && form_choice_parameter_payload_ids_are_nil(&payload) =>
-        {
-            match value.trim() {
-                "0" => FormChoiceParameterValue::Boolean(false),
-                "1" => FormChoiceParameterValue::Boolean(true),
-                _ => return None,
-            }
-        }
-        [kind]
-            if kind.trim() == r#""U""#
-                && payload.get(1)?.trim() == "0"
-                && !form_choice_parameter_payload_ids_are_nil(&payload) =>
-        {
-            FormChoiceParameterValue::DesignTimeRef(parse_form_enum_design_time_reference(
-                payload.get(3)?,
-                payload.get(4)?,
-                type_index,
-                type_index_collisions,
-                object_refs,
-            )?)
-        }
-        [kind, fixed_array_type, values]
-            if parse_exact_1c_quoted_string(kind.trim()).as_deref() == Some("#")
-                && fixed_array_type
-                    .trim()
-                    .eq_ignore_ascii_case(FIXED_ARRAY_TYPE_UUID)
-                && payload.get(1)?.trim() == "1"
-                && form_choice_parameter_payload_ids_are_nil(&payload) =>
-        {
-            FormChoiceParameterValue::FixedArray(parse_form_choice_parameter_fixed_array(
-                values,
-                type_index,
-                type_index_collisions,
-                object_refs,
-            )?)
-        }
-        _ => return None,
-    };
-    Some((presentation, value))
-}
-
-fn form_choice_parameter_payload_ids_are_nil(payload: &[&str]) -> bool {
-    payload
-        .get(3)
-        .and_then(|value| Uuid::parse_str(value.trim()).ok())
-        .is_some_and(|value| value.is_nil())
-        && payload
-            .get(4)
-            .and_then(|value| Uuid::parse_str(value.trim()).ok())
-            .is_some_and(|value| value.is_nil())
-}
-
-fn parse_form_choice_parameter_fixed_array(
-    field: &str,
-    type_index: &BTreeMap<String, String>,
-    type_index_collisions: &BTreeSet<String>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<FormChoiceParameterArrayItem>> {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    let count = fields.first()?.trim().parse::<usize>().ok()?;
-    if fields.len() != count.checked_add(1)? {
-        return None;
-    }
-    fields
-        .iter()
-        .skip(1)
-        .map(|field| {
-            parse_form_choice_parameter_array_item(
-                field,
-                type_index,
-                type_index_collisions,
-                object_refs,
-            )
-        })
-        .collect()
-}
-
-fn parse_form_choice_parameter_array_item(
-    field: &str,
-    type_index: &BTreeMap<String, String>,
-    type_index_collisions: &BTreeSet<String>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<FormChoiceParameterArrayItem> {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    if fields.len() != 3
-        || parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() != Some("#")
-        || fields.get(1)?.trim() != FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
-    {
-        return None;
-    }
-    let payload = fields.get(2)?.trim();
-    if scan_1c_braced_value(payload, 0) != Some(payload.len()) {
-        return None;
-    }
-    let payload = split_1c_braced_fields(payload, 0)?;
-    let [zero, mode, typed, type_id, value_id, presentation] = payload.as_slice() else {
-        return None;
-    };
-    if zero.trim() != "0" || mode.trim() != "0" {
-        return None;
-    }
-    let typed = typed.trim();
-    if scan_1c_braced_value(typed, 0) != Some(typed.len())
-        || !matches!(
-            split_1c_braced_fields(typed, 0).as_deref(),
-            Some([kind]) if kind.trim() == r#""U""#
-        )
-    {
-        return None;
-    }
-    Some(FormChoiceParameterArrayItem {
-        presentation: parse_form_input_field_choice_list_presentation(presentation)?,
-        value_ref: parse_form_enum_design_time_reference(
+    let parameters = parse_form_choice_parameters(field, |type_id, value_id| {
+        parse_form_enum_design_time_reference(
             type_id,
             value_id,
             type_index,
             type_index_collisions,
             object_refs,
-        )?,
-    })
+        )
+    })?;
+    parameters
+        .items()
+        .iter()
+        .map(|parameter| {
+            let value = match parameter.value() {
+                SchemaFormChoiceParameterValue::Boolean(value) => {
+                    FormChoiceParameterValue::Boolean(*value)
+                }
+                SchemaFormChoiceParameterValue::DesignTimeRef(value) => {
+                    FormChoiceParameterValue::DesignTimeRef(value.clone())
+                }
+                SchemaFormChoiceParameterValue::FixedArray(values) => {
+                    FormChoiceParameterValue::FixedArray(
+                        values
+                            .iter()
+                            .map(|value| FormChoiceParameterArrayItem {
+                                presentation: value.presentation().to_vec(),
+                                value_ref: value.value_ref().to_owned(),
+                            })
+                            .collect(),
+                    )
+                }
+            };
+            Some(FormChoiceParameter {
+                name: parameter.name().to_owned(),
+                presentation: parameter.presentation().to_vec(),
+                value,
+            })
+        })
+        .collect()
 }
 
 pub(super) fn parse_form_enum_design_time_reference(

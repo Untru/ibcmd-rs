@@ -15,6 +15,486 @@ use std::sync::OnceLock;
 use serde::de::{Error as DeError, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
+
+/// Parsed, schema-owned representation of a Form `InputField.choiceParameters`
+/// raw slot.  The grammar is intentionally closed: values which are not one of
+/// the documented boolean, design-time-reference, or fixed-array shapes are
+/// rejected rather than partially interpreted.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceParameters {
+    items: Vec<FormChoiceParameter>,
+}
+
+impl FormChoiceParameters {
+    pub fn items(&self) -> &[FormChoiceParameter] {
+        &self.items
+    }
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceParameter {
+    name: String,
+    presentation: Vec<(String, String)>,
+    value: FormChoiceParameterValue,
+}
+
+impl FormChoiceParameter {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn presentation(&self) -> &[(String, String)] {
+        &self.presentation
+    }
+    pub fn value(&self) -> &FormChoiceParameterValue {
+        &self.value
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterValue {
+    Boolean(bool),
+    DesignTimeRef(String),
+    FixedArray(Vec<FormChoiceParameterArrayItem>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceParameterArrayItem {
+    presentation: Vec<(String, String)>,
+    value_ref: String,
+}
+
+impl FormChoiceParameterArrayItem {
+    pub fn presentation(&self) -> &[(String, String)] {
+        &self.presentation
+    }
+    pub fn value_ref(&self) -> &str {
+        &self.value_ref
+    }
+}
+
+const FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+const FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE: &str = "4500381b-db30-4a10-9db4-990038032acf";
+const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
+const MAX_FORM_CHOICE_PARAMETERS_RAW_BYTES: usize = 64 * 1024;
+const MAX_FORM_CHOICE_PARAMETERS_ITEMS: usize = 512;
+const MAX_FORM_CHOICE_PARAMETERS_PRESENTATION_ITEMS: usize = 128;
+const MAX_FORM_CHOICE_PARAMETERS_FIXED_ARRAY_ITEMS: usize = 512;
+
+/// Decode the raw `ChoiceParameters` envelope. `resolve_design_time_ref` is
+/// deliberately the only domain hook: it receives the raw type/value IDs and
+/// must return a canonical reference. A missing resolution rejects the entire
+/// value, preventing an unsupported value from being emitted as a guess.
+pub fn parse_form_choice_parameters<F>(
+    raw: &str,
+    mut resolve_design_time_ref: F,
+) -> Option<FormChoiceParameters>
+where
+    F: FnMut(&str, &str) -> Option<String>,
+{
+    if raw.len() > MAX_FORM_CHOICE_PARAMETERS_RAW_BYTES {
+        return None;
+    }
+    let fields = braced_fields_bounded(raw, MAX_FORM_CHOICE_PARAMETERS_ITEMS * 2 + 2)?;
+    if fields.first()?.trim() != "0" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count > MAX_FORM_CHOICE_PARAMETERS_ITEMS {
+        return None;
+    }
+    if fields.len() != count.checked_mul(2)?.checked_add(2)? {
+        return None;
+    }
+    let mut items = Vec::with_capacity(count);
+    for pair in fields[2..].chunks_exact(2) {
+        let name = exact_1c_string(pair[0])?;
+        let (presentation, value) =
+            parse_form_choice_parameter_value(pair[1], &mut resolve_design_time_ref)?;
+        items.push(FormChoiceParameter {
+            name,
+            presentation,
+            value,
+        });
+    }
+    Some(FormChoiceParameters { items })
+}
+
+fn parse_form_choice_parameter_value<F>(
+    raw: &str,
+    resolve: &mut F,
+) -> Option<(Vec<(String, String)>, FormChoiceParameterValue)>
+where
+    F: FnMut(&str, &str) -> Option<String>,
+{
+    let fields = braced_fields_bounded(raw, 3)?;
+    if fields.len() != 3
+        || exact_1c_string(fields[0]).as_deref() != Some("#")
+        || fields[1].trim() != FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR
+    {
+        return None;
+    }
+    let payload = braced_fields_bounded(fields[2], 6)?;
+    if payload.len() != 6 || payload[0].trim() != "0" || !matches!(payload[1].trim(), "0" | "1") {
+        return None;
+    }
+    let presentation = parse_choice_parameter_presentation(payload[5])?;
+    let typed = braced_fields_bounded(payload[2], 3)?;
+    let value = match typed.as_slice() {
+        [kind, value]
+            if kind.trim() == r#""B""# && payload[1].trim() == "1" && nil_ids(&payload) =>
+        {
+            match value.trim() {
+                "0" => FormChoiceParameterValue::Boolean(false),
+                "1" => FormChoiceParameterValue::Boolean(true),
+                _ => return None,
+            }
+        }
+        [kind] if kind.trim() == r#""U""# && payload[1].trim() == "0" && non_nil_ids(&payload) => {
+            FormChoiceParameterValue::DesignTimeRef(resolve(payload[3].trim(), payload[4].trim())?)
+        }
+        [kind, array_type, values]
+            if exact_1c_string(kind).as_deref() == Some("#")
+                && array_type
+                    .trim()
+                    .eq_ignore_ascii_case(FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE)
+                && payload[1].trim() == "1"
+                && nil_ids(&payload) =>
+        {
+            FormChoiceParameterValue::FixedArray(parse_choice_parameter_array(values, resolve)?)
+        }
+        _ => return None,
+    };
+    Some((presentation, value))
+}
+
+fn parse_choice_parameter_array<F>(
+    raw: &str,
+    resolve: &mut F,
+) -> Option<Vec<FormChoiceParameterArrayItem>>
+where
+    F: FnMut(&str, &str) -> Option<String>,
+{
+    let fields = braced_fields_bounded(raw, MAX_FORM_CHOICE_PARAMETERS_FIXED_ARRAY_ITEMS + 1)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    if count > MAX_FORM_CHOICE_PARAMETERS_FIXED_ARRAY_ITEMS {
+        return None;
+    }
+    if fields.len() != count.checked_add(1)? {
+        return None;
+    }
+    fields[1..].iter().map(|item| {
+        let fields = braced_fields_bounded(item, 3)?;
+        if fields.len() != 3 || exact_1c_string(fields[0]).as_deref() != Some("#") || fields[1].trim() != FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR { return None; }
+        let payload = braced_fields_bounded(fields[2], 6)?;
+        let [zero, mode, typed, type_id, value_id, presentation] = payload.as_slice() else { return None; };
+        if zero.trim() != "0" || mode.trim() != "0" || !matches!(braced_fields_bounded(typed, 1)?.as_slice(), [kind] if kind.trim() == r#""U""#) || !non_nil_pair(type_id, value_id) { return None; }
+        Some(FormChoiceParameterArrayItem { presentation: parse_choice_parameter_presentation(presentation)?, value_ref: resolve(type_id.trim(), value_id.trim())? })
+    }).collect()
+}
+
+fn nil_ids(payload: &[&str]) -> bool {
+    payload
+        .get(3)
+        .is_some_and(|id| id.trim().eq_ignore_ascii_case(NIL_UUID))
+        && payload
+            .get(4)
+            .is_some_and(|id| id.trim().eq_ignore_ascii_case(NIL_UUID))
+}
+
+fn non_nil_ids(payload: &[&str]) -> bool {
+    matches!((payload.get(3), payload.get(4)), (Some(type_id), Some(value_id)) if non_nil_pair(type_id, value_id))
+}
+
+fn non_nil_pair(type_id: &str, value_id: &str) -> bool {
+    Uuid::parse_str(type_id.trim()).is_ok_and(|id| !id.is_nil())
+        && Uuid::parse_str(value_id.trim()).is_ok_and(|id| !id.is_nil())
+}
+
+fn parse_choice_parameter_presentation(raw: &str) -> Option<Vec<(String, String)>> {
+    let fields = braced_fields_bounded(raw, MAX_FORM_CHOICE_PARAMETERS_PRESENTATION_ITEMS + 2)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count > MAX_FORM_CHOICE_PARAMETERS_PRESENTATION_ITEMS {
+        return None;
+    }
+    if fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    fields[2..]
+        .iter()
+        .map(|item| {
+            let pair = braced_fields_bounded(item, 2)?;
+            match pair.as_slice() {
+                [lang, content] => Some((exact_1c_string(lang)?, exact_1c_string(content)?)),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn exact_1c_string(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let mut chars = raw.char_indices();
+    if chars.next()?.1 != '"' {
+        return None;
+    }
+    let mut value = String::new();
+    while let Some((index, ch)) = chars.next() {
+        if ch == '"' {
+            if matches!(chars.clone().next(), Some((_, '"'))) {
+                value.push('"');
+                chars.next();
+                continue;
+            }
+            return (index + 1 == raw.len()).then_some(value);
+        }
+        value.push(ch);
+    }
+    None
+}
+
+fn braced_fields_bounded(raw: &str, max_fields: usize) -> Option<Vec<&str>> {
+    let raw = raw.trim();
+    if scan_braced(raw, 0)? != raw.len() {
+        return None;
+    }
+    let inner = &raw[1..raw.len() - 1];
+    let mut result = Vec::with_capacity(max_fields.min(16));
+    let mut start = 0;
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut chars = inner.char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if quoted {
+            if ch == '"' {
+                if matches!(chars.peek(), Some((_, '"'))) {
+                    chars.next();
+                } else {
+                    quoted = false;
+                }
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' => depth = depth.checked_add(1)?,
+            '}' => depth = depth.checked_sub(1)?,
+            ',' if depth == 0 => {
+                if result.len() >= max_fields {
+                    return None;
+                }
+                result.push(inner[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    if quoted || depth != 0 {
+        return None;
+    }
+    if result.len() >= max_fields {
+        return None;
+    }
+    result.push(inner[start..].trim());
+    Some(result)
+}
+
+fn scan_braced(raw: &str, start: usize) -> Option<usize> {
+    if raw.get(start..)?.chars().next()? != '{' {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut chars = raw[start..].char_indices().peekable();
+    while let Some((index, ch)) = chars.next() {
+        if quoted {
+            if ch == '"' {
+                if matches!(chars.peek(), Some((_, '"'))) {
+                    chars.next();
+                } else {
+                    quoted = false;
+                }
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' => depth = depth.checked_add(1)?,
+            '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(start + index + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod form_choice_parameters_tests {
+    use super::*;
+
+    const OWNER: &str = "11111111-1111-4111-8111-111111111111";
+    const VALUE: &str = "22222222-2222-4222-8222-222222222222";
+    const NIL: &str = "00000000-0000-0000-0000-000000000000";
+
+    fn presentation() -> String {
+        "{1,1,{\"en\",\"value\"}}".to_owned()
+    }
+    fn reference() -> String {
+        format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,0,{{\"U\"}},{OWNER},{VALUE},{}}}}}",
+            presentation()
+        )
+    }
+    fn envelope(value: &str) -> String {
+        format!("{{0,1,\"parameter\",{value}}}")
+    }
+    fn resolver(type_id: &str, value_id: &str) -> Option<String> {
+        (type_id == OWNER && value_id == VALUE).then_some("Enum.Status.EnumValue.Active".to_owned())
+    }
+
+    #[test]
+    fn form_choice_parameters_decodes_boolean_reference_and_fixed_array() {
+        let boolean = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"B\",1}},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        let parsed = parse_form_choice_parameters(&envelope(&boolean), resolver).unwrap();
+        assert!(matches!(
+            parsed.items()[0].value(),
+            FormChoiceParameterValue::Boolean(true)
+        ));
+        let parsed = parse_form_choice_parameters(&envelope(&reference()), resolver).unwrap();
+        assert!(
+            matches!(parsed.items()[0].value(), FormChoiceParameterValue::DesignTimeRef(value) if value == "Enum.Status.EnumValue.Active")
+        );
+        let array = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE},{{1,{}}}}}",
+            reference()
+        );
+        let fixed = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{array},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        assert!(
+            matches!(parse_form_choice_parameters(&envelope(&fixed), resolver).unwrap().items()[0].value(), FormChoiceParameterValue::FixedArray(values) if values.len() == 1)
+        );
+    }
+
+    #[test]
+    fn form_choice_parameters_fail_closed_on_malformed_or_unsupported_values() {
+        let bad_count = "{0,2,\"one\",{}}";
+        assert!(parse_form_choice_parameters(bad_count, resolver).is_none());
+        assert!(parse_form_choice_parameters("{0,18446744073709551615}", resolver).is_none());
+        let bad_boolean = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"B\",2}},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        assert!(parse_form_choice_parameters(&envelope(&bad_boolean), resolver).is_none());
+        let invalid_type = reference().replace(OWNER, "not-a-type-id");
+        assert!(parse_form_choice_parameters(&envelope(&invalid_type), resolver).is_none());
+        let recursive_array = [
+            "{\"#\",",
+            FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE,
+            ",{1,{\"#\",",
+            FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE,
+            ",{0}}}}",
+        ]
+        .concat();
+        let fixed = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{recursive_array},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        assert!(parse_form_choice_parameters(&envelope(&fixed), resolver).is_none());
+        let unsupported = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{{\"S\",\"opaque\"}},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        assert!(parse_form_choice_parameters(&envelope(&unsupported), resolver).is_none());
+    }
+
+    #[test]
+    fn form_choice_parameters_validate_reference_ids_before_the_resolver() {
+        let permissive = |_: &str, _: &str| Some("forged".to_owned());
+        assert!(
+            parse_form_choice_parameters(
+                &envelope(&reference().replace(OWNER, "not-a-uuid")),
+                permissive,
+            )
+            .is_none()
+        );
+        assert!(
+            parse_form_choice_parameters(
+                &envelope(&reference().replace(VALUE, "also-not-a-uuid")),
+                permissive,
+            )
+            .is_none()
+        );
+        assert!(
+            parse_form_choice_parameters(&envelope(&reference().replace(OWNER, NIL)), permissive,)
+                .is_none()
+        );
+        assert!(
+            parse_form_choice_parameters(&envelope(&reference().replace(VALUE, NIL)), permissive,)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn form_choice_parameters_bound_raw_input_and_each_collection() {
+        let permissive = |_: &str, _: &str| Some("resolved".to_owned());
+        assert!(
+            parse_form_choice_parameters(
+                &format!("{{{}}}", "x".repeat(MAX_FORM_CHOICE_PARAMETERS_RAW_BYTES)),
+                permissive,
+            )
+            .is_none()
+        );
+        assert!(
+            parse_form_choice_parameters(
+                &format!("{{0,{}}}", MAX_FORM_CHOICE_PARAMETERS_ITEMS + 1),
+                permissive,
+            )
+            .is_none()
+        );
+        let oversized_presentation = format!(
+            "{{1,{}}}",
+            MAX_FORM_CHOICE_PARAMETERS_PRESENTATION_ITEMS + 1
+        );
+        let bad_presentation = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,0,{{\"U\"}},{OWNER},{VALUE},{oversized_presentation}}}}}"
+        );
+        assert!(parse_form_choice_parameters(&envelope(&bad_presentation), permissive).is_none());
+        let oversized_array = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_FIXED_ARRAY_TYPE},{{{}}}}}",
+            MAX_FORM_CHOICE_PARAMETERS_FIXED_ARRAY_ITEMS + 1
+        );
+        let bad_array = format!(
+            "{{\"#\",{FORM_CHOICE_PARAMETER_ITEM_DISCRIMINATOR},{{0,1,{oversized_array},{NIL},{NIL},{}}}}}",
+            presentation()
+        );
+        assert!(parse_form_choice_parameters(&envelope(&bad_array), permissive).is_none());
+        assert!(
+            parse_form_choice_parameters(
+                &format!(
+                    "{{{}}}",
+                    ",".repeat(MAX_FORM_CHOICE_PARAMETERS_ITEMS * 2 + 2)
+                ),
+                permissive,
+            )
+            .is_none()
+        );
+    }
+}
 
 /// Embedded EDT-derived model inventory.
 pub const BUNDLED_MODEL_INVENTORY_JSON: &str =
