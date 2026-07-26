@@ -1,8 +1,12 @@
 use super::*;
+use crate::compiler::families::assets::{
+    ConfigRowId, SourceAssetRelationError, SourceAssetRole, SourceAssetRoute,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct BodyOwnerSourceReference {
     pub(super) kind: String,
+    pub(super) canonical_name: String,
     pub(super) object_path: PathBuf,
 }
 
@@ -40,6 +44,7 @@ pub(super) fn build_body_owner_source_index_from_texts(
             row.file_name.clone(),
             BodyOwnerSourceReference {
                 kind: kind.to_string(),
+                canonical_name: header.name.clone(),
                 object_path,
             },
         );
@@ -50,16 +55,13 @@ pub(super) fn build_body_owner_source_index_from_texts(
 pub(super) fn configuration_module_groups(file_names: &BTreeSet<String>) -> BTreeSet<String> {
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
     suffixes_by_id
         .into_iter()
@@ -81,16 +83,13 @@ pub(super) fn standalone_content_asset_file_names<'a>(
 ) -> BTreeSet<String> {
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
 
     suffixes_by_id
@@ -179,10 +178,9 @@ pub(super) fn dynamic_source_asset(
     file_name: &str,
     bytes: &[u8],
 ) -> Option<SourceAsset> {
-    let (owner_uuid, suffix) = file_name.rsplit_once('.')?;
-    if owner_uuid.is_empty() {
-        return None;
-    }
+    let row_id = ConfigRowId::parse(file_name).ok()?;
+    let owner_uuid = row_id.owner();
+    let suffix = row_id.suffix_component();
 
     if let Some(form_ref) = context.form_refs.get(owner_uuid)
         && suffix != "0"
@@ -218,40 +216,15 @@ pub(super) fn dynamic_source_asset(
     }
 
     let owner = context.body_owners.get(owner_uuid)?;
-    if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
-        .route(
-            "Role",
-            crate::compiler::families::assets::SourceAssetRole::Rights,
-        )
-        .filter(|route| route.suffix().strip_prefix('.') == Some(suffix))
-        && owner.kind == "Role"
-        && parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
-            .is_some()
-    {
-        return Some(SourceAsset {
-            primary_path: owner.object_path.join(route.relative_path()),
-            kind: SourceAssetKind::RoleRights,
-        });
-    }
-    if owner.kind == "AccumulationRegister"
-        && suffix == "3"
-        && parse_accumulation_register_aggregates_blob(bytes).is_some()
-    {
-        let register_name = context
-            .object_refs
-            .get(owner_uuid)
-            .and_then(|reference| reference.strip_prefix("AccumulationRegister."))
-            .map(str::to_string)
-            .or_else(|| {
-                owner
-                    .object_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })?;
-        return Some(SourceAsset {
-            primary_path: owner.object_path.join("Ext").join("Aggregates.xml"),
-            kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
-        });
+    if let Some(asset) = dynamic_owner_bound_source_asset(
+        &row_id,
+        owner,
+        context.object_refs.get(owner_uuid).map(String::as_str),
+        bytes,
+        context.role_rights_object_refs,
+        context.field_refs,
+    ) {
+        return Some(asset);
     }
     if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
         .route_by_suffix(&owner.kind, suffix)
@@ -303,6 +276,88 @@ pub(super) fn dynamic_source_asset(
         });
     }
     None
+}
+
+pub(super) fn dynamic_owner_bound_source_asset(
+    row_id: &ConfigRowId<'_>,
+    owner: &BodyOwnerSourceReference,
+    owner_reference: Option<&str>,
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+) -> Option<SourceAsset> {
+    let owner_family = FamilyId::parse(&owner.kind).ok()?;
+    let route = crate::compiler::families::assets::SourceAssetRegistry
+        .owner_bound_relation(&owner_family, row_id.suffix())
+        .ok()?;
+    owner_bound_source_asset(
+        route,
+        &owner.object_path,
+        &owner.canonical_name,
+        owner_reference,
+        bytes,
+        object_refs,
+        field_refs,
+    )
+    .ok()
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum OwnerBoundSourceAssetFailure {
+    Decoder,
+    Relation(SourceAssetRelationError),
+}
+
+const ROLE_RIGHTS_DECODER_MISS: &str = "role_rights_decoder_failed";
+const ACCUMULATION_REGISTER_AGGREGATES_DECODER_MISS: &str =
+    "accumulation_register_aggregates_decoder_failed";
+
+pub(super) fn owner_bound_source_asset(
+    route: &SourceAssetRoute,
+    object_path: &Path,
+    header_name: &str,
+    owner_reference: Option<&str>,
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+) -> std::result::Result<SourceAsset, OwnerBoundSourceAssetFailure> {
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    match route.role() {
+        SourceAssetRole::Rights => {
+            parse_role_rights_blob(bytes, object_refs, field_refs)
+                .ok_or(OwnerBoundSourceAssetFailure::Decoder)?;
+            registry
+                .canonical_owner_name(route, header_name, owner_reference)
+                .map_err(OwnerBoundSourceAssetFailure::Relation)?;
+            Ok(SourceAsset {
+                primary_path: object_path.join(route.relative_path()),
+                kind: SourceAssetKind::RoleRights,
+            })
+        }
+        SourceAssetRole::Aggregates => {
+            parse_accumulation_register_aggregates_blob(bytes)
+                .ok_or(OwnerBoundSourceAssetFailure::Decoder)?;
+            let register_name = registry
+                .canonical_owner_name(route, header_name, owner_reference)
+                .map_err(OwnerBoundSourceAssetFailure::Relation)?
+                .to_owned();
+            Ok(SourceAsset {
+                primary_path: object_path.join(route.relative_path()),
+                kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
+            })
+        }
+        _ => Err(OwnerBoundSourceAssetFailure::Relation(
+            SourceAssetRelationError::UnsupportedFamily,
+        )),
+    }
+}
+
+fn owner_bound_decoder_miss(role: SourceAssetRole) -> Option<&'static str> {
+    match role {
+        SourceAssetRole::Rights => Some(ROLE_RIGHTS_DECODER_MISS),
+        SourceAssetRole::Aggregates => Some(ACCUMULATION_REGISTER_AGGREGATES_DECODER_MISS),
+        _ => None,
+    }
 }
 
 pub(super) fn is_binary_module_container(bytes: &[u8]) -> bool {
@@ -524,16 +579,13 @@ pub(super) fn source_asset_paths_with_indexes(
         .collect::<BTreeSet<_>>();
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in &file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
     let role_rights_object_refs = build_role_rights_object_reference_index(object_refs, form_refs);
 
@@ -678,9 +730,13 @@ pub(super) fn source_asset_discovery_misses(
     }
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
-        if let Some((owner_id, suffix)) = file_name.rsplit_once('.') {
-            suffixes_by_id.entry(owner_id).or_default().insert(suffix);
-        }
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
+            continue;
+        };
+        suffixes_by_id
+            .entry(row_id.owner())
+            .or_default()
+            .insert(row_id.suffix_component());
     }
     for (owner_id, suffixes) in suffixes_by_id {
         if !is_configuration_module_group(&suffixes) {
@@ -903,6 +959,8 @@ pub(super) fn source_assets_from_metadata_text_inner(
     let kind = row.kind.as_deref()?;
     let folder = row.folder?;
     let header = row.header.as_ref()?;
+    let owner_family = FamilyId::parse(kind).ok()?;
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
     let object_path = if kind == "Subsystem" {
         subsystem_refs
             .get(uuid)
@@ -955,6 +1013,39 @@ pub(super) fn source_assets_from_metadata_text_inner(
         }
     }
 
+    if let Some(route) = registry.owner_bound_route(&owner_family) {
+        let body_id = format!("{uuid}{}", route.suffix());
+        if file_names.contains(body_id.as_str()) {
+            let row_id = ConfigRowId::parse(&body_id).ok()?;
+            let route = registry
+                .owner_bound_relation(&owner_family, row_id.suffix())
+                .ok()?;
+            let relation_result = rows_by_file_name
+                .get(body_id.as_str())
+                .and_then(|row| decode_hex(&row.binary_hex).ok())
+                .map(|bytes| {
+                    owner_bound_source_asset(
+                        route,
+                        &object_path,
+                        &header.name,
+                        object_refs.get(uuid).map(String::as_str),
+                        &bytes,
+                        object_refs,
+                        field_refs,
+                    )
+                })
+                .unwrap_or(Err(OwnerBoundSourceAssetFailure::Decoder));
+            match relation_result {
+                Ok(asset) => assets.push((body_id, asset)),
+                Err(OwnerBoundSourceAssetFailure::Decoder) => {
+                    let reason = owner_bound_decoder_miss(route.role())?;
+                    misses.insert(body_id, reason.to_owned());
+                }
+                Err(OwnerBoundSourceAssetFailure::Relation(_)) => {}
+            }
+        }
+    }
+
     let body_id = format!("{uuid}.0");
     if file_names.contains(body_id.as_str()) {
         let asset = match kind {
@@ -988,26 +1079,6 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 primary_path: object_path.join("Ext").join("WSDefinition.xml"),
                 kind: SourceAssetKind::WsDefinition,
             }),
-            "Role" => {
-                let route = crate::compiler::families::assets::SourceAssetRegistry.route(
-                    "Role",
-                    crate::compiler::families::assets::SourceAssetRole::Rights,
-                )?;
-                let parsed = rows_by_file_name
-                    .get(body_id.as_str())
-                    .and_then(|row| decode_hex(&row.binary_hex).ok())
-                    .and_then(|bytes| parse_role_rights_blob(&bytes, object_refs, field_refs))
-                    .is_some();
-                if parsed {
-                    Some(SourceAsset {
-                        primary_path: object_path.join(route.relative_path()),
-                        kind: SourceAssetKind::RoleRights,
-                    })
-                } else {
-                    misses.insert(body_id.clone(), "role_rights_decoder_failed".to_string());
-                    None
-                }
-            }
             _ => None,
         };
         if let Some(asset) = asset {
@@ -1054,55 +1125,19 @@ pub(super) fn source_assets_from_metadata_text_inner(
         }
     }
 
-    let mapped_ids = assets
-        .iter()
-        .map(|(body_id, _)| body_id.clone())
-        .chain(misses.keys().cloned())
-        .collect::<BTreeSet<_>>();
-    let object_row_prefix = format!("{uuid}.");
     let preferred_help_body_id = preferred_help_body_id(kind, uuid);
-    if kind == "AccumulationRegister" {
-        let aggregates_id = format!("{uuid}.3");
-        if file_names.contains(aggregates_id.as_str()) && !mapped_ids.contains(&aggregates_id) {
-            let parsed = rows_by_file_name
-                .get(aggregates_id.as_str())
-                .and_then(|row| decode_hex(&row.binary_hex).ok())
-                .is_some_and(|bytes| parse_accumulation_register_aggregates_blob(&bytes).is_some());
-            if parsed {
-                let register_name = object_refs
-                    .get(uuid)
-                    .and_then(|reference| reference.strip_prefix("AccumulationRegister."))
-                    .map(str::to_string)
-                    .or_else(|| {
-                        object_path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                    })?;
-                assets.push((
-                    aggregates_id,
-                    SourceAsset {
-                        primary_path: object_path.join("Ext").join("Aggregates.xml"),
-                        kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
-                    },
-                ));
-            } else {
-                misses.insert(
-                    aggregates_id,
-                    "accumulation_register_aggregates_decoder_failed".to_string(),
-                );
-            }
-        }
-    }
     let mapped_ids = assets
         .iter()
         .map(|(body_id, _)| body_id.clone())
         .chain(misses.keys().cloned())
         .collect::<BTreeSet<_>>();
     for (body_id, body_row) in rows_by_file_name {
-        if !body_id.starts_with(&object_row_prefix) || mapped_ids.contains(*body_id) {
+        let Ok(row_id) = ConfigRowId::parse(body_id) else {
+            continue;
+        };
+        if row_id.owner() != uuid || mapped_ids.contains(*body_id) {
             continue;
         }
-        let suffix = (*body_id).strip_prefix(&object_row_prefix);
         let is_preferred_help = *body_id == preferred_help_body_id;
         let help_parsed = decode_hex(&body_row.binary_hex)
             .ok()
@@ -1125,7 +1160,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
             continue;
         }
         if let Some(model) = predefined_data_source_model(kind)
-            && suffix == predefined_data_suffix(kind)
+            && Some(row_id.suffix_component()) == predefined_data_suffix(kind)
         {
             let parsed = decode_hex(&body_row.binary_hex)
                 .ok()

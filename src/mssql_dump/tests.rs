@@ -771,6 +771,136 @@ fn source_asset_discovery_fails_closed_for_aggregate_decoder_miss() {
 }
 
 #[test]
+fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
+    use crate::compiler::families::assets::{ConfigRowId, SourceAssetRegistry, SourceAssetRole};
+
+    let cases = [
+        (
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "Role",
+            "Editor",
+            "Roles/Editor",
+            ".0",
+            SourceAssetRole::Rights,
+            deflate_for_test(b"{10,{0},{0},0,1,0,4294967295}"),
+        ),
+        (
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "AccumulationRegister",
+            "Stock",
+            "AccumulationRegisters/Stock",
+            ".3",
+            SourceAssetRole::Aggregates,
+            deflate_for_test(b"{0,{9,{0},{0,0,{0,0}}}}"),
+        ),
+    ];
+
+    for (uuid, family, name, object_path, suffix, role, bytes) in cases {
+        let body_id = format!("{uuid}{suffix}");
+        let reference = format!("{family}.{name}");
+        let object_refs = BTreeMap::from([(uuid.to_owned(), reference.clone())]);
+        let owner = BodyOwnerSourceReference {
+            kind: family.to_owned(),
+            canonical_name: name.to_owned(),
+            object_path: PathBuf::from(object_path),
+        };
+        let row_id = ConfigRowId::parse(&body_id).unwrap();
+        let dynamic = dynamic_owner_bound_source_asset(
+            &row_id,
+            &owner,
+            Some(&reference),
+            &bytes,
+            &object_refs,
+            &BTreeMap::new(),
+        )
+        .unwrap_or_else(|| panic!("valid unindexed {family} owner-bound relation"));
+
+        let body_row = ConfigRow {
+            file_name: body_id.clone(),
+            part_no: 0,
+            data_size: bytes.len() as i64,
+            binary_hex: encode_hex_for_test(&bytes),
+        };
+        let metadata = MetadataTextRow {
+            file_name: uuid.to_owned(),
+            text: String::new(),
+            object_code: Some(0),
+            header: Some(MetadataHeader {
+                uuid: uuid.to_owned(),
+                name: name.to_owned(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some(family.to_owned()),
+            folder: Some(match role {
+                SourceAssetRole::Rights => "Roles",
+                SourceAssetRole::Aggregates => "AccumulationRegisters",
+                _ => unreachable!(),
+            }),
+        };
+        let file_names = BTreeSet::from([body_id.as_str()]);
+        let rows_by_file_name = BTreeMap::from([(body_id.as_str(), &body_row)]);
+        let indexed = source_assets_from_metadata_text_inner(
+            &metadata,
+            &file_names,
+            &rows_by_file_name,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(indexed.misses.is_empty());
+        assert_eq!(indexed.assets.len(), 1);
+        let (indexed_id, indexed) = &indexed.assets[0];
+        assert_eq!(indexed_id, &body_id);
+        assert_eq!(indexed.primary_path, dynamic.primary_path);
+        assert_eq!(
+            indexed.primary_path,
+            PathBuf::from(object_path).join(
+                SourceAssetRegistry
+                    .route(family, role)
+                    .unwrap()
+                    .relative_path()
+            )
+        );
+        match (&indexed.kind, &dynamic.kind, role) {
+            (SourceAssetKind::RoleRights, SourceAssetKind::RoleRights, SourceAssetRole::Rights) => {
+            }
+            (
+                SourceAssetKind::AccumulationRegisterAggregates {
+                    register_name: indexed_name,
+                },
+                SourceAssetKind::AccumulationRegisterAggregates {
+                    register_name: dynamic_name,
+                },
+                SourceAssetRole::Aggregates,
+            ) => {
+                assert_eq!(indexed_name, name);
+                assert_eq!(dynamic_name, name);
+            }
+            _ => panic!("indexed and dynamic owner-bound assets differ"),
+        }
+
+        assert!(
+            dynamic_owner_bound_source_asset(
+                &row_id,
+                &owner,
+                Some(&format!("{family}.Other")),
+                &bytes,
+                &object_refs,
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "owner mismatch must fail closed"
+        );
+    }
+}
+
+#[test]
 fn dump_timing_summary_defaults_missing_new_timing_fields() {
     let json = r#"{
             "database": "OldReport",
@@ -42500,6 +42630,7 @@ fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner(
         metadata_owner_uuid.to_string(),
         BodyOwnerSourceReference {
             kind: "Catalog".to_string(),
+            canonical_name: "Types".to_string(),
             object_path: PathBuf::from("Catalogs/Types"),
         },
     )]);
@@ -42592,6 +42723,7 @@ fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner(
         duplicate_owner_uuid.to_string(),
         BodyOwnerSourceReference {
             kind: "Catalog".to_string(),
+            canonical_name: "Types".to_string(),
             object_path: PathBuf::from("Catalogs/OtherTypes"),
         },
     );
@@ -42736,6 +42868,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
             first_metadata_owner_uuid.to_string(),
             BodyOwnerSourceReference {
                 kind: "ChartOfCharacteristicTypes".to_string(),
+                canonical_name: "Domestic".to_string(),
                 object_path: PathBuf::from("ChartsOfCharacteristicTypes/Domestic"),
             },
         ),
@@ -42743,6 +42876,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
             second_metadata_owner_uuid.to_string(),
             BodyOwnerSourceReference {
                 kind: "ChartOfCharacteristicTypes".to_string(),
+                canonical_name: "International".to_string(),
                 object_path: PathBuf::from("ChartsOfCharacteristicTypes/International"),
             },
         ),
