@@ -1081,6 +1081,8 @@ impl Default for SourceAssetCompletenessScope {
 pub struct SourceAssetCompletenessEntry {
     pub code: String,
     pub classification: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parse_error_class: Option<String>,
     pub table: String,
     pub source_row_id: String,
     pub asset_path: String,
@@ -1262,6 +1264,7 @@ fn source_asset_audit_entry(
     SourceAssetCompletenessEntry {
         code,
         classification: classification.to_string(),
+        parse_error_class: None,
         table: table.to_string(),
         source_row_id: source_row_id.to_string(),
         asset_path,
@@ -4302,6 +4305,7 @@ fn dump_table_row_bytes(
                     .map(|diagnostic| SourceAssetCompletenessEntry {
                         code: diagnostic.code.to_string(),
                         classification: diagnostic.classification.to_string(),
+                        parse_error_class: diagnostic.parse_error_class.map(str::to_string),
                         table: context.table.to_string(),
                         source_row_id: file_name.to_string(),
                         asset_path: asset_path.clone(),

@@ -46,17 +46,20 @@ use crate::form_schema::{
 };
 #[cfg(test)]
 use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_item;
+#[cfg(test)]
+use ibcmd_schema::parse_form_choice_parameter_links as parse_schema_form_choice_parameter_links;
 use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue,
     FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
     FormChoiceListLayoutProfile, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
-    FormChoiceParameterClusterMember, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
+    FormChoiceParameterClusterMember, FormChoiceParameterLinkStandardTerminal,
+    FormChoiceParameterLinkTerminal, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
     FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
     GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
     MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
     bundled_writer_rules, form_choice_parameter_cluster_order,
     form_text_document_context_menu_owner_fields, parse_form_choice_list,
-    parse_form_choice_parameter_links as parse_schema_form_choice_parameter_links,
+    parse_form_choice_parameter_links_with_terminal_resolver as parse_schema_form_choice_parameter_links_with_terminal_resolver,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
     parse_generated_metadata_owner, parse_metadata_data_path,
@@ -201,6 +204,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
 pub(super) struct FormSourceAssetDiagnostic {
     pub(super) code: &'static str,
     pub(super) classification: &'static str,
+    pub(super) parse_error_class: Option<&'static str>,
     pub(super) property: &'static str,
     pub(super) property_profile: &'static str,
     pub(super) property_slot: usize,
@@ -453,6 +457,7 @@ pub(super) fn collect_opaque_choice_list_diagnostics(
             diagnostics.push(FormSourceAssetDiagnostic {
                 code: identity.code(),
                 classification: identity.classification(),
+                parse_error_class: None,
                 property: identity.property(),
                 property_profile: identity.profile(),
                 property_slot: provenance.slot,
@@ -485,6 +490,9 @@ pub(super) fn collect_opaque_choice_parameters_diagnostics(
                 diagnostics.push(FormSourceAssetDiagnostic {
                     code: "source_asset.form.choice_parameter_links.opaque_rejected",
                     classification: "opaque_property_rejected",
+                    parse_error_class: Some(form_choice_parameter_links_parse_error_class(
+                        &value.error,
+                    )),
                     property: "ChoiceParameterLinks",
                     property_profile: "input_field_extended_options_mirrored",
                     property_slot: value.primary_slot,
@@ -500,6 +508,7 @@ pub(super) fn collect_opaque_choice_parameters_diagnostics(
                 diagnostics.push(FormSourceAssetDiagnostic {
                     code: "source_asset.form.choice_parameters.opaque_omitted",
                     classification: "opaque_property_omitted",
+                    parse_error_class: None,
                     property: "ChoiceParameters",
                     property_profile: "input_field_extended_options",
                     property_slot: *slot,
@@ -513,6 +522,7 @@ pub(super) fn collect_opaque_choice_parameters_diagnostics(
                 diagnostics.push(FormSourceAssetDiagnostic {
                     code: "source_asset.form.available_types.opaque_omitted",
                     classification: "opaque_property_omitted",
+                    parse_error_class: None,
                     property: "AvailableTypes",
                     property_profile: "input_field_extended_options",
                     property_slot: value.slot,
@@ -524,6 +534,17 @@ pub(super) fn collect_opaque_choice_parameters_diagnostics(
             }
         }
         collect_opaque_choice_parameters_diagnostics(&item.child_items, diagnostics);
+    }
+}
+
+fn form_choice_parameter_links_parse_error_class(
+    error: &FormChoiceParameterLinksParseError,
+) -> &'static str {
+    match error {
+        FormChoiceParameterLinksParseError::PrimaryMalformed => "primary_malformed",
+        FormChoiceParameterLinksParseError::DuplicateMalformed => "duplicate_malformed",
+        FormChoiceParameterLinksParseError::MirrorMismatch => "mirror_mismatch",
+        FormChoiceParameterLinksParseError::UnresolvedAttribute(_) => "unresolved_attribute",
     }
 }
 
@@ -8100,10 +8121,12 @@ fn parse_form_child_item_with_metadata_owners(
             |(schema, options)| {
                 schema.input_field_option(options, InputFieldSlot::ChoiceParameters)?;
                 Some(FormChoiceParameterCluster::new(
-                    canonical_form_input_field_choice_parameter_links(
+                    canonical_form_input_field_choice_parameter_links_with_metadata(
                         *schema,
                         options,
                         attribute_names_by_id,
+                        attribute_metadata_owners_by_id,
+                        object_refs,
                     ),
                     canonical_form_input_field_choice_parameters(
                         *schema,
@@ -9075,6 +9098,7 @@ fn parse_exact_1c_quoted_string(field: &str) -> Option<String> {
     (consumed == field.len()).then_some(value)
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_input_field_choice_parameter_links(
     primary: &str,
     duplicate: &str,
@@ -9085,6 +9109,49 @@ pub(super) fn parse_form_input_field_choice_parameter_links(
     })
 }
 
+pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
+    primary: &str,
+    duplicate: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<Vec<ibcmd_schema::FormChoiceParameterLink>, FormChoiceParameterLinksParseError> {
+    parse_schema_form_choice_parameter_links_with_terminal_resolver(
+        primary,
+        duplicate,
+        |attribute_id, terminal| match terminal {
+            FormChoiceParameterLinkTerminal::Absent => {
+                attribute_names_by_id.get(attribute_id).cloned()
+            }
+            FormChoiceParameterLinkTerminal::Standard(
+                FormChoiceParameterLinkStandardTerminal::Owner,
+            ) => attribute_names_by_id
+                .get(attribute_id)
+                .map(|attribute| format!("{attribute}.Owner")),
+            FormChoiceParameterLinkTerminal::Standard(
+                FormChoiceParameterLinkStandardTerminal::Ref,
+            ) => attribute_names_by_id
+                .get(attribute_id)
+                .map(|attribute| format!("{attribute}.Ref")),
+            FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
+                match resolve_form_owner_scoped_metadata_uuid_data_path_status(
+                    attribute_id,
+                    "0",
+                    uuid,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                ) {
+                    FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+                    FormMetadataDataPathResolution::NotMetadata
+                    | FormMetadataDataPathResolution::ReferenceAbsent
+                    | FormMetadataDataPathResolution::Invalid => None,
+                }
+            }
+        },
+    )
+}
+
+#[cfg(test)]
 pub(super) fn canonical_form_input_field_choice_parameter_links(
     schema: FormFieldSchema,
     options: &[&str],
@@ -9109,6 +9176,50 @@ pub(super) fn canonical_form_input_field_choice_parameter_links(
         });
     };
     match parse_form_input_field_choice_parameter_links(primary, duplicate, attribute_names_by_id) {
+        Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
+        Ok(links) => FormChoiceParameterLinks::Typed(links),
+        Err(error) => FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+            primary_raw: Some(primary.to_owned()),
+            duplicate_raw: Some(duplicate.to_owned()),
+            primary_slot,
+            duplicate_slot,
+            error,
+        }),
+    }
+}
+
+pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
+    schema: FormFieldSchema,
+    options: &[&str],
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceParameterLinks {
+    let primary_slot = InputFieldSlot::ChoiceParameterLinks.index();
+    let duplicate_slot = InputFieldSlot::ChoiceParameterLinksDuplicate.index();
+    let primary = schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinks);
+    let duplicate =
+        schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate);
+    let (Some(primary), Some(duplicate)) = (primary, duplicate) else {
+        return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+            primary_raw: primary.map(str::to_owned),
+            duplicate_raw: duplicate.map(str::to_owned),
+            primary_slot,
+            duplicate_slot,
+            error: if primary.is_none() {
+                FormChoiceParameterLinksParseError::PrimaryMalformed
+            } else {
+                FormChoiceParameterLinksParseError::DuplicateMalformed
+            },
+        });
+    };
+    match parse_form_input_field_choice_parameter_links_with_metadata(
+        primary,
+        duplicate,
+        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
+        object_refs,
+    ) {
         Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
         Ok(links) => FormChoiceParameterLinks::Typed(links),
         Err(error) => FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
@@ -12238,6 +12349,28 @@ fn resolve_form_owner_scoped_metadata_data_path_status(
         return FormMetadataDataPathResolution::Invalid;
     }
     let Some(attribute_id) = owner.first() else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    resolve_form_owner_scoped_metadata_uuid_data_path_status(
+        attribute_id.trim(),
+        marker.trim(),
+        &uuid,
+        attribute_metadata_owners_by_id,
+        object_refs,
+    )
+}
+
+fn resolve_form_owner_scoped_metadata_uuid_data_path_status(
+    attribute_id: &str,
+    marker: &str,
+    uuid: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> FormMetadataDataPathResolution {
+    if marker.parse::<i64>().is_err() {
+        return FormMetadataDataPathResolution::Invalid;
+    }
+    let Some(uuid) = parse_non_zero_uuid(uuid) else {
         return FormMetadataDataPathResolution::Invalid;
     };
     let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id.trim()) else {

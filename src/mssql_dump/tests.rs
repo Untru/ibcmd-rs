@@ -619,6 +619,7 @@ fn source_asset_completeness_report_is_deterministic_and_strict() {
         opaque_entries.push(SourceAssetCompletenessEntry {
             code: "source_asset.form.choice_parameters.opaque_omitted".to_string(),
             classification: "opaque_property_omitted".to_string(),
+            parse_error_class: None,
             table: "Config".to_string(),
             source_row_id: format!("row-{item_id}"),
             asset_path: path.to_string(),
@@ -19566,6 +19567,149 @@ fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct()
 }
 
 #[test]
+fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_terminals() {
+    let attribute = FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.TravelRequest".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    };
+    let attribute_names = BTreeMap::from([("1".to_string(), "Object".to_string())]);
+    let attribute_owners =
+        BTreeMap::from([("1".to_string(), form_attribute_metadata_owner(&attribute))]);
+    let organization_uuid = "11111111-1111-4111-8111-111111111111";
+    let lines_uuid = "22222222-2222-4222-8222-222222222222";
+    let object_refs = BTreeMap::from([
+        (
+            organization_uuid.to_string(),
+            "Document.TravelRequest.Attribute.Organization".to_string(),
+        ),
+        (
+            lines_uuid.to_string(),
+            "Document.TravelRequest.TabularSection.Lines".to_string(),
+        ),
+    ]);
+    let primary = format!(
+        r#"{{5006,2,"Filter.Organization",2,{{1}},{{0,{organization_uuid}}},0,"Filter.Lines",2,{{1}},{{0,{lines_uuid}}},1}}"#
+    );
+    let duplicate = format!(
+        r#"{{5007,2,"Filter.Organization",2,{{1}},{{0,{organization_uuid}}},0,"","","Filter.Lines",2,{{1}},{{0,{lines_uuid}}},1,"",""}}"#
+    );
+
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &attribute_names,
+        &attribute_owners,
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].name(), "Filter.Organization");
+    assert_eq!(links[0].data_path(), "Object.Organization");
+    assert_eq!(
+        links[0].value_change(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+    );
+    assert_eq!(links[1].name(), "Filter.Lines");
+    assert_eq!(links[1].data_path(), "Object.Lines");
+    assert_eq!(
+        links[1].value_change(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::DontChange
+    );
+
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &attribute_names,
+            &attribute_owners,
+            &BTreeMap::new(),
+        ),
+        Err(ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("1".to_string()))
+    );
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &attribute_names,
+            &attribute_owners,
+            &BTreeMap::from([
+                (
+                    organization_uuid.to_string(),
+                    "Document.Other.Attribute.Organization".to_string(),
+                ),
+                (
+                    lines_uuid.to_string(),
+                    "Document.Other.TabularSection.Lines".to_string(),
+                ),
+            ]),
+        ),
+        Err(ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("1".to_string()))
+    );
+
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = &primary;
+    options[duplicate_slot] = &duplicate;
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &attribute_names,
+            &attribute_owners,
+            &object_refs,
+        ),
+        CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 2
+    ));
+    let opaque = canonical_form_input_field_choice_parameter_links_with_metadata(
+        make_schema(&options),
+        &options,
+        &attribute_names,
+        &attribute_owners,
+        &BTreeMap::new(),
+    );
+    assert!(matches!(
+        opaque,
+        CanonicalFormChoiceParameterLinks::Opaque(value)
+            if value.error
+                == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                    "1".to_string()
+                )
+    ));
+}
+
+#[test]
 fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
     let base_field = r#"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
     let primary = r#"{5006,1,"Filter.Owner",1,{3},0}"#;
@@ -19616,6 +19760,7 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
         })
         .unwrap();
     assert_eq!(link_diagnostic.classification, "opaque_property_rejected");
+    assert_eq!(link_diagnostic.parse_error_class, Some("mirror_mismatch"));
     assert_eq!(link_diagnostic.property, "ChoiceParameterLinks");
     assert_eq!(link_diagnostic.raw_length, primary.len() + duplicate.len());
     assert_eq!(

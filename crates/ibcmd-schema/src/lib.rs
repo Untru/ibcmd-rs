@@ -243,6 +243,34 @@ pub enum FormChoiceParameterLinksParseError {
     UnresolvedAttribute(String),
 }
 
+/// The terminal portion of a physical choice-parameter link.
+///
+/// `Absent` is the mode-1 form. Mode 2 is either one of the two platform
+/// standard markers or a metadata UUID owned by the form attribute. UUIDs are
+/// accepted only in canonical lower-case, non-nil form.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterLinkTerminal {
+    Absent,
+    Standard(FormChoiceParameterLinkStandardTerminal),
+    MetadataUuid(String),
+}
+
+/// Standard terminal markers carried by mode-2 choice-parameter links.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormChoiceParameterLinkStandardTerminal {
+    Owner,
+    Ref,
+}
+
+impl FormChoiceParameterLinkStandardTerminal {
+    const fn data_path_suffix(self) -> &'static str {
+        match self {
+            Self::Owner => "Owner",
+            Self::Ref => "Ref",
+        }
+    }
+}
+
 /// The three EDT-owned members of the Form choice-parameter cluster.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FormChoiceParameterClusterMember {
@@ -1170,7 +1198,7 @@ where
 struct RawFormChoiceParameterLink {
     name: String,
     attribute_id: String,
-    terminal: Option<&'static str>,
+    terminal: FormChoiceParameterLinkTerminal,
     value_change: FormChoiceParameterLinkValueChange,
 }
 
@@ -1189,8 +1217,27 @@ where
 {
     let primary = parse_raw_form_choice_parameter_links(primary, "5006", false)
         .ok_or(FormChoiceParameterLinksParseError::PrimaryMalformed)?;
+    // This compatibility entrypoint deliberately retains the historical
+    // standard-marker-only contract. UUID terminals are available through the
+    // typed resolver below, where the caller can enforce owner-scoped lookup.
+    if primary.iter().any(|link| {
+        matches!(
+            link.terminal,
+            FormChoiceParameterLinkTerminal::MetadataUuid(_)
+        )
+    }) {
+        return Err(FormChoiceParameterLinksParseError::PrimaryMalformed);
+    }
     let duplicate = parse_raw_form_choice_parameter_links(duplicate, "5007", true)
         .ok_or(FormChoiceParameterLinksParseError::DuplicateMalformed)?;
+    if duplicate.iter().any(|link| {
+        matches!(
+            link.terminal,
+            FormChoiceParameterLinkTerminal::MetadataUuid(_)
+        )
+    }) {
+        return Err(FormChoiceParameterLinksParseError::DuplicateMalformed);
+    }
     if primary != duplicate {
         return Err(FormChoiceParameterLinksParseError::MirrorMismatch);
     }
@@ -1200,10 +1247,51 @@ where
             let attribute_name = resolve_attribute(&link.attribute_id).ok_or_else(|| {
                 FormChoiceParameterLinksParseError::UnresolvedAttribute(link.attribute_id.clone())
             })?;
-            let data_path = link
-                .terminal
-                .map(|terminal| format!("{attribute_name}.{terminal}"))
-                .unwrap_or(attribute_name);
+            let data_path = match link.terminal {
+                FormChoiceParameterLinkTerminal::Absent => attribute_name,
+                FormChoiceParameterLinkTerminal::Standard(terminal) => {
+                    format!("{attribute_name}.{}", terminal.data_path_suffix())
+                }
+                FormChoiceParameterLinkTerminal::MetadataUuid(_) => {
+                    unreachable!("UUID terminals are rejected by the compatibility entrypoint")
+                }
+            };
+            Ok(FormChoiceParameterLink::new(
+                link.name,
+                data_path,
+                link.value_change,
+            ))
+        })
+        .collect()
+}
+
+/// Decode mirrored native link collections and resolve each typed terminal.
+///
+/// The resolver receives the numeric form-attribute owner id and one of the
+/// physical terminal variants. It owns domain resolution (including checking
+/// that a UUID belongs to that owner) and returns a canonical data path. Raw
+/// 5006/5007 slots are intentionally not exposed through this API.
+pub fn parse_form_choice_parameter_links_with_terminal_resolver<F>(
+    primary: &str,
+    duplicate: &str,
+    mut resolve: F,
+) -> Result<Vec<FormChoiceParameterLink>, FormChoiceParameterLinksParseError>
+where
+    F: FnMut(&str, &FormChoiceParameterLinkTerminal) -> Option<String>,
+{
+    let primary = parse_raw_form_choice_parameter_links(primary, "5006", false)
+        .ok_or(FormChoiceParameterLinksParseError::PrimaryMalformed)?;
+    let duplicate = parse_raw_form_choice_parameter_links(duplicate, "5007", true)
+        .ok_or(FormChoiceParameterLinksParseError::DuplicateMalformed)?;
+    if primary != duplicate {
+        return Err(FormChoiceParameterLinksParseError::MirrorMismatch);
+    }
+    primary
+        .into_iter()
+        .map(|link| {
+            let data_path = resolve(&link.attribute_id, &link.terminal).ok_or_else(|| {
+                FormChoiceParameterLinksParseError::UnresolvedAttribute(link.attribute_id.clone())
+            })?;
             Ok(FormChoiceParameterLink::new(
                 link.name,
                 data_path,
@@ -1259,16 +1347,28 @@ fn parse_raw_form_choice_parameter_links(
         }
         cursor += 1;
         let terminal = match mode {
-            "1" => None,
+            "1" => FormChoiceParameterLinkTerminal::Absent,
             "2" => {
-                let terminal = braced_fields_bounded(fields.get(cursor)?, 1)?;
-                let [terminal] = terminal.as_slice() else {
-                    return None;
-                };
+                let terminal = braced_fields_bounded(fields.get(cursor)?, 2)?;
                 cursor += 1;
-                match terminal.trim() {
-                    "-5" => Some("Owner"),
-                    "-8" => Some("Ref"),
+                match terminal.as_slice() {
+                    [terminal] => match terminal.trim() {
+                        "-5" => FormChoiceParameterLinkTerminal::Standard(
+                            FormChoiceParameterLinkStandardTerminal::Owner,
+                        ),
+                        "-8" => FormChoiceParameterLinkTerminal::Standard(
+                            FormChoiceParameterLinkStandardTerminal::Ref,
+                        ),
+                        _ => return None,
+                    },
+                    [kind, uuid] if kind.trim() == "0" => {
+                        let uuid_text = uuid.trim();
+                        let uuid = Uuid::parse_str(uuid_text).ok()?;
+                        if uuid.is_nil() || uuid.to_string() != uuid_text {
+                            return None;
+                        }
+                        FormChoiceParameterLinkTerminal::MetadataUuid(uuid.to_string())
+                    }
                     _ => return None,
                 }
             }
@@ -1798,6 +1898,124 @@ mod form_choice_parameters_tests {
         assert_eq!(
             parse_form_choice_parameter_links("{5006,0}", "{5007,0}", |_| None).unwrap(),
             Vec::<FormChoiceParameterLink>::new()
+        );
+    }
+
+    #[test]
+    fn form_choice_parameter_links_parse_uuid_terminals_with_typed_resolver() {
+        let primary = r#"{5006,2,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111},0,"Filter.Currency",2,{1},{0,22222222-2222-4222-8222-222222222222},1}"#;
+        let duplicate = r#"{5007,2,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111},0,"","","Filter.Currency",2,{1},{0,22222222-2222-4222-8222-222222222222},1,"",""}"#;
+        let links = parse_form_choice_parameter_links_with_terminal_resolver(
+            primary,
+            duplicate,
+            |owner_id, terminal| match (owner_id, terminal) {
+                ("1", FormChoiceParameterLinkTerminal::MetadataUuid(uuid))
+                    if uuid == "11111111-1111-4111-8111-111111111111" =>
+                {
+                    Some("Owner".to_owned())
+                }
+                ("1", FormChoiceParameterLinkTerminal::MetadataUuid(uuid))
+                    if uuid == "22222222-2222-4222-8222-222222222222" =>
+                {
+                    Some("Currency".to_owned())
+                }
+                _ => None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            links,
+            vec![
+                FormChoiceParameterLink::new(
+                    "Filter.Owner".to_owned(),
+                    "Owner".to_owned(),
+                    FormChoiceParameterLinkValueChange::Clear,
+                ),
+                FormChoiceParameterLink::new(
+                    "Filter.Currency".to_owned(),
+                    "Currency".to_owned(),
+                    FormChoiceParameterLinkValueChange::DontChange,
+                ),
+            ]
+        );
+
+        let one_primary =
+            r#"{5006,1,"Filter.Owner",2,{1},{0,33333333-3333-4333-8333-333333333333},0}"#;
+        let one_duplicate =
+            r#"{5007,1,"Filter.Owner",2,{1},{0,33333333-3333-4333-8333-333333333333},0,"",""}"#;
+        let links = parse_form_choice_parameter_links_with_terminal_resolver(
+            one_primary,
+            one_duplicate,
+            |owner_id, terminal| {
+                (owner_id == "1"
+                    && matches!(
+                        terminal,
+                        FormChoiceParameterLinkTerminal::MetadataUuid(uuid)
+                            if uuid == "33333333-3333-4333-8333-333333333333"
+                    ))
+                .then_some("Owner".to_owned())
+            },
+        )
+        .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].data_path(), "Owner");
+
+        // The legacy public API remains intentionally standard-marker-only.
+        assert_eq!(
+            parse_form_choice_parameter_links(one_primary, one_duplicate, |_| Some("Owner".into())),
+            Err(FormChoiceParameterLinksParseError::PrimaryMalformed)
+        );
+    }
+
+    #[test]
+    fn form_choice_parameter_links_uuid_terminals_fail_closed() {
+        let valid_primary =
+            r#"{5006,1,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111},0}"#;
+        let valid_duplicate =
+            r#"{5007,1,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111},0,"",""}"#;
+        let resolve = |_: &str, _: &FormChoiceParameterLinkTerminal| Some("Owner".to_owned());
+        for malformed in [
+            r#"{5006,1,"Filter.Owner",2,{1},{1,11111111-1111-4111-8111-111111111111},0}"#,
+            r#"{5006,1,"Filter.Owner",2,{1},{0,00000000-0000-0000-0000-000000000000},0}"#,
+            r#"{5006,1,"Filter.Owner",2,{1},{0,not-a-uuid},0}"#,
+            r#"{5006,1,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-11111111111A},0}"#,
+            r#"{5006,1,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111,extra},0}"#,
+        ] {
+            assert_eq!(
+                parse_form_choice_parameter_links_with_terminal_resolver(
+                    malformed,
+                    valid_duplicate,
+                    resolve,
+                ),
+                Err(FormChoiceParameterLinksParseError::PrimaryMalformed),
+                "{malformed}"
+            );
+        }
+        assert_eq!(
+            parse_form_choice_parameter_links_with_terminal_resolver(
+                valid_primary,
+                r#"{5007,1,"Filter.Owner",2,{1},{0,22222222-2222-4222-8222-222222222222},0,"",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::MirrorMismatch)
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links_with_terminal_resolver(
+                valid_primary,
+                r#"{5007,1,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111},0,"x",""}"#,
+                resolve,
+            ),
+            Err(FormChoiceParameterLinksParseError::DuplicateMalformed)
+        );
+        assert_eq!(
+            parse_form_choice_parameter_links_with_terminal_resolver(
+                r#"{5006,1,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111},0}"#,
+                r#"{5007,1,"Filter.Owner",2,{1},{0,11111111-1111-4111-8111-111111111111},0,"",""}"#,
+                |_, _| None,
+            ),
+            Err(FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                "1".to_owned()
+            ))
         );
     }
 
