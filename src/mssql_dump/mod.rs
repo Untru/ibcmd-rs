@@ -9380,10 +9380,9 @@ fn decode_owner_graph<'a>(
     }
     let collections = root[3..]
         .iter()
-        .zip(layout.collection_markers)
-        .enumerate()
-        .map(|(collection_index, (raw, expected_marker))| {
-            decode_owner_graph_collection(family, raw, expected_marker, collection_index)
+        .zip(layout.collection_layouts())
+        .map(|(raw, collection_layout)| {
+            decode_owner_graph_collection(family, raw, *collection_layout)
         })
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
@@ -9502,7 +9501,7 @@ fn decode_owner_graph<'a>(
             .insert_generated(
                 type_id.clone(),
                 generated.type_slot,
-                owner_graph::OwnerIdentityRole::GeneratedType,
+                owner_graph::GeneratedIdentityRole::Type,
             )
             .map_err(|collision| owner_graph_collision_diagnostic(family, collision))?;
         let value_id = decode_owner_graph_uuid(
@@ -9517,7 +9516,7 @@ fn decode_owner_graph<'a>(
             .insert_generated(
                 value_id.clone(),
                 generated.value_slot,
-                owner_graph::OwnerIdentityRole::GeneratedValue,
+                owner_graph::GeneratedIdentityRole::Value,
             )
             .map_err(|collision| owner_graph_collision_diagnostic(family, collision))?;
         generated_types.push(owner_graph::DecodedGeneratedType::new(
@@ -9563,10 +9562,10 @@ fn decode_owner_graph_for_family_parser<'a>(
 fn decode_owner_graph_collection<'a>(
     family: owner_graph::OwnerGraphFamily,
     raw: &'a str,
-    expected_marker: &str,
-    collection_index: usize,
+    collection_layout: owner_graph::OwnerCollectionLayout,
 ) -> std::result::Result<owner_graph::DecodedOwnerCollection<'a>, MetadataSourceExtractionDiagnostic>
 {
+    let collection_index = collection_layout.index;
     let fields = split_information_register_braced_fields(raw).ok_or_else(|| {
         owner_graph_extraction_diagnostic(
             family,
@@ -9585,7 +9584,10 @@ fn decode_owner_graph_collection<'a>(
             None,
         ));
     }
-    if !fields[0].trim().eq_ignore_ascii_case(expected_marker) {
+    if !fields[0]
+        .trim()
+        .eq_ignore_ascii_case(collection_layout.marker)
+    {
         return Err(owner_graph_extraction_diagnostic(
             family,
             owner_graph::OwnerGraphDiagnosticKind::CollectionMarker,
@@ -9612,9 +9614,10 @@ fn decode_owner_graph_collection<'a>(
             None,
         ));
     }
-    Ok(owner_graph::DecodedOwnerCollection {
-        items: fields[2..].to_vec(),
-    })
+    Ok(owner_graph::DecodedOwnerCollection::new(
+        fields[2..].to_vec(),
+        owner_graph::OwnerCollectionProvenance::from_layout(collection_layout),
+    ))
 }
 
 fn decode_owner_graph_uuid(

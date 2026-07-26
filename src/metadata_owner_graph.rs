@@ -43,6 +43,41 @@ pub(crate) enum OwnerGraphFamily {
     ChartOfCharacteristicTypes,
 }
 
+/// A semantically named child collection in an owner record.
+///
+/// The physical ordering belongs to the native record layout, but consumers
+/// must use this role instead of repeating a family-specific numeric index.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum OwnerCollectionRole {
+    Template,
+    Command,
+    TabularSection,
+    DirectAttribute,
+    Form,
+}
+
+impl OwnerCollectionRole {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Template => "template",
+            Self::Command => "command",
+            Self::TabularSection => "tabular_section",
+            Self::DirectAttribute => "direct_attribute",
+            Self::Form => "form",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct OwnerCollectionLayout {
+    pub(crate) role: OwnerCollectionRole,
+    pub(crate) index: usize,
+    pub(crate) marker: &'static str,
+    /// Stable source vocabulary used by diagnostics. It deliberately carries
+    /// no native payload or UUID.
+    pub(crate) provenance: &'static str,
+}
+
 impl OwnerGraphFamily {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
@@ -71,6 +106,7 @@ impl OwnerGraphFamily {
                     CATALOG_ATTRIBUTE_GROUP_UUID,
                     CATALOG_FORM_COLLECTION_UUID,
                 ],
+                collection_layouts: CATALOG_COLLECTIONS,
                 produced_types_classifier: "CATALOG_TYPES",
             },
             Self::Document => OwnerGraphLayout {
@@ -89,6 +125,7 @@ impl OwnerGraphFamily {
                     DOCUMENT_COMMAND_COLLECTION_UUID,
                     DOCUMENT_FORM_COLLECTION_UUID,
                 ],
+                collection_layouts: DOCUMENT_COLLECTIONS,
                 produced_types_classifier: "DOCUMENT_TYPES",
             },
             Self::BusinessProcess => OwnerGraphLayout {
@@ -107,6 +144,7 @@ impl OwnerGraphFamily {
                     BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID,
                     BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID,
                 ],
+                collection_layouts: BUSINESS_PROCESS_COLLECTIONS,
                 produced_types_classifier: "BUSINESS_PROCESS_TYPES",
             },
             Self::ChartOfCharacteristicTypes => OwnerGraphLayout {
@@ -125,6 +163,7 @@ impl OwnerGraphFamily {
                     CCT_COMMAND_COLLECTION_UUID,
                     CCT_FORM_COLLECTION_UUID,
                 ],
+                collection_layouts: CCT_COLLECTIONS,
                 produced_types_classifier: "CHART_OF_CHARACTERISTIC_TYPES_TYPES",
             },
         }
@@ -157,8 +196,175 @@ pub(crate) struct OwnerGraphLayout {
     pub(crate) generated_types: &'static [GeneratedTypeLayout],
     pub(crate) root_collection_count_token: &'static str,
     pub(crate) collection_markers: &'static [&'static str],
+    collection_layouts: &'static [OwnerCollectionLayout],
     produced_types_classifier: &'static str,
 }
+
+impl OwnerGraphLayout {
+    pub(crate) fn collection_layout(
+        self,
+        role: OwnerCollectionRole,
+    ) -> Option<OwnerCollectionLayout> {
+        self.collection_layouts
+            .iter()
+            .copied()
+            .find(|layout| layout.role == role)
+    }
+
+    pub(crate) fn collection_layout_at(self, index: usize) -> Option<OwnerCollectionLayout> {
+        self.collection_layouts.get(index).copied()
+    }
+
+    pub(crate) fn collection_layouts(self) -> &'static [OwnerCollectionLayout] {
+        self.collection_layouts
+    }
+}
+
+const fn collection(
+    role: OwnerCollectionRole,
+    index: usize,
+    marker: &'static str,
+    provenance: &'static str,
+) -> OwnerCollectionLayout {
+    OwnerCollectionLayout {
+        role,
+        index,
+        marker,
+        provenance,
+    }
+}
+
+const CATALOG_COLLECTIONS: &[OwnerCollectionLayout] = &[
+    collection(
+        OwnerCollectionRole::Template,
+        0,
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        "catalog.template",
+    ),
+    collection(
+        OwnerCollectionRole::Command,
+        1,
+        CATALOG_COMMAND_COLLECTION_UUID,
+        "catalog.command",
+    ),
+    collection(
+        OwnerCollectionRole::TabularSection,
+        2,
+        CATALOG_TABULAR_SECTION_COLLECTION_UUID,
+        "catalog.tabular_section",
+    ),
+    collection(
+        OwnerCollectionRole::DirectAttribute,
+        3,
+        CATALOG_ATTRIBUTE_GROUP_UUID,
+        "catalog.direct_attribute",
+    ),
+    collection(
+        OwnerCollectionRole::Form,
+        4,
+        CATALOG_FORM_COLLECTION_UUID,
+        "catalog.form",
+    ),
+];
+
+const DOCUMENT_COLLECTIONS: &[OwnerCollectionLayout] = &[
+    collection(
+        OwnerCollectionRole::TabularSection,
+        0,
+        DOCUMENT_TABULAR_SECTION_COLLECTION_UUID,
+        "document.tabular_section",
+    ),
+    collection(
+        OwnerCollectionRole::Template,
+        1,
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        "document.template",
+    ),
+    collection(
+        OwnerCollectionRole::DirectAttribute,
+        2,
+        DOCUMENT_ATTRIBUTE_GROUP_UUID,
+        "document.direct_attribute",
+    ),
+    collection(
+        OwnerCollectionRole::Command,
+        3,
+        DOCUMENT_COMMAND_COLLECTION_UUID,
+        "document.command",
+    ),
+    collection(
+        OwnerCollectionRole::Form,
+        4,
+        DOCUMENT_FORM_COLLECTION_UUID,
+        "document.form",
+    ),
+];
+
+const BUSINESS_PROCESS_COLLECTIONS: &[OwnerCollectionLayout] = &[
+    collection(
+        OwnerCollectionRole::Template,
+        0,
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        "business_process.template",
+    ),
+    collection(
+        OwnerCollectionRole::Form,
+        1,
+        BUSINESS_PROCESS_FORM_COLLECTION_UUID,
+        "business_process.form",
+    ),
+    collection(
+        OwnerCollectionRole::Command,
+        2,
+        BUSINESS_PROCESS_COMMAND_COLLECTION_UUID,
+        "business_process.command",
+    ),
+    collection(
+        OwnerCollectionRole::DirectAttribute,
+        3,
+        BUSINESS_PROCESS_ATTRIBUTE_COLLECTION_UUID,
+        "business_process.direct_attribute",
+    ),
+    collection(
+        OwnerCollectionRole::TabularSection,
+        4,
+        BUSINESS_PROCESS_TABULAR_SECTION_COLLECTION_UUID,
+        "business_process.tabular_section",
+    ),
+];
+
+const CCT_COLLECTIONS: &[OwnerCollectionLayout] = &[
+    collection(
+        OwnerCollectionRole::DirectAttribute,
+        0,
+        CCT_ATTRIBUTE_COLLECTION_UUID,
+        "chart_of_characteristic_types.direct_attribute",
+    ),
+    collection(
+        OwnerCollectionRole::Template,
+        1,
+        METADATA_TEMPLATE_COLLECTION_UUID,
+        "chart_of_characteristic_types.template",
+    ),
+    collection(
+        OwnerCollectionRole::TabularSection,
+        2,
+        CCT_TABULAR_SECTION_COLLECTION_UUID,
+        "chart_of_characteristic_types.tabular_section",
+    ),
+    collection(
+        OwnerCollectionRole::Command,
+        3,
+        CCT_COMMAND_COLLECTION_UUID,
+        "chart_of_characteristic_types.command",
+    ),
+    collection(
+        OwnerCollectionRole::Form,
+        4,
+        CCT_FORM_COLLECTION_UUID,
+        "chart_of_characteristic_types.form",
+    ),
+];
 
 const fn generated(
     type_slot: usize,
@@ -341,6 +547,22 @@ pub(crate) enum OwnerIdentityRole {
     Root,
     GeneratedType,
     GeneratedValue,
+    Child,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GeneratedIdentityRole {
+    Type,
+    Value,
+}
+
+impl From<GeneratedIdentityRole> for OwnerIdentityRole {
+    fn from(value: GeneratedIdentityRole) -> Self {
+        match value {
+            GeneratedIdentityRole::Type => Self::GeneratedType,
+            GeneratedIdentityRole::Value => Self::GeneratedValue,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -352,6 +574,7 @@ pub(crate) struct OwnerIdentityLedger {
 pub(crate) struct OwnerIdentityCollision {
     pub(crate) previous: OwnerIdentityRole,
     pub(crate) field_index: usize,
+    pub(crate) collection_role: Option<OwnerCollectionRole>,
 }
 
 impl OwnerIdentityLedger {
@@ -365,24 +588,54 @@ impl OwnerIdentityLedger {
         &mut self,
         uuid: String,
         field_index: usize,
-        role: OwnerIdentityRole,
+        role: GeneratedIdentityRole,
     ) -> Result<(), OwnerIdentityCollision> {
         let key = uuid.to_ascii_lowercase();
         if let Some(previous) = self.by_uuid.get(&key) {
             return Err(OwnerIdentityCollision {
                 previous: *previous,
                 field_index,
+                collection_role: None,
             });
         }
-        self.by_uuid.insert(key, role);
+        self.by_uuid.insert(key, role.into());
         Ok(())
+    }
+
+    /// Records a UUID belonging to a child record. The collection role is
+    /// retained only as typed provenance for a collision; raw UUID values are
+    /// never exposed by the error.
+    pub(crate) fn insert_child(
+        &mut self,
+        uuid: String,
+        field_index: usize,
+        collection_role: OwnerCollectionRole,
+    ) -> Result<(), OwnerIdentityCollision> {
+        let key = uuid.to_ascii_lowercase();
+        if let Some(previous) = self.by_uuid.get(&key) {
+            return Err(OwnerIdentityCollision {
+                previous: *previous,
+                field_index,
+                collection_role: Some(collection_role),
+            });
+        }
+        self.by_uuid.insert(key, OwnerIdentityRole::Child);
+        Ok(())
+    }
+
+    pub(crate) fn contains(&self, uuid: &str) -> bool {
+        self.by_uuid.contains_key(&uuid.to_ascii_lowercase())
     }
 
     pub(crate) fn generated_identities(&self) -> BTreeSet<String> {
         self.by_uuid
             .iter()
             .filter_map(|(uuid, role)| {
-                (!matches!(role, OwnerIdentityRole::Root)).then_some(uuid.clone())
+                matches!(
+                    role,
+                    OwnerIdentityRole::GeneratedType | OwnerIdentityRole::GeneratedValue
+                )
+                .then_some(uuid.clone())
             })
             .collect()
     }
@@ -416,8 +669,42 @@ impl DecodedGeneratedType {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct DecodedOwnerCollection<'a> {
     pub(crate) items: Vec<&'a str>,
+    provenance: OwnerCollectionProvenance,
+}
+
+impl<'a> DecodedOwnerCollection<'a> {
+    pub(crate) fn new(items: Vec<&'a str>, provenance: OwnerCollectionProvenance) -> Self {
+        Self { items, provenance }
+    }
+
+    pub(crate) const fn provenance(&self) -> OwnerCollectionProvenance {
+        self.provenance
+    }
+}
+
+/// A redacted, typed description of a collection location. This is the
+/// schema-side contract retained by each `DecodedOwnerCollection`; it contains
+/// no raw collection fields or UUIDs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct OwnerCollectionProvenance {
+    pub(crate) role: OwnerCollectionRole,
+    pub(crate) index: usize,
+    pub(crate) marker: &'static str,
+    pub(crate) source: &'static str,
+}
+
+impl OwnerCollectionProvenance {
+    pub(crate) const fn from_layout(layout: OwnerCollectionLayout) -> Self {
+        Self {
+            role: layout.role,
+            index: layout.index,
+            marker: layout.marker,
+            source: layout.provenance,
+        }
+    }
 }
 
 pub(crate) struct DecodedOwnerGraph<'a> {
@@ -425,6 +712,45 @@ pub(crate) struct DecodedOwnerGraph<'a> {
     pub(crate) identities: OwnerIdentityLedger,
     pub(crate) owner_fields: Vec<&'a str>,
     pub(crate) collections: Vec<DecodedOwnerCollection<'a>>,
+}
+
+impl<'a> DecodedOwnerGraph<'a> {
+    /// Resolves an owner child collection by semantic role. This remains
+    /// fail-closed while the physical adapter is migrated: the declared index
+    /// must exist, and its marker is available from the same schema layout.
+    pub(crate) fn collection(
+        &self,
+        family: OwnerGraphFamily,
+        role: OwnerCollectionRole,
+    ) -> Result<&DecodedOwnerCollection<'a>, OwnerGraphDiagnosticEvidence> {
+        let Some(layout) = family.layout().collection_layout(role) else {
+            return Err(OwnerGraphDiagnosticEvidence::missing_collection(role));
+        };
+        let collection = self
+            .collections
+            .get(layout.index)
+            .ok_or_else(|| OwnerGraphDiagnosticEvidence::missing_collection(role))?;
+        (collection.provenance.role == role
+            && collection.provenance.index == layout.index
+            && collection
+                .provenance
+                .marker
+                .eq_ignore_ascii_case(layout.marker)
+            && collection.provenance.source == layout.provenance)
+            .then_some(collection)
+            .ok_or_else(|| OwnerGraphDiagnosticEvidence::role_mismatch(role, layout.index))
+    }
+
+    pub(crate) fn collection_provenance(
+        family: OwnerGraphFamily,
+        role: OwnerCollectionRole,
+    ) -> Result<OwnerCollectionProvenance, OwnerGraphDiagnosticEvidence> {
+        family
+            .layout()
+            .collection_layout(role)
+            .map(OwnerCollectionProvenance::from_layout)
+            .ok_or_else(|| OwnerGraphDiagnosticEvidence::missing_collection(role))
+    }
 }
 
 pub(crate) fn order_generated_types(
@@ -481,7 +807,9 @@ pub(crate) enum OwnerGraphDiagnosticClass {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OwnerGraphReference {
+    Root,
     CollectionMarker,
+    ChildUuid,
     OwnerHeader,
     GeneratedType,
     GeneratedValue,
@@ -490,7 +818,9 @@ pub(crate) enum OwnerGraphReference {
 impl OwnerGraphReference {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
+            Self::Root => "root_uuid",
             Self::CollectionMarker => "collection_marker",
+            Self::ChildUuid => "child_uuid",
             Self::OwnerHeader => "owner_header",
             Self::GeneratedType => "generated_type_id",
             Self::GeneratedValue => "generated_value_id",
@@ -508,6 +838,8 @@ pub(crate) enum OwnerGraphDiagnosticKind {
     CollectionMarker,
     CollectionCount,
     CollectionCountMismatch,
+    MissingCollection,
+    CollectionRoleMismatch,
     OwnerFieldsBracedShape,
     OwnerFieldCount,
     OwnerDiscriminator,
@@ -519,6 +851,9 @@ pub(crate) enum OwnerGraphDiagnosticKind {
     GeneratedTypeNilUuid,
     GeneratedValueUuidSyntax,
     GeneratedValueNilUuid,
+    ChildUuidSyntax,
+    ChildUuidNilUuid,
+    ChildIdentityCollision,
     DuplicateIdentity,
     EdtFeatureOrder,
 }
@@ -547,6 +882,12 @@ impl OwnerGraphDiagnosticKind {
                 "owner_graph_collection",
                 "collection_count_mismatch",
             ),
+            Self::MissingCollection => (Invariant, "owner_graph_collection", "missing_collection"),
+            Self::CollectionRoleMismatch => (
+                Invariant,
+                "owner_graph_collection",
+                "collection_role_mismatch",
+            ),
             Self::OwnerFieldsBracedShape => {
                 (Malformed, "owner_graph_fields", "owner_fields_braced_shape")
             }
@@ -562,8 +903,63 @@ impl OwnerGraphDiagnosticKind {
             Self::GeneratedTypeNilUuid => (Invariant, "generated_type_id", "nil_uuid"),
             Self::GeneratedValueUuidSyntax => (Malformed, "generated_value_id", "uuid_syntax"),
             Self::GeneratedValueNilUuid => (Invariant, "generated_value_id", "nil_uuid"),
+            Self::ChildUuidSyntax => (Malformed, "child_uuid", "uuid_syntax"),
+            Self::ChildUuidNilUuid => (Invariant, "child_uuid", "nil_uuid"),
+            Self::ChildIdentityCollision => (
+                Invariant,
+                "owner_identity_ledger",
+                "child_identity_collision",
+            ),
             Self::DuplicateIdentity => (Invariant, "owner_identity_ledger", "duplicate_identity"),
             Self::EdtFeatureOrder => (Invariant, "produced_type_order", "edt_feature_order"),
+        }
+    }
+}
+
+/// Typed diagnostic evidence suitable for a user-facing extraction
+/// diagnostic. It intentionally excludes native raw fields, names and UUID
+/// values: callers receive only stable schema facts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct OwnerGraphDiagnosticEvidence {
+    pub(crate) kind: OwnerGraphDiagnosticKind,
+    pub(crate) reference: Option<OwnerGraphReference>,
+    pub(crate) field_index: Option<usize>,
+    pub(crate) collection_index: Option<usize>,
+    pub(crate) collection_role: Option<OwnerCollectionRole>,
+}
+
+impl OwnerGraphDiagnosticEvidence {
+    pub(crate) const fn missing_collection(role: OwnerCollectionRole) -> Self {
+        Self {
+            kind: OwnerGraphDiagnosticKind::MissingCollection,
+            reference: Some(OwnerGraphReference::CollectionMarker),
+            field_index: None,
+            collection_index: None,
+            collection_role: Some(role),
+        }
+    }
+
+    pub(crate) const fn role_mismatch(role: OwnerCollectionRole, index: usize) -> Self {
+        Self {
+            kind: OwnerGraphDiagnosticKind::CollectionRoleMismatch,
+            reference: Some(OwnerGraphReference::CollectionMarker),
+            field_index: None,
+            collection_index: Some(index),
+            collection_role: Some(role),
+        }
+    }
+
+    pub(crate) const fn child_uuid(
+        kind: OwnerGraphDiagnosticKind,
+        field_index: usize,
+        role: OwnerCollectionRole,
+    ) -> Self {
+        Self {
+            kind,
+            reference: Some(OwnerGraphReference::ChildUuid),
+            field_index: Some(field_index),
+            collection_index: None,
+            collection_role: Some(role),
         }
     }
 }
@@ -574,6 +970,7 @@ impl OwnerIdentityRole {
             Self::Root => "root_uuid",
             Self::GeneratedType => "generated_type_id",
             Self::GeneratedValue => "generated_value_id",
+            Self::Child => "child_uuid",
         }
     }
 }
@@ -663,17 +1060,223 @@ mod tests {
 
     #[test]
     fn identity_ledger_distinguishes_duplicate_roles_and_root_collision() {
+        assert_eq!(
+            OwnerIdentityRole::from(GeneratedIdentityRole::Type),
+            OwnerIdentityRole::GeneratedType
+        );
+        assert_eq!(
+            OwnerIdentityRole::from(GeneratedIdentityRole::Value),
+            OwnerIdentityRole::GeneratedValue
+        );
         let mut ledger = OwnerIdentityLedger::new("root".to_owned());
         ledger
-            .insert_generated("type".to_owned(), 1, OwnerIdentityRole::GeneratedType)
+            .insert_generated("type".to_owned(), 1, GeneratedIdentityRole::Type)
             .unwrap();
         let duplicate = ledger
-            .insert_generated("TYPE".to_owned(), 2, OwnerIdentityRole::GeneratedValue)
+            .insert_generated("TYPE".to_owned(), 2, GeneratedIdentityRole::Value)
             .unwrap_err();
         assert_eq!(duplicate.previous, OwnerIdentityRole::GeneratedType);
         let root = ledger
-            .insert_generated("ROOT".to_owned(), 3, OwnerIdentityRole::GeneratedType)
+            .insert_generated("ROOT".to_owned(), 3, GeneratedIdentityRole::Type)
             .unwrap_err();
         assert_eq!(root.previous, OwnerIdentityRole::Root);
+    }
+
+    #[test]
+    fn collection_roles_are_exact_for_all_four_owner_families() {
+        let expected = [
+            (
+                OwnerGraphFamily::Catalog,
+                [
+                    OwnerCollectionRole::Template,
+                    OwnerCollectionRole::Command,
+                    OwnerCollectionRole::TabularSection,
+                    OwnerCollectionRole::DirectAttribute,
+                    OwnerCollectionRole::Form,
+                ],
+            ),
+            (
+                OwnerGraphFamily::Document,
+                [
+                    OwnerCollectionRole::TabularSection,
+                    OwnerCollectionRole::Template,
+                    OwnerCollectionRole::DirectAttribute,
+                    OwnerCollectionRole::Command,
+                    OwnerCollectionRole::Form,
+                ],
+            ),
+            (
+                OwnerGraphFamily::BusinessProcess,
+                [
+                    OwnerCollectionRole::Template,
+                    OwnerCollectionRole::Form,
+                    OwnerCollectionRole::Command,
+                    OwnerCollectionRole::DirectAttribute,
+                    OwnerCollectionRole::TabularSection,
+                ],
+            ),
+            (
+                OwnerGraphFamily::ChartOfCharacteristicTypes,
+                [
+                    OwnerCollectionRole::DirectAttribute,
+                    OwnerCollectionRole::Template,
+                    OwnerCollectionRole::TabularSection,
+                    OwnerCollectionRole::Command,
+                    OwnerCollectionRole::Form,
+                ],
+            ),
+        ];
+
+        for (family, roles) in expected {
+            let layout = family.layout();
+            assert_eq!(layout.collection_layouts().len(), roles.len());
+            assert_eq!(layout.collection_markers.len(), roles.len());
+            for (index, role) in roles.into_iter().enumerate() {
+                let declared = layout.collection_layout(role).unwrap();
+                assert_eq!(declared.index, index);
+                assert_eq!(layout.collection_layout_at(index), Some(declared));
+                assert_eq!(declared.marker, layout.collection_markers[index]);
+                assert!(!declared.provenance.is_empty());
+                assert_eq!(role.as_str(), declared.role.as_str());
+            }
+        }
+    }
+
+    #[test]
+    fn role_accessors_are_deterministic_and_fail_closed() {
+        let family = OwnerGraphFamily::Document;
+        let collections = family
+            .layout()
+            .collection_layouts()
+            .iter()
+            .map(|layout| {
+                DecodedOwnerCollection::new(
+                    vec![layout.provenance],
+                    OwnerCollectionProvenance::from_layout(*layout),
+                )
+            })
+            .collect();
+        let graph = DecodedOwnerGraph {
+            generated_types: Vec::new(),
+            identities: OwnerIdentityLedger::new("root".to_owned()),
+            owner_fields: Vec::new(),
+            collections,
+        };
+        let forms = graph.collection(family, OwnerCollectionRole::Form).unwrap();
+        assert_eq!(forms.items, vec!["document.form"]);
+        assert_eq!(forms.provenance().index, 4);
+        assert_eq!(
+            DecodedOwnerGraph::collection_provenance(family, OwnerCollectionRole::Form)
+                .unwrap()
+                .marker,
+            DOCUMENT_FORM_COLLECTION_UUID
+        );
+
+        let truncated = DecodedOwnerGraph {
+            generated_types: Vec::new(),
+            identities: OwnerIdentityLedger::new("root".to_owned()),
+            owner_fields: Vec::new(),
+            collections: Vec::new(),
+        };
+        assert_eq!(
+            truncated
+                .collection(family, OwnerCollectionRole::Form)
+                .unwrap_err()
+                .kind,
+            OwnerGraphDiagnosticKind::MissingCollection
+        );
+
+        let wrong = DecodedOwnerGraph {
+            generated_types: Vec::new(),
+            identities: OwnerIdentityLedger::new("root".to_owned()),
+            owner_fields: Vec::new(),
+            collections: vec![DecodedOwnerCollection::new(
+                Vec::new(),
+                OwnerCollectionProvenance::from_layout(
+                    OwnerGraphFamily::Catalog
+                        .layout()
+                        .collection_layout(OwnerCollectionRole::Template)
+                        .unwrap(),
+                ),
+            )],
+        };
+        assert_eq!(
+            wrong
+                .collection(
+                    OwnerGraphFamily::Document,
+                    OwnerCollectionRole::TabularSection
+                )
+                .unwrap_err()
+                .kind,
+            OwnerGraphDiagnosticKind::CollectionRoleMismatch
+        );
+
+        for (actual_family, queried_family) in [
+            (OwnerGraphFamily::Catalog, OwnerGraphFamily::BusinessProcess),
+            (
+                OwnerGraphFamily::Document,
+                OwnerGraphFamily::ChartOfCharacteristicTypes,
+            ),
+        ] {
+            let collections = actual_family
+                .layout()
+                .collection_layouts()
+                .iter()
+                .map(|layout| {
+                    DecodedOwnerCollection::new(
+                        Vec::new(),
+                        OwnerCollectionProvenance::from_layout(*layout),
+                    )
+                })
+                .collect();
+            let cross_family = DecodedOwnerGraph {
+                generated_types: Vec::new(),
+                identities: OwnerIdentityLedger::new("root".to_owned()),
+                owner_fields: Vec::new(),
+                collections,
+            };
+            assert_eq!(
+                cross_family
+                    .collection(queried_family, OwnerCollectionRole::Template)
+                    .unwrap_err()
+                    .kind,
+                OwnerGraphDiagnosticKind::CollectionRoleMismatch
+            );
+        }
+    }
+
+    #[test]
+    fn identity_ledger_tracks_child_collisions_without_leaking_uuid() {
+        let mut ledger = OwnerIdentityLedger::new("root-uuid".to_owned());
+        ledger
+            .insert_generated("type-uuid".to_owned(), 1, GeneratedIdentityRole::Type)
+            .unwrap();
+        ledger
+            .insert_child("child-uuid".to_owned(), 9, OwnerCollectionRole::Form)
+            .unwrap();
+        assert!(ledger.contains("CHILD-UUID"));
+        assert_eq!(
+            ledger.generated_identities(),
+            BTreeSet::from(["type-uuid".to_owned()])
+        );
+        let duplicate = ledger
+            .insert_child("TYPE-UUID".to_owned(), 10, OwnerCollectionRole::Command)
+            .unwrap_err();
+        assert_eq!(duplicate.previous, OwnerIdentityRole::GeneratedType);
+        assert_eq!(
+            duplicate.collection_role,
+            Some(OwnerCollectionRole::Command)
+        );
+
+        let evidence = OwnerGraphDiagnosticEvidence::child_uuid(
+            OwnerGraphDiagnosticKind::ChildIdentityCollision,
+            duplicate.field_index,
+            duplicate.collection_role.unwrap(),
+        );
+        assert_eq!(evidence.reference, Some(OwnerGraphReference::ChildUuid));
+        assert_eq!(evidence.collection_role, Some(OwnerCollectionRole::Command));
+        let rendered = format!("{evidence:?}");
+        assert!(!rendered.contains("TYPE-UUID"));
+        assert!(!rendered.contains("child-uuid"));
     }
 }
