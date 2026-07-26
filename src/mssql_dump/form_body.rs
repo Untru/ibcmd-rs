@@ -43,10 +43,15 @@ use crate::form_schema::{
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
     form_tooltip_representation_schema, form_tooltip_representation_xml_order,
 };
+#[cfg(test)]
+use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_item;
 use ibcmd_schema::{
-    FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue, FormChoiceListItemPart,
+    FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue,
+    FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
+    FormChoiceListLayoutProfile, FormChoiceListValue as SchemaFormChoiceListValue,
     FormChoiceParameters, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
-    bundled_writer_rules, canonical_form_choice_parameters_qname, parse_form_choice_parameters,
+    bundled_writer_rules, canonical_form_choice_parameters_qname, parse_form_choice_list,
+    parse_form_choice_parameters,
 };
 use ibcmd_xml::{
     DcsListSettingsTailError, FormChoiceParametersEmitError, emit_form_choice_parameters,
@@ -1006,18 +1011,9 @@ pub(super) struct FormChildItem {
     pub(super) child_items: Vec<FormChildItem>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormChoiceListItem {
-    pub(super) presentation_present: bool,
-    pub(super) presentation: Vec<(String, String)>,
-    pub(super) value: FormChoiceListValue,
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(super) enum FormChoiceListRawLayout {
-    InputFieldExtendedOptions,
-    RadioButtonOptions,
-}
+pub(super) type FormChoiceListRawLayout = FormChoiceListLayoutProfile;
+pub(super) type FormChoiceListItem = SchemaFormChoiceListItem;
+pub(super) type FormChoiceListValue = SchemaFormChoiceListValue;
 
 /// Physical provenance is retained for diagnostics only.  It deliberately contains no XML
 /// QName, ordering, default-emission or target-version policy.
@@ -1344,15 +1340,6 @@ pub(super) fn validate_canonical_form_choice_parameters(
             verified_form_choice_parameters_policy().map(|_| ())
         }
     }
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) enum FormChoiceListValue {
-    Boolean(bool),
-    Decimal(String),
-    Nil,
-    String(String),
-    DesignTimeRef(String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -10019,43 +10006,18 @@ fn try_parse_form_radio_button_choice_list(
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChoiceListItem>> {
-    let field = extended_options?.get(1)?.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    let Some(item_count) = fields
-        .get(1)
-        .and_then(|value| value.trim().parse::<usize>().ok())
-    else {
-        return None;
-    };
-    let item_fields_end = item_count.checked_mul(2)?.checked_add(2)?;
-    if fields.first()?.trim() != "3"
-        || fields.len() != item_fields_end.checked_add(item_count)?
-        || (0..item_count).any(|index| {
-            parse_exact_1c_quoted_string(fields[2 + index * 2].trim()).as_deref() != Some("")
-        })
-        || fields
-            .iter()
-            .skip(item_fields_end)
-            .any(|field| !is_form_choice_list_empty_sidecar(field))
-    {
-        return None;
-    }
-
-    (0..item_count)
-        .map(|index| {
-            fields.get(3 + index * 2).and_then(|field| {
-                parse_form_radio_button_choice_list_item(
-                    field,
-                    type_index,
-                    type_index_collisions,
-                    object_refs,
-                )
-            })
-        })
-        .collect()
+    let raw = extended_options?.get(1)?;
+    let decoded = parse_form_choice_list(
+        raw,
+        FormChoiceListLayoutProfile::RadioButtonOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
+        },
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
+    )?;
+    Some(decoded.items().to_vec())
 }
 
 pub(super) fn try_parse_form_input_field_choice_list(
@@ -10065,46 +10027,18 @@ pub(super) fn try_parse_form_input_field_choice_list(
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChoiceListItem>> {
-    let field = schema.input_field_option(options, InputFieldSlot::ChoiceList)?;
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return None;
-    };
-    let Some(item_count) = fields
-        .get(1)
-        .and_then(|value| value.trim().parse::<usize>().ok())
-    else {
-        return None;
-    };
-    let item_fields_end = item_count.checked_mul(2)?.checked_add(2)?;
-    if fields.first()?.trim() != "3"
-        || fields.len() != item_fields_end.checked_add(item_count)?
-        || (0..item_count).any(|index| {
-            parse_exact_1c_quoted_string(fields[2 + index * 2].trim()).as_deref() != Some("")
-        })
-        || fields
-            .iter()
-            .skip(item_fields_end)
-            .any(|field| !is_form_choice_list_empty_sidecar(field))
-    {
-        return None;
-    }
-
-    (0..item_count)
-        .map(|index| {
-            fields.get(3 + index * 2).and_then(|field| {
-                parse_form_input_field_choice_list_item(
-                    field,
-                    type_index,
-                    type_index_collisions,
-                    object_refs,
-                )
-            })
-        })
-        .collect()
+    let raw = schema.input_field_option(options, InputFieldSlot::ChoiceList)?;
+    let decoded = parse_form_choice_list(
+        raw,
+        FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
+        },
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
+    )?;
+    Some(decoded.items().to_vec())
 }
 
 pub(super) fn canonical_form_radio_button_choice_list(
@@ -10165,299 +10099,42 @@ fn canonical_form_input_field_choice_list(
     }
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_input_field_choice_list_item(
     field: &str,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListItem> {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    if fields.len() != 3 || parse_1c_string(fields.first()?.trim())? != "#" {
-        return None;
-    }
-    let payload = fields.get(2)?.trim();
-    if scan_1c_braced_value(payload, 0) != Some(payload.len()) {
-        return None;
-    }
-    let payload_fields = split_1c_braced_fields(payload, 0)?;
-    let value = parse_form_input_field_choice_list_value(
-        &payload_fields,
-        fields.get(1)?.trim(),
-        type_index,
-        type_index_collisions,
-        object_refs,
-    )?;
-    let presentation = parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?;
-    Some(FormChoiceListItem {
-        presentation_present: true,
-        presentation,
-        value,
-    })
-}
-
-fn parse_form_input_field_choice_list_presentation(field: &str) -> Option<Vec<(String, String)>> {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    if fields.first()?.trim() != "1" {
-        return None;
-    }
-    let item_count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if fields.len() != item_count.checked_add(2)? {
-        return None;
-    }
-    fields
-        .iter()
-        .skip(2)
-        .map(|item| {
-            let item = item.trim();
-            if scan_1c_braced_value(item, 0) != Some(item.len()) {
-                return None;
-            }
-            let values = split_1c_braced_fields(item, 0)?;
-            match values.as_slice() {
-                [lang, content] => Some((
-                    parse_exact_1c_quoted_string(lang.trim())?,
-                    parse_exact_1c_quoted_string(content.trim())?,
-                )),
-                _ => None,
-            }
-        })
-        .collect()
-}
-
-fn parse_form_input_field_choice_list_value(
-    payload_fields: &[&str],
-    item_platform_discriminator: &str,
-    type_index: &BTreeMap<String, String>,
-    type_index_collisions: &BTreeSet<String>,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<FormChoiceListValue> {
-    let raw_value = payload_fields.get(2)?.trim();
-    if scan_1c_braced_value(raw_value, 0) != Some(raw_value.len()) {
-        return None;
-    }
-    let value_fields = split_1c_braced_fields(raw_value, 0)?;
-    match value_fields.as_slice() {
-        [kind, value]
-            if kind.trim() == r#""N""# && information_register_decimal_is_valid(value.trim()) =>
-        {
-            Some(FormChoiceListValue::Decimal(value.trim().to_string()))
-        }
-        [kind, value] if kind.trim() == r#""S""# => {
-            parse_exact_1c_quoted_string(value.trim()).map(FormChoiceListValue::String)
-        }
-        [kind, value] if kind.trim() == r#""B""# => match value.trim() {
-            "0" => Some(FormChoiceListValue::Boolean(false)),
-            "1" => Some(FormChoiceListValue::Boolean(true)),
-            _ => None,
+    parse_schema_form_choice_list_item(
+        field,
+        FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
         },
-        [kind] if kind.trim() == r#""U""# => {
-            if payload_fields.len() != 6 {
-                return None;
-            }
-            let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok()?;
-            let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok()?;
-            if type_id.is_nil() && value_id.is_nil() {
-                Some(FormChoiceListValue::Nil)
-            } else if type_id.is_nil() {
-                None
-            } else {
-                if value_id.is_nil() {
-                    if let Some(owner_reference) = unique_metadata_type_reference(
-                        type_index,
-                        type_index_collisions,
-                        payload_fields.get(3)?.trim(),
-                    )
-                    .and_then(parse_generated_metadata_reference_owner)
-                    {
-                        let owner_reference = owner_reference.owner_reference();
-                        return Some(FormChoiceListValue::DesignTimeRef(format!(
-                            "{owner_reference}.EmptyRef"
-                        )));
-                    }
-                } else if let Some(reference) =
-                    parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
-                {
-                    return Some(FormChoiceListValue::DesignTimeRef(reference));
-                }
-                if payload_fields.first()?.trim() != "0"
-                    || payload_fields.get(1)?.trim() != "0"
-                    || item_platform_discriminator != FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
-                {
-                    return None;
-                }
-                Some(FormChoiceListValue::DesignTimeRef(format!(
-                    "{type_id}.{value_id}"
-                )))
-            }
-        }
-        _ => None,
-    }
-}
-
-fn is_form_choice_list_empty_sidecar(field: &str) -> bool {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return false;
-    }
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return false;
-    };
-    let [outer_flag, descriptor] = fields.as_slice() else {
-        return false;
-    };
-    if outer_flag.trim() != "0" {
-        return false;
-    }
-
-    let descriptor = descriptor.trim();
-    if scan_1c_braced_value(descriptor, 0) != Some(descriptor.len()) {
-        return false;
-    }
-    let Some(fields) = split_1c_braced_fields(descriptor, 0) else {
-        return false;
-    };
-    let [
-        kind,
-        mode,
-        picture,
-        first_empty,
-        first_offset,
-        second_offset,
-        enabled,
-        trailing_flag,
-        second_empty,
-    ] = fields.as_slice()
-    else {
-        return false;
-    };
-    if kind.trim() != "4"
-        || mode.trim() != "0"
-        || parse_exact_1c_quoted_string(first_empty.trim()).as_deref() != Some("")
-        || first_offset.trim() != "-1"
-        || second_offset.trim() != "-1"
-        || enabled.trim() != "1"
-        || trailing_flag.trim() != "0"
-        || parse_exact_1c_quoted_string(second_empty.trim()).as_deref() != Some("")
-    {
-        return false;
-    }
-
-    let picture = picture.trim();
-    if scan_1c_braced_value(picture, 0) != Some(picture.len()) {
-        return false;
-    }
-    matches!(
-        split_1c_braced_fields(picture, 0).as_deref(),
-        Some([empty]) if empty.trim() == "0"
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
     )
 }
 
-const FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
-
+#[cfg(test)]
 pub(super) fn parse_form_radio_button_choice_list_item(
     field: &str,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListItem> {
-    let field = field.trim();
-    let fields = split_1c_braced_fields(field, 0)?;
-    let payload = fields.get(2)?.trim();
-    let payload_fields = split_1c_braced_fields(payload, 0)?;
-    let raw_value = payload_fields.get(2)?.trim();
-    let value_fields = split_1c_braced_fields(raw_value, 0)?;
-    let value_kind = parse_1c_string(value_fields.first()?.trim())?;
-    let exact_u_item = scan_1c_braced_value(field, 0) == Some(field.len())
-        && fields.len() == 3
-        && parse_exact_1c_quoted_string(fields.first()?.trim()).as_deref() == Some("#")
-        && fields.get(1)?.trim() == FORM_CHOICE_LIST_ITEM_PLATFORM_DISCRIMINATOR
-        && scan_1c_braced_value(payload, 0) == Some(payload.len())
-        && payload_fields.len() == 6
-        && scan_1c_braced_value(raw_value, 0) == Some(raw_value.len())
-        && matches!(value_fields.as_slice(), [kind] if kind.trim() == r#""U""#)
-        && parse_form_input_field_choice_list_presentation(payload_fields.get(5)?).is_some();
-    let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok();
-    let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok();
-    let nil_value = exact_u_item
-        && payload_fields.first()?.trim() == "0"
-        && payload_fields.get(1)?.trim() == "1"
-        && type_id.as_ref().is_some_and(Uuid::is_nil)
-        && value_id.as_ref().is_some_and(Uuid::is_nil);
-    let empty_ref_value = exact_u_item
-        && payload_fields.first()?.trim() == "0"
-        && payload_fields.get(1)?.trim() == "0"
-        && type_id.as_ref().is_some_and(|id| !id.is_nil())
-        && value_id.as_ref().is_some_and(Uuid::is_nil);
-    let value = if nil_value {
-        FormChoiceListValue::Nil
-    } else if empty_ref_value {
-        let owner_reference = unique_metadata_type_reference(
-            type_index,
-            type_index_collisions,
-            payload_fields.get(3)?.trim(),
-        )
-        .and_then(parse_generated_metadata_reference_owner)?
-        .owner_reference();
-        FormChoiceListValue::DesignTimeRef(format!("{owner_reference}.EmptyRef"))
-    } else if value_kind == "U" {
-        if !exact_u_item
-            || payload_fields.first()?.trim() != "0"
-            || payload_fields.get(1)?.trim() != "0"
-        {
-            return None;
-        }
-        let type_id = type_id.filter(|id| !id.is_nil())?;
-        let value_id = value_id.filter(|id| !id.is_nil())?;
-        let reference = parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
-            .unwrap_or_else(|| format!("{type_id}.{value_id}"));
-        FormChoiceListValue::DesignTimeRef(reference)
-    } else {
-        parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?
-    };
-    let presentation = if nil_value || empty_ref_value || value_kind == "U" {
-        parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?
-    } else {
-        payload_fields
-            .get(5)
-            .map(|field| parse_form_localized_strings(field))
-            .unwrap_or_default()
-    };
-    Some(FormChoiceListItem {
-        presentation_present: false,
-        presentation,
-        value,
-    })
-}
-
-pub(super) fn parse_form_radio_button_choice_list_value(
-    payload_fields: &[&str],
-    object_refs: &BTreeMap<String, String>,
-) -> Option<FormChoiceListValue> {
-    let value_fields = split_1c_braced_fields(payload_fields.get(2)?.trim(), 0)?;
-    match parse_1c_string(value_fields.first()?.trim())?.as_str() {
-        "N" => Some(FormChoiceListValue::Decimal(
-            value_fields.get(1)?.trim().to_string(),
-        )),
-        "S" => parse_1c_quoted_string(value_fields.get(1)?.trim()).map(FormChoiceListValue::String),
-        "U" => {
-            let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok()?;
-            let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok()?;
-            if type_id.is_nil() || value_id.is_nil() {
-                return None;
-            }
-            parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
-                .map(FormChoiceListValue::DesignTimeRef)
-        }
-        _ => None,
-    }
+    parse_schema_form_choice_list_item(
+        field,
+        FormChoiceListLayoutProfile::RadioButtonOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
+        },
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
+    )
 }
 
 pub(super) fn parse_form_search_addition_type(field: &str) -> Option<&'static str> {
@@ -17288,7 +16965,9 @@ pub(super) fn format_form_choice_list_xml(
                             "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",
                             escape_xml_text(value)
                         )),
-                        FormChoiceListValue::DesignTimeRef(value) => xml.push_str(&format!(
+                        FormChoiceListValue::EmptyRef(value)
+                        | FormChoiceListValue::LiteralDesignTimeRef(value)
+                        | FormChoiceListValue::DesignTimeRef(value) => xml.push_str(&format!(
                             "{tab}\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">{}</Value>\r\n",
                             escape_xml_text(value)
                         )),

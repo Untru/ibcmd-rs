@@ -11535,7 +11535,7 @@ fn minimal_radio_button_literal_ref_choice_is_typed_and_near_misses_are_opaque()
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0].value,
-        FormChoiceListValue::DesignTimeRef(format!(
+        FormChoiceListValue::LiteralDesignTimeRef(format!(
             "{}.{}",
             fixture.type_id.to_ascii_lowercase(),
             fixture.value_id.to_ascii_lowercase()
@@ -11768,7 +11768,7 @@ fn minimal_radio_button_empty_ref_choice_is_typed_and_near_misses_are_opaque() {
     assert_eq!(items.len(), 1);
     assert_eq!(
         items[0].value,
-        FormChoiceListValue::DesignTimeRef("Enum.SyntheticChoices.EmptyRef".to_string())
+        FormChoiceListValue::EmptyRef("Enum.SyntheticChoices.EmptyRef".to_string())
     );
     validate_canonical_form_choice_list(&canonical).unwrap();
     assert_eq!(
@@ -11882,7 +11882,7 @@ fn radio_button_empty_ref_owner_kind_is_generic_even_when_named_enum() {
     .unwrap();
     assert_eq!(
         parsed.value,
-        FormChoiceListValue::DesignTimeRef("Catalog.Enum.EmptyRef".to_string())
+        FormChoiceListValue::EmptyRef("Catalog.Enum.EmptyRef".to_string())
     );
 }
 
@@ -15792,7 +15792,7 @@ fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
     .unwrap();
     assert_eq!(
         parsed.value,
-        FormChoiceListValue::DesignTimeRef("Enum.SyntheticStatus.EmptyRef".to_string())
+        FormChoiceListValue::EmptyRef("Enum.SyntheticStatus.EmptyRef".to_string())
     );
 
     let choice_list = CanonicalFormChoiceList::Typed {
@@ -15817,7 +15817,7 @@ fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
     .unwrap();
     assert_eq!(
         literal.value,
-        FormChoiceListValue::DesignTimeRef(normalized_empty_pair.to_string())
+        FormChoiceListValue::LiteralDesignTimeRef(normalized_empty_pair.to_string())
     );
     let literal_choice_list = CanonicalFormChoiceList::Typed {
         items: vec![literal],
@@ -15842,7 +15842,7 @@ fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
             &BTreeMap::new(),
         ),
         Some(FormChoiceListItem {
-            value: FormChoiceListValue::DesignTimeRef(reference),
+            value: FormChoiceListValue::LiteralDesignTimeRef(reference),
             ..
         }) if reference == normalized_empty_pair
     ));
@@ -15916,7 +15916,7 @@ fn parses_input_field_choice_list_non_nil_uuid_pair_with_semantic_precedence() {
     .unwrap();
     assert_eq!(
         literal.value,
-        FormChoiceListValue::DesignTimeRef(normalized_pair.to_string())
+        FormChoiceListValue::LiteralDesignTimeRef(normalized_pair.to_string())
     );
 
     let choice_list = CanonicalFormChoiceList::Typed {
@@ -16059,16 +16059,14 @@ fn parses_input_field_choice_list_non_nil_uuid_pair_with_semantic_precedence() {
         )
         .is_none()
     );
-    let semantic_with_wrong_platform = parse_form_input_field_choice_list_item(
-        &wrong_platform_discriminator,
-        &BTreeMap::new(),
-        &BTreeSet::new(),
-        &object_refs,
-    )
-    .unwrap();
-    assert_eq!(
-        semantic_with_wrong_platform.value,
-        FormChoiceListValue::DesignTimeRef(semantic_reference.to_string())
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &wrong_platform_discriminator,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
     );
 
     let parse_collection = |raw: &str| {

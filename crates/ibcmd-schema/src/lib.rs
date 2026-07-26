@@ -67,6 +67,503 @@ pub struct FormChoiceParameterArrayItem {
     value_ref: String,
 }
 
+/// Physical envelope profile for a Form ChoiceList raw value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FormChoiceListLayoutProfile {
+    InputFieldExtendedOptions,
+    RadioButtonOptions,
+}
+
+/// Schema-owned, fully decoded ChoiceList model.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceList {
+    layout: FormChoiceListLayoutProfile,
+    items: Vec<FormChoiceListItem>,
+    empty_sidecar_proof: FormChoiceListEmptySidecarProof,
+}
+
+impl FormChoiceList {
+    pub fn layout(&self) -> FormChoiceListLayoutProfile {
+        self.layout
+    }
+
+    pub fn items(&self) -> &[FormChoiceListItem] {
+        &self.items
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn empty_sidecar_proof(&self) -> &FormChoiceListEmptySidecarProof {
+        &self.empty_sidecar_proof
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceListEmptySidecarProof {
+    count: usize,
+}
+
+impl FormChoiceListEmptySidecarProof {
+    pub fn count(&self) -> usize {
+        self.count
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FormChoiceListItem {
+    pub presentation_present: bool,
+    pub presentation: Vec<(String, String)>,
+    pub value: FormChoiceListValue,
+}
+
+impl FormChoiceListItem {
+    pub fn presentation_present(&self) -> bool {
+        self.presentation_present
+    }
+
+    pub fn presentation(&self) -> &[(String, String)] {
+        &self.presentation
+    }
+
+    pub fn value(&self) -> &FormChoiceListValue {
+        &self.value
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormChoiceListValue {
+    Boolean(bool),
+    Decimal(String),
+    Nil,
+    String(String),
+    EmptyRef(String),
+    LiteralDesignTimeRef(String),
+    DesignTimeRef(String),
+}
+
+const FORM_CHOICE_LIST_ITEM_DISCRIMINATOR: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+const MAX_FORM_CHOICE_LIST_RAW_BYTES: usize = 64 * 1024;
+const MAX_FORM_CHOICE_LIST_ITEMS: usize = 512;
+const MAX_FORM_CHOICE_LIST_PRESENTATION_ITEMS: usize = 128;
+
+/// Decode one complete ChoiceList envelope. Domain reference resolution is
+/// deliberately supplied by the caller; all physical grammar remains here.
+pub fn parse_form_choice_list<FO, FR>(
+    raw: &str,
+    layout: FormChoiceListLayoutProfile,
+    mut resolve_empty_ref_owner: FO,
+    mut resolve_reference: FR,
+) -> Option<FormChoiceList>
+where
+    FO: FnMut(&str) -> Option<String>,
+    FR: FnMut(&str, &str) -> Option<String>,
+{
+    if raw.len() > MAX_FORM_CHOICE_LIST_RAW_BYTES {
+        return None;
+    }
+    let fields = braced_fields_bounded(raw, MAX_FORM_CHOICE_LIST_ITEMS * 3 + 2)?;
+    if fields.first()?.trim() != "3" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count > MAX_FORM_CHOICE_LIST_ITEMS {
+        return None;
+    }
+    let item_fields_end = count.checked_mul(2)?.checked_add(2)?;
+    if fields.len() != item_fields_end.checked_add(count)? {
+        return None;
+    }
+    let mut items = Vec::with_capacity(count);
+    for index in 0..count {
+        if exact_1c_string(fields[2 + index * 2])?.as_str() != "" {
+            return None;
+        }
+        items.push(parse_form_choice_list_item_inner(
+            fields[3 + index * 2],
+            layout,
+            &mut resolve_empty_ref_owner,
+            &mut resolve_reference,
+        )?);
+    }
+    for sidecar in &fields[item_fields_end..] {
+        parse_form_choice_list_empty_sidecar(sidecar)?;
+    }
+    Some(FormChoiceList {
+        layout,
+        items,
+        empty_sidecar_proof: FormChoiceListEmptySidecarProof { count },
+    })
+}
+
+/// Decode one ChoiceList item under an explicit physical layout profile.
+pub fn parse_form_choice_list_item<FO, FR>(
+    raw: &str,
+    layout: FormChoiceListLayoutProfile,
+    mut resolve_empty_ref_owner: FO,
+    mut resolve_reference: FR,
+) -> Option<FormChoiceListItem>
+where
+    FO: FnMut(&str) -> Option<String>,
+    FR: FnMut(&str, &str) -> Option<String>,
+{
+    if raw.len() > MAX_FORM_CHOICE_LIST_RAW_BYTES {
+        return None;
+    }
+    parse_form_choice_list_item_inner(
+        raw,
+        layout,
+        &mut resolve_empty_ref_owner,
+        &mut resolve_reference,
+    )
+}
+
+fn parse_form_choice_list_item_inner<FO, FR>(
+    raw: &str,
+    layout: FormChoiceListLayoutProfile,
+    resolve_empty_ref_owner: &mut FO,
+    resolve_reference: &mut FR,
+) -> Option<FormChoiceListItem>
+where
+    FO: FnMut(&str) -> Option<String>,
+    FR: FnMut(&str, &str) -> Option<String>,
+{
+    let fields = braced_fields_bounded(raw, 3)?;
+    if fields.len() != 3
+        || exact_1c_string(fields[0])?.as_str() != "#"
+        || fields[1].trim() != FORM_CHOICE_LIST_ITEM_DISCRIMINATOR
+    {
+        return None;
+    }
+    let payload = braced_fields_bounded(fields[2], 6)?;
+    let [zero, mode, raw_value, type_id, value_id, presentation] = payload.as_slice() else {
+        return None;
+    };
+    if zero.trim() != "0" {
+        return None;
+    }
+    let value_fields = braced_fields_bounded(raw_value, 2)?;
+    let kind = exact_1c_string(value_fields.first()?)?;
+    let nil = Uuid::nil();
+    let value = match (kind.as_str(), value_fields.as_slice()) {
+        ("N", [_, decimal])
+            if mode.trim() == "1"
+                && ids_are(type_id, value_id, nil, nil)
+                && decimal_is_valid(decimal.trim()) =>
+        {
+            FormChoiceListValue::Decimal(decimal.trim().to_owned())
+        }
+        ("S", [_, string]) if mode.trim() == "1" && ids_are(type_id, value_id, nil, nil) => {
+            FormChoiceListValue::String(exact_1c_string(string)?)
+        }
+        ("B", [_, boolean])
+            if layout == FormChoiceListLayoutProfile::InputFieldExtendedOptions
+                && mode.trim() == "1"
+                && ids_are(type_id, value_id, nil, nil) =>
+        {
+            match boolean.trim() {
+                "0" => FormChoiceListValue::Boolean(false),
+                "1" => FormChoiceListValue::Boolean(true),
+                _ => return None,
+            }
+        }
+        ("U", [_]) => {
+            let type_uuid = Uuid::parse_str(type_id.trim()).ok()?;
+            let value_uuid = Uuid::parse_str(value_id.trim()).ok()?;
+            match (mode.trim(), type_uuid.is_nil(), value_uuid.is_nil()) {
+                ("1", true, true) | ("0", true, true)
+                    if layout == FormChoiceListLayoutProfile::InputFieldExtendedOptions =>
+                {
+                    FormChoiceListValue::Nil
+                }
+                ("1", true, true) => FormChoiceListValue::Nil,
+                ("0", false, true) => {
+                    if let Some(owner) = resolve_empty_ref_owner(type_id.trim()) {
+                        FormChoiceListValue::EmptyRef(format!("{owner}.EmptyRef"))
+                    } else if layout == FormChoiceListLayoutProfile::InputFieldExtendedOptions {
+                        FormChoiceListValue::LiteralDesignTimeRef(format!(
+                            "{type_uuid}.{value_uuid}"
+                        ))
+                    } else {
+                        return None;
+                    }
+                }
+                ("0", false, false) => {
+                    if let Some(reference) = resolve_reference(type_id.trim(), value_id.trim()) {
+                        FormChoiceListValue::DesignTimeRef(reference)
+                    } else {
+                        FormChoiceListValue::LiteralDesignTimeRef(format!(
+                            "{type_uuid}.{value_uuid}"
+                        ))
+                    }
+                }
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    let presentation = parse_form_choice_list_presentation(presentation)?;
+    Some(FormChoiceListItem {
+        presentation_present: layout == FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        presentation,
+        value,
+    })
+}
+
+fn parse_form_choice_list_presentation(raw: &str) -> Option<Vec<(String, String)>> {
+    let fields =
+        braced_fields_bounded(raw, MAX_FORM_CHOICE_LIST_PRESENTATION_ITEMS.checked_add(2)?)?;
+    if fields.first()?.trim() != "1" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    if count > MAX_FORM_CHOICE_LIST_PRESENTATION_ITEMS || fields.len() != count.checked_add(2)? {
+        return None;
+    }
+    fields[2..]
+        .iter()
+        .map(|entry| {
+            let values = braced_fields_bounded(entry, 2)?;
+            match values.as_slice() {
+                [language, content] => {
+                    Some((exact_1c_string(language)?, exact_1c_string(content)?))
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn parse_form_choice_list_empty_sidecar(raw: &str) -> Option<()> {
+    let fields = braced_fields_bounded(raw, 2)?;
+    let [outer_flag, descriptor] = fields.as_slice() else {
+        return None;
+    };
+    if outer_flag.trim() != "0" {
+        return None;
+    }
+    let descriptor = braced_fields_bounded(descriptor, 9)?;
+    let [
+        kind,
+        mode,
+        picture,
+        first_empty,
+        first_offset,
+        second_offset,
+        enabled,
+        trailing_flag,
+        second_empty,
+    ] = descriptor.as_slice()
+    else {
+        return None;
+    };
+    let picture = braced_fields_bounded(picture, 1)?;
+    (kind.trim() == "4"
+        && mode.trim() == "0"
+        && matches!(picture.as_slice(), [empty] if empty.trim() == "0")
+        && exact_1c_string(first_empty)?.is_empty()
+        && first_offset.trim() == "-1"
+        && second_offset.trim() == "-1"
+        && enabled.trim() == "1"
+        && trailing_flag.trim() == "0"
+        && exact_1c_string(second_empty)?.is_empty())
+    .then_some(())
+}
+
+fn ids_are(type_id: &str, value_id: &str, expected_type: Uuid, expected_value: Uuid) -> bool {
+    Uuid::parse_str(type_id.trim()).ok() == Some(expected_type)
+        && Uuid::parse_str(value_id.trim()).ok() == Some(expected_value)
+}
+
+fn decimal_is_valid(value: &str) -> bool {
+    let value = value.strip_prefix('-').unwrap_or(value);
+    let mut parts = value.split('.');
+    let Some(integer) = parts.next() else {
+        return false;
+    };
+    if integer.is_empty() || !integer.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    match (parts.next(), parts.next()) {
+        (None, None) => true,
+        (Some(fraction), None) => {
+            !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod form_choice_list_tests {
+    use super::*;
+
+    const DISC: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    const NIL: &str = "00000000-0000-0000-0000-000000000000";
+    const TYPE_ID: &str = "11111111-1111-4111-8111-111111111111";
+    const VALUE_ID: &str = "22222222-2222-4222-8222-222222222222";
+    const SIDECAR: &str = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+
+    fn item(mode: &str, value: &str, type_id: &str, value_id: &str) -> String {
+        format!(
+            r##"{{"#",{DISC},{{0,{mode},{value},{type_id},{value_id},{{1,1,{{"en","Value"}}}}}}}}"##
+        )
+    }
+
+    fn envelope(item: &str) -> String {
+        format!(r#"{{3,1,"",{item},{SIDECAR}}}"#)
+    }
+
+    fn parse(raw: &str, layout: FormChoiceListLayoutProfile) -> Option<FormChoiceList> {
+        parse_form_choice_list(
+            raw,
+            layout,
+            |type_id| (type_id == TYPE_ID).then(|| "Enum.Kind".to_owned()),
+            |type_id, value_id| {
+                (type_id == TYPE_ID && value_id == VALUE_ID)
+                    .then(|| "Enum.Kind.EnumValue.Value".to_owned())
+            },
+        )
+    }
+
+    #[test]
+    fn both_layouts_decode_values_and_record_empty_sidecar_proof() {
+        for (value, expected) in [
+            (
+                r#"{"N",-12.50}"#,
+                FormChoiceListValue::Decimal("-12.50".to_owned()),
+            ),
+            (
+                r#"{"S","text"}"#,
+                FormChoiceListValue::String("text".to_owned()),
+            ),
+        ] {
+            let parsed = parse(
+                &envelope(&item("1", value, NIL, NIL)),
+                FormChoiceListLayoutProfile::RadioButtonOptions,
+            )
+            .unwrap();
+            assert_eq!(parsed.items()[0].value(), &expected);
+            assert_eq!(parsed.empty_sidecar_proof().count(), 1);
+            assert!(!parsed.items()[0].presentation_present());
+        }
+
+        let boolean = parse(
+            &envelope(&item("1", r#"{"B",1}"#, NIL, NIL)),
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        )
+        .unwrap();
+        assert_eq!(
+            boolean.items()[0].value(),
+            &FormChoiceListValue::Boolean(true)
+        );
+        assert!(boolean.items()[0].presentation_present());
+
+        let empty = parse(
+            "{3,0}",
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        )
+        .unwrap();
+        assert!(empty.is_empty());
+        assert_eq!(empty.empty_sidecar_proof().count(), 0);
+    }
+
+    #[test]
+    fn nil_empty_ref_and_reference_variants_are_profile_exact() {
+        let nil = parse(
+            &envelope(&item("1", r#"{"U"}"#, NIL, NIL)),
+            FormChoiceListLayoutProfile::RadioButtonOptions,
+        )
+        .unwrap();
+        assert_eq!(nil.items()[0].value(), &FormChoiceListValue::Nil);
+
+        let empty_ref = parse(
+            &envelope(&item("0", r#"{"U"}"#, TYPE_ID, NIL)),
+            FormChoiceListLayoutProfile::RadioButtonOptions,
+        )
+        .unwrap();
+        assert_eq!(
+            empty_ref.items()[0].value(),
+            &FormChoiceListValue::EmptyRef("Enum.Kind.EmptyRef".to_owned())
+        );
+
+        let reference = parse(
+            &envelope(&item("0", r#"{"U"}"#, TYPE_ID, VALUE_ID)),
+            FormChoiceListLayoutProfile::RadioButtonOptions,
+        )
+        .unwrap();
+        assert_eq!(
+            reference.items()[0].value(),
+            &FormChoiceListValue::DesignTimeRef("Enum.Kind.EnumValue.Value".to_owned())
+        );
+
+        let literal = parse_form_choice_list(
+            &envelope(&item("0", r#"{"U"}"#, TYPE_ID, VALUE_ID)),
+            FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+            |_| None,
+            |_, _| None,
+        )
+        .unwrap();
+        assert_eq!(
+            literal.items()[0].value(),
+            &FormChoiceListValue::LiteralDesignTimeRef(format!("{TYPE_ID}.{VALUE_ID}"))
+        );
+    }
+
+    #[test]
+    fn malformed_layout_count_uuid_discriminator_owner_and_sidecar_fail_closed() {
+        let exact_item = item("0", r#"{"U"}"#, TYPE_ID, VALUE_ID);
+        for raw in [
+            envelope(&exact_item).replacen("{3,", "{9,", 1),
+            envelope(&exact_item).replace(DISC, "33333333-3333-4333-8333-333333333333"),
+            envelope(&item("0", r#"{"U"}"#, "not-a-uuid", VALUE_ID)),
+            envelope(&item("0", r#"{"U"}"#, TYPE_ID, "not-a-uuid")),
+            format!(r#"{{3,1,"",{exact_item}}}"#),
+            format!(r#"{{3,1,"",{exact_item},{{0,{{4,0,{{0}},"",-1,-1,0,0,""}}}}}}"#),
+            format!(r#"{{3,513}}"#),
+            format!(r#"{}suffix"#, envelope(&exact_item)),
+        ] {
+            assert!(
+                parse(&raw, FormChoiceListLayoutProfile::RadioButtonOptions).is_none(),
+                "{raw}"
+            );
+        }
+
+        let empty_ref = envelope(&item("0", r#"{"U"}"#, TYPE_ID, NIL));
+        assert!(
+            parse_form_choice_list(
+                &empty_ref,
+                FormChoiceListLayoutProfile::RadioButtonOptions,
+                |_| None,
+                |_, _| None,
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn raw_and_nested_counts_are_bounded_before_allocation() {
+        assert!(
+            parse(
+                &"x".repeat(MAX_FORM_CHOICE_LIST_RAW_BYTES + 1),
+                FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+            )
+            .is_none()
+        );
+        let oversized_presentation = format!(
+            r##"{{"#",{DISC},{{0,1,{{"S","x"}},{NIL},{NIL},{{1,{}}}}}}}"##,
+            MAX_FORM_CHOICE_LIST_PRESENTATION_ITEMS + 1
+        );
+        assert!(
+            parse(
+                &envelope(&oversized_presentation),
+                FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+            )
+            .is_none()
+        );
+    }
+}
+
 impl FormChoiceParameterArrayItem {
     pub fn presentation(&self) -> &[(String, String)] {
         &self.presentation
