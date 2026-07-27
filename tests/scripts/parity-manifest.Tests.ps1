@@ -20,6 +20,57 @@ Describe "Parity protocol scripts" {
         }
     }
 
+    function New-ValidSourceAssetV2Report {
+        $sample = [ordered]@{
+            asset_path='Documents/Fixture/Forms/Main/Ext/Form.xml'; source_row_id='fixture-form'; form_item_tag='InputField'
+            property_slot=26; raw_length=123; raw_sha256=('a' * 64)
+        }
+        $cluster = [ordered]@{
+            family='form'; code='source_asset.form.choice_parameter_links.opaque_rejected'; classification='opaque_property_rejected'
+            parse_error_class='primary_malformed'; property='ChoiceParameterLinks'; property_profile='input_field_extended_options_mirrored'
+            affected_entries=1; omitted_samples=0; samples=@($sample)
+        }
+        return [ordered]@{
+            schema_version=2; scope='full'; status='partial'; candidate_set_complete=$true
+            expected=1; emitted=0; opaque=1; missing=0; opaque_property_count=1
+            reasons=[ordered]@{ 'source_asset.form.choice_parameter_links.opaque_rejected'=1 }
+            affected_assets=@([ordered]@{
+                family='form'; code='source_asset.form.choice_parameter_links.opaque_rejected'; classification='opaque_property_rejected'
+                parse_error_class='primary_malformed'; table='Config'; source_row_id='fixture-form'
+                asset_path='Documents/Fixture/Forms/Main/Ext/Form.xml'; form_owner_reference='Document.Fixture'
+                form_item_id='648'; form_item_tag='InputField'; property='ChoiceParameterLinks'
+                property_profile='input_field_extended_options_mirrored'; property_slot=26
+                raw_length=123; raw_sha256=('a' * 64)
+            })
+            diagnostic_clusters=[ordered]@{ total_clusters=1; omitted_clusters=0; omitted_entries=0; clusters=@($cluster) }
+        }
+    }
+
+    function Copy-JsonValue {
+        param($Value)
+        return ($Value | ConvertTo-Json -Depth 20 | ConvertFrom-Json)
+    }
+
+    function Test-SourceAssetEvidenceValidation {
+        param($Report, [bool]$ExpectedValid)
+        $manifestPath = Join-Path $TestDrive ("source-assets-" + [guid]::NewGuid().ToString('N') + '.json')
+        ([ordered]@{ source_assets=$Report } | ConvertTo-Json -Depth 20) | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+        $runnerSource = Get-Content -Raw -LiteralPath $runner
+        $start = $runnerSource.IndexOf('function Import-SourceAssetCompletenessEvidence')
+        $end = $runnerSource.IndexOf('function Protect-SensitiveText')
+        if ($start -lt 0 -or $end -le $start) { throw 'Could not isolate source asset evidence validator.' }
+        $validatorSource = $runnerSource.Substring($start, $end - $start)
+        $escapedPath = $manifestPath.Replace("'", "''")
+        $script = [scriptblock]::Create(@"
+function Get-FileSha256 { param([string]`$Path) return ('a' * 64) }
+$validatorSource
+Import-SourceAssetCompletenessEvidence -Path '$escapedPath'
+"@)
+        $blocked = $false
+        try { & $script | Out-Null } catch { $blocked = $true }
+        $blocked | Should Be (-not $ExpectedValid)
+    }
+
     It "parses under PowerShell without executing an export" {
         foreach ($path in @($runner, $matrix)) {
             $tokens = $null; $errors = $null
@@ -79,6 +130,8 @@ Describe "Parity protocol scripts" {
         ($source -match "Invoke-ParityStep -Name 'parity-matrix'") | Should Be $true
         ($source -match "'--require-complete-root-metadata'") | Should Be $true
         ($source -match "'--require-complete-source-assets'") | Should Be $true
+        ($source -match "'--collect-all-source-asset-diagnostics'") | Should Be $true
+        ($source -match 'CollectAllSourceAssetDiagnostics is available only for Scope') | Should Be $true
         ((Get-Content -Raw $matrix) -match '\$params\.RequireCompleteSourceAssets = \$true') | Should Be $true
         ($source -match 'summary=\$summary') | Should Be $false
     }
@@ -88,6 +141,7 @@ Describe "Parity protocol scripts" {
         (Invoke-ExpectedFailureScript $runner @('-DbName','test','-LabRoot',$lab,'-RunId','valid_full','-Scope','full','-PathPrefix','Catalogs')) | Should Not Be 0
         (Invoke-ExpectedFailureScript $runner @('-DbName','test','-LabRoot',$lab,'-RunId','valid_scoped','-Scope','scoped')) | Should Not Be 0
         (Invoke-ExpectedFailureScript $matrix @('-LabRoot',$lab,'-RunId','strict_scoped','-Scope','scoped','-PathPrefix','Catalogs','-RequireCompleteRootMetadata')) | Should Not Be 0
+        (Invoke-ExpectedFailureScript $runner @('-DbName','test','-LabRoot',$lab,'-RunId','collect_scoped','-Scope','scoped','-PathPrefix','Catalogs','-CollectAllSourceAssetDiagnostics')) | Should Not Be 0
         (Test-Path $lab) | Should Be $false
     }
 
@@ -588,6 +642,195 @@ Describe "Parity protocol scripts" {
         $manifest.database_fingerprint.after.sha256 | Should Match "^[0-9a-f]{64}$"
         $manifest.database_fingerprint.after.ended_utc | Should Not BeNullOrEmpty
         $manifest.database_fingerprint.unchanged | Should Be $true
+    }
+
+    It "retains collected source-asset evidence after a strict candidate gate failure" {
+        $lab = Join-Path $TestDrive 'candidate-strict-evidence'
+        $strictEvidenceCli = Join-Path $TestDrive 'strict-evidence-cli.ps1'
+        $strictEvidenceBranch = @'
+if ($command -eq 'mssql-dump-config' -and $env:PARITY_FAKE_MODE -eq 'candidate-strict-evidence-exit') {
+    $output = Get-Option '-o'
+    New-Item -ItemType Directory -Path $output -Force | Out-Null
+    $sourceAssets = [ordered]@{
+        schema_version=2; scope='full'; status='partial'; candidate_set_complete=$true
+        expected=1; emitted=0; opaque=1; missing=0; opaque_property_count=1
+        reasons=[ordered]@{ 'source_asset.form.choice_parameter_links.opaque_rejected'=1 }
+        affected_assets=@([ordered]@{
+            family='form'; code='source_asset.form.choice_parameter_links.opaque_rejected'; classification='opaque_property_rejected'; parse_error_class='primary_malformed'
+            table='Config'; source_row_id='fixture-form'; asset_path='Documents/Fixture/Forms/Main/Ext/Form.xml'; form_owner_reference='Document.Fixture'
+            form_item_id='648'; form_item_tag='InputField'; property='ChoiceParameterLinks'; property_profile='input_field_extended_options_mirrored'
+            property_slot=26; raw_length=123; raw_sha256=('a' * 64)
+        })
+        diagnostic_clusters=[ordered]@{
+            total_clusters=1; omitted_clusters=0; omitted_entries=0
+            clusters=@([ordered]@{
+                family='form'; code='source_asset.form.choice_parameter_links.opaque_rejected'; classification='opaque_property_rejected'
+                parse_error_class='primary_malformed'; property='ChoiceParameterLinks'; property_profile='input_field_extended_options_mirrored'
+                affected_entries=1; omitted_samples=0
+                samples=@([ordered]@{
+                    asset_path='Documents/Fixture/Forms/Main/Ext/Form.xml'; source_row_id='fixture-form'; form_item_tag='InputField'
+                    property_slot=26; raw_length=123; raw_sha256=('a' * 64)
+                })
+            })
+        }
+    }
+    [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ([ordered]@{ server=(Get-Option '--server'); database=(Get-Option '--database'); source_assets=$sourceAssets; tables=@(); subprocess_journal=@() } | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+    Write-RuntimeJournal ([ordered]@{ protocol_version=1; status='failed'; server=(Get-Option '--server'); database=(Get-Option '--database'); started_unix_ms=1; ended_unix_ms=2; exception='strict source asset gate'; calls=@() })
+    Write-Error 'strict source asset gate' -ErrorAction Continue
+    $global:LASTEXITCODE=29
+    return
+}
+'@
+        $fakeSource = Get-Content -Raw -LiteralPath $fakeCli
+        $fakeSource = $fakeSource.Replace(
+            "'candidate-exit', 'candidate-stale-exit', 'candidate-outer-exit'",
+            "'candidate-exit', 'candidate-stale-exit', 'candidate-outer-exit', 'candidate-strict-evidence-exit'"
+        )
+        $needle = "if (`$command -eq 'mssql-dump-config' -and `$env:PARITY_FAKE_MODE -eq 'candidate-exit') {"
+        $fakeSource = $fakeSource.Replace($needle, "$strictEvidenceBranch`r`n$needle")
+        Set-Content -LiteralPath $strictEvidenceCli -Value $fakeSource -Encoding UTF8
+
+        $fixtureDir = Split-Path -Parent $fakeCli
+        $savedPath = $env:PATH
+        $savedMode = $env:PARITY_FAKE_MODE
+        try {
+            $env:PATH = "$fixtureDir;$savedPath"
+            $env:PARITY_FAKE_MODE = 'candidate-strict-evidence-exit'
+            (Invoke-ExpectedFailureScript $runner @(
+                '-DbName','strict_evidence','-IntegratedAuth','-LabRoot',$lab,'-RunId','probe',
+                '-ExePath',$strictEvidenceCli,'-IbcmdPath',$strictEvidenceCli,'-SqlcmdExecutable',$fakeSqlcmd,'-BcpExecutable',$fakeBcp,
+                '-RequireCompleteSourceAssets','-CollectAllSourceAssetDiagnostics'
+            )) | Should Not Be 0
+        } finally {
+            $env:PATH = $savedPath
+            $env:PARITY_FAKE_MODE = $savedMode
+        }
+
+        $manifestPath = Join-Path $lab 'strict_evidence_probe\parity-manifest.json'
+        $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+        $manifest.status | Should Be 'failed'
+        $manifest.release_eligible | Should Be $false
+        $manifest.result_class | Should Be 'diagnostic'
+        $manifest.steps[1].name | Should Be 'candidate-export'
+        $manifest.steps[1].status | Should Be 'failed'
+        $manifest.source_asset_gate.requested | Should Be $true
+        $manifest.source_asset_gate.passed | Should Be $false
+        $manifest.source_assets.complete | Should Be $false
+        $manifest.source_assets.report.status | Should Be 'partial'
+        $manifest.source_assets.report.opaque | Should Be 1
+        $manifest.artifacts.candidate_dump_manifest | Should Be 'candidate_dump/manifest.json'
+        $manifest.artifact_sha256.candidate_dump_manifest | Should Match '^[0-9a-f]{64}$'
+    }
+
+    It "accepts canonical source-asset evidence schemas v1 and v2" {
+        $v2 = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        Test-SourceAssetEvidenceValidation -Report $v2 -ExpectedValid $true
+
+        $v1 = Copy-JsonValue $v2
+        $v1.schema_version = 1
+        $v1.PSObject.Properties.Remove('diagnostic_clusters')
+        Test-SourceAssetEvidenceValidation -Report $v1 -ExpectedValid $true
+
+        $numericOrdering = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $first = Copy-JsonValue $numericOrdering.diagnostic_clusters.clusters[0].samples[0]
+        $first.property_slot = 2
+        $second = Copy-JsonValue $numericOrdering.diagnostic_clusters.clusters[0].samples[0]
+        $second.property_slot = 10
+        $numericOrdering.diagnostic_clusters.clusters[0].samples = @($first, $second)
+        $numericOrdering.diagnostic_clusters.clusters[0].affected_entries = 2
+        $firstAffected = Copy-JsonValue $numericOrdering.affected_assets[0]
+        $firstAffected.property_slot = 2
+        $secondAffected = Copy-JsonValue $numericOrdering.affected_assets[0]
+        $secondAffected.property_slot = 10
+        $numericOrdering.affected_assets = @($firstAffected, $secondAffected)
+        $numericOrdering.opaque_property_count = 2
+        $numericOrdering.reasons.'source_asset.form.choice_parameter_links.opaque_rejected' = 2
+        Test-SourceAssetEvidenceValidation -Report $numericOrdering -ExpectedValid $true
+    }
+
+    It "rejects malformed bounded source-asset diagnostic evidence" {
+        $invalidReports = [System.Collections.Generic.List[object]]::new()
+
+        $decimalVersion = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $decimalVersion.schema_version = [decimal]2.0
+        $invalidReports.Add($decimalVersion)
+        $stringVersion = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $stringVersion.schema_version = '2'
+        $invalidReports.Add($stringVersion)
+
+        $tooManyClusters = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $tooManyClusters.diagnostic_clusters.clusters = @(
+            0..128 | ForEach-Object {
+                $cluster = Copy-JsonValue $tooManyClusters.diagnostic_clusters.clusters[0]
+                $cluster.code = ('code-{0:D3}' -f $_)
+                $cluster
+            }
+        )
+        $tooManyClusters.diagnostic_clusters.total_clusters = 129
+        $invalidReports.Add($tooManyClusters)
+
+        $tooManySamples = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $tooManySamples.diagnostic_clusters.clusters[0].samples = @(
+            0..3 | ForEach-Object {
+                $sample = Copy-JsonValue $tooManySamples.diagnostic_clusters.clusters[0].samples[0]
+                $sample.source_row_id = ('fixture-{0:D3}' -f $_)
+                $sample
+            }
+        )
+        $tooManySamples.diagnostic_clusters.clusters[0].affected_entries = 4
+        $invalidReports.Add($tooManySamples)
+
+        $badAccounting = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $badAccounting.diagnostic_clusters.clusters[0].affected_entries = 2
+        $invalidReports.Add($badAccounting)
+
+        $impossibleOverflow = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $impossibleOverflow.diagnostic_clusters.clusters = @()
+        $impossibleOverflow.diagnostic_clusters.total_clusters = 1
+        $impossibleOverflow.diagnostic_clusters.omitted_clusters = 1
+        $impossibleOverflow.diagnostic_clusters.omitted_entries = 0
+        $invalidReports.Add($impossibleOverflow)
+
+        $missingClusterBacklog = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $missingClusterBacklog.diagnostic_clusters = [pscustomobject][ordered]@{
+            total_clusters=0; omitted_clusters=0; omitted_entries=0; clusters=@()
+        }
+        $invalidReports.Add($missingClusterBacklog)
+
+        $unsortedClusters = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $first = Copy-JsonValue $unsortedClusters.diagnostic_clusters.clusters[0]
+        $first.code = 'z-code'
+        $second = Copy-JsonValue $unsortedClusters.diagnostic_clusters.clusters[0]
+        $second.code = 'a-code'
+        $unsortedClusters.diagnostic_clusters.clusters = @($first, $second)
+        $unsortedClusters.diagnostic_clusters.total_clusters = 2
+        $invalidReports.Add($unsortedClusters)
+
+        $unsortedSamples = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $first = Copy-JsonValue $unsortedSamples.diagnostic_clusters.clusters[0].samples[0]
+        $first.source_row_id = 'z-row'
+        $second = Copy-JsonValue $unsortedSamples.diagnostic_clusters.clusters[0].samples[0]
+        $second.source_row_id = 'a-row'
+        $unsortedSamples.diagnostic_clusters.clusters[0].samples = @($first, $second)
+        $unsortedSamples.diagnostic_clusters.clusters[0].affected_entries = 2
+        $invalidReports.Add($unsortedSamples)
+
+        $unknownReportField = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $unknownReportField | Add-Member -NotePropertyName raw -NotePropertyValue 'secret-payload'
+        $invalidReports.Add($unknownReportField)
+        $unknownClusterField = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $unknownClusterField.diagnostic_clusters.clusters[0] | Add-Member -NotePropertyName payload -NotePropertyValue 'secret-payload'
+        $invalidReports.Add($unknownClusterField)
+        $unknownAffectedAssetField = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $unknownAffectedAssetField.affected_assets[0] | Add-Member -NotePropertyName raw -NotePropertyValue 'secret-payload'
+        $invalidReports.Add($unknownAffectedAssetField)
+        $unknownSampleField = Copy-JsonValue (New-ValidSourceAssetV2Report)
+        $unknownSampleField.diagnostic_clusters.clusters[0].samples[0] | Add-Member -NotePropertyName error -NotePropertyValue 'raw error text'
+        $invalidReports.Add($unknownSampleField)
+
+        foreach ($report in $invalidReports) {
+            Test-SourceAssetEvidenceValidation -Report $report -ExpectedValid $false
+        }
     }
 
     It "keeps a self-contained valid manifest when the process is interrupted mid-step" {

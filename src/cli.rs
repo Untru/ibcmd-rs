@@ -1158,6 +1158,13 @@ pub struct MssqlDumpConfigArgs {
         conflicts_with_all = ["file_names", "file_name_lists"]
     )]
     pub require_complete_source_assets: bool,
+    /// Continue a full diagnostic export after form writer rejections that have structured source-asset diagnostics.
+    #[arg(
+        long,
+        requires_all = ["extract_metadata_xml", "no_binary_rows"],
+        conflicts_with_all = ["file_names", "file_name_lists"]
+    )]
+    pub collect_all_source_asset_diagnostics: bool,
     /// Source XML version for reconstructed source files.
     #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
     pub source_version: InfobaseConfigSourceVersion,
@@ -4355,6 +4362,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_collect_all_source_asset_diagnostics_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-config",
+            "--database",
+            "TestDb",
+            "-o",
+            r"C:\dump",
+            "--extract-metadata-xml",
+            "--no-binary-rows",
+            "--collect-all-source-asset-diagnostics",
+            "--require-complete-source-assets",
+        ]);
+
+        match cli.command {
+            Commands::MssqlDumpConfig(args) => {
+                assert!(args.collect_all_source_asset_diagnostics);
+                assert!(args.require_complete_source_assets);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+
+    #[test]
     fn rejects_invalid_strict_mssql_dump_config_combinations() {
         assert!(
             Cli::try_parse_from([
@@ -4365,6 +4396,34 @@ mod tests {
                 "-o",
                 r"C:\dump",
                 "--require-complete-root-metadata",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--collect-all-source-asset-diagnostics",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-config",
+                "--database",
+                "TestDb",
+                "-o",
+                r"C:\dump",
+                "--extract-metadata-xml",
+                "--no-binary-rows",
+                "--collect-all-source-asset-diagnostics",
+                "--file-name",
+                "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
             ])
             .is_err()
         );

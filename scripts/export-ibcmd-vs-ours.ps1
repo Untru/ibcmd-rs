@@ -15,7 +15,8 @@ param(
     [ValidateSet("full", "scoped")][string]$Scope = "full",
     [string[]]$PathPrefix = @(),
     [switch]$RequireCompleteRootMetadata,
-    [switch]$RequireCompleteSourceAssets
+    [switch]$RequireCompleteSourceAssets,
+    [switch]$CollectAllSourceAssetDiagnostics
 )
 
 Set-StrictMode -Version Latest
@@ -33,11 +34,24 @@ function Import-SourceAssetCompletenessEvidence {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing candidate source asset manifest: $Path" }
     $candidate = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
     $report = $candidate.source_assets
-    if ($null -eq $report -or [int]$report.schema_version -ne 1) {
+    $isCanonicalSchemaVersion = {
+        param($Value)
+        if ($null -eq $Value -or $Value -is [string] -or $Value -is [decimal] -or $Value -is [double] -or $Value -is [single]) { return $false }
+        if ($Value -isnot [sbyte] -and $Value -isnot [byte] -and $Value -isnot [int16] -and $Value -isnot [uint16] -and
+            $Value -isnot [int32] -and $Value -isnot [uint32] -and $Value -isnot [int64] -and $Value -isnot [uint64]) { return $false }
+        return $Value -eq 1 -or $Value -eq 2
+    }
+    if ($null -eq $report -or $report.PSObject.Properties.Name -notcontains 'schema_version' -or -not (& $isCanonicalSchemaVersion $report.schema_version)) {
         throw 'Candidate source asset completeness evidence is missing or unsupported.'
     }
+    $isNonNegativeCount = {
+        param($Value)
+        if ($null -eq $Value) { return $false }
+        try { $number = [decimal]$Value } catch { return $false }
+        return $number -ge 0 -and $number -eq [decimal]::Truncate($number) -and $number -le [decimal][Int64]::MaxValue
+    }
     foreach ($count in @('expected', 'emitted', 'opaque', 'missing', 'opaque_property_count')) {
-        if ([int64]$report.$count -lt 0) { throw "Candidate source asset completeness count '$count' is invalid." }
+        if (-not (& $isNonNegativeCount $report.$count)) { throw "Candidate source asset completeness count '$count' is invalid." }
     }
     if ([int64]$report.expected -ne ([int64]$report.emitted + [int64]$report.opaque + [int64]$report.missing)) {
         throw 'Candidate source asset completeness invariant expected=emitted+opaque+missing is violated.'
@@ -57,6 +71,165 @@ function Import-SourceAssetCompletenessEvidence {
     }
     if ([string]$report.status -cne $derivedStatus) {
         throw "Candidate source asset completeness status disagrees with its evidence counts (expected '$derivedStatus')."
+    }
+    if ($report.schema_version -eq 2) {
+        $reportAllowed = @('schema_version', 'scope', 'status', 'candidate_set_complete', 'expected', 'emitted', 'opaque', 'missing', 'opaque_property_count', 'reasons', 'affected_assets', 'diagnostic_clusters')
+        foreach ($property in $report.PSObject.Properties.Name) {
+            if ($reportAllowed -notcontains $property) { throw "Candidate source asset completeness v2 report has unsupported property '$property'." }
+        }
+        if ($null -eq $report.affected_assets) { throw 'Candidate source asset completeness v2 evidence misses affected_assets.' }
+        $affectedAssetAllowed = @('family', 'code', 'classification', 'parse_error_class', 'table', 'source_row_id', 'asset_path', 'form_owner_reference', 'form_item_id', 'form_item_tag', 'property', 'property_profile', 'property_slot', 'raw_length', 'raw_sha256')
+        $clusterableAffectedByKey = @{}
+        $clusterableAffectedCount = 0
+        foreach ($affectedAsset in @($report.affected_assets)) {
+            foreach ($property in $affectedAsset.PSObject.Properties.Name) {
+                if ($affectedAssetAllowed -notcontains $property) { throw "Candidate source asset completeness v2 affected asset has unsupported property '$property'." }
+            }
+            $isClusterable = (
+                $affectedAsset.PSObject.Properties.Name -contains 'family' -and
+                $affectedAsset.family -is [string] -and
+                -not [string]::IsNullOrWhiteSpace($affectedAsset.family) -and
+                $affectedAsset.family -cne 'unknown' -and
+                $affectedAsset.PSObject.Properties.Name -contains 'property' -and
+                $affectedAsset.property -is [string] -and
+                -not [string]::IsNullOrWhiteSpace($affectedAsset.property) -and
+                $affectedAsset.PSObject.Properties.Name -contains 'property_profile' -and
+                $affectedAsset.property_profile -is [string] -and
+                -not [string]::IsNullOrWhiteSpace($affectedAsset.property_profile)
+            )
+            if ($isClusterable) {
+                foreach ($property in @('code', 'classification')) {
+                    if ($affectedAsset.PSObject.Properties.Name -notcontains $property -or
+                        $affectedAsset.$property -isnot [string] -or
+                        [string]::IsNullOrWhiteSpace($affectedAsset.$property)) {
+                        throw "Candidate source asset completeness v2 affected asset '$property' is invalid."
+                    }
+                }
+                if ($affectedAsset.PSObject.Properties.Name -contains 'parse_error_class' -and
+                    $null -ne $affectedAsset.parse_error_class -and
+                    ($affectedAsset.parse_error_class -isnot [string] -or [string]::IsNullOrWhiteSpace($affectedAsset.parse_error_class))) {
+                    throw 'Candidate source asset completeness v2 affected asset parse_error_class is invalid.'
+                }
+                $affectedKey = @(
+                    $affectedAsset.family,
+                    $affectedAsset.code,
+                    $affectedAsset.classification,
+                    [string]$affectedAsset.parse_error_class,
+                    $affectedAsset.property,
+                    $affectedAsset.property_profile
+                ) -join [char]31
+                if (-not $clusterableAffectedByKey.ContainsKey($affectedKey)) {
+                    $clusterableAffectedByKey[$affectedKey] = 0
+                }
+                $clusterableAffectedByKey[$affectedKey] = [int64]$clusterableAffectedByKey[$affectedKey] + 1
+                $clusterableAffectedCount++
+            }
+        }
+        if ([int64]$clusterableAffectedCount -ne [int64]$report.opaque_property_count) {
+            throw 'Candidate source asset completeness v2 affected assets do not account for every opaque property.'
+        }
+        $clusterReport = $report.diagnostic_clusters
+        if ($null -eq $clusterReport) { throw 'Candidate source asset completeness v2 evidence misses diagnostic_clusters.' }
+        $clusterReportAllowed = @('total_clusters', 'omitted_clusters', 'omitted_entries', 'clusters')
+        foreach ($property in $clusterReport.PSObject.Properties.Name) {
+            if ($clusterReportAllowed -notcontains $property) { throw "Candidate source asset completeness v2 cluster report has unsupported property '$property'." }
+        }
+        foreach ($count in @('total_clusters', 'omitted_clusters', 'omitted_entries')) {
+            if ($clusterReport.PSObject.Properties.Name -notcontains $count -or -not (& $isNonNegativeCount $clusterReport.$count)) {
+                throw "Candidate source asset completeness v2 cluster count '$count' is invalid."
+            }
+        }
+        if ($clusterReport.PSObject.Properties.Name -notcontains 'clusters' -or $null -eq $clusterReport.clusters) {
+            throw 'Candidate source asset completeness v2 evidence misses diagnostic_clusters.clusters.'
+        }
+        $clusters = @($clusterReport.clusters)
+        if ($clusters.Count -gt 128) { throw 'Candidate source asset completeness v2 has too many diagnostic clusters.' }
+        if ([decimal]$clusterReport.total_clusters -ne ([decimal]$clusters.Count + [decimal]$clusterReport.omitted_clusters)) {
+            throw 'Candidate source asset completeness v2 diagnostic cluster total is inconsistent.'
+        }
+        if (($clusterReport.omitted_clusters -eq 0 -and $clusterReport.omitted_entries -ne 0) -or
+            ($clusterReport.omitted_clusters -gt 0 -and $clusterReport.omitted_entries -lt $clusterReport.omitted_clusters)) {
+            throw 'Candidate source asset completeness v2 diagnostic cluster overflow is inconsistent.'
+        }
+        $previousClusterKey = $null
+        $storedClusterKeys = @{}
+        $storedClusterEntries = 0
+        foreach ($cluster in $clusters) {
+            $clusterAllowed = @('family', 'code', 'classification', 'parse_error_class', 'property', 'property_profile', 'affected_entries', 'omitted_samples', 'samples')
+            foreach ($property in $cluster.PSObject.Properties.Name) {
+                if ($clusterAllowed -notcontains $property) { throw "Candidate source asset completeness v2 cluster has unsupported property '$property'." }
+            }
+            foreach ($property in @('family', 'code', 'classification', 'property', 'property_profile', 'affected_entries', 'omitted_samples', 'samples')) {
+                if ($cluster.PSObject.Properties.Name -notcontains $property) { throw "Candidate source asset completeness v2 cluster misses '$property'." }
+            }
+            foreach ($property in @('family', 'code', 'classification', 'property', 'property_profile')) {
+                if ($cluster.$property -isnot [string] -or [string]::IsNullOrWhiteSpace($cluster.$property)) { throw "Candidate source asset completeness v2 cluster '$property' is invalid." }
+            }
+            if ($cluster.PSObject.Properties.Name -contains 'parse_error_class' -and $null -ne $cluster.parse_error_class -and
+                ($cluster.parse_error_class -isnot [string] -or [string]::IsNullOrWhiteSpace($cluster.parse_error_class))) {
+                throw 'Candidate source asset completeness v2 cluster parse_error_class is invalid.'
+            }
+            foreach ($count in @('affected_entries', 'omitted_samples')) {
+                if ($cluster.PSObject.Properties.Name -notcontains $count -or -not (& $isNonNegativeCount $cluster.$count)) {
+                    throw "Candidate source asset completeness v2 cluster count '$count' is invalid."
+                }
+            }
+            if ($cluster.PSObject.Properties.Name -notcontains 'samples' -or $null -eq $cluster.samples) {
+                throw 'Candidate source asset completeness v2 cluster misses samples.'
+            }
+            $samples = @($cluster.samples)
+            if ($samples.Count -gt 3) { throw 'Candidate source asset completeness v2 cluster has too many samples.' }
+            if ([decimal]$cluster.affected_entries -ne ([decimal]$samples.Count + [decimal]$cluster.omitted_samples)) {
+                throw 'Candidate source asset completeness v2 cluster sample counts are inconsistent.'
+            }
+            $clusterKey = @($cluster.family, $cluster.code, $cluster.classification, [string]$cluster.parse_error_class, $cluster.property, $cluster.property_profile) -join [char]31
+            if ($null -ne $previousClusterKey -and [string]::CompareOrdinal($previousClusterKey, $clusterKey) -gt 0) {
+                throw 'Candidate source asset completeness v2 diagnostic clusters are not sorted.'
+            }
+            if ($storedClusterKeys.ContainsKey($clusterKey)) {
+                throw 'Candidate source asset completeness v2 contains a duplicate diagnostic cluster key.'
+            }
+            if (-not $clusterableAffectedByKey.ContainsKey($clusterKey) -or
+                [int64]$clusterableAffectedByKey[$clusterKey] -ne [int64]$cluster.affected_entries) {
+                throw 'Candidate source asset completeness v2 diagnostic cluster does not match affected assets.'
+            }
+            $storedClusterKeys[$clusterKey] = $true
+            $storedClusterEntries += [int64]$cluster.affected_entries
+            $previousClusterKey = $clusterKey
+            $previousSampleKey = $null
+            foreach ($sample in $samples) {
+                $sampleAllowed = @('asset_path', 'source_row_id', 'form_item_tag', 'property_slot', 'raw_length', 'raw_sha256')
+                foreach ($property in $sample.PSObject.Properties.Name) {
+                    if ($sampleAllowed -notcontains $property) { throw "Candidate source asset completeness v2 sample has unsupported property '$property'." }
+                }
+                foreach ($property in $sampleAllowed) {
+                    if ($sample.PSObject.Properties.Name -notcontains $property) { throw "Candidate source asset completeness v2 sample misses '$property'." }
+                }
+                foreach ($property in @('asset_path', 'source_row_id', 'form_item_tag', 'raw_sha256')) {
+                    if ($sample.$property -isnot [string] -or [string]::IsNullOrWhiteSpace($sample.$property)) { throw "Candidate source asset completeness v2 sample '$property' is invalid." }
+                }
+                foreach ($count in @('property_slot', 'raw_length')) {
+                    if (-not (& $isNonNegativeCount $sample.$count)) { throw "Candidate source asset completeness v2 sample count '$count' is invalid." }
+                }
+                # Rust orders numeric slots numerically (not by their textual form).
+                $sampleKey = @($sample.asset_path, $sample.source_row_id, $sample.form_item_tag,
+                    ('{0:D20}' -f [int64]$sample.property_slot), ('{0:D20}' -f [int64]$sample.raw_length), $sample.raw_sha256) -join [char]31
+                if ($null -ne $previousSampleKey -and [string]::CompareOrdinal($previousSampleKey, $sampleKey) -gt 0) {
+                    throw 'Candidate source asset completeness v2 cluster samples are not sorted.'
+                }
+                $previousSampleKey = $sampleKey
+            }
+        }
+        $omittedAffectedKeys = @($clusterableAffectedByKey.Keys | Where-Object { -not $storedClusterKeys.ContainsKey($_) })
+        $omittedAffectedEntries = 0
+        foreach ($key in $omittedAffectedKeys) {
+            $omittedAffectedEntries += [int64]$clusterableAffectedByKey[$key]
+        }
+        if ([int64]$omittedAffectedKeys.Count -ne [int64]$clusterReport.omitted_clusters -or
+            [int64]$omittedAffectedEntries -ne [int64]$clusterReport.omitted_entries -or
+            [int64]$storedClusterEntries + [int64]$clusterReport.omitted_entries -ne [int64]$report.opaque_property_count) {
+            throw 'Candidate source asset completeness v2 diagnostic clusters do not exactly cover affected assets.'
+        }
     }
     $isComplete = (
         [string]$report.scope -ceq 'full' -and
@@ -932,6 +1105,7 @@ if ($Scope -eq 'full' -and $PathPrefix.Count -ne 0) { throw "Scope 'full' requir
 if ($Scope -eq 'scoped' -and $PathPrefix.Count -eq 0) { throw "Scope 'scoped' requires at least one PathPrefix." }
 if ($RequireCompleteRootMetadata -and $Scope -ne 'full') { throw "RequireCompleteRootMetadata is available only for Scope 'full'." }
 if ($RequireCompleteSourceAssets -and $Scope -ne 'full') { throw "RequireCompleteSourceAssets is available only for Scope 'full'." }
+if ($CollectAllSourceAssetDiagnostics -and $Scope -ne 'full') { throw "CollectAllSourceAssetDiagnostics is available only for Scope 'full'." }
 if ([string]::IsNullOrWhiteSpace($ExePath)) { $ExePath = Join-Path $repoRoot 'target\release\ibcmd-rs.exe' }
 $ExePath = [IO.Path]::GetFullPath($ExePath)
 if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) { throw "Missing executable: $ExePath. Build it with: cargo build --release --features platform-oracle" }
@@ -1131,10 +1305,27 @@ try {
     if (-not $IntegratedAuth) { $candidateArgs += @('--sql-user', $DbUser, '--sql-pwd-env', 'IBCMD_DB_PSW') }
     if ($RequireCompleteRootMetadata) { $candidateArgs += '--require-complete-root-metadata' }
     if ($RequireCompleteSourceAssets) { $candidateArgs += '--require-complete-source-assets' }
+    if ($CollectAllSourceAssetDiagnostics) { $candidateArgs += '--collect-all-source-asset-diagnostics' }
     try {
         Invoke-ParityStep -Name 'candidate-export' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'candidate-export.log') -Arguments $candidateArgs -Artifacts @('candidate_dump/manifest.json', 'logs/candidate-runtime.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @candidateArgs }
     } catch {
         $candidateError = $_
+        if ($CollectAllSourceAssetDiagnostics -and $RequireCompleteSourceAssets) {
+            # A strict completeness gate runs after the candidate has persisted its
+            # manifest. Preserve that bounded, non-payload evidence without
+            # converting the failed candidate step or the parity run into success.
+            try {
+                $candidateDumpManifestPath = Join-Path $candidateDumpRoot 'manifest.json'
+                $manifest.source_assets = Import-SourceAssetCompletenessEvidence -Path $candidateDumpManifestPath
+                $manifest.source_asset_gate.passed = $false
+                $manifest.artifacts.candidate_dump_manifest = 'candidate_dump/manifest.json'
+                if (-not $manifest.Contains('artifact_sha256')) { $manifest.artifact_sha256 = [ordered]@{} }
+                $manifest.artifact_sha256.candidate_dump_manifest = Get-FileSha256 -Path $candidateDumpManifestPath
+            } catch {
+                # Best-effort diagnostic retention must never replace the original
+                # strict candidate failure.
+            }
+        }
         try {
             $null = Complete-StaleRuntimeJournal -JournalKind candidate -JournalPath $candidateRuntimeJournalPath `
                 -NativeIbcmdPath $resolvedIbcmd -SqlcmdPath $sqlcmdPath -BcpPath $bcpPath `

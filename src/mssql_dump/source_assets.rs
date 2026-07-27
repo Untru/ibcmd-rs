@@ -555,6 +555,10 @@ pub(super) enum WrittenSourceAsset {
         primary_path: PathBuf,
         diagnostics: Vec<FormSourceAssetDiagnostic>,
     },
+    RejectedNotEmitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
 }
 
 pub(super) fn source_asset_paths_with_indexes(
@@ -1403,6 +1407,14 @@ pub(super) fn write_source_asset(
                     diagnostics: extraction_diagnostics,
                     error,
                 } => {
+                    if context.collect_all_source_asset_diagnostics
+                        && !extraction_diagnostics.is_empty()
+                    {
+                        return Ok(WrittenSourceAsset::RejectedNotEmitted {
+                            primary_path: asset.primary_path.clone(),
+                            diagnostics: extraction_diagnostics,
+                        });
+                    }
                     let diagnostic_codes = extraction_diagnostics
                         .iter()
                         .map(|diagnostic| diagnostic.code)

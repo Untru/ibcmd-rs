@@ -226,6 +226,7 @@ fn export_config_report(
         extract_metadata_xml: true,
         require_complete_root_metadata: false,
         require_complete_source_assets: false,
+        collect_all_source_asset_diagnostics: false,
         no_binary_rows: true,
         write_binary_rows: false,
         write_manifest: false,

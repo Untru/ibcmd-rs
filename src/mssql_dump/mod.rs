@@ -913,6 +913,7 @@ pub mod offline_context;
 mod refs;
 mod role_rights;
 mod selected;
+mod source_asset_diagnostics;
 mod source_assets;
 mod timing;
 
@@ -931,10 +932,14 @@ use moxel::*;
 use refs::*;
 use role_rights::*;
 use selected::*;
+use source_asset_diagnostics::cluster_source_asset_diagnostics;
 use source_assets::*;
 
 pub use metadata::MetadataExtractionMissReason;
 pub use mxl_ir::{MxlDiagnostic, MxlDiagnosticStage};
+pub use source_asset_diagnostics::{
+    SourceAssetDiagnosticCluster, SourceAssetDiagnosticClusterReport, SourceAssetDiagnosticSample,
+};
 
 pub(crate) fn resolve_form_item_picture_owner(
     text: &str,
@@ -1127,6 +1132,8 @@ impl Default for SourceAssetCompletenessScope {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceAssetCompletenessEntry {
+    #[serde(default = "default_source_asset_family")]
+    pub family: String,
     pub code: String,
     pub classification: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1144,6 +1151,10 @@ pub struct SourceAssetCompletenessEntry {
     pub raw_sha256: String,
 }
 
+fn default_source_asset_family() -> String {
+    "unknown".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceAssetCompletenessReport {
     pub schema_version: u32,
@@ -1157,12 +1168,14 @@ pub struct SourceAssetCompletenessReport {
     pub opaque_property_count: usize,
     pub reasons: BTreeMap<String, usize>,
     pub affected_assets: Vec<SourceAssetCompletenessEntry>,
+    #[serde(default)]
+    pub diagnostic_clusters: SourceAssetDiagnosticClusterReport,
 }
 
 impl Default for SourceAssetCompletenessReport {
     fn default() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: 2,
             scope: SourceAssetCompletenessScope::Scoped,
             status: SourceAssetCompletenessStatus::Unknown,
             candidate_set_complete: false,
@@ -1173,6 +1186,7 @@ impl Default for SourceAssetCompletenessReport {
             opaque_property_count: 0,
             reasons: BTreeMap::new(),
             affected_assets: Vec::new(),
+            diagnostic_clusters: SourceAssetDiagnosticClusterReport::default(),
         }
     }
 }
@@ -1233,6 +1247,7 @@ impl SourceAssetCompletenessReport {
     }
 
     fn finish_counts(&mut self) {
+        self.schema_version = self.schema_version.max(2);
         self.status = if !self.candidate_set_complete {
             SourceAssetCompletenessStatus::Unknown
         } else if self.opaque == 0 && self.missing == 0 {
@@ -1256,6 +1271,7 @@ impl SourceAssetCompletenessReport {
                     right.raw_sha256.as_str(),
                 ))
         });
+        self.diagnostic_clusters = cluster_source_asset_diagnostics(&self.affected_assets);
     }
 
     pub fn ensure_complete(&self, required: bool) -> Result<()> {
@@ -1296,20 +1312,26 @@ fn source_asset_audit_entry(
     code: String,
     classification: &str,
 ) -> SourceAssetCompletenessEntry {
-    let (asset_path, form_owner_reference) = asset.map_or_else(
-        || (String::new(), None),
+    let (family, asset_path, form_owner_reference) = asset.map_or_else(
+        || (default_source_asset_family(), String::new(), None),
         |asset| {
             let owner = match &asset.kind {
                 SourceAssetKind::Form { owner_reference } => owner_reference.clone(),
                 _ => None,
             };
             (
+                if matches!(&asset.kind, SourceAssetKind::Form { .. }) {
+                    "form".to_string()
+                } else {
+                    default_source_asset_family()
+                },
                 asset.primary_path.to_string_lossy().replace('\\', "/"),
                 owner,
             )
         },
     );
     SourceAssetCompletenessEntry {
+        family,
         code,
         classification: classification.to_string(),
         parse_error_class: None,
@@ -1743,6 +1765,12 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
         args.no_binary_rows,
         &selected_file_names,
     )?;
+    validate_collect_all_source_asset_diagnostics_options(
+        args.collect_all_source_asset_diagnostics,
+        args.extract_metadata_xml,
+        args.no_binary_rows,
+        &selected_file_names,
+    )?;
     prepare_output_dir(&args.output_dir, args.overwrite)?;
 
     let mut table_roles = vec![MssqlConfigurationTableRole::Current];
@@ -1784,6 +1812,7 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             args.extract_module_text,
             args.extract_metadata_xml,
             source_version,
+            args.collect_all_source_asset_diagnostics,
         )?;
         if inventory_plan.is_strict_current_identity() && args.require_complete_root_metadata {
             dumped
@@ -1878,6 +1907,70 @@ fn validate_source_asset_gate_options(
         bail!("--require-complete-source-assets requires a full Config export");
     }
     Ok(())
+}
+
+fn validate_collect_all_source_asset_diagnostics_options(
+    collect_all_source_asset_diagnostics: bool,
+    extract_metadata_xml: bool,
+    no_binary_rows: bool,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<()> {
+    if !collect_all_source_asset_diagnostics {
+        return Ok(());
+    }
+    if !extract_metadata_xml {
+        bail!("--collect-all-source-asset-diagnostics requires --extract-metadata-xml");
+    }
+    if !no_binary_rows {
+        bail!("--collect-all-source-asset-diagnostics requires --no-binary-rows");
+    }
+    if !selected_file_names.is_empty() {
+        bail!("--collect-all-source-asset-diagnostics requires a full Config export");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod source_asset_diagnostic_option_tests {
+    use std::collections::BTreeSet;
+
+    use super::validate_collect_all_source_asset_diagnostics_options;
+
+    #[test]
+    fn collect_all_requires_full_source_asset_diagnostic_scope() {
+        let selected = BTreeSet::from(["aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string()]);
+        assert!(
+            validate_collect_all_source_asset_diagnostics_options(
+                true,
+                true,
+                true,
+                &BTreeSet::new()
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_collect_all_source_asset_diagnostics_options(
+                true,
+                false,
+                true,
+                &BTreeSet::new()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_collect_all_source_asset_diagnostics_options(
+                true,
+                true,
+                false,
+                &BTreeSet::new()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_collect_all_source_asset_diagnostics_options(true, true, true, &selected)
+                .is_err()
+        );
+    }
 }
 
 fn validate_root_metadata_gate_options(
@@ -1980,6 +2073,7 @@ pub fn export_storage_image_to_source(
         RootMetadataInventoryScope::Scoped,
         SourceAssetCompletenessScope::Scoped,
         true,
+        false,
     )?;
     let successful = dumped
         .rows
@@ -2085,6 +2179,7 @@ fn dump_table_rows_eager(
         inventory_scope,
         source_asset_scope,
         false,
+        false,
     )
 }
 
@@ -2126,6 +2221,7 @@ struct DumpRowContext<'a> {
     inflate: bool,
     extract_module_text: bool,
     extract_metadata_xml: bool,
+    collect_all_source_asset_diagnostics: bool,
     module_text_paths: &'a BTreeMap<String, PathBuf>,
     source_assets: &'a BTreeMap<String, SourceAsset>,
     metadata_texts_by_file_name: &'a BTreeMap<&'a str, &'a MetadataTextRow>,
@@ -2221,6 +2317,30 @@ fn dump_table_rows_with_options(
         RootMetadataInventoryScope::Scoped,
         SourceAssetCompletenessScope::Scoped,
         false,
+        false,
+    )
+}
+
+#[cfg(test)]
+fn dump_table_rows_with_collect_all_source_asset_diagnostics(
+    output_dir: &Path,
+    table: &str,
+    rows: Vec<ConfigRow>,
+    extract_module_text: bool,
+) -> Result<DumpedTable> {
+    dump_table_rows_with_options_mode(
+        output_dir,
+        table,
+        rows,
+        false,
+        false,
+        extract_module_text,
+        true,
+        InfobaseConfigSourceVersion::V2_20,
+        RootMetadataInventoryScope::Full,
+        SourceAssetCompletenessScope::Full,
+        false,
+        true,
     )
 }
 
@@ -2237,6 +2357,7 @@ fn dump_table_rows_with_options_mode(
     inventory_scope: RootMetadataInventoryScope,
     source_asset_scope: SourceAssetCompletenessScope,
     continue_on_row_error: bool,
+    collect_all_source_asset_diagnostics: bool,
 ) -> Result<DumpedTable> {
     let table_dir = output_dir.join(table);
     if write_binary_rows {
@@ -2497,6 +2618,7 @@ fn dump_table_rows_with_options_mode(
         inflate,
         extract_module_text,
         extract_metadata_xml,
+        collect_all_source_asset_diagnostics,
         module_text_paths: &module_text_paths,
         source_assets: &source_assets,
         metadata_texts_by_file_name: &metadata_texts_by_file_name,
@@ -2650,6 +2772,7 @@ fn dump_table_rows_streamed(
     extract_module_text: bool,
     extract_metadata_xml: bool,
     source_version: InfobaseConfigSourceVersion,
+    collect_all_source_asset_diagnostics: bool,
 ) -> Result<DumpedTable> {
     let table = inventory_plan.role().sql_name();
     let generate_config_dump_info = inventory_plan.config_dump_info_eligible();
@@ -3487,6 +3610,7 @@ fn dump_table_rows_streamed(
         inflate,
         extract_module_text,
         extract_metadata_xml,
+        collect_all_source_asset_diagnostics,
         module_text_paths: &module_text_paths,
         source_assets: &source_assets,
         metadata_texts_by_file_name: &metadata_texts_by_file_name,
@@ -4339,6 +4463,10 @@ fn dump_table_row_bytes(
                         primary_path,
                         diagnostics,
                     } => (false, primary_path, diagnostics),
+                    WrittenSourceAsset::RejectedNotEmitted {
+                        primary_path,
+                        diagnostics,
+                    } => (false, primary_path, diagnostics),
                 };
                 if !emitted && form_diagnostics.is_empty() {
                     bail!(
@@ -4351,6 +4479,7 @@ fn dump_table_row_bytes(
                 let diagnostics = form_diagnostics
                     .into_iter()
                     .map(|diagnostic| SourceAssetCompletenessEntry {
+                        family: "form".to_string(),
                         code: diagnostic.code.to_string(),
                         classification: diagnostic.classification.to_string(),
                         parse_error_class: diagnostic.parse_error_class.map(str::to_string),
