@@ -143,3 +143,27 @@
 - [ ] Полный прогон не запускался до прохождения локальных gates.
 
 **Коммит:** `test(parity): validate collected source diagnostics`
+
+## Задача 7: Не терять source diagnostics из-за раннего root gate
+
+**Статус:** `[x]`
+
+**Зависимости:** задачи 1–5
+
+**Файлы:**
+- Изменить: `src/mssql_dump/mod.rs`
+- Изменить: связанные Rust-тесты
+
+**Шаги:**
+1. Записать root-metadata и source-assets evidence в candidate manifest до
+   строгих completeness-проверок.
+2. Вычислить все затребованные gate'ы и вернуть агрегированную ошибку после
+   записи manifest.
+3. Не менять fail-fast для SQL/BCP, I/O и недиагностируемых decoder errors.
+
+**Проверка:**
+- [x] Partial root inventory больше не предотвращает запись source clusters.
+- [x] Manifest содержит root inventory и source-assets schema v2.
+- [x] Любой partial requested gate сохраняет exit code 1.
+
+**Коммит:** `fix(diagnostics): persist evidence before strict gates`

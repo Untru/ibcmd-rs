@@ -12,12 +12,12 @@ Form decoder/writer
   -> Rejected without diagnostics ------> always fatal
 
 all rows
-  -> SourceAssetCompletenessReport
+  -> RootMetadataInventoryReport + SourceAssetCompletenessReport
   -> deterministic diagnostic clusters
   -> manifest.json
-  -> require-complete gate
-       complete -> success
-       partial  -> error
+  -> evaluate every requested require-complete gate
+       all complete -> success
+       any partial  -> aggregated error
 ```
 
 ## Решения
@@ -65,6 +65,11 @@ Raw payload и formatted error text запрещены.
 финальным source-asset gate. Любой collected rejection увеличивает partial
 counts, поэтому gate обязательно возвращает ошибку.
 
+`RootMetadataInventoryReport::ensure_complete(true)` сохраняет прежнюю
+строгость. В collect-all режиме проверка откладывается до записи manifest и
+выполняется вместе с source-asset gate. Это позволяет сохранить evidence обоих
+контрактов, но команда успешна только когда прошли оба затребованных gate.
+
 Parity manifest при этом может ссылаться на уже записанный candidate manifest,
 но статусы шага и запуска остаются `failed`, а `release_eligible=false`.
 
@@ -77,3 +82,5 @@ Parity manifest при этом может ссылаться на уже зап
 - Rejection без structured diagnostics остаётся fatal.
 - Кластеры детерминированы при разном порядке merge и не содержат raw payload.
 - Collect-all + strict записывает manifest, затем возвращает ошибку.
+- Одновременный partial root-metadata и partial source-assets сохраняет оба
+  отчёта в manifest и возвращает агрегированную strict-ошибку.

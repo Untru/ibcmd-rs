@@ -674,9 +674,18 @@ if ($command -eq 'mssql-dump-config' -and $env:PARITY_FAKE_MODE -eq 'candidate-s
             })
         }
     }
-    [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ([ordered]@{ server=(Get-Option '--server'); database=(Get-Option '--database'); source_assets=$sourceAssets; tables=@(); subprocess_journal=@() } | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
-    Write-RuntimeJournal ([ordered]@{ protocol_version=1; status='failed'; server=(Get-Option '--server'); database=(Get-Option '--database'); started_unix_ms=1; ended_unix_ms=2; exception='strict source asset gate'; calls=@() })
-    Write-Error 'strict source asset gate' -ErrorAction Continue
+    $rootMetadata = [ordered]@{
+        scope='full'; candidate_set_complete=$true; expected=1; emitted=0; missing=1
+        misses_by_reason=[ordered]@{ 'metadata_source.catalog.unknown.legacy_option_none'=1 }
+        entries=@([ordered]@{
+            uuid='00000000-0000-0000-0000-000000000001'; family='Catalog'; expected_path='Catalogs/Fixture.xml'
+            emitted_path=$null; reason=$null
+        })
+    }
+    $tables = @([ordered]@{ table='Config'; source_assets=$sourceAssets; metadata_root_inventory=$rootMetadata; rows=@() })
+    [IO.File]::WriteAllText((Join-Path $output 'manifest.json'), ([ordered]@{ server=(Get-Option '--server'); database=(Get-Option '--database'); source_assets=$sourceAssets; tables=$tables; subprocess_journal=@() } | ConvertTo-Json -Depth 10), [Text.UTF8Encoding]::new($false))
+    Write-RuntimeJournal ([ordered]@{ protocol_version=1; status='failed'; server=(Get-Option '--server'); database=(Get-Option '--database'); started_unix_ms=1; ended_unix_ms=2; exception='strict completeness gates'; calls=@() })
+    Write-Error 'strict completeness gates' -ErrorAction Continue
     $global:LASTEXITCODE=29
     return
 }
@@ -699,7 +708,7 @@ if ($command -eq 'mssql-dump-config' -and $env:PARITY_FAKE_MODE -eq 'candidate-s
             (Invoke-ExpectedFailureScript $runner @(
                 '-DbName','strict_evidence','-IntegratedAuth','-LabRoot',$lab,'-RunId','probe',
                 '-ExePath',$strictEvidenceCli,'-IbcmdPath',$strictEvidenceCli,'-SqlcmdExecutable',$fakeSqlcmd,'-BcpExecutable',$fakeBcp,
-                '-RequireCompleteSourceAssets','-CollectAllSourceAssetDiagnostics'
+                '-RequireCompleteRootMetadata','-RequireCompleteSourceAssets','-CollectAllSourceAssetDiagnostics'
             )) | Should Not Be 0
         } finally {
             $env:PATH = $savedPath
@@ -715,6 +724,12 @@ if ($command -eq 'mssql-dump-config' -and $env:PARITY_FAKE_MODE -eq 'candidate-s
         $manifest.steps[1].status | Should Be 'failed'
         $manifest.source_asset_gate.requested | Should Be $true
         $manifest.source_asset_gate.passed | Should Be $false
+        $manifest.root_metadata_gate.requested | Should Be $true
+        $manifest.root_metadata_gate.passed | Should Be $false
+        $manifest.root_metadata.complete | Should Be $false
+        $manifest.root_metadata.expected | Should Be 1
+        $manifest.root_metadata.missing | Should Be 1
+        $manifest.root_metadata.misses_by_reason.'metadata_source.catalog.unknown.legacy_option_none' | Should Be 1
         $manifest.source_assets.complete | Should Be $false
         $manifest.source_assets.report.status | Should Be 'partial'
         $manifest.source_assets.report.opaque | Should Be 1

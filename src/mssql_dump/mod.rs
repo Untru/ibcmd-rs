@@ -1698,6 +1698,7 @@ mod subprocess_manifest_tests {
 struct MssqlDumpTableManifest {
     table: String,
     source_assets: SourceAssetCompletenessReport,
+    metadata_root_inventory: RootMetadataInventoryReport,
     rows: Vec<MssqlDumpRowManifest>,
 }
 
@@ -1814,7 +1815,10 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             source_version,
             args.collect_all_source_asset_diagnostics,
         )?;
-        if inventory_plan.is_strict_current_identity() && args.require_complete_root_metadata {
+        if inventory_plan.is_strict_current_identity()
+            && args.require_complete_root_metadata
+            && !args.collect_all_source_asset_diagnostics
+        {
             dumped
                 .metadata_root_inventory
                 .ensure_complete(true)
@@ -1840,6 +1844,7 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             manifest_tables.push(MssqlDumpTableManifest {
                 table: table.to_string(),
                 source_assets: dumped.source_assets,
+                metadata_root_inventory: dumped.metadata_root_inventory,
                 rows: dumped.rows,
             });
         }
@@ -1869,9 +1874,22 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
             )
         })?;
     }
-    source_assets
-        .ensure_complete(args.require_complete_source_assets)
-        .context("strict full source asset check failed")?;
+    if args.collect_all_source_asset_diagnostics {
+        let root_metadata_inventory = reports
+            .iter()
+            .find(|report| report.table == MssqlConfigurationTableRole::Current.sql_name())
+            .map(|report| &report.metadata_root_inventory);
+        ensure_collect_all_strict_gates(
+            root_metadata_inventory,
+            args.require_complete_root_metadata,
+            &source_assets,
+            args.require_complete_source_assets,
+        )?;
+    } else {
+        source_assets
+            .ensure_complete(args.require_complete_source_assets)
+            .context("strict full source asset check failed")?;
+    }
 
     Ok(MssqlDumpConfigReport {
         database: args.database.clone(),
@@ -1886,6 +1904,92 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
         timings: total_timings,
         tables: reports,
     })
+}
+
+fn ensure_collect_all_strict_gates(
+    root_metadata_inventory: Option<&RootMetadataInventoryReport>,
+    require_complete_root_metadata: bool,
+    source_assets: &SourceAssetCompletenessReport,
+    require_complete_source_assets: bool,
+) -> Result<()> {
+    let mut failures = Vec::new();
+    if require_complete_root_metadata {
+        let root_result = root_metadata_inventory
+            .ok_or_else(|| anyhow!("current Config root metadata report is missing"))
+            .and_then(|report| report.ensure_complete(true));
+        if let Err(error) = root_result {
+            failures.push(format!(
+                "strict full {} root metadata check failed: {error:#}",
+                MssqlConfigurationTableRole::Current.sql_name()
+            ));
+        }
+    }
+    if let Err(error) = source_assets.ensure_complete(require_complete_source_assets) {
+        failures.push(format!("strict full source asset check failed: {error:#}"));
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "strict completeness checks failed:\n- {}",
+            failures.join("\n- ")
+        )
+    }
+}
+
+#[cfg(test)]
+mod collect_all_strict_gate_tests {
+    use super::{
+        RootMetadataInventoryReport, RootMetadataInventoryScope, SourceAssetCompletenessReport,
+        SourceAssetCompletenessScope, ensure_collect_all_strict_gates, source_asset_audit_entry,
+    };
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn collect_all_reports_every_requested_strict_gate_failure() {
+        let root = RootMetadataInventoryReport {
+            scope: RootMetadataInventoryScope::Full,
+            candidate_set_complete: true,
+            expected: 1,
+            emitted: 0,
+            missing: 1,
+            misses_by_reason: BTreeMap::new(),
+            entries: Vec::new(),
+        };
+        let mut source = SourceAssetCompletenessReport::default();
+        source.record_opaque(vec![source_asset_audit_entry(
+            "Config",
+            "row-id",
+            None,
+            "source.form.rejected".to_owned(),
+            "rejected",
+        )]);
+        source.finish_inventory(SourceAssetCompletenessScope::Full, true, 1);
+
+        let error = ensure_collect_all_strict_gates(Some(&root), true, &source, true)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("strict full Config root metadata check failed"));
+        assert!(error.contains("strict full source asset check failed"));
+    }
+
+    #[test]
+    fn collect_all_accepts_complete_requested_strict_gates() {
+        let root = RootMetadataInventoryReport {
+            scope: RootMetadataInventoryScope::Full,
+            candidate_set_complete: true,
+            expected: 0,
+            emitted: 0,
+            missing: 0,
+            misses_by_reason: BTreeMap::new(),
+            entries: Vec::new(),
+        };
+        let mut source = SourceAssetCompletenessReport::default();
+        source.finish_inventory(SourceAssetCompletenessScope::Full, true, 0);
+
+        ensure_collect_all_strict_gates(Some(&root), true, &source, true).unwrap();
+    }
 }
 
 fn validate_source_asset_gate_options(

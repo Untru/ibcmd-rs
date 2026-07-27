@@ -246,6 +246,67 @@ function Import-SourceAssetCompletenessEvidence {
     }
 }
 
+function Import-RootMetadataCompletenessEvidence {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing candidate root metadata manifest: $Path" }
+    $candidate = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
+    $configTables = @($candidate.tables | Where-Object { [string]$_.table -ceq 'Config' })
+    if ($configTables.Count -ne 1) { throw 'Candidate manifest must contain exactly one Config table.' }
+    $report = $configTables[0].metadata_root_inventory
+    if ($null -eq $report) { throw 'Candidate root metadata completeness evidence is missing.' }
+    $allowed = @('scope', 'candidate_set_complete', 'expected', 'emitted', 'missing', 'misses_by_reason', 'entries')
+    foreach ($property in $report.PSObject.Properties.Name) {
+        if ($allowed -notcontains $property) { throw "Candidate root metadata report has unsupported property '$property'." }
+    }
+    if ([string]$report.scope -notin @('full', 'scoped') -or $report.candidate_set_complete -isnot [bool]) {
+        throw 'Candidate root metadata scope or candidate-set evidence is invalid.'
+    }
+    foreach ($count in @('expected', 'emitted', 'missing')) {
+        if ($report.PSObject.Properties.Name -notcontains $count) { throw "Candidate root metadata count '$count' is missing." }
+        try { $number = [decimal]$report.$count } catch { throw "Candidate root metadata count '$count' is invalid." }
+        if ($number -lt 0 -or $number -ne [decimal]::Truncate($number) -or $number -gt [decimal][Int64]::MaxValue) {
+            throw "Candidate root metadata count '$count' is invalid."
+        }
+    }
+    if ([int64]$report.expected -ne ([int64]$report.emitted + [int64]$report.missing)) {
+        throw 'Candidate root metadata invariant expected=emitted+missing is violated.'
+    }
+    if ($null -eq $report.misses_by_reason) { throw 'Candidate root metadata reasons are missing.' }
+    $reasonTotal = [int64]0
+    $safeReasons = [ordered]@{}
+    foreach ($reason in @($report.misses_by_reason.PSObject.Properties | Sort-Object Name)) {
+        if ($reason.Name -cnotmatch '^[a-z0-9._-]{1,128}$') { throw 'Candidate root metadata reason token is invalid.' }
+        try { $count = [decimal]$reason.Value } catch { throw "Candidate root metadata reason '$($reason.Name)' count is invalid." }
+        if ($count -lt 0 -or $count -ne [decimal]::Truncate($count) -or $count -gt [decimal][Int64]::MaxValue) {
+            throw "Candidate root metadata reason '$($reason.Name)' count is invalid."
+        }
+        $safeReasons[$reason.Name] = [int64]$count
+        $reasonTotal += [int64]$count
+    }
+    if ($reasonTotal -ne [int64]$report.missing) {
+        throw 'Candidate root metadata reason counts do not cover every missing entry.'
+    }
+    if ($null -eq $report.entries -or @($report.entries).Count -ne [int64]$report.expected) {
+        throw 'Candidate root metadata entries do not cover the expected inventory.'
+    }
+    $isComplete = (
+        [string]$report.scope -ceq 'full' -and
+        $report.candidate_set_complete -eq $true -and
+        [int64]$report.missing -eq 0
+    )
+    return [ordered]@{
+        evidence_manifest='candidate_dump/manifest.json'
+        evidence_manifest_sha256=(Get-FileSha256 -Path $Path)
+        scope=[string]$report.scope
+        candidate_set_complete=[bool]$report.candidate_set_complete
+        expected=[int64]$report.expected
+        emitted=[int64]$report.emitted
+        missing=[int64]$report.missing
+        misses_by_reason=$safeReasons
+        complete=$isComplete
+    }
+}
+
 function Protect-SensitiveText {
     param([AllowNull()]$Value)
     $text = [string]$Value
@@ -1127,6 +1188,7 @@ $manifest = [ordered]@{
     protocol_version=3; run_id=$RunId; scope=$Scope; created_utc=(Get-UtcNow); status='initializing'; git_sha=$null; xml_version=$SourceVersion; source_version=$SourceVersion
     database=[ordered]@{ name=$DbName; server=$DbServer; auth_mode=$authMode; user=$manifestDbUser; password_source=$manifestPasswordSource }
     result_class='diagnostic'; release_eligible=$false
+    root_metadata_gate=[ordered]@{ requested=[bool]$RequireCompleteRootMetadata; passed=$false }
     source_asset_gate=[ordered]@{ requested=[bool]$RequireCompleteSourceAssets; passed=$false }
     tools=[ordered]@{}; layout=[ordered]@{ native='native'; candidate_dump='candidate_dump'; candidate='candidate' }; path_prefixes=@($PathPrefix); steps=$steps; artifacts=[ordered]@{}
 }
@@ -1310,14 +1372,20 @@ try {
         Invoke-ParityStep -Name 'candidate-export' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'candidate-export.log') -Arguments $candidateArgs -Artifacts @('candidate_dump/manifest.json', 'logs/candidate-runtime.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @candidateArgs }
     } catch {
         $candidateError = $_
-        if ($CollectAllSourceAssetDiagnostics -and $RequireCompleteSourceAssets) {
+        if ($CollectAllSourceAssetDiagnostics -and ($RequireCompleteSourceAssets -or $RequireCompleteRootMetadata)) {
             # A strict completeness gate runs after the candidate has persisted its
             # manifest. Preserve that bounded, non-payload evidence without
             # converting the failed candidate step or the parity run into success.
             try {
                 $candidateDumpManifestPath = Join-Path $candidateDumpRoot 'manifest.json'
-                $manifest.source_assets = Import-SourceAssetCompletenessEvidence -Path $candidateDumpManifestPath
-                $manifest.source_asset_gate.passed = $false
+                if ($RequireCompleteSourceAssets) {
+                    $manifest.source_assets = Import-SourceAssetCompletenessEvidence -Path $candidateDumpManifestPath
+                    $manifest.source_asset_gate.passed = $false
+                }
+                if ($RequireCompleteRootMetadata) {
+                    $manifest.root_metadata = Import-RootMetadataCompletenessEvidence -Path $candidateDumpManifestPath
+                    $manifest.root_metadata_gate.passed = $false
+                }
                 $manifest.artifacts.candidate_dump_manifest = 'candidate_dump/manifest.json'
                 if (-not $manifest.Contains('artifact_sha256')) { $manifest.artifact_sha256 = [ordered]@{} }
                 $manifest.artifact_sha256.candidate_dump_manifest = Get-FileSha256 -Path $candidateDumpManifestPath
@@ -1369,6 +1437,10 @@ try {
         $manifest.source_asset_gate.requested -eq $true -and
         $manifest.source_assets.complete -eq $true
     )
+    if ($RequireCompleteRootMetadata) {
+        $manifest.root_metadata = Import-RootMetadataCompletenessEvidence -Path $candidateDumpManifestPath
+        $manifest.root_metadata_gate.passed = $manifest.root_metadata.complete -eq $true
+    }
     Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
 
     $roboArgs = @($candidateDumpRoot, $candidateRoot, '/E', '/XD', 'Config_inflated', 'Config_raw', 'ConfigSave_inflated', 'ConfigSave_raw', '/XF', 'manifest.json', '*.json')
@@ -1415,6 +1487,7 @@ try {
     $manifest.release_eligible = (
         $Scope -eq 'full' -and
         $RequireCompleteRootMetadata -and
+        $manifest.root_metadata_gate.passed -eq $true -and
         $manifest.source_asset_gate.requested -eq $true -and
         $manifest.source_asset_gate.passed -eq $true -and
         $manifest.repository.status -eq 'clean' -and
