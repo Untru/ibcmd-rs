@@ -13,9 +13,15 @@ mode=2, owner={numeric-form-attribute-id}, terminal={0,non-nil-uuid}
 `{-8}` и поэтому классифицирует три зеркальные пары `5006/5007` как
 `PrimaryMalformed`. Экспорт останавливается fail-closed до writer.
 
+Следующий immutable run `20260727_full_78c5be6_j_ut` доказал ещё один exact
+standard-marker: `{-3}` в ссылке `Дата`, которой native XML сопоставляет
+`Объект.Date`. Это расширение остаётся перечислимым typed-профилем, а не
+fallback для произвольных отрицательных значений.
+
 ## Что меняется
 
 - Physical decoder различает standard-marker terminal и UUID-terminal.
+- Standard markers перечислены явно: `-3 → Date`, `-5 → Owner`, `-8 → Ref`.
 - Зеркала `5006/5007` по-прежнему разбираются независимо и сравниваются до
   semantic resolution.
 - UUID-terminal разрешается через существующие schema-owned metadata owner

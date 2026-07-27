@@ -5,7 +5,7 @@
 ```text
 raw slots 26/64
   -> ibcmd-schema strict mirrored decoder
-  -> typed terminal (attribute | standard marker | metadata UUID)
+  -> typed terminal (attribute | Date/Owner/Ref marker | metadata UUID)
   -> mssql physical adapter resolver
   -> canonical FormChoiceParameterLink
   -> ibcmd-xml writer
@@ -18,8 +18,8 @@ duplicate tail. Он не разрешает metadata path.
 Adapter разрешает:
 
 - `mode=1` через form attribute id;
-- `mode=2 + {-5|-8}` через существующую owner-scoped standard-attribute
-  модель;
+- `mode=2 + {-3|-5|-8}` через typed standard-terminal модель
+  (`Date|Owner|Ref`);
 - `mode=2 + {0,uuid}` через
   `FormAttributeMetadataOwner + object_refs + form_metadata_data_path_route`.
 

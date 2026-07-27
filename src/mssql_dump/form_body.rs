@@ -9319,6 +9319,11 @@ pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
                     attribute_names_by_id.get(attribute_id).cloned()
                 }
                 FormChoiceParameterLinkTerminal::Standard(
+                    FormChoiceParameterLinkStandardTerminal::Date,
+                ) => attribute_names_by_id
+                    .get(attribute_id)
+                    .map(|attribute| format!("{attribute}.Date")),
+                FormChoiceParameterLinkTerminal::Standard(
                     FormChoiceParameterLinkStandardTerminal::Owner,
                 ) => attribute_names_by_id
                     .get(attribute_id)

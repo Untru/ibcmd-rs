@@ -34,7 +34,9 @@ read raw slots, object names, or physical UUIDs.
 
 #### Scenario: Existing standard-marker terminal remains exact
 
-- **GIVEN** the existing `mode=2` terminal `{-5}` or `{-8}`
+- **GIVEN** the schema-owned `mode=2` terminal `{-3}`, `{-5}`, or `{-8}`
 - **WHEN** the value is decoded
-- **THEN** its prior canonical data path and fail-closed behavior are
-  unchanged.
+- **THEN** it is typed respectively as `Date`, `Owner`, or `Ref`
+- **AND** its canonical data-path suffix is respectively `.Date`, `.Owner`,
+  or `.Ref`
+- **AND** every other negative marker remains malformed and fails closed.

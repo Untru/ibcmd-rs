@@ -6,6 +6,8 @@
 - [x] Строго разобрать `{0,non-nil-uuid}` без расширения допустимой arity.
 - [x] Сравнивать полностью разобранные 5006/5007 до semantic resolution.
 - [x] Сохранить прежний public standard-marker entrypoint.
+- [x] Добавить exact standard terminal `{-3}` как typed `Date`, не расширяя
+      остальные negative markers.
 
 ## Задача 2: Подключить owner-scoped resolver
 
@@ -17,7 +19,8 @@
 ## Задача 3: Добавить доказательные тесты
 
 - [x] Sanitized live-shaped 2-link и 1-link пары дают canonical links.
-- [x] Existing `{-5|-8}` profile не регрессирует.
+- [x] Exact `{-3|-5|-8}` profiles дают `.Date|.Owner|.Ref`, остальные markers
+      fail closed.
 - [x] Mirror mismatch, nil/non-UUID, wrong kind/arity и duplicate tail fail
       closed.
 - [x] Missing/foreign owner resolution остаётся opaque.

@@ -297,6 +297,7 @@ pub const FORM_CHOICE_PARAMETER_LINK_TABLE_CURRENT_DATA_ITEM_TYPE: &str =
 /// Standard terminal markers carried by mode-2 choice-parameter links.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FormChoiceParameterLinkStandardTerminal {
+    Date,
     Owner,
     Ref,
 }
@@ -304,6 +305,7 @@ pub enum FormChoiceParameterLinkStandardTerminal {
 impl FormChoiceParameterLinkStandardTerminal {
     const fn data_path_suffix(self) -> &'static str {
         match self {
+            Self::Date => "Date",
             Self::Owner => "Owner",
             Self::Ref => "Ref",
         }
@@ -1474,6 +1476,9 @@ fn parse_raw_form_choice_parameter_links(
                 cursor += 1;
                 let terminal = match terminal.as_slice() {
                     [terminal] => match terminal.trim() {
+                        "-3" => FormChoiceParameterLinkTerminal::Standard(
+                            FormChoiceParameterLinkStandardTerminal::Date,
+                        ),
                         "-5" => FormChoiceParameterLinkTerminal::Standard(
                             FormChoiceParameterLinkStandardTerminal::Owner,
                         ),
@@ -2118,16 +2123,16 @@ mod form_choice_parameters_tests {
 
     #[test]
     fn form_choice_parameter_links_parse_exact_mirrors_and_value_changes() {
-        let primary = r#"{5006,2,"Filter.Organization",1,{27},0,"Filter.Partner",2,{9},{-8},1}"#;
-        let duplicate =
-            r#"{5007,2,"Filter.Organization",1,{27},0,"","","Filter.Partner",2,{9},{-8},1,"",""}"#;
+        let primary = r#"{5006,3,"Filter.Organization",1,{27},0,"Filter.Partner",2,{9},{-8},1,"Date",2,{1},{-3},1}"#;
+        let duplicate = r#"{5007,3,"Filter.Organization",1,{27},0,"","","Filter.Partner",2,{9},{-8},1,"","","Date",2,{1},{-3},1,"",""}"#;
         let links = parse_form_choice_parameter_links(primary, duplicate, |id| match id {
+            "1" => Some("Object".to_owned()),
             "27" => Some("Organization".to_owned()),
             "9" => Some("Partner".to_owned()),
             _ => None,
         })
         .unwrap();
-        assert_eq!(links.len(), 2);
+        assert_eq!(links.len(), 3);
         assert_eq!(links[0].name(), "Filter.Organization");
         assert_eq!(links[0].data_path(), "Organization");
         assert_eq!(
@@ -2137,6 +2142,12 @@ mod form_choice_parameters_tests {
         assert_eq!(links[1].data_path(), "Partner.Ref");
         assert_eq!(
             links[1].value_change(),
+            FormChoiceParameterLinkValueChange::DontChange
+        );
+        assert_eq!(links[2].name(), "Date");
+        assert_eq!(links[2].data_path(), "Object.Date");
+        assert_eq!(
+            links[2].value_change(),
             FormChoiceParameterLinkValueChange::DontChange
         );
         assert_eq!(
