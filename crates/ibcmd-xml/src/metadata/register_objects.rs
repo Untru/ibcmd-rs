@@ -18,6 +18,7 @@ use super::business_objects::{
     push_localized, push_reference_collection, push_text, push_u32, require_empty,
     required_properties, text_field,
 };
+use super::characteristics::project_characteristics;
 use super::common::{
     MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces,
     decode_metadata_envelope_with_child_references, element_text, resolve_namespaces, typed,
@@ -696,12 +697,9 @@ fn project_cct(
     )?;
     project_type(parts, map["Type"], uris)?;
     push_field_collection(parts, map, "InputByString", uris)?;
-    for name in [
-        "StandardAttributes",
-        "Characteristics",
-        "BasedOn",
-        "DataLockFields",
-    ] {
+    require_empty(map["StandardAttributes"], "StandardAttributes")?;
+    project_characteristics(parts, map["Characteristics"], uris)?;
+    for name in ["BasedOn", "DataLockFields"] {
         require_empty(map[name], name)?;
     }
     push_presentations(

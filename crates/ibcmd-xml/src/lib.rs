@@ -2,13 +2,21 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dcs;
 mod dialect;
+mod form_choice_parameters;
 pub mod metadata;
 mod node;
 mod reader;
 pub mod source_tree;
 mod writer;
 
+pub use dcs::{
+    DCS_WRITER_EVIDENCE, DCS_WRITER_EVIDENCE_INVALID_CODE, DCS_WRITER_EVIDENCE_PENDING_CODE,
+    DCS_WRITER_EVIDENCE_RELEASE, DcsListSettingsTailError, DcsSerializationError,
+    DcsSerializationPermit, DcsWriterDecision, DcsWriterEvidence, DcsWriterEvidenceStatus,
+    emit_form_list_settings_tail, preflight_dcs_settings_serialization,
+};
 pub use dialect::{
     BomRule, DetectionCandidate, DialectDescriptor, DialectDetection, DialectError,
     DialectEvidence, DialectFeature, DialectLexicalPolicy, DialectRegistry, DialectRule,
@@ -16,10 +24,15 @@ pub use dialect::{
     NamespaceMatcher, ParseDialectIdError, PropertyOrderRule, RootSignature, RuleProvenance,
     XmlEncoding, bundled_dialect_registry,
 };
+pub use form_choice_parameters::{
+    FormChoiceParametersEmitError, emit_form_choice_parameter_links, emit_form_choice_parameters,
+};
 pub use metadata::{
-    MetadataDecodeError, MetadataEncodeError, MetadataEnvelope, MetadataFamilyCodec,
-    MetadataRegistry, MetadataRegistryError, bundled_metadata_registry, decode_metadata_envelope,
-    decode_metadata_envelope_with_dialect, register_business_process_codec, register_catalog_codec,
+    CctTemplateChildrenError, CharacteristicsXmlError, MetadataDecodeError, MetadataEncodeError,
+    MetadataEnvelope, MetadataFamilyCodec, MetadataOrderError, MetadataRegistry,
+    MetadataRegistryError, append_cct_template_children, bundled_metadata_registry,
+    decode_metadata_envelope, decode_metadata_envelope_with_dialect, order_metadata_features,
+    order_produced_type_values, register_business_process_codec, register_catalog_codec,
     register_constant_codec, register_data_processor_codec, register_defined_type_codec,
     register_document_codec, register_enum_codec, register_event_subscription_codec,
     register_exchange_plan_codec, register_functional_option_codec,
@@ -28,6 +41,8 @@ pub use metadata::{
     register_scheduled_job_codec, register_session_parameter_codec,
     register_settings_storage_codec, register_subsystem_codec, register_task_codec,
     register_web_service_codec, register_ws_reference_codec, register_xdto_package_codec,
+    render_cct_characteristics_xml, render_characteristics_xml,
+    render_metadata_characteristics_xml,
 };
 pub use node::{
     Attribute, AttributeKind, QName, XmlCData, XmlComment, XmlDocument, XmlElement, XmlNode,
@@ -35,6 +50,31 @@ pub use node::{
 };
 pub use reader::{XmlError, XmlErrorCause, XmlReader};
 pub use writer::{LexicalPolicy, WriteError, XmlWriter};
+
+/// Standalone EDT-derived schema registry consumed by XML family writers.
+///
+/// Re-exporting the registry here establishes the dependency direction
+/// `ibcmd-xml -> ibcmd-schema`; physical decoders never own XML ordering rules.
+pub mod schema {
+    pub use ibcmd_schema::{
+        BundleInventory, CorpusSource, DcsListSettingsTailField, DcsListSettingsTailPolicy,
+        DcsWriterEvidenceCorpus, EvidenceStatus, EvidenceValue, FeatureClassifierKind,
+        FeatureEvidence, FeatureKind, FeatureSemanticKey, FeatureSemantics,
+        FeatureSemanticsClassifier, FeatureSemanticsCorpus, FeatureSemanticsPackage,
+        FeatureSemanticsSummary, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
+        FormChoiceParameterClusterMember, FormChoiceParameterLink,
+        FormChoiceParameterLinkValueChange, FormChoiceParameterLinks,
+        FormChoiceParameterLinksParseError, InventorySummary, MetadataOrderOperation,
+        MetadataOrderOperationKind, MetadataOrderRecord, MetadataOrderSection,
+        MetadataOrderVersionPredicate, ModelClassifier, ModelInventory, ModelMember, ModelPackage,
+        PackageFeatureCorpus, PackageFeatureSummary, RuleEvidence, SchemaError, WriterRule,
+        WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior,
+        bundled_dcs_list_settings_tail_policy, bundled_dcs_writer_evidence,
+        bundled_feature_semantics, bundled_metadata_order, bundled_model_inventory,
+        bundled_package_features, bundled_writer_rules, form_choice_parameter_cluster_order,
+        parse_form_choice_parameter_links,
+    };
+}
 
 #[cfg(test)]
 mod tests {

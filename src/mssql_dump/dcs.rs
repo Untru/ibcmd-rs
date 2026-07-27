@@ -979,11 +979,10 @@ pub(crate) fn canonicalize_form_data_composition_fragment(
                     if saw_root
                         || namespace_ref(&namespace) != Some(DCS_SETTINGS_NS)
                         || local.as_ref() != expected_root_local.as_bytes()
-                        || !event
-                            .attributes()
-                            .with_checks(false)
-                            .all(|attribute| attribute
-                                .is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref())))
+                        || !event.attributes().with_checks(false).all(|attribute| {
+                            attribute
+                                .is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref()))
+                        })
                     {
                         return None;
                     }
@@ -996,11 +995,9 @@ pub(crate) fn canonicalize_form_data_composition_fragment(
                 if saw_root
                     || namespace_ref(&namespace) != Some(DCS_SETTINGS_NS)
                     || local.as_ref() != expected_root_local.as_bytes()
-                    || !event
-                        .attributes()
-                        .with_checks(false)
-                        .all(|attribute| attribute
-                            .is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref())))
+                    || !event.attributes().with_checks(false).all(|attribute| {
+                        attribute.is_ok_and(|attribute| is_xmlns_attribute(attribute.key.as_ref()))
+                    })
                 {
                     return None;
                 }
@@ -1683,13 +1680,11 @@ impl<'a> DataCompositionXmlWriter<'a> {
             let qualified_canonical_value = (in_area_template || qualified_schema_style)
                 .then_some(qualified_value.clone())
                 .flatten();
-            let qualified_form_value =
-                (*mode == DataCompositionDocumentMode::FormServerStateFragment)
-                    .then_some(qualified_value)
-                    .flatten()
-                    .filter(|(namespace, _)| {
-                        canonical_form_data_ui_value_prefix(namespace).is_some()
-                    });
+            let qualified_form_value = (*mode
+                == DataCompositionDocumentMode::FormServerStateFragment)
+                .then_some(qualified_value)
+                .flatten()
+                .filter(|(namespace, _)| canonical_form_data_ui_value_prefix(namespace).is_some());
             if let Some((namespace, local)) = resolved_style_name
                 .map(|name| (STYLE_NS.to_vec(), name))
                 .or(qualified_canonical_value)

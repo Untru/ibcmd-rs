@@ -1,10 +1,11 @@
 //! Offline JSONL trace for final MXL line palettes in a saved candidate dump.
 use crate::cli::MxlLineProvenanceCorpusArgs;
 use crate::mssql_dump::{
+    MoxelLineTraceEvent, MoxelLineTraceSink,
     extract_inflated_moxel_spreadsheet_xml_with_line_trace,
-    extract_moxel_spreadsheet_xml_with_line_trace, MoxelLineTraceEvent, MoxelLineTraceSink,
+    extract_moxel_spreadsheet_xml_with_line_trace,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::BTreeMap;

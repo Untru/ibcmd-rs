@@ -206,7 +206,7 @@ mod tests {
     use super::*;
     use ibcmd_core::artifact::ProfileId;
     use ibcmd_core::detection::{DetectionObservations, detect_profiles, require_exact_target};
-    use ibcmd_core::profile::ProfileStatus;
+    use ibcmd_core::profile::{CapabilityId, CapabilityState, ProfileStatus};
 
     struct TempDirectory(PathBuf);
 
@@ -271,22 +271,93 @@ mod tests {
                 profile.constants.len(),
                 if version == "2.21" { 3 } else { 1 }
             );
-            assert!(profile.capabilities.is_empty());
+            let expected_capabilities = match version {
+                "2.17" => Vec::new(),
+                "2.20" => vec![
+                    (
+                        "xcf:metadata-catalog",
+                        CapabilityState::Supported,
+                        "xml-2.20",
+                    ),
+                    (
+                        "xcf:metadata-constant",
+                        CapabilityState::Supported,
+                        "xml-2.20",
+                    ),
+                    (
+                        "xcf:palette-namespace",
+                        CapabilityState::Unsupported,
+                        "xml-2.20",
+                    ),
+                    (
+                        "xcf:use-in-interface-compatibility-mode",
+                        CapabilityState::Unsupported,
+                        "xml-2.20",
+                    ),
+                ],
+                "2.21" => vec![
+                    (
+                        "xcf:metadata-catalog",
+                        CapabilityState::Supported,
+                        "xml-2.20",
+                    ),
+                    (
+                        "xcf:metadata-constant",
+                        CapabilityState::Supported,
+                        "xml-2.20",
+                    ),
+                    (
+                        "xcf:palette-namespace",
+                        CapabilityState::Supported,
+                        "xml-2.21",
+                    ),
+                    (
+                        "xcf:use-in-interface-compatibility-mode",
+                        CapabilityState::Supported,
+                        "xml-2.21",
+                    ),
+                ],
+                _ => unreachable!(),
+            };
+            assert_eq!(profile.capabilities.len(), expected_capabilities.len());
+            for (capability, state, declared_by) in expected_capabilities {
+                let capability = profile
+                    .capabilities
+                    .get(&CapabilityId::parse(capability).unwrap())
+                    .unwrap();
+                assert_eq!(capability.value, state);
+                assert_eq!(capability.declared_by.as_str(), declared_by);
+            }
             assert_eq!(profile.inheritance_chain.last(), Some(&id));
             assert_eq!(profile.source_chain.len(), profile.inheritance_chain.len());
             assert_eq!(
                 profile
                     .evidence
                     .iter()
-                    .map(|value| value.value.as_str())
+                    .map(|value| (value.value.as_str(), value.declared_by.as_str()))
                     .collect::<Vec<_>>(),
                 match version {
-                    "2.17" => vec!["src/module_blob.rs", "src/mssql.rs"],
+                    "2.17" => vec![
+                        ("src/module_blob.rs", "xml-2.17"),
+                        ("src/mssql.rs", "xml-2.17"),
+                    ],
                     "2.20" | "2.21" => vec![
-                        "src/module_blob.rs",
-                        "src/mssql.rs",
-                        "src/source.rs",
-                        "tests/portable_root_smoke.rs"
+                        ("docs/evidence/migration-xcf-2.20-to-2.21.md", "xml-2.20",),
+                        ("docs/evidence/migration-xcf-2.21-to-2.20.md", "xml-2.20",),
+                        ("src/module_blob.rs", "xml-2.17"),
+                        ("src/mssql.rs", "xml-2.17"),
+                        ("src/source.rs", "xml-2.20"),
+                        (
+                            "tests/fixtures/migrations/2.20-to-2.21/manifest.json",
+                            "xml-2.20",
+                        ),
+                        (
+                            "tests/fixtures/migrations/2.21-to-2.20/manifest.json",
+                            "xml-2.20",
+                        ),
+                        ("tests/migration_2_20_to_2_21.rs", "xml-2.20"),
+                        ("tests/migration_2_21_to_2_20.rs", "xml-2.20"),
+                        ("tests/portable_root_smoke.rs", "xml-2.20"),
                     ],
                     _ => unreachable!(),
                 }

@@ -209,6 +209,8 @@ fn export_config_report(
     prepare_output_dir(&output_dir, overwrite)?;
     let dump_args = MssqlDumpConfigArgs {
         sqlcmd: sqlcmd.to_path_buf(),
+        bcp_executable: crate::mssql_dump::bcp_executable_for_sqlcmd(sqlcmd),
+        runtime_journal: None,
         server: config.db_server.clone(),
         sql_user: config.db_user.clone(),
         sql_pwd: config.db_pwd.clone(),
@@ -223,6 +225,8 @@ fn export_config_report(
         extract_module_text: true,
         extract_metadata_xml: true,
         require_complete_root_metadata: false,
+        require_complete_source_assets: false,
+        collect_all_source_asset_diagnostics: false,
         no_binary_rows: true,
         write_binary_rows: false,
         write_manifest: false,

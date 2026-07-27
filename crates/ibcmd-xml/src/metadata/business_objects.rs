@@ -15,6 +15,7 @@ use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::model::{CanonicalObject, CanonicalObjectParts};
 use ibcmd_core::value::{CanonicalInteger, CanonicalValue, EnumToken, UnresolvedReference};
 
+use super::characteristics::project_characteristics;
 use super::common::decode_metadata_envelope_with_child_references;
 use super::common::{
     MD_NAMESPACE, MetadataDecodeError, MetadataEnvelope, ResolvedNamespaces, V8_NAMESPACE,
@@ -583,9 +584,8 @@ fn project_root_properties(
         }
     }
 
-    for name in ["StandardAttributes", "Characteristics"] {
-        require_empty(properties[name], name)?;
-    }
+    require_empty(properties["StandardAttributes"], "StandardAttributes")?;
+    project_characteristics(parts, properties["Characteristics"], uris)?;
     push_field_collection(parts, properties, "InputByString", uris)?;
     for name in [
         "ObjectPresentation",
@@ -1319,6 +1319,37 @@ mod tests {
         assert_eq!(envelope.root().generated_types().len(), 5);
         assert!(envelope.descendants().is_empty());
         assert!(envelope.root().properties().len() > 40);
+    }
+
+    #[test]
+    fn catalog_nonempty_characteristics_projects_and_round_trips_losslessly() {
+        let characteristics = "<Characteristics><xr:Characteristic><xr:CharacteristicTypes from=\"Catalog.TypeSource\"><xr:KeyField>0</xr:KeyField><xr:TypesFilterField>-1</xr:TypesFilterField><xr:TypesFilterValue xsi:type=\"xs:string\">safe</xr:TypesFilterValue><xr:DataPathField>0</xr:DataPathField><xr:MultipleValuesUseField>-1</xr:MultipleValuesUseField></xr:CharacteristicTypes><xr:CharacteristicValues from=\"Catalog.ValueSource\"><xr:ObjectField>0</xr:ObjectField><xr:TypeField>-1</xr:TypeField><xr:ValueField>0</xr:ValueField><xr:MultipleValuesKeyField>-1</xr:MultipleValuesKeyField><xr:MultipleValuesOrderField>0</xr:MultipleValuesOrderField></xr:CharacteristicValues></xr:Characteristic></Characteristics>";
+        let xml = String::from_utf8(catalog_xml())
+            .unwrap()
+            .replace(
+                "xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\"",
+                "xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"",
+            )
+            .replace("<Characteristics/>", characteristics);
+        let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        let envelope = decode_business_object(
+            &document,
+            ProfileId::parse("xml-2.20").unwrap(),
+            ObjectPath::root(),
+            CATALOG,
+        )
+        .unwrap();
+        assert!(
+            envelope
+                .root()
+                .properties()
+                .iter()
+                .any(|field| field.name().as_str() == "Characteristics")
+        );
+        let encoded =
+            encode_business_object(&envelope, &ProfileId::parse("xml-2.20").unwrap(), CATALOG)
+                .unwrap();
+        assert_eq!(encoded, xml.as_bytes());
     }
 
     #[test]

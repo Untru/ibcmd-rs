@@ -4,10 +4,15 @@ use std::io::{Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use crate::form_schema::form_text_document_context_menu_child_is_valid;
 use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
+use ibcmd_schema::{
+    FormTextDocumentContextMenuMultiplicity, form_layout_single_child_item_slot_indices,
+    parse_form_text_document_context_menu_multiplicity,
+};
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
@@ -1860,7 +1865,10 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
     if let Some(print_settings) = &spreadsheet.print_settings {
         fields.push(format_spreadsheet_print_settings_for_moxel(print_settings)?);
     }
-    fields.extend(format_spreadsheet_drawings_for_moxel(&spreadsheet.drawings));
+    fields.extend(format_spreadsheet_drawings_for_moxel(
+        &spreadsheet,
+        column_format_slots,
+    ));
     let line_fields = format_spreadsheet_lines_for_moxel(&spreadsheet.lines);
     let (mut format_fields, number_format_refs) =
         format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots, number_format_hint);
@@ -3595,14 +3603,37 @@ fn normalize_canonical_spreadsheet_format_order(spreadsheet: &mut SpreadsheetDoc
     if spreadsheet.formats.is_empty() {
         return;
     }
-    let should_normalize = spreadsheet.default_format_index.is_some();
-    if !should_normalize {
-        return;
-    }
     let offset = spreadsheet_column_format_offset(spreadsheet);
     if offset == 0 || offset >= spreadsheet.formats.len() {
         return;
     }
+
+    // MOXEL stores the column format block first.  Rotating only the format
+    // bodies changes the meaning of every global reference and makes the next
+    // XML -> blob -> XML pass non-idempotent.  Move the references together
+    // with the bodies so the resulting document uses the canonical indexes.
+    let remap = |index: usize| match index {
+        0 => 0,
+        index if index <= spreadsheet.formats.len() => {
+            ((index - 1 + spreadsheet.formats.len() - offset) % spreadsheet.formats.len()) + 1
+        }
+        index => index,
+    };
+    for column_set in &mut spreadsheet.column_sets {
+        for column in &mut column_set.columns {
+            column.format_index = remap(column.format_index);
+        }
+    }
+    for row in &mut spreadsheet.rows {
+        row.format_index = remap(row.format_index);
+        for cell in &mut row.cells {
+            cell.format_index = remap(cell.format_index);
+        }
+    }
+    for drawing in &mut spreadsheet.drawings {
+        drawing.format_index = remap(drawing.format_index);
+    }
+    spreadsheet.default_format_index = spreadsheet.default_format_index.map(remap);
     spreadsheet.formats.rotate_left(offset);
 }
 
@@ -4160,6 +4191,52 @@ fn format_spreadsheet_formats_for_moxel(
     (fields, number_format_refs)
 }
 
+fn spreadsheet_format_physical_index_for_moxel(
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_format_slots: usize,
+    global_index: usize,
+) -> usize {
+    if global_index == 0 {
+        return 0;
+    }
+    let source_format_count = spreadsheet
+        .formats
+        .len()
+        .max(spreadsheet.default_format_index.unwrap_or(0))
+        .max(column_format_slots);
+    let column_placeholder_count = column_format_slots.max(1);
+    let is_drawing_format = |index: usize| {
+        spreadsheet
+            .formats
+            .get(index.saturating_sub(1))
+            .is_some_and(|format| format.drawing_border.is_some())
+    };
+    let mut physical_index = 0usize;
+    for index in column_format_slots + 1..=source_format_count {
+        if !is_drawing_format(index) {
+            physical_index += 1;
+            if index == global_index {
+                return physical_index;
+            }
+        }
+    }
+    for index in 1..=column_placeholder_count {
+        physical_index += 1;
+        if index == global_index {
+            return physical_index;
+        }
+    }
+    for index in column_format_slots + 1..=source_format_count {
+        if is_drawing_format(index) {
+            physical_index += 1;
+            if index == global_index {
+                return physical_index;
+            }
+        }
+    }
+    global_index
+}
+
 fn format_spreadsheet_format_index_for_moxel(
     spreadsheet: &SpreadsheetDocumentXml,
     global_index: usize,
@@ -4631,15 +4708,29 @@ fn spreadsheet_line_style_code(value: &str) -> Option<i32> {
 }
 
 fn format_spreadsheet_drawings_for_moxel(
-    drawings: &[SpreadsheetDocumentXmlDrawing],
+    spreadsheet: &SpreadsheetDocumentXml,
+    column_format_slots: usize,
 ) -> Vec<String> {
-    drawings
+    spreadsheet
+        .drawings
         .iter()
-        .filter_map(format_spreadsheet_drawing_for_moxel)
+        .filter_map(|drawing| {
+            format_spreadsheet_drawing_for_moxel(
+                drawing,
+                spreadsheet_format_physical_index_for_moxel(
+                    spreadsheet,
+                    column_format_slots,
+                    drawing.format_index,
+                ),
+            )
+        })
         .collect()
 }
 
-fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing) -> Option<String> {
+fn format_spreadsheet_drawing_for_moxel(
+    drawing: &SpreadsheetDocumentXmlDrawing,
+    format_index: usize,
+) -> Option<String> {
     match &drawing.kind {
         SpreadsheetDocumentXmlDrawingKind::Picture {
             picture_size,
@@ -4651,7 +4742,7 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
             let auto_size = if drawing.auto_size { 0 } else { 1 };
             Some(format!(
                 "{{{{0,{}}},5,{},{},{},{},{},{},{},{},{auto_size},1,{},{}}}",
-                drawing.format_index,
+                format_index,
                 drawing.begin_column.max(0),
                 drawing.begin_row.max(0),
                 drawing.begin_column_offset.max(0),
@@ -4665,7 +4756,7 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
             ))
         }
         SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) => {
-            format_spreadsheet_chart_drawing_for_moxel(drawing, chart)
+            format_spreadsheet_chart_drawing_for_moxel(drawing, format_index, chart)
         }
         SpreadsheetDocumentXmlDrawingKind::Chart(None) => None,
     }
@@ -4673,6 +4764,7 @@ fn format_spreadsheet_drawing_for_moxel(drawing: &SpreadsheetDocumentXmlDrawing)
 
 fn format_spreadsheet_chart_drawing_for_moxel(
     drawing: &SpreadsheetDocumentXmlDrawing,
+    format_index: usize,
     chart: &SpreadsheetDocumentXmlChart,
 ) -> Option<String> {
     const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
@@ -4725,7 +4817,7 @@ fn format_spreadsheet_chart_drawing_for_moxel(
     let payload = format!("{{{{11}},{{{}}}}}", data.join(","));
     Some(format!(
         "{{{{0,{}}},10,{},{},{},{},{},{},{},{},{},{CHART_TYPE_UUID},{payload},0}}",
-        drawing.format_index,
+        format_index,
         drawing.begin_column.max(0),
         drawing.begin_row.max(0),
         drawing.begin_column_offset.max(0),
@@ -12646,10 +12738,17 @@ fn form_scaling_mode_code(value: FormXmlScalingMode) -> &'static str {
 }
 
 fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
-    let mut output = format!("{{{}", commands.len());
-    for command in commands {
+    // The platform stores standard command identifiers in UUID order, not in
+    // the source XML element order.  This keeps a re-packed layout canonical.
+    let mut command_uuids = commands
+        .iter()
+        .map(|command| form_excluded_command_uuid(*command))
+        .collect::<Vec<_>>();
+    command_uuids.sort_unstable();
+    let mut output = format!("{{{}", command_uuids.len());
+    for command in command_uuids {
         output.push(',');
-        output.push_str(form_excluded_command_uuid(*command));
+        output.push_str(command);
     }
     output.push('}');
     output
@@ -13956,7 +14055,7 @@ fn format_form_layout_new_text_document_field_item(
     let width = item.width.as_deref().unwrap_or("0");
     let height = item.height.as_deref().unwrap_or("0");
     let mut text = format!(
-        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,{},{},0",
+        "{{48,{{{},{}}},0,0,0,7,{},{},0,{},{{1,0}},{},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,{},{},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
         item.id,
         item_uuid,
         format_1c_string(&item.name),
@@ -15419,7 +15518,7 @@ fn patch_form_layout_child_item_entry(
             replacements.push((initial_tree_view_range.clone(), code.to_string()));
         }
         if let Some(choice_folders_and_items) = item.choice_folders_and_items {
-            let choice_range = form_layout_table_counted_property_bag_value_range(
+            let choice_range = form_layout_table_property_bag_value_range(
                 text,
                 fields,
                 TableBagKey::ChoiceFoldersAndItems,
@@ -16561,14 +16660,52 @@ fn patch_form_layout_single_child_items(
     command_uuids: &BTreeMap<String, String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let is_text_document_context_menu_owner = fields.first().and_then(|range| {
+        form_layout_single_child_item_slot_indices(
+            text[range.clone()].trim(),
+            fields.get(5).map(|field| text[field.clone()].trim()),
+        )
+    }) == Some((41, 42));
+    if is_text_document_context_menu_owner
+        && (item.child_items.len() > 1
+            || item
+                .child_items
+                .iter()
+                .any(|child| !form_text_document_context_menu_child_is_valid(&child.tag)))
+    {
+        return Err(anyhow!(
+            "TextDocumentField accepts at most one direct ContextMenu child"
+        ));
+    }
+    if is_text_document_context_menu_owner
+        && form_layout_single_child_item_slot(text, &fields).is_none()
+    {
+        return Err(anyhow!(
+            "TextDocumentField ContextMenu slots have invalid multiplicity or payload"
+        ));
+    }
+    if is_text_document_context_menu_owner
+        && let Some((_, Some(item_range))) = form_layout_single_child_item_slot(text, &fields)
+    {
+        let child_fields = scan_braced_fields(text, item_range.start)?;
+        let child_tag = child_fields.first().and_then(|range| {
+            form_layout_child_item_tag(text[range.clone()].trim(), text, &child_fields)
+        });
+        if !child_tag.is_some_and(form_text_document_context_menu_child_is_valid) {
+            return Err(anyhow!(
+                "TextDocumentField ContextMenu payload is not a ContextMenu"
+            ));
+        }
+    }
     if item.child_items_present {
         retain_form_layout_single_child_items(text, &item.child_items)?;
     }
     for child in &item.child_items {
-        if child.tag != "ContextMenu" {
+        if !form_text_document_context_menu_child_is_valid(&child.tag) {
             continue;
         }
-        let _ = patch_or_append_form_layout_single_child_item(
+        let patched = patch_or_append_form_layout_single_child_item(
             text,
             child,
             commands,
@@ -16584,6 +16721,11 @@ fn patch_form_layout_single_child_items(
                 child.name
             )
         })?;
+        if is_text_document_context_menu_owner && !patched {
+            return Err(anyhow!(
+                "failed to patch TextDocumentField ContextMenu child"
+            ));
+        }
     }
     Ok(())
 }
@@ -16593,22 +16735,21 @@ fn form_layout_single_child_item_slot(
     fields: &[Range<usize>],
 ) -> Option<(Range<usize>, Option<Range<usize>>)> {
     let wrapper = fields.first().map(|range| text[range.clone()].trim())?;
-    let (count_index, item_index) = match wrapper {
-        "48" => (41, 42),
-        "6" => (15, 16),
-        _ => return None,
-    };
+    let discriminator = fields.get(5).map(|range| text[range.clone()].trim());
+    let (count_index, item_index) =
+        form_layout_single_child_item_slot_indices(wrapper, discriminator)?;
     let count_range = fields.get(count_index)?.clone();
-    let count = text[count_range.clone()].trim().parse::<usize>().ok()?;
-    match count {
-        0 => Some((count_range, None)),
-        1 => fields.get(item_index).cloned().and_then(|item_range| {
-            text[item_range.clone()]
-                .trim_start()
-                .starts_with('{')
-                .then_some((count_range, Some(item_range)))
-        }),
-        _ => None,
+    match parse_form_text_document_context_menu_multiplicity(&text[count_range.clone()]) {
+        Ok(FormTextDocumentContextMenuMultiplicity::Absent) => Some((count_range, None)),
+        Ok(FormTextDocumentContextMenuMultiplicity::Present) => {
+            fields.get(item_index).cloned().and_then(|item_range| {
+                text[item_range.clone()]
+                    .trim_start()
+                    .starts_with('{')
+                    .then_some((count_range, Some(item_range)))
+            })
+        }
+        Err(_) => None,
     }
 }
 
@@ -17185,18 +17326,6 @@ fn form_layout_table_property_bag_value_range(
             && text[value_range.clone()].trim_start().starts_with('{'))
         .then(|| value_range.clone())
     })
-}
-
-fn form_layout_table_counted_property_bag_value_range(
-    text: &str,
-    fields: &[Range<usize>],
-    key: TableBagKey,
-) -> Option<Range<usize>> {
-    let slot = form_layout_table_raw_slot(text, fields, |schema, normalized_fields| {
-        schema.counted_property_bag_value_slot(normalized_fields, key)
-    })?;
-    let range = fields.get(slot)?.clone();
-    (scan_1c_braced_value_range(text, range.start) == Some(range.clone())).then_some(range)
 }
 
 fn is_form_property_bag_number_value(value: &str) -> bool {
@@ -25976,7 +26105,12 @@ mod tests {
         };
 
         assert!(
-            super::format_spreadsheet_chart_drawing_for_moxel(&drawing, chart).is_none(),
+            super::format_spreadsheet_chart_drawing_for_moxel(
+                &drawing,
+                drawing.format_index,
+                chart,
+            )
+            .is_none(),
             "unsupported multi-series charts must not produce partial MOXCEL"
         );
     }
@@ -30890,7 +31024,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn packs_form_body_xml_existing_input_field_context_menu() -> anyhow::Result<()> {
+    fn does_not_inject_text_document_context_menu_slots_into_input_field() -> anyhow::Result<()> {
         let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
         let mut field_parts = vec!["0".to_string(); 43];
         field_parts[0] = "48".to_string();
@@ -30925,14 +31059,86 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
         let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
-        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
-
         assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
-        assert_eq!(&parsed.layout[context_fields[0].clone()], "22");
-        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
-        assert!(!parsed.layout.contains("OldMenu"));
+        assert!(parsed.layout.contains("OldMenu"));
+        assert!(!parsed.layout.contains("NewMenu"));
         assert_eq!(parsed.module_text, "Old module");
 
+        Ok(())
+    }
+
+    #[test]
+    fn patches_existing_text_document_field_context_menu() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "7".to_string();
+        field_parts[6] = r#""Editor""#.to_string();
+        field_parts[41] = "1".to_string();
+        field_parts[42] =
+            format!(r#"{{22,{{23,{form_uuid}}},0,0,0,8,"OldMenu",{{1,0}},{{1,0}},0,1,0}}"#);
+        let base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><ContextMenu name="NewMenu" id="23"/></TextDocumentField></ChildItems></Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let field_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let context_fields = super::scan_braced_fields(&parsed.layout, field_fields[42].start)?;
+        assert_eq!(&parsed.layout[field_fields[41].clone()], "1");
+        assert_eq!(&parsed.layout[context_fields[6].clone()], r#""NewMenu""#);
+        assert!(!parsed.layout.contains("OldMenu"));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_invalid_text_document_field_direct_children_before_packing() -> anyhow::Result<()> {
+        let form_uuid = "02023637-7868-4a5f-8576-835a76e0c9ba";
+        let mut field_parts = vec!["0".to_string(); 43];
+        field_parts[0] = "48".to_string();
+        field_parts[1] = format!("{{22,{form_uuid}}}");
+        field_parts[5] = "7".to_string();
+        field_parts[6] = r#""Editor""#.to_string();
+        field_parts[41] = "0".to_string();
+        let base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let original = super::parse_form_body_blob(&base)?.layout;
+        for xml in [
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><ContextMenu name="First" id="23"/><ContextMenu name="Second" id="24"/></TextDocumentField></ChildItems></Form>"#
+                .as_slice(),
+            br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"><AutoCommandBar name="Foreign" id="23"/></TextDocumentField></ChildItems></Form>"#
+                .as_slice(),
+        ] {
+            assert!(super::pack_form_body_blob_from_form_xml(&base, xml, None).is_err());
+            assert_eq!(super::parse_form_body_blob(&base)?.layout, original);
+        }
+        field_parts[41] = "01".to_string();
+        let malformed_base = super::deflate_raw(
+            format!(
+                "{{4,{{59,1,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,{{{}}}}},\"Old module\",{{0}}}}",
+                field_parts.join(",")
+            )
+            .as_bytes(),
+        )?;
+        let malformed_original = super::parse_form_body_blob(&malformed_base)?.layout;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><TextDocumentField name="Editor" id="22"/></ChildItems></Form>"#;
+        assert!(super::pack_form_body_blob_from_form_xml(&malformed_base, xml, None).is_err());
+        assert_eq!(
+            super::parse_form_body_blob(&malformed_base)?.layout,
+            malformed_original
+        );
         Ok(())
     }
 
@@ -34281,7 +34487,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn packs_form_body_xml_existing_text_document_field() -> anyhow::Result<()> {
         let base = super::deflate_raw(
-            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+            br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"OldEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
         )?;
         let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">
 	<ChildItems>
@@ -34348,10 +34554,38 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
+    fn packs_nested_new_text_document_field_with_context_menu_slots() -> anyhow::Result<()> {
+        let base = super::deflate_raw(br#"{4,{59,0},"Old module",{0}}"#)?;
+        let xml = br#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform"><ChildItems><Pages name="Tabs" id="1"><ChildItems><Page name="General" id="2"><ChildItems><TextDocumentField name="Notes" id="3"/></ChildItems></Page></ChildItems></Pages></ChildItems></Form>"#;
+
+        let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
+        let parsed = super::parse_form_body_blob(&packed.blob)?;
+        let layout_fields = super::scan_braced_fields(&parsed.layout, 0)?;
+        let pages_fields = super::scan_braced_fields(&parsed.layout, layout_fields[3].start)?;
+        let page_fields = super::scan_braced_fields(&parsed.layout, pages_fields[12].start)?;
+        let text_fields = super::scan_braced_fields(&parsed.layout, page_fields[12].start)?;
+
+        assert_eq!(&parsed.layout[text_fields[0].clone()], "48");
+        assert_eq!(&parsed.layout[text_fields[5].clone()], "7");
+        assert_eq!(&parsed.layout[text_fields[6].clone()], r#""Notes""#);
+        assert_eq!(text_fields.len(), 43);
+        assert_eq!(&parsed.layout[text_fields[41].clone()], "0");
+        assert_eq!(&parsed.layout[text_fields[42].clone()], "0");
+        let extracted = crate::mssql_dump::extract_form_body_xml(
+            &packed.blob,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("nested TextDocumentField must remain exportable");
+        assert!(extracted.contains("<TextDocumentField name=\"Notes\" id=\"3\""));
+
+        Ok(())
+    }
+
+    #[test]
     fn packs_form_body_xml_existing_text_document_field_read_only() -> anyhow::Result<()> {
         for (value, expected_code) in [("true", "1"), ("false", "0")] {
             let base = super::deflate_raw(
-                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,2,2,0,2,{1,0},{1,0},1,1,0,2,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
+                br#"{4,{59,1,11111111-1111-4111-8111-111111111111,{48,{20,22222222-2222-4222-8222-222222222222},0,0,0,7,"ProcedureEditor",1,0,{1,0},{1,0},{1,{8}},{0},1,2,2,0,2,{1,0},{1,0},1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}},"Old module",{4,1,{9,{8},0,"ProcedureText",0,0,0,0,0,0,0}},{0},{0}}"#,
             )?;
             let xml = format!(
                 r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform">

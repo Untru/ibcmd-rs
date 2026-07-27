@@ -122,7 +122,11 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Commands::FormContextSummary(args) => {
-            let context = ibcmd_rs::mssql_dump::offline_context::OfflineFormContextFactory::from_run_root(&args.run_root, args.source_commit)?;
+            let context =
+                ibcmd_rs::mssql_dump::offline_context::OfflineFormContextFactory::from_run_root(
+                    &args.run_root,
+                    args.source_commit,
+                )?;
             println!("{}", serde_json::to_string_pretty(&context.summary)?);
         }
         Commands::AuditSourceLoadCoverage(args) => {
@@ -257,6 +261,19 @@ fn main() -> Result<()> {
                     "schema_version": matrix.schema_version,
                     "runs": &matrix.runs,
                     "rows": matrix.rows.len(),
+                    "json": &args.output,
+                    "markdown": &args.markdown,
+                }))?
+            );
+        }
+        Commands::SourceThreeWayOracle(args) => {
+            let report = ibcmd_rs::source_oracle::run_source_three_way_oracle(&args)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema_version": report.schema_version,
+                    "rows": report.rows.len(),
+                    "summary": &report.summary,
                     "json": &args.output,
                     "markdown": &args.markdown,
                 }))?

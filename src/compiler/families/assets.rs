@@ -8,6 +8,7 @@ use std::str;
 
 use ibcmd_core::artifact::{ProfileId, StorageProfileId};
 use ibcmd_core::asset::{Asset, AssetBuildError, MediaKind};
+use ibcmd_core::family::FamilyId;
 use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::profile::EffectiveProfile;
 use ibcmd_core::storage::{
@@ -92,6 +93,7 @@ pub enum SourceAssetRole {
     MainSectionPicture,
     StandaloneContent,
     Rights,
+    Aggregates,
     Predefined,
 }
 
@@ -440,6 +442,13 @@ const ROUTES: &[SourceAssetRoute] = &[
     route!("CommonCommand", Help, ".5", "Ext/Help.xml", Help),
     route!("Role", Rights, ".0", "Ext/Rights.xml", Rights),
     route!(
+        "AccumulationRegister",
+        Aggregates,
+        ".3",
+        "Ext/Aggregates.xml",
+        Deferred
+    ),
+    route!(
         "Catalog",
         Predefined,
         ".1c",
@@ -531,7 +540,102 @@ const ROUTES: &[SourceAssetRoute] = &[
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SourceAssetRegistry;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConfigRowIdParseError {
+    MissingDelimiter,
+    EmptyOwner,
+    EmptySuffix,
+    InvalidSuffix,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigRowId<'a> {
+    owner: &'a str,
+    suffix_component: &'a str,
+    suffix: StorageSuffix,
+}
+
+impl<'a> ConfigRowId<'a> {
+    pub fn parse(value: &'a str) -> Result<Self, ConfigRowIdParseError> {
+        let (owner, suffix_component) = value
+            .split_once('.')
+            .ok_or(ConfigRowIdParseError::MissingDelimiter)?;
+        if owner.is_empty() {
+            return Err(ConfigRowIdParseError::EmptyOwner);
+        }
+        if suffix_component.is_empty() {
+            return Err(ConfigRowIdParseError::EmptySuffix);
+        }
+        let suffix = StorageSuffix::new(&format!(".{suffix_component}"))
+            .map_err(|_| ConfigRowIdParseError::InvalidSuffix)?;
+        Ok(Self {
+            owner,
+            suffix_component,
+            suffix,
+        })
+    }
+
+    pub const fn owner(&self) -> &'a str {
+        self.owner
+    }
+
+    pub const fn suffix(&self) -> &StorageSuffix {
+        &self.suffix
+    }
+
+    pub const fn suffix_component(&self) -> &'a str {
+        self.suffix_component
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceAssetRelationError {
+    UnsupportedFamily,
+    WrongSuffix,
+    MissingOwnerReference,
+    OwnerMismatch,
+}
+
 impl SourceAssetRegistry {
+    pub fn owner_bound_route(self, owner_family: &FamilyId) -> Option<&'static SourceAssetRoute> {
+        ROUTES.iter().find(|route| {
+            route.owner_family == owner_family.as_str()
+                && matches!(
+                    route.role,
+                    SourceAssetRole::Rights | SourceAssetRole::Aggregates
+                )
+        })
+    }
+
+    pub fn owner_bound_relation(
+        self,
+        owner_family: &FamilyId,
+        suffix: &StorageSuffix,
+    ) -> Result<&'static SourceAssetRoute, SourceAssetRelationError> {
+        let route = self
+            .owner_bound_route(owner_family)
+            .ok_or(SourceAssetRelationError::UnsupportedFamily)?;
+        if route.suffix != suffix.as_str() {
+            return Err(SourceAssetRelationError::WrongSuffix);
+        }
+        Ok(route)
+    }
+
+    pub fn canonical_owner_name<'a>(
+        self,
+        route: &SourceAssetRoute,
+        header_name: &'a str,
+        owner_reference: Option<&str>,
+    ) -> Result<&'a str, SourceAssetRelationError> {
+        let owner_reference =
+            owner_reference.ok_or(SourceAssetRelationError::MissingOwnerReference)?;
+        let expected_reference = format!("{}.{}", route.owner_family, header_name);
+        if owner_reference != expected_reference {
+            return Err(SourceAssetRelationError::OwnerMismatch);
+        }
+        Ok(header_name)
+    }
+
     /// Enumerates every evidence-backed route for one exact owner family in
     /// stable registry order.  Bootstrap source-tree planning uses this to
     /// consume files by explicit relative path instead of filename heuristics.
@@ -1434,6 +1538,63 @@ mod tests {
                 .map(|route| route.suffix())
                 .collect::<Vec<_>>(),
             vec![".6", ".7"]
+        );
+    }
+
+    #[test]
+    fn config_row_ids_and_owner_bound_relations_are_exact_and_typed() {
+        let role_id = ConfigRowId::parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0").unwrap();
+        assert_eq!(role_id.owner(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        assert_eq!(role_id.suffix().as_str(), ".0");
+        assert_eq!(role_id.suffix_component(), "0");
+        for (value, expected) in [
+            ("owner", ConfigRowIdParseError::MissingDelimiter),
+            (".0", ConfigRowIdParseError::EmptyOwner),
+            ("owner.", ConfigRowIdParseError::EmptySuffix),
+            ("owner.not-hex", ConfigRowIdParseError::InvalidSuffix),
+            ("owner.0.extra", ConfigRowIdParseError::InvalidSuffix),
+        ] {
+            assert_eq!(ConfigRowId::parse(value).unwrap_err(), expected, "{value}");
+        }
+
+        let registry = SourceAssetRegistry;
+        let role_family = FamilyId::parse("Role").unwrap();
+        let role_route = registry
+            .owner_bound_relation(&role_family, role_id.suffix())
+            .unwrap();
+        assert_eq!(role_route.role(), SourceAssetRole::Rights);
+        assert_eq!(role_route.relative_path(), "Ext/Rights.xml");
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", Some("Role.Editor"),),
+            Ok("Editor")
+        );
+
+        let aggregate_id = ConfigRowId::parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.3").unwrap();
+        let register_family = FamilyId::parse("AccumulationRegister").unwrap();
+        let aggregate_route = registry
+            .owner_bound_relation(&register_family, aggregate_id.suffix())
+            .unwrap();
+        assert_eq!(aggregate_route.role(), SourceAssetRole::Aggregates);
+        assert_eq!(aggregate_route.relative_path(), "Ext/Aggregates.xml");
+        assert_eq!(
+            registry.owner_bound_relation(&role_family, aggregate_id.suffix()),
+            Err(SourceAssetRelationError::WrongSuffix)
+        );
+        assert_eq!(
+            registry.owner_bound_relation(&FamilyId::parse("Catalog").unwrap(), role_id.suffix(),),
+            Err(SourceAssetRelationError::UnsupportedFamily)
+        );
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", None),
+            Err(SourceAssetRelationError::MissingOwnerReference)
+        );
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", Some("Role.Other"),),
+            Err(SourceAssetRelationError::OwnerMismatch)
+        );
+        assert_eq!(
+            registry.canonical_owner_name(role_route, "Editor", Some("malformed")),
+            Err(SourceAssetRelationError::OwnerMismatch)
         );
     }
 

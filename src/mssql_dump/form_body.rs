@@ -28,7 +28,7 @@ use crate::form_schema::{
     FormLabelFieldOptionSlot as LabelFieldSlot, FormMobileDeviceCommandBarContentItemXmlProperty,
     FormNestedAutoCommandBarSchema, FormPageSchema, FormPageXmlProperty,
     FormPictureDecorationGeometryXmlProperty, FormPictureDecorationSchema, FormPictureValueKind,
-    FormPopupSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
+    FormPopupSchema, FormRootAutoCommandBarSchema, FormRootAutoUrlSchema, FormRootGroupSchema,
     FormRootMobileDeviceCommandBarContentSchema, FormRootVerticalAlign,
     FormRootVerticalAlignSchema, FormRootVerticalScrollSchema,
     FormSharedContainerContentChangeSchema, FormSpecialFieldSchema,
@@ -41,8 +41,35 @@ use crate::form_schema::{
     FormUsualGroupHeaderXmlProperty, FormUsualGroupSchema, FormUsualGroupXmlAnchor,
     FormUsualGroupXmlProperty, FormWarningOnEditRepresentation, decode_form_tooltip_representation,
     form_attribute_column_builtin_type_reference, form_child_item_representation_is_default,
-    form_tooltip_representation_schema, form_tooltip_representation_xml_order,
+    form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
+    form_tooltip_representation_xml_order,
 };
+#[cfg(test)]
+use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_item;
+#[cfg(test)]
+use ibcmd_schema::parse_form_choice_parameter_links as parse_schema_form_choice_parameter_links;
+use ibcmd_schema::{
+    FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue,
+    FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
+    FormChoiceListLayoutProfile, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
+    FormChoiceParameterClusterMember, FormChoiceParameterLinkReference,
+    FormChoiceParameterLinkStandardTerminal, FormChoiceParameterLinkTableCurrentDataTerminal,
+    FormChoiceParameterLinkTerminal, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
+    FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
+    GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
+    MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
+    bundled_writer_rules, form_choice_parameter_cluster_order,
+    form_text_document_context_menu_owner_fields, parse_form_choice_list,
+    parse_form_choice_parameter_links_with_reference_resolver as parse_schema_form_choice_parameter_links_with_reference_resolver,
+    parse_form_choice_parameters,
+    parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
+    parse_generated_metadata_owner, parse_metadata_data_path,
+};
+use ibcmd_xml::{
+    DcsListSettingsTailError, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
+    emit_form_choice_parameters, emit_form_list_settings_tail,
+};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
@@ -65,6 +92,8 @@ const FORM_STANDARD_DATA_PATH_NAME_ALIASES: &[(&str, &str)] = &[
     ("ВидДвижения", "RecordType"),
     ("ТипЗначения", "ValueType"),
 ];
+const FORM_CHOICE_LIST_VALUE_INDENT: &str = "\t\t\t";
+const FORM_XML_LINE_ENDING: &str = "\r\n";
 
 const MAX_FORM_SERVER_STATE_XML_BYTES: usize = 64 * 1_048_576;
 
@@ -72,6 +101,7 @@ const MAX_FORM_SERVER_STATE_XML_BYTES: usize = 64 * 1_048_576;
 /// Form-local indexes deliberately remain inside the parser.
 pub(super) struct FormParseContext<'a> {
     type_index: &'a BTreeMap<String, String>,
+    type_index_collisions: &'a BTreeSet<String>,
     dcs_type_index: &'a DcsTypeIndex,
     object_refs: &'a BTreeMap<String, String>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
@@ -107,6 +137,7 @@ pub(crate) struct FormItemTraceScalar {
 impl<'a> FormParseContext<'a> {
     pub(super) fn new(
         type_index: &'a BTreeMap<String, String>,
+        type_index_collisions: &'a BTreeSet<String>,
         dcs_type_index: &'a DcsTypeIndex,
         object_refs: &'a BTreeMap<String, String>,
         information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
@@ -114,6 +145,7 @@ impl<'a> FormParseContext<'a> {
     ) -> Self {
         Self {
             type_index,
+            type_index_collisions,
             dcs_type_index,
             object_refs,
             information_register_field_refs,
@@ -147,6 +179,7 @@ pub(super) fn extract_form_body_xml_from_body(
         body,
         &FormParseContext::new(
             type_index,
+            &BTreeSet::new(),
             &DcsTypeIndex::new(),
             object_refs,
             &BTreeMap::new(),
@@ -159,8 +192,48 @@ pub(super) fn extract_form_body_xml_from_body(
 pub(super) fn extract_form_body_xml_from_body_timed(
     body: &ParsedFormBodyBlob,
     context: &FormParseContext<'_>,
-    mut timings: Option<&mut MssqlDumpTimingReport>,
+    timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<String> {
+    match extract_form_body_xml_from_body_detailed_timed(body, context, timings)? {
+        DetailedFormBodyExtraction::Emitted { xml, .. } => Some(xml),
+        DetailedFormBodyExtraction::OpaqueNotEmitted { .. }
+        | DetailedFormBodyExtraction::Rejected { .. } => None,
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) struct FormSourceAssetDiagnostic {
+    pub(super) code: &'static str,
+    pub(super) classification: &'static str,
+    pub(super) parse_error_class: Option<&'static str>,
+    pub(super) property: &'static str,
+    pub(super) property_profile: &'static str,
+    pub(super) property_slot: usize,
+    pub(super) form_item_id: String,
+    pub(super) form_item_tag: &'static str,
+    pub(super) raw_length: usize,
+    pub(super) raw_sha256: String,
+}
+
+pub(super) enum DetailedFormBodyExtraction {
+    Emitted {
+        xml: String,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    OpaqueNotEmitted {
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    Rejected {
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+        error: FormSchemaWriteError,
+    },
+}
+
+pub(super) fn extract_form_body_xml_from_body_detailed_timed(
+    body: &ParsedFormBodyBlob,
+    context: &FormParseContext<'_>,
+    mut timings: Option<&mut MssqlDumpTimingReport>,
+) -> Option<DetailedFormBodyExtraction> {
     let started = Instant::now();
     let form_fields = split_1c_braced_fields(&body.layout, 0)?;
     if let Some(timings) = timings.as_deref_mut() {
@@ -211,7 +284,7 @@ pub(super) fn extract_form_body_xml_from_body_timed(
     }
 
     let started = Instant::now();
-    let child_item_indexes = collect_form_child_item_indexes_with_object_refs(
+    let mut child_item_indexes = collect_form_child_item_indexes_with_object_refs(
         &form_fields,
         &attributes,
         context.object_refs,
@@ -254,6 +327,10 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         context.object_refs,
         &child_item_indexes,
     );
+    extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
+        &mut child_item_indexes,
+        &attributes,
+    );
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
@@ -264,6 +341,8 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &form_fields,
         &attributes,
         &commands,
+        context.type_index,
+        context.type_index_collisions,
         context.object_refs,
         &child_item_indexes,
         context.trace_sink,
@@ -287,8 +366,69 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         timings.source_asset_form_command_interface_cpu_ms += elapsed_ms(started);
     }
 
+    let mut diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(&child_items, &mut diagnostics);
+    if let Some(auto_command_bar) = auto_command_bar.as_ref() {
+        collect_opaque_choice_list_diagnostics(&auto_command_bar.child_items, &mut diagnostics);
+    }
+    let has_opaque_choice_list = !diagnostics.is_empty();
+    collect_opaque_choice_parameters_diagnostics(&child_items, &mut diagnostics);
+    if let Some(auto_command_bar) = auto_command_bar.as_ref() {
+        collect_opaque_choice_parameters_diagnostics(
+            &auto_command_bar.child_items,
+            &mut diagnostics,
+        );
+    }
+    diagnostics.sort_by(|left, right| {
+        (
+            left.form_item_id.as_str(),
+            left.form_item_tag,
+            left.property,
+            left.property_profile,
+            left.property_slot,
+            left.code,
+            left.raw_sha256.as_str(),
+        )
+            .cmp(&(
+                right.form_item_id.as_str(),
+                right.form_item_tag,
+                right.property,
+                right.property_profile,
+                right.property_slot,
+                right.code,
+                right.raw_sha256.as_str(),
+            ))
+    });
+
+    if has_opaque_choice_list {
+        // Writer-corpus, policy, and other formatter failures are never diagnostic data
+        // failures. Exercise every fallible writer path before taking the one recoverable exit;
+        // emitted forms continue through the real formatter exactly once below.
+        if let Err(error) = preflight_form_writer_paths(
+            &child_items,
+            auto_command_bar
+                .as_ref()
+                .map(|command_bar| command_bar.child_items.as_slice()),
+            &attributes,
+        ) {
+            return Some(DetailedFormBodyExtraction::Rejected { diagnostics, error });
+        }
+        return Some(DetailedFormBodyExtraction::OpaqueNotEmitted { diagnostics });
+    }
+
+    // With no opaque ChoiceList left, the existing typed preflight remains an invariant check
+    // immediately before formatting.
+    if let Err(error) = validate_form_choice_list_writer_trees(
+        &child_items,
+        auto_command_bar
+            .as_ref()
+            .map(|command_bar| command_bar.child_items.as_slice()),
+    ) {
+        return Some(DetailedFormBodyExtraction::Rejected { diagnostics, error });
+    }
+
     let started = Instant::now();
-    let xml = format_form_body_xml(
+    let xml = match format_form_body_xml(
         &properties,
         auto_command_bar.as_ref(),
         &events,
@@ -298,12 +438,119 @@ pub(super) fn extract_form_body_xml_from_body_timed(
         &parameters,
         &commands,
         &command_interface,
-    );
+    ) {
+        Ok(xml) => xml,
+        Err(error) => {
+            return Some(DetailedFormBodyExtraction::Rejected { diagnostics, error });
+        }
+    };
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_format_cpu_ms += elapsed_ms(started);
     }
 
-    Some(xml)
+    Some(DetailedFormBodyExtraction::Emitted { xml, diagnostics })
+}
+
+pub(super) fn collect_opaque_choice_list_diagnostics(
+    items: &[FormChildItem],
+    diagnostics: &mut Vec<FormSourceAssetDiagnostic>,
+) {
+    for item in items {
+        if let CanonicalFormChoiceList::OpaqueSameProfile { raw, provenance } = &item.choice_list {
+            let opaque_diagnostic = provenance.layout.opaque_diagnostic(raw);
+            let identity = opaque_diagnostic.identity();
+            diagnostics.push(FormSourceAssetDiagnostic {
+                code: identity.code(),
+                classification: identity.classification(),
+                parse_error_class: None,
+                property: identity.property(),
+                property_profile: identity.profile(),
+                property_slot: provenance.slot,
+                form_item_id: item.id.clone(),
+                form_item_tag: item.tag,
+                raw_length: opaque_diagnostic.raw_length(),
+                raw_sha256: opaque_diagnostic.raw_sha256().to_owned(),
+            });
+        }
+        collect_opaque_choice_list_diagnostics(&item.child_items, diagnostics);
+    }
+}
+
+pub(super) fn collect_opaque_choice_parameters_diagnostics(
+    items: &[FormChildItem],
+    diagnostics: &mut Vec<FormSourceAssetDiagnostic>,
+) {
+    for item in items {
+        if let Some(cluster) = &item.choice_parameter_cluster {
+            if let FormChoiceParameterLinks::Opaque(value) = cluster.links() {
+                let mut raw_hasher = Sha256::new();
+                let mut raw_length = 0usize;
+                for raw in [&value.primary_raw, &value.duplicate_raw]
+                    .into_iter()
+                    .flatten()
+                {
+                    raw_hasher.update(raw.as_bytes());
+                    raw_length += raw.len();
+                }
+                diagnostics.push(FormSourceAssetDiagnostic {
+                    code: "source_asset.form.choice_parameter_links.opaque_rejected",
+                    classification: "opaque_property_rejected",
+                    parse_error_class: Some(form_choice_parameter_links_parse_error_class(
+                        &value.error,
+                    )),
+                    property: "ChoiceParameterLinks",
+                    property_profile: "input_field_extended_options_mirrored",
+                    property_slot: value.primary_slot,
+                    form_item_id: item.id.clone(),
+                    form_item_tag: item.tag,
+                    raw_length,
+                    raw_sha256: format!("{:x}", raw_hasher.finalize()),
+                });
+            }
+            if let CanonicalFormChoiceParameters::OpaqueSameProfile { raw, slot } =
+                cluster.parameters()
+            {
+                diagnostics.push(FormSourceAssetDiagnostic {
+                    code: "source_asset.form.choice_parameters.opaque_omitted",
+                    classification: "opaque_property_omitted",
+                    parse_error_class: None,
+                    property: "ChoiceParameters",
+                    property_profile: "input_field_extended_options",
+                    property_slot: *slot,
+                    form_item_id: item.id.clone(),
+                    form_item_tag: item.tag,
+                    raw_length: raw.len(),
+                    raw_sha256: format!("{:x}", Sha256::digest(raw.as_bytes())),
+                });
+            }
+            if let FormChoiceParameterAvailableTypes::Opaque(value) = cluster.available_types() {
+                diagnostics.push(FormSourceAssetDiagnostic {
+                    code: "source_asset.form.available_types.opaque_omitted",
+                    classification: "opaque_property_omitted",
+                    parse_error_class: None,
+                    property: "AvailableTypes",
+                    property_profile: "input_field_extended_options",
+                    property_slot: value.slot,
+                    form_item_id: item.id.clone(),
+                    form_item_tag: item.tag,
+                    raw_length: value.raw.len(),
+                    raw_sha256: format!("{:x}", Sha256::digest(value.raw.as_bytes())),
+                });
+            }
+        }
+        collect_opaque_choice_parameters_diagnostics(&item.child_items, diagnostics);
+    }
+}
+
+fn form_choice_parameter_links_parse_error_class(
+    error: &FormChoiceParameterLinksParseError,
+) -> &'static str {
+    match error {
+        FormChoiceParameterLinksParseError::PrimaryMalformed => "primary_malformed",
+        FormChoiceParameterLinksParseError::DuplicateMalformed => "duplicate_malformed",
+        FormChoiceParameterLinksParseError::MirrorMismatch => "mirror_mismatch",
+        FormChoiceParameterLinksParseError::UnresolvedAttribute(_) => "unresolved_attribute",
+    }
 }
 
 /// Table-specific evidence captured alongside the production layout selection.
@@ -346,8 +593,10 @@ pub(crate) fn trace_form_body_with_context(
     form_owner_reference: Option<&str>,
     trace_sink: &dyn FormItemTraceSink,
 ) -> Option<()> {
+    let type_index_collisions = BTreeSet::new();
     let context = FormParseContext::new(
         type_index,
+        &type_index_collisions,
         dcs_type_index,
         object_refs,
         information_register_field_refs,
@@ -828,8 +1077,8 @@ pub(super) struct FormChildItem {
     pub(super) title_formatted: Option<bool>,
     pub(super) tooltip: Vec<(String, String)>,
     pub(super) input_hint: Vec<(String, String)>,
-    pub(super) choice_list: Vec<FormChoiceListItem>,
-    pub(super) choice_parameter_links: Vec<FormChoiceParameterLink>,
+    pub(super) choice_list: CanonicalFormChoiceList,
+    pub(super) choice_parameter_cluster: Option<CanonicalFormChoiceParameterCluster>,
     pub(super) type_link: Option<FormTypeLink>,
     pub(super) extended_tooltip: Option<FormExtendedTooltip>,
     pub(super) events: Vec<FormBodyEvent>,
@@ -841,27 +1090,411 @@ pub(super) struct FormChildItem {
     pub(super) child_items: Vec<FormChildItem>,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormChoiceListItem {
-    pub(super) presentation_present: bool,
-    pub(super) presentation: Vec<(String, String)>,
-    pub(super) value: FormChoiceListValue,
+pub(super) type FormChoiceListRawLayout = FormChoiceListLayoutProfile;
+pub(super) type FormChoiceListItem = SchemaFormChoiceListItem;
+#[cfg(test)]
+pub(super) type FormChoiceListValue = ibcmd_schema::FormChoiceListValue;
+
+/// Physical provenance is retained for diagnostics only.  It deliberately contains no XML
+/// QName, ordering, default-emission or target-version policy.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) struct FormChoiceListRawProvenance {
+    pub(super) layout: FormChoiceListRawLayout,
+    pub(super) slot: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub(super) enum CanonicalFormChoiceList {
+    #[default]
+    Absent,
+    Empty {
+        provenance: FormChoiceListRawProvenance,
+    },
+    Typed {
+        items: Vec<FormChoiceListItem>,
+        provenance: FormChoiceListRawProvenance,
+    },
+    OpaqueSameProfile {
+        raw: String,
+        provenance: FormChoiceListRawProvenance,
+    },
+}
+
+impl CanonicalFormChoiceList {
+    pub(super) fn is_empty(&self) -> bool {
+        matches!(self, Self::Absent | Self::Empty { .. })
+    }
+
+    pub(super) fn items(&self) -> Result<&[FormChoiceListItem], FormSchemaWriteError> {
+        match self {
+            Self::Typed { items, .. } => Ok(items),
+            Self::Absent | Self::Empty { .. } => Ok(&[]),
+            Self::OpaqueSameProfile { provenance, .. } => {
+                Err(FormSchemaWriteError::OpaqueChoiceList {
+                    layout: provenance.layout,
+                    slot: provenance.slot,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
+pub(super) enum CanonicalFormChoiceParameters {
+    #[default]
+    Absent,
+    Empty {
+        slot: usize,
+    },
+    Typed {
+        parameters: FormChoiceParameters,
+        slot: usize,
+    },
+    OpaqueSameProfile {
+        raw: String,
+        slot: usize,
+    },
+}
+
+impl CanonicalFormChoiceParameters {
+    pub(super) fn should_emit(&self) -> bool {
+        matches!(self, Self::Typed { parameters, .. } if !parameters.is_empty())
+    }
+
+    /// MSSQL source-parity extraction keeps undecoded same-profile payloads non-emitting.
+    /// Direct validation and formatting remain fail-closed through `items()`.
+    pub(super) fn is_non_emitting(&self) -> bool {
+        match self {
+            Self::Absent | Self::Empty { .. } | Self::OpaqueSameProfile { .. } => true,
+            Self::Typed { parameters, .. } => parameters.is_empty(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) enum FormChoiceListValue {
-    Boolean(bool),
-    Decimal(String),
-    Nil,
-    String(String),
-    DesignTimeRef(String),
+pub(super) struct OpaqueFormChoiceParameterClusterValue {
+    pub(super) raw: String,
+    pub(super) slot: usize,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormChoiceParameterLink {
-    pub(super) name: String,
-    pub(super) data_path: String,
-    pub(super) value_change: &'static str,
+pub(super) struct OpaqueFormChoiceParameterLinksValue {
+    pub(super) primary_raw: Option<String>,
+    pub(super) duplicate_raw: Option<String>,
+    pub(super) primary_slot: usize,
+    pub(super) duplicate_slot: usize,
+    pub(super) error: FormChoiceParameterLinksParseError,
+}
+
+pub(super) type CanonicalFormChoiceParameterLinks =
+    FormChoiceParameterLinks<OpaqueFormChoiceParameterLinksValue>;
+pub(super) type CanonicalFormChoiceParameterAvailableTypes =
+    FormChoiceParameterAvailableTypes<(), OpaqueFormChoiceParameterClusterValue>;
+pub(super) type CanonicalFormChoiceParameterCluster = FormChoiceParameterCluster<
+    CanonicalFormChoiceParameterLinks,
+    CanonicalFormChoiceParameters,
+    CanonicalFormChoiceParameterAvailableTypes,
+>;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormSchemaWriteError {
+    Corpus(SchemaError),
+    WriterRule(WriterRuleLookupError),
+    DcsTail(DcsListSettingsTailError),
+    UnexpectedPolicy {
+        rule_id: String,
+        expected: &'static str,
+    },
+    OpaqueChoiceList {
+        layout: FormChoiceListRawLayout,
+        slot: usize,
+    },
+    OpaqueChoiceParameters {
+        slot: usize,
+    },
+    OpaqueChoiceParameterLinks {
+        primary_slot: usize,
+        duplicate_slot: usize,
+    },
+    OpaqueChoiceParameterAvailableTypes {
+        slot: usize,
+    },
+    UnsupportedTypedChoiceParameterAvailableTypes,
+    ChoiceParametersEmit(FormChoiceParametersEmitError),
+    #[allow(dead_code)]
+    CanonicalDcsSerializerPending {
+        rule_id: String,
+        dependency: &'static str,
+    },
+}
+
+impl From<WriterRuleLookupError> for FormSchemaWriteError {
+    fn from(error: WriterRuleLookupError) -> Self {
+        Self::WriterRule(error)
+    }
+}
+
+impl From<SchemaError> for FormSchemaWriteError {
+    fn from(error: SchemaError) -> Self {
+        Self::Corpus(error)
+    }
+}
+
+impl From<DcsListSettingsTailError> for FormSchemaWriteError {
+    fn from(error: DcsListSettingsTailError) -> Self {
+        Self::DcsTail(error)
+    }
+}
+
+impl From<FormChoiceParametersEmitError> for FormSchemaWriteError {
+    fn from(error: FormChoiceParametersEmitError) -> Self {
+        Self::ChoiceParametersEmit(error)
+    }
+}
+
+fn verified_form_choice_list_policy() -> Result<WriterPolicy, FormSchemaWriteError> {
+    let corpus = bundled_writer_rules()?;
+    let rule = corpus.exact_rule(WriterRuleKey {
+        source_release: "2025.2.3+30",
+        model_type: "FormChoiceList",
+        feature: "values",
+    })?;
+    match &rule.policy {
+        Some(policy @ WriterPolicy::FormChoiceList { .. }) => Ok(policy.clone()),
+        _ => Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: rule.id.clone(),
+            expected: "form-choice-list",
+        }),
+    }
+}
+
+fn verified_form_choice_parameters_policy() -> Result<WriterPolicy, FormSchemaWriteError> {
+    let corpus = bundled_writer_rules()?;
+    let rule = corpus.exact_rule(WriterRuleKey {
+        source_release: "2025.2.3+30",
+        model_type: "InputFieldExtInfo",
+        feature: "choiceParameters",
+    })?;
+    match &rule.policy {
+        Some(policy @ WriterPolicy::FormChoiceParameters { .. }) => Ok(policy.clone()),
+        _ => Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: rule.id.clone(),
+            expected: "form-choice-parameters",
+        }),
+    }
+}
+
+/// Resolves the verified delegate without pretending that #283's canonical DCS serializer
+/// already exists.  Calling this as a Form-layer serializer therefore fails closed.
+#[allow(dead_code)]
+pub(super) fn require_canonical_form_list_settings_serializer() -> Result<(), FormSchemaWriteError>
+{
+    let corpus = bundled_writer_rules()?;
+    let rule = corpus.exact_rule(WriterRuleKey {
+        source_release: "2025.2.3+30",
+        model_type: "DynamicListExtInfo",
+        feature: "listSettings",
+    })?;
+    match &rule.policy {
+        Some(WriterPolicy::FormListSettings { .. }) => {
+            Err(FormSchemaWriteError::CanonicalDcsSerializerPending {
+                rule_id: rule.id.clone(),
+                dependency: "GitHub #283 / build-canonical-dcs-serializer",
+            })
+        }
+        _ => Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: rule.id.clone(),
+            expected: "form-list-settings",
+        }),
+    }
+}
+
+fn validate_form_choice_list_writer_rules(
+    items: &[FormChildItem],
+) -> Result<(), FormSchemaWriteError> {
+    fn visit(item: &FormChildItem) -> Result<(), FormSchemaWriteError> {
+        validate_canonical_form_choice_list(&item.choice_list)?;
+        if let Some(cluster) = &item.choice_parameter_cluster {
+            match cluster.links() {
+                FormChoiceParameterLinks::Empty | FormChoiceParameterLinks::Typed(_) => {
+                    verified_form_choice_parameters_policy().map(|_| ())?
+                }
+                FormChoiceParameterLinks::Absent => {}
+                FormChoiceParameterLinks::Opaque(value) => {
+                    return Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
+                        primary_slot: value.primary_slot,
+                        duplicate_slot: value.duplicate_slot,
+                    });
+                }
+            }
+            match cluster.parameters() {
+                CanonicalFormChoiceParameters::Empty { .. }
+                | CanonicalFormChoiceParameters::Typed { .. } => {
+                    verified_form_choice_parameters_policy().map(|_| ())?
+                }
+                // Opaque values remain intentionally non-emitting and diagnostic-only.
+                CanonicalFormChoiceParameters::Absent
+                | CanonicalFormChoiceParameters::OpaqueSameProfile { .. } => {}
+            }
+        }
+        for child in &item.child_items {
+            visit(child)?;
+        }
+        Ok(())
+    }
+
+    for item in items {
+        visit(item)?;
+    }
+    Ok(())
+}
+
+fn validate_form_writer_policy_availability(
+    items: &[FormChildItem],
+) -> Result<(), FormSchemaWriteError> {
+    fn visit(item: &FormChildItem) -> Result<(), FormSchemaWriteError> {
+        if !matches!(&item.choice_list, CanonicalFormChoiceList::Absent) {
+            verified_form_choice_list_policy().map(|_| ())?;
+        }
+        if item.choice_parameter_cluster.is_some() {
+            verified_form_choice_parameters_policy().map(|_| ())?;
+        }
+        for child in &item.child_items {
+            visit(child)?;
+        }
+        Ok(())
+    }
+
+    for item in items {
+        visit(item)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_form_writer_policy_availability_trees(
+    child_items: &[FormChildItem],
+    auto_command_bar_child_items: Option<&[FormChildItem]>,
+) -> Result<(), FormSchemaWriteError> {
+    validate_form_writer_policy_availability(child_items)?;
+    if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
+        validate_form_writer_policy_availability(auto_command_bar_child_items)?;
+    }
+    Ok(())
+}
+
+fn preflight_form_choice_parameter_writer_paths(
+    items: &[FormChildItem],
+) -> Result<(), FormSchemaWriteError> {
+    for item in items {
+        if let Some(cluster) = &item.choice_parameter_cluster {
+            drop(format_form_choice_parameter_cluster_xml(cluster, 0)?);
+        }
+        preflight_form_choice_parameter_writer_paths(&item.child_items)?;
+    }
+    Ok(())
+}
+
+pub(super) fn preflight_form_writer_paths(
+    child_items: &[FormChildItem],
+    auto_command_bar_child_items: Option<&[FormChildItem]>,
+    attributes: &[FormAttribute],
+) -> Result<(), FormSchemaWriteError> {
+    validate_form_writer_policy_availability_trees(child_items, auto_command_bar_child_items)?;
+    preflight_form_choice_parameter_writer_paths(child_items)?;
+    if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
+        preflight_form_choice_parameter_writer_paths(auto_command_bar_child_items)?;
+    }
+    for settings in attributes
+        .iter()
+        .filter_map(|attribute| attribute.settings.as_ref())
+    {
+        // This is the only fallible DynamicList/ListSettings formatter path. It returns its
+        // complete fragment atomically and has no output or filesystem side effects.
+        drop(emit_form_list_settings_tail(
+            settings.list_settings.items_view_mode.as_deref(),
+            settings.list_settings.items_user_setting_id.as_deref(),
+            "dcsset",
+            "\t\t\t\t\t",
+        )?);
+    }
+    Ok(())
+}
+
+pub(super) fn validate_form_choice_list_writer_trees(
+    child_items: &[FormChildItem],
+    auto_command_bar_child_items: Option<&[FormChildItem]>,
+) -> Result<(), FormSchemaWriteError> {
+    validate_form_choice_list_writer_rules(child_items)?;
+    if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
+        validate_form_choice_list_writer_rules(auto_command_bar_child_items)?;
+    }
+    Ok(())
+}
+
+pub(super) fn validate_canonical_form_choice_list(
+    value: &CanonicalFormChoiceList,
+) -> Result<(), FormSchemaWriteError> {
+    match value {
+        CanonicalFormChoiceList::Absent => Ok(()),
+        CanonicalFormChoiceList::OpaqueSameProfile { provenance, .. } => {
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: provenance.layout,
+                slot: provenance.slot,
+            })
+        }
+        CanonicalFormChoiceList::Empty { .. } | CanonicalFormChoiceList::Typed { .. } => {
+            verified_form_choice_list_policy().map(|_| ())
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(super) fn validate_canonical_form_choice_parameters(
+    value: &CanonicalFormChoiceParameters,
+) -> Result<(), FormSchemaWriteError> {
+    match value {
+        CanonicalFormChoiceParameters::Absent => Ok(()),
+        CanonicalFormChoiceParameters::OpaqueSameProfile { slot, .. } => {
+            Err(FormSchemaWriteError::OpaqueChoiceParameters { slot: *slot })
+        }
+        CanonicalFormChoiceParameters::Empty { .. }
+        | CanonicalFormChoiceParameters::Typed { .. } => {
+            verified_form_choice_parameters_policy().map(|_| ())
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(super) fn validate_canonical_form_choice_parameter_links(
+    value: &CanonicalFormChoiceParameterLinks,
+) -> Result<(), FormSchemaWriteError> {
+    match value {
+        FormChoiceParameterLinks::Absent => Ok(()),
+        FormChoiceParameterLinks::Empty | FormChoiceParameterLinks::Typed(_) => {
+            verified_form_choice_parameters_policy().map(|_| ())
+        }
+        FormChoiceParameterLinks::Opaque(value) => {
+            Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
+                primary_slot: value.primary_slot,
+                duplicate_slot: value.duplicate_slot,
+            })
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(super) fn validate_canonical_form_choice_parameter_available_types(
+    value: &CanonicalFormChoiceParameterAvailableTypes,
+) -> Result<(), FormSchemaWriteError> {
+    match value {
+        FormChoiceParameterAvailableTypes::Absent => Ok(()),
+        FormChoiceParameterAvailableTypes::Typed(()) => {
+            Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+        }
+        FormChoiceParameterAvailableTypes::Opaque(value) => {
+            Err(FormSchemaWriteError::OpaqueChoiceParameterAvailableTypes { slot: value.slot })
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1595,14 +2228,10 @@ pub(super) fn parse_form_auto_command_bar_fields(
     standard_command_owner_name_by_id: &BTreeMap<String, FormStandardCommandOwner>,
     command_source_owner_name_by_id: &BTreeMap<String, String>,
 ) -> Option<FormAutoCommandBar> {
-    if fields.first().map(|value| value.trim()) != Some("22") {
-        return None;
-    }
+    let wrapper = fields.first()?.trim();
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
-    if id != "-1" {
-        return None;
-    }
+    let schema = FormRootAutoCommandBarSchema::from_raw_layout(wrapper, id, fields)?;
     let (name, _) = parse_1c_quoted_string_with_len(fields.get(6)?.trim())?;
     if name.trim().is_empty() {
         return None;
@@ -1610,19 +2239,9 @@ pub(super) fn parse_form_auto_command_bar_fields(
     Some(FormAutoCommandBar {
         id: id.to_string(),
         name,
-        display_importance: FormChildItemDisplayImportanceSchema::from_raw_layout(
-            "22",
-            fields.len(),
-            "AutoCommandBar",
-            0,
-        )
-        .and_then(|schema| schema.display_importance(fields)),
-        horizontal_align: fields
-            .get(20)
-            .and_then(|field| parse_form_auto_command_bar_horizontal_align(field)),
-        autofill: fields
-            .get(20)
-            .and_then(|field| parse_form_auto_command_bar_autofill(field)),
+        display_importance: schema.display_importance(fields),
+        horizontal_align: schema.horizontal_align(),
+        autofill: schema.autofill(),
         child_items: parse_form_child_item_pairs(
             fields,
             None,
@@ -1640,6 +2259,8 @@ pub(super) fn parse_form_auto_command_bar_fields(
             &BTreeMap::new(),
             &FormOwnerScopedBindingIndexes::default(),
             commands,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
             object_refs,
         )
         .unwrap_or_default(),
@@ -1654,36 +2275,6 @@ pub(super) fn parse_form_auto_command_bar_horizontal_align(field: &str) -> Optio
         "3" => Some("Auto"),
         _ => None,
     }
-}
-
-pub(super) fn parse_form_auto_command_bar_autofill(field: &str) -> Option<bool> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    match fields.get(2).map(|value| value.trim())? {
-        "0" => Some(false),
-        "1" => Some(true),
-        _ => None,
-    }
-}
-
-fn is_raw_empty_nested_auto_command_bar(
-    wrapper: &str,
-    tag: &str,
-    id: &str,
-    fields: &[&str],
-) -> bool {
-    if wrapper != "22" || tag != "AutoCommandBar" || id == "-1" || fields.len() != 29 {
-        return false;
-    }
-    let Some(marker_text) = fields.get(20).map(|field| field.trim()) else {
-        return false;
-    };
-    if scan_1c_braced_value(marker_text, 0) != Some(marker_text.len()) {
-        return false;
-    }
-    let Some(marker) = split_1c_braced_fields(marker_text, 0) else {
-        return false;
-    };
-    marker.len() == 3 && marker.iter().map(|field| field.trim()).eq(["0", "0", "1"])
 }
 
 pub(super) fn parse_form_context_menu_autofill(field: &str) -> Option<bool> {
@@ -2698,6 +3289,16 @@ fn resolve_form_attribute_additional_columns_metadata_table_path(
     object_refs: &BTreeMap<String, String>,
     child_item_indexes: &FormChildItemIndexes,
 ) -> Option<String> {
+    let type_id = parse_non_zero_uuid(type_id)?;
+    if let Some(reference) = object_refs.get(&type_id) {
+        let (owner_base, relative_path) =
+            form_attribute_additional_columns_metadata_route(reference)?;
+        let attribute_owners = form_attribute_metadata_owners_by_id(attributes);
+        let attribute = attribute_owners.get(attribute_id)?;
+        return form_attribute_matches_metadata_owner(attribute, &owner_base)
+            .then(|| format!("{}.{}", attribute.name, relative_path));
+    }
+
     let binding_key = parse_form_binding_key(binding)?;
     let scoped_key = FormBoundTableKey {
         attribute_id: attribute_id.to_string(),
@@ -2712,13 +3313,7 @@ fn resolve_form_attribute_additional_columns_metadata_table_path(
         Some(None) => return None,
         None => {}
     }
-    let type_id = parse_non_zero_uuid(type_id)?;
-    let reference = object_refs.get(&type_id)?;
-    let (owner_base, relative_path) = form_attribute_additional_columns_metadata_route(reference)?;
-    let attribute_owners = form_attribute_metadata_owners_by_id(attributes);
-    let attribute = attribute_owners.get(attribute_id)?;
-    form_attribute_matches_metadata_owner(attribute, &owner_base)
-        .then(|| format!("{}.{}", attribute.name, relative_path))
+    None
 }
 
 fn form_attribute_additional_columns_metadata_route(reference: &str) -> Option<(String, String)> {
@@ -4255,6 +4850,8 @@ pub(super) fn extract_form_child_items(
     fields: &[&str],
     attributes: &[FormAttribute],
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
     indexes: &FormChildItemIndexes,
     trace_sink: Option<&dyn FormItemTraceSink>,
@@ -4286,6 +4883,8 @@ pub(super) fn extract_form_child_items(
         &indexes.table_column_names_by_binding_key,
         &indexes.owner_scoped_bindings,
         commands,
+        type_index,
+        type_index_collisions,
         object_refs,
     )
     .unwrap_or_default();
@@ -4307,10 +4906,15 @@ pub(super) fn record_complete_table_schema_events(
         .map(|attribute| (attribute.id.as_str(), attribute))
         .collect::<BTreeMap<_, _>>();
     let mut final_counts = BTreeMap::<(String, String, String), usize>::new();
-    fn count_tables(items: &[FormChildItem], counts: &mut BTreeMap<(String, String, String), usize>) {
+    fn count_tables(
+        items: &[FormChildItem],
+        counts: &mut BTreeMap<(String, String, String), usize>,
+    ) {
         for item in items {
             if item.tag == "Table" {
-                *counts.entry((item.id.clone(), item.tag.to_string(), item.name.clone())).or_default() += 1;
+                *counts
+                    .entry((item.id.clone(), item.tag.to_string(), item.name.clone()))
+                    .or_default() += 1;
             }
             count_tables(&item.child_items, counts);
         }
@@ -4326,31 +4930,56 @@ pub(super) fn record_complete_table_schema_events(
         for item in items {
             if item.tag == "Table" {
                 let key = (item.id.clone(), item.tag.to_string(), item.name.clone());
-                let occurrence = indexes
-                    .trace_table_occurrences
-                    .get(&key)
-                    .and_then(|occurrences| unique_table_trace_occurrence(occurrences, final_counts.get(&key).copied()));
+                let occurrence =
+                    indexes
+                        .trace_table_occurrences
+                        .get(&key)
+                        .and_then(|occurrences| {
+                            unique_table_trace_occurrence(
+                                occurrences,
+                                final_counts.get(&key).copied(),
+                            )
+                        });
                 if let Some(occurrence) = occurrence {
                     let attribute = indexes
                         .bound_attribute_id_by_table_id
                         .get(&item.id)
-                        .and_then(|id| attributes.get(id.as_str()).map(|attribute| (id, *attribute)));
+                        .and_then(|id| {
+                            attributes
+                                .get(id.as_str())
+                                .map(|attribute| (id, *attribute))
+                        });
                     let hierarchical = form_table_has_hierarchical_navigation(item);
                     let (hierarchical_suppressed, emitted_auto_max_width) =
                         table_auto_max_width_emission(item.auto_max_width, hierarchical);
                     sink.record_schema(FormItemSchemaTraceEvent {
-                        id: item.id.clone(), tag: item.tag.to_string(), name: item.name.clone(), occurrence,
-                        wrapper: String::new(), raw_field_count: 0, normalized_field_count: 0,
-                        strict_table_schema: false, ordinary_table_variant: false, ordinary_discriminator: None,
-                        auto_max_width_source: "final_item", auto_max_width_slot: None,
-                        auto_max_width_raw: None, auto_max_width_auxiliary_raw: None,
+                        id: item.id.clone(),
+                        tag: item.tag.to_string(),
+                        name: item.name.clone(),
+                        occurrence,
+                        wrapper: String::new(),
+                        raw_field_count: 0,
+                        normalized_field_count: 0,
+                        strict_table_schema: false,
+                        ordinary_table_variant: false,
+                        ordinary_discriminator: None,
+                        auto_max_width_source: "final_item",
+                        auto_max_width_slot: None,
+                        auto_max_width_raw: None,
+                        auto_max_width_auxiliary_raw: None,
                         effective_auto_max_width: item.auto_max_width,
-                        evidence_complete: true, evidence_stage: "final_item_and_renderer_predicate",
+                        evidence_complete: true,
+                        evidence_stage: "final_item_and_renderer_predicate",
                         hierarchical_suppressed,
                         emitted_auto_max_width,
                         auto_max_width_xml_order: Some(12),
                         resolved_data_path: item.data_path.clone(),
-                        data_path_provenance: item.data_path_provenance.map(|p| match p { FormChildItemDataPathProvenance::DirectRawSlot => "direct_raw_slot", FormChildItemDataPathProvenance::InferredFallback => "inferred_fallback" }),
+                        data_path_provenance: item.data_path_provenance.map(|p| match p {
+                            FormChildItemDataPathProvenance::DirectRawSlot => "direct_raw_slot",
+                            FormChildItemDataPathProvenance::InferredFallback => {
+                                "inferred_fallback"
+                            }
+                        }),
                         root_attribute_id: attribute.map(|(id, _)| id.clone()),
                         root_attribute_name: attribute.map(|(_, attribute)| attribute.name.clone()),
                         root_attribute_dynamic_list: attribute
@@ -4364,7 +4993,10 @@ pub(super) fn record_complete_table_schema_events(
     visit(items, &attributes_by_id, indexes, &final_counts, trace_sink);
 }
 
-pub(super) fn unique_table_trace_occurrence(occurrences: &[usize], final_count: Option<usize>) -> Option<usize> {
+pub(super) fn unique_table_trace_occurrence(
+    occurrences: &[usize],
+    final_count: Option<usize>,
+) -> Option<usize> {
     (occurrences.len() == 1 && final_count == Some(1)).then(|| occurrences[0])
 }
 
@@ -4400,7 +5032,9 @@ fn form_attribute_metadata_owners_by_id(
         .collect()
 }
 
-fn form_attribute_metadata_owner(attribute: &FormAttribute) -> FormAttributeMetadataOwner {
+pub(super) fn form_attribute_metadata_owner(
+    attribute: &FormAttribute,
+) -> FormAttributeMetadataOwner {
     let exact_single_type_reference = match attribute.value_types.as_slice() {
         [ConstantValueType::Reference { reference }] => Some(reference.clone()),
         _ => None,
@@ -4581,11 +5215,24 @@ pub(super) struct FormChildItemIndexes {
     pub(super) user_settings_group_by_table_id: BTreeMap<String, String>,
     bound_attribute_id_by_table_id: BTreeMap<String, String>,
     pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
+    table_id_by_binding_key: BTreeMap<String, Option<String>>,
+    table_current_data_name_by_binding_key: BTreeMap<(String, String), Option<String>>,
+    table_current_data_name_by_table_column: BTreeMap<(String, String), Option<String>>,
     trace_table_occurrences: BTreeMap<(String, String, String), Vec<usize>>,
 }
 
 #[cfg(test)]
 impl FormChildItemIndexes {
+    #[cfg(test)]
+    pub(super) fn insert_bound_attribute_for_table_for_test(
+        &mut self,
+        table_id: &str,
+        attribute_id: &str,
+    ) {
+        self.bound_attribute_id_by_table_id
+            .insert(table_id.to_string(), attribute_id.to_string());
+    }
+
     pub(super) fn insert_owner_scoped_table_path_for_test(
         &mut self,
         attribute_id: &str,
@@ -4600,6 +5247,24 @@ impl FormChildItemIndexes {
             },
             table_path.to_string(),
         );
+    }
+
+    pub(super) fn resolve_owner_scoped_data_path_for_test(
+        &self,
+        field: &str,
+        attributes: &[FormAttribute],
+        object_refs: &BTreeMap<String, String>,
+    ) -> Option<String> {
+        let attribute_owners = form_attribute_metadata_owners_by_id(attributes);
+        match resolve_form_owner_scoped_bound_data_path(
+            field,
+            &attribute_owners,
+            &self.owner_scoped_bindings,
+            object_refs,
+        ) {
+            FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
+            FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
+        }
     }
 }
 
@@ -4725,6 +5390,8 @@ pub(super) fn extract_form_child_items_with_trace_for_test(
         fields,
         attributes,
         &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
         &object_refs,
         &indexes,
         Some(trace_sink),
@@ -4745,7 +5412,7 @@ pub(crate) fn trace_form_body_items(body: &str, trace_sink: &dyn FormItemTraceSi
     Ok(())
 }
 
-fn collect_form_child_item_indexes_with_object_refs(
+pub(super) fn collect_form_child_item_indexes_with_object_refs(
     fields: &[&str],
     attributes: &[FormAttribute],
     object_refs: &BTreeMap<String, String>,
@@ -4766,9 +5433,76 @@ fn collect_form_child_item_indexes_with_object_refs(
             object_refs,
             &mut indexes,
             trace_sink,
+            None,
             &[],
             &mut trace_occurrence,
         );
+    }
+    let mut table_current_data_routes = BTreeMap::new();
+    for ((table_binding_key, column_binding_key), column_name) in
+        &indexes.table_current_data_name_by_binding_key
+    {
+        let Some(table_id) = indexes
+            .table_id_by_binding_key
+            .get(table_binding_key)
+            .and_then(Option::as_ref)
+        else {
+            continue;
+        };
+        let Some(table_name) = indexes.table_name_by_id.get(table_id) else {
+            continue;
+        };
+        let Some(column_name) = column_name.as_ref() else {
+            continue;
+        };
+        insert_unambiguous_form_binding(
+            &mut table_current_data_routes,
+            (table_id.clone(), column_binding_key.clone()),
+            format!(
+                "Items.{table_name}.CurrentData.{}",
+                normalize_form_table_column_name(table_name, column_name)
+            ),
+        );
+    }
+    for ((table_id, column_binding_key), column_name) in
+        &indexes.table_current_data_name_by_table_column
+    {
+        let Some(table_name) = indexes.table_name_by_id.get(table_id) else {
+            continue;
+        };
+        let Some(column_name) = column_name.as_ref() else {
+            continue;
+        };
+        insert_unambiguous_form_binding(
+            &mut table_current_data_routes,
+            (table_id.clone(), column_binding_key.clone()),
+            format!(
+                "Items.{table_name}.CurrentData.{}",
+                normalize_form_table_column_name(table_name, column_name)
+            ),
+        );
+        let column_name = normalize_form_table_column_name(table_name, column_name);
+        indexes
+            .table_column_names_by_id
+            .entry(table_id.clone())
+            .or_default()
+            .entry(column_binding_key.clone())
+            .or_insert_with(|| column_name.clone());
+        if let Some(attribute_id) = indexes.bound_attribute_id_by_table_id.get(table_id) {
+            indexes
+                .table_column_names_by_id
+                .entry(attribute_id.clone())
+                .or_default()
+                .entry(column_binding_key.clone())
+                .or_insert(column_name);
+        }
+    }
+    for (key, data_path) in table_current_data_routes {
+        if let Some(data_path) = data_path {
+            indexes
+                .type_link_data_path_by_table_column
+                .insert(key, data_path);
+        }
     }
     let unresolved_binding_paths = indexes
         .binding_names_by_key
@@ -4880,6 +5614,68 @@ fn collect_form_child_item_indexes_with_object_refs(
     indexes
 }
 
+/// Adds only exact `AdditionalColumns` routes needed by table-current-data
+/// choice links. The parent attribute, table element and column identifier are
+/// all carried by the source representation; a name is never guessed.
+pub(super) fn extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
+    indexes: &mut FormChildItemIndexes,
+    attributes: &[FormAttribute],
+) {
+    let mut candidates = BTreeMap::<(String, String), BTreeSet<String>>::new();
+    for (table_id, attribute_id) in &indexes.bound_attribute_id_by_table_id {
+        let (Some(table_name), Some(attribute)) = (
+            indexes.table_name_by_id.get(table_id),
+            attributes
+                .iter()
+                .find(|attribute| attribute.id == *attribute_id),
+        ) else {
+            continue;
+        };
+        let attribute_table_path = format!("{}.{}", attribute.name, table_name);
+        for additional in attribute
+            .additional_columns
+            .iter()
+            .filter(|additional| additional.table == attribute_table_path)
+        {
+            for column in &additional.columns {
+                let path = format!(
+                    "Items.{table_name}.CurrentData.{}",
+                    normalize_form_table_column_name(table_name, &column.name)
+                );
+                for key in [
+                    column.id.clone(),
+                    format!("{}|{FORM_VALUE_TABLE_COLUMN_BINDING_UUID}", column.id),
+                ] {
+                    candidates
+                        .entry((table_id.clone(), key))
+                        .or_default()
+                        .insert(path.clone());
+                }
+            }
+        }
+    }
+    for (key, values) in candidates {
+        let values = values.into_iter().collect::<Vec<_>>();
+        let [value] = values.as_slice() else {
+            // AdditionalColumns is supplemental. An ambiguous addition must not
+            // erase a direct child-item route already established from layout.
+            continue;
+        };
+        match indexes.type_link_data_path_by_table_column.get(&key) {
+            None => {
+                indexes
+                    .type_link_data_path_by_table_column
+                    .insert(key, value.clone());
+            }
+            Some(existing) if existing == value => {}
+            Some(_) => {
+                // The direct child-item route has precedence over the
+                // supplemental AdditionalColumns representation.
+            }
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub(super) fn collect_form_child_item_indexes_from_field(
     field: &str,
@@ -4896,6 +5692,7 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         object_refs,
         indexes,
         None,
+        None,
         &[],
         &mut trace_occurrence,
     );
@@ -4911,6 +5708,7 @@ pub(super) fn trace_form_item_indexes_for_test(field: &str, trace_sink: &dyn For
         &BTreeMap::new(),
         &mut FormChildItemIndexes::default(),
         Some(trace_sink),
+        None,
         &[],
         &mut trace_occurrence,
     );
@@ -4923,6 +5721,7 @@ fn collect_form_child_item_indexes_from_field_traced(
     object_refs: &BTreeMap<String, String>,
     indexes: &mut FormChildItemIndexes,
     trace_sink: Option<&dyn FormItemTraceSink>,
+    structural_table_id: Option<&str>,
     owner_chain: &[String],
     trace_occurrence: &mut usize,
 ) {
@@ -5096,31 +5895,51 @@ fn collect_form_child_item_indexes_from_field_traced(
             indexes
                 .table_name_by_id
                 .insert(id.to_string(), name.clone());
-            if let Some(attribute_id) = fields
-                .get(11)
-                .and_then(|field| parse_exact_form_attribute_binding_id(field))
-            {
+            if let Some(attribute_id) = fields.get(11).and_then(|field| {
+                parse_form_table_binding(field)
+                    .map(|(attribute_id, _)| attribute_id)
+                    .or_else(|| parse_form_attribute_binding_id(field))
+            }) {
                 indexes
                     .bound_attribute_id_by_table_id
                     .insert(id.to_string(), attribute_id);
             }
-            if let Some((attribute_id, table_key)) = fields
-                .get(11)
-                .and_then(|field| parse_form_table_binding(field))
-                && let Some(attribute_name) = attribute_names_by_id.get(&attribute_id)
+            if let Some(binding) = fields.get(11)
+                && let Some((attribute_id, table_key)) = parse_form_table_binding(binding)
             {
-                let table_path = format!("{attribute_name}.{}", indexes.table_name_by_id[id]);
                 insert_unambiguous_form_binding(
-                    &mut indexes.owner_scoped_bindings.table_paths,
-                    FormBoundTableKey {
-                        attribute_id,
-                        table_key: table_key.clone(),
-                    },
-                    table_path.clone(),
+                    &mut indexes.table_id_by_binding_key,
+                    table_key.clone(),
+                    id.to_string(),
                 );
-                indexes
-                    .bound_table_path_by_binding_key
-                    .insert(table_key, table_path);
+                let metadata_path = resolve_form_owner_scoped_metadata_data_path_status(
+                    binding,
+                    attribute_metadata_owners_by_id,
+                    object_refs,
+                );
+                let table_path = match metadata_path {
+                    FormMetadataDataPathResolution::Resolved(table_path) => Some(table_path),
+                    FormMetadataDataPathResolution::NotMetadata
+                    | FormMetadataDataPathResolution::ReferenceAbsent => attribute_names_by_id
+                        .get(&attribute_id)
+                        .map(|attribute_name| {
+                            format!("{attribute_name}.{}", indexes.table_name_by_id[id])
+                        }),
+                    FormMetadataDataPathResolution::Invalid => None,
+                };
+                if let Some(table_path) = table_path {
+                    insert_unambiguous_form_binding(
+                        &mut indexes.owner_scoped_bindings.table_paths,
+                        FormBoundTableKey {
+                            attribute_id,
+                            table_key: table_key.clone(),
+                        },
+                        table_path.clone(),
+                    );
+                    indexes
+                        .bound_table_path_by_binding_key
+                        .insert(table_key, table_path);
+                }
             }
             let mut columns = BTreeMap::new();
             collect_form_table_column_names_for_table(&fields, &mut columns);
@@ -5209,15 +6028,40 @@ fn collect_form_child_item_indexes_from_field_traced(
                         },
                         column_name.clone(),
                     );
+                    if form_table_uuid_binding_key(&column_key).is_some() {
+                        insert_unambiguous_form_binding(
+                            &mut indexes.table_current_data_name_by_binding_key,
+                            (table_key.clone(), column_key.clone()),
+                            column_name.clone(),
+                        );
+                    }
                     indexes
                         .table_column_names_by_binding_key
                         .entry(table_key)
                         .or_default()
                         .insert(column_key, column_name);
                 }
+                if let Some((attribute_id, column_key)) =
+                    parse_form_direct_table_column_binding(binding)
+                    && let Some(table_id) = structural_table_id
+                    && indexes
+                        .bound_attribute_id_by_table_id
+                        .get(table_id)
+                        .is_some_and(|bound_attribute_id| bound_attribute_id == &attribute_id)
+                {
+                    insert_unambiguous_form_binding(
+                        &mut indexes.table_current_data_name_by_table_column,
+                        (table_id.to_string(), column_key),
+                        name.clone(),
+                    );
+                }
             }
         }
     }
+    let child_structural_table_id = structural_identity
+        .as_ref()
+        .and_then(|(_, _, id, _)| indexes.table_name_by_id.contains_key(*id).then_some(*id))
+        .or(structural_table_id);
     if let Some(trace_sink) = trace_sink {
         let mut child_owner_chain = owner_chain.to_vec();
         if let Some((_, tag, id, _)) = structural_identity.as_ref() {
@@ -5232,6 +6076,7 @@ fn collect_form_child_item_indexes_from_field_traced(
                     object_refs,
                     indexes,
                     Some(trace_sink),
+                    child_structural_table_id,
                     &child_owner_chain,
                     trace_occurrence,
                 );
@@ -5247,6 +6092,7 @@ fn collect_form_child_item_indexes_from_field_traced(
                     object_refs,
                     indexes,
                     None,
+                    child_structural_table_id,
                     owner_chain,
                     trace_occurrence,
                 );
@@ -5301,6 +6147,8 @@ pub(super) fn parse_form_child_item_pairs(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<FormChildItem>> {
     let mut best = Vec::new();
@@ -5341,6 +6189,8 @@ pub(super) fn parse_form_child_item_pairs(
                 table_column_names_by_binding_key,
                 owner_scoped_bindings,
                 commands,
+                type_index,
+                type_index_collisions,
                 object_refs,
             ) {
                 items.push(item);
@@ -5465,6 +6315,8 @@ pub(super) fn parse_form_child_item_with_attrs(
         table_column_names_by_binding_key,
         &FormOwnerScopedBindingIndexes::default(),
         commands,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
         object_refs,
     )
 }
@@ -5503,6 +6355,8 @@ pub(super) fn parse_form_child_item_with_context(
         table_column_names_by_binding_key,
         &FormOwnerScopedBindingIndexes::default(),
         commands,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
         object_refs,
     )
 }
@@ -5553,6 +6407,8 @@ fn parse_form_child_item_with_metadata_owners(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChildItem> {
     let raw_fields = split_1c_braced_fields(field.trim(), 0)?;
@@ -5810,23 +6666,13 @@ fn parse_form_child_item_with_metadata_owners(
             )
         })
         .flatten();
-    let nested_auto_command_bar_schema = (tag == "AutoCommandBar")
-        .then(|| {
-            let marker_text = fields.get(20)?.trim();
-            if scan_1c_braced_value(marker_text, 0) != Some(marker_text.len()) {
-                return None;
-            }
-            let marker = split_1c_braced_fields(marker_text, 0)?;
-            FormNestedAutoCommandBarSchema::from_raw_layout(
-                wrapper,
-                fields.len(),
-                tag,
-                id,
-                direct_discriminator,
-                &marker,
-            )
-        })
-        .flatten();
+    let nested_auto_command_bar_schema = FormNestedAutoCommandBarSchema::from_raw_layout(
+        wrapper,
+        tag,
+        id,
+        direct_discriminator,
+        &fields,
+    );
     let page_schema = show_title_options.as_deref().and_then(|options| {
         FormPageSchema::from_raw_layout(wrapper, fields.len(), tag, direct_discriminator, options)
     });
@@ -5868,6 +6714,8 @@ fn parse_form_child_item_with_metadata_owners(
         table_column_names_by_binding_key,
         owner_scoped_bindings,
         commands,
+        type_index,
+        type_index_collisions,
         object_refs,
     )
     .unwrap_or_default();
@@ -5890,9 +6738,13 @@ fn parse_form_child_item_with_metadata_owners(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         );
-    } else if is_form_field_direct_service_parent(tag) {
+    } else if is_form_field_direct_service_parent(tag)
+        && !form_text_document_context_menu_owner_fields(&fields)
+    {
         append_form_child_items_by_tag(
             &mut child_items,
             &fields,
@@ -5912,6 +6764,8 @@ fn parse_form_child_item_with_metadata_owners(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         );
     } else if tag.ends_with("Addition") {
@@ -5934,32 +6788,39 @@ fn parse_form_child_item_with_metadata_owners(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         );
     }
-    if tag == "TextDocumentField"
-        && child_items.iter().all(|item| item.tag != "ContextMenu")
-        && let Some(context_menu) = parse_form_text_document_context_menu(
-            &fields,
-            main_data_path,
-            child_parent_data_path,
-            Some(tag),
-            attribute_names_by_id,
-            attribute_metadata_owners_by_id,
-            table_name_by_id,
-            standard_command_owner_name_by_id,
-            item_name_by_id,
-            table_column_names_by_id,
-            type_link_data_path_by_table_column,
-            data_path_by_binding_key,
-            bound_table_path_by_binding_key,
-            table_column_names_by_binding_key,
-            owner_scoped_bindings,
-            commands,
-            object_refs,
-        )
-    {
-        child_items.push(context_menu);
+    match parse_form_text_document_context_menu(
+        &fields,
+        main_data_path,
+        child_parent_data_path,
+        Some(tag),
+        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
+        table_name_by_id,
+        standard_command_owner_name_by_id,
+        item_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        data_path_by_binding_key,
+        bound_table_path_by_binding_key,
+        table_column_names_by_binding_key,
+        owner_scoped_bindings,
+        commands,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
+        Ok(Some(context_menu)) => child_items.push(context_menu),
+        Ok(None) => {}
+        Err(
+            FormTextDocumentContextMenuParseError::WrongWrapper
+            | FormTextDocumentContextMenuParseError::WrongDiscriminator,
+        ) => {}
+        Err(_) => return None,
     }
     let extended_group_options = (tag == "UsualGroup")
         .then(|| parse_form_usual_group_extended_options(&fields))
@@ -6077,19 +6938,16 @@ fn parse_form_child_item_with_metadata_owners(
         name,
         display_importance: display_importance_schema
             .and_then(|schema| schema.display_importance(&fields)),
-        auto_command_bar_empty_element: is_raw_empty_nested_auto_command_bar(
-            wrapper, tag, id, &fields,
-        ),
+        auto_command_bar_empty_element: nested_auto_command_bar_schema
+            .is_some_and(FormNestedAutoCommandBarSchema::is_empty_shape),
         autofill: if let Some(schema) = table_schema {
             schema.autofill(&fields)
         } else if tag == "ContextMenu" {
             fields
                 .get(20)
                 .and_then(|field| parse_form_context_menu_autofill(field))
-        } else if tag == "AutoCommandBar" {
-            fields
-                .get(20)
-                .and_then(|field| parse_form_auto_command_bar_autofill(field))
+        } else if let Some(schema) = nested_auto_command_bar_schema {
+            Some(schema.autofill())
         } else {
             None
         },
@@ -7420,20 +8278,53 @@ fn parse_form_child_item_with_metadata_owners(
         tooltip,
         input_hint,
         choice_list: if tag == "RadioButtonField" {
-            parse_form_radio_button_choice_list(radio_button_options.as_deref(), object_refs)
+            canonical_form_radio_button_choice_list(
+                radio_button_options.as_deref(),
+                type_index,
+                type_index_collisions,
+                object_refs,
+            )
         } else if tag == "InputField" {
             field_schema_and_options
                 .as_ref()
                 .map(|(schema, options)| {
-                    parse_form_input_field_choice_list(*schema, options, object_refs)
+                    canonical_form_input_field_choice_list(
+                        *schema,
+                        options,
+                        type_index,
+                        type_index_collisions,
+                        object_refs,
+                    )
                 })
                 .unwrap_or_default()
         } else {
-            Vec::new()
+            CanonicalFormChoiceList::Absent
         },
-        choice_parameter_links: parse_form_input_field_choice_parameter_links(
-            audited_input_field_options,
-            attribute_names_by_id,
+        choice_parameter_cluster: field_schema_and_options.as_ref().and_then(
+            |(schema, options)| {
+                schema.input_field_option(options, InputFieldSlot::ChoiceParameters)?;
+                Some(FormChoiceParameterCluster::new(
+                    canonical_form_input_field_choice_parameter_links_with_metadata(
+                        *schema,
+                        options,
+                        attribute_names_by_id,
+                        attribute_metadata_owners_by_id,
+                        table_name_by_id,
+                        table_column_names_by_id,
+                        type_link_data_path_by_table_column,
+                        data_path_by_binding_key,
+                        object_refs,
+                    ),
+                    canonical_form_input_field_choice_parameters(
+                        *schema,
+                        options,
+                        type_index,
+                        type_index_collisions,
+                        object_refs,
+                    ),
+                    FormChoiceParameterAvailableTypes::Absent,
+                ))
+            },
         ),
         type_link: parse_form_input_field_type_link(
             audited_input_field_options,
@@ -7518,7 +8409,9 @@ fn sanitize_form_conditional_group_descendants(items: &mut [FormChildItem]) {
             item.data_path = None;
             item.data_path_provenance = None;
         }
-        item.choice_parameter_links.clear();
+        if let Some(cluster) = &mut item.choice_parameter_cluster {
+            *cluster.links_mut() = FormChoiceParameterLinks::Absent;
+        }
         item.type_link = None;
         item.title_data_path = None;
         if item.tag == "LabelField" {
@@ -7571,6 +8464,8 @@ pub(super) fn append_form_table_service_child_items(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) {
     append_form_child_items_by_tag(
@@ -7598,6 +8493,8 @@ pub(super) fn append_form_table_service_child_items(
         table_column_names_by_binding_key,
         owner_scoped_bindings,
         commands,
+        type_index,
+        type_index_collisions,
         object_refs,
     );
 }
@@ -7621,6 +8518,8 @@ pub(super) fn append_form_child_items_by_tag(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) {
     for field in fields {
@@ -7641,6 +8540,8 @@ pub(super) fn append_form_child_items_by_tag(
             table_column_names_by_binding_key,
             owner_scoped_bindings,
             commands,
+            type_index,
+            type_index_collisions,
             object_refs,
         ) else {
             continue;
@@ -7685,30 +8586,37 @@ pub(super) fn parse_form_text_document_context_menu(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
     commands: &[FormCommand],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<FormChildItem> {
-    if fields.get(41).map(|field| field.trim()) != Some("1") {
-        return None;
+) -> Result<Option<FormChildItem>, FormTextDocumentContextMenuParseError> {
+    match parse_schema_form_text_document_context_menu(fields, |payload| {
+        parse_form_child_item_with_metadata_owners(
+            payload,
+            main_data_path,
+            parent_data_path,
+            parent_tag,
+            attribute_names_by_id,
+            attribute_metadata_owners_by_id,
+            table_name_by_id,
+            standard_command_owner_name_by_id,
+            item_name_by_id,
+            table_column_names_by_id,
+            type_link_data_path_by_table_column,
+            data_path_by_binding_key,
+            bound_table_path_by_binding_key,
+            table_column_names_by_binding_key,
+            owner_scoped_bindings,
+            commands,
+            type_index,
+            type_index_collisions,
+            object_refs,
+        )
+        .filter(|item| form_text_document_context_menu_child_is_valid(&item.tag))
+    })? {
+        FormTextDocumentContextMenu::Absent => Ok(None),
+        FormTextDocumentContextMenu::Present(context_menu) => Ok(Some(context_menu)),
     }
-    parse_form_child_item_with_metadata_owners(
-        fields.get(42)?,
-        main_data_path,
-        parent_data_path,
-        parent_tag,
-        attribute_names_by_id,
-        attribute_metadata_owners_by_id,
-        table_name_by_id,
-        standard_command_owner_name_by_id,
-        item_name_by_id,
-        table_column_names_by_id,
-        type_link_data_path_by_table_column,
-        data_path_by_binding_key,
-        bound_table_path_by_binding_key,
-        table_column_names_by_binding_key,
-        owner_scoped_bindings,
-        commands,
-        object_refs,
-    )
 }
 
 pub(super) struct FormUsualGroupExtendedOptions {
@@ -8371,116 +9279,292 @@ pub(super) fn form_input_field_top_level_offset(fields: &[&str]) -> usize {
         .unwrap_or(1)
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct RawFormChoiceParameterLink {
-    name: String,
-    attribute_id: String,
-    terminal: Option<&'static str>,
-}
-
 fn parse_exact_1c_quoted_string(field: &str) -> Option<String> {
     let field = field.trim();
     let (value, consumed) = parse_1c_quoted_string_with_len(field)?;
     (consumed == field.len()).then_some(value)
 }
 
-fn parse_raw_form_choice_parameter_link(
-    field: &str,
-    marker: &str,
-    duplicate: bool,
-) -> Option<RawFormChoiceParameterLink> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    if fields.first().map(|field| field.trim()) != Some(marker)
-        || fields.get(1).map(|field| field.trim()) != Some("1")
-    {
-        return None;
-    }
-    let name = parse_exact_1c_quoted_string(fields.get(2)?)?;
-    if name.is_empty() {
-        return None;
-    }
-    let mode = fields.get(3)?.trim();
-    let duplicate_tail_len = if duplicate { 2 } else { 0 };
-    let value_change_slot = match mode {
-        "1" if fields.len() == 6 + duplicate_tail_len => 5,
-        "2" if fields.len() == 7 + duplicate_tail_len => 6,
-        _ => return None,
-    };
-    let owner = split_1c_braced_fields(fields.get(4)?.trim(), 0)?;
-    if owner.len() != 1 {
-        return None;
-    }
-    let attribute_id = owner.first()?.trim();
-    if attribute_id.is_empty() {
-        return None;
-    }
-    let terminal = if mode == "2" {
-        let terminal = split_1c_braced_fields(fields.get(5)?.trim(), 0)?;
-        if terminal.len() != 1 {
-            return None;
-        }
-        match terminal.first()?.trim() {
-            "-5" => Some("Owner"),
-            "-8" => Some("Ref"),
-            _ => return None,
-        }
-    } else {
-        None
-    };
-    if fields.get(value_change_slot).map(|field| field.trim()) != Some("0") {
-        return None;
-    }
-    if duplicate
-        && (!fields[value_change_slot + 1..]
-            .iter()
-            .all(|field| parse_exact_1c_quoted_string(field).is_some_and(|value| value.is_empty()))
-            || fields.len() != value_change_slot + 3)
-    {
-        return None;
-    }
-    Some(RawFormChoiceParameterLink {
-        name,
-        attribute_id: attribute_id.to_string(),
-        terminal,
+#[cfg(test)]
+pub(super) fn parse_form_input_field_choice_parameter_links(
+    primary: &str,
+    duplicate: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
+) -> Result<Vec<ibcmd_schema::FormChoiceParameterLink>, FormChoiceParameterLinksParseError> {
+    parse_schema_form_choice_parameter_links(primary, duplicate, |attribute_id| {
+        attribute_names_by_id.get(attribute_id).cloned()
     })
 }
 
-pub(super) fn parse_form_input_field_choice_parameter_links(
-    options: Option<&[&str]>,
+pub(super) fn parse_form_input_field_choice_parameter_links_with_metadata(
+    primary: &str,
+    duplicate: &str,
     attribute_names_by_id: &BTreeMap<String, String>,
-) -> Vec<FormChoiceParameterLink> {
-    let Some(options) = options.filter(|options| {
-        options.len() == 66 && options.first().map(|field| field.trim()) == Some("36")
-    }) else {
-        return Vec::new();
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<Vec<ibcmd_schema::FormChoiceParameterLink>, FormChoiceParameterLinksParseError> {
+    parse_schema_form_choice_parameter_links_with_reference_resolver(
+        primary,
+        duplicate,
+        |reference| match reference {
+            FormChoiceParameterLinkReference::FormAttribute {
+                attribute_id,
+                terminal,
+            } => match terminal {
+                FormChoiceParameterLinkTerminal::Absent => {
+                    attribute_names_by_id.get(attribute_id).cloned()
+                }
+                FormChoiceParameterLinkTerminal::Standard(
+                    FormChoiceParameterLinkStandardTerminal::Date,
+                ) => attribute_names_by_id
+                    .get(attribute_id)
+                    .map(|attribute| format!("{attribute}.Date")),
+                FormChoiceParameterLinkTerminal::Standard(
+                    FormChoiceParameterLinkStandardTerminal::Owner,
+                ) => attribute_names_by_id
+                    .get(attribute_id)
+                    .map(|attribute| format!("{attribute}.Owner")),
+                FormChoiceParameterLinkTerminal::Standard(
+                    FormChoiceParameterLinkStandardTerminal::Ref,
+                ) => attribute_names_by_id
+                    .get(attribute_id)
+                    .map(|attribute| format!("{attribute}.Ref")),
+                FormChoiceParameterLinkTerminal::MetadataUuid(uuid) => {
+                    match resolve_form_owner_scoped_metadata_uuid_data_path_status(
+                        attribute_id,
+                        "0",
+                        uuid,
+                        attribute_metadata_owners_by_id,
+                        object_refs,
+                    ) {
+                        FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+                        FormMetadataDataPathResolution::NotMetadata
+                        | FormMetadataDataPathResolution::ReferenceAbsent
+                        | FormMetadataDataPathResolution::Invalid => None,
+                    }
+                }
+            },
+            FormChoiceParameterLinkReference::TableCurrentData { table_id, terminal } => {
+                let table_id = table_id.to_string();
+                match terminal {
+                    FormChoiceParameterLinkTableCurrentDataTerminal::BindingId(column_id) => {
+                        let column_id = column_id.to_string();
+                        type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), column_id.clone()))
+                            .cloned()
+                            .or_else(|| {
+                                resolve_form_item_current_data_path(
+                                    &table_id,
+                                    &column_id,
+                                    table_name_by_id,
+                                    table_column_names_by_id,
+                                    data_path_by_binding_key,
+                                )
+                            })
+                    }
+                    FormChoiceParameterLinkTableCurrentDataTerminal::MetadataUuid(uuid) => {
+                        type_link_data_path_by_table_column
+                            .get(&(table_id, format!("0|{uuid}")))
+                            .cloned()
+                    }
+                    FormChoiceParameterLinkTableCurrentDataTerminal::BindingUuid {
+                        binding_id,
+                        uuid,
+                    } => {
+                        let binding_id = binding_id.to_string();
+                        let uuid_route = type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), format!("{binding_id}|{uuid}")))
+                            .cloned();
+                        let numeric_route = type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), binding_id.clone()))
+                            .cloned()
+                            .or_else(|| {
+                                resolve_form_item_current_data_path(
+                                    &table_id,
+                                    &binding_id,
+                                    table_name_by_id,
+                                    table_column_names_by_id,
+                                    data_path_by_binding_key,
+                                )
+                            });
+                        match (uuid_route, numeric_route) {
+                            (Some(uuid_route), Some(numeric_route))
+                                if uuid_route != numeric_route =>
+                            {
+                                None
+                            }
+                            (Some(uuid_route), _) => Some(uuid_route),
+                            (None, _) => None,
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+#[cfg(test)]
+pub(super) fn canonical_form_input_field_choice_parameter_links(
+    schema: FormFieldSchema,
+    options: &[&str],
+    attribute_names_by_id: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceParameterLinks {
+    let primary_slot = InputFieldSlot::ChoiceParameterLinks.index();
+    let duplicate_slot = InputFieldSlot::ChoiceParameterLinksDuplicate.index();
+    let primary = schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinks);
+    let duplicate =
+        schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate);
+    let (Some(primary), Some(duplicate)) = (primary, duplicate) else {
+        return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+            primary_raw: primary.map(str::to_owned),
+            duplicate_raw: duplicate.map(str::to_owned),
+            primary_slot,
+            duplicate_slot,
+            error: if primary.is_none() {
+                FormChoiceParameterLinksParseError::PrimaryMalformed
+            } else {
+                FormChoiceParameterLinksParseError::DuplicateMalformed
+            },
+        });
     };
-    let Some(primary) = options
-        .get(InputFieldSlot::ChoiceParameterLinks.index())
-        .and_then(|field| parse_raw_form_choice_parameter_link(field, "5006", false))
-    else {
-        return Vec::new();
-    };
-    let Some(duplicate) = options
-        .get(64)
-        .and_then(|field| parse_raw_form_choice_parameter_link(field, "5007", true))
-    else {
-        return Vec::new();
-    };
-    if primary != duplicate {
-        return Vec::new();
+    match parse_form_input_field_choice_parameter_links(primary, duplicate, attribute_names_by_id) {
+        Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
+        Ok(links) => FormChoiceParameterLinks::Typed(links),
+        Err(error) => FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+            primary_raw: Some(primary.to_owned()),
+            duplicate_raw: Some(duplicate.to_owned()),
+            primary_slot,
+            duplicate_slot,
+            error,
+        }),
     }
-    let Some(attribute_name) = attribute_names_by_id.get(&primary.attribute_id) else {
-        return Vec::new();
+}
+
+pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
+    schema: FormFieldSchema,
+    options: &[&str],
+    attribute_names_by_id: &BTreeMap<String, String>,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceParameterLinks {
+    let primary_slot = InputFieldSlot::ChoiceParameterLinks.index();
+    let duplicate_slot = InputFieldSlot::ChoiceParameterLinksDuplicate.index();
+    let primary = schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinks);
+    let duplicate =
+        schema.input_field_option(options, InputFieldSlot::ChoiceParameterLinksDuplicate);
+    let (Some(primary), Some(duplicate)) = (primary, duplicate) else {
+        return FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+            primary_raw: primary.map(str::to_owned),
+            duplicate_raw: duplicate.map(str::to_owned),
+            primary_slot,
+            duplicate_slot,
+            error: if primary.is_none() {
+                FormChoiceParameterLinksParseError::PrimaryMalformed
+            } else {
+                FormChoiceParameterLinksParseError::DuplicateMalformed
+            },
+        });
     };
-    let data_path = primary
-        .terminal
-        .map(|terminal| format!("{attribute_name}.{terminal}"))
-        .unwrap_or_else(|| attribute_name.clone());
-    vec![FormChoiceParameterLink {
-        name: primary.name,
-        data_path,
-        value_change: "Clear",
-    }]
+    match parse_form_input_field_choice_parameter_links_with_metadata(
+        primary,
+        duplicate,
+        attribute_names_by_id,
+        attribute_metadata_owners_by_id,
+        table_name_by_id,
+        table_column_names_by_id,
+        type_link_data_path_by_table_column,
+        data_path_by_binding_key,
+        object_refs,
+    ) {
+        Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
+        Ok(links) => FormChoiceParameterLinks::Typed(links),
+        Err(error) => FormChoiceParameterLinks::Opaque(OpaqueFormChoiceParameterLinksValue {
+            primary_raw: Some(primary.to_owned()),
+            duplicate_raw: Some(duplicate.to_owned()),
+            primary_slot,
+            duplicate_slot,
+            error,
+        }),
+    }
+}
+
+pub(super) fn canonical_form_input_field_choice_parameters(
+    schema: FormFieldSchema,
+    options: &[&str],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceParameters {
+    let slot = InputFieldSlot::ChoiceParameters.index();
+    let Some(raw) = schema.input_field_option(options, InputFieldSlot::ChoiceParameters) else {
+        return CanonicalFormChoiceParameters::Absent;
+    };
+    match parse_form_input_field_choice_parameters(
+        raw,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
+        Some(parameters) if parameters.is_empty() => CanonicalFormChoiceParameters::Empty { slot },
+        Some(parameters) => CanonicalFormChoiceParameters::Typed { parameters, slot },
+        None => CanonicalFormChoiceParameters::OpaqueSameProfile {
+            raw: raw.to_owned(),
+            slot,
+        },
+    }
+}
+
+pub(super) fn parse_form_input_field_choice_parameters(
+    field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<FormChoiceParameters> {
+    let parameters = parse_form_choice_parameters(field, |type_id, value_id| {
+        parse_form_enum_design_time_reference(
+            type_id,
+            value_id,
+            type_index,
+            type_index_collisions,
+            object_refs,
+        )
+    })?;
+    Some(parameters)
+}
+
+pub(super) fn parse_form_enum_design_time_reference(
+    type_id: &str,
+    value_id: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let type_uuid = Uuid::parse_str(type_id.trim()).ok()?;
+    let value_uuid = Uuid::parse_str(value_id.trim()).ok()?;
+    if type_uuid.is_nil() || value_uuid.is_nil() {
+        return None;
+    }
+    let type_reference =
+        unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())?;
+    let owner = parse_generated_metadata_reference_owner(type_reference)?;
+    if owner.kind() != GeneratedMetadataReferenceOwnerKind::Enum {
+        return None;
+    }
+    let owner_reference = owner.owner_reference();
+    let value_ref = parse_design_time_reference(value_id.trim(), object_refs)?;
+    let enum_value_prefix = format!("{owner_reference}.EnumValue.");
+    value_ref
+        .strip_prefix(&enum_value_prefix)
+        .is_some_and(|name| !name.is_empty())
+        .then_some(value_ref)
 }
 
 pub(super) fn parse_form_input_field_type_link(
@@ -9292,177 +10376,155 @@ pub(super) fn parse_form_radio_button_font_xml(
         .and_then(|field| parse_form_font_tuple_xml(field, object_refs))
 }
 
+#[allow(dead_code)]
 pub(super) fn parse_form_radio_button_choice_list(
     extended_options: Option<&[&str]>,
     object_refs: &BTreeMap<String, String>,
 ) -> Vec<FormChoiceListItem> {
-    let Some(field) = extended_options.and_then(|options| options.get(1)) else {
-        return Vec::new();
-    };
-    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
-        return Vec::new();
-    };
-    let Some(item_count) = fields
-        .get(1)
-        .and_then(|value| value.trim().parse::<usize>().ok())
-    else {
-        return Vec::new();
-    };
-
-    (0..item_count)
-        .filter_map(|index| fields.get(3 + index * 2).copied())
-        .filter_map(|field| parse_form_radio_button_choice_list_item(field, object_refs))
-        .collect()
+    try_parse_form_radio_button_choice_list(
+        extended_options,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+    )
+    .unwrap_or_default()
 }
 
-pub(super) fn parse_form_input_field_choice_list(
+fn try_parse_form_radio_button_choice_list(
+    extended_options: Option<&[&str]>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<FormChoiceListItem>> {
+    let raw = extended_options?.get(1)?;
+    let decoded = parse_form_choice_list(
+        raw,
+        FormChoiceListLayoutProfile::RadioButtonOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
+        },
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
+    )?;
+    Some(decoded.items().to_vec())
+}
+
+pub(super) fn try_parse_form_input_field_choice_list(
     schema: FormFieldSchema,
     options: &[&str],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
-) -> Vec<FormChoiceListItem> {
-    let Some(field) = schema.input_field_option(options, InputFieldSlot::ChoiceList) else {
-        return Vec::new();
-    };
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return Vec::new();
-    }
-    let Some(fields) = split_1c_braced_fields(field, 0) else {
-        return Vec::new();
-    };
-    let Some(item_count) = fields
-        .get(1)
-        .and_then(|value| value.trim().parse::<usize>().ok())
-    else {
-        return Vec::new();
-    };
-
-    (0..item_count)
-        .filter_map(|index| fields.get(3 + index * 2).copied())
-        .filter_map(|field| parse_form_input_field_choice_list_item(field, object_refs))
-        .collect()
+) -> Option<Vec<FormChoiceListItem>> {
+    let raw = schema.input_field_option(options, InputFieldSlot::ChoiceList)?;
+    let decoded = parse_form_choice_list(
+        raw,
+        FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
+        },
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
+    )?;
+    Some(decoded.items().to_vec())
 }
 
+pub(super) fn canonical_form_radio_button_choice_list(
+    extended_options: Option<&[&str]>,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceList {
+    let provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::RadioButtonOptions,
+        slot: 1,
+    };
+    let Some(raw) = extended_options.and_then(|options| options.get(provenance.slot)) else {
+        return CanonicalFormChoiceList::Absent;
+    };
+    match try_parse_form_radio_button_choice_list(
+        extended_options,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
+        Some(items) if items.is_empty() => CanonicalFormChoiceList::Empty { provenance },
+        Some(items) => CanonicalFormChoiceList::Typed { items, provenance },
+        None => CanonicalFormChoiceList::OpaqueSameProfile {
+            raw: (*raw).to_owned(),
+            provenance,
+        },
+    }
+}
+
+fn canonical_form_input_field_choice_list(
+    schema: FormFieldSchema,
+    options: &[&str],
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_refs: &BTreeMap<String, String>,
+) -> CanonicalFormChoiceList {
+    let provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+        slot: InputFieldSlot::ChoiceList.index(),
+    };
+    let Some(raw) = schema.input_field_option(options, InputFieldSlot::ChoiceList) else {
+        return CanonicalFormChoiceList::Absent;
+    };
+    match try_parse_form_input_field_choice_list(
+        schema,
+        options,
+        type_index,
+        type_index_collisions,
+        object_refs,
+    ) {
+        Some(items) if items.is_empty() => CanonicalFormChoiceList::Empty { provenance },
+        Some(items) => CanonicalFormChoiceList::Typed { items, provenance },
+        None => CanonicalFormChoiceList::OpaqueSameProfile {
+            raw: raw.to_owned(),
+            provenance,
+        },
+    }
+}
+
+#[cfg(test)]
 pub(super) fn parse_form_input_field_choice_list_item(
     field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListItem> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    if parse_1c_string(fields.first()?.trim())? != "#" {
-        return None;
-    }
-    let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    let value = parse_form_input_field_choice_list_value(&payload_fields, object_refs)?;
-    let presentation = parse_form_input_field_choice_list_presentation(payload_fields.get(5)?)?;
-    Some(FormChoiceListItem {
-        presentation_present: true,
-        presentation,
-        value,
-    })
-}
-
-fn parse_form_input_field_choice_list_presentation(field: &str) -> Option<Vec<(String, String)>> {
-    let field = field.trim();
-    if scan_1c_braced_value(field, 0) != Some(field.len()) {
-        return None;
-    }
-    let fields = split_1c_braced_fields(field, 0)?;
-    if fields.first()?.trim() != "1" {
-        return None;
-    }
-    let item_count = fields.get(1)?.trim().parse::<usize>().ok()?;
-    if fields.len() != item_count.checked_add(2)? {
-        return None;
-    }
-    fields
-        .iter()
-        .skip(2)
-        .map(|item| {
-            let item = item.trim();
-            if scan_1c_braced_value(item, 0) != Some(item.len()) {
-                return None;
-            }
-            let values = split_1c_braced_fields(item, 0)?;
-            match values.as_slice() {
-                [lang, content] => Some((
-                    parse_exact_1c_quoted_string(lang.trim())?,
-                    parse_exact_1c_quoted_string(content.trim())?,
-                )),
-                _ => None,
-            }
-        })
-        .collect()
-}
-
-fn parse_form_input_field_choice_list_value(
-    payload_fields: &[&str],
-    object_refs: &BTreeMap<String, String>,
-) -> Option<FormChoiceListValue> {
-    let raw_value = payload_fields.get(2)?.trim();
-    if scan_1c_braced_value(raw_value, 0) != Some(raw_value.len()) {
-        return None;
-    }
-    let value_fields = split_1c_braced_fields(raw_value, 0)?;
-    match value_fields.as_slice() {
-        [kind, value]
-            if kind.trim() == r#""N""# && information_register_decimal_is_valid(value.trim()) =>
-        {
-            Some(FormChoiceListValue::Decimal(value.trim().to_string()))
-        }
-        [kind, value] if kind.trim() == r#""S""# => {
-            parse_exact_1c_quoted_string(value.trim()).map(FormChoiceListValue::String)
-        }
-        [kind, value] if kind.trim() == r#""B""# => match value.trim() {
-            "0" => Some(FormChoiceListValue::Boolean(false)),
-            "1" => Some(FormChoiceListValue::Boolean(true)),
-            _ => None,
+    parse_schema_form_choice_list_item(
+        field,
+        FormChoiceListLayoutProfile::InputFieldExtendedOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
         },
-        [kind] if kind.trim() == r#""U""# => {
-            let type_id = Uuid::parse_str(payload_fields.get(3)?.trim()).ok()?;
-            let value_id = Uuid::parse_str(payload_fields.get(4)?.trim()).ok()?;
-            if type_id.is_nil() && value_id.is_nil() {
-                Some(FormChoiceListValue::Nil)
-            } else {
-                parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
-                    .map(FormChoiceListValue::DesignTimeRef)
-            }
-        }
-        _ => None,
-    }
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
+    )
 }
 
+#[cfg(test)]
 pub(super) fn parse_form_radio_button_choice_list_item(
     field: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FormChoiceListItem> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
-    let payload_fields = split_1c_braced_fields(fields.get(2)?.trim(), 0)?;
-    let value = parse_form_radio_button_choice_list_value(&payload_fields, object_refs)?;
-    let presentation = payload_fields
-        .get(5)
-        .map(|field| parse_form_localized_strings(field))
-        .unwrap_or_default();
-    Some(FormChoiceListItem {
-        presentation_present: false,
-        presentation,
-        value,
-    })
-}
-
-pub(super) fn parse_form_radio_button_choice_list_value(
-    payload_fields: &[&str],
-    object_refs: &BTreeMap<String, String>,
-) -> Option<FormChoiceListValue> {
-    let value_fields = split_1c_braced_fields(payload_fields.get(2)?.trim(), 0)?;
-    match parse_1c_string(value_fields.first()?.trim())?.as_str() {
-        "N" => Some(FormChoiceListValue::Decimal(
-            value_fields.get(1)?.trim().to_string(),
-        )),
-        "S" => parse_1c_quoted_string(value_fields.get(1)?.trim()).map(FormChoiceListValue::String),
-        "U" => parse_design_time_reference(payload_fields.get(4)?.trim(), object_refs)
-            .map(FormChoiceListValue::DesignTimeRef),
-        _ => None,
-    }
+    parse_schema_form_choice_list_item(
+        field,
+        FormChoiceListLayoutProfile::RadioButtonOptions,
+        |type_id| {
+            unique_metadata_type_reference(type_index, type_index_collisions, type_id)
+                .and_then(parse_generated_metadata_reference_owner)
+                .map(|owner| owner.owner_reference())
+        },
+        |_, value_id| parse_design_time_reference(value_id, object_refs),
+    )
 }
 
 pub(super) fn parse_form_search_addition_type(field: &str) -> Option<&'static str> {
@@ -11335,12 +12397,19 @@ fn resolve_form_owner_scoped_bound_data_path(
     if !matches!(attribute_column, FormOwnerScopedDataPath::Unknown) {
         return attribute_column;
     }
-    if let Some(data_path) = resolve_form_owner_scoped_metadata_data_path(
+    match resolve_form_owner_scoped_metadata_data_path_status(
         field,
         attribute_metadata_owners_by_id,
         object_refs,
     ) {
-        return FormOwnerScopedDataPath::Resolved(data_path);
+        FormMetadataDataPathResolution::Resolved(data_path) => {
+            return FormOwnerScopedDataPath::Resolved(data_path);
+        }
+        FormMetadataDataPathResolution::Invalid => {
+            return FormOwnerScopedDataPath::Ambiguous;
+        }
+        FormMetadataDataPathResolution::NotMetadata
+        | FormMetadataDataPathResolution::ReferenceAbsent => {}
     }
     let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
         return FormOwnerScopedDataPath::Unknown;
@@ -11456,13 +12525,14 @@ fn parse_form_bound_data_path_with_metadata_owner(
     table_column_names_by_binding_key: &BTreeMap<String, BTreeMap<String, String>>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    resolve_form_owner_scoped_metadata_data_path(
+    match resolve_form_owner_scoped_metadata_data_path_status(
         field,
         attribute_metadata_owners_by_id,
         object_refs,
-    )
-    .or_else(|| {
-        parse_form_bound_data_path(
+    ) {
+        FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+        FormMetadataDataPathResolution::NotMetadata
+        | FormMetadataDataPathResolution::ReferenceAbsent => parse_form_bound_data_path(
             field,
             name,
             attribute_names_by_id,
@@ -11470,16 +12540,44 @@ fn parse_form_bound_data_path_with_metadata_owner(
             table_column_names_by_id,
             bound_table_path_by_binding_key,
             table_column_names_by_binding_key,
-        )
-    })
+        ),
+        FormMetadataDataPathResolution::Invalid => None,
+    }
 }
 
-fn resolve_form_owner_scoped_metadata_data_path(
+#[cfg(test)]
+pub(super) fn resolve_form_owner_scoped_metadata_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
-    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    match resolve_form_owner_scoped_metadata_data_path_status(
+        field,
+        attribute_metadata_owners_by_id,
+        object_refs,
+    ) {
+        FormMetadataDataPathResolution::Resolved(data_path) => Some(data_path),
+        FormMetadataDataPathResolution::NotMetadata
+        | FormMetadataDataPathResolution::ReferenceAbsent
+        | FormMetadataDataPathResolution::Invalid => None,
+    }
+}
+
+enum FormMetadataDataPathResolution {
+    NotMetadata,
+    ReferenceAbsent,
+    Invalid,
+    Resolved(String),
+}
+
+fn resolve_form_owner_scoped_metadata_data_path_status(
+    field: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> FormMetadataDataPathResolution {
+    let Some(fields) = split_1c_braced_fields(field.trim(), 0) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
     let (owner_field, terminal_field) = match fields.as_slice() {
         [kind, owner, terminal] if kind.trim() == "2" => (*owner, *terminal),
         [kind, owner, table, terminal]
@@ -11487,28 +12585,75 @@ fn resolve_form_owner_scoped_metadata_data_path(
         {
             (*owner, *terminal)
         }
-        _ => return None,
+        _ => return FormMetadataDataPathResolution::NotMetadata,
     };
-    let owner = split_1c_braced_fields(owner_field.trim(), 0)?;
-    if owner.len() != 1 {
-        return None;
+    let Some(terminal) = split_1c_braced_fields(terminal_field.trim(), 0) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    if terminal.len() != 2 {
+        return FormMetadataDataPathResolution::NotMetadata;
     }
-    let attribute = attribute_metadata_owners_by_id.get(owner.first()?.trim())?;
+    let Some(marker) = terminal.first() else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    if marker.trim().parse::<i64>().is_err() {
+        return FormMetadataDataPathResolution::Invalid;
+    }
+    let Some(uuid) = terminal
+        .get(1)
+        .and_then(|uuid| parse_non_zero_uuid(uuid.trim()))
+    else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
 
-    let terminal = split_1c_braced_fields(terminal_field.trim(), 0)?;
-    if terminal.len() != 2 || terminal.first()?.trim().parse::<i64>().is_err() {
-        return None;
+    let Some(owner) = split_1c_braced_fields(owner_field.trim(), 0) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    if owner.len() != 1 {
+        return FormMetadataDataPathResolution::Invalid;
     }
-    let uuid = parse_non_zero_uuid(terminal.get(1)?.trim())?;
-    let reference = object_refs.get(&uuid)?;
-    let (owner_base, relative_path) = form_metadata_data_path_route(reference)?;
-    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
-        return None;
-    }
-    Some(format!("{}.{}", attribute.name, relative_path))
+    let Some(attribute_id) = owner.first() else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    resolve_form_owner_scoped_metadata_uuid_data_path_status(
+        attribute_id.trim(),
+        marker.trim(),
+        &uuid,
+        attribute_metadata_owners_by_id,
+        object_refs,
+    )
 }
 
-fn resolve_form_strict_field_model_data_path(
+fn resolve_form_owner_scoped_metadata_uuid_data_path_status(
+    attribute_id: &str,
+    marker: &str,
+    uuid: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    object_refs: &BTreeMap<String, String>,
+) -> FormMetadataDataPathResolution {
+    if marker.parse::<i64>().is_err() {
+        return FormMetadataDataPathResolution::Invalid;
+    }
+    let Some(uuid) = parse_non_zero_uuid(uuid) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id.trim()) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+
+    let Some(reference) = object_refs.get(&uuid) else {
+        return FormMetadataDataPathResolution::ReferenceAbsent;
+    };
+    let Some((owner_base, relative_path)) = form_metadata_data_path_route(reference) else {
+        return FormMetadataDataPathResolution::Invalid;
+    };
+    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
+        return FormMetadataDataPathResolution::Invalid;
+    }
+    FormMetadataDataPathResolution::Resolved(format!("{}.{}", attribute.name, relative_path))
+}
+
+pub(super) fn resolve_form_strict_field_model_data_path(
     field: &str,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     object_refs: &BTreeMap<String, String>,
@@ -11542,14 +12687,21 @@ fn resolve_form_strict_field_model_data_path(
     }
 }
 
-fn resolve_form_owner_scoped_standard_attribute_data_path(
+pub(super) fn resolve_form_owner_scoped_standard_attribute_data_path(
     attribute: &FormAttributeMetadataOwner,
     marker: &str,
 ) -> Option<String> {
     let reference = attribute.exact_single_type_reference.as_deref()?;
-    let (generated_type, _) = form_generated_owner_type_from_type_reference(reference)?;
-    let attribute_name = match generated_type {
-        "ChartOfAccountsObject" => chart_of_accounts_standard_attribute_name(marker),
+    let owner = form_generated_owner_type_from_type_reference(reference)?;
+    let attribute_name = match (owner.family(), owner.role()) {
+        (GeneratedMetadataOwnerFamily::Document, GeneratedMetadataOwnerRole::Object) => {
+            DOCUMENT_STANDARD_ATTRIBUTES
+                .iter()
+                .find_map(|(candidate, name)| (*candidate == marker).then_some(*name))
+        }
+        (GeneratedMetadataOwnerFamily::ChartOfAccounts, GeneratedMetadataOwnerRole::Object) => {
+            chart_of_accounts_standard_attribute_name(marker)
+        }
         _ => None,
     }?;
     Some(format!("{}.{}", attribute.name, attribute_name))
@@ -11569,24 +12721,18 @@ fn resolve_form_constants_set_data_path(
     Some(format!("{}.{}", attribute.name, constant_name))
 }
 
-fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
-    let mut parts = reference.split('.');
-    let owner_kind = parts.next()?;
-    let owner_name = parts.next()?;
-    if owner_kind.is_empty() || owner_name.is_empty() {
-        return None;
-    }
-    let owner_base = format!("{owner_kind}.{owner_name}");
-    let relative = reference.strip_prefix(&format!("{owner_base}."))?;
-    let route = relative.split('.').collect::<Vec<_>>();
-    let relative_path = match route.as_slice() {
-        ["Attribute" | "Dimension" | "Resource", name] if !name.is_empty() => (*name).to_string(),
-        ["TabularSection", table, "Attribute", name] if !table.is_empty() && !name.is_empty() => {
-            format!("{table}.{name}")
+pub(super) fn form_metadata_data_path_route(reference: &str) -> Option<(String, String)> {
+    let path = parse_metadata_data_path(reference)?;
+    let relative_path = match path.role() {
+        MetadataDataPathRole::Attribute
+        | MetadataDataPathRole::Dimension
+        | MetadataDataPathRole::Resource => path.member_name().to_string(),
+        MetadataDataPathRole::TabularSection => path.table_name()?.to_string(),
+        MetadataDataPathRole::TabularAttribute => {
+            format!("{}.{}", path.table_name()?, path.member_name())
         }
-        _ => return None,
     };
-    Some((owner_base, relative_path))
+    Some((path.owner_reference(), relative_path))
 }
 
 fn form_attribute_matches_metadata_owner(
@@ -11692,45 +12838,27 @@ fn resolve_form_title_rows_count_path(
 ) -> Option<String> {
     let attribute = attribute_metadata_owners_by_id.get(attribute_id)?;
     let reference = object_refs.get(uuid)?;
-    let route = reference.split('.').collect::<Vec<_>>();
-    let (owner_kind, owner_name, table_name) = match route.as_slice() {
-        [owner_kind, owner_name, "TabularSection", table_name]
-            if !owner_kind.is_empty() && !owner_name.is_empty() && !table_name.is_empty() =>
-        {
-            (*owner_kind, *owner_name, *table_name)
-        }
-        _ => return None,
-    };
-    let owner_base = format!("{owner_kind}.{owner_name}");
-    if !form_attribute_matches_metadata_owner(attribute, &owner_base) {
+    let path = parse_metadata_data_path(reference)?;
+    if path.role() != MetadataDataPathRole::TabularSection
+        || !form_attribute_matches_metadata_owner(attribute, &path.owner_reference())
+    {
         return None;
     }
-    Some(format!("{}.{}.RowsCount", attribute.name, table_name))
+    Some(format!(
+        "{}.{}.RowsCount",
+        attribute.name,
+        path.table_name()?
+    ))
 }
 
-fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
-    let (generated_type, owner_name) = form_generated_owner_type_from_type_reference(reference)?;
-    let owner_kind = [
-        "RecordManager",
-        "RecordSet",
-        "RecordKey",
-        "Object",
-        "Record",
-        "Ref",
-    ]
-    .into_iter()
-    .find_map(|role| generated_type.strip_suffix(role))
-    .filter(|owner_kind| !owner_kind.is_empty())?;
-    Some(format!("{owner_kind}.{owner_name}"))
+pub(super) fn form_metadata_owner_base_from_type_reference(reference: &str) -> Option<String> {
+    Some(form_generated_owner_type_from_type_reference(reference)?.owner_reference())
 }
 
-fn form_generated_owner_type_from_type_reference(reference: &str) -> Option<(&str, &str)> {
-    let reference = reference.strip_prefix("cfg:")?;
-    let (generated_type, owner_name) = reference.split_once('.')?;
-    if owner_name.is_empty() || owner_name.contains('.') {
-        return None;
-    }
-    Some((generated_type, owner_name))
+fn form_generated_owner_type_from_type_reference(
+    reference: &str,
+) -> Option<GeneratedMetadataOwner<'_>> {
+    parse_generated_metadata_owner(reference)
 }
 
 pub(super) fn parse_form_bound_data_path(
@@ -11874,6 +13002,16 @@ pub(super) fn normalize_form_standard_data_path_name(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+fn form_table_uuid_binding_key(binding_key: &str) -> Option<&str> {
+    let (kind, uuid_text) = binding_key.split_once('|')?;
+    let kind_number = kind.parse::<u64>().ok()?;
+    if kind != kind_number.to_string() || uuid_text.contains('|') {
+        return None;
+    }
+    let uuid = Uuid::parse_str(uuid_text).ok()?;
+    (!uuid.is_nil() && uuid.to_string() == uuid_text).then_some(binding_key)
+}
+
 pub(super) fn parse_form_binding_key(field: &str) -> Option<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     let first = fields.first()?.trim();
@@ -11955,6 +13093,27 @@ pub(super) fn parse_form_nested_table_column_binding(
     let table_key = parse_form_binding_key(fields.get(2)?.trim())?;
     let column_key = parse_form_binding_key(fields.get(3)?.trim())?;
     Some((attribute_id, table_key, column_key))
+}
+
+pub(super) fn parse_form_direct_table_column_binding(field: &str) -> Option<(String, String)> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first()?.trim().parse::<u8>().ok()? != 2 || fields.len() != 3 {
+        return None;
+    }
+    let owner = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    if owner.len() != 1 {
+        return None;
+    }
+    let attribute_id = owner.first()?.trim();
+    if attribute_id.is_empty() {
+        return None;
+    }
+    let column_key = parse_form_binding_key(fields.get(2)?.trim())?;
+    let column_id = column_key.parse::<u64>().ok()?;
+    if column_id == 0 || column_id.to_string() != column_key {
+        return None;
+    }
+    Some((attribute_id.to_string(), column_key))
 }
 
 pub(super) fn form_child_item_binding_fields<'a>(tag: &str, fields: &'a [&'a str]) -> Vec<&'a str> {
@@ -13025,7 +14184,7 @@ pub(super) fn format_form_body_xml(
     parameters: &[FormParameter],
     commands: &[FormCommand],
     command_interface: &Option<FormCommandInterface>,
-) -> String {
+) -> Result<String, FormSchemaWriteError> {
     let mut xml = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
 "
@@ -13238,7 +14397,7 @@ pub(super) fn format_form_body_xml(
     xml.push_str(&format_form_attributes_section_xml(
         attributes,
         attributes_section,
-    ));
+    )?);
     if !commands.is_empty() {
         xml.push_str("\t<Commands>\r\n");
         for command in commands {
@@ -13322,7 +14481,7 @@ pub(super) fn format_form_body_xml(
         xml.push_str(&format_form_command_interface_xml(command_interface));
     }
     xml.push_str("</Form>");
-    xml
+    Ok(xml)
 }
 
 pub(super) fn format_form_child_items_xml(items: &[FormChildItem], indent: usize) -> String {
@@ -13689,7 +14848,7 @@ fn format_form_table_property_xml(
             } else {
                 String::new()
             }
-        },
+        }
         FormTableXmlProperty::ChoiceMode => match item.table_choice_mode {
             Some(true) => format!("{tab}<ChoiceMode>true</ChoiceMode>\r\n"),
             _ => String::new(),
@@ -14855,7 +16014,9 @@ pub(super) fn format_form_child_item_xml(
         ));
     }
     if !item.choice_list.is_empty() {
-        xml.push_str(&format_form_choice_list_xml(&item.choice_list, indent + 1));
+        let choice_list_xml = format_form_choice_list_xml(&item.choice_list, indent + 1)
+            .expect("ChoiceList must pass both Form writer trees' typed preflight");
+        xml.push_str(&choice_list_xml);
     }
     if item.tag == "InputField" {
         xml.push_str(&format_form_input_field_button_option_xml(
@@ -14870,11 +16031,11 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(drop_list_width)
         ));
     }
-    if item.tag == "InputField" && !item.choice_parameter_links.is_empty() {
-        xml.push_str(&format_form_choice_parameter_links_xml(
-            &item.choice_parameter_links,
-            indent + 1,
-        ));
+    if let Some(cluster) = &item.choice_parameter_cluster {
+        xml.push_str(
+            &format_form_choice_parameter_cluster_xml(cluster, indent + 1)
+                .expect("ChoiceParameters must pass the Form writer tree typed preflight"),
+        );
     }
     if item.tag == "InputField"
         && let Some(type_link) = &item.type_link
@@ -16152,75 +17313,127 @@ fn format_form_extended_tooltip_events_xml(events: &[FormBodyEvent], indent: usi
     xml
 }
 
-pub(super) fn format_form_choice_list_xml(items: &[FormChoiceListItem], indent: usize) -> String {
+pub(super) fn format_form_choice_list_xml(
+    choice_list: &CanonicalFormChoiceList,
+    indent: usize,
+) -> Result<String, FormSchemaWriteError> {
+    let policy = verified_form_choice_list_policy()?;
+    let WriterPolicy::FormChoiceList {
+        item_order,
+        empty_collection: FormChoiceListEmptyCollection::WriteWrapperWhenWriteDefault,
+        empty_string_value: FormChoiceListEmptyStringValue::SelfClosing,
+    } = policy
+    else {
+        return Err(FormSchemaWriteError::UnexpectedPolicy {
+            rule_id: "form.choice-list.design-time-value".to_owned(),
+            expected: "form-choice-list",
+        });
+    };
+    let items = choice_list.items()?;
+    // This writer is invoked with writeDefault=false.  The verified policy allows an empty
+    // wrapper only when writeDefault=true, so both absent and explicit-empty values emit nothing.
+    if items.is_empty() {
+        return Ok(String::new());
+    }
     let tab = "\t".repeat(indent);
     let mut xml = format!("{tab}<ChoiceList>\r\n");
     for item in items {
-        xml.push_str(&format!(
-            "{tab}\t<xr:Item>\r\n\
-{tab}\t\t<xr:Presentation/>\r\n\
-{tab}\t\t<xr:CheckState>0</xr:CheckState>\r\n\
-{tab}\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"
-        ));
-        if item.presentation_present && item.presentation.is_empty() {
-            xml.push_str(&format!("{tab}\t\t\t<Presentation/>\r\n"));
-        } else if !item.presentation.is_empty() {
-            xml.push_str(&format_form_localized_section(
-                "Presentation",
-                &item.presentation,
-                indent + 3,
-            ));
-        }
-        match &item.value {
-            FormChoiceListValue::Boolean(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xs:boolean\">{}</Value>\r\n",
-                xml_bool(*value)
-            )),
-            FormChoiceListValue::Decimal(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xs:decimal\">{}</Value>\r\n",
-                escape_xml_text(value)
-            )),
-            FormChoiceListValue::Nil => {
-                xml.push_str(&format!("{tab}\t\t\t<Value xsi:nil=\"true\"/>\r\n"))
+        xml.push_str(&format!("{tab}\t<xr:Item>\r\n"));
+        for part in &item_order {
+            match part {
+                FormChoiceListItemPart::Presentation => {
+                    xml.push_str(&format!("{tab}\t\t<xr:Presentation/>\r\n"));
+                }
+                FormChoiceListItemPart::CheckState => {
+                    xml.push_str(&format!("{tab}\t\t<xr:CheckState>0</xr:CheckState>\r\n"));
+                }
+                FormChoiceListItemPart::Value => {
+                    xml.push_str(&format!(
+                        "{tab}\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n"
+                    ));
+                    if item.presentation_present && item.presentation.is_empty() {
+                        xml.push_str(&format!("{tab}\t\t\t<Presentation/>\r\n"));
+                    } else if !item.presentation.is_empty() {
+                        xml.push_str(&format_form_localized_section(
+                            "Presentation",
+                            &item.presentation,
+                            indent + 3,
+                        ));
+                    }
+                    xml.push_str(&tab);
+                    xml.push_str(FORM_CHOICE_LIST_VALUE_INDENT);
+                    item.value
+                        .wire_shape()
+                        .append_xml_escaped(&mut xml, escape_xml_text);
+                    xml.push_str(FORM_XML_LINE_ENDING);
+                    xml.push_str(&format!("{tab}\t\t</xr:Value>\r\n"));
+                }
             }
-            FormChoiceListValue::String(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xs:string\">{}</Value>\r\n",
-                escape_xml_text(value)
-            )),
-            FormChoiceListValue::DesignTimeRef(value) => xml.push_str(&format!(
-                "{tab}\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">{}</Value>\r\n",
-                escape_xml_text(value)
-            )),
         }
-        xml.push_str(&format!(
-            "{tab}\t\t</xr:Value>\r\n\
-{tab}\t</xr:Item>\r\n"
-        ));
+        xml.push_str(&format!("{tab}\t</xr:Item>\r\n"));
     }
     xml.push_str(&format!("{tab}</ChoiceList>\r\n"));
-    xml
+    Ok(xml)
 }
 
-fn format_form_choice_parameter_links_xml(
-    links: &[FormChoiceParameterLink],
+pub(super) fn format_form_choice_parameter_cluster_xml(
+    cluster: &CanonicalFormChoiceParameterCluster,
     indent: usize,
-) -> String {
-    let tab = "\t".repeat(indent);
-    let mut xml = format!("{tab}<ChoiceParameterLinks>\r\n");
-    for link in links {
-        xml.push_str(&format!(
-            "{tab}\t<xr:Link>\r\n\
-{tab}\t\t<xr:Name>{}</xr:Name>\r\n\
-{tab}\t\t<xr:DataPath xsi:type=\"xs:string\">{}</xr:DataPath>\r\n\
-{tab}\t\t<xr:ValueChange>{}</xr:ValueChange>\r\n\
-{tab}\t</xr:Link>\r\n",
-            escape_xml_text(&link.name),
-            escape_xml_text(&link.data_path),
-            escape_xml_text(link.value_change)
-        ));
+) -> Result<String, FormSchemaWriteError> {
+    let policy = verified_form_choice_parameters_policy()?;
+    let mut xml = String::new();
+    for member in form_choice_parameter_cluster_order(&policy)? {
+        match member {
+            FormChoiceParameterClusterMember::Links => match cluster.links() {
+                FormChoiceParameterLinks::Absent | FormChoiceParameterLinks::Empty => {}
+                FormChoiceParameterLinks::Typed(links) => {
+                    xml.push_str(&emit_form_choice_parameter_links(links, indent)?);
+                }
+                FormChoiceParameterLinks::Opaque(value) => {
+                    return Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
+                        primary_slot: value.primary_slot,
+                        duplicate_slot: value.duplicate_slot,
+                    });
+                }
+            },
+            FormChoiceParameterClusterMember::Parameters => {
+                if !cluster.parameters().is_non_emitting() {
+                    debug_assert!(cluster.parameters().should_emit());
+                    xml.push_str(&format_form_choice_parameters_xml(
+                        cluster.parameters(),
+                        indent,
+                    )?);
+                }
+            }
+            FormChoiceParameterClusterMember::AvailableTypes => match cluster.available_types() {
+                FormChoiceParameterAvailableTypes::Absent
+                | FormChoiceParameterAvailableTypes::Opaque(_) => {}
+                FormChoiceParameterAvailableTypes::Typed(()) => {
+                    return Err(
+                        FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes,
+                    );
+                }
+            },
+        }
     }
-    xml.push_str(&format!("{tab}</ChoiceParameterLinks>\r\n"));
-    xml
+    Ok(xml)
+}
+
+pub(super) fn format_form_choice_parameters_xml(
+    parameters: &CanonicalFormChoiceParameters,
+    indent: usize,
+) -> Result<String, FormSchemaWriteError> {
+    match parameters {
+        CanonicalFormChoiceParameters::Absent | CanonicalFormChoiceParameters::Empty { .. } => {
+            Ok(String::new())
+        }
+        CanonicalFormChoiceParameters::Typed { parameters, .. } => {
+            emit_form_choice_parameters(parameters, indent).map_err(Into::into)
+        }
+        CanonicalFormChoiceParameters::OpaqueSameProfile { slot, .. } => {
+            Err(FormSchemaWriteError::OpaqueChoiceParameters { slot: *slot })
+        }
+    }
 }
 
 fn format_form_type_link_xml(type_link: &FormTypeLink, indent: usize) -> String {
@@ -16269,17 +17482,18 @@ pub(super) fn format_form_context_menu_xml(item: &FormChildItem, indent: usize) 
 #[cfg(test)]
 pub(super) fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String {
     format_form_attributes_section_xml(attributes, &FormAttributesSection::default())
+        .expect("bundled DCS writer evidence must validate in tests")
 }
 
 pub(super) fn format_form_attributes_section_xml(
     attributes: &[FormAttribute],
     attributes_section: &FormAttributesSection,
-) -> String {
+) -> Result<String, FormSchemaWriteError> {
     if attributes.is_empty() && attributes_section.conditional_appearance_xml.is_none() {
-        return "\t<Attributes/>\r\n".to_string();
+        return Ok("\t<Attributes/>\r\n".to_string());
     }
     let mut xml = "\t<Attributes>\r\n".to_string();
-    xml.push_str(&format_form_attributes_items_xml(attributes));
+    xml.push_str(&format_form_attributes_items_xml(attributes)?);
     if let Some(conditional_appearance_xml) = &attributes_section.conditional_appearance_xml {
         xml.push_str(&indent_xml_fragment(
             &split_adjacent_xml_tags(conditional_appearance_xml),
@@ -16287,10 +17501,12 @@ pub(super) fn format_form_attributes_section_xml(
         ));
     }
     xml.push_str("\t</Attributes>\r\n");
-    xml
+    Ok(xml)
 }
 
-pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> String {
+pub(super) fn format_form_attributes_items_xml(
+    attributes: &[FormAttribute],
+) -> Result<String, FormSchemaWriteError> {
     let mut xml = String::new();
     for attribute in attributes {
         xml.push_str(&format!(
@@ -16422,7 +17638,7 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
                     escape_xml_text(main_table)
                 ));
             }
-            xml.push_str(&format_form_list_settings_xml(&settings.list_settings));
+            xml.push_str(&format_form_list_settings_xml(&settings.list_settings)?);
             xml.push_str("\t\t\t</Settings>\r\n");
         } else if let Some(spreadsheet_document_settings) = &attribute.spreadsheet_document_settings
         {
@@ -16448,7 +17664,7 @@ pub(super) fn format_form_attributes_items_xml(attributes: &[FormAttribute]) -> 
         }
         xml.push_str("\t\t</Attribute>\r\n");
     }
-    xml
+    Ok(xml)
 }
 
 pub(super) fn format_form_attribute_column_xml(
@@ -16488,14 +17704,21 @@ pub(super) fn format_form_attribute_column_xml(
     xml
 }
 
-pub(super) fn format_form_list_settings_xml(settings: &FormListSettings) -> String {
+pub(super) fn format_form_list_settings_xml(
+    settings: &FormListSettings,
+) -> Result<String, FormSchemaWriteError> {
+    let tail_xml = emit_form_list_settings_tail(
+        settings.items_view_mode.as_deref(),
+        settings.items_user_setting_id.as_deref(),
+        "dcsset",
+        "\t\t\t\t\t",
+    )?;
     if !form_list_settings_standard_section_has_output(settings.filter.as_ref())
         && !form_list_settings_order_has_output(settings.order.as_ref())
         && !form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
-        && settings.items_view_mode.is_none()
-        && settings.items_user_setting_id.is_none()
+        && tail_xml.is_empty()
     {
-        return String::new();
+        return Ok(String::new());
     }
     let mut xml = "\t\t\t\t<ListSettings>\r\n".to_string();
     if form_list_settings_standard_section_has_output(settings.filter.as_ref())
@@ -16557,20 +17780,9 @@ pub(super) fn format_form_list_settings_xml(settings: &FormListSettings) -> Stri
             ));
         }
     }
-    if let Some(items_view_mode) = &settings.items_view_mode {
-        xml.push_str(&format!(
-            "\t\t\t\t\t<dcsset:itemsViewMode>{}</dcsset:itemsViewMode>\r\n",
-            escape_xml_text(items_view_mode)
-        ));
-    }
-    if let Some(items_user_setting_id) = &settings.items_user_setting_id {
-        xml.push_str(&format!(
-            "\t\t\t\t\t<dcsset:itemsUserSettingID>{}</dcsset:itemsUserSettingID>\r\n",
-            escape_xml_text(items_user_setting_id)
-        ));
-    }
+    xml.push_str(&tail_xml);
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
-    xml
+    Ok(xml)
 }
 
 pub(super) fn form_list_settings_standard_section_has_output(

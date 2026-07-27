@@ -1,8 +1,12 @@
 use super::*;
+use crate::compiler::families::assets::{
+    ConfigRowId, SourceAssetRelationError, SourceAssetRole, SourceAssetRoute,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct BodyOwnerSourceReference {
     pub(super) kind: String,
+    pub(super) canonical_name: String,
     pub(super) object_path: PathBuf,
 }
 
@@ -40,6 +44,7 @@ pub(super) fn build_body_owner_source_index_from_texts(
             row.file_name.clone(),
             BodyOwnerSourceReference {
                 kind: kind.to_string(),
+                canonical_name: header.name.clone(),
                 object_path,
             },
         );
@@ -50,16 +55,13 @@ pub(super) fn build_body_owner_source_index_from_texts(
 pub(super) fn configuration_module_groups(file_names: &BTreeSet<String>) -> BTreeSet<String> {
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
     suffixes_by_id
         .into_iter()
@@ -81,16 +83,13 @@ pub(super) fn standalone_content_asset_file_names<'a>(
 ) -> BTreeSet<String> {
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
 
     suffixes_by_id
@@ -179,10 +178,9 @@ pub(super) fn dynamic_source_asset(
     file_name: &str,
     bytes: &[u8],
 ) -> Option<SourceAsset> {
-    let (owner_uuid, suffix) = file_name.rsplit_once('.')?;
-    if owner_uuid.is_empty() {
-        return None;
-    }
+    let row_id = ConfigRowId::parse(file_name).ok()?;
+    let owner_uuid = row_id.owner();
+    let suffix = row_id.suffix_component();
 
     if let Some(form_ref) = context.form_refs.get(owner_uuid)
         && suffix != "0"
@@ -218,40 +216,15 @@ pub(super) fn dynamic_source_asset(
     }
 
     let owner = context.body_owners.get(owner_uuid)?;
-    if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
-        .route(
-            "Role",
-            crate::compiler::families::assets::SourceAssetRole::Rights,
-        )
-        .filter(|route| route.suffix().strip_prefix('.') == Some(suffix))
-        && owner.kind == "Role"
-        && parse_role_rights_blob(bytes, context.role_rights_object_refs, context.field_refs)
-            .is_some()
-    {
-        return Some(SourceAsset {
-            primary_path: owner.object_path.join(route.relative_path()),
-            kind: SourceAssetKind::RoleRights,
-        });
-    }
-    if owner.kind == "AccumulationRegister"
-        && suffix == "3"
-        && parse_accumulation_register_aggregates_blob(bytes).is_some()
-    {
-        let register_name = context
-            .object_refs
-            .get(owner_uuid)
-            .and_then(|reference| reference.strip_prefix("AccumulationRegister."))
-            .map(str::to_string)
-            .or_else(|| {
-                owner
-                    .object_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })?;
-        return Some(SourceAsset {
-            primary_path: owner.object_path.join("Ext").join("Aggregates.xml"),
-            kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
-        });
+    if let Some(asset) = dynamic_owner_bound_source_asset(
+        &row_id,
+        owner,
+        context.object_refs.get(owner_uuid).map(String::as_str),
+        bytes,
+        context.role_rights_object_refs,
+        context.field_refs,
+    ) {
+        return Some(asset);
     }
     if let Some(route) = crate::compiler::families::assets::SourceAssetRegistry
         .route_by_suffix(&owner.kind, suffix)
@@ -303,6 +276,88 @@ pub(super) fn dynamic_source_asset(
         });
     }
     None
+}
+
+pub(super) fn dynamic_owner_bound_source_asset(
+    row_id: &ConfigRowId<'_>,
+    owner: &BodyOwnerSourceReference,
+    owner_reference: Option<&str>,
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+) -> Option<SourceAsset> {
+    let owner_family = FamilyId::parse(&owner.kind).ok()?;
+    let route = crate::compiler::families::assets::SourceAssetRegistry
+        .owner_bound_relation(&owner_family, row_id.suffix())
+        .ok()?;
+    owner_bound_source_asset(
+        route,
+        &owner.object_path,
+        &owner.canonical_name,
+        owner_reference,
+        bytes,
+        object_refs,
+        field_refs,
+    )
+    .ok()
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum OwnerBoundSourceAssetFailure {
+    Decoder,
+    Relation(SourceAssetRelationError),
+}
+
+const ROLE_RIGHTS_DECODER_MISS: &str = "role_rights_decoder_failed";
+const ACCUMULATION_REGISTER_AGGREGATES_DECODER_MISS: &str =
+    "accumulation_register_aggregates_decoder_failed";
+
+pub(super) fn owner_bound_source_asset(
+    route: &SourceAssetRoute,
+    object_path: &Path,
+    header_name: &str,
+    owner_reference: Option<&str>,
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+) -> std::result::Result<SourceAsset, OwnerBoundSourceAssetFailure> {
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    match route.role() {
+        SourceAssetRole::Rights => {
+            parse_role_rights_blob(bytes, object_refs, field_refs)
+                .ok_or(OwnerBoundSourceAssetFailure::Decoder)?;
+            registry
+                .canonical_owner_name(route, header_name, owner_reference)
+                .map_err(OwnerBoundSourceAssetFailure::Relation)?;
+            Ok(SourceAsset {
+                primary_path: object_path.join(route.relative_path()),
+                kind: SourceAssetKind::RoleRights,
+            })
+        }
+        SourceAssetRole::Aggregates => {
+            parse_accumulation_register_aggregates_blob(bytes)
+                .ok_or(OwnerBoundSourceAssetFailure::Decoder)?;
+            let register_name = registry
+                .canonical_owner_name(route, header_name, owner_reference)
+                .map_err(OwnerBoundSourceAssetFailure::Relation)?
+                .to_owned();
+            Ok(SourceAsset {
+                primary_path: object_path.join(route.relative_path()),
+                kind: SourceAssetKind::AccumulationRegisterAggregates { register_name },
+            })
+        }
+        _ => Err(OwnerBoundSourceAssetFailure::Relation(
+            SourceAssetRelationError::UnsupportedFamily,
+        )),
+    }
+}
+
+fn owner_bound_decoder_miss(role: SourceAssetRole) -> Option<&'static str> {
+    match role {
+        SourceAssetRole::Rights => Some(ROLE_RIGHTS_DECODER_MISS),
+        SourceAssetRole::Aggregates => Some(ACCUMULATION_REGISTER_AGGREGATES_DECODER_MISS),
+        _ => None,
+    }
 }
 
 pub(super) fn is_binary_module_container(bytes: &[u8]) -> bool {
@@ -491,6 +546,21 @@ pub(super) struct SourceAsset {
     pub(super) kind: SourceAssetKind,
 }
 
+pub(super) enum WrittenSourceAsset {
+    Emitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    OpaqueNotEmitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+    RejectedNotEmitted {
+        primary_path: PathBuf,
+        diagnostics: Vec<FormSourceAssetDiagnostic>,
+    },
+}
+
 pub(super) fn source_asset_paths_with_indexes(
     rows: &[ConfigRow],
     metadata_texts: &[MetadataTextRow],
@@ -513,16 +583,13 @@ pub(super) fn source_asset_paths_with_indexes(
         .collect::<BTreeSet<_>>();
     let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
     for file_name in &file_names {
-        let Some((metadata_id, suffix)) = file_name.rsplit_once('.') else {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
-        if metadata_id.is_empty() {
-            continue;
-        }
         suffixes_by_id
-            .entry(metadata_id)
+            .entry(row_id.owner())
             .or_default()
-            .insert(suffix);
+            .insert(row_id.suffix_component());
     }
     let role_rights_object_refs = build_role_rights_object_reference_index(object_refs, form_refs);
 
@@ -605,7 +672,7 @@ pub(super) fn source_asset_paths_with_indexes(
         }
     }
     for row in metadata_texts {
-        for (body_id, asset) in source_assets_from_metadata_text(
+        let Some(discovery) = source_assets_from_metadata_text_inner(
             row,
             &file_names,
             &rows_by_file_name,
@@ -615,7 +682,10 @@ pub(super) fn source_asset_paths_with_indexes(
             &field_refs,
             &type_index,
             &subsystem_refs,
-        ) {
+        ) else {
+            continue;
+        };
+        for (body_id, asset) in discovery.assets {
             paths.insert(body_id, asset);
         }
     }
@@ -624,6 +694,102 @@ pub(super) fn source_asset_paths_with_indexes(
     paths.extend(template_body_asset_paths(&template_refs, &file_names));
 
     paths
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn source_asset_discovery_misses(
+    metadata_texts: &[MetadataTextRow],
+    file_names: &BTreeSet<&str>,
+    rows_by_file_name: &BTreeMap<&str, &ConfigRow>,
+    command_refs: &BTreeMap<String, String>,
+    metadata_refs: &BTreeMap<String, MetadataCommandReference>,
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
+    subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    template_refs: &BTreeMap<String, TemplateSourceReference>,
+) -> BTreeMap<String, String> {
+    let mut misses = BTreeMap::new();
+    for row in metadata_texts.iter().filter(|row| row.folder.is_some()) {
+        match source_assets_from_metadata_text_inner(
+            row,
+            file_names,
+            rows_by_file_name,
+            command_refs,
+            metadata_refs,
+            object_refs,
+            field_refs,
+            type_index,
+            subsystem_refs,
+        ) {
+            Some(discovery) => misses.extend(discovery.misses),
+            None => {
+                misses.insert(
+                    row.file_name.clone(),
+                    "metadata_source_asset_relation_unclassified".to_string(),
+                );
+            }
+        }
+    }
+    let mut suffixes_by_id = BTreeMap::<&str, BTreeSet<&str>>::new();
+    for file_name in file_names {
+        let Ok(row_id) = ConfigRowId::parse(file_name) else {
+            continue;
+        };
+        suffixes_by_id
+            .entry(row_id.owner())
+            .or_default()
+            .insert(row_id.suffix_component());
+    }
+    for (owner_id, suffixes) in suffixes_by_id {
+        if !is_configuration_module_group(&suffixes) {
+            continue;
+        }
+        for suffix in ["9", "a"] {
+            let body_id = format!("{owner_id}.{suffix}");
+            if !file_names.contains(body_id.as_str()) {
+                continue;
+            }
+            let parsed = rows_by_file_name
+                .get(body_id.as_str())
+                .and_then(|row| decode_hex(&row.binary_hex).ok())
+                .is_some_and(|bytes| {
+                    parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
+                });
+            if !parsed {
+                misses.insert(
+                    body_id,
+                    "configuration_command_interface_decoder_failed".to_string(),
+                );
+            }
+        }
+    }
+    for form_uuid in form_refs.keys() {
+        let help_id = format!("{form_uuid}.1");
+        if !file_names.contains(help_id.as_str()) {
+            continue;
+        }
+        let parsed = rows_by_file_name
+            .get(help_id.as_str())
+            .and_then(|row| decode_hex(&row.binary_hex).ok())
+            .is_some_and(|bytes| parse_help_blob_pages(&bytes).is_some());
+        if !parsed {
+            misses.insert(help_id, "form_help_decoder_failed".to_string());
+        }
+    }
+    for (uuid, template_ref) in template_refs {
+        let body_id = format!("{uuid}.0");
+        if file_names.contains(body_id.as_str())
+            && template_body_source_asset(template_ref.template_type).is_none()
+        {
+            misses.insert(
+                body_id,
+                "template_source_asset_type_unclassified".to_string(),
+            );
+        }
+    }
+    misses
 }
 
 pub(super) fn template_body_asset_paths(
@@ -746,9 +912,11 @@ pub(super) fn source_assets_from_metadata_blob(
                 subsystem_refs,
             )
         })
+        .map(|discovery| discovery.assets)
         .unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub(super) fn source_assets_from_metadata_text(
     row: &MetadataTextRow,
     file_names: &BTreeSet<&str>,
@@ -771,7 +939,13 @@ pub(super) fn source_assets_from_metadata_text(
         type_index,
         subsystem_refs,
     )
+    .map(|discovery| discovery.assets)
     .unwrap_or_default()
+}
+
+pub(super) struct SourceAssetDiscovery {
+    pub(super) assets: Vec<(String, SourceAsset)>,
+    pub(super) misses: BTreeMap<String, String>,
 }
 
 pub(super) fn source_assets_from_metadata_text_inner(
@@ -784,11 +958,13 @@ pub(super) fn source_assets_from_metadata_text_inner(
     field_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     subsystem_refs: &BTreeMap<String, SubsystemSourceReference>,
-) -> Option<Vec<(String, SourceAsset)>> {
+) -> Option<SourceAssetDiscovery> {
     let uuid = row.file_name.as_str();
     let kind = row.kind.as_deref()?;
     let folder = row.folder?;
     let header = row.header.as_ref()?;
+    let owner_family = FamilyId::parse(kind).ok()?;
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
     let object_path = if kind == "Subsystem" {
         subsystem_refs
             .get(uuid)
@@ -800,6 +976,7 @@ pub(super) fn source_assets_from_metadata_text_inner(
         PathBuf::from(folder).join(sanitize_source_path_segment(&header.name))
     };
     let mut assets = Vec::new();
+    let mut misses = BTreeMap::new();
 
     if kind == "ExchangePlan" {
         let content_id = format!("{uuid}.1");
@@ -840,6 +1017,39 @@ pub(super) fn source_assets_from_metadata_text_inner(
         }
     }
 
+    if let Some(route) = registry.owner_bound_route(&owner_family) {
+        let body_id = format!("{uuid}{}", route.suffix());
+        if file_names.contains(body_id.as_str()) {
+            let row_id = ConfigRowId::parse(&body_id).ok()?;
+            let route = registry
+                .owner_bound_relation(&owner_family, row_id.suffix())
+                .ok()?;
+            let relation_result = rows_by_file_name
+                .get(body_id.as_str())
+                .and_then(|row| decode_hex(&row.binary_hex).ok())
+                .map(|bytes| {
+                    owner_bound_source_asset(
+                        route,
+                        &object_path,
+                        &header.name,
+                        object_refs.get(uuid).map(String::as_str),
+                        &bytes,
+                        object_refs,
+                        field_refs,
+                    )
+                })
+                .unwrap_or(Err(OwnerBoundSourceAssetFailure::Decoder));
+            match relation_result {
+                Ok(asset) => assets.push((body_id, asset)),
+                Err(OwnerBoundSourceAssetFailure::Decoder) => {
+                    let reason = owner_bound_decoder_miss(route.role())?;
+                    misses.insert(body_id, reason.to_owned());
+                }
+                Err(OwnerBoundSourceAssetFailure::Relation(_)) => {}
+            }
+        }
+    }
+
     let body_id = format!("{uuid}.0");
     if file_names.contains(body_id.as_str()) {
         let asset = match kind {
@@ -873,22 +1083,6 @@ pub(super) fn source_assets_from_metadata_text_inner(
                 primary_path: object_path.join("Ext").join("WSDefinition.xml"),
                 kind: SourceAssetKind::WsDefinition,
             }),
-            "Role"
-                if rows_by_file_name
-                    .get(body_id.as_str())
-                    .and_then(|row| decode_hex(&row.binary_hex).ok())
-                    .and_then(|bytes| parse_role_rights_blob(&bytes, object_refs, field_refs))
-                    .is_some() =>
-            {
-                let route = crate::compiler::families::assets::SourceAssetRegistry.route(
-                    "Role",
-                    crate::compiler::families::assets::SourceAssetRole::Rights,
-                )?;
-                Some(SourceAsset {
-                    primary_path: object_path.join(route.relative_path()),
-                    kind: SourceAssetKind::RoleRights,
-                })
-            }
             _ => None,
         };
         if let Some(asset) = asset {
@@ -899,39 +1093,60 @@ pub(super) fn source_assets_from_metadata_text_inner(
     let command_mapped_ids = assets
         .iter()
         .map(|(body_id, _)| body_id.clone())
+        .chain(misses.keys().cloned())
         .collect::<BTreeSet<_>>();
     for suffix in ["0", "1"] {
         let body_id = format!("{uuid}.{suffix}");
         if command_mapped_ids.contains(&body_id) {
             continue;
         }
-        if let Some(row) = rows_by_file_name.get(body_id.as_str())
-            && let Ok(bytes) = decode_hex(&row.binary_hex)
-            && parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
-        {
+        let is_command_relation = crate::compiler::families::assets::SourceAssetRegistry
+            .route_by_suffix(kind, suffix)
+            .is_some_and(|route| {
+                route.role() == crate::compiler::families::assets::SourceAssetRole::CommandInterface
+            });
+        if !is_command_relation || !file_names.contains(body_id.as_str()) {
+            continue;
+        }
+        let parsed = rows_by_file_name
+            .get(body_id.as_str())
+            .and_then(|row| decode_hex(&row.binary_hex).ok())
+            .is_some_and(|bytes| {
+                parse_command_interface_blob(&bytes, command_refs, metadata_refs).is_some()
+            });
+        if parsed {
+            let route = crate::compiler::families::assets::SourceAssetRegistry
+                .route_by_suffix(kind, suffix)?;
             assets.push((
                 body_id,
                 SourceAsset {
-                    primary_path: object_path.join("Ext").join("CommandInterface.xml"),
+                    primary_path: object_path.join(route.relative_path()),
                     kind: SourceAssetKind::CommandInterface,
                 },
             ));
+        } else {
+            misses.insert(body_id, "command_interface_decoder_failed".to_string());
         }
     }
 
+    let preferred_help_body_id = preferred_help_body_id(kind, uuid);
     let mapped_ids = assets
         .iter()
         .map(|(body_id, _)| body_id.clone())
+        .chain(misses.keys().cloned())
         .collect::<BTreeSet<_>>();
-    let object_row_prefix = format!("{uuid}.");
-    let preferred_help_body_id = preferred_help_body_id(kind, uuid);
     for (body_id, body_row) in rows_by_file_name {
-        if !body_id.starts_with(&object_row_prefix) || mapped_ids.contains(*body_id) {
+        let Ok(row_id) = ConfigRowId::parse(body_id) else {
+            continue;
+        };
+        if row_id.owner() != uuid || mapped_ids.contains(*body_id) {
             continue;
         }
-        if let Ok(help_bytes) = decode_hex(&body_row.binary_hex)
-            && parse_help_blob_pages(&help_bytes).is_some()
-        {
+        let is_preferred_help = *body_id == preferred_help_body_id;
+        let help_parsed = decode_hex(&body_row.binary_hex)
+            .ok()
+            .is_some_and(|help_bytes| parse_help_blob_pages(&help_bytes).is_some());
+        if help_parsed {
             if rows_by_file_name.contains_key(preferred_help_body_id.as_str())
                 && *body_id != preferred_help_body_id
             {
@@ -949,22 +1164,35 @@ pub(super) fn source_assets_from_metadata_text_inner(
             continue;
         }
         if let Some(model) = predefined_data_source_model(kind)
-            && (*body_id).strip_prefix(&object_row_prefix) == predefined_data_suffix(kind)
-            && let Ok(predefined_bytes) = decode_hex(&body_row.binary_hex)
-            && parse_predefined_data_blob_with_model(&predefined_bytes, type_index, model).is_some()
+            && Some(row_id.suffix_component()) == predefined_data_suffix(kind)
         {
-            let route = predefined_data_route(kind)?;
-            assets.push((
-                (*body_id).to_string(),
-                SourceAsset {
-                    primary_path: object_path.join(route.relative_path()),
-                    kind: SourceAssetKind::PredefinedData { model },
-                },
-            ));
+            let parsed = decode_hex(&body_row.binary_hex)
+                .ok()
+                .is_some_and(|predefined_bytes| {
+                    parse_predefined_data_blob_with_model(&predefined_bytes, type_index, model)
+                        .is_some()
+                });
+            if parsed {
+                let route = predefined_data_route(kind)?;
+                assets.push((
+                    (*body_id).to_string(),
+                    SourceAsset {
+                        primary_path: object_path.join(route.relative_path()),
+                        kind: SourceAssetKind::PredefinedData { model },
+                    },
+                ));
+            } else {
+                misses.insert(
+                    (*body_id).to_string(),
+                    "predefined_data_decoder_failed".to_string(),
+                );
+            }
+        } else if is_preferred_help {
+            misses.insert((*body_id).to_string(), "help_decoder_failed".to_string());
         }
     }
 
-    Some(assets)
+    Some(SourceAssetDiscovery { assets, misses })
 }
 
 pub(super) fn additional_indexes_body_suffix(kind: &str) -> Option<&'static str> {
@@ -1029,8 +1257,10 @@ pub(super) fn write_source_asset(
     bytes: &[u8],
     parsed_form_body: Option<&ParsedFormBodyBlob>,
     timings: &mut MssqlDumpTimingReport,
-) -> Result<PathBuf> {
+) -> Result<WrittenSourceAsset> {
     let output_dir = context.output_dir;
+    let mut diagnostics = Vec::new();
+    let mut opaque_not_emitted = false;
     match &asset.kind {
         SourceAssetKind::ExtPicture => {
             let picture = extract_ext_picture(bytes).with_context(|| {
@@ -1122,45 +1352,80 @@ pub(super) fn write_source_asset(
             };
             let form_context = FormParseContext::new(
                 context.type_index,
+                context.type_index_collisions,
                 context.dcs_type_index,
                 context.object_refs,
                 context.information_register_field_refs,
                 owner_reference.as_deref(),
             );
-            let xml = extract_form_body_xml_from_body_timed(
-                body,
-                &form_context,
-                Some(timings),
-            )
-            .with_context(|| {
-                format!(
-                    "failed to extract form xml from source asset {}",
-                    asset.primary_path.display()
-                )
-            })?;
-            let path = output_dir.join(&asset.primary_path);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create {}", parent.display()))?;
-            }
-            write_source_xml_file(&path, xml, context.source_version)?;
-            timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
+            let extraction =
+                extract_form_body_xml_from_body_detailed_timed(body, &form_context, Some(timings))
+                    .with_context(|| {
+                        format!(
+                            "failed to extract form xml from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
+            match extraction {
+                DetailedFormBodyExtraction::Emitted {
+                    xml,
+                    diagnostics: extraction_diagnostics,
+                } => {
+                    diagnostics = extraction_diagnostics;
+                    let path = output_dir.join(&asset.primary_path);
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| format!("failed to create {}", parent.display()))?;
+                    }
+                    write_source_xml_file(&path, xml, context.source_version)?;
 
-            let form_items_started = Instant::now();
-            for item_asset in extract_form_item_assets(bytes) {
-                let item_path = output_dir
-                    .join(asset.primary_path.with_extension(""))
-                    .join("Items")
-                    .join(sanitize_source_path_segment(&item_asset.item_name))
-                    .join(&item_asset.file_name);
-                if let Some(parent) = item_path.parent() {
-                    fs::create_dir_all(parent)
-                        .with_context(|| format!("failed to create {}", parent.display()))?;
+                    let form_items_started = Instant::now();
+                    for item_asset in extract_form_item_assets(bytes) {
+                        let item_path = output_dir
+                            .join(asset.primary_path.with_extension(""))
+                            .join("Items")
+                            .join(sanitize_source_path_segment(&item_asset.item_name))
+                            .join(&item_asset.file_name);
+                        if let Some(parent) = item_path.parent() {
+                            fs::create_dir_all(parent).with_context(|| {
+                                format!("failed to create {}", parent.display())
+                            })?;
+                        }
+                        fs::write(&item_path, &item_asset.content)
+                            .with_context(|| format!("failed to write {}", item_path.display()))?;
+                    }
+                    timings.source_asset_form_items_cpu_ms += elapsed_ms(form_items_started);
                 }
-                fs::write(&item_path, &item_asset.content)
-                    .with_context(|| format!("failed to write {}", item_path.display()))?;
+                DetailedFormBodyExtraction::OpaqueNotEmitted {
+                    diagnostics: extraction_diagnostics,
+                } => {
+                    debug_assert!(!extraction_diagnostics.is_empty());
+                    diagnostics = extraction_diagnostics;
+                    opaque_not_emitted = true;
+                }
+                DetailedFormBodyExtraction::Rejected {
+                    diagnostics: extraction_diagnostics,
+                    error,
+                } => {
+                    if context.collect_all_source_asset_diagnostics
+                        && !extraction_diagnostics.is_empty()
+                    {
+                        return Ok(WrittenSourceAsset::RejectedNotEmitted {
+                            primary_path: asset.primary_path.clone(),
+                            diagnostics: extraction_diagnostics,
+                        });
+                    }
+                    let diagnostic_codes = extraction_diagnostics
+                        .iter()
+                        .map(|diagnostic| diagnostic.code)
+                        .collect::<Vec<_>>();
+                    bail!(
+                        "form source asset {} was rejected: {error:?}; diagnostics={diagnostic_codes:?}",
+                        asset.primary_path.display()
+                    );
+                }
             }
-            timings.source_asset_form_items_cpu_ms += elapsed_ms(form_items_started);
+            timings.source_asset_form_xml_cpu_ms += elapsed_ms(form_xml_started);
         }
         SourceAssetKind::Help => {
             let help = parse_help_blob(bytes).with_context(|| {
@@ -1471,12 +1736,7 @@ pub(super) fn write_source_asset(
         }
         SourceAssetKind::MoxelSpreadsheet => {
             let xml =
-                extract_moxel_spreadsheet_xml(bytes, context.object_refs).with_context(|| {
-                    format!(
-                        "failed to extract spreadsheet template from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+                extract_moxel_source_asset_xml(bytes, context.object_refs, &asset.primary_path)?;
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
@@ -1486,7 +1746,56 @@ pub(super) fn write_source_asset(
         }
     }
 
-    Ok(asset.primary_path.clone())
+    if opaque_not_emitted {
+        Ok(WrittenSourceAsset::OpaqueNotEmitted {
+            primary_path: asset.primary_path.clone(),
+            diagnostics,
+        })
+    } else {
+        Ok(WrittenSourceAsset::Emitted {
+            primary_path: asset.primary_path.clone(),
+            diagnostics,
+        })
+    }
+}
+
+fn extract_moxel_source_asset_xml(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    source_path: &Path,
+) -> Result<String> {
+    try_extract_moxel_spreadsheet_xml(bytes, object_refs).with_context(|| {
+        format!(
+            "failed to extract spreadsheet template from source asset {}",
+            source_path.display()
+        )
+    })
+}
+
+#[cfg(test)]
+mod mxl_source_asset_tests {
+    use super::*;
+
+    #[test]
+    fn typed_mxl_diagnostic_survives_source_asset_context() {
+        let error = extract_moxel_source_asset_xml(
+            &[0],
+            &BTreeMap::new(),
+            Path::new("Templates/Example/Ext/Template.xml"),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to extract spreadsheet template from source asset")
+        );
+        let diagnostic = error
+            .chain()
+            .find_map(|source| source.downcast_ref::<MxlDiagnostic>())
+            .expect("typed MXL diagnostic must remain in the anyhow error chain");
+        assert_eq!(diagnostic.stage(), MxlDiagnosticStage::Decoder);
+        assert_eq!(diagnostic.code(), "mxl.decoder.binary-container");
+    }
 }
 
 pub(super) struct HelpPage {
@@ -2754,19 +3063,15 @@ mod predefined_code_tests {
     #[test]
     fn all_predefined_layouts_preserve_numeric_and_text_code_representation() {
         for kind in ["Catalog", "ChartOfAccounts", "ChartOfCalculationTypes"] {
-            let numeric = format_item_code(
-                kind,
-                parse_predefined_code_value(r#"{"N",0}"#).unwrap(),
-            );
+            let numeric =
+                format_item_code(kind, parse_predefined_code_value(r#"{"N",0}"#).unwrap());
             assert!(
                 numeric.contains(r#"<Code xsi:type="xs:decimal">0</Code>"#),
                 "{kind}: {numeric}"
             );
 
-            let text = format_item_code(
-                kind,
-                parse_predefined_code_value(r#"{"S","A01"}"#).unwrap(),
-            );
+            let text =
+                format_item_code(kind, parse_predefined_code_value(r#"{"S","A01"}"#).unwrap());
             assert!(text.contains("<Code>A01</Code>"), "{kind}: {text}");
             assert!(!text.contains(r#"<Code xsi:type="#), "{kind}: {text}");
         }

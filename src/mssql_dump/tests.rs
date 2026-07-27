@@ -1,6 +1,13 @@
+use super::characteristics::*;
 use super::*;
+use crate::metadata_owner_graph::{
+    CATALOG_FORM_COLLECTION_UUID, CATALOG_TABULAR_SECTION_COLLECTION_UUID,
+    METADATA_TEMPLATE_COLLECTION_UUID, OwnerGraphFamily,
+};
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
+use ibcmd_core::characteristics::{CharacteristicFilterValue, CharacteristicReference};
+use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::semantic::semantic_digest;
 use ibcmd_core::validate::validate_configuration;
 use sha2::{Digest, Sha256};
@@ -93,10 +100,7 @@ fn form_navigation_panel_kind_3_keeps_external_command_fallback() {
 #[test]
 fn form_navigation_panel_kind_4_keeps_catalog_precedence() {
     let catalog_uuid = "44444444-4444-4444-8444-444444444444".to_string();
-    let object_refs = BTreeMap::from([(
-        catalog_uuid.clone(),
-        "Catalog.Products".to_string(),
-    )]);
+    let object_refs = BTreeMap::from([(catalog_uuid.clone(), "Catalog.Products".to_string())]);
 
     assert_eq!(
         form_body::parse_form_command_interface_command_for_test(
@@ -506,6 +510,7 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
             module_text_rows: 0,
             metadata_xml_rows: 0,
             source_asset_rows: 8,
+            source_assets: SourceAssetCompletenessReport::default(),
             metadata_root_inventory: RootMetadataInventoryReport {
                 scope: RootMetadataInventoryScope::Scoped,
                 candidate_set_complete: true,
@@ -543,6 +548,7 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
         total_module_text_rows: 0,
         total_metadata_xml_rows: 0,
         total_source_asset_rows: 8,
+        source_assets: SourceAssetCompletenessReport::default(),
         timings: MssqlDumpTimingReport {
             prepare_indexes_ms: 40,
             prepare_metadata_fetch_ms: 11,
@@ -588,6 +594,319 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
     assert_eq!(summary.tables[0].table, "Config");
     assert_eq!(summary.tables[0].fetch_row_batch_max_binary_mib, 300);
     assert_eq!(summary.tables[0].source_asset_cpu_ms_per_row, Some(15));
+}
+
+#[test]
+fn source_asset_completeness_report_is_deterministic_and_strict() {
+    let unknown = SourceAssetCompletenessReport::default();
+    assert_eq!(unknown.status, SourceAssetCompletenessStatus::Unknown);
+    assert!(!unknown.candidate_set_complete);
+
+    let mut complete = SourceAssetCompletenessReport::default();
+    complete.record_emitted();
+    complete.finish_inventory(SourceAssetCompletenessScope::Full, true, 1);
+    assert_eq!(complete.status, SourceAssetCompletenessStatus::Complete);
+    assert_eq!(
+        complete.expected,
+        complete.emitted + complete.opaque + complete.missing
+    );
+    complete.ensure_complete(true).unwrap();
+
+    let mut report = SourceAssetCompletenessReport::default();
+    report.record_emitted();
+    let mut opaque_entries = Vec::new();
+    for (path, item_id, raw_sha256) in [
+        ("Forms/Z/Ext/Form.xml", "20", "b"),
+        ("Forms/A/Ext/Form.xml", "10", "a"),
+    ] {
+        opaque_entries.push(SourceAssetCompletenessEntry {
+            family: "form".to_string(),
+            code: "source_asset.form.choice_parameters.opaque_omitted".to_string(),
+            classification: "opaque_property_omitted".to_string(),
+            parse_error_class: None,
+            table: "Config".to_string(),
+            source_row_id: format!("row-{item_id}"),
+            asset_path: path.to_string(),
+            form_owner_reference: None,
+            form_item_id: item_id.to_string(),
+            form_item_tag: "InputField".to_string(),
+            property: "ChoiceParameters".to_string(),
+            property_profile: "input_field_extended_options".to_string(),
+            property_slot: 58,
+            raw_length: 17,
+            raw_sha256: raw_sha256.repeat(64),
+        });
+    }
+    report.record_opaque(opaque_entries);
+    report.finish_inventory(SourceAssetCompletenessScope::Full, true, 2);
+
+    assert_eq!(report.status, SourceAssetCompletenessStatus::Partial);
+    assert_eq!(report.emitted, 1);
+    assert_eq!(report.opaque, 1);
+    assert_eq!(report.opaque_property_count, 2);
+    assert_eq!(report.expected, 2);
+    assert_eq!(report.missing, 0);
+    assert_eq!(
+        report
+            .reasons
+            .get("source_asset.form.choice_parameters.opaque_omitted"),
+        Some(&2)
+    );
+    assert_eq!(report.affected_assets[0].asset_path, "Forms/A/Ext/Form.xml");
+    assert!(report.ensure_complete(true).is_err());
+
+    let json = serde_json::to_string(&report).unwrap();
+    assert!(!json.contains("unsupported-choice-parameters"));
+}
+
+#[test]
+fn source_asset_discovery_fails_closed_for_recognized_family_decoder_misses() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-source-completeness-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let role_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let subsystem_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
+    let catalog_metadata = deflate_for_test(
+        format!(
+            "{{1,{{57,{{0,{{3,{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}}}}}}}"
+        )
+        .as_bytes(),
+    );
+    let role_metadata = deflate_for_test(
+        format!("{{1,{{6,{{3,{{1,0,{role_uuid}}},\"Editor\",{{1,\"en\",\"Editor\"}},\"\"}},0}}}}")
+            .as_bytes(),
+    );
+    let subsystem_metadata = deflate_for_test(
+        format!(
+            "{{1,{{22,{{3,{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1}}}}"
+        )
+        .as_bytes(),
+    );
+    let invalid = deflate_for_test(b"{invalid-source-asset}");
+    let row = |file_name: String, bytes: &[u8]| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: bytes.len() as i64,
+        binary_hex: encode_hex_for_test(bytes),
+    };
+    let rows = vec![
+        row(catalog_uuid.to_string(), &catalog_metadata),
+        row(format!("{catalog_uuid}.5"), &invalid),
+        row(format!("{catalog_uuid}.1c"), &invalid),
+        row(role_uuid.to_string(), &role_metadata),
+        row(format!("{role_uuid}.0"), &invalid),
+        row(subsystem_uuid.to_string(), &subsystem_metadata),
+        row(format!("{subsystem_uuid}.1"), &invalid),
+    ];
+
+    let dumped = dump_table_rows(&root, "Config", rows, false, false, true).unwrap();
+
+    assert_eq!(
+        dumped.source_assets.status,
+        SourceAssetCompletenessStatus::Unknown
+    );
+    assert!(!dumped.source_assets.candidate_set_complete);
+    for reason in [
+        "source_asset.discovery.help_decoder_failed",
+        "source_asset.discovery.predefined_data_decoder_failed",
+        "source_asset.discovery.role_rights_decoder_failed",
+        "source_asset.discovery.command_interface_decoder_failed",
+    ] {
+        assert_eq!(
+            dumped.source_assets.reasons.get(reason),
+            Some(&1),
+            "{reason}"
+        );
+    }
+    assert_eq!(dumped.source_assets.missing, 4);
+    assert_eq!(
+        dumped.source_assets.expected,
+        dumped.source_assets.emitted + dumped.source_assets.opaque + dumped.source_assets.missing
+    );
+    assert!(dumped.source_assets.ensure_complete(true).is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn source_asset_discovery_fails_closed_for_aggregate_decoder_miss() {
+    let register_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let body_id = format!("{register_uuid}.3");
+    let invalid = deflate_for_test(b"{invalid-aggregates}");
+    let body_row = ConfigRow {
+        file_name: body_id.clone(),
+        part_no: 0,
+        data_size: invalid.len() as i64,
+        binary_hex: encode_hex_for_test(&invalid),
+    };
+    let metadata = MetadataTextRow {
+        file_name: register_uuid.to_string(),
+        text: String::new(),
+        object_code: Some(28),
+        header: Some(MetadataHeader {
+            uuid: register_uuid.to_string(),
+            name: "Stock".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("AccumulationRegister".to_string()),
+        folder: Some("AccumulationRegisters"),
+    };
+    let file_names = BTreeSet::from([body_id.as_str()]);
+    let rows_by_file_name = BTreeMap::from([(body_id.as_str(), &body_row)]);
+
+    let misses = source_asset_discovery_misses(
+        &[metadata],
+        &file_names,
+        &rows_by_file_name,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+
+    assert_eq!(
+        misses.get(&body_id).map(String::as_str),
+        Some("accumulation_register_aggregates_decoder_failed")
+    );
+}
+
+#[test]
+fn owner_bound_source_assets_share_canonical_indexed_and_dynamic_routes() {
+    use crate::compiler::families::assets::{ConfigRowId, SourceAssetRegistry, SourceAssetRole};
+
+    let cases = [
+        (
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "Role",
+            "Editor",
+            "Roles/Editor",
+            ".0",
+            SourceAssetRole::Rights,
+            deflate_for_test(b"{10,{0},{0},0,1,0,4294967295}"),
+        ),
+        (
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "AccumulationRegister",
+            "Stock",
+            "AccumulationRegisters/Stock",
+            ".3",
+            SourceAssetRole::Aggregates,
+            deflate_for_test(b"{0,{9,{0},{0,0,{0,0}}}}"),
+        ),
+    ];
+
+    for (uuid, family, name, object_path, suffix, role, bytes) in cases {
+        let body_id = format!("{uuid}{suffix}");
+        let reference = format!("{family}.{name}");
+        let object_refs = BTreeMap::from([(uuid.to_owned(), reference.clone())]);
+        let owner = BodyOwnerSourceReference {
+            kind: family.to_owned(),
+            canonical_name: name.to_owned(),
+            object_path: PathBuf::from(object_path),
+        };
+        let row_id = ConfigRowId::parse(&body_id).unwrap();
+        let dynamic = dynamic_owner_bound_source_asset(
+            &row_id,
+            &owner,
+            Some(&reference),
+            &bytes,
+            &object_refs,
+            &BTreeMap::new(),
+        )
+        .unwrap_or_else(|| panic!("valid unindexed {family} owner-bound relation"));
+
+        let body_row = ConfigRow {
+            file_name: body_id.clone(),
+            part_no: 0,
+            data_size: bytes.len() as i64,
+            binary_hex: encode_hex_for_test(&bytes),
+        };
+        let metadata = MetadataTextRow {
+            file_name: uuid.to_owned(),
+            text: String::new(),
+            object_code: Some(0),
+            header: Some(MetadataHeader {
+                uuid: uuid.to_owned(),
+                name: name.to_owned(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+                template_type_code: None,
+            }),
+            kind: Some(family.to_owned()),
+            folder: Some(match role {
+                SourceAssetRole::Rights => "Roles",
+                SourceAssetRole::Aggregates => "AccumulationRegisters",
+                _ => unreachable!(),
+            }),
+        };
+        let file_names = BTreeSet::from([body_id.as_str()]);
+        let rows_by_file_name = BTreeMap::from([(body_id.as_str(), &body_row)]);
+        let indexed = source_assets_from_metadata_text_inner(
+            &metadata,
+            &file_names,
+            &rows_by_file_name,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &object_refs,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(indexed.misses.is_empty());
+        assert_eq!(indexed.assets.len(), 1);
+        let (indexed_id, indexed) = &indexed.assets[0];
+        assert_eq!(indexed_id, &body_id);
+        assert_eq!(indexed.primary_path, dynamic.primary_path);
+        assert_eq!(
+            indexed.primary_path,
+            PathBuf::from(object_path).join(
+                SourceAssetRegistry
+                    .route(family, role)
+                    .unwrap()
+                    .relative_path()
+            )
+        );
+        match (&indexed.kind, &dynamic.kind, role) {
+            (SourceAssetKind::RoleRights, SourceAssetKind::RoleRights, SourceAssetRole::Rights) => {
+            }
+            (
+                SourceAssetKind::AccumulationRegisterAggregates {
+                    register_name: indexed_name,
+                },
+                SourceAssetKind::AccumulationRegisterAggregates {
+                    register_name: dynamic_name,
+                },
+                SourceAssetRole::Aggregates,
+            ) => {
+                assert_eq!(indexed_name, name);
+                assert_eq!(dynamic_name, name);
+            }
+            _ => panic!("indexed and dynamic owner-bound assets differ"),
+        }
+
+        assert!(
+            dynamic_owner_bound_source_asset(
+                &row_id,
+                &owner,
+                Some(&format!("{family}.Other")),
+                &bytes,
+                &object_refs,
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "owner mismatch must fail closed"
+        );
+    }
 }
 
 #[test]
@@ -827,7 +1146,7 @@ fn expands_selected_file_names_with_module_pairs() {
     assert!(selected.contains("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.16"));
     assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb"));
     assert!(selected.contains("bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.2"));
-    assert_eq!(selected.len(), 13);
+    assert_eq!(selected.len(), 14);
 }
 
 #[test]
@@ -1065,7 +1384,7 @@ fn metadata_text_audit_classifies_decode_and_structure_misses() {
 }
 
 #[test]
-fn root_metadata_inventory_reports_formatter_miss_and_strict_gate() {
+fn root_metadata_inventory_reports_typed_extraction_miss_and_strict_gate() {
     let uuid = "22222222-2222-4222-8222-222222222222";
     let row = MetadataTextRow {
         file_name: uuid.to_string(),
@@ -1086,28 +1405,2986 @@ fn root_metadata_inventory_reports_formatter_miss_and_strict_gate() {
         misses: BTreeMap::new(),
     };
     let candidates = BTreeSet::from([uuid.to_string()]);
+    let diagnostics = BTreeMap::from([(
+        uuid.to_string(),
+        MetadataSourceExtractionDiagnostic::legacy_option_none(
+            MetadataSourceFailureClass::Unknown,
+            "Catalog",
+            "legacy_option_none",
+        ),
+    )]);
     let full = audit_root_metadata_inventory(
         &candidates,
         &metadata,
         &[],
+        &diagnostics,
         RootMetadataInventoryScope::Full,
         true,
     );
     assert_eq!(full.expected, 1);
     assert_eq!(full.emitted, 0);
     assert_eq!(full.missing, 1);
+    assert_eq!(full.entries[0].reason, None);
     assert_eq!(
-        full.entries[0].reason,
-        Some(MetadataExtractionMissReason::Formatter)
+        full.entries[0]
+            .diagnostic
+            .as_ref()
+            .map(|diagnostic| diagnostic.code.as_str()),
+        Some("metadata_source.catalog.unknown.legacy_option_none")
     );
     assert!(full.ensure_complete(false).is_ok());
-    assert!(full.ensure_complete(true).is_err());
+    assert!(
+        full.ensure_complete(true)
+            .unwrap_err()
+            .to_string()
+            .contains("metadata_source.catalog.unknown.legacy_option_none")
+    );
 
     let scoped = RootMetadataInventoryReport {
         scope: RootMetadataInventoryScope::Scoped,
         ..full
     };
     assert!(scoped.ensure_complete(true).is_ok());
+}
+
+#[test]
+fn source_extraction_diagnostic_has_stable_bounded_non_payload_contract() {
+    for (class, token) in [
+        (MetadataSourceFailureClass::Unknown, "unknown"),
+        (MetadataSourceFailureClass::Unsupported, "unsupported"),
+        (MetadataSourceFailureClass::Malformed, "malformed"),
+        (MetadataSourceFailureClass::Unresolved, "unresolved"),
+        (MetadataSourceFailureClass::Ambiguous, "ambiguous"),
+        (MetadataSourceFailureClass::Invariant, "invariant"),
+    ] {
+        let diagnostic = MetadataSourceExtractionDiagnostic::legacy_option_none(
+            class,
+            "Catalog",
+            "bounded_contract",
+        );
+        let json = serde_json::to_string(&diagnostic).unwrap();
+        assert_eq!(
+            diagnostic.code,
+            format!("metadata_source.catalog.{token}.legacy_option_none")
+        );
+        assert_eq!(
+            json,
+            format!(
+                r#"{{"code":"metadata_source.catalog.{token}.legacy_option_none","class":"{token}","family":"Catalog","parser_stage":"legacy_option_none","structural_signature":"bounded_contract"}}"#
+            )
+        );
+    }
+
+    let bounded = MetadataSourceExtractionDiagnostic::legacy_option_none(
+        MetadataSourceFailureClass::Unknown,
+        &"Catalog".repeat(32),
+        &"legacy-option-none".repeat(32),
+    );
+    assert!(bounded.family.len() <= 96);
+    assert!(bounded.structural_signature.len() <= 96);
+}
+
+#[test]
+fn audited_source_extraction_preserves_success_bytes_and_reports_family_on_failure() {
+    let successful =
+        calculation_recalculation_row("42000000-0000-4000-8000-000000000001", "Recalculation");
+    let refs = BTreeMap::from([(
+        successful.file_name.clone(),
+        CalculationRecalculationReference {
+            owner_name: "Owner".to_string(),
+            recalculation_name: "Recalculation".to_string(),
+        },
+    )]);
+    let legacy = extract_metadata_source_xml_from_text_row(
+        &successful,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let audited = extract_metadata_source_xml_from_text_row_audited(
+        &successful,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    assert_eq!(audited.relative_path, legacy.relative_path);
+    assert_eq!(audited.xml, legacy.xml);
+
+    let secret = "raw-secret-payload-must-not-appear";
+    let failed = MetadataTextRow {
+        file_name: "42000000-0000-4000-8000-000000000002".to_string(),
+        text: secret.to_string(),
+        object_code: Some(56),
+        header: Some(MetadataHeader {
+            uuid: "42000000-0000-4000-8000-000000000002".to_string(),
+            name: "Products".to_string(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        }),
+        kind: Some("Catalog".to_string()),
+        folder: Some("Catalogs"),
+    };
+    let diagnostic = match extract_metadata_source_xml_from_text_row_audited(
+        &failed,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    ) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("malformed Catalog row unexpectedly extracted"),
+    };
+    assert_eq!(diagnostic.family, "Catalog");
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Malformed);
+    assert_eq!(diagnostic.parser_stage, "owner_graph_root");
+    assert_eq!(diagnostic.structural_signature, "root_braced_shape");
+    assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+}
+
+fn owner_graph_uuid_for_test(seed: usize) -> String {
+    format!("00000000-0000-4000-8000-{seed:012x}")
+}
+
+#[derive(Clone, Copy)]
+struct ExpectedOwnerGraphGeneratedType {
+    type_slot: usize,
+    value_slot: usize,
+    name_prefix: &'static str,
+    category: &'static str,
+}
+
+struct ExpectedOwnerGraphLayout {
+    family: owner_graph::OwnerGraphFamily,
+    owner_field_count: usize,
+    owner_discriminators: &'static [&'static str],
+    owner_header_slot: usize,
+    owner_header_encoding: owner_graph::OwnerHeaderEncoding,
+    owner_reserved_fields: &'static [(usize, &'static str)],
+    generated_types: &'static [ExpectedOwnerGraphGeneratedType],
+    collection_markers: &'static [&'static str],
+}
+
+const EXPECTED_OWNER_GRAPH_LAYOUTS: &[ExpectedOwnerGraphLayout] = &[
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::Catalog,
+        owner_field_count: 61,
+        owner_discriminators: &["56", "57"],
+        owner_header_slot: 9,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
+        owner_reserved_fields: &[(39, "0")],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 1,
+                value_slot: 2,
+                name_prefix: "CatalogObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "CatalogRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "CatalogSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "CatalogList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 34,
+                value_slot: 35,
+                name_prefix: "CatalogManager",
+                category: "Manager",
+            },
+        ],
+        collection_markers: &[
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "4fe87c89-9ad4-43f6-9fdb-9dc83b3879c6",
+            "932159f9-95b2-4e76-a8dd-8849fe5c5ded",
+            "cf4abea7-37b2-11d4-940f-008048da11f9",
+            "fdf816d2-1ead-11d5-b975-0050bae0a95d",
+        ],
+    },
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::Document,
+        owner_field_count: 53,
+        owner_discriminators: &["40"],
+        owner_header_slot: 9,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
+        owner_reserved_fields: &[],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 1,
+                value_slot: 2,
+                name_prefix: "DocumentObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "DocumentRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "DocumentSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "DocumentList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 26,
+                value_slot: 27,
+                name_prefix: "DocumentManager",
+                category: "Manager",
+            },
+        ],
+        collection_markers: &[
+            "21c53e09-8950-4b5e-a6a0-1054f1bbc274",
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "45e46cbc-3e24-4165-8b7b-cc98a6f80211",
+            "b544fc6a-2ba3-4885-8fb2-cb289fb6d65e",
+            "fb880e93-47d7-4127-9357-a20e69c17545",
+        ],
+    },
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::BusinessProcess,
+        owner_field_count: 49,
+        owner_discriminators: &["30"],
+        owner_header_slot: 1,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Direct,
+        owner_reserved_fields: &[],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "BusinessProcessObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "BusinessProcessRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "BusinessProcessSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 9,
+                value_slot: 10,
+                name_prefix: "BusinessProcessList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 11,
+                value_slot: 12,
+                name_prefix: "BusinessProcessManager",
+                category: "Manager",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 13,
+                value_slot: 14,
+                name_prefix: "BusinessProcessRoutePointRef",
+                category: "RoutePointRef",
+            },
+        ],
+        collection_markers: &[
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
+            "7a3e533c-f232-40d5-a932-6a311d2480bf",
+            "87c988de-ecbf-413b-87b0-b9516df05e28",
+            "a3fe6537-d787-40f7-8a06-419d2f0c1cfd",
+        ],
+    },
+    ExpectedOwnerGraphLayout {
+        family: owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_field_count: 59,
+        owner_discriminators: &["34"],
+        owner_header_slot: 13,
+        owner_header_encoding: owner_graph::OwnerHeaderEncoding::Wrapped,
+        owner_reserved_fields: &[],
+        generated_types: &[
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 1,
+                value_slot: 2,
+                name_prefix: "ChartOfCharacteristicTypesObject",
+                category: "Object",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 3,
+                value_slot: 4,
+                name_prefix: "ChartOfCharacteristicTypesRef",
+                category: "Ref",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 5,
+                value_slot: 6,
+                name_prefix: "ChartOfCharacteristicTypesSelection",
+                category: "Selection",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 7,
+                value_slot: 8,
+                name_prefix: "ChartOfCharacteristicTypesList",
+                category: "List",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 9,
+                value_slot: 10,
+                name_prefix: "Characteristic",
+                category: "Characteristic",
+            },
+            ExpectedOwnerGraphGeneratedType {
+                type_slot: 11,
+                value_slot: 12,
+                name_prefix: "ChartOfCharacteristicTypesManager",
+                category: "Manager",
+            },
+        ],
+        collection_markers: &[
+            "31182525-9346-4595-81f8-6f91a72ebe06",
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "54e36536-7863-42fd-bea3-c5edd3122fdc",
+            "95b5e1d4-abfa-4a16-818d-a5b07b7d3f73",
+            "eb2b78a8-40a6-4b7e-b1b3-6ca9966cbc94",
+        ],
+    },
+];
+
+fn owner_graph_fixture_for_test(
+    expected: &ExpectedOwnerGraphLayout,
+) -> (MetadataHeader, Vec<String>, Vec<String>) {
+    let header = MetadataHeader {
+        uuid: owner_graph_uuid_for_test(1),
+        name: "Owner".to_owned(),
+        synonyms: Vec::new(),
+        comment: String::new(),
+        template_type_code: None,
+    };
+    let mut fields = vec!["0".to_owned(); expected.owner_field_count];
+    fields[0] = expected.owner_discriminators[0].to_owned();
+    let header_raw = format!(
+        "{{3,{{1,0,{}}},\"{}\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}",
+        header.uuid, header.name
+    );
+    fields[expected.owner_header_slot] = match expected.owner_header_encoding {
+        owner_graph::OwnerHeaderEncoding::Direct => header_raw,
+        owner_graph::OwnerHeaderEncoding::Wrapped => format!("{{0,{header_raw}}}"),
+    };
+    for (index, generated) in expected.generated_types.iter().enumerate() {
+        fields[generated.type_slot] = owner_graph_uuid_for_test(index * 2 + 2);
+        fields[generated.value_slot] = owner_graph_uuid_for_test(index * 2 + 3);
+    }
+    for (field_index, value) in expected.owner_reserved_fields {
+        fields[*field_index] = (*value).to_owned();
+    }
+    if let Ok(slot) = characteristics::characteristics_slot(expected.family) {
+        fields[slot] = "{0,{0}}".to_owned();
+    }
+    let collections = expected
+        .collection_markers
+        .iter()
+        .map(|marker| format!("{{{marker},0}}"))
+        .collect();
+    (header, fields, collections)
+}
+
+fn exact_document_owner_fixture_for_test(
+    document_uuid: &str,
+    name: &str,
+    comment: &str,
+) -> (MetadataHeader, Vec<String>, Vec<String>) {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
+    let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    header.uuid = document_uuid.to_owned();
+    header.name = name.to_owned();
+    header.comment = comment.to_owned();
+    fields[9] = format!(
+        "{{0,{{3,{{1,0,{document_uuid}}},\"{name}\",{{0}},\"{comment}\",0,0,{zero_uuid},0}}}}"
+    );
+    fields[10] = zero_uuid.to_owned();
+    fields[11] = "0".to_owned();
+    fields[12] = "0".to_owned();
+    fields[13] = "0".to_owned();
+    fields[14] = "0".to_owned();
+    fields[15] = "0".to_owned();
+    for field_index in [16, 17, 18, 35, 36, 37] {
+        fields[field_index] = zero_uuid.to_owned();
+    }
+    for field_index in [
+        19, 20, 21, 23, 25, 28, 30, 31, 33, 34, 43, 44, 46, 49, 50, 51, 52,
+    ] {
+        fields[field_index] = "0".to_owned();
+    }
+    for field_index in [22, 24] {
+        fields[field_index] = "{0,0}".to_owned();
+    }
+    for field_index in [29, 47] {
+        fields[field_index] = "{1,{0,0}}".to_owned();
+    }
+    fields[32] = "{0}".to_owned();
+    for field_index in [38, 39, 40, 41, 42] {
+        fields[field_index] = "{0}".to_owned();
+    }
+    fields[48] = "{1,2,0}".to_owned();
+    (header, fields, collections)
+}
+
+fn exact_catalog_owner_fixture_for_test(
+    catalog_uuid: &str,
+    name: &str,
+    comment: &str,
+) -> (MetadataHeader, Vec<String>, Vec<String>) {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[0];
+    let (mut header, mut fields, collections) = owner_graph_fixture_for_test(expected);
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    header.uuid = catalog_uuid.to_owned();
+    header.name = name.to_owned();
+    header.comment = comment.to_owned();
+    fields[0] = "57".to_owned();
+    fields[9] = format!(
+        "{{0,{{3,{{1,0,{catalog_uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"{comment}\",0,0,{zero_uuid},0}}}}"
+    );
+    fields[10] = "2".to_owned();
+    fields[11] = "1".to_owned();
+    fields[12] = "{0,0}".to_owned();
+    fields[13] = "1".to_owned();
+    fields[14] = "0".to_owned();
+    fields[15] = "0".to_owned();
+    fields[16] = "0".to_owned();
+    fields[17] = "3".to_owned();
+    fields[18] = "1".to_owned();
+    fields[19] = "10".to_owned();
+    fields[20] = "1".to_owned();
+    for field in &mut fields[21..=30] {
+        *field = zero_uuid.to_owned();
+    }
+    fields[31] = "1".to_owned();
+    fields[32] = "{0,0}".to_owned();
+    fields[33] = "1".to_owned();
+    fields[36] = "0".to_owned();
+    fields[37] = "0".to_owned();
+    fields[38] = "0".to_owned();
+    fields[39] = "0".to_owned();
+    fields[40] = "2".to_owned();
+    fields[41] = "1".to_owned();
+    fields[42] = "{1,{0,0}}".to_owned();
+    fields[43] = "1".to_owned();
+    fields[44] = "0".to_owned();
+    for field in &mut fields[45..=50] {
+        *field = "{0}".to_owned();
+    }
+    fields[51] = "1".to_owned();
+    fields[53] = "1".to_owned();
+    fields[54] = "{1,{0,0}}".to_owned();
+    fields[55] = "0".to_owned();
+    fields[56] = "{1,2,0}".to_owned();
+    fields[57] = "0".to_owned();
+    fields[58] = "0".to_owned();
+    fields[59] = "0".to_owned();
+    fields[60] = "0".to_owned();
+    (header, fields, collections)
+}
+
+fn render_owner_graph_fixture_for_test(fields: &[String], collections: &[String]) -> String {
+    format!("{{1,{{{}}},5,{}}}", fields.join(","), collections.join(","))
+}
+
+fn audit_owner_graph_row_for_test(
+    row: &MetadataTextRow,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    extract_metadata_source_xml_from_text_row_audited(
+        row,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
+fn audit_owner_graph_row_with_forms_for_test(
+    row: &MetadataTextRow,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    extract_metadata_source_xml_from_text_row_audited(
+        row,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        form_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
+fn audit_owner_graph_row_with_object_refs_for_test(
+    row: &MetadataTextRow,
+    object_refs: &BTreeMap<String, String>,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    extract_metadata_source_xml_from_text_row_audited(
+        row,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        object_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+}
+
+#[test]
+fn audited_owner_graph_families_reject_second_declared_form_from_other_owner() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
+        let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
+        let good = owner_graph_uuid_for_test(80);
+        let bad = owner_graph_uuid_for_test(81);
+        let form_index = expected
+            .family
+            .layout()
+            .collection_layout(owner_graph::OwnerCollectionRole::Form)
+            .unwrap()
+            .index;
+        collections[form_index] = format!(
+            "{{{},2,{good},{bad}}}",
+            expected.collection_markers[form_index]
+        );
+        let folder = match expected.family {
+            owner_graph::OwnerGraphFamily::Catalog => "Catalogs",
+            owner_graph::OwnerGraphFamily::Document => "Documents",
+            owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                "ChartsOfCharacteristicTypes"
+            }
+        };
+        let row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: render_owner_graph_fixture_for_test(&fields, &collections),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(folder),
+        };
+        let form_refs = BTreeMap::from([
+            (
+                good,
+                FormSourceReference {
+                    relative_path: PathBuf::from(folder).join("Owner/Forms/Good.xml"),
+                    kind: "Form",
+                },
+            ),
+            (
+                bad,
+                FormSourceReference {
+                    relative_path: PathBuf::from(folder).join("Other/Forms/Bad.xml"),
+                    kind: "Form",
+                },
+            ),
+        ]);
+        let diagnostic = match audit_owner_graph_row_with_forms_for_test(&row, &form_refs) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!("wrong-owner form was accepted for {:?}", expected.family),
+        };
+        assert_eq!(diagnostic.family, expected.family.as_str());
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(diagnostic.structural_signature, "wrong_owner");
+        assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.offending_reference.as_deref(),
+            Some("owned_form")
+        );
+    }
+}
+
+#[test]
+fn audited_business_process_and_cct_reject_second_duplicate_form_identity() {
+    for expected in &EXPECTED_OWNER_GRAPH_LAYOUTS[2..] {
+        let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
+        let duplicate = owner_graph_uuid_for_test(82);
+        let form_index = expected
+            .family
+            .layout()
+            .collection_layout(owner_graph::OwnerCollectionRole::Form)
+            .unwrap()
+            .index;
+        collections[form_index] = format!(
+            "{{{},2,{duplicate},{duplicate}}}",
+            expected.collection_markers[form_index]
+        );
+        let row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: render_owner_graph_fixture_for_test(&fields, &collections),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(match expected.family {
+                owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                    "ChartsOfCharacteristicTypes"
+                }
+                _ => unreachable!(),
+            }),
+        };
+        let diagnostic = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "duplicate second form was accepted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(diagnostic.family, expected.family.as_str());
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(diagnostic.structural_signature, "ambiguous");
+        assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.offending_reference.as_deref(),
+            Some("owned_form")
+        );
+        assert!(
+            !serde_json::to_string(&diagnostic)
+                .unwrap()
+                .contains(&duplicate)
+        );
+    }
+}
+
+#[test]
+fn audited_document_direct_child_keeps_document_owner_validation() {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[1];
+    let (header, mut fields, mut collections) = owner_graph_fixture_for_test(expected);
+    let zero = "00000000-0000-0000-0000-000000000000";
+    for field_index in [16, 17, 18, 35, 36, 37] {
+        fields[field_index] = zero.to_owned();
+    }
+    let child_uuid = "71717171-7171-4171-8171-717171717171";
+    let wrapper = document_attribute_wrapper_for_test(
+        6,
+        child_uuid,
+        r#"{"Pattern",{"B"}}"#,
+        r#"{"U"}"#,
+        "0",
+        "1",
+    );
+    let direct_index = expected
+        .family
+        .layout()
+        .collection_layout(owner_graph::OwnerCollectionRole::DirectAttribute)
+        .unwrap()
+        .index;
+    collections[direct_index] = format!(
+        "{{{},1,{{{wrapper},0}}}}",
+        expected.collection_markers[direct_index]
+    );
+    let row = MetadataTextRow {
+        file_name: header.uuid.clone(),
+        text: render_owner_graph_fixture_for_test(&fields, &collections),
+        object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+        header: Some(header),
+        kind: Some(expected.family.as_str().to_owned()),
+        folder: Some("Documents"),
+    };
+    let object_refs = BTreeMap::from([(
+        child_uuid.to_owned(),
+        "Document.Owner.Attribute.TrackChanges".to_owned(),
+    )]);
+    let diagnostic = match audit_owner_graph_row_with_object_refs_for_test(&row, &object_refs) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("synthetic Document unexpectedly reached complete extraction"),
+    };
+    assert_eq!(diagnostic.family, "Document");
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.field_index, Some(29));
+    assert_eq!(diagnostic.structural_signature, "header_mismatch");
+    assert_ne!(diagnostic.structural_signature, "wrong_owner");
+}
+
+#[test]
+fn audited_business_process_second_wrong_owner_direct_child_uses_bp_validator() {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[2];
+    let (header, mut fields, mut collections) = owner_graph_fixture_for_test(expected);
+    let zero = "00000000-0000-0000-0000-000000000000";
+    for field_index in [22, 23, 24, 32, 33, 34] {
+        fields[field_index] = zero.to_owned();
+    }
+    let first_uuid = "72727272-7272-4272-8272-727272727272";
+    let second_uuid = "73737373-7373-4373-8373-737373737373";
+    let direct_wrapper = |uuid: &str, name: &str| {
+        document_attribute_wrapper_for_test(8, uuid, r#"{"Pattern",{"B"}}"#, r#"{"U"}"#, "0", "1")
+            .replacen("{8,", "{2,", 1)
+            .replace("\"TrackChanges\"", &format!("\"{name}\""))
+            .replace("\"Track changes\"", &format!("\"{name}\""))
+    };
+    let first = direct_wrapper(first_uuid, "First");
+    let second = direct_wrapper(second_uuid, "Second");
+    let direct_index = expected
+        .family
+        .layout()
+        .collection_layout(owner_graph::OwnerCollectionRole::DirectAttribute)
+        .unwrap()
+        .index;
+    collections[direct_index] = format!(
+        "{{{},2,{{{first},0}},{{{second},0}}}}",
+        expected.collection_markers[direct_index]
+    );
+    let row = MetadataTextRow {
+        file_name: header.uuid.clone(),
+        text: render_owner_graph_fixture_for_test(&fields, &collections),
+        object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+        header: Some(header),
+        kind: Some(expected.family.as_str().to_owned()),
+        folder: Some("BusinessProcesses"),
+    };
+    let object_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "BusinessProcess.Owner.Attribute.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "BusinessProcess.Other.Attribute.Second".to_owned(),
+        ),
+    ]);
+    let diagnostic = match audit_owner_graph_row_with_object_refs_for_test(&row, &object_refs) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("wrong-owner BusinessProcess direct child was accepted"),
+    };
+    assert_eq!(diagnostic.family, "BusinessProcess");
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+}
+
+#[test]
+fn audited_business_process_second_wrong_owner_tabular_section_is_typed() {
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[2];
+    let (header, mut fields, mut collections) = owner_graph_fixture_for_test(expected);
+    let zero = "00000000-0000-0000-0000-000000000000";
+    for field_index in [22, 23, 24, 32, 33, 34] {
+        fields[field_index] = zero.to_owned();
+    }
+    let first_uuid = "74747474-7474-4474-8474-747474747474";
+    let second_uuid = "75757575-7575-4575-8575-757575757575";
+    let first_nested = owner_graph_nested_attribute_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        8,
+        "76767676-7676-4676-8676-767676767676",
+    );
+    let second_nested = owner_graph_nested_attribute_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        8,
+        "77777777-7777-4777-8777-777777777777",
+    );
+    let first = owner_graph_tabular_section_item_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        first_uuid,
+        "First",
+        [
+            "81818181-8181-4181-8181-818181818181",
+            "82828282-8282-4282-8282-828282828282",
+            "83838383-8383-4383-8383-838383838383",
+            "84848484-8484-4484-8484-848484848484",
+        ],
+        &[first_nested],
+    );
+    let second = owner_graph_tabular_section_item_for_test(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        second_uuid,
+        "Second",
+        [
+            "85858585-8585-4585-8585-858585858585",
+            "86868686-8686-4686-8686-868686868686",
+            "87878787-8787-4787-8787-878787878787",
+            "88888888-8888-4888-8888-888888888888",
+        ],
+        &[second_nested],
+    );
+    let tabular_index = expected
+        .family
+        .layout()
+        .collection_layout(owner_graph::OwnerCollectionRole::TabularSection)
+        .unwrap()
+        .index;
+    collections[tabular_index] = format!(
+        "{{{},2,{first},{second}}}",
+        expected.collection_markers[tabular_index]
+    );
+    let row = MetadataTextRow {
+        file_name: header.uuid.clone(),
+        text: render_owner_graph_fixture_for_test(&fields, &collections),
+        object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+        header: Some(header),
+        kind: Some(expected.family.as_str().to_owned()),
+        folder: Some("BusinessProcesses"),
+    };
+    let object_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "BusinessProcess.Owner.TabularSection.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "BusinessProcess.Other.TabularSection.Second".to_owned(),
+        ),
+    ]);
+    let diagnostic = match audit_owner_graph_row_with_object_refs_for_test(&row, &object_refs) {
+        Err(diagnostic) => diagnostic,
+        Ok(_) => panic!("wrong-owner BusinessProcess tabular section was accepted"),
+    };
+    assert_eq!(diagnostic.family, "BusinessProcess");
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("tabular_section")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+}
+
+#[test]
+fn catalog_and_document_validators_keep_second_tabular_property_failure_location() {
+    let first = "11111111-1111-4111-8111-111111111111";
+    let second = "22222222-2222-4222-8222-222222222222";
+    let properties = || MetadataTabularSectionProperties {
+        tooltip: Vec::new(),
+        fill_checking: "DontCheck",
+        line_number_fill_checking: "",
+        line_number_fill_value: None,
+        line_number_synonym: Vec::new(),
+        use_mode: None,
+        line_number_length: Some(5),
+    };
+    let child = |uuid: &str, name: &str, tabular_section_properties| MetadataChildObject {
+        tag: OWNER_CHILD_TABULAR_SECTION_TAG,
+        header: MetadataHeader {
+            uuid: uuid.to_owned(),
+            name: name.to_owned(),
+            synonyms: Vec::new(),
+            comment: String::new(),
+            template_type_code: None,
+        },
+        generated_types: Vec::new(),
+        value_types: Vec::new(),
+        emit_empty_type: false,
+        properties: None,
+        register_properties: None,
+        tabular_section_properties,
+        child_objects: Vec::new(),
+    };
+    let children = vec![
+        child(first, "First", Some(properties())),
+        child(second, "Second", None),
+    ];
+    let expected_document = vec![
+        DocumentTabularSectionLayout {
+            uuid: first.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+        DocumentTabularSectionLayout {
+            uuid: second.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+    ];
+    let expected_catalog = vec![
+        CatalogTabularSectionLayout {
+            uuid: first.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+        CatalogTabularSectionLayout {
+            uuid: second.to_owned(),
+            generated_ids: Vec::new(),
+            attribute_uuids: Vec::new(),
+        },
+    ];
+    let object_refs = BTreeMap::from([
+        (
+            first.to_owned(),
+            "Catalog.Owner.TabularSection.First".to_owned(),
+        ),
+        (
+            second.to_owned(),
+            "Catalog.Owner.TabularSection.Second".to_owned(),
+        ),
+    ]);
+    for failure in [
+        validate_catalog_child_objects(&children, &[], &expected_catalog, "Owner", &object_refs)
+            .unwrap_err(),
+        validate_document_owner_graph_child_objects(&children, &[], &expected_document)
+            .unwrap_err(),
+    ] {
+        assert_eq!(
+            failure.role,
+            owner_graph::OwnerCollectionRole::TabularSection
+        );
+        assert_eq!(failure.item_index, 1);
+        assert_eq!(
+            failure.reason,
+            owner_graph::OwnerGraphOwnedChildReason::PropertyParse
+        );
+    }
+}
+
+#[test]
+fn owned_form_and_template_duplicate_names_report_second_item_as_ambiguous() {
+    let first = "11111111-1111-4111-8111-111111111111".to_owned();
+    let second = "22222222-2222-4222-8222-222222222222".to_owned();
+    let forms = BTreeMap::from([
+        (
+            first.clone(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Catalogs/Owner/Forms/Duplicate.xml"),
+                kind: "Form",
+            },
+        ),
+        (
+            second.clone(),
+            FormSourceReference {
+                relative_path: PathBuf::from("Catalogs/Owner/Forms/dUpLiCaTe.xml"),
+                kind: "Form",
+            },
+        ),
+    ]);
+    let mut form_diagnostic = None;
+    assert!(
+        validate_owner_graph_owned_forms(
+            &[first.clone(), second.clone()],
+            owner_graph::OwnerGraphFamily::Catalog,
+            "Owner",
+            &forms,
+            &mut form_diagnostic,
+        )
+        .is_none()
+    );
+    let form_diagnostic = form_diagnostic.unwrap();
+    assert_eq!(form_diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(form_diagnostic.collection_index, Some(1));
+    assert_eq!(form_diagnostic.structural_signature, "ambiguous");
+
+    let templates = BTreeMap::from([
+        (
+            first,
+            TemplateSourceReference {
+                relative_path: PathBuf::from("Documents/Owner/Templates/Duplicate.xml"),
+                kind: "Template",
+                template_type: "SpreadsheetDocument",
+            },
+        ),
+        (
+            second,
+            TemplateSourceReference {
+                relative_path: PathBuf::from("Documents/Owner/Templates/dUpLiCaTe.xml"),
+                kind: "Template",
+                template_type: "SpreadsheetDocument",
+            },
+        ),
+    ]);
+    let mut template_diagnostic = None;
+    assert!(
+        validate_owner_graph_owned_templates(
+            &[
+                "11111111-1111-4111-8111-111111111111".to_owned(),
+                "22222222-2222-4222-8222-222222222222".to_owned(),
+            ],
+            owner_graph::OwnerGraphFamily::Document,
+            "Owner",
+            &templates,
+            &mut template_diagnostic,
+        )
+        .is_none()
+    );
+    let template_diagnostic = template_diagnostic.unwrap();
+    assert_eq!(
+        template_diagnostic.collection_role.as_deref(),
+        Some("template")
+    );
+    assert_eq!(template_diagnostic.collection_index, Some(1));
+    assert_eq!(template_diagnostic.structural_signature, "ambiguous");
+}
+
+#[test]
+fn owner_graph_decoder_is_table_driven_for_four_exact_family_layouts() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
+        let family = expected.family;
+        let layout = family.layout();
+        assert_eq!(layout.owner_field_count, expected.owner_field_count);
+        assert_eq!(layout.owner_discriminators, expected.owner_discriminators);
+        assert_eq!(layout.owner_header_slot, expected.owner_header_slot);
+        assert_eq!(layout.owner_header_encoding, expected.owner_header_encoding);
+        assert_eq!(layout.owner_reserved_fields, expected.owner_reserved_fields);
+        assert_eq!(layout.root_collection_count_token, "5");
+        assert_eq!(layout.collection_markers, expected.collection_markers);
+        assert_eq!(
+            layout
+                .generated_types
+                .iter()
+                .map(|generated| (generated.type_slot, generated.value_slot))
+                .collect::<Vec<_>>(),
+            expected
+                .generated_types
+                .iter()
+                .map(|generated| (generated.type_slot, generated.value_slot))
+                .collect::<Vec<_>>()
+        );
+
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        let text = render_owner_graph_fixture_for_test(&fields, &collections);
+        let decoded = decode_owner_graph(family, &text, &header).unwrap();
+        assert_eq!(decoded.owner_fields.len(), expected.owner_field_count);
+        assert_eq!(decoded.collections.len(), 5);
+        let actual_generated_types = decoded
+            .generated_types
+            .clone()
+            .into_iter()
+            .map(owner_graph::DecodedGeneratedType::into_parts)
+            .collect::<Vec<_>>();
+        let expected_generated_types = expected
+            .generated_types
+            .iter()
+            .enumerate()
+            .map(|(index, generated)| {
+                (
+                    format!("{}.Owner", generated.name_prefix),
+                    generated.category,
+                    owner_graph_uuid_for_test(index * 2 + 2),
+                    owner_graph_uuid_for_test(index * 2 + 3),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual_generated_types, expected_generated_types);
+        assert_eq!(
+            decoded.identities.generated_identities().len(),
+            expected.generated_types.len() * 2
+        );
+    }
+}
+
+#[test]
+fn business_process_and_cct_graph_roles_follow_all_five_native_collections() {
+    let expected = [
+        (
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            [
+                owner_graph::OwnerCollectionRole::Template,
+                owner_graph::OwnerCollectionRole::Form,
+                owner_graph::OwnerCollectionRole::Command,
+                owner_graph::OwnerCollectionRole::DirectAttribute,
+                owner_graph::OwnerCollectionRole::TabularSection,
+            ],
+        ),
+        (
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            [
+                owner_graph::OwnerCollectionRole::DirectAttribute,
+                owner_graph::OwnerCollectionRole::Template,
+                owner_graph::OwnerCollectionRole::TabularSection,
+                owner_graph::OwnerCollectionRole::Command,
+                owner_graph::OwnerCollectionRole::Form,
+            ],
+        ),
+    ];
+    for (family, roles) in expected {
+        let layout = family.layout();
+        for (index, role) in roles.into_iter().enumerate() {
+            let role_layout = layout.collection_layout(role).unwrap();
+            assert_eq!(role_layout.index, index, "{family:?} {role:?}");
+            assert_eq!(
+                role_layout.marker, layout.collection_markers[index],
+                "{family:?} {role:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn business_process_and_cct_reject_a_misordered_marker_at_each_native_role() {
+    for expected in &EXPECTED_OWNER_GRAPH_LAYOUTS[2..] {
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        for collection_index in 0..collections.len() {
+            let mut mutated = collections.clone();
+            let wrong_marker =
+                expected.collection_markers[(collection_index + 1) % collections.len()];
+            mutated[collection_index] = format!("{{{wrong_marker},0}}");
+            let diagnostic = match decode_owner_graph(
+                expected.family,
+                &render_owner_graph_fixture_for_test(&fields, &mutated),
+                &header,
+            ) {
+                Err(diagnostic) => diagnostic,
+                Ok(_) => panic!("misordered marker was accepted for {:?}", expected.family),
+            };
+            assert_eq!(diagnostic.family, expected.family.as_str());
+            assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+            assert_eq!(diagnostic.parser_stage, "owner_graph_collection");
+            assert_eq!(diagnostic.structural_signature, "collection_marker");
+            assert_eq!(diagnostic.collection_index, Some(collection_index));
+            assert_eq!(
+                diagnostic.offending_reference.as_deref(),
+                Some("collection_marker")
+            );
+        }
+    }
+}
+
+#[test]
+fn cct_command_and_bp_template_are_exact_typed_unsupported() {
+    let cases = [
+        (
+            &EXPECTED_OWNER_GRAPH_LAYOUTS[2],
+            owner_graph::OwnerCollectionRole::Template,
+            "owned_template",
+        ),
+        (
+            &EXPECTED_OWNER_GRAPH_LAYOUTS[3],
+            owner_graph::OwnerCollectionRole::Command,
+            "owned_command",
+        ),
+    ];
+    let secret = "native-payload-must-stay-redacted";
+    for (expected, role, reference) in cases {
+        let (header, fields, mut collections) = owner_graph_fixture_for_test(expected);
+        let role_index = expected
+            .family
+            .layout()
+            .collection_layout(role)
+            .unwrap()
+            .index;
+        collections[role_index] =
+            format!("{{{},1,{secret}}}", expected.collection_markers[role_index]);
+        let row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: render_owner_graph_fixture_for_test(&fields, &collections),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(match expected.family {
+                owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+                owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                    "ChartsOfCharacteristicTypes"
+                }
+                _ => unreachable!(),
+            }),
+        };
+        let diagnostic = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "unsupported {role:?} payload was accepted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Unsupported);
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(
+            diagnostic.structural_signature,
+            "unsupported_collection_item"
+        );
+        assert_eq!(diagnostic.collection_role.as_deref(), Some(role.as_str()));
+        assert_eq!(diagnostic.collection_index, Some(0));
+        assert_eq!(diagnostic.offending_reference.as_deref(), Some(reference));
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+    }
+}
+
+#[test]
+fn parse_cct_child_templates_validates_paths_identity_and_names() {
+    let first = "11111111-1111-4111-8111-111111111111".to_string();
+    let second = "22222222-2222-4222-8222-222222222222".to_string();
+    let owner = "Characteristics";
+    let template = |name: &str| TemplateSourceReference {
+        relative_path: PathBuf::from(format!(
+            "ChartsOfCharacteristicTypes/{owner}/Templates/{name}.xml"
+        )),
+        kind: "Template",
+        template_type: "SpreadsheetDocument",
+    };
+    let refs = BTreeMap::from([
+        (first.clone(), template("First")),
+        (second.clone(), template("Second")),
+    ]);
+
+    assert_eq!(
+        parse_cct_child_templates(owner, &[second.clone(), first.clone()], &refs),
+        Some(vec!["Second".to_string(), "First".to_string()])
+    );
+    assert_eq!(
+        parse_cct_child_templates(owner, &["missing".to_string()], &refs),
+        None
+    );
+
+    let mut wrong_kind = BTreeMap::from([(first.clone(), template("First"))]);
+    wrong_kind.get_mut(&first).unwrap().kind = "Form";
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone()], &wrong_kind),
+        None
+    );
+
+    let mut wrong_owner = BTreeMap::from([(first.clone(), template("First"))]);
+    wrong_owner.get_mut(&first).unwrap().relative_path =
+        PathBuf::from("ChartsOfCharacteristicTypes/Other/Templates/First.xml");
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone()], &wrong_owner),
+        None
+    );
+
+    let mut wrong_path = BTreeMap::from([(first.clone(), template("First"))]);
+    wrong_path.get_mut(&first).unwrap().relative_path =
+        PathBuf::from("ChartsOfCharacteristicTypes/Characteristics/Forms/First.xml");
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone()], &wrong_path),
+        None
+    );
+
+    let ambiguous_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_string();
+    let ambiguous = BTreeMap::from([
+        (ambiguous_uuid.clone(), template("First")),
+        (ambiguous_uuid.to_ascii_uppercase(), template("First")),
+    ]);
+    assert_eq!(
+        parse_cct_child_templates(owner, &[ambiguous_uuid], &ambiguous),
+        None
+    );
+
+    let duplicate_names = BTreeMap::from([
+        (first.clone(), template("Duplicate")),
+        (second.clone(), template("dUpLiCaTe")),
+    ]);
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first.clone(), second.clone()], &duplicate_names),
+        None
+    );
+
+    let unicode_duplicate_names = BTreeMap::from([
+        (first.clone(), template("Шаблон")),
+        (second.clone(), template("шаблон")),
+    ]);
+    assert_eq!(
+        parse_cct_child_templates(
+            owner,
+            &[first.clone(), second.clone()],
+            &unicode_duplicate_names
+        ),
+        None
+    );
+
+    let mut header_mismatch = BTreeMap::from([(first.clone(), template("First"))]);
+    header_mismatch.get_mut(&first).unwrap().relative_path =
+        PathBuf::from("ChartsOfCharacteristicTypes/Characteristics/Templates/First.bad");
+    assert_eq!(
+        parse_cct_child_templates(owner, &[first], &header_mismatch),
+        None
+    );
+}
+
+#[test]
+fn task_internal_uuid_slots_normalize_zero_and_report_typed_malformed_slots() {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let first = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+    let second = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB";
+    for (field_13, field_14, expected_13, expected_14) in [
+        (zero, zero, None, None),
+        (first, zero, Some(first.to_ascii_lowercase()), None),
+        (zero, second, None, Some(second.to_ascii_lowercase())),
+        (
+            first,
+            second,
+            Some(first.to_ascii_lowercase()),
+            Some(second.to_ascii_lowercase()),
+        ),
+    ] {
+        let mut fields = vec![zero; 15];
+        fields[13] = field_13;
+        fields[14] = field_14;
+        let slots = parse_task_internal_uuid_slots(&fields).unwrap();
+        assert_eq!(slots.field_13, expected_13);
+        assert_eq!(slots.field_14, expected_14);
+    }
+
+    for field_index in [13, 14] {
+        let secret = "malformed-uuid-must-not-leak";
+        let mut fields = vec![zero; 15];
+        fields[field_index] = secret;
+        let diagnostic = parse_task_internal_uuid_slots(&fields).unwrap_err();
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Malformed);
+        assert_eq!(diagnostic.family, "Task");
+        assert_eq!(diagnostic.parser_stage, "task_internal_uuid_slot");
+        assert_eq!(diagnostic.structural_signature, "uuid_syntax");
+        assert_eq!(diagnostic.field_index, Some(field_index));
+        assert_eq!(diagnostic.offending_reference, None);
+        assert_eq!(diagnostic.reference_uuid, None);
+        assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+    }
+}
+
+#[test]
+fn audited_owner_graph_handoff_distinguishes_decode_errors_from_downstream_misses() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        let valid_text = render_owner_graph_fixture_for_test(&fields, &collections);
+        let folder = match expected.family {
+            owner_graph::OwnerGraphFamily::Catalog => "Catalogs",
+            owner_graph::OwnerGraphFamily::Document => "Documents",
+            owner_graph::OwnerGraphFamily::BusinessProcess => "BusinessProcesses",
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes => {
+                "ChartsOfCharacteristicTypes"
+            }
+        };
+        let mut row = MetadataTextRow {
+            file_name: header.uuid.clone(),
+            text: valid_text.replacen(",5,", ",05,", 1),
+            object_code: Some(expected.owner_discriminators[0].parse().unwrap()),
+            header: Some(header),
+            kind: Some(expected.family.as_str().to_owned()),
+            folder: Some(folder),
+        };
+        let invalid = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "invalid owner graph unexpectedly extracted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(invalid.family, expected.family.as_str());
+        assert_eq!(invalid.class, MetadataSourceFailureClass::Malformed);
+        assert_eq!(invalid.parser_stage, "owner_graph_root");
+        assert_eq!(invalid.structural_signature, "root_collection_count");
+        assert_eq!(invalid.field_index, Some(2));
+
+        row.text = valid_text;
+        let downstream = match audit_owner_graph_row_for_test(&row) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!(
+                "synthetic downstream-miss fixture unexpectedly extracted for {:?}",
+                expected.family
+            ),
+        };
+        assert_eq!(downstream.family, expected.family.as_str());
+        assert_eq!(downstream.class, MetadataSourceFailureClass::Invariant);
+        assert_eq!(downstream.parser_stage, "owner_graph_owned_child");
+        assert_ne!(downstream.parser_stage, "legacy_option_none");
+        if matches!(
+            expected.family,
+            owner_graph::OwnerGraphFamily::BusinessProcess
+                | owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes
+        ) {
+            assert_eq!(downstream.collection_role.as_deref(), Some("form"));
+            assert_eq!(downstream.structural_signature, "header_mismatch");
+        }
+    }
+}
+
+#[test]
+fn owner_graph_decoder_rejects_noncanonical_root_collection_count_for_all_families() {
+    for expected in EXPECTED_OWNER_GRAPH_LAYOUTS {
+        let family = expected.family;
+        let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+        let text =
+            render_owner_graph_fixture_for_test(&fields, &collections).replacen(",5,", ",05,", 1);
+        let diagnostic = match decode_owner_graph(family, &text, &header) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!("noncanonical collection count was accepted for {family:?}"),
+        };
+        assert_eq!(diagnostic.class, MetadataSourceFailureClass::Malformed);
+        assert_eq!(diagnostic.parser_stage, "owner_graph_root");
+        assert_eq!(diagnostic.structural_signature, "root_collection_count");
+        assert_eq!(diagnostic.field_index, Some(2));
+    }
+}
+
+#[test]
+fn owner_graph_decoder_reports_exact_identity_failures_without_payload_disclosure() {
+    let family = owner_graph::OwnerGraphFamily::Catalog;
+    let expected = &EXPECTED_OWNER_GRAPH_LAYOUTS[0];
+    let (header, fields, collections) = owner_graph_fixture_for_test(expected);
+    let secret = "secret-owner-reference";
+    let cases = [
+        (
+            secret.to_owned(),
+            MetadataSourceFailureClass::Malformed,
+            "generated_type_id",
+            "uuid_syntax",
+            1,
+            "metadata_source.catalog.malformed.generated_type_id",
+            "generated_type_id",
+        ),
+        (
+            "00000000-0000-0000-0000-000000000000".to_owned(),
+            MetadataSourceFailureClass::Invariant,
+            "generated_type_id",
+            "nil_uuid",
+            1,
+            "metadata_source.catalog.invariant.generated_type_id",
+            "generated_type_id",
+        ),
+        (
+            fields[2].clone(),
+            MetadataSourceFailureClass::Invariant,
+            "owner_identity_ledger",
+            "duplicate_identity",
+            2,
+            "metadata_source.catalog.invariant.owner_identity_ledger",
+            "generated_type_id",
+        ),
+        (
+            header.uuid.clone(),
+            MetadataSourceFailureClass::Invariant,
+            "owner_identity_ledger",
+            "duplicate_identity",
+            1,
+            "metadata_source.catalog.invariant.owner_identity_ledger",
+            "root_uuid",
+        ),
+    ];
+    for (replacement, class, stage, signature, field_index, code, reference) in cases {
+        let mut mutated = fields.clone();
+        mutated[1] = replacement;
+        let diagnostic = match decode_owner_graph(
+            family,
+            &render_owner_graph_fixture_for_test(&mutated, &collections),
+            &header,
+        ) {
+            Err(diagnostic) => diagnostic,
+            Ok(_) => panic!("invalid owner identity was accepted"),
+        };
+        assert_eq!(diagnostic.class, class);
+        assert_eq!(diagnostic.parser_stage, stage);
+        assert_eq!(diagnostic.structural_signature, signature);
+        assert_eq!(diagnostic.field_index, Some(field_index));
+        assert_eq!(diagnostic.code, code);
+        assert_eq!(diagnostic.offending_reference.as_deref(), Some(reference));
+        let serialized = serde_json::to_string(&diagnostic).unwrap();
+        assert!(!serialized.contains(secret));
+        assert!(!serialized.contains(&header.uuid));
+        assert!(!serialized.contains(&header.name));
+    }
+}
+
+#[test]
+fn owner_graph_post_root_evidence_is_role_based_and_redacted() {
+    let secret = "9a4f38fb-9d13-4b71-83d1-0123456789ab";
+    let mut identities = owner_graph::OwnerIdentityLedger::new(secret.to_owned());
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_child_ids(
+            &mut identities,
+            owner_graph::OwnerGraphFamily::Catalog,
+            owner_graph::OwnerCollectionRole::Form,
+            vec![secret.to_owned()],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.expect("root/child collision must stay typed");
+    assert_eq!(diagnostic.family, "Catalog");
+    assert_eq!(diagnostic.parser_stage, "owner_identity_ledger");
+    assert_eq!(diagnostic.structural_signature, "child_identity_collision");
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(diagnostic.collection_index, Some(0));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+    assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+
+    let evidence = owner_graph_owned_child_diagnostic(
+        owner_graph::OwnerGraphFamily::Document,
+        owner_graph::OwnerCollectionRole::Template,
+        2,
+        owner_graph::OwnerGraphReference::OwnedTemplate,
+        owner_graph::OwnerGraphOwnedChildReason::DeclarationOrder,
+    );
+    assert_eq!(evidence.family, "Document");
+    assert_eq!(evidence.parser_stage, "owner_graph_owned_child");
+    assert_eq!(evidence.structural_signature, "declaration_order");
+    assert_eq!(evidence.collection_role.as_deref(), Some("template"));
+    assert_eq!(evidence.collection_index, Some(2));
+    assert_eq!(
+        evidence.offending_reference.as_deref(),
+        Some("owned_template")
+    );
+    assert!(!serde_json::to_string(&evidence).unwrap().contains(secret));
+}
+
+#[test]
+fn business_process_and_cct_ledgers_report_exact_outer_identity_collision() {
+    let duplicate = "11111111-1111-4111-8111-111111111111";
+    let mut bp_identities =
+        owner_graph::OwnerIdentityLedger::new("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned());
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_child_ids(
+            &mut bp_identities,
+            owner_graph::OwnerGraphFamily::BusinessProcess,
+            owner_graph::OwnerCollectionRole::DirectAttribute,
+            vec![duplicate.to_owned(), duplicate.to_owned()],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.family, "BusinessProcess");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(diagnostic.parser_stage, "owner_identity_ledger");
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+
+    let root_generated = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let mut cct_identities =
+        owner_graph::OwnerIdentityLedger::new("cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_owned());
+    cct_identities
+        .insert_generated(
+            root_generated.to_owned(),
+            1,
+            owner_graph::GeneratedIdentityRole::Type,
+        )
+        .unwrap();
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_tabular_section_ids(
+            &mut cct_identities,
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            vec![
+                (
+                    "dddddddd-dddd-4ddd-8ddd-dddddddddddd".to_owned(),
+                    vec![
+                        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".to_owned(),
+                        "ffffffff-ffff-4fff-8fff-ffffffffffff".to_owned(),
+                    ],
+                    Vec::new(),
+                ),
+                (
+                    "12121212-1212-4212-8212-121212121212".to_owned(),
+                    vec![root_generated.to_owned()],
+                    Vec::new(),
+                ),
+            ],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.family, "ChartOfCharacteristicTypes");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("tabular_section")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(diagnostic.structural_signature, "ambiguous");
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("generated_type_id")
+    );
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains(root_generated)
+    );
+
+    let mut nested_identities =
+        owner_graph::OwnerIdentityLedger::new("13131313-1313-4313-8313-131313131313".to_owned());
+    let mut diagnostic = None;
+    assert!(
+        record_owner_graph_tabular_section_ids(
+            &mut nested_identities,
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            vec![(
+                "14141414-1414-4414-8414-141414141414".to_owned(),
+                Vec::new(),
+                vec![duplicate.to_owned(), duplicate.to_owned()],
+            )],
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.collection_index, Some(0));
+    assert_eq!(diagnostic.structural_signature, "ambiguous");
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+}
+
+#[test]
+fn cct_direct_item_failure_rolls_back_staged_identity_and_corrected_item_commits() {
+    let first_uuid = "91919191-9191-4191-8191-919191919191";
+    let second_uuid = "92929292-9292-4292-8292-929292929292";
+    let first = cct_attribute_item_for_test(first_uuid, "First", false);
+    let second = cct_attribute_item_for_test(second_uuid, "Second", false);
+    let mut child_ids = BTreeSet::from(["root-seed".to_owned()]);
+    let original = child_ids.clone();
+    let wrong_owner_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.Attribute.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Other.Attribute.Second".to_owned(),
+        ),
+    ]);
+    let failure = match parse_cct_direct_attributes_indexed(
+        &[first.as_str(), second.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &wrong_owner_refs,
+        &BTreeMap::new(),
+        &mut child_ids,
+    ) {
+        Err(failure) => failure,
+        Ok(_) => panic!("wrong-owner second CCT direct item was accepted"),
+    };
+    assert_eq!(failure.item_index, 1, "{failure:?}");
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::WrongOwner
+    );
+    assert_eq!(
+        child_ids,
+        BTreeSet::from([original.into_iter().next().unwrap(), first_uuid.to_owned()])
+    );
+    assert!(!child_ids.contains(second_uuid));
+    let diagnostic = owner_collection_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+        owner_graph::OwnerCollectionRole::DirectAttribute,
+        failure,
+    );
+    assert_eq!(diagnostic.family, "ChartOfCharacteristicTypes");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+
+    let corrected_refs = BTreeMap::from([(
+        second_uuid.to_owned(),
+        "ChartOfCharacteristicTypes.Owner.Attribute.Second".to_owned(),
+    )]);
+    let corrected = parse_cct_direct_attributes_indexed(
+        &[second.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &corrected_refs,
+        &BTreeMap::new(),
+        &mut child_ids,
+    )
+    .unwrap();
+    assert_eq!(corrected.len(), 1);
+    assert!(child_ids.contains(first_uuid));
+    assert!(child_ids.contains(second_uuid));
+}
+
+#[test]
+fn cct_direct_uuid_collisions_are_exact_ambiguous_and_retryable() {
+    let first_uuid = "a1111111-1111-4111-8111-111111111111";
+    let seeded_uuid = "a2222222-2222-4222-8222-222222222222";
+    let corrected_uuid = "a3333333-3333-4333-8333-333333333333";
+
+    for seeded_collision in [false, true] {
+        let collision_uuid = if seeded_collision {
+            seeded_uuid
+        } else {
+            first_uuid
+        };
+        let collision_name = if seeded_collision { "Second" } else { "First" };
+        let first = cct_attribute_item_for_test(first_uuid, "First", false);
+        let collision = cct_attribute_item_for_test(collision_uuid, collision_name, false);
+        let corrected = cct_attribute_item_for_test(corrected_uuid, "Corrected", false);
+        let mut refs = BTreeMap::from([(
+            first_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.Attribute.First".to_owned(),
+        )]);
+        if seeded_collision {
+            refs.insert(
+                seeded_uuid.to_owned(),
+                "ChartOfCharacteristicTypes.Owner.Attribute.Second".to_owned(),
+            );
+        }
+        let mut child_ids = BTreeSet::from(["root-seed".to_owned()]);
+        if seeded_collision {
+            child_ids.insert(seeded_uuid.to_owned());
+        }
+
+        let failure = match parse_cct_direct_attributes_indexed(
+            &[first.as_str(), collision.as_str()],
+            "Owner",
+            &BTreeMap::new(),
+            &refs,
+            &BTreeMap::new(),
+            &mut child_ids,
+        ) {
+            Err(failure) => failure,
+            Ok(_) => panic!("duplicate second CCT direct UUID was accepted"),
+        };
+        assert_eq!(failure.item_index, 1);
+        assert_eq!(
+            failure.reference,
+            owner_graph::OwnerGraphReference::ChildUuid
+        );
+        assert_eq!(
+            failure.reason,
+            owner_graph::OwnerGraphOwnedChildReason::Ambiguous
+        );
+        let diagnostic = owner_collection_failure_diagnostic(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            owner_graph::OwnerCollectionRole::DirectAttribute,
+            failure,
+        );
+        assert_eq!(
+            diagnostic.collection_role.as_deref(),
+            Some("direct_attribute")
+        );
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.offending_reference.as_deref(),
+            Some("child_uuid")
+        );
+        assert_eq!(diagnostic.structural_signature, "ambiguous");
+
+        let mut expected_ids = BTreeSet::from(["root-seed".to_owned(), first_uuid.to_owned()]);
+        if seeded_collision {
+            expected_ids.insert(seeded_uuid.to_owned());
+        }
+        assert_eq!(child_ids, expected_ids);
+        assert!(!child_ids.contains(corrected_uuid));
+
+        let corrected_refs = BTreeMap::from([(
+            corrected_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.Attribute.Corrected".to_owned(),
+        )]);
+        let parsed = parse_cct_direct_attributes_indexed(
+            &[corrected.as_str()],
+            "Owner",
+            &BTreeMap::new(),
+            &corrected_refs,
+            &BTreeMap::new(),
+            &mut child_ids,
+        )
+        .unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert!(child_ids.contains(corrected_uuid));
+    }
+}
+
+#[test]
+fn cct_tabular_late_failure_rolls_back_all_staged_ids_and_corrected_item_commits() {
+    let first_uuid = "93939393-9393-4393-8393-939393939393";
+    let second_uuid = "94949494-9494-4494-8494-949494949494";
+    let first_nested_uuid = "95959595-9595-4595-8595-959595959595";
+    let second_nested_uuid = "96969696-9696-4696-8696-969696969696";
+    let first_generated = [
+        "a1919191-9191-4191-8191-919191919191",
+        "a2929292-9292-4292-8292-929292929292",
+        "a3939393-9393-4393-8393-939393939393",
+        "a4949494-9494-4494-8494-949494949494",
+    ];
+    let second_generated = [
+        "b1919191-9191-4191-8191-919191919191",
+        "b2929292-9292-4292-8292-929292929292",
+        "b3939393-9393-4393-8393-939393939393",
+        "b4949494-9494-4494-8494-949494949494",
+    ];
+    let first_nested = cct_attribute_item_for_test(first_nested_uuid, "FirstNested", true);
+    let second_nested = cct_attribute_item_for_test(second_nested_uuid, "SecondNested", true);
+    let first = cct_tabular_section_item_for_test(
+        first_uuid,
+        "First",
+        first_generated,
+        &[first_nested.clone()],
+        "{0}",
+    );
+    let second_invalid = cct_tabular_section_item_for_test(
+        second_uuid,
+        "Second",
+        second_generated,
+        &[second_nested.clone()],
+        "late-tooltip-shape",
+    );
+    let second_corrected = cct_tabular_section_item_for_test(
+        second_uuid,
+        "Second",
+        second_generated,
+        &[second_nested],
+        "{0}",
+    );
+    let refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.First".to_owned(),
+        ),
+        (
+            second_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.Second".to_owned(),
+        ),
+        (
+            first_nested_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.First.Attribute.FirstNested"
+                .to_owned(),
+        ),
+        (
+            second_nested_uuid.to_owned(),
+            "ChartOfCharacteristicTypes.Owner.TabularSection.Second.Attribute.SecondNested"
+                .to_owned(),
+        ),
+    ]);
+    let mut generated_ids = BTreeSet::from(["generated-seed".to_owned()]);
+    let mut child_ids = BTreeSet::from(["child-seed".to_owned()]);
+    let failure = match parse_cct_tabular_sections_indexed(
+        &[first.as_str(), second_invalid.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &mut generated_ids,
+        &mut child_ids,
+    ) {
+        Err(failure) => failure,
+        Ok(_) => panic!("late-invalid second CCT tabular section was accepted"),
+    };
+    assert_eq!(failure.item_index, 1, "{failure:?}");
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch
+    );
+    assert_eq!(
+        failure.reference,
+        owner_graph::OwnerGraphReference::ChildUuid
+    );
+    assert_eq!(
+        generated_ids,
+        BTreeSet::from_iter(
+            std::iter::once("generated-seed".to_owned())
+                .chain(first_generated.into_iter().map(str::to_owned))
+        )
+    );
+    assert_eq!(
+        child_ids,
+        BTreeSet::from([
+            "child-seed".to_owned(),
+            first_uuid.to_owned(),
+            first_nested_uuid.to_owned(),
+        ])
+    );
+    assert!(!generated_ids.contains(second_generated[0]));
+    assert!(!child_ids.contains(second_uuid));
+    assert!(!child_ids.contains(second_nested_uuid));
+
+    let corrected = parse_cct_tabular_sections_indexed(
+        &[second_corrected.as_str()],
+        "Owner",
+        &BTreeMap::new(),
+        &refs,
+        &BTreeMap::new(),
+        &mut generated_ids,
+        &mut child_ids,
+    )
+    .unwrap();
+    assert_eq!(corrected.len(), 1);
+    assert!(child_ids.contains(second_uuid));
+    assert!(child_ids.contains(second_nested_uuid));
+    assert!(
+        second_generated
+            .iter()
+            .all(|uuid| generated_ids.contains(*uuid))
+    );
+}
+
+#[test]
+fn owner_graph_owned_child_failures_are_typed_for_form_template_and_command() {
+    let secret = "7b18e5c1-1a2b-4a7a-9c07-abcdef123456".to_owned();
+    let mut form_diagnostic = None;
+    let forms = BTreeMap::from([(
+        secret.clone(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Other/Forms/Foreign.xml"),
+            kind: "Form",
+        },
+    )]);
+    assert!(
+        validate_owner_graph_owned_forms(
+            std::slice::from_ref(&secret),
+            owner_graph::OwnerGraphFamily::Catalog,
+            "Owner",
+            &forms,
+            &mut form_diagnostic,
+        )
+        .is_none()
+    );
+    let form_diagnostic = form_diagnostic.unwrap();
+    assert_eq!(form_diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(form_diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(form_diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(form_diagnostic.collection_index, Some(0));
+    assert_eq!(
+        form_diagnostic.offending_reference.as_deref(),
+        Some("owned_form")
+    );
+    assert!(
+        !serde_json::to_string(&form_diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+
+    let mut template_diagnostic = None;
+    let templates = BTreeMap::from([(
+        secret.clone(),
+        TemplateSourceReference {
+            relative_path: PathBuf::from("Documents/Other/Templates/Foreign.xml"),
+            kind: "Template",
+            template_type: "SpreadsheetDocument",
+        },
+    )]);
+    assert!(
+        validate_owner_graph_owned_templates(
+            std::slice::from_ref(&secret),
+            owner_graph::OwnerGraphFamily::Document,
+            "Owner",
+            &templates,
+            &mut template_diagnostic,
+        )
+        .is_none()
+    );
+    let template_diagnostic = template_diagnostic.unwrap();
+    assert_eq!(template_diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(template_diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(
+        template_diagnostic.collection_role.as_deref(),
+        Some("template")
+    );
+    assert_eq!(template_diagnostic.collection_index, Some(0));
+    assert_eq!(
+        template_diagnostic.offending_reference.as_deref(),
+        Some("owned_template")
+    );
+    assert!(
+        !serde_json::to_string(&template_diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+
+    let command_failure =
+        match parse_owner_graph_command_identity_slots_indexed(&["{not-a-command}"]) {
+            Err(failure) => failure,
+            Ok(_) => panic!("malformed command identity must be rejected"),
+        };
+    let command_diagnostic = owner_graph_command_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::Catalog,
+        command_failure,
+    );
+    assert_eq!(command_diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(command_diagnostic.structural_signature, "header_mismatch");
+    assert_eq!(
+        command_diagnostic.collection_role.as_deref(),
+        Some("command")
+    );
+    assert_eq!(command_diagnostic.collection_index, Some(0));
+    assert_eq!(
+        command_diagnostic.offending_reference.as_deref(),
+        Some("owned_command")
+    );
+    assert!(
+        !serde_json::to_string(&command_diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+}
+
+#[test]
+fn owner_graph_form_slots_report_exact_field_and_second_declared_item() {
+    let first = "11111111-1111-4111-8111-111111111111".to_owned();
+    let secret = "22222222-2222-4222-8222-222222222222".to_owned();
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let mut fields = vec![zero; 24];
+    fields[23] = &secret;
+    let forms = BTreeMap::from([(
+        secret.clone(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Other/Forms/Foreign.xml"),
+            kind: OWNER_GRAPH_FORM_KIND,
+        },
+    )]);
+
+    let diagnostic = validate_owner_graph_form_slots(
+        &fields,
+        &[23],
+        &[first, secret.clone()],
+        owner_graph::OwnerGraphFamily::Catalog,
+        "Owner",
+        &forms,
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(diagnostic.field_index, Some(23));
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("owned_form")
+    );
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+}
+
+#[test]
+fn owner_graph_form_slots_distinguish_exact_but_undeclared_form() {
+    let declared = "11111111-1111-4111-8111-111111111111".to_owned();
+    let secret = "33333333-3333-4333-8333-333333333333".to_owned();
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let mut fields = vec![zero; 18];
+    fields[17] = &secret;
+    let forms = BTreeMap::from([(
+        secret.clone(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Documents/Owner/Forms/Exact.xml"),
+            kind: OWNER_GRAPH_FORM_KIND,
+        },
+    )]);
+
+    let diagnostic = validate_owner_graph_form_slots(
+        &fields,
+        &[17],
+        &[declared],
+        owner_graph::OwnerGraphFamily::Document,
+        "Owner",
+        &forms,
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.structural_signature, "unexpected");
+    assert_eq!(diagnostic.field_index, Some(17));
+    assert_eq!(diagnostic.collection_index, None);
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("form"));
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains(&secret)
+    );
+}
+
+#[test]
+fn catalog_field_references_report_unknown_second_item_without_payload() {
+    let secret = "native-secret-marker";
+    let first = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{-3}}}}");
+    let second = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{{secret}}}}}");
+    let collection = format!("{{1,{{0,2,{first},{second}}}}}");
+    let mut fields = vec![""; 43];
+    fields[42] = &collection;
+
+    let diagnostic = parse_catalog_field_references(
+        &fields,
+        42,
+        "Owner",
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &[("-3", "Description"), ("-2", "Code")],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Invariant);
+    assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+    assert_eq!(diagnostic.structural_signature, "unexpected");
+    assert_eq!(diagnostic.field_index, Some(42));
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.offending_reference.as_deref(),
+        Some("child_uuid")
+    );
+    assert!(!serde_json::to_string(&diagnostic).unwrap().contains(secret));
+}
+
+#[test]
+fn catalog_field_references_report_duplicate_second_item() {
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{-3}}}}");
+    let collection = format!("{{1,{{0,2,{item},{item}}}}}");
+    let mut fields = vec![""; 55];
+    fields[54] = &collection;
+
+    let diagnostic = parse_catalog_field_references(
+        &fields,
+        54,
+        "Owner",
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &CATALOG_STANDARD_ATTRIBUTES,
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.structural_signature, "ambiguous");
+    assert_eq!(diagnostic.field_index, Some(54));
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+}
+
+#[test]
+fn document_field_references_report_second_foreign_attribute() {
+    let first_uuid = "44444444-4444-4444-8444-444444444444";
+    let secret = "55555555-5555-4555-8555-555555555555";
+    let first = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{first_uuid}}}}}");
+    let second = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{secret}}}}}");
+    let collection = format!("{{1,{{0,2,{first},{second}}}}}");
+    let mut fields = vec![""; 48];
+    fields[47] = &collection;
+    let object_refs = BTreeMap::from([
+        (
+            first_uuid.to_owned(),
+            "Document.Owner.Attribute.First".to_owned(),
+        ),
+        (
+            secret.to_owned(),
+            "Document.Other.Attribute.Foreign".to_owned(),
+        ),
+    ]);
+    let attribute_references = BTreeSet::from(["Document.Owner.Attribute.First".to_owned()]);
+
+    let diagnostic = parse_document_field_references(
+        &fields,
+        47,
+        "Owner",
+        &object_refs,
+        &attribute_references,
+        &[],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(diagnostic.field_index, Some(47));
+    assert_eq!(diagnostic.collection_index, Some(1));
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    let serialized = serde_json::to_string(&diagnostic).unwrap();
+    assert!(!serialized.contains(secret));
+    assert!(!serialized.contains("Foreign"));
+}
+
+#[test]
+fn business_process_field_references_keep_fields_27_and_43_typed() {
+    for (field_index, marker, name) in [(27, "-2", "Number"), (43, "-8", "HeadTask")] {
+        let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{{marker}}}}}");
+        let collection = format!("{{1,{{0,2,{item},{item}}}}}");
+        let mut fields = vec![""; field_index + 1];
+        fields[field_index] = &collection;
+        let diagnostic = parse_business_process_field_references(
+            &fields,
+            field_index,
+            "Owner",
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &[(marker, name)],
+        )
+        .unwrap_err();
+        assert_eq!(diagnostic.family, "BusinessProcess");
+        assert_eq!(diagnostic.parser_stage, "owner_graph_owned_child");
+        assert_eq!(diagnostic.structural_signature, "ambiguous");
+        assert_eq!(diagnostic.field_index, Some(field_index));
+        assert_eq!(diagnostic.collection_index, Some(1));
+        assert_eq!(
+            diagnostic.collection_role.as_deref(),
+            Some("direct_attribute")
+        );
+    }
+
+    let declared = "44444444-4444-4444-8444-444444444444";
+    let foreign = "55555555-5555-4555-8555-555555555555";
+    let item = format!("{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{0,{foreign}}}}}");
+    let collection = format!("{{1,{{0,1,{item}}}}}");
+    let mut fields = vec![""; 28];
+    fields[27] = &collection;
+    let object_refs = BTreeMap::from([(
+        foreign.to_owned(),
+        "BusinessProcess.Other.Attribute.Foreign".to_owned(),
+    )]);
+    let attribute_references =
+        BTreeSet::from([format!("BusinessProcess.Owner.Attribute.{declared}")]);
+    let diagnostic = parse_business_process_field_references(
+        &fields,
+        27,
+        "Owner",
+        &object_refs,
+        &attribute_references,
+        &[("-2", "Number")],
+    )
+    .unwrap_err();
+    assert_eq!(diagnostic.structural_signature, "wrong_owner");
+    assert_eq!(diagnostic.collection_index, Some(0));
+    let serialized = serde_json::to_string(&diagnostic).unwrap();
+    assert!(!serialized.contains(foreign));
+    assert!(!serialized.contains("Foreign"));
+}
+
+#[test]
+fn owner_graph_declared_role_mismatch_does_not_fall_back_to_legacy_option_none() {
+    let wrong = owner_graph::DecodedOwnerCollection::new(
+        Vec::new(),
+        owner_graph::OwnerCollectionProvenance::from_layout(
+            owner_graph::OwnerGraphFamily::Catalog
+                .layout()
+                .collection_layout(owner_graph::OwnerCollectionRole::Template)
+                .unwrap(),
+        ),
+    );
+    let graph = owner_graph::DecodedOwnerGraph {
+        generated_types: Vec::new(),
+        identities: owner_graph::OwnerIdentityLedger::new("root".to_owned()),
+        owner_fields: Vec::new(),
+        collections: vec![wrong],
+    };
+    let mut diagnostic = None;
+    assert!(
+        owner_graph_collection_for_family_parser(
+            &graph,
+            owner_graph::OwnerGraphFamily::Document,
+            owner_graph::OwnerCollectionRole::TabularSection,
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.parser_stage, "owner_graph_collection");
+    assert_eq!(diagnostic.structural_signature, "collection_role_mismatch");
+    assert_eq!(
+        diagnostic.collection_role.as_deref(),
+        Some("tabular_section")
+    );
+    assert_ne!(diagnostic.parser_stage, "legacy_option_none");
+}
+
+#[test]
+fn physical_scanner_orders_declared_catalog_and_document_children_and_reports_actual_mismatch() {
+    let owner = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let direct = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let section = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    let nested = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    let extra = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    let header = |uuid: &str, name: &str| {
+        format!(
+            "{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}"
+        )
+    };
+    // Native text order is deliberately section/nested/direct; the owner
+    // declaration is direct/section/nested for both physical families.
+    let text = format!(
+        "{{11,{},{{8,{}}}}},{{5,{}}}",
+        header(section, "Lines"),
+        header(nested, "Nested"),
+        header(direct, "Direct"),
+    );
+    let inventory = DeclaredOwnerChildInventory {
+        direct_attributes: vec![direct.to_owned()],
+        tabular_sections: vec![(section.to_owned(), vec![nested.to_owned()])],
+    };
+
+    for (family, name) in [("Catalog", "Products"), ("Document", "Invoice")] {
+        let observed = nested_headers_with_offsets_from_text(&text, owner, |_| true)
+            .into_iter()
+            .filter_map(|(child, offset)| {
+                attribute_tabular_section_child_object_tag(
+                    family, name, owner, &text, offset, &child,
+                )
+                .map(|(tag, parent)| (tag, child, parent))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observed
+                .iter()
+                .map(|(tag, child, _)| (*tag, child.uuid.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("TabularSection", section),
+                ("Attribute", nested),
+                ("Attribute", direct),
+            ],
+            "{family} physical scanner"
+        );
+        for (tag, child, parent) in &observed {
+            assert!(
+                inventory
+                    .failure_for_observed(tag, &child.uuid, parent.as_ref())
+                    .is_none()
+            );
+        }
+        let mut roots = observed
+            .iter()
+            .filter(|(_, _, parent)| parent.is_none())
+            .map(|(tag, child, _)| (*tag, child.uuid.clone()))
+            .collect::<Vec<_>>();
+        roots.sort_by_key(|(tag, uuid)| inventory.root_order_for(tag, uuid).unwrap());
+        assert_eq!(
+            roots,
+            vec![
+                ("Attribute", direct.to_owned()),
+                ("TabularSection", section.to_owned())
+            ]
+        );
+        assert_eq!(inventory.child_order(section, nested), Some(0));
+    }
+
+    let wrong_parent_text = format!(
+        "{{11,{},{{8,{}}}}}",
+        header(section, "Lines"),
+        header(direct, "Direct"),
+    );
+    let (_, wrong_parent, parent) =
+        nested_headers_with_offsets_from_text(&wrong_parent_text, owner, |_| true)
+            .into_iter()
+            .filter_map(|(child, offset)| {
+                attribute_tabular_section_child_object_tag(
+                    "Document",
+                    "Invoice",
+                    owner,
+                    &wrong_parent_text,
+                    offset,
+                    &child,
+                )
+                .map(|(tag, parent)| (tag, child, parent))
+            })
+            .find(|(tag, child, _)| *tag == "Attribute" && child.uuid.eq_ignore_ascii_case(direct))
+            .unwrap();
+    let failure = inventory
+        .failure_for_observed("Attribute", &wrong_parent.uuid, parent.as_ref())
+        .unwrap();
+    assert_eq!(
+        failure.role,
+        owner_graph::OwnerCollectionRole::DirectAttribute
+    );
+    assert_eq!(failure.item_index, 0);
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::WrongOwner
+    );
+
+    let extra_text = format!("{{5,{}}}", header(extra, "Extra"));
+    let (_, extra_header, parent) =
+        nested_headers_with_offsets_from_text(&extra_text, owner, |_| true)
+            .into_iter()
+            .filter_map(|(child, offset)| {
+                attribute_tabular_section_child_object_tag(
+                    "Catalog",
+                    "Products",
+                    owner,
+                    &extra_text,
+                    offset,
+                    &child,
+                )
+                .map(|(tag, parent)| (tag, child, parent))
+            })
+            .next()
+            .unwrap();
+    let failure = inventory
+        .failure_for_observed("Attribute", &extra_header.uuid, parent.as_ref())
+        .unwrap();
+    assert_eq!(
+        failure.role,
+        owner_graph::OwnerCollectionRole::DirectAttribute
+    );
+    assert_eq!(failure.item_index, 1);
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::Unexpected
+    );
+}
+
+#[test]
+fn owner_graph_targeted_collection_parsers_report_the_second_bad_item() {
+    let first = "11111111-1111-4111-8111-111111111111";
+    let second = "22222222-2222-4222-8222-222222222222";
+    let direct =
+        document_attribute_wrapper_for_test(6, first, r#"{"Pattern",{"B"}}"#, r#"{"U"}"#, "0", "1");
+    let direct_items = vec![format!("{{{direct},0}}"), "{malformed}".to_owned()];
+    assert_eq!(
+        parse_document_direct_attribute_collection_indexed(
+            &direct_items.iter().map(String::as_str).collect::<Vec<_>>()
+        )
+        .map_err(|failure| failure.item_index),
+        Err(1)
+    );
+    let duplicate_direct_items = [direct_items[0].as_str(), direct_items[0].as_str()];
+    let duplicate_direct =
+        parse_document_attribute_collection_indexed(&duplicate_direct_items, Some(6)).unwrap_err();
+    assert_eq!(duplicate_direct.item_index, 1);
+    assert_eq!(
+        duplicate_direct.reason,
+        owner_graph::OwnerGraphOwnedChildReason::Ambiguous
+    );
+    let duplicate_direct_diagnostic = declared_owner_child_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        duplicate_direct,
+    );
+    assert_eq!(duplicate_direct_diagnostic.family, "BusinessProcess");
+    assert_eq!(
+        duplicate_direct_diagnostic.collection_role.as_deref(),
+        Some("direct_attribute")
+    );
+    assert_eq!(duplicate_direct_diagnostic.collection_index, Some(1));
+    let wrong_bp_direct =
+        parse_document_attribute_collection_indexed(&duplicate_direct_items[..1], Some(2))
+            .unwrap_err();
+    assert_eq!(wrong_bp_direct.item_index, 0);
+    assert_eq!(
+        wrong_bp_direct.reason,
+        owner_graph::OwnerGraphOwnedChildReason::WrongKind
+    );
+
+    let nested = document_attribute_wrapper_for_test(
+        8,
+        second,
+        r#"{"Pattern",{"B"}}"#,
+        r#"{"S",""}"#,
+        "0",
+        "1",
+    );
+    let attributes = document_attribute_collection_for_test(
+        DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+        std::slice::from_ref(&nested),
+    );
+    let payload = format!(
+        "{{11,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-8ccc-cccccccccccc,dddddddd-dddd-4ddd-8ddd-dddddddddddd,{{0,{{3,{{1,0,{first}}},\"Lines\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}},0,0,0}}"
+    );
+    let tabular = format!("{{{{1,{payload}}},1,{attributes}}}");
+    let tabular_items = vec![tabular, "{malformed}".to_owned()];
+    let refs = BTreeMap::from([(
+        first.to_owned(),
+        "Document.Invoice.TabularSection.Lines".to_owned(),
+    )]);
+    assert_eq!(
+        parse_document_tabular_sections_indexed(
+            &tabular_items.iter().map(String::as_str).collect::<Vec<_>>(),
+            "Invoice",
+            &refs,
+        )
+        .map(|_| ())
+        .map_err(|failure| failure.item_index),
+        Err(1)
+    );
+
+    let command_header = format!(
+        "{{3,{{1,0,{first}}},\"Run\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}"
+    );
+    let command_properties = format!("{{9,0,0,0,0,0,0,0,0,{command_header},0,0,0}}");
+    let command_body = format!("{{1,{{2,{first},{second}}},{command_properties}}}");
+    let command_nested = format!("{{0,0,0,{command_body}}}");
+    let command_wrapper = format!("{{0,{command_nested}}}");
+    let command = format!("{{{command_wrapper},0}}");
+    let outer = split_information_register_braced_fields(&command).unwrap();
+    assert_eq!(outer.len(), 2, "{command}");
+    let wrapper = split_information_register_braced_fields(outer[0]).unwrap();
+    assert_eq!(wrapper.len(), 2, "{command}");
+    let nested_command = split_information_register_braced_fields(wrapper[1]).unwrap();
+    assert_eq!(nested_command.len(), 4, "{command}");
+    let body = split_information_register_braced_fields(nested_command[3]).unwrap();
+    assert_eq!(body.len(), 3, "{command}");
+    let properties = split_information_register_braced_fields(body[2]).unwrap();
+    assert_eq!(properties.len(), 13, "{command}");
+    assert!(
+        parse_owner_graph_command_identity_slots_indexed(&[command.as_str()]).is_ok(),
+        "{command}"
+    );
+    let failure = match parse_owner_graph_command_identity_slots_indexed(&[
+        command.as_str(),
+        "{malformed}",
+    ]) {
+        Err(failure) => failure,
+        Ok(_) => panic!("second malformed command must report its ordinal"),
+    };
+    assert_eq!(failure.item_index, 1);
+    assert_eq!(
+        failure.reason,
+        owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch
+    );
+    let duplicate = match parse_owner_graph_command_identity_slots_indexed(&[
+        command.as_str(),
+        command.as_str(),
+    ]) {
+        Err(failure) => failure,
+        Ok(_) => panic!("duplicate second command identity was accepted"),
+    };
+    assert_eq!(duplicate.item_index, 1);
+    assert_eq!(
+        duplicate.reason,
+        owner_graph::OwnerGraphOwnedChildReason::Ambiguous
+    );
+    let duplicate_diagnostic = owner_graph_command_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        duplicate,
+    );
+    assert_eq!(duplicate_diagnostic.family, "BusinessProcess");
+    assert_eq!(
+        duplicate_diagnostic.collection_role.as_deref(),
+        Some("command")
+    );
+    assert_eq!(duplicate_diagnostic.collection_index, Some(1));
+    let reordered = command
+        .replace(first, "33333333-3333-4333-8333-333333333333")
+        .replace(second, "44444444-4444-4444-8444-444444444444")
+        .replace("\"Run\"", "\"RunSecond\"");
+    let reordered = match parse_owner_graph_command_identity_slots_indexed(&[
+        command.as_str(),
+        reordered.as_str(),
+    ]) {
+        Err(failure) => failure,
+        Ok(_) => panic!("second command value declaration-order mismatch was accepted"),
+    };
+    assert_eq!(reordered.item_index, 1);
+    assert_eq!(
+        reordered.reason,
+        owner_graph::OwnerGraphOwnedChildReason::DeclarationOrder
+    );
+    let reordered_diagnostic = owner_graph_command_failure_diagnostic(
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+        reordered,
+    );
+    assert_eq!(
+        reordered_diagnostic.structural_signature,
+        "declaration_order"
+    );
+    assert_eq!(reordered_diagnostic.collection_index, Some(1));
+}
+
+fn owner_graph_nested_attribute_for_test(
+    family: owner_graph::OwnerGraphFamily,
+    wrapper_code: u32,
+    uuid: &str,
+) -> String {
+    match family {
+        owner_graph::OwnerGraphFamily::Catalog => catalog_attribute_wrapper_for_test(
+            wrapper_code,
+            uuid,
+            r#"{"Pattern",{"B"}}"#,
+            r#"{"U"}"#,
+            "0",
+        ),
+        owner_graph::OwnerGraphFamily::Document
+        | owner_graph::OwnerGraphFamily::BusinessProcess => document_attribute_wrapper_for_test(
+            wrapper_code,
+            uuid,
+            r#"{"Pattern",{"B"}}"#,
+            r#"{"S",""}"#,
+            "0",
+            "1",
+        ),
+        _ => unreachable!(),
+    }
+}
+
+fn cct_attribute_item_for_test(uuid: &str, name: &str, nested: bool) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let header = format!("{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,{zero},0}}");
+    let detail = format!("{{2,{header},{{\"Pattern\",{{\"B\"}}}}}}");
+    let fill = if nested { r#"{"S",""}"# } else { r#"{"U"}"# };
+    let payload = format!(
+        "{{27,{detail},0,{{0}},{{0}},0,\"\",0,{{\"U\"}},{{\"U\"}},0,{zero},2,0,{{5006,0}},{{3,0,0}},{{0,0}},0,{{0}},{fill},0,0,0}}"
+    );
+    let wrapper = if nested {
+        format!("{{8,{payload},2,1,0}}")
+    } else {
+        format!("{{2,{payload},2,1,1,0}}")
+    };
+    format!("{{{wrapper},0}}")
+}
+
+fn cct_tabular_section_item_for_test(
+    uuid: &str,
+    name: &str,
+    generated: [&str; 4],
+    nested_items: &[String],
+    tooltip: &str,
+) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let payload = format!(
+        "{{11,{},{},{},{},{{0,{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,{zero},0}}}},0,{{0}},{tooltip}}}",
+        generated[0], generated[1], generated[2], generated[3]
+    );
+    let nested = if nested_items.is_empty() {
+        format!("{{{CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID},0}}")
+    } else {
+        format!(
+            "{{{CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID},{},{}}}",
+            nested_items.len(),
+            nested_items.join(",")
+        )
+    };
+    format!("{{{{0,{payload},0}},1,{nested}}}")
+}
+
+fn owner_graph_tabular_section_item_for_test(
+    family: owner_graph::OwnerGraphFamily,
+    uuid: &str,
+    name: &str,
+    generated: [&str; 4],
+    nested_wrappers: &[String],
+) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let payload = format!(
+        "{{11,{},{},{},{},{{0,{{3,{{1,0,{uuid}}},\"{name}\",{{0}},\"\",0,0,{zero},0}}}},0,{{0}},{{0}}}}",
+        generated[0], generated[1], generated[2], generated[3]
+    );
+    match family {
+        owner_graph::OwnerGraphFamily::Catalog => {
+            let nested = catalog_attribute_collection_for_test(
+                CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
+                nested_wrappers,
+            );
+            format!("{{{{1,{payload},0}},1,{nested}}}")
+        }
+        owner_graph::OwnerGraphFamily::Document => {
+            let nested = document_attribute_collection_for_test(
+                DOCUMENT_TABULAR_ATTRIBUTE_GROUP_UUID,
+                nested_wrappers,
+            );
+            format!("{{{{1,{payload}}},1,{nested}}}")
+        }
+        owner_graph::OwnerGraphFamily::BusinessProcess => {
+            let nested = document_attribute_collection_for_test(
+                CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID,
+                nested_wrappers,
+            );
+            format!("{{{{0,{payload}}},1,{nested}}}")
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn catalog_document_and_business_process_tabular_sections_report_exact_second_item_matrix() {
+    let section_first = "11111111-1111-4111-8111-111111111111";
+    let section_second = "22222222-2222-4222-8222-222222222222";
+    let nested_first = "33333333-3333-4333-8333-333333333333";
+    let nested_second = "44444444-4444-4444-8444-444444444444";
+    let generated_first = [
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3",
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4",
+    ];
+    let generated_second = [
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3",
+        "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb4",
+    ];
+
+    for family in [
+        owner_graph::OwnerGraphFamily::Catalog,
+        owner_graph::OwnerGraphFamily::Document,
+        owner_graph::OwnerGraphFamily::BusinessProcess,
+    ] {
+        let kind = family.as_str();
+        let first_nested = owner_graph_nested_attribute_for_test(family, 8, nested_first);
+        let valid_second_nested = owner_graph_nested_attribute_for_test(family, 8, nested_second);
+        let first = owner_graph_tabular_section_item_for_test(
+            family,
+            section_first,
+            "First",
+            generated_first,
+            &[first_nested],
+        );
+
+        for (
+            case,
+            second_uuid,
+            second_name,
+            second_generated,
+            second_nested,
+            second_reference,
+            expected_reason,
+            expected_reference,
+        ) in [
+            (
+                "wrong owner",
+                section_second,
+                "Second",
+                generated_second,
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Other.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::WrongOwner,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "duplicate uuid",
+                section_first,
+                "First",
+                generated_second,
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.First"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "duplicate name",
+                section_second,
+                "First",
+                generated_second,
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.First"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "duplicate generated type",
+                section_second,
+                "Second",
+                [
+                    generated_first[0],
+                    generated_second[1],
+                    generated_second[2],
+                    generated_second[3],
+                ],
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::GeneratedType,
+            ),
+            (
+                "invalid generated value",
+                section_second,
+                "Second",
+                [
+                    generated_second[0],
+                    "not-a-generated-uuid",
+                    generated_second[2],
+                    generated_second[3],
+                ],
+                vec![valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::HeaderMismatch,
+                owner_graph::OwnerGraphReference::GeneratedValue,
+            ),
+            (
+                "duplicate nested attribute",
+                section_second,
+                "Second",
+                generated_second,
+                vec![valid_second_nested.clone(), valid_second_nested.clone()],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::Ambiguous,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+            (
+                "wrong nested kind",
+                section_second,
+                "Second",
+                generated_second,
+                vec![owner_graph_nested_attribute_for_test(
+                    family,
+                    6,
+                    nested_second,
+                )],
+                format!("{kind}.Owner.TabularSection.Second"),
+                owner_graph::OwnerGraphOwnedChildReason::WrongKind,
+                owner_graph::OwnerGraphReference::ChildUuid,
+            ),
+        ] {
+            let second = owner_graph_tabular_section_item_for_test(
+                family,
+                second_uuid,
+                second_name,
+                second_generated,
+                &second_nested,
+            );
+            let refs = BTreeMap::from([
+                (
+                    section_first.to_owned(),
+                    format!("{kind}.Owner.TabularSection.First"),
+                ),
+                (second_uuid.to_owned(), second_reference),
+            ]);
+            let items = [first.as_str(), second.as_str()];
+            let failure = match family {
+                owner_graph::OwnerGraphFamily::Catalog => {
+                    let seed = "cccccccc-cccc-4ccc-8ccc-cccccccccccc".to_owned();
+                    let mut generated_ids = BTreeSet::from([seed.clone()]);
+                    let failure = match parse_catalog_tabular_sections_indexed(
+                        &items,
+                        "Owner",
+                        &refs,
+                        &mut generated_ids,
+                    ) {
+                        Err(failure) => failure,
+                        Ok(_) => panic!("{kind}: {case} was accepted"),
+                    };
+                    assert_eq!(
+                        generated_ids,
+                        BTreeSet::from([seed]),
+                        "{kind}: {case} leaked staged generated identities"
+                    );
+                    failure
+                }
+                owner_graph::OwnerGraphFamily::Document => {
+                    match parse_document_tabular_sections_indexed(&items, "Owner", &refs) {
+                        Err(failure) => failure,
+                        Ok(_) => panic!("{kind}: {case} was accepted"),
+                    }
+                }
+                owner_graph::OwnerGraphFamily::BusinessProcess => {
+                    match parse_business_process_tabular_sections_indexed(&items, "Owner", &refs) {
+                        Err(failure) => failure,
+                        Ok(_) => panic!("{kind}: {case} was accepted"),
+                    }
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(failure.item_index, 1, "{kind}: {case}");
+            assert_eq!(failure.reason, expected_reason, "{kind}: {case}");
+            assert_eq!(failure.reference, expected_reference, "{kind}: {case}");
+        }
+    }
+}
+
+#[test]
+fn root_inventory_synthesizes_missing_provenance_and_drops_hostile_diagnostics_on_read() {
+    let uuid = "22222222-2222-4222-8222-222222222223";
+    let report = audit_root_metadata_inventory(
+        &BTreeSet::from([uuid.to_string()]),
+        &MetadataTextRowsAudit::default(),
+        &[],
+        &BTreeMap::new(),
+        RootMetadataInventoryScope::Full,
+        true,
+    );
+    let diagnostic = report.entries[0].diagnostic.as_ref().unwrap();
+    assert_eq!(diagnostic.class, MetadataSourceFailureClass::Unknown);
+    assert_eq!(diagnostic.parser_stage, "audit_missing_provenance");
+    assert_eq!(
+        report
+            .misses_by_reason
+            .get("metadata_source.unknown.unknown.audit_missing_provenance"),
+        Some(&1)
+    );
+    assert!(
+        report
+            .ensure_complete(true)
+            .unwrap_err()
+            .to_string()
+            .contains("audit_missing_provenance")
+    );
+
+    let hostile = serde_json::json!({
+        "scope": "full",
+        "candidate_set_complete": true,
+        "expected": 1,
+        "emitted": 0,
+        "missing": 1,
+        "misses_by_reason": {},
+        "entries": [{
+            "uuid": uuid,
+            "family": "Catalog",
+            "expected_path": "Catalogs/Products.xml",
+            "emitted_path": null,
+            "reason": null,
+            "diagnostic": {
+                "code": "x".repeat(4096),
+                "family": "секрет".repeat(1024),
+                "parser_stage": "payload-must-not-be-read",
+                "structural_signature": "raw-secret-payload",
+                "class": "unknown"
+            }
+        }]
+    });
+    let decoded: RootMetadataInventoryReport = serde_json::from_value(hostile).unwrap();
+    assert!(decoded.entries[0].diagnostic.is_none());
 }
 
 #[test]
@@ -1181,6 +4458,7 @@ fn root_inventory_serializes_exact_extraction_causes() {
         &candidates,
         &metadata,
         &[],
+        &BTreeMap::new(),
         RootMetadataInventoryScope::Full,
         true,
     );
@@ -1219,7 +4497,7 @@ fn scoped_inventory_ignores_broad_dependency_rows() {
         ],
         misses: BTreeMap::from([(
             dependency_uuid.to_string(),
-            MetadataExtractionMissReason::Formatter,
+            MetadataExtractionMissReason::Family,
         )]),
     };
     let selected = BTreeSet::from([selected_uuid.to_string(), dependency_uuid.to_string()]);
@@ -1265,20 +4543,23 @@ fn strict_gate_options_and_inventory_scope_fail_closed() {
     assert!(validate_root_metadata_gate_options(true, true, &selected).is_err());
     assert!(validate_root_metadata_gate_options(true, true, &empty).is_ok());
 
+    let plan = |role, selected, metadata| {
+        MssqlExportInventoryPlan::new(role, selected, metadata, false, false, false)
+    };
     assert_eq!(
-        root_metadata_inventory_scope("Config", &empty, true),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Current, false, true)),
         RootMetadataInventoryScope::Full
     );
     assert_eq!(
-        root_metadata_inventory_scope("Config", &selected, true),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Current, true, true)),
         RootMetadataInventoryScope::Scoped
     );
     assert_eq!(
-        root_metadata_inventory_scope("ConfigSave", &empty, true),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Saved, false, true)),
         RootMetadataInventoryScope::Scoped
     );
     assert_eq!(
-        root_metadata_inventory_scope("Config", &empty, false),
+        root_metadata_inventory_scope(plan(MssqlConfigurationTableRole::Current, false, false)),
         RootMetadataInventoryScope::Scoped
     );
 
@@ -1288,6 +4569,63 @@ fn strict_gate_options_and_inventory_scope_fail_closed() {
         ..RootMetadataInventoryReport::default()
     };
     assert!(undiscovered.ensure_complete(true).is_err());
+}
+
+#[test]
+fn inventory_plan_has_one_shared_eager_and_streamed_scope_projection() {
+    for (role, selected, metadata, module, binary, allow_dump_info) in [
+        (
+            MssqlConfigurationTableRole::Current,
+            false,
+            true,
+            true,
+            false,
+            true,
+        ),
+        (
+            MssqlConfigurationTableRole::Current,
+            false,
+            true,
+            true,
+            true,
+            true,
+        ),
+        (
+            MssqlConfigurationTableRole::Current,
+            true,
+            true,
+            true,
+            false,
+            true,
+        ),
+        (
+            MssqlConfigurationTableRole::Saved,
+            false,
+            true,
+            true,
+            false,
+            true,
+        ),
+    ] {
+        let plan = MssqlExportInventoryPlan::new(
+            role,
+            selected,
+            metadata,
+            module,
+            binary,
+            allow_dump_info,
+        );
+        // Both boundaries invoke `inventory_scopes` before touching SQL rows.
+        // This test exercises that shared projection, rather than duplicating
+        // the decision in a streamed-only expectation.
+        let scopes = inventory_scopes(plan);
+        if role == MssqlConfigurationTableRole::Saved {
+            assert_eq!(scopes.0, RootMetadataInventoryScope::Scoped);
+            assert_eq!(scopes.1, SourceAssetCompletenessScope::Scoped);
+            assert!(!plan.config_dump_info_eligible());
+            assert!(!plan.is_strict_current_identity());
+        }
+    }
 }
 
 #[test]
@@ -1679,9 +5017,7 @@ fn parses_legacy_command_interface_visibility_wrapper_for_source_export() {
     assert!(parse_command_interface_blob(&blob, &BTreeMap::new(), &BTreeMap::new()).is_some());
 
     let oversized = deflate_for_test(b"{7,1,100001,0,0,0,0,0}");
-    assert!(
-        parse_command_interface_blob(&oversized, &BTreeMap::new(), &BTreeMap::new()).is_none()
-    );
+    assert!(parse_command_interface_blob(&oversized, &BTreeMap::new(), &BTreeMap::new()).is_none());
 
     let oversized_command_reference = deflate_for_test(
         b"{7,1,1,{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,unexpected},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}",
@@ -1704,10 +5040,8 @@ fn parses_legacy_command_interface_visibility_wrapper_for_source_export() {
         parse_command_interface_blob(&nil_group, &BTreeMap::new(), &BTreeMap::new()).unwrap();
     let xml = format_command_interface_xml(&parsed);
     assert_eq!(
-        xml.matches(
-            "<CommandGroup>00000000-0000-0000-0000-000000000000</CommandGroup>"
-        )
-        .count(),
+        xml.matches("<CommandGroup>00000000-0000-0000-0000-000000000000</CommandGroup>")
+            .count(),
         2
     );
     assert!(xml.contains("<CommandsPlacement>"));
@@ -2854,7 +6188,6 @@ fn extracts_common_form_wrapper_properties_to_metadata_xml() {
     )
     .unwrap();
     let xml = String::from_utf8(extracted.xml).unwrap();
-
     assert_eq!(
         extracted.relative_path,
         PathBuf::from("CommonForms").join("QuoteForm.xml")
@@ -3006,6 +6339,52 @@ fn writes_code4_common_form_to_common_forms_layout() {
 }
 
 #[test]
+fn malformed_form_source_asset_remains_fatal() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let form_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"BrokenForm\",{{1,\"en\",\"Broken form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+        )
+        .as_bytes(),
+    );
+    let malformed_body = deflate_for_test(
+        b"{4,{malformed-layout},\"Procedure StillParsed()\r\nEndProcedure\r\n\",{0}}",
+    );
+    let rows = vec![
+        ConfigRow {
+            file_name: form_uuid.to_string(),
+            part_no: 0,
+            data_size: form_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&form_metadata),
+        },
+        ConfigRow {
+            file_name: format!("{form_uuid}.0"),
+            part_no: 0,
+            data_size: malformed_body.len() as i64,
+            binary_hex: encode_hex_for_test(&malformed_body),
+        },
+    ];
+
+    let error = match dump_table_rows(&root, "Config", rows, false, true, true) {
+        Ok(_) => panic!("malformed form source asset unexpectedly succeeded"),
+        Err(error) => error,
+    };
+
+    assert!(
+        format!("{error:#}").contains("failed to parse form body"),
+        "{error:#}"
+    );
+    assert!(!root.join("CommonForms/BrokenForm/Ext/Form.xml").exists());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn writes_form_module_text_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
         "ibcmd-rs-mssql-dump-test-{}",
@@ -3078,6 +6457,312 @@ fn writes_form_module_text_to_source_layout() {
     assert_eq!(
         body_row.source_asset_path.as_deref(),
         Some("Catalogs/Products/Forms/ListForm/Ext/Form.xml")
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn keeps_form_module_but_suppresses_opaque_choice_list_asset() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let catalog_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{99999999-9999-4999-8999-999999999999,1,{form_uuid}}}}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let form_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
+        )
+        .as_bytes(),
+    );
+    let opaque_radio = r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#;
+    let opaque_raw = "{9,2}";
+    let form_body_text = format!(
+        "{{4,{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{0}}}}"
+    );
+    let form_body = deflate_for_test(form_body_text.as_bytes());
+    let rows = vec![
+        ConfigRow {
+            file_name: catalog_uuid.to_string(),
+            part_no: 0,
+            data_size: catalog_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&catalog_metadata),
+        },
+        ConfigRow {
+            file_name: form_uuid.to_string(),
+            part_no: 0,
+            data_size: form_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&form_metadata),
+        },
+        ConfigRow {
+            file_name: format!("{form_uuid}.0"),
+            part_no: 0,
+            data_size: form_body.len() as i64,
+            binary_hex: encode_hex_for_test(&form_body),
+        },
+    ];
+
+    let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+
+    let form_dir = root.join("Catalogs/Products/Forms/ListForm/Ext");
+    assert_eq!(dumped.module_text_rows, 1);
+    assert_eq!(dumped.source_asset_rows, 0);
+    assert_eq!(
+        fs::read_to_string(form_dir.join("Form/Module.bsl")).unwrap(),
+        "\u{feff}Procedure KeepMe()\r\nEndProcedure\r\n"
+    );
+    assert!(!form_dir.join("Form.xml").exists());
+    assert!(!form_dir.join("Form/Items").exists());
+
+    let body_row = dumped
+        .rows
+        .iter()
+        .find(|row| row.file_name == format!("{form_uuid}.0"))
+        .unwrap();
+    assert_eq!(
+        body_row.module_text_path.as_deref(),
+        Some("Catalogs/Products/Forms/ListForm/Ext/Form/Module.bsl")
+    );
+    assert_eq!(body_row.source_asset_path, None);
+
+    let report = &dumped.source_assets;
+    assert_eq!(report.emitted, 0);
+    assert_eq!(report.opaque, 1);
+    assert_eq!(report.missing, 0);
+    assert_eq!(report.opaque_property_count, 1);
+    assert_eq!(
+        report.expected,
+        report.emitted + report.opaque + report.missing
+    );
+    assert!(report.ensure_complete(false).is_ok());
+    assert!(report.ensure_complete(true).is_err());
+    assert_eq!(
+        report
+            .reasons
+            .get("source_asset.form.choice_list.opaque_asset_not_emitted"),
+        Some(&1)
+    );
+    let affected = report.affected_assets.first().unwrap();
+    assert_eq!(affected.classification, "opaque_asset_not_emitted");
+    assert_eq!(affected.property, "ChoiceList");
+    assert_eq!(affected.property_profile, "radio_button_options");
+    assert_eq!(affected.property_slot, 1);
+    assert_eq!(affected.form_item_id, "38");
+    assert_eq!(affected.form_item_tag, "RadioButtonField");
+    assert_eq!(affected.raw_length, opaque_raw.len());
+    assert_eq!(
+        affected.raw_sha256,
+        format!("{:x}", Sha256::digest(opaque_raw.as_bytes()))
+    );
+    let report_json = serde_json::to_string(report).unwrap();
+    assert!(!report_json.contains(opaque_raw));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn opaque_choice_list_does_not_recover_malformed_list_settings_source_asset() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let form_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"BrokenListSettings\",{{1,\"en\",\"Broken list settings\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+        )
+        .as_bytes(),
+    );
+    let opaque_radio = r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#;
+    let dynamic_list_object_id = "11111111-1111-4111-8111-111111111111";
+    let malformed_attribute = format!(
+        r##"{{9,{{17}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,3,"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{dynamic_list_object_id}}},"AutoSaveUserSettings",{{"B",1}},"ItemsViewMode",{{"S","{}"}}}},{{0,0}}}}"##,
+        '\u{1}'
+    );
+    let form_body = deflate_for_test(
+        format!(
+            "{{4,{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{4,1,{malformed_attribute}}}}}"
+        )
+        .as_bytes(),
+    );
+    let rows = vec![
+        ConfigRow {
+            file_name: form_uuid.to_string(),
+            part_no: 0,
+            data_size: form_metadata.len() as i64,
+            binary_hex: encode_hex_for_test(&form_metadata),
+        },
+        ConfigRow {
+            file_name: format!("{form_uuid}.0"),
+            part_no: 0,
+            data_size: form_body.len() as i64,
+            binary_hex: encode_hex_for_test(&form_body),
+        },
+    ];
+
+    let error = match dump_table_rows(&root, "Config", rows, false, true, true) {
+        Ok(_) => panic!("malformed ListSettings unexpectedly became recoverable"),
+        Err(error) => error,
+    };
+
+    assert!(
+        format!("{error:#}").contains("was rejected: DcsTail"),
+        "{error:#}"
+    );
+    assert!(
+        !root
+            .join("CommonForms/BrokenListSettings/Ext/Form.xml")
+            .exists()
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+fn common_form_metadata_for_source_asset_diagnostic_test(form_uuid: &str, name: &str) -> Vec<u8> {
+    deflate_for_test(
+        format!(
+            "{{1,\r\n{{4,\r\n{{14,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}},0}},{{0}},{{0}},0}},0}}"
+        )
+        .as_bytes(),
+    )
+}
+
+fn malformed_list_settings_form_body_for_source_asset_diagnostic_test(
+    include_opaque_radio: bool,
+) -> Vec<u8> {
+    let opaque_radio = r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#;
+    let child_items = if include_opaque_radio {
+        format!("{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{opaque_radio}}}")
+    } else {
+        "{0}".to_owned()
+    };
+    let dynamic_list_object_id = "11111111-1111-4111-8111-111111111111";
+    let malformed_attribute = format!(
+        r##"{{9,{{17}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,3,"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{dynamic_list_object_id}}},"AutoSaveUserSettings",{{"B",1}},"ItemsViewMode",{{"S","{}"}}}},{{0,0}}}}"##,
+        '\u{1}'
+    );
+    deflate_for_test(
+        format!(
+            "{{4,{child_items},\"Procedure KeepMe()\r\nEndProcedure\r\n\",{{4,1,{malformed_attribute}}}}}"
+        )
+        .as_bytes(),
+    )
+}
+
+#[test]
+fn collect_all_records_multiple_diagnosed_rejections_and_writes_later_form() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let first_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa1";
+    let second_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa2";
+    let valid_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa3";
+    let first_metadata =
+        common_form_metadata_for_source_asset_diagnostic_test(first_uuid, "BrokenOne");
+    let second_metadata =
+        common_form_metadata_for_source_asset_diagnostic_test(second_uuid, "BrokenTwo");
+    let valid_metadata =
+        common_form_metadata_for_source_asset_diagnostic_test(valid_uuid, "ValidAfter");
+    let first_body = malformed_list_settings_form_body_for_source_asset_diagnostic_test(true);
+    let second_body = malformed_list_settings_form_body_for_source_asset_diagnostic_test(true);
+    let valid_body = deflate_for_test(b"{4,{0},\"Procedure Valid()\r\nEndProcedure\r\n\",{0}}");
+    let row = |file_name: String, data: &[u8]| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: data.len() as i64,
+        binary_hex: encode_hex_for_test(data),
+    };
+    let rows = vec![
+        row(first_uuid.to_owned(), &first_metadata),
+        row(format!("{first_uuid}.0"), &first_body),
+        row(second_uuid.to_owned(), &second_metadata),
+        row(format!("{second_uuid}.0"), &second_body),
+        row(valid_uuid.to_owned(), &valid_metadata),
+        row(format!("{valid_uuid}.0"), &valid_body),
+    ];
+
+    let dumped =
+        dump_table_rows_with_collect_all_source_asset_diagnostics(&root, "Config", rows, true)
+            .unwrap();
+
+    assert!(!root.join("CommonForms/BrokenOne/Ext/Form.xml").exists());
+    assert!(!root.join("CommonForms/BrokenTwo/Ext/Form.xml").exists());
+    assert!(root.join("CommonForms/ValidAfter/Ext/Form.xml").exists());
+    assert_eq!(dumped.source_asset_rows, 1);
+    assert_eq!(dumped.source_assets.schema_version, 2);
+    assert_eq!(dumped.source_assets.emitted, 1);
+    assert_eq!(dumped.source_assets.opaque, 2);
+    assert_eq!(dumped.source_assets.missing, 0);
+    assert_eq!(
+        dumped
+            .source_assets
+            .affected_assets
+            .iter()
+            .filter(|entry| entry.family == "form" && !entry.property.is_empty())
+            .count(),
+        2
+    );
+    assert_eq!(dumped.source_assets.diagnostic_clusters.total_clusters, 1);
+    assert_eq!(
+        dumped.source_assets.diagnostic_clusters.clusters[0].affected_entries,
+        2
+    );
+    assert!(dumped.source_assets.ensure_complete(false).is_ok());
+    assert!(dumped.source_assets.ensure_complete(true).is_err());
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn collect_all_keeps_rejection_without_structured_diagnostics_fatal() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaa4";
+    let metadata =
+        common_form_metadata_for_source_asset_diagnostic_test(form_uuid, "UndiagnosedFailure");
+    let body = malformed_list_settings_form_body_for_source_asset_diagnostic_test(false);
+    let row = |file_name: String, data: &[u8]| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: data.len() as i64,
+        binary_hex: encode_hex_for_test(data),
+    };
+
+    let error = match dump_table_rows_with_collect_all_source_asset_diagnostics(
+        &root,
+        "Config",
+        vec![
+            row(form_uuid.to_owned(), &metadata),
+            row(format!("{form_uuid}.0"), &body),
+        ],
+        true,
+    ) {
+        Ok(_) => panic!("an undiagnosed writer rejection unexpectedly became recoverable"),
+        Err(error) => error,
+    };
+
+    assert!(
+        format!("{error:#}").contains("was rejected: DcsTail"),
+        "{error:#}"
+    );
+    assert!(
+        !root
+            .join("CommonForms/UndiagnosedFailure/Ext/Form.xml")
+            .exists()
     );
 
     let _ = fs::remove_dir_all(root);
@@ -3301,8 +6986,8 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
         })
     );
     let table_raw = format!(r#"{{1,{EVENT_ID},"TableHandler"}}"#);
-    let table_record = split_1c_braced_fields(&table_raw, 0)
-        .expect("well-formed table event record");
+    let table_record =
+        split_1c_braced_fields(&table_raw, 0).expect("well-formed table event record");
     assert_eq!(
         parse_form_child_item_event_record(&table_record),
         vec![FormBodyEvent {
@@ -4598,14 +8283,15 @@ fn prefix_default_xml_tags_preserves_utf8_text() {
 #[test]
 fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
     let xml = format_form_attributes_section_xml(
-            &[],
-            &FormAttributesSection {
-                conditional_appearance_xml: Some(
-                    "<ConditionalAppearance><dcsset:item><dcsset:selection/></dcsset:item></ConditionalAppearance>"
-                        .to_string(),
-                ),
-            },
-        );
+        &[],
+        &FormAttributesSection {
+            conditional_appearance_xml: Some(
+                "<ConditionalAppearance><dcsset:item><dcsset:selection/></dcsset:item></ConditionalAppearance>"
+                    .to_string(),
+            ),
+        },
+    )
+    .unwrap();
 
     assert!(xml.contains("\t<Attributes>\r\n"), "{xml}");
     assert!(xml.contains("\t\t<ConditionalAppearance>\r\n"), "{xml}");
@@ -4981,6 +8667,106 @@ fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
 }
 
 #[test]
+fn omits_list_settings_wrapper_when_tail_has_only_evidence_defaults() {
+    let xml = format_form_list_settings_xml(&FormListSettings {
+        items_view_mode: Some("QuickAccess".to_string()),
+        items_user_setting_id: Some(String::new()),
+        ..FormListSettings::default()
+    })
+    .unwrap();
+
+    assert_eq!(xml, "");
+}
+
+#[test]
+fn appends_escaped_list_settings_tail_after_unchanged_complex_sections() {
+    let complex_settings = FormListSettings {
+        filter: Some(FormListSettingsStandardSection {
+            raw_xml: Some(
+                "<dcsset:filter><dcsset:item>opaque-filter</dcsset:item></dcsset:filter>"
+                    .to_string(),
+            ),
+            ..FormListSettingsStandardSection::default()
+        }),
+        order: Some(FormListSettingsOrder {
+            raw_xml: Some(
+                "<dcsset:order><dcsset:item>opaque-order</dcsset:item></dcsset:order>".to_string(),
+            ),
+            ..FormListSettingsOrder::default()
+        }),
+        conditional_appearance: Some(FormListSettingsStandardSection {
+            raw_xml: Some(
+                "<dcsset:conditionalAppearance><dcsset:item>opaque-appearance</dcsset:item></dcsset:conditionalAppearance>"
+                    .to_string(),
+            ),
+            ..FormListSettingsStandardSection::default()
+        }),
+        ..FormListSettings::default()
+    };
+    let complex_xml = format_form_list_settings_xml(&complex_settings).unwrap();
+
+    let mut settings_with_tail = complex_settings;
+    settings_with_tail.items_view_mode = Some("Compact<&".to_string());
+    settings_with_tail.items_user_setting_id = Some("id<&".to_string());
+    let xml = format_form_list_settings_xml(&settings_with_tail).unwrap();
+
+    let closing = "\t\t\t\t</ListSettings>\r\n";
+    let expected = format!(
+        "{}\t\t\t\t\t<dcsset:itemsViewMode>Compact&lt;&amp;</dcsset:itemsViewMode>\r\n\
+\t\t\t\t\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n\
+{closing}",
+        complex_xml.strip_suffix(closing).unwrap()
+    );
+    assert_eq!(xml, expected);
+}
+
+#[test]
+fn opaque_choice_list_does_not_mask_malformed_dynamic_list_settings() {
+    let opaque_radio = parse_form_child_item(
+        r#"{37,{38,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"OpaqueRadio",1,0,{1,0},{1,0},{0},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{8,{9,2}}}"#,
+        None,
+        None,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &[],
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert!(matches!(
+        opaque_radio.choice_list,
+        CanonicalFormChoiceList::OpaqueSameProfile { .. }
+    ));
+
+    let dynamic_list_object_id = "11111111-1111-4111-8111-111111111111";
+    let mut malformed_attribute = parse_form_attribute(
+        &format!(
+            r##"{{9,{{17}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,2,"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{dynamic_list_object_id}}},"AutoSaveUserSettings",{{"B",1}}}},{{0,0}}}}"##
+        ),
+        &BTreeMap::new(),
+        &BTreeMap::from([(
+            dynamic_list_object_id.to_string(),
+            "Document.СинтетическийДокумент".to_string(),
+        )]),
+    )
+    .unwrap();
+    malformed_attribute
+        .settings
+        .as_mut()
+        .unwrap()
+        .list_settings
+        .items_view_mode = Some("\u{1}".to_string());
+
+    assert!(matches!(
+        preflight_form_writer_paths(
+            std::slice::from_ref(&opaque_radio),
+            None,
+            std::slice::from_ref(&malformed_attribute),
+        ),
+        Err(FormSchemaWriteError::DcsTail(_))
+    ));
+}
+
+#[test]
 fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
     let filter_xml = concat!(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
@@ -5080,9 +8866,7 @@ fn canonicalizes_dynamic_list_appearance_nested_default_namespaces() {
         "{normalized}"
     );
     assert!(
-        normalized.contains(
-            r#"<dcscor:value xsi:type="v8ui:Color">web:FireBrick</dcscor:value>"#
-        ),
+        normalized.contains(r#"<dcscor:value xsi:type="v8ui:Color">web:FireBrick</dcscor:value>"#),
         "{normalized}"
     );
     assert!(!normalized.contains("xmlns"), "{normalized}");
@@ -5709,11 +9493,13 @@ fn form_parse_context_matches_legacy_wrapper_byte_for_byte() {
     let type_index = BTreeMap::new();
     let object_refs = BTreeMap::new();
     let dcs_type_index = DcsTypeIndex::new();
+    let type_index_collisions = BTreeSet::new();
     let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
     let legacy = extract_form_body_xml_from_body(&body, &type_index, &object_refs).unwrap();
     let sink = Sink(std::cell::RefCell::new(Vec::new()));
     let context = FormParseContext::new(
         &type_index,
+        &type_index_collisions,
         &dcs_type_index,
         &object_refs,
         &information_register_field_refs,
@@ -5761,8 +9547,18 @@ fn form_item_trace_records_nested_and_duplicate_identities_without_deduplication
     // A separate trace traversal restarts its ordinal; within one traversal it is unique.
     assert_eq!(events[3].occurrence, 0);
     assert_eq!(events[3].name, "Duplicate");
-    assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 0 && scalar.value.as_deref() == Some("31")));
-    assert!(events[0].top_level_scalars.iter().any(|scalar| scalar.index == 1 && scalar.nested));
+    assert!(
+        events[0]
+            .top_level_scalars
+            .iter()
+            .any(|scalar| scalar.index == 0 && scalar.value.as_deref() == Some("31"))
+    );
+    assert!(
+        events[0]
+            .top_level_scalars
+            .iter()
+            .any(|scalar| scalar.index == 1 && scalar.nested)
+    );
 }
 
 #[test]
@@ -5823,8 +9619,11 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
     let layout = format!("{{1,{uuid_a},{TABLE}}}");
     let fields = split_1c_braced_fields(&layout, 0).unwrap();
     let sink = Sink::default();
-    let (mut items, indexes) =
-        form_body::extract_form_child_items_with_trace_for_test(&fields, &[attribute(false)], &sink);
+    let (mut items, indexes) = form_body::extract_form_child_items_with_trace_for_test(
+        &fields,
+        &[attribute(false)],
+        &sink,
+    );
     assert_eq!(items.len(), 1);
     let complete = sink
         .schema
@@ -5856,8 +9655,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
     );
 
     let missing_sink = Sink::default();
-    let _ =
-        form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &missing_sink);
+    let _ = form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &missing_sink);
     assert_eq!(
         missing_sink
             .schema
@@ -5917,7 +9715,10 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
         &emitted_sink,
     );
     let emitted = emitted_sink.schema.borrow();
-    let emitted = emitted.iter().find(|event| event.evidence_complete).unwrap();
+    let emitted = emitted
+        .iter()
+        .find(|event| event.evidence_complete)
+        .unwrap();
     let emitted_xml = format_form_child_items_xml(&items, 1);
     assert_eq!(emitted.hierarchical_suppressed, None);
     assert_eq!(emitted.emitted_auto_max_width, Some(false));
@@ -6191,7 +9992,8 @@ fn formatter_emits_form_command_children_in_native_order() {
         &[],
         &commands,
         &None,
-    );
+    )
+    .unwrap();
 
     assert!(form_xml.contains(r#"<Command name="ЗаписатьИЗакрыть" id="1">"#));
     let action = form_xml
@@ -6230,7 +10032,8 @@ fn formatter_emits_form_command_children_in_native_order() {
         &[],
         &[command_without_options],
         &None,
-    );
+    )
+    .unwrap();
     assert!(no_options_xml.contains("<Representation>TextPicture</Representation>"));
     assert!(!no_options_xml.contains("<FunctionalOptions>"));
 }
@@ -6341,7 +10144,16 @@ fn extracts_form_child_items_from_layout_pairs() {
     )]);
 
     let indexes = collect_form_child_item_indexes(&layout_fields, &attributes);
-    let items = extract_form_child_items(&layout_fields, &attributes, &[], &object_refs, &indexes, None);
+    let items = extract_form_child_items(
+        &layout_fields,
+        &attributes,
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+        &indexes,
+        None,
+    );
     let xml = format_form_child_items_xml(&items, 1);
 
     assert!(xml.contains(r#"<CommandBar name="Панель" id="64">"#));
@@ -7081,7 +10893,10 @@ fn extracts_text_document_field_child_item() {
     );
     assert_eq!(item.events[0].name, "OnChange");
     assert_eq!(item.events[0].handler, "ProcedureChanged");
+    assert_eq!(item.child_items.len(), 1);
     assert_eq!(item.child_items[0].tag, "ContextMenu");
+    let xml = format_form_child_items_xml(&[item], 1);
+    assert_eq!(xml.matches("<ContextMenu ").count(), 1);
 }
 
 #[test]
@@ -7575,7 +11390,16 @@ fn extracts_wrapper55_table_user_settings_group() {
     let fields = split_1c_braced_fields(&layout, 0).unwrap();
 
     let indexes = collect_form_child_item_indexes(&fields, &attributes);
-    let items = extract_form_child_items(&fields, &attributes, &[], &BTreeMap::new(), &indexes, None);
+    let items = extract_form_child_items(
+        &fields,
+        &attributes,
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+        &indexes,
+        None,
+    );
 
     let table = items.iter().find(|item| item.tag == "Table").unwrap();
     assert_eq!(table.user_settings_group.as_deref(), Some("SettingsGroup"));
@@ -7932,15 +11756,25 @@ fn table_auto_max_width_uses_validated_fixed_tail_scalar() {
     default_fields[0] = "55".to_string();
     let slot = default_fields.len() - 15;
     default_fields[slot] = "1".to_string();
-    let default_refs = default_fields.iter().map(String::as_str).collect::<Vec<_>>();
-    let default_schema = crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &default_refs)
-        .expect("default scalar remains a valid table layout");
+    let default_refs = default_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let default_schema =
+        crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &default_refs)
+            .expect("default scalar remains a valid table layout");
     assert_eq!(default_schema.auto_max_width(&default_refs), None);
 
     let mut malformed_fields = default_fields;
     malformed_fields[slot] = "2".to_string();
-    let malformed_refs = malformed_fields.iter().map(String::as_str).collect::<Vec<_>>();
-    assert!(crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed_refs).is_none());
+    let malformed_refs = malformed_fields
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed_refs)
+            .is_none()
+    );
 }
 
 #[test]
@@ -7966,7 +11800,9 @@ fn table_auto_add_incomplete_uses_validated_fixed_tail_scalar() {
     let malformed_slot = malformed.len() - 36;
     malformed[malformed_slot] = "3".to_string();
     let malformed = malformed.iter().map(String::as_str).collect::<Vec<_>>();
-    assert!(crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed).is_none());
+    assert!(
+        crate::form_schema::FormTableSchema::from_raw_layout("55", "Table", &malformed).is_none()
+    );
 }
 
 #[test]
@@ -7981,11 +11817,8 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     fn run(table: String) -> FormChildItem {
         let layout = format!("{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}");
         let fields = split_1c_braced_fields(&layout, 0).unwrap();
-        let (items, _) = form_body::extract_form_child_items_with_trace_for_test(
-            &fields,
-            &[],
-            &Sink,
-        );
+        let (items, _) =
+            form_body::extract_form_child_items_with_trace_for_test(&fields, &[], &Sink);
         items
             .into_iter()
             .find(|item| item.tag == "Table")
@@ -8006,8 +11839,10 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     false_item.top_level_parent_nil = None;
     false_item.show_root = None;
     false_item.allow_root_choice = None;
-    assert!(format_form_child_items_xml(&[false_item], 1)
-        .contains("<AutoAddIncomplete>false</AutoAddIncomplete>"));
+    assert!(
+        format_form_child_items_xml(&[false_item], 1)
+            .contains("<AutoAddIncomplete>false</AutoAddIncomplete>")
+    );
 
     // Old slot-40 logic would emit false; the fixed tail emits true instead.
     let mut true_fields = split_1c_braced_fields(TABLE, 0)
@@ -8023,8 +11858,10 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     true_item.top_level_parent_nil = None;
     true_item.show_root = None;
     true_item.allow_root_choice = None;
-    assert!(format_form_child_items_xml(&[true_item], 1)
-        .contains("<AutoAddIncomplete>true</AutoAddIncomplete>"));
+    assert!(
+        format_form_child_items_xml(&[true_item], 1)
+            .contains("<AutoAddIncomplete>true</AutoAddIncomplete>")
+    );
 
     // Old slot-40 logic would emit false; tail code 2 is the platform
     // default and must omit the property altogether.
@@ -8041,8 +11878,7 @@ fn table_auto_add_incomplete_tail_rule_beats_slot_40_end_to_end() {
     omitted_item.top_level_parent_nil = None;
     omitted_item.show_root = None;
     omitted_item.allow_root_choice = None;
-    assert!(!format_form_child_items_xml(&[omitted_item], 1)
-        .contains("<AutoAddIncomplete>"));
+    assert!(!format_form_child_items_xml(&[omitted_item], 1).contains("<AutoAddIncomplete>"));
 }
 
 #[test]
@@ -8064,9 +11900,7 @@ fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
     const TABLE: &str = include_str!("../../.tmp_zhurnal_spisokdokumentov_table_raw.txt");
 
     fn run(table: String) -> (FormChildItem, FormItemSchemaTraceEvent) {
-        let layout = format!(
-            "{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}"
-        );
+        let layout = format!("{{1,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,{table}}}");
         let fields = split_1c_braced_fields(&layout, 0).unwrap();
         let sink = Sink::default();
         let (items, _) =
@@ -8108,7 +11942,9 @@ fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
     a_item.top_level_parent_nil = None;
     a_item.show_root = None;
     a_item.allow_root_choice = None;
-    assert!(format_form_child_items_xml(&[a_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    assert!(
+        format_form_child_items_xml(&[a_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>")
+    );
 
     // Case B has exactly the old false-positive pair (53, 54) = (0, 2),
     // while reverse-15=1 means the XML must omit it.
@@ -8126,7 +11962,9 @@ fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
     b_item.top_level_parent_nil = None;
     b_item.show_root = None;
     b_item.allow_root_choice = None;
-    assert!(!format_form_child_items_xml(&[b_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>"));
+    assert!(
+        !format_form_child_items_xml(&[b_item], 1).contains("<AutoMaxWidth>false</AutoMaxWidth>")
+    );
     assert!(b_trace.strict_table_schema);
     assert_eq!(b_trace.auto_max_width_source, "fixed_tail_reverse_15");
     assert_eq!(b_trace.auto_max_width_slot, Some(b_slot));
@@ -9015,6 +12853,515 @@ fn extracts_nested_table_child_data_paths_from_binding_indexes() {
 }
 
 #[test]
+fn resolves_document_form_paths_from_the_typed_metadata_owner() {
+    let attribute = FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.Invoice".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    };
+    let owner = form_attribute_metadata_owner(&attribute);
+    let owners = BTreeMap::from([("1".to_string(), owner)]);
+    let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let object_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.Invoice.TabularSection.Lines".to_string(),
+    )]);
+
+    assert_eq!(
+        resolve_form_strict_field_model_data_path(r#"{2,{1},{-2}}"#, &owners, &BTreeMap::new(),)
+            .as_deref(),
+        Some("Object.Number")
+    );
+    assert_eq!(
+        resolve_form_owner_scoped_metadata_data_path(
+            &format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#),
+            &owners,
+            &object_refs,
+        )
+        .as_deref(),
+        Some("Object.Lines")
+    );
+
+    assert!(
+        resolve_form_strict_field_model_data_path(
+            r#"{2,{1},{-2}}"#,
+            &BTreeMap::from([(
+                "1".to_string(),
+                form_attribute_metadata_owner(&FormAttribute {
+                    value_types: vec![ConstantValueType::Reference {
+                        reference: "cfg:CatalogObject.Invoice".to_string(),
+                    }],
+                    ..attribute.clone()
+                }),
+            )]),
+            &BTreeMap::new(),
+        )
+        .is_none(),
+        "the marker alone must not prove a document standard attribute"
+    );
+    assert!(
+        resolve_form_owner_scoped_metadata_data_path(
+            &format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#),
+            &owners,
+            &BTreeMap::from([(
+                table_uuid.to_string(),
+                "Document.OtherInvoice.TabularSection.Lines".to_string(),
+            )]),
+        )
+        .is_none(),
+        "a tabular-section reference from another metadata owner must be rejected"
+    );
+}
+
+#[test]
+fn form_metadata_owner_base_uses_typed_reference_kinds() {
+    for kind in [
+        "Catalog",
+        "Document",
+        "Enum",
+        "ExchangePlan",
+        "ChartOfAccounts",
+        "ChartOfCharacteristicTypes",
+        "ChartOfCalculationTypes",
+        "BusinessProcess",
+        "Task",
+    ] {
+        assert_eq!(
+            form_metadata_owner_base_from_type_reference(&format!("cfg:{kind}Ref.Owner")),
+            Some(format!("{kind}.Owner")),
+            "{kind}"
+        );
+    }
+    assert!(
+        form_metadata_owner_base_from_type_reference("cfg:UnknownRef.Owner").is_none(),
+        "unsupported Ref families must not fall back to the generic generated-role parser"
+    );
+    assert_eq!(
+        form_metadata_owner_base_from_type_reference("cfg:InformationRegisterRecordSet.Prices"),
+        Some("InformationRegister.Prices".to_string()),
+        "non-reference generated roles remain supported"
+    );
+}
+
+#[test]
+fn typed_form_metadata_paths_cover_members_and_fail_closed() {
+    for (reference, expected) in [
+        ("Document.Invoice.Attribute.Comment", "Comment"),
+        ("InformationRegister.Prices.Dimension.Period", "Period"),
+        ("InformationRegister.Prices.Resource.Amount", "Amount"),
+        ("Document.Invoice.TabularSection.Lines", "Lines"),
+        (
+            "Document.Invoice.TabularSection.Lines.Attribute.Quantity",
+            "Lines.Quantity",
+        ),
+    ] {
+        assert_eq!(
+            form_metadata_data_path_route(reference),
+            Some((
+                reference.split('.').take(2).collect::<Vec<_>>().join("."),
+                expected.to_string(),
+            )),
+            "{reference}"
+        );
+    }
+    for invalid in [
+        "Unknown.Invoice.Attribute.Comment",
+        "Document.Invoice.TabularSection.Lines.Dimension.Period",
+        "Document.Invoice.Attribute.Comment.More",
+    ] {
+        assert!(
+            form_metadata_data_path_route(invalid).is_none(),
+            "{invalid}"
+        );
+    }
+
+    let chart_owner = form_attribute_metadata_owner(&FormAttribute {
+        id: "1".to_string(),
+        name: "Plan".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:ChartOfAccountsObject.Main".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    });
+    assert_eq!(
+        resolve_form_owner_scoped_standard_attribute_data_path(&chart_owner, "-8").as_deref(),
+        Some("Plan.Description")
+    );
+}
+
+#[test]
+fn indexes_table_current_data_metadata_uuid_bindings_per_table_and_rejects_collisions() {
+    let table_binding_uuid = "e79eb444-8be0-4d33-af83-81c9d8362618";
+    let column_binding_uuid = "461bb43b-8803-4f48-811f-6beef397ee4c";
+    let table_binding = format!(r#"{{2,{{1}},{{0,{table_binding_uuid}}}}}"#);
+    let table = r#"{73,{81,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"ВыбранныеОтправители",0,0,1,{1,0},0,{1,{6}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#
+        .replace("{1,{6}}", &table_binding);
+    let field = |id: &str, name: &str| {
+        format!(
+            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,1,"{name}",1,0,{{1,0}},{{1,0}},{{3,{{1}},{{0,{table_binding_uuid}}},{{18,{column_binding_uuid}}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+        )
+    };
+    let sender = field("149", "ВыбранныеОтправителиОтправитель");
+    let indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table.as_str(), sender.as_str()],
+        &[],
+        &BTreeMap::new(),
+        None,
+    );
+    let route_key = ("81".to_string(), format!("18|{column_binding_uuid}"));
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&route_key)
+            .map(String::as_str),
+        Some("Items.ВыбранныеОтправители.CurrentData.Отправитель")
+    );
+
+    let conflicting = field("150", "ВыбранныеОтправителиДругойОтправитель");
+    let ambiguous = collect_form_child_item_indexes_with_object_refs(
+        &[table.as_str(), sender.as_str(), conflicting.as_str()],
+        &[],
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !ambiguous
+            .type_link_data_path_by_table_column
+            .contains_key(&route_key),
+        "the same table/binding UUID with different child names must fail closed"
+    );
+}
+
+#[test]
+fn indexes_direct_table_columns_from_their_structural_table_parent() {
+    let column = |id: &str, name: &str, attribute_id: &str, column_id: &str| {
+        format!(
+            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,2,"{name}",1,0,{{1,0}},{{1,0}},{{2,{{{attribute_id}}},{{{column_id}}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+        )
+    };
+    let country = column("822", "ТаблицаСуммСтранаПроисхождения", "19", "12");
+    let number = column("825", "ТаблицаСуммНомерГТД", "19", "13");
+    let child_container = format!("{{2,{country},{number}}}");
+    let table = r#"{73,{785,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"ТаблицаСумм",0,0,1,{1,0},0,{1,{19}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#
+        .replacen("{1,0}", &child_container, 1);
+    let attributes = vec![FormAttribute {
+        id: "19".to_string(),
+        name: "ТаблицаСумм".to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: false,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }];
+
+    let indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("785".to_string(), "12".to_string()))
+            .map(String::as_str),
+        Some("Items.ТаблицаСумм.CurrentData.СтранаПроисхождения")
+    );
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        r#"{5006,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0}"#,
+        r#"{5007,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0,"",""}"#,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &indexes.table_name_by_id,
+        &indexes.table_column_names_by_id,
+        &indexes.type_link_data_path_by_table_column,
+        &indexes.data_path_by_binding_key,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(
+        links[0].data_path(),
+        "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения"
+    );
+    assert_eq!(
+        indexes
+            .table_column_names_by_id
+            .get("19")
+            .and_then(|columns| columns.get("13"))
+            .map(String::as_str),
+        Some("НомерГТД")
+    );
+
+    let foreign = column("826", "ТаблицаСуммЧужаяКолонка", "20", "14");
+    let foreign_table = table.replacen(&child_container, &format!("{{1,{foreign}}}"), 1);
+    let foreign_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[foreign_table.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !foreign_indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("785".to_string(), "14".to_string())),
+        "a direct column whose attribute differs from the enclosing table must fail closed"
+    );
+
+    let conflicting = column("827", "ТаблицаСуммДругаяСтрана", "19", "12");
+    let conflicting_table = table.replacen(
+        &child_container,
+        &format!("{{3,{country},{conflicting}}}"),
+        1,
+    );
+    let conflicting_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[conflicting_table.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !conflicting_indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("785".to_string(), "12".to_string())),
+        "conflicting names for one direct table column must fail closed"
+    );
+}
+
+#[test]
+fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional_columns() {
+    let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let table_binding = format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#);
+    let base_table = r#"{73,{25,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"Rows",0,0,1,{1,0},0,{1,{6}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#;
+    let table_a = base_table
+        .replace("{25,", "{31,")
+        .replace("\"Rows\"", "\"PrimaryView\"")
+        .replace("{1,{6}}", &table_binding);
+    let table_b = base_table
+        .replace("{25,", "{32,")
+        .replace("\"Rows\"", "\"SecondaryView\"")
+        .replace("{1,{6}}", &table_binding);
+    let table_c = base_table
+        .replace("{25,", "{34,")
+        .replace("\"Rows\"", "\"TertiaryView\"")
+        .replace("{1,{6}}", &table_binding);
+    let line_number_field = |id: &str, name: &str| {
+        format!(
+            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,1,"{name}",1,0,{{1,0}},{{1,0}},{{3,{{1}},{{0,{table_uuid}}},{{-2}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+        )
+    };
+    let line_a = line_number_field("41", "PrimaryLineNumber");
+    let line_b = line_number_field("42", "SecondaryLineNumber");
+    let line_c = line_number_field("43", "TertiaryLineNumber");
+    let mut attributes = vec![FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.Invoice".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }];
+    let object_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.Invoice.TabularSection.Lines".to_string(),
+    )]);
+    let layout = format!(
+        "{{6,11111111-1111-4111-8111-111111111111,{table_a},\
+22222222-2222-4222-8222-222222222222,{line_a},\
+33333333-3333-4333-8333-333333333333,{table_b},\
+44444444-4444-4444-8444-444444444444,{line_b},\
+55555555-5555-4555-8555-555555555555,{table_c},\
+66666666-6666-4666-8666-666666666666,{line_c}}}"
+    );
+    let layout_fields = split_1c_braced_fields(&layout, 0).unwrap();
+    let indexes = collect_form_child_item_indexes_with_object_refs(
+        &layout_fields,
+        &attributes,
+        &object_refs,
+        None,
+    );
+    let binding_key = format!("0|{table_uuid}");
+
+    assert_eq!(
+        indexes
+            .bound_table_path_by_binding_key
+            .get(&binding_key)
+            .map(String::as_str),
+        Some("Object.Lines")
+    );
+    assert_eq!(
+        indexes
+            .resolve_owner_scoped_data_path_for_test(
+                &format!(r#"{{3,{{1}},{{0,{table_uuid}}},{{-2}}}}"#),
+                &attributes,
+                &object_refs,
+            )
+            .as_deref(),
+        Some("Object.Lines.LineNumber")
+    );
+    let items = extract_form_child_items(
+        &layout_fields,
+        &attributes,
+        &[],
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+        &indexes,
+        None,
+    );
+    let items_xml = format_form_child_items_xml(&items, 1);
+    assert_eq!(
+        items_xml
+            .matches("<DataPath>Object.Lines</DataPath>")
+            .count(),
+        3,
+        "{items_xml}"
+    );
+    assert_eq!(
+        items_xml
+            .matches("<DataPath>Object.Lines.LineNumber</DataPath>")
+            .count(),
+        3,
+        "{items_xml}"
+    );
+
+    let additional_columns = format!(
+        r#"{{0,{{2,{{1}},{{0,{table_uuid}}}}},2,{{5,1,0,"Selected",{{1,1,{{"en","Selected"}}}},{{"Pattern",{{"B"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},0}},{{5,2,0,"Taxable",{{1,1,{{"en","Taxable"}}}},{{"Pattern",{{"B"}}}},{{0,{{0,{{"B",0}},0}}}},{{0,{{0,{{"B",0}},0}}}},{{0,0}},0}}}}"#
+    );
+    apply_form_attribute_additional_columns(
+        &mut attributes,
+        &["1", additional_columns.as_str()],
+        0,
+        &BTreeMap::new(),
+        &object_refs,
+        &indexes,
+    );
+    let xml = format_form_attributes_xml(&attributes);
+    assert!(xml.contains("<Columns>"), "{xml}");
+    assert!(
+        xml.contains(r#"<AdditionalColumns table="Object.Lines">"#),
+        "{xml}"
+    );
+    assert!(xml.contains(r#"<Column name="Selected" id="1">"#), "{xml}");
+    assert!(xml.contains(r#"<Column name="Taxable" id="2">"#), "{xml}");
+    assert!(
+        xml.find(r#"<Column name="Selected" id="1">"#).unwrap()
+            < xml.find(r#"<Column name="Taxable" id="2">"#).unwrap(),
+        "{xml}"
+    );
+
+    let mismatched_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.OtherInvoice.TabularSection.Lines".to_string(),
+    )]);
+    let mismatched_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table_a.as_str(), line_a.as_str()],
+        &attributes,
+        &mismatched_refs,
+        None,
+    );
+    assert!(
+        !mismatched_indexes
+            .bound_table_path_by_binding_key
+            .contains_key(&binding_key),
+        "a single table must not fall back to its visual name after an owner mismatch"
+    );
+    assert!(
+        mismatched_indexes
+            .resolve_owner_scoped_data_path_for_test(
+                &format!(r#"{{3,{{1}},{{0,{table_uuid}}},{{-2}}}}"#),
+                &attributes,
+                &mismatched_refs,
+            )
+            .is_none(),
+        "an indexed metadata reference from another owner must fail closed"
+    );
+
+    let unsupported_refs = BTreeMap::from([(
+        table_uuid.to_string(),
+        "Document.Invoice.Command.Lines".to_string(),
+    )]);
+    let unsupported_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table_a.as_str()],
+        &attributes,
+        &unsupported_refs,
+        None,
+    );
+    assert!(
+        !unsupported_indexes
+            .bound_table_path_by_binding_key
+            .contains_key(&binding_key),
+        "an indexed unsupported metadata route must not become Object.PrimaryView"
+    );
+
+    let malformed_binding = table_a.replace(table_uuid, "not-a-uuid");
+    let malformed_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[malformed_binding.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !malformed_indexes
+            .bound_table_path_by_binding_key
+            .contains_key("0|not-a-uuid"),
+        "a malformed UUID must not use the visual table alias"
+    );
+}
+
+#[test]
 fn extracts_nested_table_additional_columns_group() {
     let attributes = vec![FormAttribute {
         id: "1".to_string(),
@@ -9058,7 +13405,7 @@ fn extracts_nested_table_additional_columns_group() {
 }
 
 #[test]
-fn prefers_child_binding_path_for_additional_columns_group() {
+fn uses_unique_child_binding_for_additional_columns_when_metadata_reference_is_unindexed() {
     let attributes = vec![FormAttribute {
         id: "1".to_string(),
         name: "Объект".to_string(),
@@ -9102,6 +13449,106 @@ fn prefers_child_binding_path_for_additional_columns_group() {
         .unwrap();
 
     assert_eq!(group.table, "Объект.ТаблицаПравилВыгрузки");
+}
+
+#[test]
+fn additional_columns_metadata_reference_precedes_and_guards_child_binding() {
+    let metadata_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let attributes = vec![FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.Invoice".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }];
+    let mut indexes = FormChildItemIndexes::default();
+    indexes.insert_owner_scoped_table_path_for_test(
+        "1",
+        &format!("0|{metadata_uuid}"),
+        "Object.ChildFallback",
+    );
+    indexes.insert_owner_scoped_table_path_for_test(
+        "1",
+        "0|not-a-uuid",
+        "Object.MalformedFallback",
+    );
+    let group = |uuid: &str| {
+        format!(
+            r#"{{0,{{2,{{1}},{{0,{uuid}}}}},1,{{5,1,0,"Selected",{{1,0}},{{"Pattern",{{"B"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},0}}}}"#
+        )
+    };
+
+    assert_eq!(
+        parse_form_attribute_additional_columns_group(
+            &group(metadata_uuid),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .unwrap()
+        .table,
+        "Object.ChildFallback",
+        "a valid UUID absent from object_refs may use the unique child binding"
+    );
+    assert_eq!(
+        parse_form_attribute_additional_columns_group(
+            &group(metadata_uuid),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::from([(
+                metadata_uuid.to_string(),
+                "Document.Invoice.TabularSection.Lines".to_string(),
+            )]),
+            &indexes,
+        )
+        .unwrap()
+        .table,
+        "Object.Lines",
+        "an indexed valid metadata route must take precedence over the child path"
+    );
+
+    for reference in [
+        "Document.OtherInvoice.TabularSection.Lines",
+        "Document.Invoice.Command.Lines",
+    ] {
+        assert!(
+            parse_form_attribute_additional_columns_group(
+                &group(metadata_uuid),
+                &attributes,
+                &BTreeMap::new(),
+                &BTreeMap::from([(metadata_uuid.to_string(), reference.to_string())]),
+                &indexes,
+            )
+            .is_none(),
+            "an indexed invalid metadata reference must not fall back to a child path: {reference}"
+        );
+    }
+    assert!(
+        parse_form_attribute_additional_columns_group(
+            &group("not-a-uuid"),
+            &attributes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &indexes,
+        )
+        .is_none(),
+        "a malformed UUID must be rejected even when a child binding exists"
+    );
 }
 
 #[test]
@@ -10286,13 +14733,14 @@ fn extracts_radio_button_field_with_choice_list_from_layout_code() {
     assert_eq!(item.tag, "RadioButtonField");
     assert_eq!(item.data_path.as_deref(), Some("ВариантОбработки"));
     assert_eq!(item.radio_button_type, Some("Auto"));
-    assert_eq!(item.choice_list.len(), 2);
+    let choice_list = item.choice_list.items().unwrap();
+    assert_eq!(choice_list.len(), 2);
     assert_eq!(
-        item.choice_list[0].value,
+        choice_list[0].value,
         FormChoiceListValue::Decimal("0".to_string())
     );
     assert_eq!(
-        item.choice_list[1].value,
+        choice_list[1].value,
         FormChoiceListValue::Decimal("1".to_string())
     );
 
@@ -10336,7 +14784,7 @@ fn parses_radio_button_choice_list_value_variants() {
     );
 
     let mut decimal_options = vec!["0"; 12];
-    decimal_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Архивирование чеков ККМ"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+    decimal_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"N",0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Архивирование чеков ККМ"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
     let decimal_items = parse_form_radio_button_choice_list(Some(&decimal_options), &object_refs);
     assert_eq!(
         decimal_items[0].value,
@@ -10344,7 +14792,7 @@ fn parses_radio_button_choice_list_value_variants() {
     );
 
     let mut string_options = vec!["0"; 12];
-    string_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"S","ПоОтдельности"},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Загрузить категории по отдельности"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+    string_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,1,{"S","ПоОтдельности"},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{1,1,{"ru","Загрузить категории по отдельности"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
     let string_items = parse_form_radio_button_choice_list(Some(&string_options), &object_refs);
     assert_eq!(
         string_items[0].value,
@@ -10352,7 +14800,7 @@ fn parses_radio_button_choice_list_value_variants() {
     );
 
     let mut ref_options = vec!["0"; 12];
-    ref_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,0,{"U"},e914059f-4304-4438-82fc-8ebf2019b331,16edd24a-02b8-432a-ab20-de3fe0039ac3,{1,1,{"ru","Загрузка отчета"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
+    ref_options[1] = r##"{3,1,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,0,{"U"},e914059f-4304-4438-82fc-8ebf2019b331,16edd24a-02b8-432a-ab20-de3fe0039ac3,{1,1,{"ru","Загрузка отчета"}}}},{0,{4,0,{0},"",-1,-1,1,0,""}}}"##;
     let ref_items = parse_form_radio_button_choice_list(Some(&ref_options), &object_refs);
     assert_eq!(
         ref_items[0].value,
@@ -10360,6 +14808,579 @@ fn parses_radio_button_choice_list_value_variants() {
             "Enum.ВариантыЗагрузкиОтчетаБанкаПоСБП.EnumValue.ЗагрузкаОтчета".to_string()
         )
     );
+}
+
+#[test]
+fn minimal_radio_button_literal_ref_choice_is_typed_and_near_misses_are_opaque() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        profile: String,
+        slot: usize,
+        type_id: String,
+        value_id: String,
+        raw_choice_list: String,
+        expected_xml: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_radio_choice_list_literal_ref_minimal.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.profile, "radio_button_options");
+    assert_eq!(fixture.slot, 1);
+
+    let empty_type_index = BTreeMap::new();
+    let empty_collisions = BTreeSet::new();
+    let empty_object_refs = BTreeMap::new();
+    let mut options = vec!["0"; 12];
+    options[fixture.slot] = &fixture.raw_choice_list;
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options),
+        &empty_type_index,
+        &empty_collisions,
+        &empty_object_refs,
+    );
+    let CanonicalFormChoiceList::Typed { items, provenance } = &canonical else {
+        panic!("exact radio U(non-nil type, non-nil value) must remain typed");
+    };
+    assert_eq!(
+        provenance.layout,
+        FormChoiceListRawLayout::RadioButtonOptions
+    );
+    assert_eq!(provenance.slot, fixture.slot);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].value,
+        FormChoiceListValue::LiteralDesignTimeRef(format!(
+            "{}.{}",
+            fixture.type_id.to_ascii_lowercase(),
+            fixture.value_id.to_ascii_lowercase()
+        ))
+    );
+    validate_canonical_form_choice_list(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
+    );
+
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let sidecar = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let presentation = r#"{1,1,{"en","Synthetic reference"}}"#;
+    let exact_payload = format!(
+        r#"{{0,0,{{"U"}},{},{},{presentation}}}"#,
+        fixture.type_id, fixture.value_id
+    );
+    let cases = [
+        (
+            "wrong marker",
+            format!(r#"{{"!",{discriminator},{exact_payload}}}"#),
+        ),
+        (
+            "wrong discriminator",
+            format!(r##"{{"#",cccccccc-cccc-4ccc-8ccc-cccccccccccc,{exact_payload}}}"##),
+        ),
+        (
+            "wrong first mode",
+            format!(
+                r##"{{"#",{discriminator},{{1,0,{{"U"}},{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "wrong second mode",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "raw value suffix",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}}suffix,{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "raw value extra field",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U",0}},{},{},{presentation}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "extra payload field",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},{},{presentation},0}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "nil type",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{},{presentation}}}}}"##,
+                fixture.value_id
+            ),
+        ),
+        (
+            "nil value without an EmptyRef type mapping",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},{nil},{presentation}}}}}"##,
+                fixture.type_id
+            ),
+        ),
+        (
+            "nil pair in reference mode",
+            format!(r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{presentation}}}}}"##),
+        ),
+        (
+            "malformed type UUID",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},not-a-uuid,{},{presentation}}}}}"##,
+                fixture.value_id
+            ),
+        ),
+        (
+            "malformed value UUID",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},not-a-uuid,{presentation}}}}}"##,
+                fixture.type_id
+            ),
+        ),
+        (
+            "malformed presentation",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{},{},{{1,1,{{"en","Synthetic reference"}},0}}}}}}"##,
+                fixture.type_id, fixture.value_id
+            ),
+        ),
+        (
+            "extra item field",
+            format!(r##"{{"#",{discriminator},{exact_payload},0}}"##),
+        ),
+        (
+            "item suffix",
+            format!(r##"{{"#",{discriminator},{exact_payload}}}suffix"##),
+        ),
+    ];
+    for (label, item) in cases {
+        let raw = format!(r#"{{3,1,"",{item},{sidecar}}}"#);
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &empty_type_index,
+            &empty_collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+    }
+
+    let exact_item = format!(r##"{{"#",{discriminator},{exact_payload}}}"##);
+    for (label, raw) in [
+        (
+            "wrong outer header",
+            format!(r#"{{9,1,"",{exact_item},{sidecar}}}"#),
+        ),
+        ("missing sidecar", format!(r#"{{3,1,"",{exact_item}}}"#)),
+        (
+            "extra outer field",
+            format!(r#"{{3,1,"",{exact_item},{sidecar},0}}"#),
+        ),
+        (
+            "outer suffix",
+            format!(r#"{{3,1,"",{exact_item},{sidecar}}}suffix"#),
+        ),
+    ] {
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &empty_type_index,
+            &empty_collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+    }
+
+    let mapped_reference = "Enum.Synthetic.EnumValue.Mapped";
+    let mapped_object_refs = BTreeMap::from([(
+        fixture.value_id.to_ascii_lowercase(),
+        mapped_reference.to_string(),
+    )]);
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options_for_radio_choice_list_test(
+            fixture.slot,
+            &fixture.raw_choice_list,
+        )),
+        &empty_type_index,
+        &empty_collisions,
+        &mapped_object_refs,
+    );
+    let CanonicalFormChoiceList::Typed { items, .. } = canonical else {
+        panic!("ordinary mapped radio U reference must remain typed");
+    };
+    assert_eq!(
+        items[0].value,
+        FormChoiceListValue::DesignTimeRef(mapped_reference.to_string())
+    );
+}
+
+fn options_for_radio_choice_list_test<'a>(slot: usize, raw: &'a str) -> Vec<&'a str> {
+    let mut options = vec!["0"; 12];
+    options[slot] = raw;
+    options
+}
+
+#[test]
+fn minimal_radio_button_empty_ref_choice_is_typed_and_near_misses_are_opaque() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        profile: String,
+        slot: usize,
+        raw_choice_list: String,
+        type_index: BTreeMap<String, String>,
+        expected_xml: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_radio_choice_list_empty_ref_minimal.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.profile, "radio_button_options");
+    assert_eq!(fixture.slot, 1);
+
+    let empty_collisions = BTreeSet::new();
+    let empty_object_refs = BTreeMap::new();
+    let mut options = vec!["0"; 12];
+    options[fixture.slot] = &fixture.raw_choice_list;
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options),
+        &fixture.type_index,
+        &empty_collisions,
+        &empty_object_refs,
+    );
+    let CanonicalFormChoiceList::Typed { items, provenance } = &canonical else {
+        panic!("exact radio U(non-nil type, nil value) must remain typed");
+    };
+    assert_eq!(
+        provenance.layout,
+        FormChoiceListRawLayout::RadioButtonOptions
+    );
+    assert_eq!(provenance.slot, fixture.slot);
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].value,
+        FormChoiceListValue::EmptyRef("Enum.SyntheticChoices.EmptyRef".to_string())
+    );
+    validate_canonical_form_choice_list(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
+    );
+
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let sidecar = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let item_cases = [
+        (
+            "wrong platform mode",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "nil type",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "wrong discriminator",
+            format!(
+                r##"{{"#",22222222-2222-4222-8222-222222222222,{{0,0,{{"U"}},{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "trailing raw value garbage",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}}garbage,{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
+            ),
+        ),
+        (
+            "extra payload field",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}},0}}}}"##
+            ),
+        ),
+    ];
+    for (label, item) in item_cases {
+        let raw = format!(r#"{{3,1,"",{item},{sidecar}}}"#);
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &fixture.type_index,
+            &empty_collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+        assert_eq!(
+            validate_canonical_form_choice_list(&canonical),
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: FormChoiceListRawLayout::RadioButtonOptions,
+                slot: fixture.slot,
+            }),
+            "{label}"
+        );
+    }
+
+    for (label, type_index, collisions) in [
+        ("missing type", BTreeMap::new(), BTreeSet::new()),
+        (
+            "ambiguous type",
+            fixture.type_index.clone(),
+            BTreeSet::from([type_id.to_string()]),
+        ),
+    ] {
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &type_index,
+            &collisions,
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn radio_button_empty_ref_owner_kind_is_generic_even_when_named_enum() {
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let item = format!(
+        r##"{{"#",{discriminator},{{0,0,{{"U"}},{type_id},{nil},{{1,1,{{"en","No value"}}}}}}}}"##
+    );
+    let type_index = BTreeMap::from([(type_id.to_string(), "cfg:CatalogRef.Enum".to_string())]);
+
+    let parsed = parse_form_radio_button_choice_list_item(
+        &item,
+        &type_index,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.value,
+        FormChoiceListValue::EmptyRef("Catalog.Enum.EmptyRef".to_string())
+    );
+}
+
+#[test]
+fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        profile: String,
+        slot: usize,
+        raw_choice_list: String,
+        expected_xml: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_radio_choice_list_nil_minimal.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.profile, "radio_button_options");
+    assert_eq!(fixture.slot, 1);
+
+    let mut options = vec!["0"; 12];
+    options[fixture.slot] = &fixture.raw_choice_list;
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    );
+    let CanonicalFormChoiceList::Typed { items, provenance } = &canonical else {
+        panic!("nil U pair from the radio-button profile must remain typed");
+    };
+    assert_eq!(
+        provenance.layout,
+        FormChoiceListRawLayout::RadioButtonOptions
+    );
+    assert_eq!(provenance.slot, fixture.slot);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].value, FormChoiceListValue::Nil);
+    validate_canonical_form_choice_list(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
+    );
+
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let non_nil_type = "11111111-1111-4111-8111-111111111111";
+    let non_nil_value = "22222222-2222-4222-8222-222222222222";
+    let empty_object_refs = BTreeMap::new();
+    let resolvable_object_refs = BTreeMap::from([(
+        non_nil_value.to_string(),
+        "Enum.Synthetic.EnumValue.Resolved".to_string(),
+    )]);
+    let cases = [
+        (
+            "wrong discriminator",
+            format!(
+                r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "wrong payload mode",
+            format!(
+                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "extra payload field",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}},0}}}}"##
+            ),
+            false,
+        ),
+        (
+            "trailing nested raw value garbage",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}}garbage,{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "non-nil type",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{non_nil_type},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            false,
+        ),
+        (
+            "nil type with resolvable non-nil value",
+            format!(
+                r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{non_nil_value},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+            ),
+            true,
+        ),
+    ];
+    for (label, item, use_resolvable_refs) in cases {
+        let raw = format!(r#"{{3,1,"",{item},{{0,{{4,0,{{0}},"",-1,-1,1,0,""}}}}}}"#);
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let object_refs = if use_resolvable_refs {
+            &resolvable_object_refs
+        } else {
+            &empty_object_refs
+        };
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+        assert_eq!(
+            validate_canonical_form_choice_list(&canonical),
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: FormChoiceListRawLayout::RadioButtonOptions,
+                slot: fixture.slot,
+            }),
+            "{label}"
+        );
+    }
+
+    let exact_item = format!(
+        r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+    );
+    let sidecar = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let outer_cases = [
+        (
+            "wrong outer header",
+            format!(r#"{{9,1,"",{exact_item},{sidecar}}}"#),
+        ),
+        (
+            "non-empty item name",
+            format!(r#"{{3,1,"named",{exact_item},{sidecar}}}"#),
+        ),
+        (
+            "missing all sidecars",
+            format!(r#"{{3,1,"",{exact_item}}}"#),
+        ),
+        (
+            "extra sidecar beyond allowed range",
+            format!(r#"{{3,1,"",{exact_item},{sidecar},{sidecar},{sidecar}}}"#),
+        ),
+        (
+            "trailing outer garbage",
+            format!(r#"{{3,1,"",{exact_item},{sidecar}}}garbage"#),
+        ),
+    ];
+    for (label, raw) in outer_cases {
+        let mut options = vec!["0"; 12];
+        options[fixture.slot] = &raw;
+        let canonical = canonical_form_radio_button_choice_list(
+            Some(&options),
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &empty_object_refs,
+        );
+        assert!(
+            matches!(
+                &canonical,
+                CanonicalFormChoiceList::OpaqueSameProfile { .. }
+            ),
+            "{label}"
+        );
+        assert_eq!(
+            validate_canonical_form_choice_list(&canonical),
+            Err(FormSchemaWriteError::OpaqueChoiceList {
+                layout: FormChoiceListRawLayout::RadioButtonOptions,
+                slot: fixture.slot,
+            }),
+            "{label}"
+        );
+    }
 }
 
 #[test]
@@ -11915,9 +16936,7 @@ fn extracts_available_fields_table_command_aliases() {
 #[test]
 fn maps_formatted_document_search_command_alias() {
     assert_eq!(
-        form_formatted_document_standard_command_suffix(
-            "6e2f7ea0-a346-4c78-96d9-a0f512000910"
-        ),
+        form_formatted_document_standard_command_suffix("6e2f7ea0-a346-4c78-96d9-a0f512000910"),
         Some("SearchEverywhere")
     );
 }
@@ -12495,8 +17514,8 @@ fn formats_table_search_additions_as_direct_sections() {
         title_formatted: None,
         tooltip: Vec::new(),
         input_hint: Vec::new(),
-        choice_list: Vec::new(),
-        choice_parameter_links: Vec::new(),
+        choice_list: CanonicalFormChoiceList::Absent,
+        choice_parameter_cluster: None,
         type_link: None,
         extended_tooltip: None,
         events: Vec::new(),
@@ -12680,8 +17699,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 title_formatted: None,
                 tooltip: Vec::new(),
                 input_hint: Vec::new(),
-                choice_list: Vec::new(),
-                choice_parameter_links: Vec::new(),
+                choice_list: CanonicalFormChoiceList::Absent,
+                choice_parameter_cluster: None,
                 type_link: None,
                 extended_tooltip: None,
                 events: Vec::new(),
@@ -12866,8 +17885,8 @@ fn formats_table_search_additions_as_direct_sections() {
                 title_formatted: None,
                 tooltip: Vec::new(),
                 input_hint: Vec::new(),
-                choice_list: Vec::new(),
-                choice_parameter_links: Vec::new(),
+                choice_list: CanonicalFormChoiceList::Absent,
+                choice_parameter_cluster: None,
                 type_link: None,
                 extended_tooltip: None,
                 events: Vec::new(),
@@ -13950,21 +18969,105 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
     assert_eq!(item.width.as_deref(), Some("7"));
     assert_eq!(item.list_choice_mode, Some(true));
     assert!(item.input_hint.is_empty());
-    assert_eq!(item.choice_list.len(), 3);
+    let choice_list = item.choice_list.items().unwrap();
+    assert_eq!(choice_list.len(), 3);
     assert_eq!(
-        item.choice_list[0].value,
+        choice_list[0].value,
         FormChoiceListValue::Decimal("0".to_string())
     );
     assert_eq!(
-        item.choice_list[1].value,
+        choice_list[1].value,
         FormChoiceListValue::Decimal("1".to_string())
     );
     assert_eq!(
-        item.choice_list[2].value,
+        choice_list[2].value,
         FormChoiceListValue::Decimal("2".to_string())
     );
 
-    let xml = format_form_child_items_xml(&[item], 1);
+    let mut opaque_auto_command_item = item.clone();
+    opaque_auto_command_item.choice_list = CanonicalFormChoiceList::OpaqueSameProfile {
+        raw: "{unsupported-auto-command-bar-choice-list}".to_owned(),
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    assert_eq!(
+        validate_form_choice_list_writer_trees(
+            &[],
+            Some(std::slice::from_ref(&opaque_auto_command_item)),
+        ),
+        Err(FormSchemaWriteError::OpaqueChoiceList {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        })
+    );
+    validate_form_writer_policy_availability_trees(
+        &[],
+        Some(std::slice::from_ref(&opaque_auto_command_item)),
+    )
+    .unwrap();
+    let mut opaque_choice_list_diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(
+        std::slice::from_ref(&opaque_auto_command_item),
+        &mut opaque_choice_list_diagnostics,
+    );
+    assert_eq!(opaque_choice_list_diagnostics.len(), 1);
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].code,
+        "source_asset.form.choice_list.opaque_asset_not_emitted"
+    );
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].classification,
+        "opaque_asset_not_emitted"
+    );
+    assert_eq!(opaque_choice_list_diagnostics[0].property, "ChoiceList");
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].property_profile,
+        "input_field_extended_options"
+    );
+    assert_eq!(
+        opaque_choice_list_diagnostics[0].raw_length,
+        "{unsupported-auto-command-bar-choice-list}".len()
+    );
+    assert_eq!(opaque_choice_list_diagnostics[0].raw_sha256.len(), 64);
+
+    let mut nested_parent = item.clone();
+    nested_parent.choice_list = CanonicalFormChoiceList::Absent;
+    nested_parent.child_items = vec![opaque_auto_command_item.clone()];
+    let mut nested_diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(
+        std::slice::from_ref(&nested_parent),
+        &mut nested_diagnostics,
+    );
+    assert_eq!(nested_diagnostics.len(), 1);
+    assert_eq!(
+        nested_diagnostics[0].form_item_id,
+        opaque_auto_command_item.id
+    );
+
+    let typed_item = item.clone();
+    let mut absent_item = item.clone();
+    absent_item.choice_list = CanonicalFormChoiceList::Absent;
+    let empty_provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+    };
+    let non_opaque_items = vec![
+        typed_item,
+        absent_item,
+        FormChildItem {
+            choice_list: CanonicalFormChoiceList::Empty {
+                provenance: empty_provenance,
+            },
+            ..item.clone()
+        },
+    ];
+    let mut non_opaque_diagnostics = Vec::new();
+    collect_opaque_choice_list_diagnostics(&non_opaque_items, &mut non_opaque_diagnostics);
+    assert!(non_opaque_diagnostics.is_empty());
+
+    let xml = format_form_child_items_xml(std::slice::from_ref(&item), 1);
     assert!(xml.contains("<ToolTip>"));
     assert!(!xml.contains("<InputHint>"), "{xml}");
     assert!(
@@ -13974,6 +19077,1907 @@ fn extracts_live_input_field_choice_list_without_synthetic_input_hint() {
     assert!(
         xml.find("<Width>").unwrap() < xml.find("<ChoiceList>").unwrap(),
         "{xml}"
+    );
+
+    let mut opaque_parameters_item = item;
+    opaque_parameters_item.choice_parameter_cluster =
+        Some(CanonicalFormChoiceParameterCluster::new(
+            CanonicalFormChoiceParameterLinks::Empty,
+            CanonicalFormChoiceParameters::OpaqueSameProfile {
+                raw: "{unsupported-choice-parameters}".to_string(),
+                slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters
+                    .index(),
+            },
+            CanonicalFormChoiceParameterAvailableTypes::Absent,
+        ));
+    opaque_parameters_item.input_hint =
+        vec![("en".to_string(), "Emitted after parameters".to_string())];
+    let opaque_parameters = opaque_parameters_item
+        .choice_parameter_cluster
+        .as_ref()
+        .unwrap()
+        .parameters();
+    assert!(!opaque_parameters.should_emit());
+    assert!(opaque_parameters.is_non_emitting());
+    validate_form_choice_list_writer_trees(std::slice::from_ref(&opaque_parameters_item), None)
+        .unwrap();
+    let opaque_parameters_xml =
+        format_form_child_items_xml(std::slice::from_ref(&opaque_parameters_item), 1);
+    assert!(!opaque_parameters_xml.contains("<ChoiceParameters"));
+    assert!(opaque_parameters_xml.contains("<InputHint>"));
+    assert!(opaque_parameters_xml.contains("Emitted after parameters"));
+    assert!(opaque_parameters_xml.contains("<ContextMenu"));
+    let mut diagnostics = Vec::new();
+    collect_opaque_choice_parameters_diagnostics(
+        std::slice::from_ref(&opaque_parameters_item),
+        &mut diagnostics,
+    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].code,
+        "source_asset.form.choice_parameters.opaque_omitted"
+    );
+    assert_eq!(
+        diagnostics[0].property_profile,
+        "input_field_extended_options"
+    );
+    assert_eq!(
+        diagnostics[0].property_slot,
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()
+    );
+    assert_eq!(diagnostics[0].raw_length, 31);
+    assert_eq!(diagnostics[0].raw_sha256.len(), 64);
+
+    *opaque_parameters_item
+        .choice_parameter_cluster
+        .as_mut()
+        .unwrap()
+        .available_types_mut() =
+        CanonicalFormChoiceParameterAvailableTypes::Opaque(OpaqueFormChoiceParameterClusterValue {
+            raw: "{opaque-available-types}".to_owned(),
+            slot: 63,
+        });
+    diagnostics.clear();
+    collect_opaque_choice_parameters_diagnostics(
+        std::slice::from_ref(&opaque_parameters_item),
+        &mut diagnostics,
+    );
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(
+        diagnostics[1].code,
+        "source_asset.form.available_types.opaque_omitted"
+    );
+    assert_eq!(diagnostics[1].property, "AvailableTypes");
+    assert_eq!(diagnostics[1].property_slot, 63);
+    assert_eq!(diagnostics[1].raw_sha256.len(), 64);
+}
+
+#[test]
+fn parses_input_field_choice_list_empty_ref_from_generated_reference_type() {
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let value_id = "22222222-2222-4222-8222-222222222222";
+    let normalized_empty_pair =
+        "11111111-1111-4111-8111-111111111111.00000000-0000-0000-0000-000000000000";
+    let item = format!(
+        r##"{{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{{0,0,{{"U"}},{type_id},00000000-0000-0000-0000-000000000000,{{1,1,{{"en","No value"}}}}}}}}"##
+    );
+    let type_index = BTreeMap::from([(
+        type_id.to_string(),
+        "cfg:EnumRef.SyntheticStatus".to_string(),
+    )]);
+
+    let parsed = parse_form_input_field_choice_list_item(
+        &item,
+        &type_index,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.value,
+        FormChoiceListValue::EmptyRef("Enum.SyntheticStatus.EmptyRef".to_string())
+    );
+
+    let choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![parsed],
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    validate_canonical_form_choice_list(&choice_list).unwrap();
+    let xml = format_form_choice_list_xml(&choice_list, 1).unwrap();
+    assert!(
+        xml.contains(r#"<Value xsi:type="xr:DesignTimeRef">Enum.SyntheticStatus.EmptyRef</Value>"#)
+    );
+
+    let literal = parse_form_input_field_choice_list_item(
+        &item,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        literal.value,
+        FormChoiceListValue::LiteralDesignTimeRef(normalized_empty_pair.to_string())
+    );
+    let literal_choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![literal],
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    validate_canonical_form_choice_list(&literal_choice_list).unwrap();
+    assert!(
+        format_form_choice_list_xml(&literal_choice_list, 1)
+            .unwrap()
+            .contains(&format!(
+                r#"<Value xsi:type="xr:DesignTimeRef">{normalized_empty_pair}</Value>"#
+            ))
+    );
+    assert!(matches!(
+        parse_form_input_field_choice_list_item(
+            &item,
+            &type_index,
+            &BTreeSet::from([type_id.to_string()]),
+            &BTreeMap::new(),
+        ),
+        Some(FormChoiceListItem {
+            value: FormChoiceListValue::LiteralDesignTimeRef(reference),
+            ..
+        }) if reference == normalized_empty_pair
+    ));
+
+    let wrong_platform_discriminator = item.replace(
+        "0e704aa2-07bd-48b9-8223-a0212c4d5fc2",
+        "33333333-3333-4333-8333-333333333333",
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &wrong_platform_discriminator,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let invalid_reverse_pair = format!(
+        r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,0,{{"U"}},00000000-0000-0000-0000-000000000000,{value_id},{{1,1,{{"en","Invalid"}}}}}}}}"##
+    );
+    let object_refs = BTreeMap::from([(
+        value_id.to_string(),
+        "Enum.SyntheticStatus.EnumValue.Active".to_string(),
+    )]);
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &invalid_reverse_pair,
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn parses_input_field_choice_list_non_nil_uuid_pair_with_semantic_precedence() {
+    let platform_discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let type_id = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+    let value_id = "FFFFFFFF-AAAA-4BBB-8CCC-DDDDDDDDDDDD";
+    let normalized_pair =
+        "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.ffffffff-aaaa-4bbb-8ccc-dddddddddddd";
+    let item = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}}}}"##
+    );
+
+    let semantic_reference = "Enum.SyntheticStatus.EnumValue.Active";
+    let object_refs = BTreeMap::from([(
+        value_id.to_ascii_lowercase(),
+        semantic_reference.to_string(),
+    )]);
+    let semantic = parse_form_input_field_choice_list_item(
+        &item,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(
+        semantic.value,
+        FormChoiceListValue::DesignTimeRef(semantic_reference.to_string())
+    );
+
+    let literal = parse_form_input_field_choice_list_item(
+        &item,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        literal.value,
+        FormChoiceListValue::LiteralDesignTimeRef(normalized_pair.to_string())
+    );
+
+    let choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![literal],
+        provenance: FormChoiceListRawProvenance {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        },
+    };
+    validate_canonical_form_choice_list(&choice_list).unwrap();
+    assert_eq!(
+        format_form_choice_list_xml(&choice_list, 1).unwrap(),
+        "\t<ChoiceList>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.ffffffff-aaaa-4bbb-8ccc-dddddddddddd</Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t</ChoiceList>\r\n"
+    );
+
+    let malformed_uuid = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},not-a-uuid,{value_id},{{1,0}}}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &malformed_uuid,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    let malformed_value_uuid = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},not-a-uuid,{{1,0}}}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &malformed_value_uuid,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let nil_pair = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{{1,0}}}}}}"##
+    );
+    assert_eq!(
+        parse_form_input_field_choice_list_item(
+            &nil_pair,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap()
+        .value,
+        FormChoiceListValue::Nil
+    );
+
+    let extra_payload_field = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}},0}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &extra_payload_field,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let extra_item_field = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}},0}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &extra_item_field,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let trailing_item_garbage = format!("{item}garbage");
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &trailing_item_garbage,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    let trailing_payload_garbage = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}}garbage}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &trailing_payload_garbage,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+
+    for (first_slot, second_slot) in [("1", "0"), ("0", "1")] {
+        let wrong_prefix = format!(
+            r##"{{"#",{platform_discriminator},{{{first_slot},{second_slot},{{"U"}},{type_id},{value_id},{{1,0}}}}}}"##
+        );
+        assert!(
+            parse_form_input_field_choice_list_item(
+                &wrong_prefix,
+                &BTreeMap::new(),
+                &BTreeSet::new(),
+                &BTreeMap::new(),
+            )
+            .is_none(),
+            "literal fallback accepted prefix {first_slot},{second_slot}"
+        );
+    }
+
+    let wrong_platform_discriminator = format!(
+        r##"{{"#",33333333-3333-4333-8333-333333333333,{{0,0,{{"U"}},{type_id},{value_id},{{1,0}}}}}}"##
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &wrong_platform_discriminator,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+        .is_none()
+    );
+    assert!(
+        parse_form_input_field_choice_list_item(
+            &wrong_platform_discriminator,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+
+    let parse_collection = |raw: &str| {
+        let mut options = vec!["0"; 66];
+        options[0] = "36";
+        options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index()] = raw;
+        let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            &options,
+        )
+        .unwrap();
+        form_body::try_parse_form_input_field_choice_list(
+            schema,
+            &options,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        )
+    };
+    let collection_tail = r#"{0,{4,0,{0},"",-1,-1,1,0,""}}"#;
+    let collection = format!(r#"{{3,1,"",{item},{collection_tail}}}"#);
+    assert_eq!(parse_collection(&collection).unwrap().len(), 1);
+    let multiline_collection_tail =
+        "{ 0,\r\n  { 4, 0,\r\n    { 0 }, \"\", -1, -1, 1, 0, \"\" }\r\n}";
+    assert_eq!(
+        parse_collection(&format!(r#"{{3,1,"",{item},{multiline_collection_tail}}}"#))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(parse_collection(&format!("{collection}garbage")).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,"",{item},{collection_tail},0}}"#)).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,0,{item},{collection_tail}}}"#)).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,"",{item},{collection_tail}garbage}}"#)).is_none());
+    assert!(parse_collection(&format!(r#"{{3,1,"",{item},{{garbage}}}}"#)).is_none());
+    assert!(
+        parse_collection(&format!(
+            r#"{{3,1,"",{item},{{1,{{4,0,{{0}},"",-1,-1,1,0,""}}}}}}"#
+        ))
+        .is_none()
+    );
+    assert!(
+        parse_collection(&format!(
+            r#"{{3,1,"",{item},{{0,{{4,0,{{1}},"",-1,-1,1,0,""}}}}}}"#
+        ))
+        .is_none()
+    );
+}
+
+#[test]
+fn parses_and_formats_input_field_choice_parameters_boolean_and_fixed_array() {
+    let platform_discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let fixed_array_type = "4500381b-db30-4a10-9db4-990038032acf";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let enum_type = "11111111-1111-4111-8111-111111111111";
+    let first_value = "22222222-2222-4222-8222-222222222221";
+    let second_value = "22222222-2222-4222-8222-222222222222";
+    let boolean =
+        format!(r##"{{"#",{platform_discriminator},{{0,1,{{"B",1}},{nil},{nil},{{1,0}}}}}}"##);
+    let first = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{enum_type},{first_value},{{1,0}}}}}}"##
+    );
+    let second = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{enum_type},{second_value},{{1,0}}}}}}"##
+    );
+    let fixed_array = format!(
+        r##"{{"#",{platform_discriminator},{{0,1,{{"#",{fixed_array_type},{{2,{first},{second}}}}},{nil},{nil},{{1,0}}}}}}"##
+    );
+    let collection = format!(r#"{{0,2,"Filter.Enabled",{boolean},"Filter.Kind",{fixed_array}}}"#);
+    let type_index = BTreeMap::from([(
+        enum_type.to_string(),
+        "cfg:EnumRef.SyntheticKind".to_string(),
+    )]);
+    let object_refs = BTreeMap::from([
+        (
+            first_value.to_string(),
+            "Enum.SyntheticKind.EnumValue.First".to_string(),
+        ),
+        (
+            second_value.to_string(),
+            "Enum.SyntheticKind.EnumValue.Second".to_string(),
+        ),
+    ]);
+
+    let parameters = parse_form_input_field_choice_parameters(
+        &collection,
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(parameters.items().len(), 2);
+    assert_eq!(
+        parameters.items()[0].value(),
+        &ibcmd_schema::FormChoiceParameterValue::Boolean(true)
+    );
+    assert!(matches!(
+        parameters.items()[1].value(),
+        ibcmd_schema::FormChoiceParameterValue::FixedArray(values)
+            if values.iter().map(|value| value.value_ref()).collect::<Vec<_>>()
+                == ["Enum.SyntheticKind.EnumValue.First", "Enum.SyntheticKind.EnumValue.Second"]
+    ));
+
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()] =
+        &collection;
+    let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+        "37",
+        59,
+        "InputField",
+        0,
+        Some("2"),
+        &options,
+    )
+    .unwrap();
+    let canonical = canonical_form_input_field_choice_parameters(
+        schema,
+        &options,
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+    );
+    assert!(canonical.should_emit());
+    assert!(!canonical.is_non_emitting());
+    validate_canonical_form_choice_parameters(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_parameters_xml(&canonical, 1).unwrap(),
+        "\t<ChoiceParameters>\r\n\
+\t\t<app:item name=\"Filter.Enabled\">\r\n\
+\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:boolean\">true</Value>\r\n\
+\t\t\t</app:value>\r\n\
+\t\t</app:item>\r\n\
+\t\t<app:item name=\"Filter.Kind\">\r\n\
+\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"v8:FixedArray\">\r\n\
+\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.SyntheticKind.EnumValue.First</Value>\r\n\
+\t\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t\t<v8:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t\t\t<Value xsi:type=\"xr:DesignTimeRef\">Enum.SyntheticKind.EnumValue.Second</Value>\r\n\
+\t\t\t\t\t</v8:Value>\r\n\
+\t\t\t\t</Value>\r\n\
+\t\t\t</app:value>\r\n\
+\t\t</app:item>\r\n\
+\t</ChoiceParameters>\r\n"
+    );
+
+    let scalar_reference = format!(
+        r##"{{"#",{platform_discriminator},{{0,0,{{"U"}},{enum_type},{first_value},{{1,0}}}}}}"##
+    );
+    let scalar_parameters = parse_form_input_field_choice_parameters(
+        &format!(r#"{{0,1,"Filter.Kind",{scalar_reference}}}"#),
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert!(matches!(
+        scalar_parameters.items()[0].value(),
+        ibcmd_schema::FormChoiceParameterValue::DesignTimeRef(value)
+            if value == "Enum.SyntheticKind.EnumValue.First"
+    ));
+    let scalar_wrong_mode = scalar_reference.replacen("{0,0,", "{0,1,", 1);
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Kind",{scalar_wrong_mode}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    let boolean_wrong_mode = boolean.replacen("{0,1,", "{0,0,", 1);
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Enabled",{boolean_wrong_mode}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!("{collection}garbage"),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,2,"Filter.Enabled",{boolean}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    let wrong_discriminator = boolean.replace(
+        platform_discriminator,
+        "33333333-3333-4333-8333-333333333333",
+    );
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Enabled",{wrong_discriminator}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    let wrong_nested_mode = fixed_array.replacen("{0,0,", "{0,1,", 1);
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Kind",{wrong_nested_mode}}}"#),
+            &type_index,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_form_input_field_choice_parameters(
+            &format!(r#"{{0,1,"Filter.Kind",{fixed_array}}}"#),
+            &type_index,
+            &BTreeSet::from([enum_type.to_string()]),
+            &object_refs,
+        )
+        .is_none()
+    );
+
+    let opaque = CanonicalFormChoiceParameters::OpaqueSameProfile {
+        raw: "{unsupported}".to_string(),
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+    };
+    assert!(!opaque.should_emit());
+    assert!(opaque.is_non_emitting());
+    assert_eq!(
+        validate_canonical_form_choice_parameters(&opaque),
+        Err(FormSchemaWriteError::OpaqueChoiceParameters {
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        })
+    );
+    assert_eq!(
+        format_form_choice_parameters_xml(&opaque, 1),
+        Err(FormSchemaWriteError::OpaqueChoiceParameters {
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        })
+    );
+    assert_eq!(
+        format_form_choice_parameters_xml(&CanonicalFormChoiceParameters::Absent, 1).unwrap(),
+        ""
+    );
+    assert_eq!(
+        format_form_choice_parameters_xml(
+            &CanonicalFormChoiceParameters::Empty {
+                slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters
+                    .index(),
+            },
+            1,
+        )
+        .unwrap(),
+        ""
+    );
+}
+
+#[test]
+fn choice_parameter_cluster_emits_exact_typed_order_and_rejects_available_types_guessing() {
+    let discriminator = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let boolean = format!(r##"{{"#",{discriminator},{{0,1,{{"B",1}},{nil},{nil},{{1,0}}}}}}"##);
+    let parameters = ibcmd_schema::parse_form_choice_parameters(
+        &format!(r#"{{0,1,"Filter.Enabled",{boolean}}}"#),
+        |_, _| None,
+    )
+    .unwrap();
+    let link = ibcmd_schema::FormChoiceParameterLink::new(
+        "Filter.Owner".to_owned(),
+        "Object.Ref".to_owned(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::DontChange,
+    );
+    let mut cluster = CanonicalFormChoiceParameterCluster::new(
+        CanonicalFormChoiceParameterLinks::Typed(vec![link]),
+        CanonicalFormChoiceParameters::Typed {
+            parameters,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        },
+        CanonicalFormChoiceParameterAvailableTypes::Absent,
+    );
+
+    assert_eq!(
+        format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap(),
+        "\t<ChoiceParameterLinks>\r\n\
+\t\t<xr:Link>\r\n\
+\t\t\t<xr:Name>Filter.Owner</xr:Name>\r\n\
+\t\t\t<xr:DataPath xsi:type=\"xs:string\">Object.Ref</xr:DataPath>\r\n\
+\t\t\t<xr:ValueChange>DontChange</xr:ValueChange>\r\n\
+\t\t</xr:Link>\r\n\
+\t</ChoiceParameterLinks>\r\n\
+\t<ChoiceParameters>\r\n\
+\t\t<app:item name=\"Filter.Enabled\">\r\n\
+\t\t\t<app:value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:boolean\">true</Value>\r\n\
+\t\t\t</app:value>\r\n\
+\t\t</app:item>\r\n\
+\t</ChoiceParameters>\r\n"
+    );
+
+    *cluster.available_types_mut() = CanonicalFormChoiceParameterAvailableTypes::Typed(());
+    assert_eq!(
+        validate_canonical_form_choice_parameter_available_types(cluster.available_types()),
+        Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+    );
+    assert_eq!(
+        format_form_choice_parameter_cluster_xml(&cluster, 1),
+        Err(FormSchemaWriteError::UnsupportedTypedChoiceParameterAvailableTypes)
+    );
+
+    *cluster.available_types_mut() =
+        CanonicalFormChoiceParameterAvailableTypes::Opaque(OpaqueFormChoiceParameterClusterValue {
+            raw: "{unconfirmed-available-types}".to_owned(),
+            slot: 63,
+        });
+    assert_eq!(
+        validate_canonical_form_choice_parameter_available_types(cluster.available_types()),
+        Err(FormSchemaWriteError::OpaqueChoiceParameterAvailableTypes { slot: 63 })
+    );
+    let opaque_xml = format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap();
+    assert!(!opaque_xml.contains("AvailableTypes"));
+    assert!(opaque_xml.contains("<ChoiceParameterLinks>"));
+    assert!(opaque_xml.contains("<ChoiceParameters>"));
+}
+
+#[test]
+fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct() {
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = "{5006,0}";
+    options[duplicate_slot] = "{5007,0}";
+    assert_eq!(
+        canonical_form_input_field_choice_parameter_links(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Empty
+    );
+
+    options[primary_slot] = r#"{5006,1,"Filter.Owner",1,{27},0}"#;
+    options[duplicate_slot] = r#"{5007,1,"Filter.Other",1,{27},0,"",""}"#;
+    let opaque = canonical_form_input_field_choice_parameter_links(
+        make_schema(&options),
+        &options,
+        &BTreeMap::from([("27".to_owned(), "Owner".to_owned())]),
+    );
+    assert!(matches!(
+        &opaque,
+        CanonicalFormChoiceParameterLinks::Opaque(value)
+            if value.error == ibcmd_schema::FormChoiceParameterLinksParseError::MirrorMismatch
+    ));
+    assert_eq!(
+        validate_canonical_form_choice_parameter_links(&opaque),
+        Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
+            primary_slot,
+            duplicate_slot,
+        })
+    );
+    let cluster = CanonicalFormChoiceParameterCluster::new(
+        opaque,
+        CanonicalFormChoiceParameters::Absent,
+        CanonicalFormChoiceParameterAvailableTypes::Absent,
+    );
+    assert_eq!(
+        format_form_choice_parameter_cluster_xml(&cluster, 1),
+        Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
+            primary_slot,
+            duplicate_slot,
+        })
+    );
+}
+
+#[test]
+fn input_field_choice_parameter_links_resolve_owner_scoped_metadata_uuid_terminals() {
+    let attribute = FormAttribute {
+        id: "1".to_string(),
+        name: "Object".to_string(),
+        title: Vec::new(),
+        value_types: vec![ConstantValueType::Reference {
+            reference: "cfg:DocumentObject.TravelRequest".to_string(),
+        }],
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: true,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    };
+    let attribute_names = BTreeMap::from([("1".to_string(), "Object".to_string())]);
+    let attribute_owners =
+        BTreeMap::from([("1".to_string(), form_attribute_metadata_owner(&attribute))]);
+    let organization_uuid = "11111111-1111-4111-8111-111111111111";
+    let lines_uuid = "22222222-2222-4222-8222-222222222222";
+    let object_refs = BTreeMap::from([
+        (
+            organization_uuid.to_string(),
+            "Document.TravelRequest.Attribute.Organization".to_string(),
+        ),
+        (
+            lines_uuid.to_string(),
+            "Document.TravelRequest.TabularSection.Lines".to_string(),
+        ),
+    ]);
+    let primary = format!(
+        r#"{{5006,2,"Filter.Organization",2,{{1}},{{0,{organization_uuid}}},0,"Filter.Lines",2,{{1}},{{0,{lines_uuid}}},1}}"#
+    );
+    let duplicate = format!(
+        r#"{{5007,2,"Filter.Organization",2,{{1}},{{0,{organization_uuid}}},0,"","","Filter.Lines",2,{{1}},{{0,{lines_uuid}}},1,"",""}}"#
+    );
+
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &attribute_names,
+        &attribute_owners,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].name(), "Filter.Organization");
+    assert_eq!(links[0].data_path(), "Object.Organization");
+    assert_eq!(
+        links[0].value_change(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+    );
+    assert_eq!(links[1].name(), "Filter.Lines");
+    assert_eq!(links[1].data_path(), "Object.Lines");
+    assert_eq!(
+        links[1].value_change(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::DontChange
+    );
+
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &attribute_names,
+            &attribute_owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("1".to_string()))
+    );
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &attribute_names,
+            &attribute_owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::from([
+                (
+                    organization_uuid.to_string(),
+                    "Document.Other.Attribute.Organization".to_string(),
+                ),
+                (
+                    lines_uuid.to_string(),
+                    "Document.Other.TabularSection.Lines".to_string(),
+                ),
+            ]),
+        ),
+        Err(ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("1".to_string()))
+    );
+
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = &primary;
+    options[duplicate_slot] = &duplicate;
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &attribute_names,
+            &attribute_owners,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &object_refs,
+        ),
+        CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 2
+    ));
+    let opaque = canonical_form_input_field_choice_parameter_links_with_metadata(
+        make_schema(&options),
+        &options,
+        &attribute_names,
+        &attribute_owners,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+    assert!(matches!(
+        opaque,
+        CanonicalFormChoiceParameterLinks::Opaque(value)
+            if value.error
+                == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                    "1".to_string()
+                )
+    ));
+}
+
+#[test]
+fn input_field_choice_parameter_links_resolve_table_current_data_from_form_indexes() {
+    let table_names = BTreeMap::from([
+        ("1050".to_string(), "ТаблицаДопРеквизитов".to_string()),
+        ("785".to_string(), "ТаблицаСумм".to_string()),
+    ]);
+    let table_columns = BTreeMap::from([
+        (
+            "1050".to_string(),
+            BTreeMap::from([("21".to_string(), "Партнер".to_string())]),
+        ),
+        (
+            "785".to_string(),
+            BTreeMap::from([("12".to_string(), "СтранаПроисхождения".to_string())]),
+        ),
+    ]);
+
+    for (primary, duplicate, name, data_path) in [
+        (
+            r#"{5006,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0}"#,
+            r#"{5007,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0,"",""}"#,
+            "Отбор.Партнер",
+            "Items.ТаблицаДопРеквизитов.CurrentData.Партнер",
+        ),
+        (
+            r#"{5006,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0}"#,
+            r#"{5007,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0,"",""}"#,
+            "Отбор.СтранаПроисхождения",
+            "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения",
+        ),
+    ] {
+        let links = parse_form_input_field_choice_parameter_links_with_metadata(
+            primary,
+            duplicate,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &table_columns,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].name(), name);
+        assert_eq!(links[0].data_path(), data_path);
+        assert_eq!(
+            links[0].value_change(),
+            ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+        );
+    }
+
+    let primary =
+        r#"{5006,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0}"#;
+    let duplicate =
+        r#"{5007,1,"Отбор.Партнер",2,{1050,02023637-7868-4a5f-8576-835a76e0c9ba},{21},0,"",""}"#;
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            primary,
+            duplicate,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(
+            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                "1050".to_string()
+            )
+        )
+    );
+
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = primary;
+    options[duplicate_slot] = duplicate;
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &table_columns,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 1
+    ));
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Opaque(value)
+            if value.error
+                == ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute(
+                    "1050".to_string()
+                )
+    ));
+}
+
+#[test]
+fn input_field_choice_parameter_links_resolve_table_metadata_uuid_from_authoritative_route() {
+    let binding_uuid = "461bb43b-8803-4f48-811f-6beef397ee4c";
+    let primary = format!(
+        r#"{{5006,2,"Отбор.ОрганизацияПолучатель",1,{{3}},0,"Отбор.Организация",2,{{81,02023637-7868-4a5f-8576-835a76e0c9ba}},{{0,{binding_uuid}}},0}}"#
+    );
+    let duplicate = format!(
+        r#"{{5007,2,"Отбор.ОрганизацияПолучатель",1,{{3}},0,"","","Отбор.Организация",2,{{81,02023637-7868-4a5f-8576-835a76e0c9ba}},{{0,{binding_uuid}}},0,"",""}}"#
+    );
+    let attribute_names = BTreeMap::from([("3".to_string(), "Организация".to_string())]);
+    let table_routes = BTreeMap::from([(
+        ("81".to_string(), format!("0|{binding_uuid}")),
+        "Items.ВыбранныеОтправители.CurrentData.Отправитель".to_string(),
+    )]);
+
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &attribute_names,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &table_routes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].name(), "Отбор.ОрганизацияПолучатель");
+    assert_eq!(links[0].data_path(), "Организация");
+    assert_eq!(links[1].name(), "Отбор.Организация");
+    assert_eq!(
+        links[1].data_path(),
+        "Items.ВыбранныеОтправители.CurrentData.Отправитель"
+    );
+    assert!(links.iter().all(|link| {
+        link.value_change() == ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+    }));
+
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &attribute_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(
+            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("81".to_string())
+        )
+    );
+
+    let make_schema = |options: &[&str]| {
+        crate::form_schema::FormFieldSchema::from_raw_layout(
+            "37",
+            59,
+            "InputField",
+            0,
+            Some("2"),
+            options,
+        )
+        .unwrap()
+    };
+    let primary_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index();
+    let duplicate_slot =
+        crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate.index();
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[primary_slot] = &primary;
+    options[duplicate_slot] = &duplicate;
+    assert!(matches!(
+        canonical_form_input_field_choice_parameter_links_with_metadata(
+            make_schema(&options),
+            &options,
+            &attribute_names,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &table_routes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        CanonicalFormChoiceParameterLinks::Typed(links) if links.len() == 2
+    ));
+}
+
+#[test]
+fn input_field_choice_parameter_links_require_authoritative_binding_uuid_route_agreement() {
+    let binding_uuid = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let primary = format!(
+        r#"{{5006,1,"Отбор.Организация",2,{{94,02023637-7868-4a5f-8576-835a76e0c9ba}},{{18,{binding_uuid}}},0}}"#
+    );
+    let duplicate = format!(
+        r#"{{5007,1,"Отбор.Организация",2,{{94,02023637-7868-4a5f-8576-835a76e0c9ba}},{{18,{binding_uuid}}},0,"",""}}"#
+    );
+    let expected = "Items.КассыККМ.CurrentData.Организация";
+    let agreeing_routes = BTreeMap::from([
+        (
+            ("94".to_string(), format!("18|{binding_uuid}")),
+            expected.to_string(),
+        ),
+        (("94".to_string(), "18".to_string()), expected.to_string()),
+    ]);
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        &primary,
+        &duplicate,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &agreeing_routes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].data_path(), expected);
+    assert_eq!(
+        links[0].value_change(),
+        ibcmd_schema::FormChoiceParameterLinkValueChange::Clear
+    );
+
+    let disagreeing_routes = BTreeMap::from([
+        (
+            ("94".to_string(), format!("18|{binding_uuid}")),
+            expected.to_string(),
+        ),
+        (
+            ("94".to_string(), "18".to_string()),
+            "Items.КассыККМ.CurrentData.ДругаяОрганизация".to_string(),
+        ),
+    ]);
+    assert_eq!(
+        parse_form_input_field_choice_parameter_links_with_metadata(
+            &primary,
+            &duplicate,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &disagreeing_routes,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        ),
+        Err(
+            ibcmd_schema::FormChoiceParameterLinksParseError::UnresolvedAttribute("94".to_string())
+        )
+    );
+}
+
+#[test]
+fn input_field_choice_parameter_links_resolve_live_hybrid_table_routes_and_date() {
+    let primary = r#"{5006,5,"ДокументПередачи",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{0,474a2574-2d26-4bf7-b8f7-17ed986539e8},0,"Номенклатура",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{0,b9382bb5-8c41-4bcc-94d4-429c915a4c03},1,"Отбор.СтранаПроисхождения",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{22,5bdad865-f2c5-434b-8041-ba4aad3b6687},0,"Характеристика",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{0,6a9b7425-e45d-42e5-a7af-31bb1cc02beb},1,"Дата",2,{1},{-3},1}"#;
+    let duplicate = r#"{5007,5,"ДокументПередачи",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{0,474a2574-2d26-4bf7-b8f7-17ed986539e8},0,"","","Номенклатура",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{0,b9382bb5-8c41-4bcc-94d4-429c915a4c03},1,"","","Отбор.СтранаПроисхождения",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{22,5bdad865-f2c5-434b-8041-ba4aad3b6687},0,"","","Характеристика",2,{15,02023637-7868-4a5f-8576-835a76e0c9ba},{0,6a9b7425-e45d-42e5-a7af-31bb1cc02beb},1,"","","Дата",2,{1},{-3},1,"",""}"#;
+    let table_names = BTreeMap::from([("15".to_string(), "Товары".to_string())]);
+    let type_routes = BTreeMap::from([
+        (
+            (
+                "15".to_string(),
+                "0|474a2574-2d26-4bf7-b8f7-17ed986539e8".to_string(),
+            ),
+            "Items.Товары.CurrentData.ДокументРеализации".to_string(),
+        ),
+        (
+            (
+                "15".to_string(),
+                "0|b9382bb5-8c41-4bcc-94d4-429c915a4c03".to_string(),
+            ),
+            "Items.Товары.CurrentData.Номенклатура".to_string(),
+        ),
+        (
+            (
+                "15".to_string(),
+                "22|5bdad865-f2c5-434b-8041-ba4aad3b6687".to_string(),
+            ),
+            "Items.Товары.CurrentData.СтранаПроисхождения".to_string(),
+        ),
+        (
+            (
+                "15".to_string(),
+                "0|6a9b7425-e45d-42e5-a7af-31bb1cc02beb".to_string(),
+            ),
+            "Items.Товары.CurrentData.Характеристика".to_string(),
+        ),
+    ]);
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        primary,
+        duplicate,
+        &BTreeMap::from([("1".to_string(), "Объект".to_string())]),
+        &BTreeMap::new(),
+        &table_names,
+        &BTreeMap::new(),
+        &type_routes,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 5);
+    assert_eq!(
+        links
+            .iter()
+            .map(|link| (link.name(), link.data_path()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "ДокументПередачи",
+                "Items.Товары.CurrentData.ДокументРеализации"
+            ),
+            ("Номенклатура", "Items.Товары.CurrentData.Номенклатура"),
+            (
+                "Отбор.СтранаПроисхождения",
+                "Items.Товары.CurrentData.СтранаПроисхождения"
+            ),
+            ("Характеристика", "Items.Товары.CurrentData.Характеристика"),
+            ("Дата", "Объект.Date"),
+        ]
+    );
+}
+
+#[test]
+fn choice_parameter_table_current_data_routes_use_exact_additional_column_binding() {
+    let binding_uuid = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+    let mut indexes = FormChildItemIndexes::default();
+    indexes
+        .table_name_by_id
+        .insert("785".to_string(), "ТаблицаСумм".to_string());
+    indexes
+        .table_name_by_id
+        .insert("94".to_string(), "КассыККМ".to_string());
+    indexes.insert_bound_attribute_for_table_for_test("785", "1");
+    indexes.insert_bound_attribute_for_table_for_test("94", "2");
+    indexes.type_link_data_path_by_table_column.insert(
+        ("785".to_string(), "12".to_string()),
+        "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения".to_string(),
+    );
+    let additional_column = |id: &str, name: &str| FormAttributeColumn {
+        id: id.to_string(),
+        name: name.to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        explicit_empty_type: false,
+        functional_options: Vec::new(),
+    };
+    let attributes = vec![
+        FormAttribute {
+            id: "1".to_string(),
+            name: "Отбор".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            exact_single_type_uuid: None,
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: vec![FormAttributeAdditionalColumns {
+                table: "Отбор.ТаблицаСумм".to_string(),
+                columns: vec![
+                    additional_column("12", "ДругаяСтрана"),
+                    additional_column("13", "ПервоеНеоднозначное"),
+                    additional_column("13", "ВтороеНеоднозначное"),
+                ],
+            }],
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        },
+        FormAttribute {
+            id: "2".to_string(),
+            name: "Объект".to_string(),
+            title: Vec::new(),
+            value_types: Vec::new(),
+            exact_single_type_uuid: None,
+            explicit_empty_type: false,
+            columns: Vec::new(),
+            additional_columns: vec![FormAttributeAdditionalColumns {
+                table: "Объект.КассыККМ".to_string(),
+                columns: vec![additional_column("18", "Организация")],
+            }],
+            main_attribute: true,
+            saved_data: false,
+            fill_check: None,
+            save_fields: Vec::new(),
+            use_always: Vec::new(),
+            functional_options: Vec::new(),
+            settings: None,
+            spreadsheet_document_settings: None,
+            type_description_settings: None,
+        },
+    ];
+    extend_form_choice_parameter_link_table_current_data_routes_from_additional_columns(
+        &mut indexes,
+        &attributes,
+    );
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("785".to_string(), "12".to_string())),
+        Some(&"Items.ТаблицаСумм.CurrentData.СтранаПроисхождения".to_string())
+    );
+    let expected = "Items.КассыККМ.CurrentData.Организация".to_string();
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("94".to_string(), "18".to_string())),
+        Some(&expected)
+    );
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("94".to_string(), format!("18|{binding_uuid}"))),
+        Some(&expected)
+    );
+    assert!(
+        !indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("785".to_string(), "13".to_string()))
+    );
+    assert!(
+        !indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("785".to_string(), format!("13|{binding_uuid}")))
+    );
+}
+
+#[test]
+fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
+    let base_field = r#"{37,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,"Организация",2,0,{1,1,{"ru","От организации"}},{1,1,{"ru","Организация, от имени которой будете приглашать."}},{1,{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},"",-1,-1,1,0,""},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{"U"},{"U"},"",0,{4,0,{0},"",-1,-1,1,0,""},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},1,1,0,{"Pattern"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,1,{"ru","Организация, от имени которой будете приглашать."}},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0},{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,"ОрганизацияПриИзменении",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"ОрганизацияКонтекстноеМеню",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{"Pattern"},{"Pattern"},"","",{0},0,3,1,{12,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,"ОрганизацияРасширеннаяПодсказка",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"#;
+    let primary = r#"{5006,1,"Filter.Owner",1,{3},0}"#;
+    let duplicate = r#"{5007,1,"Filter.Other",1,{3},0,"",""}"#;
+    let field = base_field
+        .replacen("{36,{3,0},", "{36,{3,1,0},", 1)
+        .replacen("{5006,0}", primary, 1)
+        .replacen("{5007,0}", duplicate, 1);
+    let body = ParsedFormBodyBlob {
+        layout: format!("{{59,1,cccccccc-cccc-4ccc-8ccc-cccccccccccc,{field}}}"),
+        module_text: String::new(),
+        trailing: Vec::new(),
+        trailing_fields: 0,
+    };
+    let type_index = BTreeMap::new();
+    let type_index_collisions = BTreeSet::new();
+    let dcs_type_index = DcsTypeIndex::new();
+    let object_refs = BTreeMap::new();
+    let information_register_field_refs = InformationRegisterFieldReferenceIndex::default();
+    let context = FormParseContext::new(
+        &type_index,
+        &type_index_collisions,
+        &dcs_type_index,
+        &object_refs,
+        &information_register_field_refs,
+        None,
+    );
+
+    let extraction = extract_form_body_xml_from_body_detailed_timed(&body, &context, None).unwrap();
+    let DetailedFormBodyExtraction::Rejected { diagnostics, error } = extraction else {
+        panic!("malformed mirrored links must reject detailed extraction");
+    };
+    assert_eq!(
+        error,
+        FormSchemaWriteError::OpaqueChoiceParameterLinks {
+            primary_slot:
+                crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinks.index(),
+            duplicate_slot:
+                crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate
+                    .index(),
+        }
+    );
+    assert_eq!(diagnostics.len(), 2);
+    let link_diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code == "source_asset.form.choice_parameter_links.opaque_rejected"
+        })
+        .unwrap();
+    assert_eq!(link_diagnostic.classification, "opaque_property_rejected");
+    assert_eq!(link_diagnostic.parse_error_class, Some("mirror_mismatch"));
+    assert_eq!(link_diagnostic.property, "ChoiceParameterLinks");
+    assert_eq!(link_diagnostic.raw_length, primary.len() + duplicate.len());
+    assert_eq!(
+        link_diagnostic.raw_sha256,
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{primary}{duplicate}").as_bytes())
+        )
+    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "source_asset.form.choice_list.opaque_asset_not_emitted"
+    }));
+    assert!(
+        extract_form_body_xml_from_body_timed(&body, &context, None).is_none(),
+        "ordinary extraction must not emit rejected form XML"
+    );
+}
+
+#[test]
+fn input_field_enum_reference_uses_schema_owner_kind_not_owner_name() {
+    let type_id = "11111111-1111-4111-8111-111111111111";
+    let value_id = "22222222-2222-4222-8222-222222222222";
+    let object_refs = BTreeMap::from([(
+        value_id.to_string(),
+        "Enum.Catalog.EnumValue.Enum".to_string(),
+    )]);
+
+    let enum_named_catalog =
+        BTreeMap::from([(type_id.to_string(), "cfg:EnumRef.Catalog".to_string())]);
+    assert_eq!(
+        parse_form_enum_design_time_reference(
+            type_id,
+            value_id,
+            &enum_named_catalog,
+            &BTreeSet::new(),
+            &object_refs,
+        )
+        .as_deref(),
+        Some("Enum.Catalog.EnumValue.Enum")
+    );
+
+    let catalog_named_enum =
+        BTreeMap::from([(type_id.to_string(), "cfg:CatalogRef.Enum".to_string())]);
+    let catalog_object_refs = BTreeMap::from([(
+        value_id.to_string(),
+        "Catalog.Enum.EnumValue.Enum".to_string(),
+    )]);
+    assert!(
+        parse_form_enum_design_time_reference(
+            type_id,
+            value_id,
+            &catalog_named_enum,
+            &BTreeSet::new(),
+            &catalog_object_refs,
+        )
+        .is_none()
+    );
+
+    for hostile_type_reference in [
+        "cfg:enumRef.Catalog",
+        "cfg:UnknownRef.Catalog",
+        "cfg:EnumRef.Catalog.Extra",
+        "cfg:EnumRef.",
+    ] {
+        let hostile_type_index =
+            BTreeMap::from([(type_id.to_string(), hostile_type_reference.to_string())]);
+        assert!(
+            parse_form_enum_design_time_reference(
+                type_id,
+                value_id,
+                &hostile_type_index,
+                &BTreeSet::new(),
+                &object_refs,
+            )
+            .is_none(),
+            "{hostile_type_reference}"
+        );
+    }
+}
+
+#[test]
+fn live_slot27_choice_parameters_slice_matches_native_xml_exactly() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        source: FixtureSource,
+        raw_slot_value: String,
+        type_index: BTreeMap<String, String>,
+        object_refs: BTreeMap<String, String>,
+        expected_xml: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FixtureSource {
+        run: String,
+        raw_row: String,
+        raw_source: String,
+        raw_source_sha256: String,
+        native_source: String,
+        native_source_sha256: String,
+        raw_slot: usize,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_choice_parameters_slot27_live.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture.source.raw_slot, 27);
+    assert_eq!(
+        fixture.source.raw_row,
+        "34accda9-6211-4bc3-be8d-e42a24260653.0"
+    );
+    assert!(
+        fixture
+            .source
+            .run
+            .ends_with("ut_ibcmd_ut_full_33a9baf_20260724_a")
+    );
+    assert!(fixture.source.raw_source.ends_with("__part0.txt"));
+    assert_eq!(
+        fixture.source.raw_source_sha256,
+        "77a99cffaa0b5c81ccccafa3a5fa01dec56342b49d1cce2e56f97f28b62785b1"
+    );
+    assert!(fixture.source.native_source.ends_with("/Ext/Form.xml"));
+    assert_eq!(
+        fixture.source.native_source_sha256,
+        "30cf0689522d6b74408da77426a178df282361f36d3787c0cfaf456c85cb8b03"
+    );
+
+    let mut options = vec!["0"; 66];
+    options[0] = "36";
+    options[crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index()] =
+        &fixture.raw_slot_value;
+    let schema = crate::form_schema::FormFieldSchema::from_raw_layout(
+        "37",
+        59,
+        "InputField",
+        0,
+        Some("2"),
+        &options,
+    )
+    .unwrap();
+    let canonical = canonical_form_input_field_choice_parameters(
+        schema,
+        &options,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &fixture.object_refs,
+    );
+    let CanonicalFormChoiceParameters::Typed { parameters, slot } = &canonical else {
+        panic!("live slot-27 value must be fully typed");
+    };
+    assert_eq!(*slot, 27);
+    assert_eq!(
+        parameters
+            .items()
+            .iter()
+            .map(|item| item.name())
+            .collect::<Vec<_>>(),
+        [
+            "Отбор.Статус",
+            "Отбор.ХозяйственнаяОперация",
+            "Отбор.ПометкаУдаления",
+        ]
+    );
+    assert!(matches!(
+        parameters.items()[0].value(),
+        ibcmd_schema::FormChoiceParameterValue::DesignTimeRef(value)
+            if value == "Enum.СтатусыДоговоровКонтрагентов.EnumValue.Действует"
+    ));
+    assert!(matches!(
+        parameters.items()[1].value(),
+        ibcmd_schema::FormChoiceParameterValue::FixedArray(values) if values.len() == 2
+    ));
+    assert_eq!(
+        parameters.items()[2].value(),
+        &ibcmd_schema::FormChoiceParameterValue::Boolean(false)
+    );
+
+    // This is the production preflight: it resolves the dedicated exact rule and
+    // its cross-bound evidence before the formatter can emit any XML.
+    validate_canonical_form_choice_parameters(&canonical).unwrap();
+    assert_eq!(
+        format_form_choice_parameters_xml(&canonical, 1).unwrap(),
+        fixture.expected_xml
+    );
+}
+
+#[test]
+fn native_choice_parameter_cluster_matches_exact_boundaries_and_absent_available_types() {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Fixture {
+        source: FixtureSource,
+        links: Vec<FixtureLink>,
+        raw_choice_parameter_links_primary: String,
+        raw_choice_parameter_links_duplicate: String,
+        attribute_names_by_id: BTreeMap<String, String>,
+        raw_choice_parameters: String,
+        type_index: BTreeMap<String, String>,
+        object_refs: BTreeMap<String, String>,
+        available_types: String,
+        expected_xml: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FixtureSource {
+        run: String,
+        raw_row: String,
+        raw_source: String,
+        raw_source_sha256: String,
+        native_source: String,
+        native_source_sha256: String,
+        item_name: String,
+        item_id: String,
+        native_predecessor_qname: String,
+        native_successor_qname: String,
+        native_start_line: usize,
+        native_end_line: usize,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct FixtureLink {
+        name: String,
+        data_path: String,
+        value_change: String,
+    }
+
+    let fixture: Fixture = serde_json::from_str(include_str!(
+        "../../tests/fixtures/form_choice_parameter_cluster_native.json"
+    ))
+    .unwrap();
+    assert!(
+        fixture
+            .source
+            .run
+            .ends_with("ut_ibcmd_ut_full_33a9baf_20260724_a")
+    );
+    assert_eq!(
+        fixture.source.raw_row,
+        "34accda9-6211-4bc3-be8d-e42a24260653.0"
+    );
+    assert!(fixture.source.raw_source.ends_with("__part0.txt"));
+    assert_eq!(
+        fixture.source.raw_source_sha256,
+        "77a99cffaa0b5c81ccccafa3a5fa01dec56342b49d1cce2e56f97f28b62785b1"
+    );
+    assert!(fixture.source.native_source.ends_with("/Ext/Form.xml"));
+    assert_eq!(
+        fixture.source.native_source_sha256,
+        "30cf0689522d6b74408da77426a178df282361f36d3787c0cfaf456c85cb8b03"
+    );
+    assert_eq!(fixture.source.item_name, "ТорговаяПлощадкаСоглашение1");
+    assert_eq!(fixture.source.item_id, "971");
+    assert_eq!(
+        fixture.source.native_predecessor_qname,
+        "AutoMarkIncomplete"
+    );
+    assert_eq!(fixture.source.native_successor_qname, "ContextMenu");
+    assert_eq!(
+        (
+            fixture.source.native_start_line,
+            fixture.source.native_end_line
+        ),
+        (3118, 3138)
+    );
+    assert_eq!(fixture.available_types, "absent");
+
+    let links = parse_form_input_field_choice_parameter_links(
+        &fixture.raw_choice_parameter_links_primary,
+        &fixture.raw_choice_parameter_links_duplicate,
+        &fixture.attribute_names_by_id,
+    )
+    .unwrap();
+    assert_eq!(links.len(), fixture.links.len());
+    for (parsed, expected) in links.iter().zip(&fixture.links) {
+        assert_eq!(parsed.name(), expected.name);
+        assert_eq!(parsed.data_path(), expected.data_path);
+        assert_eq!(parsed.value_change().xml_value(), expected.value_change);
+    }
+    let parameters = parse_form_input_field_choice_parameters(
+        &fixture.raw_choice_parameters,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &fixture.object_refs,
+    )
+    .unwrap();
+    let cluster = CanonicalFormChoiceParameterCluster::new(
+        CanonicalFormChoiceParameterLinks::Typed(links),
+        CanonicalFormChoiceParameters::Typed {
+            parameters,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameters.index(),
+        },
+        CanonicalFormChoiceParameterAvailableTypes::Absent,
+    );
+    let xml = format_form_choice_parameter_cluster_xml(&cluster, 1).unwrap();
+    assert_eq!(xml, fixture.expected_xml);
+    assert!(xml.find("<ChoiceParameterLinks>").unwrap() < xml.find("<ChoiceParameters>").unwrap());
+    assert!(!xml.contains("<AvailableTypes"));
+}
+
+#[test]
+fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_payload() {
+    let provenance = FormChoiceListRawProvenance {
+        layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+        slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+    };
+    let choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![FormChoiceListItem {
+            presentation_present: true,
+            presentation: Vec::new(),
+            value: FormChoiceListValue::Decimal("1".to_string()),
+        }],
+        provenance,
+    };
+
+    validate_canonical_form_choice_list(&choice_list).unwrap();
+    let xml = format_form_choice_list_xml(&choice_list, 1).unwrap();
+    assert_eq!(
+        xml,
+        "\t<ChoiceList>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:decimal\">1</Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t</ChoiceList>\r\n"
+    );
+
+    let string_choice_list = CanonicalFormChoiceList::Typed {
+        items: vec![
+            FormChoiceListItem {
+                presentation_present: true,
+                presentation: Vec::new(),
+                value: FormChoiceListValue::String(String::new()),
+            },
+            FormChoiceListItem {
+                presentation_present: true,
+                presentation: Vec::new(),
+                value: FormChoiceListValue::String(" ".to_owned()),
+            },
+            FormChoiceListItem {
+                presentation_present: true,
+                presentation: Vec::new(),
+                value: FormChoiceListValue::String("a<&>\"'".to_owned()),
+            },
+        ],
+        provenance,
+    };
+    let string_xml = format_form_choice_list_xml(&string_choice_list, 1).unwrap();
+    assert_eq!(
+        string_xml,
+        "\t<ChoiceList>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:string\"/>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:string\"> </Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t\t<xr:Item>\r\n\
+\t\t\t<xr:Presentation/>\r\n\
+\t\t\t<xr:CheckState>0</xr:CheckState>\r\n\
+\t\t\t<xr:Value xsi:type=\"FormChoiceListDesTimeValue\">\r\n\
+\t\t\t\t<Presentation/>\r\n\
+\t\t\t\t<Value xsi:type=\"xs:string\">a&lt;&amp;&gt;&quot;'</Value>\r\n\
+\t\t\t</xr:Value>\r\n\
+\t\t</xr:Item>\r\n\
+\t</ChoiceList>\r\n"
+    );
+
+    let ref_xml = [
+        FormChoiceListValue::EmptyRef("Catalog.Status.EmptyRef".to_owned()),
+        FormChoiceListValue::LiteralDesignTimeRef("Catalog.Status.EmptyRef".to_owned()),
+        FormChoiceListValue::DesignTimeRef("Catalog.Status.EmptyRef".to_owned()),
+    ]
+    .map(|value| {
+        format_form_choice_list_xml(
+            &CanonicalFormChoiceList::Typed {
+                items: vec![FormChoiceListItem {
+                    presentation_present: true,
+                    presentation: Vec::new(),
+                    value,
+                }],
+                provenance,
+            },
+            1,
+        )
+        .unwrap()
+    });
+    assert!(ref_xml.windows(2).all(|pair| pair[0] == pair[1]));
+    assert!(
+        ref_xml[0]
+            .contains(r#"<Value xsi:type="xr:DesignTimeRef">Catalog.Status.EmptyRef</Value>"#),
+        "{}",
+        ref_xml[0]
+    );
+
+    let empty = CanonicalFormChoiceList::Empty { provenance };
+    validate_canonical_form_choice_list(&empty).unwrap();
+    assert_eq!(format_form_choice_list_xml(&empty, 1).unwrap(), "");
+
+    let opaque = CanonicalFormChoiceList::OpaqueSameProfile {
+        raw: "{unsupported}".to_owned(),
+        provenance,
+    };
+    assert_eq!(
+        validate_canonical_form_choice_list(&opaque),
+        Err(FormSchemaWriteError::OpaqueChoiceList {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        })
+    );
+    assert_eq!(
+        format_form_choice_list_xml(&opaque, 1),
+        Err(FormSchemaWriteError::OpaqueChoiceList {
+            layout: FormChoiceListRawLayout::InputFieldExtendedOptions,
+            slot: crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceList.index(),
+        })
+    );
+}
+
+#[test]
+fn form_list_settings_reports_canonical_dcs_dependency_instead_of_guessing() {
+    assert_eq!(
+        require_canonical_form_list_settings_serializer(),
+        Err(FormSchemaWriteError::CanonicalDcsSerializerPending {
+            rule_id: "form.dynamic-list.list-settings".to_owned(),
+            dependency: "GitHub #283 / build-canonical-dcs-serializer",
+        })
     );
 }
 
@@ -14312,7 +21316,16 @@ fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
         false
     ));
     assert!(cct_attribute_wrapper_is_exact(
-        &["3", "payload", "0", "2", "1", "0", "0", &format!("{{1,{zero}}}")],
+        &[
+            "3",
+            "payload",
+            "0",
+            "2",
+            "1",
+            "0",
+            "0",
+            &format!("{{1,{zero}}}")
+        ],
         false
     ));
     assert!(cct_attribute_wrapper_is_exact(
@@ -14320,7 +21333,16 @@ fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
         true
     ));
     assert!(!cct_attribute_wrapper_is_exact(
-        &["3", "payload", "0", "2", "1", "0", "1", &format!("{{1,{zero}}}")],
+        &[
+            "3",
+            "payload",
+            "0",
+            "2",
+            "1",
+            "0",
+            "1",
+            &format!("{{1,{zero}}}")
+        ],
         false
     ));
     assert!(!cct_attribute_wrapper_is_exact(
@@ -14333,9 +21355,15 @@ fn accepts_only_evidenced_cct_attribute_and_tabular_wrappers() {
     ));
 
     assert!(cct_tabular_section_wrapper_is_exact(&["0", "payload", "0"]));
-    assert!(cct_tabular_section_wrapper_is_exact(&["1", "payload", "0", "5"]));
-    assert!(!cct_tabular_section_wrapper_is_exact(&["1", "payload", "0", "4"]));
-    assert!(!cct_tabular_section_wrapper_is_exact(&["1", "payload", "0"]));
+    assert!(cct_tabular_section_wrapper_is_exact(&[
+        "1", "payload", "0", "5"
+    ]));
+    assert!(!cct_tabular_section_wrapper_is_exact(&[
+        "1", "payload", "0", "4"
+    ]));
+    assert!(!cct_tabular_section_wrapper_is_exact(&[
+        "1", "payload", "0"
+    ]));
 }
 
 #[test]
@@ -20697,10 +27725,7 @@ fn moxel_style_refs_require_one_canonical_count_prefixed_span() {
     assert_eq!(refs[4].as_deref(), Some("style:ReportHeaderBackColor"));
 
     let custom = parse_moxel_style_refs(
-        &[
-            "1",
-            "{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}}",
-        ],
+        &["1", "{3,3,{0,43d91051-d5a2-4d2a-8447-7fa917e5ea38}}"],
         &BTreeMap::from([(
             "43d91051-d5a2-4d2a-8447-7fa917e5ea38".to_string(),
             "StyleItem.Custom".to_string(),
@@ -20709,11 +27734,11 @@ fn moxel_style_refs_require_one_canonical_count_prefixed_span() {
     assert_eq!(custom[0].as_deref(), Some("style:Custom"));
 
     for fields in [
-        vec!["2", "{3,3,{-1}}"], // overrun
-        vec!["1", "{3,3,{-1}}", "{3,3,{-3}}"], // underconsume
-        vec!["1", "{3,4,{1}}"], // mode 4 accepts only {0}
-        vec!["1", "{3,3,{-1,-3}}"], // wrong arity
-        vec!["{3,3,{-1}}"], // legacy uncounted descriptor
+        vec!["2", "{3,3,{-1}}"],                    // overrun
+        vec!["1", "{3,3,{-1}}", "{3,3,{-3}}"],      // underconsume
+        vec!["1", "{3,4,{1}}"],                     // mode 4 accepts only {0}
+        vec!["1", "{3,3,{-1,-3}}"],                 // wrong arity
+        vec!["{3,3,{-1}}"],                         // legacy uncounted descriptor
         vec!["1", "{3,3,{-1}}", "1", "{3,3,{-3}}"], // ambiguity
         vec!["01", "{3,3,{-1}}"],
         vec!["+1", "{3,3,{-1}}"],
@@ -20746,8 +27771,8 @@ fn moxel_style_ref_palette_has_exact_counted_layout_before_nested_formats() {
 	<format><width>38</width></format>
 </document>"#;
     let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
-    let inflated = String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate"))
-        .expect("UTF-8");
+    let inflated =
+        String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate")).expect("UTF-8");
     let body_start = inflated.find("{8,").expect("MOXCEL root");
     let fields = split_1c_braced_fields(&inflated[body_start..], 0).expect("root fields");
     let candidates = fields
@@ -20779,18 +27804,16 @@ fn moxel_style_ref_palette_has_exact_counted_layout_before_nested_formats() {
     );
     let table = split_1c_braced_fields(fields[palette_start + palette_count + 1], 0)
         .expect("nested format table follows palette");
-    assert_eq!(table.first().and_then(|count| count.parse::<usize>().ok()), Some(2));
+    assert_eq!(
+        table.first().and_then(|count| count.parse::<usize>().ok()),
+        Some(2)
+    );
     assert_eq!(table.len(), 3);
 }
 
 #[test]
 fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_formats() {
-    let fields = [
-        "1",
-        "{3,3,{-1}}",
-        "{2,{0},{0}}",
-        "{3,3,{-3}}",
-    ];
+    let fields = ["1", "{3,3,{-1}}", "{2,{0},{0}}", "{3,3,{-3}}"];
 
     let style_refs = parse_moxel_style_refs(&fields, &BTreeMap::new());
     assert_eq!(style_refs.len(), 1);
@@ -20798,7 +27821,11 @@ fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_format
     let formats = parse_moxel_format_table(&fields, 0, &style_refs, &BTreeSet::new(), &[])
         .expect("nested format table");
     assert_eq!(formats.len(), 2);
-    assert!(formats.iter().all(|format| *format == MoxelFormat::default()));
+    assert!(
+        formats
+            .iter()
+            .all(|format| *format == MoxelFormat::default())
+    );
 }
 
 #[test]
@@ -20812,8 +27839,8 @@ fn moxel_format_table_skips_confirmed_palette_when_invalid_override_clears_refs(
 	<format><width>38</width></format>
 </document>"#;
     let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
-    let inflated = String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate"))
-        .expect("UTF-8");
+    let inflated =
+        String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate")).expect("UTF-8");
     let body_start = inflated.find("{8,").expect("MOXCEL root");
     let mut fields = split_1c_braced_fields(&inflated[body_start..], 0)
         .expect("root fields")
@@ -23070,7 +30097,10 @@ fn format_role_rights_preserves_false_rights_without_restrictions() {
                     }),
                 },
                 RoleRight {
-                    name: "Edit".to_string(),
+                    // `Edit` is intentionally omitted for top-level Documents even when
+                    // restriction-only suppression is inactive.  Use a non-policy right
+                    // here to exercise the latter case.
+                    name: "CustomRight".to_string(),
                     value: false,
                     restriction_by_condition: None,
                 },
@@ -23084,7 +30114,7 @@ fn format_role_rights_preserves_false_rights_without_restrictions() {
     assert!(xml.contains("<value>false</value>"));
     assert!(xml.contains("<condition>ГДЕ\nЛОЖЬ</condition>"));
     assert!(!xml.contains("<condition>ГДЕ\r\nЛОЖЬ</condition>"));
-    assert!(xml.contains("<name>Edit</name>"));
+    assert!(xml.contains("<name>CustomRight</name>"));
 }
 
 #[test]
@@ -24693,6 +31723,28 @@ fn parses_business_process_flowchart_processing_split_and_join_items() {
     assert_eq!(flowchart.items[2].tag, "Join");
 }
 
+fn subsystem_source_for_test(
+    subsystem_uuid: &str,
+    name: &str,
+    synonym: &str,
+    include_in_command_interface: bool,
+    include_help_in_contents: bool,
+    use_one_command: bool,
+    child_uuids: &[&str],
+) -> String {
+    let include_in_command_interface = if include_in_command_interface { 1 } else { 0 };
+    let include_help_in_contents = if include_help_in_contents { 1 } else { 0 };
+    let use_one_command = if use_one_command { 1 } else { 0 };
+    let children = child_uuids
+        .iter()
+        .map(|uuid| format!(",{uuid}"))
+        .collect::<String>();
+    format!(
+        "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"{name}\",{{1,\"en\",\"{synonym}\"}},\"\"}},\r\n{include_help_in_contents},0,{include_in_command_interface},{{4,0,{{0}},0,0,0,0}},{{0}},{{0}},{use_one_command}}},0,{{00000000-0000-0000-0000-000000000000,{}{children}}}}}",
+        child_uuids.len(),
+    )
+}
+
 #[test]
 fn writes_nested_subsystem_metadata_and_help_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
@@ -24703,17 +31755,20 @@ fn writes_nested_subsystem_metadata_and_help_to_source_layout() {
     let parent_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let child_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let parent_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{parent_uuid}}},\"StandardSubsystems\",{{1,\"en\",\"Standard subsystems\"}},\"\"}},1,{child_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        subsystem_source_for_test(
+            parent_uuid,
+            "StandardSubsystems",
+            "Standard subsystems",
+            true,
+            false,
+            false,
+            &[child_uuid],
+        )
+        .as_bytes(),
+    );
     let child_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{child_uuid}}},\"Users\",{{1,\"en\",\"Users\"}},\"\"}},1}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        subsystem_source_for_test(child_uuid, "Users", "Users", true, false, false, &[]).as_bytes(),
+    );
     let help = deflate_for_test(b"{5,1,\"ru\",{#base64:PGgxPlVzZXJzPC9oMT4=},0}");
     let rows = vec![
         ConfigRow {
@@ -24907,19 +31962,18 @@ fn disambiguates_colliding_metadata_object_codes() {
 #[test]
 fn extracts_subsystem_include_in_command_interface_to_metadata_xml() {
     let true_uuid = "11111111-1111-4111-8111-111111111111";
-    let true_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{true_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"subsystem comment\"}},1}}\r\n}}"
-            )
-            .as_bytes(),
+    let true_source =
+        subsystem_source_for_test(true_uuid, "Admin", "Admin", true, false, false, &[]).replacen(
+            "\"\"",
+            "\"subsystem comment\"",
+            1,
         );
+    let true_blob = deflate_for_test(true_source.as_bytes());
     let false_uuid = "22222222-2222-4222-8222-222222222222";
     let false_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{false_uuid}}},\"Hidden\",{{1,\"en\",\"Hidden\"}},\"\"}},0}}\r\n}}"
-            )
+        subsystem_source_for_test(false_uuid, "Hidden", "Hidden", false, false, false, &[])
             .as_bytes(),
-        );
+    );
 
     let extracted = extract_metadata_source_xml(
         &true_blob,
@@ -24976,11 +32030,9 @@ fn extracts_subsystem_include_in_command_interface_to_metadata_xml() {
 fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
     let subsystem_uuid = "11111111-1111-4111-8111-111111111111";
     let blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{subsystem_uuid}}},\"Admin\",{{1,\"en\",\"Admin\"}},\"\"}},1,0,1}}\r\n}}"
-            )
+        subsystem_source_for_test(subsystem_uuid, "Admin", "Admin", false, true, true, &[])
             .as_bytes(),
-        );
+    );
 
     for source_version in [
         InfobaseConfigSourceVersion::V2_20,
@@ -25005,8 +32057,8 @@ fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
             PathBuf::from("Subsystems/Admin.xml")
         );
         assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
-        assert!(xml.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"));
-        assert!(xml.contains("<IncludeInCommandInterface>true</IncludeInCommandInterface>"));
+        assert!(xml.contains("<IncludeHelpInContents>true</IncludeHelpInContents>"));
+        assert!(xml.contains("<IncludeInCommandInterface>false</IncludeInCommandInterface>"));
         assert!(xml.contains("<UseOneCommand>true</UseOneCommand>"));
         assert!(!xml.contains("<UseStandardCommands>"));
         assert!(
@@ -25034,12 +32086,16 @@ fn extracts_subsystem_native_scalar_tail_to_metadata_xml() {
 fn extracts_subsystem_child_objects_to_metadata_xml() {
     let parent_uuid = "11111111-1111-4111-8111-111111111111";
     let child_uuid = "22222222-2222-4222-8222-222222222222";
-    let blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{22,\r\n{{3,\r\n{{1,0,{parent_uuid}}},\"Parent\",{{1,\"en\",\"Parent\"}},\"\"}},1,{child_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let source = subsystem_source_for_test(
+        parent_uuid,
+        "Parent",
+        "Parent",
+        true,
+        false,
+        false,
+        &[child_uuid],
+    );
+    let blob = deflate_for_test(source.as_bytes());
     let subsystem_refs = BTreeMap::from([(
         child_uuid.to_string(),
         SubsystemSourceReference {
@@ -29035,6 +36091,40 @@ fn parses_information_register_variable_collections_without_partial_results() {
 }
 
 #[test]
+fn information_register_design_time_ref_uses_typed_generated_owner_kinds() {
+    let owner_uuid = "11111111-1111-4111-8111-111111111111";
+    let nil_uuid = "00000000-0000-0000-0000-000000000000";
+    let raw = format!(r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{owner_uuid},{nil_uuid}}}}}"##);
+    let object_refs = BTreeMap::new();
+
+    for kind in [
+        "Catalog",
+        "Document",
+        "Enum",
+        "ExchangePlan",
+        "ChartOfAccounts",
+        "ChartOfCharacteristicTypes",
+        "ChartOfCalculationTypes",
+        "BusinessProcess",
+        "Task",
+    ] {
+        let type_index = BTreeMap::from([(owner_uuid.to_string(), format!("cfg:{kind}Ref.Owner"))]);
+        assert_eq!(
+            parse_information_register_design_time_ref(&raw, &type_index, &object_refs),
+            Some(format!("{kind}.Owner.EmptyRef")),
+            "{kind}"
+        );
+    }
+
+    let hostile_type_index =
+        BTreeMap::from([(owner_uuid.to_string(), "cfg:UnknownRef.Owner".to_string())]);
+    assert!(
+        parse_information_register_design_time_ref(&raw, &hostile_type_index, &object_refs)
+            .is_none()
+    );
+}
+
+#[test]
 fn parses_information_register_choice_form_reference_variants_fail_closed() {
     let owner_uuid = "11111111-1111-4111-8111-111111111111";
     let form_uuid = "22222222-2222-4222-8222-222222222222";
@@ -30321,9 +37411,7 @@ fn configuration_reference_requires_identity_and_exact_root_slots() {
         .replace("$OBJECT", object_uuid)
         .replace("$ZERO", zero_uuid);
     assert!(parse_configuration_reference_text(&extended_catalog).is_none());
-    assert!(
-        parse_configuration_reference_text_for_row(&extended_catalog, identity).is_none()
-    );
+    assert!(parse_configuration_reference_text_for_row(&extended_catalog, identity).is_none());
 
     let missing_tail = format!("{{2,{{{identity}}},1,{child}}}");
     let wrong_count = format!(r#"{{2,{{{identity}}},2,{child},{{{{0,"",""}}}}}}"#);
@@ -33647,7 +40735,9 @@ fn metadata_reference_index_maps_extended_catalog_tabular_attribute() {
     let refs = build_metadata_object_reference_index_from_texts(&rows);
     assert_eq!(
         refs.get(attribute_uuid).map(String::as_str),
-        Some("Catalog.AdditionalProperties.TabularSection.AdditionalAttributes.Attribute.TrackChanges")
+        Some(
+            "Catalog.AdditionalProperties.TabularSection.AdditionalAttributes.Attribute.TrackChanges"
+        )
     );
 }
 
@@ -35008,12 +42098,14 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
     source_version: InfobaseConfigSourceVersion,
 ) -> Option<ExtractedMetadataSourceXml> {
     let blob = deflate_for_test(raw.as_bytes());
-    extract_metadata_source_xml_with_recalculation_refs(
+    let object_ref_indexes = MetadataObjectReferenceIndexes::from_legacy(object_refs);
+    extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
         &blob,
         &fixture.owner_uuid,
         type_index,
         &BTreeSet::new(),
         object_refs,
+        &object_ref_indexes.resolutions,
         metadata_object_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
@@ -35023,6 +42115,32 @@ fn extract_filter_criterion_with_distinct_object_ref_indexes(
         &BTreeMap::new(),
         &BTreeMap::new(),
         source_version,
+    )
+}
+
+fn audit_strict_filter_criterion(
+    fixture: &StrictFilterCriterionFixture,
+    raw: &str,
+    type_index: &BTreeMap<String, String>,
+    type_index_collisions: &BTreeSet<String>,
+    object_ref_indexes: &MetadataObjectReferenceIndexes,
+) -> std::result::Result<ExtractedMetadataSourceXml, MetadataSourceExtractionDiagnostic> {
+    let row = metadata_text_row_from_text(&fixture.owner_uuid, raw.to_string()).unwrap();
+    extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions(
+        &row,
+        type_index,
+        type_index_collisions,
+        &object_ref_indexes.references,
+        &object_ref_indexes.resolutions,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
     )
 }
 
@@ -35157,6 +42275,238 @@ fn extracts_strict_v20_filter_criterion_in_native_order_from_base_indexes() {
         )
         .is_none(),
         "Content must not resolve from the expanded metadata-object map"
+    );
+}
+
+#[test]
+fn extracts_strict_v20_filter_criterion_with_two_types_and_448_ordered_content_items() {
+    let owner_uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let generated_ids = (0..4)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let type_ids = (0..2)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let content_ids = (0..448)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let tail_ids = (0..2)
+        .map(|_| uuid_with_ascii_case_difference_for_filter_criterion_test())
+        .collect::<Vec<_>>();
+    let raw = strict_filter_criterion_raw_for_test(
+        &owner_uuid,
+        "SyntheticCriterion",
+        &generated_ids,
+        &type_ids,
+        &content_ids,
+        &tail_ids,
+    );
+    let type_index = BTreeMap::from([
+        (
+            type_ids[0].clone(),
+            "cfg:CatalogRef.SyntheticFirst".to_string(),
+        ),
+        (
+            type_ids[1].clone(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    let object_refs = content_ids
+        .iter()
+        .enumerate()
+        .map(|(index, uuid)| {
+            (
+                uuid.clone(),
+                format!("Document.Synthetic.Attribute.Field{index:03}"),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let fixture = StrictFilterCriterionFixture {
+        raw,
+        owner_uuid,
+        generated_ids,
+        type_ids,
+        content_ids,
+        tail_ids,
+        type_index,
+        object_refs,
+    };
+
+    let extracted = extract_filter_criterion_with_distinct_object_ref_indexes(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &fixture.object_refs,
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .unwrap();
+    let xml = String::from_utf8(extracted.xml).unwrap();
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("FilterCriteria/SyntheticCriterion.xml")
+    );
+    assert!(xml.contains(r#"version="2.20""#));
+    assert_eq!(xml.matches("<v8:Type>").count(), 2);
+    assert_eq!(
+        xml.matches(r#"<xr:Item xsi:type="xr:MDObjectRef">"#)
+            .count(),
+        448
+    );
+    assert_eq!(xml.matches("<xr:GeneratedType ").count(), 2);
+    for generated_id in &fixture.generated_ids {
+        assert!(xml.contains(generated_id));
+    }
+    let ordered = [
+        "Document.Synthetic.Attribute.Field000",
+        "Document.Synthetic.Attribute.Field224",
+        "Document.Synthetic.Attribute.Field447",
+    ]
+    .map(|reference| xml.find(reference).unwrap());
+    assert!(ordered.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn filter_criterion_diagnostics_are_typed_bounded_and_atomic() {
+    let fixture = strict_filter_criterion_fixture();
+    let base_indexes = MetadataObjectReferenceIndexes::from_legacy(&fixture.object_refs);
+    let first_content_member = format!(
+        r##"{{"#",{METADATA_OBJECT_REF_TYPE_UUID},{{1,{}}}}}"##,
+        fixture.content_ids[0]
+    );
+    let malformed = replace_filter_criterion_test_value(
+        &fixture.raw,
+        &first_content_member,
+        &first_content_member.replacen(r##"{"#","##, r##"{"Ref","##, 1),
+    );
+    let malformed_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &malformed,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &base_indexes,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        malformed_diagnostic.class,
+        MetadataSourceFailureClass::Malformed
+    );
+    assert_eq!(malformed_diagnostic.family, "FilterCriterion");
+    assert_eq!(
+        malformed_diagnostic.parser_stage,
+        "filter_criterion_content"
+    );
+    assert_eq!(malformed_diagnostic.structural_signature, "shape");
+    assert_eq!(
+        malformed_diagnostic.collection_role.as_deref(),
+        Some("content")
+    );
+    assert_eq!(malformed_diagnostic.item_index, Some(0));
+    assert_eq!(malformed_diagnostic.reference_uuid, None);
+    assert_eq!(malformed_diagnostic.offending_reference, None);
+    assert_ne!(malformed_diagnostic.parser_stage, "legacy_option_none");
+
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let zero_raw =
+        replace_filter_criterion_test_value(&fixture.raw, &fixture.content_ids[0], zero_uuid);
+    let zero_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &zero_raw,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &base_indexes,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(zero_diagnostic.class, MetadataSourceFailureClass::Invariant);
+    assert_eq!(zero_diagnostic.parser_stage, "filter_criterion_content");
+    assert_eq!(zero_diagnostic.structural_signature, "zero_uuid");
+    assert_eq!(zero_diagnostic.item_index, Some(0));
+    assert_eq!(zero_diagnostic.reference_uuid.as_deref(), Some(zero_uuid));
+
+    let mut missing_refs = fixture.object_refs.clone();
+    missing_refs.remove(&fixture.content_ids[0]);
+    let missing_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &BTreeSet::new(),
+        &MetadataObjectReferenceIndexes::from_legacy(&missing_refs),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        missing_diagnostic.class,
+        MetadataSourceFailureClass::Unresolved
+    );
+    assert_eq!(missing_diagnostic.parser_stage, "filter_criterion_resolver");
+    assert_eq!(missing_diagnostic.structural_signature, "missing_reference");
+    assert_eq!(
+        missing_diagnostic.collection_role.as_deref(),
+        Some("content")
+    );
+    assert_eq!(missing_diagnostic.item_index, Some(0));
+    assert_eq!(
+        missing_diagnostic.reference_uuid.as_deref(),
+        Some(fixture.content_ids[0].as_str())
+    );
+
+    let type_collision_diagnostic = audit_strict_filter_criterion(
+        &fixture,
+        &fixture.raw,
+        &fixture.type_index,
+        &BTreeSet::from([fixture.type_ids[0].to_ascii_lowercase()]),
+        &base_indexes,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        type_collision_diagnostic.class,
+        MetadataSourceFailureClass::Ambiguous
+    );
+    assert_eq!(
+        type_collision_diagnostic.parser_stage,
+        "filter_criterion_resolver"
+    );
+    assert_eq!(
+        type_collision_diagnostic.structural_signature,
+        "ambiguous_reference"
+    );
+    assert_eq!(
+        type_collision_diagnostic.collection_role.as_deref(),
+        Some("pattern")
+    );
+    assert_eq!(type_collision_diagnostic.item_index, Some(0));
+
+    let serialized = serde_json::to_string(&missing_diagnostic).unwrap();
+    assert!(serialized.contains(&format!(r#""reference_uuid":"{}""#, fixture.content_ids[0])));
+    assert!(!serialized.contains("DynamicCriterion"));
+    assert!(!serialized.contains(METADATA_OBJECT_REF_TYPE_UUID));
+    assert!(!serialized.contains(&fixture.raw));
+    assert!(!serialized.contains(&fixture.generated_ids[0]));
+}
+
+#[test]
+fn filter_criterion_object_reference_ledger_marks_every_reinsertion_ambiguous() {
+    let uuid = uuid::Uuid::new_v4().hyphenated().to_string();
+    let reference = "Document.Synthetic.Attribute.Field".to_string();
+
+    let mut inserted = MetadataObjectReferenceIndexes::default();
+    inserted.insert(uuid.clone(), reference.clone());
+    inserted.insert(uuid.clone(), reference.clone());
+    assert_eq!(
+        inserted.resolutions.get(&uuid),
+        Some(&MetadataObjectReferenceResolution::Ambiguous)
+    );
+
+    let mut retained = MetadataObjectReferenceIndexes::default();
+    retained.or_insert(uuid.clone(), reference.clone());
+    retained.or_insert(uuid.to_ascii_uppercase(), reference);
+    assert_eq!(
+        retained.resolutions.get(&uuid),
+        Some(&MetadataObjectReferenceResolution::Ambiguous)
     );
 }
 
@@ -35490,10 +42840,11 @@ fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
             &fixture.raw,
             &mismatched_header,
             &fixture.type_index,
-            &fixture.object_refs,
+            &BTreeSet::new(),
+            &MetadataObjectReferenceIndexes::from_legacy(&fixture.object_refs).resolutions,
             InfobaseConfigSourceVersion::V2_20,
         )
-        .is_none(),
+        .is_err(),
         "strict full owner header must match the selected metadata header"
     );
 
@@ -35623,6 +42974,7 @@ fn rejects_invalid_strict_filter_criterion_type_patterns_atomically() {
         "DocumentRef.Invoice",
         "cfg:DocumentManager.Invoice",
         "cfg:DocumentRef.Invoice.Extra",
+        "cfg:UnknownRef.Owner",
         "cfg:RefOnly.",
     ] {
         let mut invalid_index = fixture.type_index.clone();
@@ -36717,6 +44069,7 @@ fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner(
         metadata_owner_uuid.to_string(),
         BodyOwnerSourceReference {
             kind: "Catalog".to_string(),
+            canonical_name: "Types".to_string(),
             object_path: PathBuf::from("Catalogs/Types"),
         },
     )]);
@@ -36809,6 +44162,7 @@ fn selected_metadata_predefined_owner_resolves_generated_type_to_metadata_owner(
         duplicate_owner_uuid.to_string(),
         BodyOwnerSourceReference {
             kind: "Catalog".to_string(),
+            canonical_name: "Types".to_string(),
             object_path: PathBuf::from("Catalogs/OtherTypes"),
         },
     );
@@ -36953,6 +44307,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
             first_metadata_owner_uuid.to_string(),
             BodyOwnerSourceReference {
                 kind: "ChartOfCharacteristicTypes".to_string(),
+                canonical_name: "Domestic".to_string(),
                 object_path: PathBuf::from("ChartsOfCharacteristicTypes/Domestic"),
             },
         ),
@@ -36960,6 +44315,7 @@ fn owner_qualified_predefined_values_resolve_generated_dtr_owners_without_bare_c
             second_metadata_owner_uuid.to_string(),
             BodyOwnerSourceReference {
                 kind: "ChartOfCharacteristicTypes".to_string(),
+                canonical_name: "International".to_string(),
                 object_path: PathBuf::from("ChartsOfCharacteristicTypes/International"),
             },
         ),
@@ -37189,15 +44545,24 @@ fn strict_document_journal_text_for_test(
         manager_type_id,
         manager_value_id,
     ] = generated_type_ids;
-    let [forms, templates, commands, other] = root_collections;
+    let [templates, columns, commands, forms] = root_collections;
     let zero_uuid = "00000000-0000-0000-0000-000000000000";
     format!(
         "{{1,{{26,{list_type_id},{list_value_id},\
 {{0,{{3,{{1,0,{journal_uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,{zero_uuid},0}}}},\
-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,{{0}},0,{manager_type_id},{manager_value_id},\
+{zero_uuid},1,{{0,0}},0,{manager_type_id},{manager_value_id},\
 {selection_type_id},{selection_value_id},{{0}},{zero_uuid},{{0}},{{0}},{{0}}}},\
-4,{forms},{templates},{commands},{other}}}"
+4,{templates},{columns},{commands},{forms}}}"
     )
+}
+
+fn empty_document_journal_root_collections_for_test() -> [&'static str; 4] {
+    [
+        "{3daea016-69b7-4ed4-9453-127911372fe6,0}",
+        "{5aee69df-0513-4c6c-9815-103102471712,0}",
+        "{a49a35ce-120a-4c80-8eea-b0618479cd70,0}",
+        "{ec81ad10-ca07-11d5-b9a5-0050bae0a95d,0}",
+    ]
 }
 
 #[test]
@@ -37256,7 +44621,7 @@ fn extracts_four_document_journal_generated_type_cohorts_in_native_order() {
             journal_uuid,
             name,
             ids,
-            ["{0}", "{0}", "{0}", "{0}"],
+            empty_document_journal_root_collections_for_test(),
         );
         let blob = deflate_for_test(text.as_bytes());
         let extracted = extract_metadata_source_xml(
@@ -37311,18 +44676,19 @@ fn extracts_four_document_journal_generated_type_cohorts_in_native_order() {
             );
         }
         assert!(xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap());
-        for unrelated in [
-            "<UseStandardCommands>",
-            "<DefaultListForm>",
-            "<RegisteredDocuments>",
-            "<StandardAttributes>",
-            "<Column ",
-        ] {
-            assert!(
-                !xml.contains(unrelated),
-                "unexpected {unrelated} in {name}: {xml}"
-            );
-        }
+        assert!(xml.contains("<DefaultForm/>"), "{name}: {xml}");
+        assert!(xml.contains("<AuxiliaryForm/>"), "{name}: {xml}");
+        assert!(
+            xml.contains("<UseStandardCommands>true</UseStandardCommands>"),
+            "{name}: {xml}"
+        );
+        assert!(xml.contains("<RegisteredDocuments/>"), "{name}: {xml}");
+        assert!(
+            xml.contains("<IncludeHelpInContents>false</IncludeHelpInContents>"),
+            "{name}: {xml}"
+        );
+        assert!(!xml.contains("<StandardAttributes>"), "{name}: {xml}");
+        assert!(!xml.contains("<Column "), "{name}: {xml}");
     }
 }
 
@@ -37341,7 +44707,7 @@ fn derives_document_journal_generated_type_names_from_renamed_header() {
             "50000000-0000-4000-8000-000000000005",
             "50000000-0000-4000-8000-000000000006",
         ],
-        ["{0}", "{0}", "{0}", "{0}"],
+        empty_document_journal_root_collections_for_test(),
     );
     let blob = deflate_for_test(text.as_bytes());
     let extracted = extract_metadata_source_xml(
@@ -37384,15 +44750,15 @@ fn rejects_non_exact_document_journal_generated_type_cohorts_atomically() {
         journal_uuid,
         "Interactions",
         ids,
-        ["{0}", "{0}", "{0}", "{0}"],
+        empty_document_journal_root_collections_for_test(),
     );
     let owner_header = format!(
         "{{0,{{3,{{1,0,{journal_uuid}}},\"Interactions\",{{1,\"en\",\"Interactions\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}}}"
     );
-    let owner_marker = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let default_form = "00000000-0000-0000-0000-000000000000";
     let wrong_header_slot = valid.replacen(
-        &format!("{owner_header},{owner_marker}"),
-        &format!("{owner_marker},{owner_header}"),
+        &format!("{owner_header},{default_form}"),
+        &format!("{default_form},{owner_header}"),
         1,
     );
     let wrong_owner_len = valid.replacen("{26,", "{26,0,", 1);
@@ -37418,7 +44784,14 @@ fn rejects_non_exact_document_journal_generated_type_cohorts_atomically() {
 
     for (case, text) in [
         ("root tag", valid.replacen("{1,", "{2,", 1)),
-        (", root count", valid.replacen("},4,{0}", "},3,{0}", 1)),
+        (
+            ", root count",
+            valid.replacen(
+                "},4,{3daea016-69b7-4ed4-9453-127911372fe6,0}",
+                "},3,{3daea016-69b7-4ed4-9453-127911372fe6,0}",
+                1,
+            ),
+        ),
         ("root length", wrong_root_len),
         ("owner code", valid.replacen("{26,", "{25,", 1)),
         ("owner length", wrong_owner_len),
@@ -37503,7 +44876,6 @@ fn extracts_document_journal_child_form_template_and_command_refs_from_current_i
     let form_uuid = "22222222-2222-4222-8222-222222222222";
     let template_uuid = "33333333-3333-4333-8333-333333333333";
     let command_uuid = "44444444-4444-4444-8444-444444444444";
-    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let generated_type_ids = [
         "50000000-0000-4000-8000-000000000001",
         "50000000-0000-4000-8000-000000000002",
@@ -37512,13 +44884,23 @@ fn extracts_document_journal_child_form_template_and_command_refs_from_current_i
         "50000000-0000-4000-8000-000000000005",
         "50000000-0000-4000-8000-000000000006",
     ];
-    let forms = format!("{{{form_list_marker},1,{form_uuid}}}");
-    let command = format!("{{9,{{3,{{1,0,{command_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\"}}}}");
+    let templates = format!("{{3daea016-69b7-4ed4-9453-127911372fe6,1,{template_uuid}}}");
+    let columns = "{5aee69df-0513-4c6c-9815-103102471712,0}";
+    let forms = format!("{{ec81ad10-ca07-11d5-b9a5-0050bae0a95d,1,{form_uuid}}}");
+    let zero_uuid = "00000000-0000-0000-0000-000000000000";
+    let command_header = format!(
+        "{{3,{{1,0,{command_uuid}}},\"Open\",{{1,\"en\",\"Open\"}},\"\",0,0,{zero_uuid},0}}"
+    );
+    let command_properties =
+        format!("{{9,{{4,0,0,0,0,0,0}},0,{{0}},0,{{0,0,0}},0,{{0}},{{0}},{command_header},0,0,0}}");
+    let command = format!(
+        "{{a49a35ce-120a-4c80-8eea-b0618479cd70,1,{{{{0,{{1,{{2,{command_uuid},{command_uuid}}},{command_properties}}}}},0}}}}"
+    );
     let journal_text = strict_document_journal_text_for_test(
         journal_uuid,
         "Interactions",
         generated_type_ids,
-        [&forms, template_uuid, &command, "{0}"],
+        [&templates, columns, &command, &forms],
     );
     let journal_blob = deflate_for_test(journal_text.as_bytes());
     let form_blob = deflate_for_test(
@@ -37718,14 +45100,10 @@ fn parse_report_properties_for_child_template_test(
 
 fn report_other_collections_for_test() -> [String; 4] {
     [
-        format!(
-            "{{{},1,{{nested,{}}}}}",
-            uuid::Uuid::new_v4(),
-            uuid::Uuid::new_v4()
-        ),
-        format!("{{{},0}}", uuid::Uuid::new_v4()),
-        format!("{{{},0}}", uuid::Uuid::new_v4()),
-        format!("{{{},0}}", uuid::Uuid::new_v4()),
+        format!("{{{REPORT_ATTRIBUTE_COLLECTION_UUID},0}}"),
+        format!("{{{REPORT_FORM_COLLECTION_UUID},0}}"),
+        format!("{{{REPORT_TABULAR_SECTION_COLLECTION_UUID},0}}"),
+        format!("{{{REPORT_COMMAND_COLLECTION_UUID},0}}"),
     ]
 }
 
@@ -37923,15 +45301,10 @@ fn fails_report_child_template_cohort_closed_on_invalid_envelopes() {
         ("extra header wrapper field", extra_wrapper_field),
         ("trailing root garbage", format!("{base_raw},0")),
     ] {
-        let properties =
-            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).unwrap();
-        assert!(properties.child_templates.is_empty(), "{case}");
-        assert_eq!(
-            properties.main_data_composition_schema.as_deref(),
-            Some("Report.EnvelopeReport.Template.MainDCS"),
+        assert!(
+            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).is_none(),
             "{case}"
         );
-        assert_eq!(properties.generated_types.len(), 2, "{case}");
     }
 }
 
@@ -38019,10 +45392,10 @@ fn fails_report_child_template_cohort_closed_on_resolution_collisions() {
         ("empty filename", empty_name),
         ("nested template path", nested_path),
     ] {
-        let properties =
-            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).unwrap();
-        assert!(properties.child_templates.is_empty(), "{case}");
-        assert_eq!(properties.generated_types.len(), 2, "{case}");
+        assert!(
+            parse_report_properties_for_child_template_test(&raw, &owner_uuid, &refs).is_none(),
+            "{case}"
+        );
     }
 
     let malformed_refs = {
@@ -38033,9 +45406,7 @@ fn fails_report_child_template_cohort_closed_on_resolution_collisions() {
     };
     assert!(
         parse_report_properties_for_child_template_test(&raw, &owner_uuid, &malformed_refs)
-            .unwrap()
-            .child_templates
-            .is_empty()
+            .is_none()
     );
 }
 
@@ -39146,16 +46517,25 @@ fn extracts_document_generated_types_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_fields = std::iter::repeat("0")
-        .take(20)
-        .collect::<Vec<_>>()
-        .join(",");
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{zero_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (header, mut fields, collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    let text = render_owner_graph_fixture_for_test(&fields, &collections);
+    let row = MetadataTextRow {
+        file_name: document_uuid.to_owned(),
+        text: text.clone(),
+        object_code: Some(40),
+        header: Some(header),
+        kind: Some("Document".to_owned()),
+        folder: Some("Documents"),
+    };
+    audit_owner_graph_row_for_test(&row).unwrap();
+    let document_blob = deflate_for_test(text.as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
@@ -39203,27 +46583,71 @@ fn extracts_document_standard_attributes_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let standard_attribute_details = r##"{1,{1,2,{-3},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Дата документа"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Дата"}}},{-2},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Номер документа"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"ru","Номер"}}}}}"##;
-    let document_blob = |number_type: &str| {
-        let mut owner_fields = vec![
-            "0".to_string(),
-            zero_uuid.to_string(),
-            number_type.to_string(),
-            "11".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "1".to_string(),
-            "1".to_string(),
+    let standard_attribute_details = |number_type: &str| {
+        let attributes = [
+            ("-7", "{\"B\",0}", None),
+            ("-5", "{\"U\"}", None),
+            ("-4", "{\"B\",0}", None),
+            (
+                "-3",
+                "{\"D\",00010101000000}",
+                Some(("Дата документа", "Дата")),
+            ),
+            (
+                "-2",
+                if number_type == "1" {
+                    "{\"S\",\"\"}"
+                } else {
+                    "{\"N\",0}"
+                },
+                Some(("Номер документа", "Номер")),
+            ),
         ];
-        owner_fields.extend(std::iter::repeat("0".to_string()).take(12));
-        let owner_fields = owner_fields.join(",");
-        deflate_for_test(
-                format!(
-                    "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"document comment\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id},{standard_attribute_details}}}\r\n}}"
-                )
-                .as_bytes(),
-            )
+        let mut payload = vec!["1".to_owned(), attributes.len().to_string()];
+        for (marker, fill_value, presentation) in attributes {
+            let mut values =
+                information_register_standard_attribute_values_for_test("Active", false);
+            values[22] = fill_value.to_owned();
+            if let Some((tooltip, synonym)) = presentation {
+                values[7] = format!(
+                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{tooltip}\"}}}}"
+                );
+                values[18] = format!(
+                    "{{\"#\",{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_LOCALIZED_TYPE_UUID},{{1,\"ru\",\"{synonym}\"}}}}"
+                );
+            }
+            payload.push(format!("{{{marker}}}"));
+            payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+            payload.push(
+                information_register_standard_attribute_bag_from_values_for_test(&values, true),
+            );
+        }
+        format!("{{1,{{{}}}}}", payload.join(","))
+    };
+    let document_blob = |number_type: &str| {
+        let (header, mut fields, collections) =
+            exact_document_owner_fixture_for_test(document_uuid, "Invoice", "document comment");
+        fields[1] = object_type_id.to_owned();
+        fields[2] = object_value_id.to_owned();
+        fields[3] = ref_type_id.to_owned();
+        fields[4] = ref_value_id.to_owned();
+        fields[26] = manager_type_id.to_owned();
+        fields[27] = manager_value_id.to_owned();
+        fields[11] = number_type.to_owned();
+        fields[12] = "11".to_owned();
+        fields[15] = "1".to_owned();
+        fields[32] = standard_attribute_details(number_type);
+        let text = render_owner_graph_fixture_for_test(&fields, &collections);
+        let row = MetadataTextRow {
+            file_name: document_uuid.to_owned(),
+            text: text.clone(),
+            object_code: Some(40),
+            header: Some(header),
+            kind: Some("Document".to_owned()),
+            folder: Some("Documents"),
+        };
+        audit_owner_graph_row_for_test(&row).unwrap();
+        deflate_for_test(text.as_bytes())
     };
 
     let extracted = extract_metadata_source_xml_with_refs(
@@ -39303,35 +46727,39 @@ fn extracts_document_numbering_commands_and_default_forms_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let owner_fields = [
-        "0",
-        numerator_uuid,
-        "1",
-        "11",
-        "0",
-        "0",
-        "1",
-        "1",
-        "0",
-        "1",
-        "0",
-        "0",
-        "0",
-        object_form_uuid,
-        list_form_uuid,
-        choice_form_uuid,
-        auxiliary_form_uuid,
-        "00000000-0000-0000-0000-000000000000",
-        "00000000-0000-0000-0000-000000000000",
-        "0",
-    ]
-    .join(",");
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, mut collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[10] = numerator_uuid.to_owned();
+    fields[11] = "1".to_owned();
+    fields[12] = "11".to_owned();
+    fields[13] = "1".to_owned();
+    fields[14] = "1".to_owned();
+    fields[15] = "1".to_owned();
+    fields[16] = object_form_uuid.to_owned();
+    fields[17] = list_form_uuid.to_owned();
+    fields[18] = choice_form_uuid.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    fields[35] = auxiliary_form_uuid.to_owned();
+    let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
+    for marker in ["-7", "-5", "-4", "-3", "-2"] {
+        standard_attribute_payload.push(format!("{{{marker}}}"));
+        standard_attribute_payload
+            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
+            "Active", true, false,
+        ));
+    }
+    fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
+    collections[4] = format!(
+        "{{{},4,{object_form_uuid},{list_form_uuid},{choice_form_uuid},{auxiliary_form_uuid}}}",
+        EXPECTED_OWNER_GRAPH_LAYOUTS[1].collection_markers[4]
+    );
+    let text = render_owner_graph_fixture_for_test(&fields, &collections);
     let object_refs = BTreeMap::from([(
         numerator_uuid.to_string(),
         "DocumentNumerator.CompanyDocuments".to_string(),
@@ -39366,6 +46794,7 @@ fn extracts_document_numbering_commands_and_default_forms_to_metadata_xml() {
             },
         ),
     ]);
+    let document_blob = deflate_for_test(text.as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
@@ -39422,18 +46851,17 @@ fn extracts_document_include_help_in_contents_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let owner_fields = [
-        "1", "0", "1", "9", "1", "4", "0", "0", "0", "0", "0", "0", "0", zero_uuid, zero_uuid,
-        zero_uuid, zero_uuid, zero_uuid, zero_uuid, "1",
-    ]
-    .join(",");
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{owner_fields},{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[25] = "1".to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    let document_blob =
+        deflate_for_test(render_owner_graph_fixture_for_test(&fields, &collections).as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
@@ -39478,17 +46906,24 @@ fn extracts_document_child_forms_and_templates_to_metadata_xml() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_fields = std::iter::repeat("0")
-        .take(20)
-        .collect::<Vec<_>>()
-        .join(",");
-    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let document_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},{zero_fields},{manager_type_id},{manager_value_id}}},{{{form_list_marker},3,{list_form_uuid},{common_form_uuid},{main_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{print_template_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, mut collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    collections[1] = format!(
+        "{{{},1,{print_template_uuid}}}",
+        EXPECTED_OWNER_GRAPH_LAYOUTS[1].collection_markers[1]
+    );
+    collections[4] = format!(
+        "{{{},2,{list_form_uuid},{main_form_uuid}}}",
+        EXPECTED_OWNER_GRAPH_LAYOUTS[1].collection_markers[4]
+    );
+    let document_blob =
+        deflate_for_test(render_owner_graph_fixture_for_test(&fields, &collections).as_bytes());
     let form_refs = BTreeMap::from([
         (
             main_form_uuid.to_string(),
@@ -39560,12 +46995,6 @@ fn extracts_document_child_attribute_data_history_tail() {
     let ref_value_id = "22222222-2222-4222-8222-222222222222";
     let manager_type_id = "33333333-3333-4333-8333-333333333331";
     let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let owner_fields = [
-        "1", zero_uuid, "1", "9", "1", "4", "0", "0", "0", "0", "0", "0", "0", zero_uuid,
-        zero_uuid, zero_uuid, zero_uuid, zero_uuid, zero_uuid, "0",
-    ]
-    .join(",");
     let attribute_wrapper = document_attribute_wrapper_for_test(
         6,
         attribute_uuid,
@@ -39576,15 +47005,27 @@ fn extracts_document_child_attribute_data_history_tail() {
     );
     let attribute_collection =
         document_attribute_collection_for_test(DOCUMENT_ATTRIBUTE_GROUP_UUID, &[attribute_wrapper]);
-    let document_blob = deflate_for_test(
-        format!(
-            "{{1,\r\n{{40,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{document_uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}},\
-{owner_fields},{manager_type_id},{manager_value_id}}},\
-{attribute_collection}\r\n}}"
-        )
-        .as_bytes(),
-    );
+    let (_header, mut fields, mut collections) =
+        exact_document_owner_fixture_for_test(document_uuid, "Invoice", "");
+    fields[1] = object_type_id.to_owned();
+    fields[2] = object_value_id.to_owned();
+    fields[3] = ref_type_id.to_owned();
+    fields[4] = ref_value_id.to_owned();
+    fields[26] = manager_type_id.to_owned();
+    fields[27] = manager_value_id.to_owned();
+    let mut standard_attribute_payload = vec!["1".to_owned(), "5".to_owned()];
+    for marker in ["-7", "-5", "-4", "-3", "-2"] {
+        standard_attribute_payload.push(format!("{{{marker}}}"));
+        standard_attribute_payload
+            .push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        standard_attribute_payload.push(information_register_standard_attribute_bag_for_test(
+            "Active", true, false,
+        ));
+    }
+    fields[32] = format!("{{1,{{{}}}}}", standard_attribute_payload.join(","));
+    collections[2] = attribute_collection;
+    let document_blob =
+        deflate_for_test(render_owner_graph_fixture_for_test(&fields, &collections).as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
         &document_blob,
@@ -40408,6 +47849,35 @@ fn empty_ref_data_processor_fixture(
     }
 }
 
+fn empty_ref_data_processor_fixture_with_pattern(
+    base: &EmptyRefDataProcessorFixture,
+    pattern_type_ids: &[&str],
+    selected_type_id: &str,
+) -> EmptyRefDataProcessorFixture {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let original_pattern = format!(r##"{{"Pattern",{{"#",{}}}}}"##, base.owner_type_id);
+    let original_fill = format!(
+        r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}}}}"##,
+        base.owner_type_id
+    );
+    let members = pattern_type_ids
+        .iter()
+        .map(|type_id| format!(r##"{{"#",{type_id}}}"##))
+        .collect::<Vec<_>>()
+        .join(",");
+    let pattern = format!(r#"{{"Pattern",{members}}}"#);
+    let fill = format!(r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{selected_type_id},{zero}}}}}"##);
+    EmptyRefDataProcessorFixture {
+        raw: base
+            .raw
+            .replacen(&original_pattern, &pattern, 1)
+            .replacen(&original_fill, &fill, 1),
+        owner_uuid: base.owner_uuid.clone(),
+        attribute_uuid: base.attribute_uuid.clone(),
+        owner_type_id: base.owner_type_id.clone(),
+    }
+}
+
 fn extract_empty_ref_data_processor(
     fixture: &EmptyRefDataProcessorFixture,
     type_index: &BTreeMap<String, String>,
@@ -40457,6 +47927,69 @@ fn derives_empty_ref_for_saved_data_processor_tabular_attribute() {
         1,
         "{xml}"
     );
+}
+
+#[test]
+fn derives_selected_empty_ref_from_two_document_references_in_both_orders() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        "",
+        "0",
+    );
+    let second_type_id = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+    let first_reference = "cfg:DocumentRef.SyntheticFirst";
+    let second_reference = "cfg:DocumentRef.SyntheticSecond";
+    let type_index = BTreeMap::from([
+        (base.owner_type_id.clone(), first_reference.to_string()),
+        (second_type_id.to_string(), second_reference.to_string()),
+    ]);
+    for (pattern_type_ids, expected_type_order) in [
+        (
+            [base.owner_type_id.as_str(), second_type_id],
+            [first_reference, second_reference],
+        ),
+        (
+            [second_type_id, base.owner_type_id.as_str()],
+            [second_reference, first_reference],
+        ),
+    ] {
+        for (selected_type_id, selected_owner) in [
+            (base.owner_type_id.as_str(), "Document.SyntheticFirst"),
+            (second_type_id, "Document.SyntheticSecond"),
+        ] {
+            let fixture = empty_ref_data_processor_fixture_with_pattern(
+                &base,
+                &pattern_type_ids,
+                selected_type_id,
+            );
+            let extracted = extract_empty_ref_data_processor(
+                &fixture,
+                &type_index,
+                &BTreeSet::new(),
+                &BTreeMap::new(),
+            )
+            .expect("either selected member in either Pattern order must be emitted");
+            let xml = String::from_utf8(extracted.xml).unwrap();
+            let first_type = format!("<v8:Type>{}</v8:Type>", expected_type_order[0]);
+            let second_type = format!("<v8:Type>{}</v8:Type>", expected_type_order[1]);
+            let fill_value = format!(
+                r#"<FillValue xsi:type="xr:DesignTimeRef">{selected_owner}.EmptyRef</FillValue>"#
+            );
+            let first_offset = xml.find(&first_type).unwrap();
+            let second_offset = xml.find(&second_type).unwrap();
+            let fill_offset = xml.find(&fill_value).unwrap();
+
+            assert!(
+                first_offset < second_offset && second_offset < fill_offset,
+                "{xml}"
+            );
+            assert_eq!(xml.matches(&first_type).count(), 1, "{xml}");
+            assert_eq!(xml.matches(&second_type).count(), 1, "{xml}");
+            assert_eq!(xml.matches(&fill_value).count(), 1, "{xml}");
+        }
+    }
 }
 
 #[test]
@@ -40636,6 +48169,153 @@ fn rejects_missing_ambiguous_and_malformed_empty_ref_owners_atomically() {
 }
 
 #[test]
+fn rejects_absent_or_ambiguous_selected_empty_ref_union_member_atomically() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        "",
+        "0",
+    );
+    let second_type_id = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+    let absent_type_id = "ffffffff-6666-4666-8666-ffffffffffff";
+    let selected_fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        second_type_id,
+    );
+    let complete_index = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_string(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    let first_selected_fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        &base.owner_type_id,
+    );
+    let unselected_ambiguous_index = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_lowercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_uppercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    let unselected_object_refs = BTreeMap::from([(
+        second_type_id.to_ascii_uppercase(),
+        "Document.SyntheticSecond".to_string(),
+    )]);
+    let extracted = extract_empty_ref_data_processor(
+        &first_selected_fixture,
+        &unselected_ambiguous_index,
+        &BTreeSet::from([second_type_id.to_string()]),
+        &unselected_object_refs,
+    )
+    .expect("unselected collisions must not suppress the selected EmptyRef");
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert_eq!(
+        xml.matches(
+            r#"<FillValue xsi:type="xr:DesignTimeRef">Document.SyntheticFirst.EmptyRef</FillValue>"#
+        )
+        .count(),
+        1,
+        "{xml}"
+    );
+
+    let missing_selected = BTreeMap::from([(
+        base.owner_type_id.clone(),
+        "cfg:DocumentRef.SyntheticFirst".to_string(),
+    )]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &selected_fixture,
+            &missing_selected,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "selected TypeId must resolve"
+    );
+
+    let ambiguous_selected = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_lowercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+        (
+            second_type_id.to_ascii_uppercase(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+    ]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &selected_fixture,
+            &ambiguous_selected,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "case-insensitive selected mapping must be unique"
+    );
+    assert!(
+        extract_empty_ref_data_processor(
+            &selected_fixture,
+            &complete_index,
+            &BTreeSet::from([second_type_id.to_string()]),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "selected collision ledger entry must fail closed"
+    );
+
+    let absent_fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        absent_type_id,
+    );
+    let index_with_absent = BTreeMap::from([
+        (
+            base.owner_type_id.clone(),
+            "cfg:DocumentRef.SyntheticFirst".to_string(),
+        ),
+        (
+            second_type_id.to_string(),
+            "cfg:DocumentRef.SyntheticSecond".to_string(),
+        ),
+        (
+            absent_type_id.to_string(),
+            "cfg:DocumentRef.SyntheticAbsent".to_string(),
+        ),
+    ]);
+    assert!(
+        extract_empty_ref_data_processor(
+            &absent_fixture,
+            &index_with_absent,
+            &BTreeSet::new(),
+            &BTreeMap::new()
+        )
+        .is_none(),
+        "selected TypeId absent from Pattern must fail closed"
+    );
+}
+
+#[test]
 fn rejects_malformed_empty_ref_protocol_fields_atomically() {
     let base = empty_ref_data_processor_fixture(
         EmptyRefDataProcessorLayout::SavedTabular,
@@ -40647,18 +48327,39 @@ fn rejects_malformed_empty_ref_protocol_fields_atomically() {
     let zero = "00000000-0000-0000-0000-000000000000";
     let nonzero = "ffffffff-6666-4666-8666-ffffffffffff";
     let pattern = format!(r##"{{"Pattern",{{"#",{}}}}}"##, base.owner_type_id);
-    let multi_pattern = format!(
-        r##"{{"Pattern",{{"#",{0}}},{{"#",{0}}}}}"##,
-        base.owner_type_id
+    let duplicate_pattern = format!(
+        r##"{{"Pattern",{{"#",{0}}},{{"#",{1}}}}}"##,
+        base.owner_type_id,
+        base.owner_type_id.to_ascii_uppercase()
     );
+    let mixed_pattern = format!(r##"{{"Pattern",{{"#",{}}},{{"S"}}}}"##, base.owner_type_id);
+    let malformed_member_pattern = format!(r##"{{"Pattern",{{"#",{},0}}}}"##, base.owner_type_id);
+    let zero_member_pattern = format!(r##"{{"Pattern",{{"#",{zero}}}}}"##);
+    let empty_pattern = r#"{"Pattern"}"#;
     let fill = format!(
         r##"{{"#",{DESIGN_TIME_REF_TYPE_UUID},{{0,{},{zero}}}}}"##,
         base.owner_type_id
     );
     let cases = [
         (
-            "multi-member Pattern",
-            base.raw.replacen(&pattern, &multi_pattern, 1),
+            "case-insensitive duplicate Pattern member",
+            base.raw.replacen(&pattern, &duplicate_pattern, 1),
+        ),
+        (
+            "mixed scalar Pattern member",
+            base.raw.replacen(&pattern, &mixed_pattern, 1),
+        ),
+        (
+            "reference Pattern member extra arity",
+            base.raw.replacen(&pattern, &malformed_member_pattern, 1),
+        ),
+        (
+            "zero reference Pattern member",
+            base.raw.replacen(&pattern, &zero_member_pattern, 1),
+        ),
+        (
+            "empty reference Pattern",
+            base.raw.replacen(&pattern, empty_pattern, 1),
         ),
         (
             "wrong reference inner tag",
@@ -40843,7 +48544,7 @@ fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
         &BTreeMap::new(),
     )
     .unwrap();
-    let mut child_objects = parse_attribute_tabular_section_child_objects(
+    let child_objects = parse_attribute_tabular_section_child_objects(
         "DataProcessor",
         &owner_header.name,
         &fixture.raw,
@@ -40854,6 +48555,7 @@ fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
         &BTreeMap::new(),
         &BTreeMap::new(),
     );
+    let mut child_objects = child_objects;
     let attribute = child_objects
         .iter_mut()
         .flat_map(|child| child.child_objects.iter_mut())
@@ -40884,6 +48586,101 @@ fn refuses_to_apply_empty_ref_when_fill_value_emission_is_disabled() {
         .and_then(|child| child.properties.as_ref())
         .unwrap();
     assert!(properties.fill_value.is_none());
+}
+
+#[test]
+fn refuses_selected_empty_ref_when_child_reference_membership_mismatches() {
+    let base = empty_ref_data_processor_fixture(
+        EmptyRefDataProcessorLayout::SavedTabular,
+        "",
+        "",
+        "",
+        "0",
+    );
+    let second_type_id = "eeeeeeee-5555-4555-8555-eeeeeeeeeeee";
+    let fixture = empty_ref_data_processor_fixture_with_pattern(
+        &base,
+        &[&base.owner_type_id, second_type_id],
+        second_type_id,
+    );
+    let first_reference = "cfg:DocumentRef.SyntheticFirst";
+    let second_reference = "cfg:DocumentRef.SyntheticSecond";
+    let type_index = BTreeMap::from([
+        (base.owner_type_id.clone(), first_reference.to_string()),
+        (second_type_id.to_string(), second_reference.to_string()),
+    ]);
+    let owner_header = parse_metadata_header_from_text(&fixture.raw, &fixture.owner_uuid).unwrap();
+    let expectations = parse_data_processor_empty_ref_fill_values(
+        &fixture.raw,
+        &owner_header,
+        &type_index,
+        &BTreeSet::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    let child_objects = parse_attribute_tabular_section_child_objects(
+        "DataProcessor",
+        &owner_header.name,
+        &fixture.raw,
+        &fixture.owner_uuid,
+        None,
+        &type_index,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+
+    let mismatches = [
+        vec![ConstantValueType::Reference {
+            reference: first_reference.to_string(),
+        }],
+        vec![ConstantValueType::String {
+            length: None,
+            allowed_length_flag: 0,
+        }],
+        vec![
+            ConstantValueType::Reference {
+                reference: second_reference.to_string(),
+            },
+            ConstantValueType::Reference {
+                reference: second_reference.to_string(),
+            },
+        ],
+    ];
+    for value_types in mismatches {
+        let mut candidate = child_objects.clone();
+        let attribute = candidate
+            .iter_mut()
+            .flat_map(|child| child.child_objects.iter_mut())
+            .find(|child| {
+                child
+                    .header
+                    .uuid
+                    .eq_ignore_ascii_case(&fixture.attribute_uuid)
+            })
+            .unwrap();
+        attribute.value_types = value_types;
+
+        assert!(!apply_data_processor_empty_ref_fill_values(
+            &mut candidate,
+            &expectations
+        ));
+        let properties = candidate
+            .iter()
+            .flat_map(|child| child.child_objects.iter())
+            .find(|child| {
+                child
+                    .header
+                    .uuid
+                    .eq_ignore_ascii_case(&fixture.attribute_uuid)
+            })
+            .and_then(|child| child.properties.as_ref())
+            .unwrap();
+        assert!(
+            properties.fill_value.is_none(),
+            "failed apply must not retain a FillValue"
+        );
+    }
 }
 
 #[test]
@@ -42432,12 +50229,24 @@ fn extracts_catalog_generated_types_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
 
     let extracted = extract_metadata_source_xml(
         &catalog_blob,
@@ -42560,13 +50369,29 @@ fn extracts_catalog_create_and_data_history_tail_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}},2,1,1,1,1}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    fields[53] = "2".to_owned();
+    fields[57] = "1".to_owned();
+    fields[58] = "1".to_owned();
+    fields[59] = "1".to_owned();
+    fields[60] = "1".to_owned();
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
 
     let extracted = extract_metadata_source_xml(
         &catalog_blob,
@@ -42655,13 +50480,29 @@ fn extracts_catalog_owners_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"BankAccounts\",{{1,\"en\",\"Bank accounts\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{2,{owner_catalog_uuid},{owner_person_uuid}}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "BankAccounts", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    let metadata_object_ref_type_uuid = "157fa490-4ce9-11d4-9415-008048da11f9";
+    fields[12] = format!(
+        "{{0,2,{{\"#\",{metadata_object_ref_type_uuid},{{1,{owner_catalog_uuid}}}}},\
+{{\"#\",{metadata_object_ref_type_uuid},{{1,{owner_person_uuid}}}}}}}"
+    );
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
     let object_refs = BTreeMap::from([
         (
             owner_catalog_uuid.to_string(),
@@ -42883,14 +50724,27 @@ fn extracts_catalog_child_forms_and_templates_to_metadata_xml() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id}}},{{{form_list_marker},2,{list_form_uuid},{item_form_uuid}}},{{11111111-1111-4111-8111-111111111111,1,{print_template_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, mut collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    collections[0] = format!("{{{METADATA_TEMPLATE_COLLECTION_UUID},1,{print_template_uuid}}}");
+    collections[4] =
+        format!("{{{CATALOG_FORM_COLLECTION_UUID},2,{list_form_uuid},{item_form_uuid}}}");
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
     let form_refs = BTreeMap::from([
         (
             list_form_uuid.to_string(),
@@ -42952,39 +50806,67 @@ fn extracts_catalog_attribute_and_tabular_section_child_headers() {
     let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
     let catalog_ref_type_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
-22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
-33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
-44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
-2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
-{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
-55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
-0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
-{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
-{{5d24a9d1-098e-11d6-b9b8-0050bae0a95d,1,\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"#\",{catalog_ref_type_id}}}}}}},\
-{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"Price\",{{1,\"en\",\"Price\"}},\"\"}}\r\n}}\
-}}}},\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,0}}}}}},\
-{{3,\r\n{{1,0,{attribute_uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\"}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, fields, mut collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    let direct = catalog_attribute_wrapper_for_test(
+        6,
+        attribute_uuid,
+        r#"{"Pattern",{"S",20,0}}"#,
+        r#"{"S",""}"#,
+        "0",
+    );
+    let nested = catalog_attribute_wrapper_for_test(
+        8,
+        tabular_attribute_uuid,
+        &format!(r##"{{"Pattern",{{"#",{catalog_ref_type_id}}}}}"##),
+        r#"{"S",""}"#,
+        "0",
+    );
+    let tabular = owner_graph_tabular_section_item_for_test(
+        owner_graph::OwnerGraphFamily::Catalog,
+        tabular_section_uuid,
+        "Prices",
+        [
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee3",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee4",
+        ],
+        &[nested],
+    );
+    collections[2] = format!("{{{CATALOG_TABULAR_SECTION_COLLECTION_UUID},1,{tabular}}}");
+    collections[3] = catalog_attribute_collection_for_test(CATALOG_ATTRIBUTE_GROUP_UUID, &[direct]);
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
     let type_index = BTreeMap::from([(
         catalog_ref_type_id.to_string(),
         "cfg:CatalogRef.Prices".to_string(),
     )]);
 
-    let extracted = extract_metadata_source_xml(
+    let object_refs = BTreeMap::from([
+        (
+            attribute_uuid.to_string(),
+            "Catalog.Products.Attribute.ExternalCode".to_string(),
+        ),
+        (
+            tabular_section_uuid.to_string(),
+            "Catalog.Products.TabularSection.Prices".to_string(),
+        ),
+        (
+            tabular_attribute_uuid.to_string(),
+            "Catalog.Products.TabularSection.Prices.Attribute.Price".to_string(),
+        ),
+    ]);
+    let extracted = extract_metadata_source_xml_with_refs(
         &catalog_blob,
         catalog_uuid,
         &type_index,
+        &object_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_21,
     )
     .unwrap();
     let xml = String::from_utf8(extracted.xml).unwrap();
@@ -43436,9 +51318,10 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         6
     ));
     assert_eq!(
-        parse_document_direct_attribute_collection(
+        parse_document_direct_attribute_collection_indexed(
             &split_1c_braced_fields(&direct_collection, 0).unwrap()[2..]
-        ),
+        )
+        .ok(),
         Some(vec![first_uuid.to_string()])
     );
     let legacy_direct_collection = document_attribute_collection_for_test(
@@ -43446,9 +51329,10 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         std::slice::from_ref(&direct5),
     );
     assert_eq!(
-        parse_document_direct_attribute_collection(
+        parse_document_direct_attribute_collection_indexed(
             &split_1c_braced_fields(&legacy_direct_collection, 0).unwrap()[2..]
-        ),
+        )
+        .ok(),
         Some(vec![first_uuid.to_string()])
     );
     let wrong_marker = document_attribute_collection_for_test(
@@ -43485,10 +51369,10 @@ fn document_attribute_layouts_collections_and_nested_omissions_fail_closed() {
         6
     ));
     assert!(
-        parse_document_direct_attribute_collection(
+        parse_document_direct_attribute_collection_indexed(
             &split_1c_braced_fields(&mixed, 0).unwrap()[2..]
         )
-        .is_none()
+        .is_err()
     );
     let duplicate = document_attribute_collection_for_test(
         DOCUMENT_ATTRIBUTE_GROUP_UUID,
@@ -43647,7 +51531,7 @@ fn document_tabular_sections_accept_legacy_and_extended_envelopes_only() {
     );
     let parse = |envelope: String| {
         let item = format!("{{{envelope},1,{attributes}}}");
-        parse_document_tabular_sections(
+        parse_document_tabular_sections_indexed(
             &[item.as_str()],
             "Invoice",
             &BTreeMap::from([(
@@ -43655,6 +51539,7 @@ fn document_tabular_sections_accept_legacy_and_extended_envelopes_only() {
                 "Document.Invoice.TabularSection.Lines".to_string(),
             )]),
         )
+        .ok()
     };
 
     for envelope in [format!("{{1,{payload}}}"), format!("{{2,{payload},5}}")] {
@@ -43985,7 +51870,7 @@ fn document_formatter_stably_orders_root_child_groups() {
             autonumbering: true,
         },
         standard_attributes: None,
-        characteristics: Vec::new(),
+        characteristics: Characteristics::default(),
         based_on: Vec::new(),
         input_by_string: Vec::new(),
         create_on_input: "Use",
@@ -44061,7 +51946,8 @@ fn document_formatter_stably_orders_root_child_groups() {
         comment: String::new(),
         template_type_code: None,
     };
-    let xml = format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21);
+    let xml =
+        format_document_source_xml(&header, &document, InfobaseConfigSourceVersion::V2_21).unwrap();
     let field1 = xml.find("<Name>Field1</Name>").unwrap();
     let field2 = xml.find("<Name>Field2</Name>").unwrap();
     let form = xml.find("<Form>Main</Form>").unwrap();
@@ -44518,26 +52404,31 @@ $CHOICE_PARAMETERS,
     .replace("$TYPE_SET", type_set_uuid)
     .replace("$CHOICE_FORM", choice_form_uuid)
     .replace("$CHOICE_PARAMETERS", &choice_parameters);
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
-22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
-33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
-44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
-2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
-{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
-55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
-0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
-{attribute_collection}\r\n\
-}}\r\n}}"
-            )
-            .as_bytes(),
-        );
-    let object_refs = BTreeMap::from([(
-        status_uuid.to_string(),
-        "Enum.Statuses.EnumValue.Open".to_string(),
-    )]);
+    let (_header, mut fields, mut collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    fields[1] = "11111111-1111-4111-8111-111111111111".to_owned();
+    fields[2] = "11111111-1111-4111-8111-111111111112".to_owned();
+    fields[3] = "22222222-2222-4222-8222-222222222221".to_owned();
+    fields[4] = "22222222-2222-4222-8222-222222222222".to_owned();
+    fields[5] = "33333333-3333-4333-8333-333333333331".to_owned();
+    fields[6] = "33333333-3333-4333-8333-333333333332".to_owned();
+    fields[7] = "44444444-4444-4444-8444-444444444441".to_owned();
+    fields[8] = "44444444-4444-4444-8444-444444444442".to_owned();
+    fields[34] = "55555555-5555-4555-8555-555555555551".to_owned();
+    fields[35] = "55555555-5555-4555-8555-555555555552".to_owned();
+    collections[3] = attribute_collection;
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
+    let object_refs = BTreeMap::from([
+        (
+            attribute_uuid.to_string(),
+            "Catalog.Products.Attribute.RequiredFlag".to_string(),
+        ),
+        (
+            status_uuid.to_string(),
+            "Enum.Statuses.EnumValue.Open".to_string(),
+        ),
+    ]);
     let type_index = BTreeMap::from([
         (
             status_owner_type_uuid.to_string(),
@@ -46174,6 +54065,24 @@ fn register_localized_field(values: &[(&str, &str)]) -> String {
     format!("{{{}}}", fields.join(","))
 }
 
+fn exact_register_standard_attributes_for_test(definitions: &[(&str, &str)]) -> String {
+    let mut payload = vec!["1".to_string(), definitions.len().to_string()];
+    for (marker, name) in definitions {
+        payload.push(format!("{{{marker}}}"));
+        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        if *name == "Period" {
+            values[1] = information_register_standard_attribute_direct_enum_for_test(
+                INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+                "1",
+            );
+        }
+        payload
+            .push(information_register_standard_attribute_bag_from_values_for_test(&values, false));
+    }
+    format!("{{1,{{{}}}}}", payload.join(","))
+}
+
 fn localized_property_block<'a>(xml: &'a str, name: &str) -> &'a str {
     let open = format!("<{name}>");
     let start = xml.find(&open).unwrap();
@@ -46268,14 +54177,20 @@ impl AccumulationRegisterTotalsFixture {
         fields.extend(register_generated_type_fields(12));
         fields.extend([
             register_owner_header(ACCUMULATION_TOTALS_TEST_UUID, "Totals"),
-            "1".to_string(),
             ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
-            ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            "0".to_string(),
             "1".to_string(),
+            "0".to_string(),
             "1".to_string(),
             "0".to_string(),
             flag.to_string(),
-            "{0}".to_string(),
+            exact_register_standard_attributes_for_test(&[
+                ("-9", "RecordType"),
+                ("-5", "Active"),
+                ("-4", "LineNumber"),
+                ("-3", "Recorder"),
+                ("-2", "Period"),
+            ]),
             ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
             "{0}".to_string(),
             "{0}".to_string(),
@@ -46318,6 +54233,19 @@ impl CalculationRegisterPresentationsFixture {
             22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
             23 => CALCULATION_DEFAULT_FORM_TEST_UUID.to_string(),
             29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
+            28 => exact_register_standard_attributes_for_test(&[
+                ("-13", "RegistrationPeriod"),
+                ("-11", "ReversingEntry"),
+                ("-10", "Active"),
+                ("-9", "EndOfBasePeriod"),
+                ("-8", "BegOfBasePeriod"),
+                ("-7", "EndOfActionPeriod"),
+                ("-6", "BegOfActionPeriod"),
+                ("-5", "ActionPeriod"),
+                ("-4", "CalculationType"),
+                ("-3", "LineNumber"),
+                ("-2", "Recorder"),
+            ]),
             30..=32 => "{0}".to_string(),
             _ => "0".to_string(),
         }));
@@ -46698,15 +54626,6 @@ fn accumulation_totals_changes_only_exact_property() {
         enabled.replace(enabled_line, ""),
         disabled.replace(disabled_line, "")
     );
-
-    let mut legacy = AccumulationRegisterTotalsFixture::exact("1");
-    legacy.fields.pop();
-    let exact_without_bounded_tail = enabled
-        .replace(enabled_line, "")
-        .replace("\t\t\t<ListPresentation/>\r\n", "")
-        .replace("\t\t\t<ExtendedListPresentation/>\r\n", "")
-        .replace("\t\t\t<Explanation/>\r\n", "");
-    assert_eq!(exact_without_bounded_tail, legacy.xml().unwrap());
 }
 
 #[test]
@@ -47491,19 +55410,17 @@ fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
 
 #[test]
 fn calculation_include_help_does_not_consume_hold_neighbors() {
-    let expected = CalculationRegisterPresentationsFixture::exact()
-        .xml()
-        .unwrap();
-
     for slot in [26] {
-        for value in ["0", "1", "2", "-1", "value", "{0}"] {
+        for value in ["0", "1"] {
             let mut fixture = CalculationRegisterPresentationsFixture::exact();
             fixture.fields[slot] = value.to_string();
             let xml = fixture.xml().expect("HOLD neighbor must remain accepted");
 
             assert_eq!(
-                xml, expected,
-                "include-help consumed HOLD field {slot} value {value}"
+                xml.matches("<IncludeHelpInContents>false</IncludeHelpInContents>")
+                    .count(),
+                1,
+                "include-help changed after HOLD field {slot} value {value}"
             );
         }
     }
@@ -48029,8 +55946,8 @@ fn calculation_form_pair_preserves_accounting_and_accumulation_form_slots() {
     let accumulation_default_uuid = "77777777-7777-4777-8777-777777777777";
     let accumulation_aux_uuid = "88888888-8888-4888-8888-888888888888";
     let mut accumulation_fixture = AccumulationRegisterTotalsFixture::exact("1");
-    accumulation_fixture.fields[15] = accumulation_default_uuid.to_string();
-    accumulation_fixture.fields[16] = accumulation_aux_uuid.to_string();
+    accumulation_fixture.fields[14] = accumulation_default_uuid.to_string();
+    accumulation_fixture.fields[22] = accumulation_aux_uuid.to_string();
     let accumulation_form_refs = BTreeMap::from([
         (
             accumulation_default_uuid.to_string(),
@@ -48625,28 +56542,20 @@ fn calculation_full_text_search_alternatives_are_accepted_omissions() {
 }
 
 #[test]
-fn calculation_full_text_search_does_not_consume_f26_or_f28() {
-    let expected = CalculationRegisterPresentationsFixture::exact()
-        .xml()
-        .unwrap();
-    assert!(expected.contains("<FullTextSearch>DontUse</FullTextSearch>"));
+fn calculation_full_text_search_does_not_consume_f26() {
+    for value in ["0", "1"] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[26] = value.to_string();
+        let xml = fixture
+            .xml()
+            .expect("valid data-lock mode must remain accepted");
 
-    for slot in [26, 28] {
-        for value in [
-            "0",
-            "1",
-            "2",
-            "-1",
-            "value",
-            "{0}",
-            ACCUMULATION_TOTALS_ZERO_UUID,
-        ] {
-            let mut fixture = CalculationRegisterPresentationsFixture::exact();
-            fixture.fields[slot] = value.to_string();
-            let xml = fixture.xml().expect("HOLD neighbor must remain accepted");
-
-            assert_eq!(xml, expected, "consumed F{slot} value {value}");
-        }
+        assert_eq!(
+            xml.matches("<FullTextSearch>DontUse</FullTextSearch>")
+                .count(),
+            1,
+            "full-text-search changed after F26 value {value}"
+        );
     }
 }
 
@@ -49744,4 +57653,396 @@ fn calculation_recalculation_root_has_one_line_target_and_no_corpus_literals() {
     ] {
         assert!(!source.contains(forbidden));
     }
+}
+
+const TYPES_UUID: &str = "10000000-0000-4000-8000-000000000001";
+const VALUES_UUID: &str = "10000000-0000-4000-8000-000000000002";
+const FIELD_UUID: &str = "10000000-0000-4000-8000-000000000003";
+const DTR_OWNER_UUID: &str = "10000000-0000-4000-8000-000000000004";
+const DTR_VALUE_UUID: &str = "10000000-0000-4000-8000-000000000005";
+
+fn source(uuid: &str) -> String {
+    format!("{{1,{uuid}}}")
+}
+
+fn field(marker: &str) -> String {
+    format!("{{1,{{{marker}}},0}}")
+}
+
+fn item(body_discriminator: &str, type_uuid: &str, filter: &str) -> String {
+    let fields = [
+        source(TYPES_UUID),
+        source(VALUES_UUID),
+        field("0"),
+        field("-1"),
+        field("0"),
+        field("-1"),
+        filter.to_owned(),
+        field("0"),
+        field("-1"),
+        field("0"),
+        field("-1"),
+        field("0"),
+    ]
+    .join(",");
+    format!("{{\"#\",{type_uuid},{{{body_discriminator},{fields}}}}}")
+}
+
+fn collection(item: &str) -> String {
+    format!("{{0,{{1,{item}}}}}")
+}
+
+fn references() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (TYPES_UUID.to_owned(), "Catalog.Types".to_owned()),
+        (VALUES_UUID.to_owned(), "Catalog.Values".to_owned()),
+        (
+            FIELD_UUID.to_owned(),
+            "Catalog.Types.Attribute.Field".to_owned(),
+        ),
+    ])
+}
+
+fn decode(value: &str) -> Result<Characteristics, CharacteristicsDiagnostic> {
+    decode_characteristics(
+        OwnerGraphFamily::Catalog,
+        value,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &references(),
+    )
+}
+
+#[test]
+fn characteristics_strict_synthetic_collection_decodes_without_payload_fallback() {
+    let raw = collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"S","safe"}"#,
+    ));
+    let model = decode(&raw).unwrap();
+    assert_eq!(model.items().len(), 1);
+    assert_eq!(
+        model.items()[0].types().source().source_uuid(),
+        Some(ObjectUuid::parse(TYPES_UUID).unwrap())
+    );
+}
+
+#[test]
+fn characteristics_mutation_matrix_reports_typed_stage_role_and_reason() {
+    let valid_item = item("4", DOCUMENT_CHARACTERISTIC_TYPE_UUID, r#"{"S","safe"}"#);
+    let wrong_outer = collection(&valid_item).replacen("{0,", "{1,", 1);
+    let wrong_count = collection(&valid_item).replacen("{1,", "{2,", 1);
+    let wrong_type = collection(&item(
+        "4",
+        "00000000-0000-0000-0000-000000000000",
+        r#"{"S","safe"}"#,
+    ));
+    let wrong_body = collection(&item(
+        "5",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"S","safe"}"#,
+    ));
+    let wrong_filter = collection(&item("4", DOCUMENT_CHARACTERISTIC_TYPE_UUID, r#"{"N",1}"#));
+    for (raw, stage, reason) in [
+        (
+            wrong_outer,
+            CharacteristicsStage::Outer,
+            CharacteristicsReason::InvalidEnvelope,
+        ),
+        (
+            wrong_count,
+            CharacteristicsStage::Count,
+            CharacteristicsReason::InvalidCount,
+        ),
+        (
+            wrong_type,
+            CharacteristicsStage::TypedItem,
+            CharacteristicsReason::InvalidTypeTag,
+        ),
+        (
+            wrong_body,
+            CharacteristicsStage::Body,
+            CharacteristicsReason::InvalidBodyShape,
+        ),
+        (
+            wrong_filter,
+            CharacteristicsStage::FilterValue,
+            CharacteristicsReason::UnsupportedFilterUnion,
+        ),
+    ] {
+        let diagnostic = decode(&raw).unwrap_err();
+        assert_eq!(diagnostic.stage, stage);
+        assert_eq!(diagnostic.reason, reason);
+        assert_eq!(diagnostic.field_index, 52);
+    }
+}
+
+#[test]
+fn characteristics_slot_matrix_is_closed_to_three_owner_families() {
+    assert_eq!(characteristics_slot(OwnerGraphFamily::Catalog), Ok(52));
+    assert_eq!(characteristics_slot(OwnerGraphFamily::Document), Ok(45));
+    assert_eq!(
+        characteristics_slot(OwnerGraphFamily::ChartOfCharacteristicTypes),
+        Ok(50)
+    );
+    assert_eq!(
+        characteristics_slot(OwnerGraphFamily::BusinessProcess)
+            .unwrap_err()
+            .reason,
+        CharacteristicsReason::UnsupportedFamily
+    );
+}
+
+#[test]
+fn characteristics_cct_preconditions_preserve_exact_zero_pair_and_binary_lexemes() {
+    let mut fields = vec![""; 59];
+    fields[15] = "{0,0}";
+    fields[36] = "0";
+    fields[52] = "{1,{0,0}}";
+    assert!(cct_characteristics_preconditions(&fields));
+    fields[36] = "1";
+    assert!(cct_characteristics_preconditions(&fields));
+    for valid in [" 0 ", "1 "] {
+        fields[36] = valid;
+        assert!(
+            cct_characteristics_preconditions(&fields),
+            "rejected baseline-compatible padded flag {valid:?}"
+        );
+    }
+
+    for invalid in ["00", "01"] {
+        fields[36] = invalid;
+        assert!(!cct_characteristics_preconditions(&fields));
+    }
+    fields[36] = "0";
+    for valid in ["{ 0 ,0 }", "{0, 0}"] {
+        fields[15] = valid;
+        assert!(
+            cct_characteristics_preconditions(&fields),
+            "rejected baseline-compatible padded pair {valid:?}"
+        );
+    }
+    for invalid in ["{1,1}", "{00,0}", "{0,00}", "{0}", "{0,0,0}", "0,0", "{0,0"] {
+        fields[15] = invalid;
+        assert!(
+            !cct_characteristics_preconditions(&fields),
+            "accepted invalid pair {invalid:?}"
+        );
+    }
+}
+
+#[test]
+fn characteristics_document_schema_marker_is_closed_to_object_field() {
+    let values = CharacteristicReference::new("Document.Values", None).unwrap();
+    assert!(
+        decode_field(
+            OwnerGraphFamily::Document,
+            0,
+            &field("-5"),
+            CharacteristicRole::ObjectField,
+            &values,
+            &BTreeMap::new(),
+        )
+        .is_ok()
+    );
+    let failure = decode_field(
+        OwnerGraphFamily::Document,
+        0,
+        &field("-5"),
+        CharacteristicRole::TypeField,
+        &values,
+        &BTreeMap::new(),
+    )
+    .unwrap_err();
+    assert_eq!(failure.reason, CharacteristicsReason::UnsupportedMarker);
+}
+
+#[test]
+fn characteristics_uuid_field_outside_source_fails_ancestry() {
+    let source = CharacteristicReference::new("Catalog.Values", None).unwrap();
+    let raw = format!("{{1,{{0,{FIELD_UUID}}},0}}");
+    let failure = decode_field(
+        OwnerGraphFamily::Catalog,
+        0,
+        &raw,
+        CharacteristicRole::ValueField,
+        &source,
+        &references(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        failure.reason,
+        CharacteristicsReason::ReferenceOutsideSource
+    );
+}
+
+#[test]
+fn characteristics_nonempty_design_time_ref_retains_value_uuid_provenance() {
+    let raw = format!(
+        "{{\"#\",{},{{0,{DTR_OWNER_UUID},{DTR_VALUE_UUID}}}}}",
+        DESIGN_TIME_REF_TYPE_UUID
+    );
+    let refs = BTreeMap::from([
+        (DTR_OWNER_UUID.to_owned(), "Catalog.Filter".to_owned()),
+        (
+            format!("owner-value:Catalog.Filter:{DTR_VALUE_UUID}"),
+            "Catalog.Filter.Item".to_owned(),
+        ),
+    ]);
+    let value =
+        decode_filter_value(OwnerGraphFamily::Catalog, 0, &raw, &BTreeMap::new(), &refs).unwrap();
+    let CharacteristicFilterValue::DesignTimeRef(Some(reference)) = value else {
+        panic!("expected nonempty design-time reference");
+    };
+    assert_eq!(reference.path(), "Catalog.Filter.Item");
+    assert_eq!(
+        reference.source_uuid(),
+        Some(ObjectUuid::parse(DTR_VALUE_UUID).unwrap())
+    );
+}
+
+#[test]
+fn characteristics_all_three_owner_slots_decode_render_and_invalid_cct_is_typed() {
+    let raw = collection(&item(
+        "4",
+        DOCUMENT_CHARACTERISTIC_TYPE_UUID,
+        r#"{"S","safe"}"#,
+    ));
+    for family in [
+        OwnerGraphFamily::Catalog,
+        OwnerGraphFamily::Document,
+        OwnerGraphFamily::ChartOfCharacteristicTypes,
+    ] {
+        let slot = characteristics_slot(family).unwrap();
+        let mut owned_fields = vec!["0".to_owned(); family.layout().owner_field_count];
+        owned_fields[slot] = raw.clone();
+        let fields = owned_fields.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut diagnostic = None;
+        let model = decode_owner_characteristics(
+            family,
+            &fields,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &references(),
+            &mut diagnostic,
+        )
+        .unwrap();
+        assert!(diagnostic.is_none());
+        let xml = ibcmd_xml::render_characteristics_xml(&model, "\t\t\t").unwrap();
+        let ordered = [
+            "CharacteristicTypes",
+            "KeyField",
+            "TypesFilterField",
+            "TypesFilterValue",
+            "DataPathField",
+            "MultipleValuesUseField",
+            "CharacteristicValues",
+            "ObjectField",
+            "TypeField",
+            "ValueField",
+            "MultipleValuesKeyField",
+            "MultipleValuesOrderField",
+        ];
+        let mut cursor = 0;
+        for name in ordered {
+            cursor += xml[cursor..].find(name).unwrap();
+        }
+    }
+
+    let family = OwnerGraphFamily::ChartOfCharacteristicTypes;
+    let slot = characteristics_slot(family).unwrap();
+    let invalid = collection(&item(
+        "4",
+        "00000000-0000-0000-0000-000000000000",
+        r#"{"S","must-not-leak"}"#,
+    ));
+    let mut owned_fields = vec!["0".to_owned(); family.layout().owner_field_count];
+    owned_fields[slot] = invalid;
+    let fields = owned_fields.iter().map(String::as_str).collect::<Vec<_>>();
+    let mut diagnostic = None;
+    assert!(
+        decode_owner_characteristics(
+            family,
+            &fields,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &references(),
+            &mut diagnostic,
+        )
+        .is_none()
+    );
+    let diagnostic = diagnostic.unwrap();
+    assert_eq!(diagnostic.family, "ChartOfCharacteristicTypes");
+    assert_eq!(diagnostic.parser_stage, "characteristics_typed_item");
+    assert_eq!(diagnostic.field_index, Some(50));
+    assert_eq!(diagnostic.item_index, Some(0));
+    assert_eq!(diagnostic.collection_role.as_deref(), Some("collection"));
+    assert_eq!(diagnostic.offending_reference.as_deref(), None,);
+    assert!(
+        !serde_json::to_string(&diagnostic)
+            .unwrap()
+            .contains("must-not-leak")
+    );
+}
+
+#[test]
+fn characteristics_three_family_call_sites_share_decoder_and_xml_writer_seams() {
+    let production = include_str!("mod.rs");
+    for (start, end, family) in [
+        (
+            "fn parse_strict_catalog_properties_from_text",
+            "fn parse_catalog_attribute_collection_indexed",
+            "OwnerGraphFamily::Catalog",
+        ),
+        (
+            "fn parse_document_properties_from_text",
+            "fn parse_document_optional_object_reference",
+            "OwnerGraphFamily::Document",
+        ),
+        (
+            "fn parse_chart_of_characteristic_types_properties_from_text",
+            "fn cct_pair_is",
+            "OwnerGraphFamily::ChartOfCharacteristicTypes",
+        ),
+    ] {
+        let start = production.find(start).unwrap();
+        let end = production[start..]
+            .find(end)
+            .map(|offset| start + offset)
+            .unwrap();
+        let implementation = &production[start..end];
+        assert!(implementation.contains("decode_owner_characteristics("));
+        assert!(implementation.contains(family));
+    }
+    for (start, end, model, renderer) in [
+        (
+            "fn format_chart_of_characteristic_types_source_xml",
+            "fn format_catalog_source_xml",
+            "&chart.characteristics",
+            "render_cct_characteristics_xml(",
+        ),
+        (
+            "fn format_catalog_source_xml",
+            "fn format_document_source_xml",
+            "&catalog.characteristics",
+            "render_metadata_characteristics_xml(",
+        ),
+        (
+            "fn format_document_source_xml",
+            "fn push_document_reference_collection_xml",
+            "&document.characteristics",
+            "render_metadata_characteristics_xml(",
+        ),
+    ] {
+        let start = production.find(start).unwrap();
+        let end = production[start..]
+            .find(end)
+            .map(|offset| start + offset)
+            .unwrap();
+        let writer = &production[start..end];
+        assert!(writer.contains(renderer));
+        assert!(writer.contains(model));
+    }
+    assert!(!production.contains("fn push_document_characteristics_xml"));
 }

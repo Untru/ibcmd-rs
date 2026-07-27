@@ -529,7 +529,12 @@ fn correlate(
         FormItemSchemaTraceEvent,
     > = BTreeMap::new();
     for event in schema {
-        let key = (event.id.clone(), event.tag.clone(), event.name.clone(), event.occurrence);
+        let key = (
+            event.id.clone(),
+            event.tag.clone(),
+            event.name.clone(),
+            event.occurrence,
+        );
         if event.evidence_complete {
             if let Some(previous) = schema_by_identity.get_mut(&key) {
                 previous.evidence_complete = true;

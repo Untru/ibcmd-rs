@@ -10,6 +10,8 @@ pub mod adapter;
 pub mod artifact;
 pub mod asset;
 pub mod capability;
+pub mod characteristics;
+pub mod dcs;
 pub mod detection;
 pub mod diagnostic;
 pub mod family;

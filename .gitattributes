@@ -1,1 +1,4 @@
 tests/fixtures/xml/** -text
+tests/fixtures/migrations/** -text
+tests/fixtures/form_choice_parameters_slot27_live.json text eol=lf
+crates/ibcmd-schema/data/** text eol=lf

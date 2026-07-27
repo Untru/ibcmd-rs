@@ -8,11 +8,15 @@ param(
     [string]$RunId = (Get-Date -Format "yyyyMMdd_HHmmss"),
     [string]$ExePath = "",
     [string]$IbcmdPath = "",
+    [string]$SqlcmdExecutable = "",
+    [string]$BcpExecutable = "",
     [ValidateRange(1, 86400)][int]$NativeTimeoutSec = 900,
     [ValidateSet("2.20", "2.21")][string]$SourceVersion = "2.20",
     [ValidateSet("full", "scoped")][string]$Scope = "full",
     [string[]]$PathPrefix = @(),
-    [switch]$RequireCompleteRootMetadata
+    [switch]$RequireCompleteRootMetadata,
+    [switch]$RequireCompleteSourceAssets,
+    [switch]$CollectAllSourceAssetDiagnostics
 )
 
 Set-StrictMode -Version Latest
@@ -25,24 +29,313 @@ $Cli = [ordered]@{
 
 function Get-UtcNow { (Get-Date).ToUniversalTime().ToString("o") }
 
+function Import-SourceAssetCompletenessEvidence {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing candidate source asset manifest: $Path" }
+    $candidate = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
+    $report = $candidate.source_assets
+    $isCanonicalSchemaVersion = {
+        param($Value)
+        if ($null -eq $Value -or $Value -is [string] -or $Value -is [decimal] -or $Value -is [double] -or $Value -is [single]) { return $false }
+        if ($Value -isnot [sbyte] -and $Value -isnot [byte] -and $Value -isnot [int16] -and $Value -isnot [uint16] -and
+            $Value -isnot [int32] -and $Value -isnot [uint32] -and $Value -isnot [int64] -and $Value -isnot [uint64]) { return $false }
+        return $Value -eq 1 -or $Value -eq 2
+    }
+    if ($null -eq $report -or $report.PSObject.Properties.Name -notcontains 'schema_version' -or -not (& $isCanonicalSchemaVersion $report.schema_version)) {
+        throw 'Candidate source asset completeness evidence is missing or unsupported.'
+    }
+    $isNonNegativeCount = {
+        param($Value)
+        if ($null -eq $Value) { return $false }
+        try { $number = [decimal]$Value } catch { return $false }
+        return $number -ge 0 -and $number -eq [decimal]::Truncate($number) -and $number -le [decimal][Int64]::MaxValue
+    }
+    foreach ($count in @('expected', 'emitted', 'opaque', 'missing', 'opaque_property_count')) {
+        if (-not (& $isNonNegativeCount $report.$count)) { throw "Candidate source asset completeness count '$count' is invalid." }
+    }
+    if ([int64]$report.expected -ne ([int64]$report.emitted + [int64]$report.opaque + [int64]$report.missing)) {
+        throw 'Candidate source asset completeness invariant expected=emitted+opaque+missing is violated.'
+    }
+    if ([int64]$report.opaque_property_count -lt [int64]$report.opaque) {
+        throw 'Candidate source asset opaque property count is smaller than the opaque asset count.'
+    }
+    if ([string]$report.status -notin @('complete', 'partial', 'unknown')) {
+        throw "Candidate source asset completeness status '$($report.status)' is invalid."
+    }
+    $derivedStatus = if ($report.candidate_set_complete -ne $true) {
+        'unknown'
+    } elseif ([int64]$report.opaque -eq 0 -and [int64]$report.missing -eq 0) {
+        'complete'
+    } else {
+        'partial'
+    }
+    if ([string]$report.status -cne $derivedStatus) {
+        throw "Candidate source asset completeness status disagrees with its evidence counts (expected '$derivedStatus')."
+    }
+    if ($report.schema_version -eq 2) {
+        $reportAllowed = @('schema_version', 'scope', 'status', 'candidate_set_complete', 'expected', 'emitted', 'opaque', 'missing', 'opaque_property_count', 'reasons', 'affected_assets', 'diagnostic_clusters')
+        foreach ($property in $report.PSObject.Properties.Name) {
+            if ($reportAllowed -notcontains $property) { throw "Candidate source asset completeness v2 report has unsupported property '$property'." }
+        }
+        if ($null -eq $report.affected_assets) { throw 'Candidate source asset completeness v2 evidence misses affected_assets.' }
+        $affectedAssetAllowed = @('family', 'code', 'classification', 'parse_error_class', 'table', 'source_row_id', 'asset_path', 'form_owner_reference', 'form_item_id', 'form_item_tag', 'property', 'property_profile', 'property_slot', 'raw_length', 'raw_sha256')
+        $clusterableAffectedByKey = @{}
+        $clusterableAffectedCount = 0
+        foreach ($affectedAsset in @($report.affected_assets)) {
+            foreach ($property in $affectedAsset.PSObject.Properties.Name) {
+                if ($affectedAssetAllowed -notcontains $property) { throw "Candidate source asset completeness v2 affected asset has unsupported property '$property'." }
+            }
+            $isClusterable = (
+                $affectedAsset.PSObject.Properties.Name -contains 'family' -and
+                $affectedAsset.family -is [string] -and
+                -not [string]::IsNullOrWhiteSpace($affectedAsset.family) -and
+                $affectedAsset.family -cne 'unknown' -and
+                $affectedAsset.PSObject.Properties.Name -contains 'property' -and
+                $affectedAsset.property -is [string] -and
+                -not [string]::IsNullOrWhiteSpace($affectedAsset.property) -and
+                $affectedAsset.PSObject.Properties.Name -contains 'property_profile' -and
+                $affectedAsset.property_profile -is [string] -and
+                -not [string]::IsNullOrWhiteSpace($affectedAsset.property_profile)
+            )
+            if ($isClusterable) {
+                foreach ($property in @('code', 'classification')) {
+                    if ($affectedAsset.PSObject.Properties.Name -notcontains $property -or
+                        $affectedAsset.$property -isnot [string] -or
+                        [string]::IsNullOrWhiteSpace($affectedAsset.$property)) {
+                        throw "Candidate source asset completeness v2 affected asset '$property' is invalid."
+                    }
+                }
+                if ($affectedAsset.PSObject.Properties.Name -contains 'parse_error_class' -and
+                    $null -ne $affectedAsset.parse_error_class -and
+                    ($affectedAsset.parse_error_class -isnot [string] -or [string]::IsNullOrWhiteSpace($affectedAsset.parse_error_class))) {
+                    throw 'Candidate source asset completeness v2 affected asset parse_error_class is invalid.'
+                }
+                $affectedKey = @(
+                    $affectedAsset.family,
+                    $affectedAsset.code,
+                    $affectedAsset.classification,
+                    [string]$affectedAsset.parse_error_class,
+                    $affectedAsset.property,
+                    $affectedAsset.property_profile
+                ) -join [char]31
+                if (-not $clusterableAffectedByKey.ContainsKey($affectedKey)) {
+                    $clusterableAffectedByKey[$affectedKey] = 0
+                }
+                $clusterableAffectedByKey[$affectedKey] = [int64]$clusterableAffectedByKey[$affectedKey] + 1
+                $clusterableAffectedCount++
+            }
+        }
+        if ([int64]$clusterableAffectedCount -ne [int64]$report.opaque_property_count) {
+            throw 'Candidate source asset completeness v2 affected assets do not account for every opaque property.'
+        }
+        $clusterReport = $report.diagnostic_clusters
+        if ($null -eq $clusterReport) { throw 'Candidate source asset completeness v2 evidence misses diagnostic_clusters.' }
+        $clusterReportAllowed = @('total_clusters', 'omitted_clusters', 'omitted_entries', 'clusters')
+        foreach ($property in $clusterReport.PSObject.Properties.Name) {
+            if ($clusterReportAllowed -notcontains $property) { throw "Candidate source asset completeness v2 cluster report has unsupported property '$property'." }
+        }
+        foreach ($count in @('total_clusters', 'omitted_clusters', 'omitted_entries')) {
+            if ($clusterReport.PSObject.Properties.Name -notcontains $count -or -not (& $isNonNegativeCount $clusterReport.$count)) {
+                throw "Candidate source asset completeness v2 cluster count '$count' is invalid."
+            }
+        }
+        if ($clusterReport.PSObject.Properties.Name -notcontains 'clusters' -or $null -eq $clusterReport.clusters) {
+            throw 'Candidate source asset completeness v2 evidence misses diagnostic_clusters.clusters.'
+        }
+        $clusters = @($clusterReport.clusters)
+        if ($clusters.Count -gt 128) { throw 'Candidate source asset completeness v2 has too many diagnostic clusters.' }
+        if ([decimal]$clusterReport.total_clusters -ne ([decimal]$clusters.Count + [decimal]$clusterReport.omitted_clusters)) {
+            throw 'Candidate source asset completeness v2 diagnostic cluster total is inconsistent.'
+        }
+        if (($clusterReport.omitted_clusters -eq 0 -and $clusterReport.omitted_entries -ne 0) -or
+            ($clusterReport.omitted_clusters -gt 0 -and $clusterReport.omitted_entries -lt $clusterReport.omitted_clusters)) {
+            throw 'Candidate source asset completeness v2 diagnostic cluster overflow is inconsistent.'
+        }
+        $previousClusterKey = $null
+        $storedClusterKeys = @{}
+        $storedClusterEntries = 0
+        foreach ($cluster in $clusters) {
+            $clusterAllowed = @('family', 'code', 'classification', 'parse_error_class', 'property', 'property_profile', 'affected_entries', 'omitted_samples', 'samples')
+            foreach ($property in $cluster.PSObject.Properties.Name) {
+                if ($clusterAllowed -notcontains $property) { throw "Candidate source asset completeness v2 cluster has unsupported property '$property'." }
+            }
+            foreach ($property in @('family', 'code', 'classification', 'property', 'property_profile', 'affected_entries', 'omitted_samples', 'samples')) {
+                if ($cluster.PSObject.Properties.Name -notcontains $property) { throw "Candidate source asset completeness v2 cluster misses '$property'." }
+            }
+            foreach ($property in @('family', 'code', 'classification', 'property', 'property_profile')) {
+                if ($cluster.$property -isnot [string] -or [string]::IsNullOrWhiteSpace($cluster.$property)) { throw "Candidate source asset completeness v2 cluster '$property' is invalid." }
+            }
+            if ($cluster.PSObject.Properties.Name -contains 'parse_error_class' -and $null -ne $cluster.parse_error_class -and
+                ($cluster.parse_error_class -isnot [string] -or [string]::IsNullOrWhiteSpace($cluster.parse_error_class))) {
+                throw 'Candidate source asset completeness v2 cluster parse_error_class is invalid.'
+            }
+            foreach ($count in @('affected_entries', 'omitted_samples')) {
+                if ($cluster.PSObject.Properties.Name -notcontains $count -or -not (& $isNonNegativeCount $cluster.$count)) {
+                    throw "Candidate source asset completeness v2 cluster count '$count' is invalid."
+                }
+            }
+            if ($cluster.PSObject.Properties.Name -notcontains 'samples' -or $null -eq $cluster.samples) {
+                throw 'Candidate source asset completeness v2 cluster misses samples.'
+            }
+            $samples = @($cluster.samples)
+            if ($samples.Count -gt 3) { throw 'Candidate source asset completeness v2 cluster has too many samples.' }
+            if ([decimal]$cluster.affected_entries -ne ([decimal]$samples.Count + [decimal]$cluster.omitted_samples)) {
+                throw 'Candidate source asset completeness v2 cluster sample counts are inconsistent.'
+            }
+            $clusterKey = @($cluster.family, $cluster.code, $cluster.classification, [string]$cluster.parse_error_class, $cluster.property, $cluster.property_profile) -join [char]31
+            if ($null -ne $previousClusterKey -and [string]::CompareOrdinal($previousClusterKey, $clusterKey) -gt 0) {
+                throw 'Candidate source asset completeness v2 diagnostic clusters are not sorted.'
+            }
+            if ($storedClusterKeys.ContainsKey($clusterKey)) {
+                throw 'Candidate source asset completeness v2 contains a duplicate diagnostic cluster key.'
+            }
+            if (-not $clusterableAffectedByKey.ContainsKey($clusterKey) -or
+                [int64]$clusterableAffectedByKey[$clusterKey] -ne [int64]$cluster.affected_entries) {
+                throw 'Candidate source asset completeness v2 diagnostic cluster does not match affected assets.'
+            }
+            $storedClusterKeys[$clusterKey] = $true
+            $storedClusterEntries += [int64]$cluster.affected_entries
+            $previousClusterKey = $clusterKey
+            $previousSampleKey = $null
+            foreach ($sample in $samples) {
+                $sampleAllowed = @('asset_path', 'source_row_id', 'form_item_tag', 'property_slot', 'raw_length', 'raw_sha256')
+                foreach ($property in $sample.PSObject.Properties.Name) {
+                    if ($sampleAllowed -notcontains $property) { throw "Candidate source asset completeness v2 sample has unsupported property '$property'." }
+                }
+                foreach ($property in $sampleAllowed) {
+                    if ($sample.PSObject.Properties.Name -notcontains $property) { throw "Candidate source asset completeness v2 sample misses '$property'." }
+                }
+                foreach ($property in @('asset_path', 'source_row_id', 'form_item_tag', 'raw_sha256')) {
+                    if ($sample.$property -isnot [string] -or [string]::IsNullOrWhiteSpace($sample.$property)) { throw "Candidate source asset completeness v2 sample '$property' is invalid." }
+                }
+                foreach ($count in @('property_slot', 'raw_length')) {
+                    if (-not (& $isNonNegativeCount $sample.$count)) { throw "Candidate source asset completeness v2 sample count '$count' is invalid." }
+                }
+                # Rust orders numeric slots numerically (not by their textual form).
+                $sampleKey = @($sample.asset_path, $sample.source_row_id, $sample.form_item_tag,
+                    ('{0:D20}' -f [int64]$sample.property_slot), ('{0:D20}' -f [int64]$sample.raw_length), $sample.raw_sha256) -join [char]31
+                if ($null -ne $previousSampleKey -and [string]::CompareOrdinal($previousSampleKey, $sampleKey) -gt 0) {
+                    throw 'Candidate source asset completeness v2 cluster samples are not sorted.'
+                }
+                $previousSampleKey = $sampleKey
+            }
+        }
+        $omittedAffectedKeys = @($clusterableAffectedByKey.Keys | Where-Object { -not $storedClusterKeys.ContainsKey($_) })
+        $omittedAffectedEntries = 0
+        foreach ($key in $omittedAffectedKeys) {
+            $omittedAffectedEntries += [int64]$clusterableAffectedByKey[$key]
+        }
+        if ([int64]$omittedAffectedKeys.Count -ne [int64]$clusterReport.omitted_clusters -or
+            [int64]$omittedAffectedEntries -ne [int64]$clusterReport.omitted_entries -or
+            [int64]$storedClusterEntries + [int64]$clusterReport.omitted_entries -ne [int64]$report.opaque_property_count) {
+            throw 'Candidate source asset completeness v2 diagnostic clusters do not exactly cover affected assets.'
+        }
+    }
+    $isComplete = (
+        [string]$report.scope -ceq 'full' -and
+        $report.candidate_set_complete -eq $true -and
+        [string]$report.status -ceq 'complete' -and
+        [int64]$report.opaque -eq 0 -and
+        [int64]$report.missing -eq 0
+    )
+    return [ordered]@{
+        evidence_manifest='candidate_dump/manifest.json'
+        evidence_manifest_sha256=(Get-FileSha256 -Path $Path)
+        report=$report
+        complete=$isComplete
+    }
+}
+
+function Import-RootMetadataCompletenessEvidence {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Missing candidate root metadata manifest: $Path" }
+    $candidate = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
+    $configTables = @($candidate.tables | Where-Object { [string]$_.table -ceq 'Config' })
+    if ($configTables.Count -ne 1) { throw 'Candidate manifest must contain exactly one Config table.' }
+    $report = $configTables[0].metadata_root_inventory
+    if ($null -eq $report) { throw 'Candidate root metadata completeness evidence is missing.' }
+    $allowed = @('scope', 'candidate_set_complete', 'expected', 'emitted', 'missing', 'misses_by_reason', 'entries')
+    foreach ($property in $report.PSObject.Properties.Name) {
+        if ($allowed -notcontains $property) { throw "Candidate root metadata report has unsupported property '$property'." }
+    }
+    if ([string]$report.scope -notin @('full', 'scoped') -or $report.candidate_set_complete -isnot [bool]) {
+        throw 'Candidate root metadata scope or candidate-set evidence is invalid.'
+    }
+    foreach ($count in @('expected', 'emitted', 'missing')) {
+        if ($report.PSObject.Properties.Name -notcontains $count) { throw "Candidate root metadata count '$count' is missing." }
+        try { $number = [decimal]$report.$count } catch { throw "Candidate root metadata count '$count' is invalid." }
+        if ($number -lt 0 -or $number -ne [decimal]::Truncate($number) -or $number -gt [decimal][Int64]::MaxValue) {
+            throw "Candidate root metadata count '$count' is invalid."
+        }
+    }
+    if ([int64]$report.expected -ne ([int64]$report.emitted + [int64]$report.missing)) {
+        throw 'Candidate root metadata invariant expected=emitted+missing is violated.'
+    }
+    if ($null -eq $report.misses_by_reason) { throw 'Candidate root metadata reasons are missing.' }
+    $reasonTotal = [int64]0
+    $safeReasons = [ordered]@{}
+    foreach ($reason in @($report.misses_by_reason.PSObject.Properties | Sort-Object Name)) {
+        if ($reason.Name -cnotmatch '^[a-z0-9._-]{1,128}$') { throw 'Candidate root metadata reason token is invalid.' }
+        try { $count = [decimal]$reason.Value } catch { throw "Candidate root metadata reason '$($reason.Name)' count is invalid." }
+        if ($count -lt 0 -or $count -ne [decimal]::Truncate($count) -or $count -gt [decimal][Int64]::MaxValue) {
+            throw "Candidate root metadata reason '$($reason.Name)' count is invalid."
+        }
+        $safeReasons[$reason.Name] = [int64]$count
+        $reasonTotal += [int64]$count
+    }
+    if ($reasonTotal -ne [int64]$report.missing) {
+        throw 'Candidate root metadata reason counts do not cover every missing entry.'
+    }
+    if ($null -eq $report.entries -or @($report.entries).Count -ne [int64]$report.expected) {
+        throw 'Candidate root metadata entries do not cover the expected inventory.'
+    }
+    $isComplete = (
+        [string]$report.scope -ceq 'full' -and
+        $report.candidate_set_complete -eq $true -and
+        [int64]$report.missing -eq 0
+    )
+    return [ordered]@{
+        evidence_manifest='candidate_dump/manifest.json'
+        evidence_manifest_sha256=(Get-FileSha256 -Path $Path)
+        scope=[string]$report.scope
+        candidate_set_complete=[bool]$report.candidate_set_complete
+        expected=[int64]$report.expected
+        emitted=[int64]$report.emitted
+        missing=[int64]$report.missing
+        misses_by_reason=$safeReasons
+        complete=$isComplete
+    }
+}
+
 function Protect-SensitiveText {
     param([AllowNull()]$Value)
     $text = [string]$Value
-    foreach ($secretName in @('IBCMD_DB_PSW', 'IBCMD_USER_PSW', 'SQLCMDPASSWORD')) {
+    $secretNames = @('IBCMD_DB_PSW', 'IBCMD_USER_PSW', 'SQLCMDPASSWORD')
+    $secretValues = @($secretNames |
+        ForEach-Object { [Environment]::GetEnvironmentVariable($_, 'Process') } |
+        Where-Object { -not [string]::IsNullOrEmpty($_) } |
+        Sort-Object -Property @{ Expression = { $_.Length }; Descending = $true }, @{ Expression = { $_ }; Descending = $false } -Unique)
+    foreach ($secretValue in $secretValues) {
+        $jsonLiteral = [string](ConvertTo-Json -InputObject $secretValue -Compress)
+        if ($jsonLiteral.Length -ge 2 -and $jsonLiteral[0] -eq '"' -and $jsonLiteral[$jsonLiteral.Length - 1] -eq '"') {
+            $jsonEscapedValue = $jsonLiteral.Substring(1, $jsonLiteral.Length - 2)
+            if (-not [string]::IsNullOrEmpty($jsonEscapedValue)) {
+                $text = $text.Replace($jsonEscapedValue, '<redacted>')
+            }
+        }
+        $text = $text.Replace($secretValue, '<redacted>')
+    }
+    foreach ($secretName in $secretNames) {
         $text = [regex]::Replace(
             $text,
             [regex]::Escape($secretName),
             '<redacted-environment>',
             [Text.RegularExpressions.RegexOptions]::IgnoreCase
         )
-        $secretValue = [Environment]::GetEnvironmentVariable($secretName, 'Process')
-        if (-not [string]::IsNullOrEmpty($secretValue)) {
-            $text = $text.Replace($secretValue, '<redacted>')
-        }
     }
     return [regex]::Replace(
         $text,
-        '(?i)(--(?:db-pwd|sql-pwd|password|pwd)(?:-env)?)(?:=|\s+)(?:"[^"]*"|\S+)',
+        '(?i)(--(?:db-pwd|sql-pwd|password|pwd)(?:-env)?)(?:=|\s+)(?:"(?:\\.|[^"\\])*"|(?:\\.|[^\s"\\])+)',
         '$1=<redacted>'
     )
 }
@@ -79,22 +372,75 @@ function Assert-ManifestSafe {
 }
 
 function Write-ManifestAtomic {
-    param([string]$Path, [System.Collections.IDictionary]$Manifest)
+    param([string]$Path, [object]$Manifest)
     $json = $Manifest | ConvertTo-Json -Depth 20
     Assert-ManifestSafe -Json $json
     $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
     $utf8 = [System.Text.UTF8Encoding]::new($false)
     [IO.File]::WriteAllText($tmp, $json, $utf8)
     try {
-        if (Test-Path -LiteralPath $Path) {
-            $backup = "$Path.$([guid]::NewGuid().ToString('N')).bak"
-            [IO.File]::Replace($tmp, $Path, $backup, $true)
-            Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-        } else {
-            [IO.File]::Move($tmp, $Path)
+        $attempt = 0
+        while ($true) {
+            $backup = $null
+            try {
+                if (Test-Path -LiteralPath $Path) {
+                    $backup = "$Path.$([guid]::NewGuid().ToString('N')).bak"
+                    [IO.File]::Replace($tmp, $Path, $backup, $true)
+                } else {
+                    [IO.File]::Move($tmp, $Path)
+                }
+                break
+            } catch [IO.IOException] {
+                $attempt++
+                if ($attempt -ge 20) { throw }
+                Start-Sleep -Milliseconds ([Math]::Min(200, 10 * $attempt))
+            } catch [UnauthorizedAccessException] {
+                $attempt++
+                if ($attempt -ge 20) { throw }
+                Start-Sleep -Milliseconds ([Math]::Min(200, 10 * $attempt))
+            } finally {
+                if ($null -ne $backup) {
+                    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+                }
+            }
         }
     } finally {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Register-ManifestTool {
+    param(
+        [string]$Name,
+        [string]$Path,
+        [string[]]$VersionArguments,
+        [int[]]$AllowedExitCodes = @(0),
+        [System.Collections.IDictionary]$Manifest,
+        [string]$ManifestPath
+    )
+    $record = [ordered]@{
+        status = 'running'
+        started_utc = Get-UtcNow
+        ended_utc = $null
+        path = $Path
+        version_arguments = ConvertTo-SanitizedArguments $VersionArguments
+        version = $null
+        sha256 = $null
+        exception = $null
+    }
+    $Manifest.tools[$Name] = $record
+    Write-ManifestAtomic -Path $ManifestPath -Manifest $Manifest
+    try {
+        $record.version = Protect-SensitiveText (Get-CommandVersion -Path $Path -Arguments $VersionArguments -AllowedExitCodes $AllowedExitCodes)
+        $record.sha256 = Get-FileSha256 -Path $Path
+        $record.status = 'passed'
+    } catch {
+        $record.status = 'failed'
+        $record.exception = Protect-SensitiveText $_.Exception.Message
+        throw
+    } finally {
+        $record.ended_utc = Get-UtcNow
+        Write-ManifestAtomic -Path $ManifestPath -Manifest $Manifest
     }
 }
 
@@ -113,6 +459,16 @@ function Get-ApplicationPath {
     param([string]$Name)
     $command = Get-Command -Name $Name -CommandType Application -ErrorAction Stop | Select-Object -First 1
     return $command.Source
+}
+
+function Get-ExplicitOrDiscoveredApplicationPath {
+    param([string]$ExplicitPath, [string]$Name)
+    if ([string]::IsNullOrWhiteSpace($ExplicitPath)) {
+        return Get-ApplicationPath $Name
+    }
+    $resolved = Get-Command -Name $ExplicitPath -CommandType Application,ExternalScript -ErrorAction Stop |
+        Select-Object -First 1
+    return [IO.Path]::GetFullPath($resolved.Source)
 }
 
 function Get-Sha256Text {
@@ -142,14 +498,16 @@ function Get-FileSha256 {
 }
 
 function Get-RepositoryState {
-    param([string]$RepoRoot)
-    $lines = @(& git -C $RepoRoot status --porcelain=v1 --untracked-files=all)
+    param([string]$RepoRoot, [string]$GitPath)
+    $lines = @(& $GitPath -C $RepoRoot status --porcelain=v1 --untracked-files=all)
     if ($LASTEXITCODE -ne 0) { throw "Cannot determine repository state in $RepoRoot" }
     return [ordered]@{
         status = if ($lines.Count -eq 0) { 'clean' } else { 'dirty' }
         dirty_entries = $lines.Count
         porcelain = @($lines)
         command = @('git', '-C', $RepoRoot, 'status', '--porcelain=v1', '--untracked-files=all')
+        executable = $GitPath
+        arguments = @('-C', $RepoRoot, 'status', '--porcelain=v1', '--untracked-files=all')
     }
 }
 
@@ -298,12 +656,483 @@ function Test-CliCommand {
     } finally { $ErrorActionPreference = $previousPreference }
 }
 
+function ConvertFrom-WindowsExtendedLengthPath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $Path }
+
+    $extendedPrefix = '\\?\'
+    $extendedUncPrefix = '\\?\UNC\'
+    foreach ($unsupportedPrefix in @('\\.\', '\??\', '\\??\')) {
+        if ($Path.StartsWith($unsupportedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsupported Windows device/NT executable path namespace: $Path"
+        }
+    }
+    if (-not $Path.StartsWith($extendedPrefix, [StringComparison]::Ordinal)) {
+        return $Path
+    }
+    if ($Path.IndexOf('/') -ge 0) {
+        throw "Invalid Windows extended-length executable path: $Path"
+    }
+
+    $relativeComponents = @()
+    $converted = $null
+    if ($Path.StartsWith($extendedUncPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        $tail = $Path.Substring($extendedUncPrefix.Length)
+        $components = @([regex]::Split($tail, '\\'))
+        if ($components.Count -lt 3 -or
+            [string]::IsNullOrEmpty($components[0]) -or
+            [string]::IsNullOrEmpty($components[1])) {
+            throw "Malformed Windows extended-length UNC executable path: $Path"
+        }
+        $relativeComponents = $components
+        $converted = '\\' + $tail
+    } elseif ($Path.Length -ge 8 -and
+        $Path.StartsWith($extendedPrefix, [StringComparison]::Ordinal) -and
+        [char]::IsLetter($Path[4]) -and $Path[5] -eq ':' -and $Path[6] -eq '\') {
+        $relative = $Path.Substring(7)
+        $relativeComponents = @([regex]::Split($relative, '\\'))
+        $converted = $Path.Substring($extendedPrefix.Length)
+    } else {
+        throw "Unsupported Windows extended-length executable path namespace: $Path"
+    }
+
+    foreach ($component in $relativeComponents) {
+        if ([string]::IsNullOrEmpty($component) -or
+            $component -eq '.' -or $component -eq '..' -or
+            $component.EndsWith('.', [StringComparison]::Ordinal) -or
+            $component.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $component.IndexOf(':') -ge 0 -or
+            [Management.Automation.WildcardPattern]::ContainsWildcardCharacters($component)) {
+            throw "Ambiguous Windows extended-length executable path component: $Path"
+        }
+    }
+    return $converted
+}
+
+function Get-NormalizedExecutablePath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw 'Runtime journal executable path is empty.' }
+    $lookupPath = ConvertFrom-WindowsExtendedLengthPath $Path
+    if ($lookupPath.IndexOf('/') -ge 0 -or
+        [Management.Automation.WildcardPattern]::ContainsWildcardCharacters($lookupPath)) {
+        throw 'Runtime journal executable path contains an unsupported separator or wildcard.'
+    }
+    $driveRooted = $lookupPath.Length -ge 3 -and
+        [char]::IsLetter($lookupPath[0]) -and $lookupPath[1] -eq ':' -and $lookupPath[2] -eq '\'
+    $uncRooted = $lookupPath.StartsWith('\\', [StringComparison]::Ordinal)
+    if (-not ($driveRooted -or $uncRooted)) {
+        throw 'Runtime journal executable path must be a fully qualified drive or UNC path.'
+    }
+    $components = if ($driveRooted) {
+        @([regex]::Split($lookupPath.Substring(3), '\\'))
+    } else {
+        @([regex]::Split($lookupPath.Substring(2), '\\'))
+    }
+    if ($components.Count -lt $(if ($driveRooted) { 1 } else { 3 })) {
+        throw 'Runtime journal executable path has an incomplete drive or UNC route.'
+    }
+    foreach ($component in $components) {
+        if ([string]::IsNullOrEmpty($component) -or
+            $component -eq '.' -or $component -eq '..' -or
+            $component.EndsWith('.', [StringComparison]::Ordinal) -or
+            $component.EndsWith(' ', [StringComparison]::Ordinal) -or
+            $component.IndexOf(':') -ge 0) {
+            throw 'Runtime journal executable path contains an ambiguous component.'
+        }
+    }
+
+    $fullPath = [IO.Path]::GetFullPath($lookupPath)
+    $root = [IO.Path]::GetPathRoot($fullPath)
+    $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+    if (($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Runtime journal executable path root is a reparse point.'
+    }
+    $current = $root
+    $relative = $fullPath.Substring($root.Length)
+    $item = $null
+    foreach ($component in @([regex]::Split($relative, '\\'))) {
+        $current = Join-Path $current $component
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Runtime journal executable path crosses a reparse point: $current"
+        }
+    }
+    if ($null -eq $item -or $item.PSIsContainer) {
+        throw 'Runtime journal executable path is not a file.'
+    }
+    return $fullPath
+}
+
+function Assert-CompleteRuntimeCall {
+    param(
+        [Parameter(Mandatory = $true)]$Call,
+        [Parameter(Mandatory = $true)][string]$ExpectedExecutable,
+        [Parameter(Mandatory = $true)][string]$ExpectedServer,
+        [Parameter(Mandatory = $true)][string]$ExpectedDatabase,
+        [Parameter(Mandatory = $true)][ValidateSet('native_ibcmd', 'sqlcmd', 'bcp')][string]$Kind,
+        [ValidateSet('running', 'passed', 'failed')][string]$ExpectedStatus = 'passed'
+    )
+    foreach ($property in @('executable', 'arguments', 'started_unix_ms', 'ended_unix_ms', 'status', 'exit_code', 'timed_out', 'exception')) {
+        if ($Call.PSObject.Properties.Name -notcontains $property) { throw "Runtime journal $Kind call is missing '$property'." }
+    }
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+        (Get-NormalizedExecutablePath ([string]$Call.executable)),
+        (Get-NormalizedExecutablePath $ExpectedExecutable)
+    )) {
+        throw "Runtime journal $Kind executable does not match the registered tool."
+    }
+    if ([string]$Call.status -ne $ExpectedStatus) {
+        throw "Runtime journal $Kind call status does not match expected '$ExpectedStatus'."
+    }
+    if ($Call.timed_out -isnot [bool]) {
+        throw "Runtime journal $Kind timed_out is not a JSON boolean."
+    }
+    if ($null -ne $Call.exception -and $Call.exception -isnot [string]) {
+        throw "Runtime journal $Kind exception is neither null nor a string."
+    }
+    if ([decimal]$Call.started_unix_ms -le 0) {
+        throw "Runtime journal $Kind timestamps are incomplete."
+    }
+    $hasException = -not [string]::IsNullOrWhiteSpace([string]$Call.exception)
+    $hasExitCode = $null -ne $Call.exit_code
+    if ($ExpectedStatus -eq 'running') {
+        if ($null -ne $Call.ended_unix_ms -or $hasExitCode -or [bool]$Call.timed_out -or $hasException) {
+            throw "Runtime journal $Kind running call already contains terminal fields."
+        }
+    } else {
+        if ($null -eq $Call.ended_unix_ms -or [decimal]$Call.ended_unix_ms -lt [decimal]$Call.started_unix_ms) {
+            throw "Runtime journal $Kind timestamps are incomplete."
+        }
+        if ($ExpectedStatus -eq 'passed') {
+            if (-not $hasExitCode -or [int]$Call.exit_code -ne 0 -or [bool]$Call.timed_out -or $hasException) {
+                throw "Runtime journal $Kind passed call is not coherent."
+            }
+        } elseif (-not ([bool]$Call.timed_out -or ($hasExitCode -and [int]$Call.exit_code -ne 0) -or $hasException)) {
+            throw "Runtime journal $Kind failed call has no timeout, nonzero exit, or exception reason."
+        }
+    }
+    $arguments = @($Call.arguments | ForEach-Object { [string]$_ })
+    if ($arguments.Count -eq 0 -or @($arguments | Where-Object { [string]::IsNullOrEmpty($_) }).Count -ne 0) {
+        throw "Runtime journal $Kind arguments are incomplete."
+    }
+    for ($index = 0; $index -lt $arguments.Count; $index++) {
+            if ($arguments[$index] -ceq '-P') {
+            if ($index + 1 -ge $arguments.Count -or $arguments[$index + 1] -notmatch '^<password-source:[a-z-]+>$') {
+                throw "Runtime journal $Kind password argument is not source-marked."
+            }
+        }
+    }
+    if ($Kind -eq 'native_ibcmd') {
+        if ($arguments.Count -lt 3 -or $arguments[0] -ne 'infobase' -or $arguments[1] -ne 'config' -or $arguments[2] -ne 'export') {
+            throw 'Native ibcmd runtime journal does not contain the exact export command.'
+        }
+        $serverArguments = @($arguments | Where-Object { $_.StartsWith('--db-server=', [StringComparison]::Ordinal) })
+        $databaseArguments = @($arguments | Where-Object { $_.StartsWith('--db-name=', [StringComparison]::Ordinal) })
+        if ($serverArguments.Count -ne 1 -or
+            -not [StringComparer]::Ordinal.Equals($serverArguments[0].Substring('--db-server='.Length), $ExpectedServer) -or
+            $databaseArguments.Count -ne 1 -or
+            -not [StringComparer]::Ordinal.Equals($databaseArguments[0].Substring('--db-name='.Length), $ExpectedDatabase)) {
+            throw 'Native ibcmd runtime journal database identity does not match the requested server/database.'
+        }
+        if (@($arguments | Where-Object { $_ -match '^--(?:db-pwd|password)=' -and $_ -notmatch '=<password-source:[a-z-]+>$' }).Count -ne 0) {
+            throw 'Native ibcmd runtime journal contains an unmarked password.'
+        }
+    } elseif ($Kind -eq 'sqlcmd') {
+        $queryEvidence = $false
+        for ($index = 0; $index -lt $arguments.Count; $index++) {
+            if ($arguments[$index] -ceq '-Q') {
+                if ($index + 1 -ge $arguments.Count -or $arguments[$index + 1] -notmatch '^<query-sha256:[0-9a-f]{64}>$') {
+                    throw 'sqlcmd runtime journal contains a raw or invalid inline query.'
+                }
+                $queryEvidence = $true
+            } elseif ($arguments[$index] -ceq '-i') {
+                if ($index + 1 -ge $arguments.Count -or [string]::IsNullOrWhiteSpace($arguments[$index + 1])) {
+                    throw 'sqlcmd runtime journal omits its temporary query path.'
+                }
+                $queryEvidence = $true
+            }
+        }
+        if (-not $queryEvidence) { throw 'sqlcmd runtime journal has no query evidence.' }
+    } else {
+        if ($arguments.Count -lt 3 -or $arguments[0] -notmatch '^<query-sha256:[0-9a-f]{64}>$' -or $arguments[1] -ne 'queryout' -or [string]::IsNullOrWhiteSpace($arguments[2])) {
+            throw 'bcp runtime journal does not contain a query marker and explicit output path.'
+        }
+    }
+    if ($Kind -in @('sqlcmd', 'bcp')) {
+        $serverValues = [System.Collections.Generic.List[string]]::new()
+        for ($index = 0; $index -lt $arguments.Count; $index++) {
+            if ($arguments[$index] -ceq '-S') {
+                if ($index + 1 -ge $arguments.Count) { throw "$Kind runtime journal omits the -S value." }
+                $serverValues.Add($arguments[$index + 1])
+            }
+        }
+        if ($serverValues.Count -ne 1 -or -not [StringComparer]::Ordinal.Equals($serverValues[0], $ExpectedServer)) {
+            throw "Runtime journal $Kind server does not match the requested server."
+        }
+    }
+}
+
+function Import-VerifiedRuntimeEvidence {
+    param(
+        [string]$NativeJournalPath,
+        [string]$CandidateJournalPath,
+        [string]$NativeIbcmdPath,
+        [string]$SqlcmdPath,
+        [string]$BcpPath,
+        [string]$ExpectedServer,
+        [string]$ExpectedDatabase
+    )
+    if (-not (Test-Path -LiteralPath $NativeJournalPath -PathType Leaf)) { throw 'Native export runtime journal is missing.' }
+    if (-not (Test-Path -LiteralPath $CandidateJournalPath -PathType Leaf)) { throw 'Candidate subprocess journal is missing.' }
+
+    $nativeJson = Get-Content -Raw -LiteralPath $NativeJournalPath
+    Assert-ManifestSafe -Json $nativeJson
+    $nativeJournal = $nativeJson | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$nativeJournal.protocol_version -ne 1 -or $nativeJournal.PSObject.Properties.Name -notcontains 'runtime_call') {
+        throw 'Native export runtime journal protocol is invalid.'
+    }
+    Assert-CompleteRuntimeCall -Call $nativeJournal.runtime_call -ExpectedExecutable $NativeIbcmdPath `
+        -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind native_ibcmd
+
+    $candidateJson = Get-Content -Raw -LiteralPath $CandidateJournalPath
+    Assert-ManifestSafe -Json $candidateJson
+    $candidateJournal = $candidateJson | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$candidateJournal.protocol_version -ne 1 -or [string]$candidateJournal.status -ne 'passed') {
+        throw 'Candidate subprocess journal protocol/status is invalid.'
+    }
+    if (-not [StringComparer]::Ordinal.Equals([string]$candidateJournal.server, $ExpectedServer) -or
+        -not [StringComparer]::Ordinal.Equals([string]$candidateJournal.database, $ExpectedDatabase)) {
+        throw 'Candidate subprocess journal database identity does not match the requested server/database.'
+    }
+    $calls = @($candidateJournal.calls)
+    if ($calls.Count -eq 0) { throw 'Candidate subprocess journal is empty.' }
+    $sqlcmdCalls = 0
+    $bcpCalls = 0
+    foreach ($call in $calls) {
+        $runtimeExecutable = Get-NormalizedExecutablePath ([string]$call.executable)
+        if ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $SqlcmdPath))) {
+            Assert-CompleteRuntimeCall -Call $call -ExpectedExecutable $SqlcmdPath `
+                -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind sqlcmd
+            $sqlcmdCalls++
+        } elseif ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $BcpPath))) {
+            Assert-CompleteRuntimeCall -Call $call -ExpectedExecutable $BcpPath `
+                -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind bcp
+            $bcpCalls++
+        } else {
+            throw "Candidate subprocess journal contains an unregistered executable: $($call.executable)"
+        }
+    }
+    if ($sqlcmdCalls -eq 0 -or $bcpCalls -eq 0) { throw 'Candidate subprocess journal must contain passed sqlcmd and bcp calls.' }
+
+    return [ordered]@{
+        status='passed'
+        native_report='logs/native-runtime.json'
+        native_report_sha256=(Get-FileSha256 -Path $NativeJournalPath)
+        native_call=$nativeJournal.runtime_call
+        candidate_manifest='logs/candidate-runtime.json'
+        candidate_manifest_sha256=(Get-FileSha256 -Path $CandidateJournalPath)
+        candidate_subprocess_journal_status='passed'
+        candidate_calls=$calls
+        sqlcmd_calls=$sqlcmdCalls
+        bcp_calls=$bcpCalls
+    }
+}
+
+function Import-FailedRuntimeEvidence {
+    param(
+        [ValidateSet('native', 'candidate')][string]$JournalKind,
+        [string]$JournalPath,
+        [string]$NativeIbcmdPath,
+        [string]$SqlcmdPath,
+        [string]$BcpPath,
+        [string]$ExpectedServer,
+        [string]$ExpectedDatabase,
+        [ValidateSet('failed', 'terminal')][string]$ExpectedStatus = 'failed'
+    )
+    if (-not (Test-Path -LiteralPath $JournalPath -PathType Leaf)) {
+        throw "Failed $JournalKind runtime journal is missing."
+    }
+    $json = Get-Content -Raw -LiteralPath $JournalPath
+    Assert-ManifestSafe -Json $json
+    $journal = $json | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$journal.protocol_version -ne 1) { throw "Failed $JournalKind runtime journal protocol is invalid." }
+    if ($JournalKind -eq 'native') {
+        Assert-CompleteRuntimeCall -Call $journal.runtime_call -ExpectedExecutable $NativeIbcmdPath `
+            -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind native_ibcmd -ExpectedStatus failed
+        return [ordered]@{
+            status='failed'
+            native_report='logs/native-runtime.json'
+            native_report_sha256=(Get-FileSha256 -Path $JournalPath)
+            native_call=$journal.runtime_call
+        }
+    }
+    $actualStatus = [string]$journal.status
+    if ($ExpectedStatus -eq 'terminal') {
+        if ($actualStatus -notin @('passed', 'failed')) {
+            throw 'Candidate journal is not finalized with a terminal status.'
+        }
+    } elseif ($actualStatus -ne 'failed') {
+        throw 'Candidate failure journal is not finalized as failed.'
+    }
+    if (-not [StringComparer]::Ordinal.Equals([string]$journal.server, $ExpectedServer) -or
+        -not [StringComparer]::Ordinal.Equals([string]$journal.database, $ExpectedDatabase)) {
+        throw 'Candidate failure journal database identity does not match the requested server/database.'
+    }
+    $sqlcmdCalls = 0
+    $bcpCalls = 0
+    foreach ($call in @($journal.calls)) {
+        $runtimeExecutable = Get-NormalizedExecutablePath ([string]$call.executable)
+        $kind = if ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $SqlcmdPath))) {
+            $sqlcmdCalls++; 'sqlcmd'
+        } elseif ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $BcpPath))) {
+            $bcpCalls++; 'bcp'
+        } else {
+            throw "Candidate failure journal contains an unregistered executable: $($call.executable)"
+        }
+        $expected = [string]$call.status
+        if ($expected -notin @('passed', 'failed')) { throw 'Candidate failure journal contains an incomplete call.' }
+        if ($actualStatus -eq 'passed' -and $expected -ne 'passed') {
+            throw 'Passed candidate journal contains a non-passed call.'
+        }
+        Assert-CompleteRuntimeCall -Call $call -ExpectedExecutable ([string]$call.executable) `
+            -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind $kind -ExpectedStatus $expected
+    }
+    if ($actualStatus -eq 'passed' -and ($sqlcmdCalls -eq 0 -or $bcpCalls -eq 0)) {
+        throw 'Passed candidate journal must contain passed sqlcmd and bcp calls.'
+    }
+    return [ordered]@{
+        status=$actualStatus
+        candidate_manifest='logs/candidate-runtime.json'
+        candidate_manifest_sha256=(Get-FileSha256 -Path $JournalPath)
+        candidate_subprocess_journal_status=$actualStatus
+        candidate_calls=@($journal.calls)
+        sqlcmd_calls=$sqlcmdCalls
+        bcp_calls=$bcpCalls
+    }
+}
+
+function Import-NativeRuntimeEvidence {
+    param(
+        [string]$JournalPath,
+        [string]$NativeIbcmdPath,
+        [string]$ExpectedServer,
+        [string]$ExpectedDatabase,
+        [ValidateSet('passed', 'failed', 'terminal')][string]$ExpectedStatus
+    )
+    if (-not (Test-Path -LiteralPath $JournalPath -PathType Leaf)) { throw 'Native runtime journal is missing.' }
+    $json = Get-Content -Raw -LiteralPath $JournalPath
+    Assert-ManifestSafe -Json $json
+    $journal = $json | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$journal.protocol_version -ne 1) { throw 'Native runtime journal protocol is invalid.' }
+    $actualStatus = [string]$journal.runtime_call.status
+    if ($ExpectedStatus -eq 'terminal') {
+        if ($actualStatus -notin @('passed', 'failed')) { throw 'Native runtime journal is not terminal.' }
+    } elseif ($actualStatus -ne $ExpectedStatus) {
+        throw "Native runtime journal call status does not match expected '$ExpectedStatus'."
+    }
+    Assert-CompleteRuntimeCall -Call $journal.runtime_call -ExpectedExecutable $NativeIbcmdPath `
+        -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind native_ibcmd -ExpectedStatus $actualStatus
+    return [ordered]@{
+        native_report='logs/native-runtime.json'
+        native_report_sha256=(Get-FileSha256 -Path $JournalPath)
+        native_call_status=$actualStatus
+        native_call=$journal.runtime_call
+    }
+}
+
+function Complete-StaleRuntimeJournal {
+    param(
+        [ValidateSet('native', 'candidate')][string]$JournalKind,
+        [string]$JournalPath,
+        [string]$NativeIbcmdPath,
+        [string]$SqlcmdPath,
+        [string]$BcpPath,
+        [string]$ExpectedServer,
+        [string]$ExpectedDatabase
+    )
+    if (-not (Test-Path -LiteralPath $JournalPath -PathType Leaf)) { return $false }
+    $originalJson = Get-Content -Raw -LiteralPath $JournalPath
+    Assert-ManifestSafe -Json $originalJson
+    $journal = $originalJson | ConvertFrom-Json -ErrorAction Stop
+    if ([int]$journal.protocol_version -ne 1) { throw "Stale $JournalKind runtime journal protocol is invalid." }
+    $ended = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $reason = 'supervisor observed producer exit while runtime journal was still running'
+
+    if ($JournalKind -eq 'native') {
+        if ([string]$journal.runtime_call.status -ne 'running') { return $false }
+        Assert-CompleteRuntimeCall -Call $journal.runtime_call -ExpectedExecutable $NativeIbcmdPath `
+            -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind native_ibcmd -ExpectedStatus running
+        $journal.runtime_call.status = 'failed'
+        $journal.runtime_call.ended_unix_ms = $ended
+        $journal.runtime_call.exit_code = $null
+        $journal.runtime_call.timed_out = $false
+        $journal.runtime_call.exception = $reason
+    } else {
+        if (-not [StringComparer]::Ordinal.Equals([string]$journal.server, $ExpectedServer) -or
+            -not [StringComparer]::Ordinal.Equals([string]$journal.database, $ExpectedDatabase)) {
+            throw 'Stale candidate journal database identity does not match the requested server/database.'
+        }
+        if ([string]$journal.status -ne 'running') { return $false }
+        foreach ($call in @($journal.calls)) {
+            $runtimeExecutable = Get-NormalizedExecutablePath ([string]$call.executable)
+            $kind = if ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $SqlcmdPath))) {
+                'sqlcmd'
+            } elseif ([StringComparer]::OrdinalIgnoreCase.Equals($runtimeExecutable, (Get-NormalizedExecutablePath $BcpPath))) {
+                'bcp'
+            } else {
+                throw "Stale candidate journal contains an unregistered executable: $($call.executable)"
+            }
+            $status = [string]$call.status
+            if ($status -notin @('running', 'passed', 'failed')) {
+                throw 'Stale candidate journal contains an invalid call status.'
+            }
+            Assert-CompleteRuntimeCall -Call $call -ExpectedExecutable ([string]$call.executable) `
+                -ExpectedServer $ExpectedServer -ExpectedDatabase $ExpectedDatabase -Kind $kind -ExpectedStatus $status
+            if ($status -eq 'running') {
+                $call.status = 'failed'
+                $call.ended_unix_ms = $ended
+                $call.exit_code = $null
+                $call.timed_out = $false
+                $call.exception = $reason
+            }
+        }
+        $journal.status = 'failed'
+        $journal.ended_unix_ms = $ended
+        $journal.exception = $reason
+    }
+
+    $recovery = [ordered]@{
+        kind='stale-running'
+        recovered_unix_ms=$ended
+        original_sha256=(Get-FileSha256 -Path $JournalPath)
+    }
+    $journal | Add-Member -NotePropertyName supervisor_recovery -NotePropertyValue $recovery -Force
+    $currentJson = Get-Content -Raw -LiteralPath $JournalPath
+    if (-not [StringComparer]::Ordinal.Equals($currentJson, $originalJson)) {
+        throw "Stale $JournalKind runtime journal changed during supervisor recovery."
+    }
+    Write-ManifestAtomic -Path $JournalPath -Manifest $journal
+    return $true
+}
+
 function Invoke-ParityStep {
     param(
-        [string]$Name, [string]$LogPath, [string[]]$Arguments, [string[]]$Artifacts,
+        [string]$Name, [string]$Tool, [string]$Executable, [string]$LogPath, [string[]]$Arguments, [string[]]$Artifacts,
         [scriptblock]$Action, [System.Collections.ArrayList]$Steps, [System.Collections.IDictionary]$Manifest, [string]$ManifestPath
     )
-    $record = [ordered]@{ name=$Name; status='running'; started_utc=(Get-UtcNow); ended_utc=$null; exit_code=$null; exception=$null; log=(Split-Path $LogPath -Leaf); arguments=(ConvertTo-SanitizedArguments $Arguments); artifacts=@($Artifacts) }
+    $record = [ordered]@{
+        name=$Name
+        tool=$Tool
+        executable=$Executable
+        status='running'
+        started_utc=(Get-UtcNow)
+        ended_utc=$null
+        exit_code=$null
+        exception=$null
+        log=(Split-Path $LogPath -Leaf)
+        arguments=(ConvertTo-SanitizedArguments $Arguments)
+        artifacts=@($Artifacts)
+    }
     [void]$Steps.Add($record)
     Write-ManifestAtomic -Path $ManifestPath -Manifest $Manifest
     $previousPreference = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
@@ -336,6 +1165,8 @@ if (@($PathPrefix | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -ne
 if ($Scope -eq 'full' -and $PathPrefix.Count -ne 0) { throw "Scope 'full' requires an empty PathPrefix. Use -Scope scoped for a partial comparison." }
 if ($Scope -eq 'scoped' -and $PathPrefix.Count -eq 0) { throw "Scope 'scoped' requires at least one PathPrefix." }
 if ($RequireCompleteRootMetadata -and $Scope -ne 'full') { throw "RequireCompleteRootMetadata is available only for Scope 'full'." }
+if ($RequireCompleteSourceAssets -and $Scope -ne 'full') { throw "RequireCompleteSourceAssets is available only for Scope 'full'." }
+if ($CollectAllSourceAssetDiagnostics -and $Scope -ne 'full') { throw "CollectAllSourceAssetDiagnostics is available only for Scope 'full'." }
 if ([string]::IsNullOrWhiteSpace($ExePath)) { $ExePath = Join-Path $repoRoot 'target\release\ibcmd-rs.exe' }
 $ExePath = [IO.Path]::GetFullPath($ExePath)
 if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) { throw "Missing executable: $ExePath. Build it with: cargo build --release --features platform-oracle" }
@@ -354,30 +1185,53 @@ $steps = [System.Collections.ArrayList]::new(); $manifestPath = Join-Path $runRo
 $sqlcmdPath = $null
 $primaryFailure = $false
 $manifest = [ordered]@{
-    protocol_version=2; run_id=$RunId; scope=$Scope; created_utc=(Get-UtcNow); status='initializing'; git_sha=$null; xml_version=$SourceVersion; source_version=$SourceVersion
+    protocol_version=3; run_id=$RunId; scope=$Scope; created_utc=(Get-UtcNow); status='initializing'; git_sha=$null; xml_version=$SourceVersion; source_version=$SourceVersion
     database=[ordered]@{ name=$DbName; server=$DbServer; auth_mode=$authMode; user=$manifestDbUser; password_source=$manifestPasswordSource }
+    result_class='diagnostic'; release_eligible=$false
+    root_metadata_gate=[ordered]@{ requested=[bool]$RequireCompleteRootMetadata; passed=$false }
+    source_asset_gate=[ordered]@{ requested=[bool]$RequireCompleteSourceAssets; passed=$false }
     tools=[ordered]@{}; layout=[ordered]@{ native='native'; candidate_dump='candidate_dump'; candidate='candidate' }; path_prefixes=@($PathPrefix); steps=$steps; artifacts=[ordered]@{}
 }
 # This is intentionally the first persistent action after directory creation: every later external command is journaled.
 Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
 
 try {
+    $manifest.status = 'running'
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+
     $gitPath = Get-ApplicationPath 'git'
-    $manifest.git_sha = (& $gitPath -C $repoRoot rev-parse HEAD).Trim()
-    if ($LASTEXITCODE -ne 0) { throw "Cannot determine git SHA in $repoRoot" }
-    $manifest.tools.git = [ordered]@{
-        path=$gitPath
-        version=((& $gitPath --version).Trim())
-        sha256=(Get-FileSha256 -Path $gitPath)
+    Register-ManifestTool -Name 'git' -Path $gitPath -VersionArguments @('--version') -Manifest $manifest -ManifestPath $manifestPath
+    $manifest.repository_probe = [ordered]@{
+        status='running'
+        started_utc=(Get-UtcNow)
+        ended_utc=$null
+        exception=$null
+        commands=@(
+            [ordered]@{ executable=$gitPath; arguments=@('-C', $repoRoot, 'rev-parse', 'HEAD') },
+            [ordered]@{ executable=$gitPath; arguments=@('-C', $repoRoot, 'status', '--porcelain=v1', '--untracked-files=all') }
+        )
     }
-    $manifest.repository = Get-RepositoryState -RepoRoot $repoRoot
-    $manifest.tools.candidate = [ordered]@{ path=$ExePath; version=(Get-CommandVersion $ExePath); sha256=(Get-FileSha256 -Path $ExePath) }
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+    try {
+        $manifest.git_sha = (& $gitPath -C $repoRoot rev-parse HEAD).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "Cannot determine git SHA in $repoRoot" }
+        $manifest.repository = Get-RepositoryState -RepoRoot $repoRoot -GitPath $gitPath
+        $manifest.repository_probe.status = 'passed'
+    } catch {
+        $manifest.repository_probe.status = 'failed'
+        $manifest.repository_probe.exception = Protect-SensitiveText $_.Exception.Message
+        throw
+    } finally {
+        $manifest.repository_probe.ended_utc = Get-UtcNow
+        Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+    }
+    Register-ManifestTool -Name 'candidate' -Path $ExePath -VersionArguments @('--version') -Manifest $manifest -ManifestPath $manifestPath
     $resolvedIbcmd = Get-ResolvedIbcmdPath $IbcmdPath
     $resolvedIbcmdFile = Get-Command -Name $resolvedIbcmd -CommandType Application,ExternalScript -ErrorAction Stop | Select-Object -First 1
-    $resolvedIbcmdHash = if (Test-Path -LiteralPath $resolvedIbcmdFile.Source -PathType Leaf) { Get-FileSha256 -Path $resolvedIbcmdFile.Source } else { $null }
-    $manifest.tools.native_ibcmd = [ordered]@{ path=$resolvedIbcmdFile.Source; version=(Get-CommandVersion $resolvedIbcmdFile.Source); sha256=$resolvedIbcmdHash }
+    Register-ManifestTool -Name 'native_ibcmd' -Path $resolvedIbcmdFile.Source -VersionArguments @('--version') -Manifest $manifest -ManifestPath $manifestPath
     $resolvedIbcmd = $resolvedIbcmdFile.Source
-    $sqlcmdPath = Get-ApplicationPath 'sqlcmd'
+    $sqlcmdPath = Get-ExplicitOrDiscoveredApplicationPath -ExplicitPath $SqlcmdExecutable -Name 'sqlcmd'
+    Register-ManifestTool -Name 'sqlcmd' -Path $sqlcmdPath -VersionArguments @('-?') -Manifest $manifest -ManifestPath $manifestPath
     $beforeFingerprintCommand = Get-DatabaseFingerprintCommand -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
     $manifest.database_fingerprint = [ordered]@{
         before = [ordered]@{
@@ -401,67 +1255,247 @@ try {
     }
     Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
 
-    $bcpPath = Join-Path (Split-Path -Parent $sqlcmdPath) 'bcp.exe'
-    if (-not (Test-Path -LiteralPath $bcpPath -PathType Leaf)) { $bcpPath = Get-ApplicationPath 'bcp' }
+    if (-not [string]::IsNullOrWhiteSpace($BcpExecutable)) {
+        $bcpPath = Get-ExplicitOrDiscoveredApplicationPath -ExplicitPath $BcpExecutable -Name 'bcp'
+    } else {
+        $bcpPath = Join-Path (Split-Path -Parent $sqlcmdPath) 'bcp.exe'
+        if (-not (Test-Path -LiteralPath $bcpPath -PathType Leaf)) { $bcpPath = Get-ApplicationPath 'bcp' }
+    }
     $robocopyPath = Get-ApplicationPath 'robocopy'
-    $manifest.tools.sqlcmd = [ordered]@{
-        path=$sqlcmdPath
-        version=(Get-CommandVersion $sqlcmdPath @('-?'))
-        sha256=(Get-FileSha256 -Path $sqlcmdPath)
-    }
-    $manifest.tools.bcp = [ordered]@{
-        path=$bcpPath
-        version=(Get-CommandVersion $bcpPath @('-v'))
-        sha256=(Get-FileSha256 -Path $bcpPath)
-    }
-    $manifest.tools.robocopy = [ordered]@{
-        path=$robocopyPath
-        version=(Get-CommandVersion $robocopyPath @('/?') @(16))
-        sha256=(Get-FileSha256 -Path $robocopyPath)
-    }
-    foreach ($command in @($Cli.NativeExport, $Cli.CandidateExport, $Cli.Diff, $Cli.Signatures, $Cli.Matrix, $Cli.MatrixMerge)) {
-        if (-not (Test-CliCommand -Exe $ExePath -Command $command)) { throw "Required command '$command' is unavailable in $ExePath. Build it with: cargo build --release --features platform-oracle" }
+    Register-ManifestTool -Name 'bcp' -Path $bcpPath -VersionArguments @('-v') -Manifest $manifest -ManifestPath $manifestPath
+    Register-ManifestTool -Name 'robocopy' -Path $robocopyPath -VersionArguments @('/?') -AllowedExitCodes @(16) -Manifest $manifest -ManifestPath $manifestPath
+    $manifest.tools.candidate.capability_probe_status = 'running'
+    $manifest.tools.candidate.capability_probe_started_utc = Get-UtcNow
+    $manifest.tools.candidate.capability_probe_ended_utc = $null
+    $manifest.tools.candidate.capability_probe_arguments = @(
+        @($Cli.NativeExport, '--help'),
+        @($Cli.CandidateExport, '--help'),
+        @($Cli.Diff, '--help'),
+        @($Cli.Signatures, '--help'),
+        @($Cli.Matrix, '--help'),
+        @($Cli.MatrixMerge, '--help')
+    )
+    $manifest.tools.candidate.capability_probes = [System.Collections.ArrayList]::new()
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+    try {
+        foreach ($command in @($Cli.NativeExport, $Cli.CandidateExport, $Cli.Diff, $Cli.Signatures, $Cli.Matrix, $Cli.MatrixMerge)) {
+            $probe = [ordered]@{
+                executable=$ExePath
+                arguments=@($command, '--help')
+                status='running'
+                started_utc=(Get-UtcNow)
+                ended_utc=$null
+                exit_code=$null
+                exception=$null
+            }
+            [void]$manifest.tools.candidate.capability_probes.Add($probe)
+            Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $help = & $ExePath $command '--help' 2>&1 | Out-String
+                $probe.exit_code = $LASTEXITCODE
+                if ($probe.exit_code -ne 0 -or $help -notmatch [regex]::Escape($command)) {
+                    throw "Required command '$command' is unavailable in $ExePath. Build it with: cargo build --release --features platform-oracle"
+                }
+                $probe.status = 'passed'
+            } catch {
+                if ($null -eq $probe.exit_code) { $probe.exit_code = -1 }
+                $probe.status = 'failed'
+                $probe.exception = Protect-SensitiveText $_.Exception.Message
+                throw
+            } finally {
+                $ErrorActionPreference = $previousPreference
+                $probe.ended_utc = Get-UtcNow
+                Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+            }
+        }
+        $manifest.tools.candidate.capability_probe_status = 'passed'
+    } catch {
+        $manifest.tools.candidate.capability_probe_status = 'failed'
+        $manifest.tools.candidate.capability_probe_exception = Protect-SensitiveText $_.Exception.Message
+        throw
+    } finally {
+        $manifest.tools.candidate.capability_probe_ended_utc = Get-UtcNow
+        Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
     }
 
-    $nativeArgs = @($Cli.NativeExport, '--dbms', 'MSSQLServer', '--db-server', $DbServer, '--db-name', $DbName, '-o', $nativeRoot, '--overwrite', '--ibcmd', $resolvedIbcmd, '--timeout-sec', [string]$NativeTimeoutSec)
+    $nativeRuntimeJournalPath = Join-Path $logsRoot 'native-runtime.json'
+    $candidateRuntimeJournalPath = Join-Path $logsRoot 'candidate-runtime.json'
+    $manifest.nested_runtime_calls = [ordered]@{
+        status='running'
+        started_utc=(Get-UtcNow)
+        ended_utc=$null
+        exception=$null
+        native_report='logs/native-runtime.json'
+        candidate_manifest='logs/candidate-runtime.json'
+    }
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+
+    $nativeArgs = @($Cli.NativeExport, '--dbms', 'MSSQLServer', '--db-server', $DbServer, '--db-name', $DbName, '-o', $nativeRoot, '--overwrite', '--ibcmd', $resolvedIbcmd, '--timeout-sec', [string]$NativeTimeoutSec, '--runtime-journal', $nativeRuntimeJournalPath)
     if (-not $IntegratedAuth) { $nativeArgs += @('--db-user', $DbUser, '--db-pwd-env', 'IBCMD_DB_PSW') }
     $nativeAction = { & $ExePath @nativeArgs }
-    if ($IntegratedAuth) {
-        Invoke-ParityStep -Name 'native-export' -LogPath (Join-Path $logsRoot 'native-export.log') -Arguments $nativeArgs -Artifacts @('native') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { Invoke-WithoutSqlCredentialEnvironment $nativeAction }
-    } else {
-        Invoke-ParityStep -Name 'native-export' -LogPath (Join-Path $logsRoot 'native-export.log') -Arguments $nativeArgs -Artifacts @('native') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action $nativeAction
+    try {
+        if ($IntegratedAuth) {
+            Invoke-ParityStep -Name 'native-export' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'native-export.log') -Arguments $nativeArgs -Artifacts @('native', 'logs/native-runtime.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { Invoke-WithoutSqlCredentialEnvironment $nativeAction }
+        } else {
+            Invoke-ParityStep -Name 'native-export' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'native-export.log') -Arguments $nativeArgs -Artifacts @('native', 'logs/native-runtime.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action $nativeAction
+        }
+        $nativeEvidence = Import-NativeRuntimeEvidence -JournalPath $nativeRuntimeJournalPath `
+            -NativeIbcmdPath $resolvedIbcmd -ExpectedServer $DbServer -ExpectedDatabase $DbName -ExpectedStatus passed
+        foreach ($key in $nativeEvidence.Keys) { $manifest.nested_runtime_calls[$key] = $nativeEvidence[$key] }
+        Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+    } catch {
+        $nativeError = $_
+        try {
+            $null = Complete-StaleRuntimeJournal -JournalKind native -JournalPath $nativeRuntimeJournalPath `
+                -NativeIbcmdPath $resolvedIbcmd -SqlcmdPath $sqlcmdPath -BcpPath $bcpPath `
+                -ExpectedServer $DbServer -ExpectedDatabase $DbName
+            $nativeEvidence = Import-NativeRuntimeEvidence -JournalPath $nativeRuntimeJournalPath `
+                -NativeIbcmdPath $resolvedIbcmd -ExpectedServer $DbServer -ExpectedDatabase $DbName -ExpectedStatus terminal
+            foreach ($key in $nativeEvidence.Keys) { $manifest.nested_runtime_calls[$key] = $nativeEvidence[$key] }
+        } catch {
+            $manifest.nested_runtime_calls.exception = Protect-SensitiveText $_.Exception.Message
+        }
+        $manifest.nested_runtime_calls.status = 'failed'
+        $manifest.nested_runtime_calls.ended_utc = Get-UtcNow
+        Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+        throw $nativeError
     }
 
-    $candidateArgs = @($Cli.CandidateExport, '--database', $DbName, '--server', $DbServer, '--sqlcmd', $sqlcmdPath, '-o', $candidateDumpRoot, '--overwrite', '--inflate', '--extract-module-text', '--extract-metadata-xml', '--source-version', $SourceVersion, '--no-binary-rows')
+    $candidateArgs = @($Cli.CandidateExport, '--database', $DbName, '--server', $DbServer, '--sqlcmd', $sqlcmdPath, '--bcp-executable', $bcpPath, '--runtime-journal', $candidateRuntimeJournalPath, '-o', $candidateDumpRoot, '--overwrite', '--inflate', '--extract-module-text', '--extract-metadata-xml', '--source-version', $SourceVersion, '--no-binary-rows')
     if (-not $IntegratedAuth) { $candidateArgs += @('--sql-user', $DbUser, '--sql-pwd-env', 'IBCMD_DB_PSW') }
     if ($RequireCompleteRootMetadata) { $candidateArgs += '--require-complete-root-metadata' }
-    Invoke-ParityStep -Name 'candidate-export' -LogPath (Join-Path $logsRoot 'candidate-export.log') -Arguments $candidateArgs -Artifacts @('candidate_dump/manifest.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @candidateArgs }
+    if ($RequireCompleteSourceAssets) { $candidateArgs += '--require-complete-source-assets' }
+    if ($CollectAllSourceAssetDiagnostics) { $candidateArgs += '--collect-all-source-asset-diagnostics' }
+    try {
+        Invoke-ParityStep -Name 'candidate-export' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'candidate-export.log') -Arguments $candidateArgs -Artifacts @('candidate_dump/manifest.json', 'logs/candidate-runtime.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @candidateArgs }
+    } catch {
+        $candidateError = $_
+        if ($CollectAllSourceAssetDiagnostics -and ($RequireCompleteSourceAssets -or $RequireCompleteRootMetadata)) {
+            # A strict completeness gate runs after the candidate has persisted its
+            # manifest. Preserve that bounded, non-payload evidence without
+            # converting the failed candidate step or the parity run into success.
+            try {
+                $candidateDumpManifestPath = Join-Path $candidateDumpRoot 'manifest.json'
+                if ($RequireCompleteSourceAssets) {
+                    $manifest.source_assets = Import-SourceAssetCompletenessEvidence -Path $candidateDumpManifestPath
+                    $manifest.source_asset_gate.passed = $false
+                }
+                if ($RequireCompleteRootMetadata) {
+                    $manifest.root_metadata = Import-RootMetadataCompletenessEvidence -Path $candidateDumpManifestPath
+                    $manifest.root_metadata_gate.passed = $false
+                }
+                $manifest.artifacts.candidate_dump_manifest = 'candidate_dump/manifest.json'
+                if (-not $manifest.Contains('artifact_sha256')) { $manifest.artifact_sha256 = [ordered]@{} }
+                $manifest.artifact_sha256.candidate_dump_manifest = Get-FileSha256 -Path $candidateDumpManifestPath
+            } catch {
+                # Best-effort diagnostic retention must never replace the original
+                # strict candidate failure.
+            }
+        }
+        try {
+            $null = Complete-StaleRuntimeJournal -JournalKind candidate -JournalPath $candidateRuntimeJournalPath `
+                -NativeIbcmdPath $resolvedIbcmd -SqlcmdPath $sqlcmdPath -BcpPath $bcpPath `
+                -ExpectedServer $DbServer -ExpectedDatabase $DbName
+            $candidateEvidence = Import-FailedRuntimeEvidence -JournalKind candidate `
+                -JournalPath $candidateRuntimeJournalPath -SqlcmdPath $sqlcmdPath -BcpPath $bcpPath `
+                -ExpectedServer $DbServer -ExpectedDatabase $DbName -ExpectedStatus terminal
+            foreach ($key in $candidateEvidence.Keys) { $manifest.nested_runtime_calls[$key] = $candidateEvidence[$key] }
+        } catch {
+            $manifest.nested_runtime_calls.exception = Protect-SensitiveText $_.Exception.Message
+        }
+        $manifest.nested_runtime_calls.status = 'failed'
+        $manifest.nested_runtime_calls.ended_utc = Get-UtcNow
+        Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+        throw $candidateError
+    }
+    try {
+        $runtimeEvidence = Import-VerifiedRuntimeEvidence `
+            -NativeJournalPath $nativeRuntimeJournalPath `
+            -CandidateJournalPath $candidateRuntimeJournalPath `
+            -NativeIbcmdPath $resolvedIbcmd -SqlcmdPath $sqlcmdPath -BcpPath $bcpPath `
+            -ExpectedServer $DbServer -ExpectedDatabase $DbName
+        foreach ($key in $runtimeEvidence.Keys) { $manifest.nested_runtime_calls[$key] = $runtimeEvidence[$key] }
+    } catch {
+        $manifest.nested_runtime_calls.status = 'failed'
+        $manifest.nested_runtime_calls.exception = Protect-SensitiveText $_.Exception.Message
+        throw
+    } finally {
+        $manifest.nested_runtime_calls.ended_utc = Get-UtcNow
+        Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
+    }
+    $candidateDumpManifestPath = Join-Path $candidateDumpRoot 'manifest.json'
+    $candidateDumpManifest = Get-Content -Raw -LiteralPath $candidateDumpManifestPath |
+        ConvertFrom-Json -ErrorAction Stop
+    if (-not [StringComparer]::Ordinal.Equals([string]$candidateDumpManifest.server, $DbServer) -or
+        -not [StringComparer]::Ordinal.Equals([string]$candidateDumpManifest.database, $DbName)) {
+        throw 'Candidate dump manifest database identity does not match the requested server/database.'
+    }
+    $manifest.source_assets = Import-SourceAssetCompletenessEvidence -Path $candidateDumpManifestPath
+    $manifest.source_asset_gate.passed = (
+        $manifest.source_asset_gate.requested -eq $true -and
+        $manifest.source_assets.complete -eq $true
+    )
+    if ($RequireCompleteRootMetadata) {
+        $manifest.root_metadata = Import-RootMetadataCompletenessEvidence -Path $candidateDumpManifestPath
+        $manifest.root_metadata_gate.passed = $manifest.root_metadata.complete -eq $true
+    }
+    Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
 
     $roboArgs = @($candidateDumpRoot, $candidateRoot, '/E', '/XD', 'Config_inflated', 'Config_raw', 'ConfigSave_inflated', 'ConfigSave_raw', '/XF', 'manifest.json', '*.json')
-    Invoke-ParityStep -Name 'candidate-source-layout' -LogPath (Join-Path $logsRoot 'candidate-source-layout.log') -Arguments $roboArgs -Artifacts @('candidate') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & robocopy @roboArgs | Out-Host; if ($LASTEXITCODE -le 7) { $global:LASTEXITCODE = 0 } }
+    Invoke-ParityStep -Name 'candidate-source-layout' -Tool 'robocopy' -Executable $robocopyPath -LogPath (Join-Path $logsRoot 'candidate-source-layout.log') -Arguments $roboArgs -Artifacts @('candidate') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $robocopyPath @roboArgs | Out-Host; if ($LASTEXITCODE -le 7) { $global:LASTEXITCODE = 0 } }
 
     $diffPath = Join-Path $runRoot 'raw-diff.json'; $diffArgs = @($Cli.Diff, '-o', $diffPath)
     foreach ($prefix in $PathPrefix) { $diffArgs += @('--path-prefix', $prefix) }; $diffArgs += @($nativeRoot, $candidateRoot)
-    Invoke-ParityStep -Name 'raw-diff' -LogPath (Join-Path $logsRoot 'raw-diff.log') -Arguments $diffArgs -Artifacts @('raw-diff.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @diffArgs }
+    Invoke-ParityStep -Name 'raw-diff' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'raw-diff.log') -Arguments $diffArgs -Artifacts @('raw-diff.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @diffArgs }
     $manifest.tree_summaries = [ordered]@{
         native = Get-TreeSummaryFromDiff -DiffPath $diffPath -Side left
         candidate = Get-TreeSummaryFromDiff -DiffPath $diffPath -Side right
     }
+    $rawDiffReport = Get-Content -Raw -LiteralPath $diffPath | ConvertFrom-Json -ErrorAction Stop
+    foreach ($count in @('different', 'left_only', 'right_only')) {
+        if ($rawDiffReport.summary.PSObject.Properties.Name -notcontains $count -or [int64]$rawDiffReport.summary.$count -lt 0) {
+            throw "Raw diff summary count '$count' is missing or invalid."
+        }
+    }
+    $manifest.raw_parity = [ordered]@{
+        different=[int64]$rawDiffReport.summary.different
+        left_only=[int64]$rawDiffReport.summary.left_only
+        right_only=[int64]$rawDiffReport.summary.right_only
+        zero=(
+            [int64]$rawDiffReport.summary.different -eq 0 -and
+            [int64]$rawDiffReport.summary.left_only -eq 0 -and
+            [int64]$rawDiffReport.summary.right_only -eq 0
+        )
+    }
     Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
     $signaturesPath = Join-Path $runRoot 'signatures.json'; $signatureArgs = @($Cli.Signatures, '-o', $signaturesPath, $diffPath)
-    Invoke-ParityStep -Name 'diff-signatures' -LogPath (Join-Path $logsRoot 'diff-signatures.log') -Arguments $signatureArgs -Artifacts @('signatures.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @signatureArgs }
+    Invoke-ParityStep -Name 'diff-signatures' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'diff-signatures.log') -Arguments $signatureArgs -Artifacts @('signatures.json') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @signatureArgs }
     $matrixPath = Join-Path $runRoot 'matrix.json'; $matrixMarkdownPath = Join-Path $runRoot 'matrix.md'; $matrixScopeArg = if ($Scope -eq 'full') { '--full' } else { '--scoped' }
     $matrixArgs = @($Cli.Matrix, $diffPath, '--database', $DbName, '--run-id', $RunId, '--git-sha', $manifest.git_sha, $matrixScopeArg, '--output', $matrixPath, '--markdown', $matrixMarkdownPath)
-    Invoke-ParityStep -Name 'parity-matrix' -LogPath (Join-Path $logsRoot 'parity-matrix.log') -Arguments $matrixArgs -Artifacts @('matrix.json', 'matrix.md') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @matrixArgs }
+    Invoke-ParityStep -Name 'parity-matrix' -Tool 'candidate' -Executable $ExePath -LogPath (Join-Path $logsRoot 'parity-matrix.log') -Arguments $matrixArgs -Artifacts @('matrix.json', 'matrix.md') -Steps $steps -Manifest $manifest -ManifestPath $manifestPath -Action { & $ExePath @matrixArgs }
     if ($Scope -eq 'full' -and $manifest.repository.status -ne 'clean') { throw 'Full release parity requires a clean Git repository.' }
-    $manifest.artifacts = [ordered]@{ raw_diff='raw-diff.json'; signatures='signatures.json'; matrix='matrix.json'; markdown='matrix.md' }
+    $manifest.artifacts = [ordered]@{ candidate_dump_manifest='candidate_dump/manifest.json'; raw_diff='raw-diff.json'; signatures='signatures.json'; matrix='matrix.json'; markdown='matrix.md' }
     $manifest.artifact_sha256 = [ordered]@{
+        candidate_dump_manifest=(Get-FileSha256 -Path $candidateDumpManifestPath)
         raw_diff=(Get-FileSha256 -Path $diffPath)
         signatures=(Get-FileSha256 -Path $signaturesPath)
         matrix=(Get-FileSha256 -Path $matrixPath)
         markdown=(Get-FileSha256 -Path $matrixMarkdownPath)
     }
-    $manifest.status='passed'
+    $manifest.release_eligible = (
+        $Scope -eq 'full' -and
+        $RequireCompleteRootMetadata -and
+        $manifest.root_metadata_gate.passed -eq $true -and
+        $manifest.source_asset_gate.requested -eq $true -and
+        $manifest.source_asset_gate.passed -eq $true -and
+        $manifest.repository.status -eq 'clean' -and
+        $manifest.source_assets.complete -eq $true -and
+        $manifest.raw_parity.zero -eq $true
+    )
+    $manifest.result_class = if ($manifest.release_eligible) { 'release' } else { 'diagnostic' }
+    $manifest.status='finalizing'
 } catch {
     $primaryFailure = $true
     $manifest.status='failed'; $manifest.failure=(Protect-SensitiveText $_.Exception.Message); throw
@@ -479,6 +1513,7 @@ try {
             $afterFingerprintCommand = Get-DatabaseFingerprintCommand -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
             $manifest.database_fingerprint.after.executable = $afterFingerprintCommand.executable
             $manifest.database_fingerprint.after.arguments = ConvertTo-SanitizedArguments $afterFingerprintCommand.arguments
+            Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
             $afterFingerprint = Get-DatabaseFingerprint -SqlcmdPath $sqlcmdPath -Server $DbServer -Database $DbName -UseIntegratedAuth $IntegratedAuth -SqlUser $DbUser
             $manifest.database_fingerprint.after = $afterFingerprint
             $manifest.database_fingerprint.after.status = 'passed'
@@ -489,14 +1524,26 @@ try {
         }
     }
 
+    $fingerprintsComplete = $manifest.Contains('database_fingerprint') -and
+        $manifest.database_fingerprint.before.status -eq 'passed' -and
+        $null -ne $manifest.database_fingerprint.after -and
+        $manifest.database_fingerprint.after.status -eq 'passed'
+    if ($fingerprintsComplete) {
+        $manifest.database_fingerprint.unchanged = [StringComparer]::OrdinalIgnoreCase.Equals(
+            [string]$manifest.database_fingerprint.before.sha256,
+            [string]$manifest.database_fingerprint.after.sha256
+        )
+    }
+
     $integrityFailure = $null
     if (-not $primaryFailure) {
-        if ($manifest.database_fingerprint.before.status -ne 'passed') {
+        if (-not $manifest.Contains('nested_runtime_calls') -or $manifest.nested_runtime_calls.status -ne 'passed') {
+            $integrityFailure = 'Nested runtime journals are unavailable or incomplete; run is invalid.'
+        } elseif ($manifest.database_fingerprint.before.status -ne 'passed') {
             $integrityFailure = 'Database fingerprint before export is unavailable; run is invalid.'
         } elseif ($null -eq $manifest.database_fingerprint.after -or $manifest.database_fingerprint.after.status -ne 'passed') {
             $integrityFailure = 'Database fingerprint after export is unavailable; run is invalid.'
         } else {
-            $manifest.database_fingerprint.unchanged = ($manifest.database_fingerprint.before.sha256 -eq $manifest.database_fingerprint.after.sha256)
             if (-not $manifest.database_fingerprint.unchanged) { $integrityFailure = 'Database configuration storage changed during parity export.' }
         }
         if ($null -ne $integrityFailure) {
@@ -505,6 +1552,9 @@ try {
         }
     }
     $manifest.finished_utc=Get-UtcNow
+    if (-not $primaryFailure -and $null -eq $integrityFailure) {
+        $manifest.status = 'passed'
+    }
     Write-ManifestAtomic -Path $manifestPath -Manifest $manifest
     if ($null -ne $integrityFailure) { throw $integrityFailure }
 }
