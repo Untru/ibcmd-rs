@@ -12917,6 +12917,112 @@ fn indexes_table_current_data_metadata_uuid_bindings_per_table_and_rejects_colli
 }
 
 #[test]
+fn indexes_direct_table_columns_from_their_structural_table_parent() {
+    let column = |id: &str, name: &str, attribute_id: &str, column_id: &str| {
+        format!(
+            r#"{{37,{{{id},02023637-7868-4a5f-8576-835a76e0c9ba}},0,0,0,2,"{name}",1,0,{{1,0}},{{1,0}},{{2,{{{attribute_id}}},{{{column_id}}}}},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,2,3,0}}"#
+        )
+    };
+    let country = column("822", "ТаблицаСуммСтранаПроисхождения", "19", "12");
+    let number = column("825", "ТаблицаСуммНомерГТД", "19", "13");
+    let child_container = format!("{{2,{country},{number}}}");
+    let table = r#"{73,{785,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,0,"ТаблицаСумм",0,0,1,{1,0},0,{1,{19}},0,0,0,0,0,0,0,0,0,6,0,0,1,0,1,0,0,1,2}"#
+        .replacen("{1,0}", &child_container, 1);
+    let attributes = vec![FormAttribute {
+        id: "19".to_string(),
+        name: "ТаблицаСумм".to_string(),
+        title: Vec::new(),
+        value_types: Vec::new(),
+        exact_single_type_uuid: None,
+        explicit_empty_type: false,
+        columns: Vec::new(),
+        additional_columns: Vec::new(),
+        main_attribute: false,
+        saved_data: false,
+        fill_check: None,
+        save_fields: Vec::new(),
+        use_always: Vec::new(),
+        functional_options: Vec::new(),
+        settings: None,
+        spreadsheet_document_settings: None,
+        type_description_settings: None,
+    }];
+
+    let indexes = collect_form_child_item_indexes_with_object_refs(
+        &[table.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert_eq!(
+        indexes
+            .type_link_data_path_by_table_column
+            .get(&("785".to_string(), "12".to_string()))
+            .map(String::as_str),
+        Some("Items.ТаблицаСумм.CurrentData.СтранаПроисхождения")
+    );
+    let links = parse_form_input_field_choice_parameter_links_with_metadata(
+        r#"{5006,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0}"#,
+        r#"{5007,1,"Отбор.СтранаПроисхождения",2,{785,02023637-7868-4a5f-8576-835a76e0c9ba},{12},0,"",""}"#,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &indexes.table_name_by_id,
+        &indexes.table_column_names_by_id,
+        &indexes.type_link_data_path_by_table_column,
+        &indexes.data_path_by_binding_key,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(
+        links[0].data_path(),
+        "Items.ТаблицаСумм.CurrentData.СтранаПроисхождения"
+    );
+    assert_eq!(
+        indexes
+            .table_column_names_by_id
+            .get("19")
+            .and_then(|columns| columns.get("13"))
+            .map(String::as_str),
+        Some("НомерГТД")
+    );
+
+    let foreign = column("826", "ТаблицаСуммЧужаяКолонка", "20", "14");
+    let foreign_table = table.replacen(&child_container, &format!("{{1,{foreign}}}"), 1);
+    let foreign_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[foreign_table.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !foreign_indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("785".to_string(), "14".to_string())),
+        "a direct column whose attribute differs from the enclosing table must fail closed"
+    );
+
+    let conflicting = column("827", "ТаблицаСуммДругаяСтрана", "19", "12");
+    let conflicting_table = table.replacen(
+        &child_container,
+        &format!("{{3,{country},{conflicting}}}"),
+        1,
+    );
+    let conflicting_indexes = collect_form_child_item_indexes_with_object_refs(
+        &[conflicting_table.as_str()],
+        &attributes,
+        &BTreeMap::new(),
+        None,
+    );
+    assert!(
+        !conflicting_indexes
+            .type_link_data_path_by_table_column
+            .contains_key(&("785".to_string(), "12".to_string())),
+        "conflicting names for one direct table column must fail closed"
+    );
+}
+
+#[test]
 fn shared_document_table_binding_keeps_one_schema_path_for_fields_and_additional_columns() {
     let table_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     let table_binding = format!(r#"{{2,{{1}},{{0,{table_uuid}}}}}"#);

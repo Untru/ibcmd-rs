@@ -16,6 +16,16 @@ SHALL NOT read raw form slots or infer paths from application object names.
   `Items.<Table>.CurrentData.<Column>`
 - **AND** writer order remains `Name`, `DataPath`, `ValueChange`.
 
+#### Scenario: Direct attribute table binding resolves a numeric column
+
+- **GIVEN** a table is directly bound as `{1,{attribute-id}}`
+- **AND** a structurally nested child field is bound as
+  `{2,{the-same-attribute-id},{positive-column-id}}`
+- **WHEN** the form indexes are built
+- **THEN** the numeric route is derived from that exact parent/child binding
+- **AND** the visual table prefix is removed from the child field name
+- **AND** a child with another attribute id or a conflicting name fails closed.
+
 #### Scenario: TableCurrentData mirror differs
 
 - **GIVEN** independently valid primary and duplicate collections

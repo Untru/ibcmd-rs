@@ -18,6 +18,8 @@
       bindings.
 - [x] Построить те же routes из доказанных `AdditionalColumns`, связанных с
       таблицей через точный source binding.
+- [x] Построить numeric routes из прямой пары table `{1,{attribute-id}}` и
+      структурно вложенной column `{2,{attribute-id},{column-id}}`.
 - [x] Отклонять конфликтующие UUID routes.
 
 ## Задача 3: Тесты
@@ -32,6 +34,8 @@
 - [x] AdditionalColumns route имеет exact positive и collision-negative тест.
 - [x] Direct child-item route имеет приоритет над конфликтующим supplemental
       AdditionalColumns route.
+- [x] Direct attribute table/column route имеет автономный positive,
+      foreign-attribute и collision-negative тесты.
 - [x] Старые direct, standard и metadata UUID профили не регрессируют.
 
 ## Задача 4: Production proof

@@ -5217,6 +5217,7 @@ pub(super) struct FormChildItemIndexes {
     pub(super) type_link_data_path_by_table_column: BTreeMap<(String, String), String>,
     table_id_by_binding_key: BTreeMap<String, Option<String>>,
     table_current_data_name_by_binding_key: BTreeMap<(String, String), Option<String>>,
+    table_current_data_name_by_table_column: BTreeMap<(String, String), Option<String>>,
     trace_table_occurrences: BTreeMap<(String, String, String), Vec<usize>>,
 }
 
@@ -5432,6 +5433,7 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
             object_refs,
             &mut indexes,
             trace_sink,
+            None,
             &[],
             &mut trace_occurrence,
         );
@@ -5461,6 +5463,39 @@ pub(super) fn collect_form_child_item_indexes_with_object_refs(
                 normalize_form_table_column_name(table_name, column_name)
             ),
         );
+    }
+    for ((table_id, column_binding_key), column_name) in
+        &indexes.table_current_data_name_by_table_column
+    {
+        let Some(table_name) = indexes.table_name_by_id.get(table_id) else {
+            continue;
+        };
+        let Some(column_name) = column_name.as_ref() else {
+            continue;
+        };
+        insert_unambiguous_form_binding(
+            &mut table_current_data_routes,
+            (table_id.clone(), column_binding_key.clone()),
+            format!(
+                "Items.{table_name}.CurrentData.{}",
+                normalize_form_table_column_name(table_name, column_name)
+            ),
+        );
+        let column_name = normalize_form_table_column_name(table_name, column_name);
+        indexes
+            .table_column_names_by_id
+            .entry(table_id.clone())
+            .or_default()
+            .entry(column_binding_key.clone())
+            .or_insert_with(|| column_name.clone());
+        if let Some(attribute_id) = indexes.bound_attribute_id_by_table_id.get(table_id) {
+            indexes
+                .table_column_names_by_id
+                .entry(attribute_id.clone())
+                .or_default()
+                .entry(column_binding_key.clone())
+                .or_insert(column_name);
+        }
     }
     for (key, data_path) in table_current_data_routes {
         if let Some(data_path) = data_path {
@@ -5657,6 +5692,7 @@ pub(super) fn collect_form_child_item_indexes_from_field(
         object_refs,
         indexes,
         None,
+        None,
         &[],
         &mut trace_occurrence,
     );
@@ -5672,6 +5708,7 @@ pub(super) fn trace_form_item_indexes_for_test(field: &str, trace_sink: &dyn For
         &BTreeMap::new(),
         &mut FormChildItemIndexes::default(),
         Some(trace_sink),
+        None,
         &[],
         &mut trace_occurrence,
     );
@@ -5684,6 +5721,7 @@ fn collect_form_child_item_indexes_from_field_traced(
     object_refs: &BTreeMap<String, String>,
     indexes: &mut FormChildItemIndexes,
     trace_sink: Option<&dyn FormItemTraceSink>,
+    structural_table_id: Option<&str>,
     owner_chain: &[String],
     trace_occurrence: &mut usize,
 ) {
@@ -5858,7 +5896,9 @@ fn collect_form_child_item_indexes_from_field_traced(
                 .table_name_by_id
                 .insert(id.to_string(), name.clone());
             if let Some(attribute_id) = fields.get(11).and_then(|field| {
-                parse_form_table_binding(field).map(|(attribute_id, _)| attribute_id)
+                parse_form_table_binding(field)
+                    .map(|(attribute_id, _)| attribute_id)
+                    .or_else(|| parse_form_attribute_binding_id(field))
             }) {
                 indexes
                     .bound_attribute_id_by_table_id
@@ -6001,9 +6041,27 @@ fn collect_form_child_item_indexes_from_field_traced(
                         .or_default()
                         .insert(column_key, column_name);
                 }
+                if let Some((attribute_id, column_key)) =
+                    parse_form_direct_table_column_binding(binding)
+                    && let Some(table_id) = structural_table_id
+                    && indexes
+                        .bound_attribute_id_by_table_id
+                        .get(table_id)
+                        .is_some_and(|bound_attribute_id| bound_attribute_id == &attribute_id)
+                {
+                    insert_unambiguous_form_binding(
+                        &mut indexes.table_current_data_name_by_table_column,
+                        (table_id.to_string(), column_key),
+                        name.clone(),
+                    );
+                }
             }
         }
     }
+    let child_structural_table_id = structural_identity
+        .as_ref()
+        .and_then(|(_, _, id, _)| indexes.table_name_by_id.contains_key(*id).then_some(*id))
+        .or(structural_table_id);
     if let Some(trace_sink) = trace_sink {
         let mut child_owner_chain = owner_chain.to_vec();
         if let Some((_, tag, id, _)) = structural_identity.as_ref() {
@@ -6018,6 +6076,7 @@ fn collect_form_child_item_indexes_from_field_traced(
                     object_refs,
                     indexes,
                     Some(trace_sink),
+                    child_structural_table_id,
                     &child_owner_chain,
                     trace_occurrence,
                 );
@@ -6033,6 +6092,7 @@ fn collect_form_child_item_indexes_from_field_traced(
                     object_refs,
                     indexes,
                     None,
+                    child_structural_table_id,
                     owner_chain,
                     trace_occurrence,
                 );
@@ -13028,6 +13088,27 @@ pub(super) fn parse_form_nested_table_column_binding(
     let table_key = parse_form_binding_key(fields.get(2)?.trim())?;
     let column_key = parse_form_binding_key(fields.get(3)?.trim())?;
     Some((attribute_id, table_key, column_key))
+}
+
+pub(super) fn parse_form_direct_table_column_binding(field: &str) -> Option<(String, String)> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    if fields.first()?.trim().parse::<u8>().ok()? != 2 || fields.len() != 3 {
+        return None;
+    }
+    let owner = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
+    if owner.len() != 1 {
+        return None;
+    }
+    let attribute_id = owner.first()?.trim();
+    if attribute_id.is_empty() {
+        return None;
+    }
+    let column_key = parse_form_binding_key(fields.get(2)?.trim())?;
+    let column_id = column_key.parse::<u64>().ok()?;
+    if column_id == 0 || column_id.to_string() != column_key {
+        return None;
+    }
+    Some((attribute_id.to_string(), column_key))
 }
 
 pub(super) fn form_child_item_binding_fields<'a>(tag: &str, fields: &'a [&'a str]) -> Vec<&'a str> {
