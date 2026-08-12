@@ -2,6 +2,9 @@
   "schemaVersion": 1,
   "contract": "8.3.27-xml-2.20-dcs-settings-selection-v1",
   "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27.2214",
+    "derivation": "two fresh isolated file-infobase round-trips with pinned ibcmd; immutable raw body and selected native XML retained; Unica supplied cross-evidence only",
     "platformVersion": "8.3.27.2214",
     "sourceVersion": "2.20",
     "fixtureId": "8.3.27.2214-xml-2.20-dcs-selection-auto",

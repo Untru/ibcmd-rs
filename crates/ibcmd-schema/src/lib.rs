@@ -3328,6 +3328,9 @@ struct DcsSelectionEvidenceCorpus {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DcsSelectionEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
     platform_version: String,
     source_version: String,
     fixture_id: String,
@@ -3373,6 +3376,19 @@ impl DcsSelectionEvidenceCorpus {
             (
                 "platform line",
                 self.source.platform_version.starts_with("8.3.27."),
+            ),
+            (
+                "source product",
+                self.source.product == "1C:Enterprise Platform",
+            ),
+            (
+                "source release",
+                self.source.release == self.source.platform_version,
+            ),
+            (
+                "source derivation",
+                self.source.derivation
+                    == "two fresh isolated file-infobase round-trips with pinned ibcmd; immutable raw body and selected native XML retained; Unica supplied cross-evidence only",
             ),
             ("source version", self.source.source_version == "2.20"),
             (
