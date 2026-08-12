@@ -47358,6 +47358,95 @@ fn extracts_platform_proven_minimal_task_to_metadata_xml() {
 }
 
 #[test]
+fn validates_platform_proven_task_assignee_native_shape() {
+    let task_uuid = "3ad08f4a-6202-4099-b6cc-bc116e6731a0";
+    let packed = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.deflate"
+    );
+    let task_text = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.txt"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(packed)),
+        "2543bb3496f76cf5f6e32699a07aa1cfb3d2024a5513e0064eec0c1cffeb5ebf"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(task_text.as_bytes())),
+        "eda15b8f06cdc119a180e257214d77350fd54a940a97a411aff5486583f3e22c"
+    );
+    assert_eq!(
+        inflate_raw_deflate(packed).expect("native Task raw-deflate payload"),
+        task_text.as_bytes()
+    );
+
+    let root = split_information_register_braced_fields(task_text.trim_start_matches('\u{feff}'))
+        .expect("native Task root");
+    assert_eq!(root.len(), 9);
+    assert_eq!(root[0].trim(), "1");
+    assert_eq!(root[2].trim(), "6");
+    let fields = split_information_register_braced_fields(root[1]).expect("native Task fields");
+    assert_eq!(fields.len(), 52);
+    assert_eq!(fields[0].trim(), "33");
+    assert_eq!(metadata_header_field_index(&fields, task_uuid), Some(1));
+    assert_eq!(
+        parse_task_generated_types(&fields, "ЗадачаИсполнителя")
+            .unwrap()
+            .len(),
+        5
+    );
+
+    let collections = root[3..]
+        .iter()
+        .map(|value| parse_task_root_collection(value).expect("native Task collection"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        collections
+            .iter()
+            .map(|collection| collection.marker.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "3f58cbfb-4172-4e54-be49-561a579bb38b",
+            "8ddfb495-c5fc-46b9-bdc5-bcf58341bff0",
+            "e97c0570-251c-4566-b0f1-10686820f143",
+            "ee865d4b-a458-48a0-b38f-5a26898feeb0",
+            "f27c2152-a2c9-4c30-adb1-130f5eb2590f",
+        ]
+    );
+    assert_eq!(
+        collections
+            .iter()
+            .map(|collection| collection.items.len())
+            .collect::<Vec<_>>(),
+        vec![0, 8, 14, 4, 0, 4]
+    );
+    let internal_slots =
+        decode_task_internal_uuid_slots(&fields).expect("native Task internal UUID slots");
+    assert!(internal_slots.field_13.is_none());
+    assert!(internal_slots.field_14.is_none());
+
+    let native_xml = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/task-assignee/native/Tasks/ЗадачаИсполнителя.xml"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(native_xml)),
+        "ba812fa6ec6d63d8339775dd399a280479a973d3ecf00492c42fdb1dd20c1b05"
+    );
+    let native_xml = std::str::from_utf8(native_xml).expect("native Task XML is UTF-8");
+    assert!(native_xml.contains(r#"<Task uuid="3ad08f4a-6202-4099-b6cc-bc116e6731a0">"#));
+    assert_eq!(native_xml.matches("\t\t\t<Form>").count(), 8);
+    assert_eq!(native_xml.matches("\t\t\t<Attribute uuid=").count(), 14);
+    assert_eq!(
+        native_xml
+            .matches("\t\t\t<AddressingAttribute uuid=")
+            .count(),
+        4
+    );
+    assert_eq!(native_xml.matches("\t\t\t<Command uuid=").count(), 4);
+    assert!(!native_xml.contains("\t\t\t<Template>"));
+}
+
+#[test]
 fn extracts_task_generated_types_to_metadata_xml() {
     let task_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let object_type_id = "11111111-1111-4111-8111-111111111111";

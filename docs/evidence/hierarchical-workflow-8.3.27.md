@@ -62,6 +62,20 @@ drops unsupported customization.
 Flowchart and source assets remain separate storage artifacts; this issue
 covers the primary metadata rows and their identity/ownership references.
 
+## Task attestation on 8.3.27.2214
+
+Issue #317 adds an immutable real-object pair for
+`Task.ЗадачаИсполнителя` at
+`tests/fixtures/native-evidence/8.3.27.2214/task-assignee`. The exact native CF
+storage element was extracted before compilation, then independently preserved
+by `ibcmd 8.3.27.2214` while saving an isolated lab configuration. Its paired
+native XML 2.20 export is byte-identical to the source snapshot.
+
+This evidence confirms the 9-field Task root, discriminator `33`, 52 owner
+fields, all six ordered collection markers, nil internal UUID slots 13/14, and
+an empty Task `Templates` collection on 8.3.27.2214. It deliberately does not
+claim an encoding for a non-empty Task template collection.
+
 Portable fixtures cover minimal Subsystem content/hierarchy, child-rich
 ExchangePlan and BusinessProcess tabular metadata, Task addressing ownership,
 deterministic deflate output, profile fail-closed behavior, and strict native

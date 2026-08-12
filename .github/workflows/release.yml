@@ -67,7 +67,9 @@ jobs:
           CI: "true"
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
-        run: npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
+        run: |
+          npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-selected-cf-extract --strict --no-interactive
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked

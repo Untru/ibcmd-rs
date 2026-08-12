@@ -1,4 +1,4 @@
-//! Offline `cf inspect`, `verify`, `export`, and `overlay` commands.
+//! Offline `cf inspect`, `verify`, `extract`, `export`, and `overlay` commands.
 //!
 //! The command layer opens files directly, relies on the bounded streaming V8
 //! reader, and decodes only selected payloads. It never probes `PATH`, starts a
@@ -8,7 +8,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -35,8 +36,8 @@ use serde::Serialize;
 
 use crate::{
     cli::{
-        CfArgs, CfBootstrapArgs, CfCommands, CfCompression, CfExportArgs, CfInspectArgs,
-        CfOverlayArgs, CfRevision, CfVerifyArgs,
+        CfArgs, CfBootstrapArgs, CfCommands, CfCompression, CfExportArgs, CfExtractArgs,
+        CfInspectArgs, CfOverlayArgs, CfRevision, CfVerifyArgs,
     },
     compiler::{
         CompileAxes, CompileRequest, SourcePayload, bootstrap::compile_bootstrap_source_tree,
@@ -79,6 +80,29 @@ pub struct CfExportReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub export: Option<StorageImageSourceExportReport>,
     pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CfExtractReport {
+    pub schema_version: u32,
+    pub command: &'static str,
+    pub ok: bool,
+    pub input: String,
+    pub output_dir: String,
+    pub element: String,
+    pub profile: CfProfileReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packed: Option<CfExtractArtifactReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unpacked: Option<CfExtractArtifactReport>,
+    pub errors: Vec<CfDiagnostic>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CfExtractArtifactReport {
+    pub path: String,
+    pub bytes: u64,
+    pub sha256: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -139,6 +163,7 @@ pub struct CfBootstrapPublicationReport {
 pub enum CfCommandReport {
     Archive(CfReport),
     Bootstrap(CfBootstrapReport),
+    Extract(CfExtractReport),
     Export(CfExportReport),
     Overlay(CfOverlayReport),
 }
@@ -149,6 +174,7 @@ impl CfCommandReport {
         match self {
             Self::Archive(report) => report.ok,
             Self::Bootstrap(report) => report.ok,
+            Self::Extract(report) => report.ok,
             Self::Export(report) => report.ok,
             Self::Overlay(report) => report.ok,
         }
@@ -159,6 +185,7 @@ impl CfCommandReport {
         match self {
             Self::Archive(report) => &report.errors,
             Self::Bootstrap(report) => &report.errors,
+            Self::Extract(report) => &report.errors,
             Self::Export(report) => &report.errors,
             Self::Overlay(report) => &report.errors,
         }
@@ -266,9 +293,211 @@ pub fn run(args: CfArgs) -> Result<CfCommandReport, CfCommandError> {
     match args.command {
         CfCommands::Inspect(args) => execute(inspect_options(args)).map(CfCommandReport::Archive),
         CfCommands::Verify(args) => execute(verify_options(args)).map(CfCommandReport::Archive),
+        CfCommands::Extract(args) => extract(args),
         CfCommands::Export(args) => export(args),
         CfCommands::Overlay(args) => overlay(args),
         CfCommands::Bootstrap(args) => bootstrap(args),
+    }
+}
+
+fn extract(args: CfExtractArgs) -> Result<CfCommandReport, CfCommandError> {
+    let profile = profile_report_values(&args.profile, args.compression);
+    if let Err(source) = StorageProfileId::parse(&args.profile) {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "invalid_profile",
+            format!("invalid storage profile `{}`: {source}", args.profile),
+        ));
+    }
+    if args.element.is_empty() {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "invalid_element",
+            "element name cannot be empty".to_owned(),
+        ));
+    }
+    if args.output_dir.exists() {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_exists",
+            format!(
+                "output directory already exists: `{}`",
+                args.output_dir.display()
+            ),
+        ));
+    }
+    let parent = args
+        .output_dir
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_parent_missing",
+            format!("output parent is not a directory: `{}`", parent.display()),
+        ));
+    }
+
+    let source = File::open(&args.input).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "open_failed",
+            format!("failed to open `{}`: {source}", args.input.display()),
+        )
+    })?;
+    let mut reader =
+        StreamingReader::open(source, ResourceLimits::default()).map_err(|source| {
+            extract_failure(
+                &args,
+                profile.clone(),
+                "invalid_archive",
+                format!("failed to index CF archive: {source}"),
+            )
+        })?;
+    if let Some(error) = duplicate_name_diagnostic(reader.index()) {
+        return Err(extract_failure(&args, profile, error.code, error.message));
+    }
+    let Some(index) = reader
+        .index()
+        .entries
+        .iter()
+        .position(|entry| entry.name == args.element)
+    else {
+        return Err(extract_failure(
+            &args,
+            profile,
+            "element_not_found",
+            format!("CF element `{}` was not found", args.element),
+        ));
+    };
+    let packed = reader
+        .read_entry_data(index)
+        .map_err(|source| {
+            extract_failure(
+                &args,
+                profile.clone(),
+                "payload_read_failed",
+                format!(
+                    "failed to read element `{}` payload: {source}",
+                    args.element
+                ),
+            )
+        })?
+        .ok_or_else(|| {
+            extract_failure(
+                &args,
+                profile.clone(),
+                "payload_absent",
+                format!("CF element `{}` has no payload", args.element),
+            )
+        })?;
+    let encoding = payload_encoding(args.compression);
+    let mut decoder = PayloadDecoder::new(ResourceLimits::default());
+    let unpacked = decoder.decode(encoding, &packed).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "payload_decode_failed",
+            format!(
+                "failed to decode element `{}` as {}: {source}",
+                args.element,
+                encoding_name(encoding)
+            ),
+        )
+    })?;
+    let packed_path = args.output_dir.join("packed.bin");
+    let unpacked_path = args.output_dir.join("unpacked.bin");
+    let packed_report = CfExtractArtifactReport {
+        path: display_path(&packed_path),
+        bytes: u64::try_from(packed.len()).unwrap_or(u64::MAX),
+        sha256: Sha256Digest::for_bytes(&packed).to_string(),
+    };
+    let unpacked_report = CfExtractArtifactReport {
+        path: display_path(&unpacked_path),
+        bytes: u64::try_from(unpacked.bytes().len()).unwrap_or(u64::MAX),
+        sha256: Sha256Digest::for_bytes(unpacked.bytes()).to_string(),
+    };
+
+    fs::create_dir(&args.output_dir).map_err(|source| {
+        extract_failure(
+            &args,
+            profile.clone(),
+            "output_create_failed",
+            format!(
+                "failed to create output directory `{}`: {source}",
+                args.output_dir.display()
+            ),
+        )
+    })?;
+    if let Err(source) = write_new_file(&packed_path, &packed) {
+        rollback_extraction_output(&args.output_dir, &packed_path, &unpacked_path);
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_write_failed",
+            format!("failed to write `{}`: {source}", packed_path.display()),
+        ));
+    }
+    if let Err(source) = write_new_file(&unpacked_path, unpacked.bytes()) {
+        rollback_extraction_output(&args.output_dir, &packed_path, &unpacked_path);
+        return Err(extract_failure(
+            &args,
+            profile,
+            "output_write_failed",
+            format!("failed to write `{}`: {source}", unpacked_path.display()),
+        ));
+    }
+
+    Ok(CfCommandReport::Extract(CfExtractReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "extract",
+        ok: true,
+        input: display_path(&args.input),
+        output_dir: display_path(&args.output_dir),
+        element: args.element,
+        profile,
+        packed: Some(packed_report),
+        unpacked: Some(unpacked_report),
+        errors: Vec::new(),
+    }))
+}
+
+fn write_new_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(bytes)
+}
+
+fn rollback_extraction_output(output_dir: &Path, packed_path: &Path, unpacked_path: &Path) {
+    let _ = fs::remove_file(unpacked_path);
+    let _ = fs::remove_file(packed_path);
+    let _ = fs::remove_dir(output_dir);
+}
+
+fn extract_failure(
+    args: &CfExtractArgs,
+    profile: CfProfileReport,
+    code: &'static str,
+    message: String,
+) -> CfCommandError {
+    CfCommandError {
+        report: Box::new(CfCommandReport::Extract(CfExtractReport {
+            schema_version: REPORT_SCHEMA_VERSION,
+            command: "extract",
+            ok: false,
+            input: display_path(&args.input),
+            output_dir: display_path(&args.output_dir),
+            element: args.element.clone(),
+            profile,
+            packed: None,
+            unpacked: None,
+            errors: vec![diagnostic(code, message)],
+        })),
     }
 }
 
@@ -1364,6 +1593,7 @@ mod tests {
         match report {
             CfCommandReport::Archive(report) => report,
             CfCommandReport::Bootstrap(_)
+            | CfCommandReport::Extract(_)
             | CfCommandReport::Export(_)
             | CfCommandReport::Overlay(_) => {
                 panic!("expected archive command report")
@@ -1375,6 +1605,7 @@ mod tests {
         match report {
             CfCommandReport::Archive(report) => report,
             CfCommandReport::Bootstrap(_)
+            | CfCommandReport::Extract(_)
             | CfCommandReport::Export(_)
             | CfCommandReport::Overlay(_) => {
                 panic!("expected archive command error")
@@ -1386,6 +1617,13 @@ mod tests {
         match report {
             CfCommandReport::Bootstrap(report) => report,
             _ => panic!("expected bootstrap command report"),
+        }
+    }
+
+    fn extract_report(report: CfCommandReport) -> CfExtractReport {
+        match report {
+            CfCommandReport::Extract(report) => report,
+            _ => panic!("expected extract command report"),
         }
     }
 
@@ -1474,6 +1712,80 @@ mod tests {
         assert!(report.ok);
         assert!(!report.elements[0].payload_verified);
         assert!(report.elements[0].unpacked_sha256.is_none());
+    }
+
+    #[test]
+    fn extract_publishes_exact_packed_and_unpacked_bytes_into_new_directory() {
+        let (archive, digest) = archive();
+        let temp = TempDirectory::new("extract");
+        let output = temp.0.join("root-evidence");
+        let report = extract_report(
+            run(CfArgs {
+                command: CfCommands::Extract(CfExtractArgs {
+                    input: archive.0.clone(),
+                    element: "root".to_owned(),
+                    output_dir: output.clone(),
+                    profile: "storage:cf-test".to_owned(),
+                    compression: CfCompression::RawDeflate,
+                }),
+            })
+            .unwrap(),
+        );
+
+        assert!(report.ok);
+        assert_eq!(report.unpacked.as_ref().unwrap().sha256, digest);
+        assert_eq!(
+            fs::read(output.join("unpacked.bin")).unwrap(),
+            b"offline payload"
+        );
+        let packed = fs::read(output.join("packed.bin")).unwrap();
+        assert_eq!(
+            Sha256Digest::for_bytes(&packed).to_string(),
+            report.packed.as_ref().unwrap().sha256
+        );
+    }
+
+    #[test]
+    fn extract_refuses_existing_output_without_modifying_it() {
+        let (archive, _) = archive();
+        let temp = TempDirectory::new("extract-existing");
+        let output = temp.0.join("root-evidence");
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("sentinel"), b"keep").unwrap();
+
+        let error = run(CfArgs {
+            command: CfCommands::Extract(CfExtractArgs {
+                input: archive.0.clone(),
+                element: "root".to_owned(),
+                output_dir: output.clone(),
+                profile: "storage:cf-test".to_owned(),
+                compression: CfCompression::RawDeflate,
+            }),
+        })
+        .unwrap_err();
+        let CfCommandReport::Extract(report) = error.report() else {
+            panic!("expected extract error report");
+        };
+        assert_eq!(report.errors[0].code, "output_exists");
+        assert_eq!(fs::read(output.join("sentinel")).unwrap(), b"keep");
+        assert!(!output.join("packed.bin").exists());
+        assert!(!output.join("unpacked.bin").exists());
+    }
+
+    #[test]
+    fn extraction_rollback_removes_only_its_new_partial_publication() {
+        let temp = TempDirectory::new("extract-rollback");
+        let output = temp.0.join("partial-evidence");
+        fs::create_dir(&output).unwrap();
+        let packed = output.join("packed.bin");
+        let unpacked = output.join("unpacked.bin");
+        fs::write(&packed, b"partial packed").unwrap();
+        fs::write(&unpacked, b"partial unpacked").unwrap();
+
+        rollback_extraction_output(&output, &packed, &unpacked);
+
+        assert!(!output.exists());
+        assert!(temp.0.exists());
     }
 
     #[test]

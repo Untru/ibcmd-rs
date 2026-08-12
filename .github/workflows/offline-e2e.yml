@@ -38,6 +38,7 @@ jobs:
         run: |
           npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
           npx --yes @fission-ai/openspec@1.6.0 validate add-fast-parity-evidence --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-selected-cf-extract --strict --no-interactive
 
   quality:
     name: Quality

@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-task-assignee",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 317,
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-12",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "vm": "Parallels Windows 11 ARM64; x86-64 platform under Windows emulation"
+  },
+  "source_lineage": {
+    "kind": "native_parent_configuration_cf_paired_with_native_xcf",
+    "redacted_logical_path": "<private-wms-source>/configuration/Ext/ParentConfigurations/<configuration>.cf",
+    "parent_cf_size": 383001481,
+    "parent_cf_sha256": "1de68bfd3d92f322dc06c5c04e547159826595a385bf46511da0542e3700e7c2",
+    "parent_cf_format": "format16",
+    "parent_cf_storage_version": 12552,
+    "parent_cf_element_count": 12552,
+    "source_configuration_xml_size": 369746,
+    "source_configuration_xml_sha256": "749545fa4633106c2e47939d2fea8498b7689e9be7a7c7f3534c69a790b8e645",
+    "source_config_dump_info_size": 4289193,
+    "source_config_dump_info_sha256": "2a649ef597207cdf46c80eb420f129f018406908b6fa2afb88f33ec476f03df2",
+    "source_task_config_version": "c2c20e115295394dbab9a486f5dec3e900000000"
+  },
+  "platform_attestation": {
+    "procedure": [
+      "Load the native parent CF into a new isolated file infobase with the pinned ibcmd.exe.",
+      "Partial-import the native Configuration.xml and Task XML; omit two unrelated top-level information-register entries from the lab root.",
+      "Perform a native full XML export and save the configuration to a second CF.",
+      "Inspect and extract the exact Task UUID element from both CF files with explicit raw-deflate encoding."
+    ],
+    "modified_lab_root_sha256": "ff946718cfa817031817cf4aa2b4e2bec7a3f052b4d0c90e933c33d8f7802e62",
+    "platform_saved_cf_size": 383001489,
+    "platform_saved_cf_sha256": "5d305907226075a9b4ead24227d932b545a22c8fe649cf94e9a6cabf8161e12f",
+    "platform_task_config_version": "a867772277136b4c9fc4b070f292c46c00000000",
+    "parent_and_platform_saved_packed_equal": true,
+    "parent_and_platform_saved_unpacked_equal": true,
+    "source_and_platform_exported_task_xml_equal": true
+  },
+  "object": {
+    "kind": "Task",
+    "name": "ЗадачаИсполнителя",
+    "uuid": "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+    "raw_entry": {
+      "compression": "raw-deflate",
+      "packed": {
+        "path": "raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.deflate",
+        "size": 5170,
+        "sha256": "2543bb3496f76cf5f6e32699a07aa1cfb3d2024a5513e0064eec0c1cffeb5ebf"
+      },
+      "unpacked": {
+        "path": "raw/3ad08f4a-6202-4099-b6cc-bc116e6731a0.txt",
+        "size": 33746,
+        "sha256": "eda15b8f06cdc119a180e257214d77350fd54a940a97a411aff5486583f3e22c"
+      }
+    },
+    "native_xml": {
+      "path": "native/Tasks/ЗадачаИсполнителя.xml",
+      "size": 54498,
+      "sha256": "ba812fa6ec6d63d8339775dd399a280479a973d3ecf00492c42fdb1dd20c1b05"
+    }
+  },
+  "proven_shape": {
+    "root_field_count": 9,
+    "owner_discriminator": "33",
+    "owner_field_count": 52,
+    "collection_count": 6,
+    "collection_markers_in_order": [
+      "3daea016-69b7-4ed4-9453-127911372fe6",
+      "3f58cbfb-4172-4e54-be49-561a579bb38b",
+      "8ddfb495-c5fc-46b9-bdc5-bcf58341bff0",
+      "e97c0570-251c-4566-b0f1-10686820f143",
+      "ee865d4b-a458-48a0-b38f-5a26898feeb0",
+      "f27c2152-a2c9-4c30-adb1-130f5eb2590f"
+    ],
+    "collection_item_counts": [0, 8, 14, 4, 0, 4],
+    "internal_uuid_slots_13_14": [null, null]
+  },
+  "proven_claims": [
+    "The exact Task storage element was present in the native parent CF before any ibcmd-rs compilation or lab import.",
+    "Pinned 8.3.27.2214 preserved the exact packed and unpacked Task bytes when saving the attested lab configuration.",
+    "Pinned 8.3.27.2214 exported the Task XML byte-for-byte equal to the paired native XML 2.20 source.",
+    "The raw root has 9 fields, the owner has discriminator 33 and 52 fields, and all six collection markers and counts are exact.",
+    "Owner internal UUID slots 13 and 14 are both nil.",
+    "The Task Templates collection is proven empty in both raw and native XML evidence."
+  ],
+  "non_claims": [
+    "No non-empty Task Template payload encoding is inferred from this fixture.",
+    "The full proprietary CF and source tree are not committed.",
+    "The fixture is diagnostic-only and is never read as a production fallback.",
+    "Unica was not used as an authority or generator for this real-object evidence."
+  ]
+}

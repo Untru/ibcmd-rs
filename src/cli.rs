@@ -289,6 +289,8 @@ pub enum CfCommands {
     Inspect(CfInspectArgs),
     /// Verify CF structure, selected payloads, and optional SHA-256 expectations.
     Verify(CfVerifyArgs),
+    /// Extract one exact CF storage element into a new evidence directory.
+    Extract(CfExtractArgs),
     /// Export recognized CF storage records to hierarchical XML sources offline.
     Export(CfExportArgs),
     /// Apply selected source files to a base CF and publish a new CF offline.
@@ -347,6 +349,22 @@ pub struct CfVerifyArgs {
     /// Require the selected element's unpacked SHA-256 (`NAME=64-lowercase-hex`).
     #[arg(long = "expect-sha256", value_name = "NAME=SHA256")]
     pub expected_sha256: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct CfExtractArgs {
+    /// CF archive to read.
+    pub input: PathBuf,
+    /// Exact top-level storage element name.
+    pub element: String,
+    /// New directory that will receive packed.bin and unpacked.bin.
+    pub output_dir: PathBuf,
+    /// Stable source-storage profile recorded in the JSON report.
+    #[arg(long, default_value = "storage:cf-cli")]
+    pub profile: String,
+    /// Explicit payload representation; payload bytes are never guessed.
+    #[arg(long, value_enum, default_value_t = CfCompression::RawDeflate)]
+    pub compression: CfCompression,
 }
 
 #[derive(Debug, Args)]
@@ -5110,5 +5128,33 @@ mod tests {
         assert_eq!(args.storage_version, 7);
         assert_eq!(args.page_size, Some(1024));
         assert_eq!(args.reserved, 3);
+    }
+
+    #[test]
+    fn parses_exact_cf_extract_with_explicit_compression() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "cf",
+            "extract",
+            "configuration.cf",
+            "3ad08f4a-6202-4099-b6cc-bc116e6731a0",
+            "task-evidence",
+            "--profile",
+            "storage:native-evidence",
+            "--compression",
+            "raw-deflate",
+        ]);
+
+        let Commands::Cf(CfArgs {
+            command: CfCommands::Extract(args),
+        }) = cli.command
+        else {
+            panic!("expected cf extract command");
+        };
+        assert_eq!(args.input, PathBuf::from("configuration.cf"));
+        assert_eq!(args.element, "3ad08f4a-6202-4099-b6cc-bc116e6731a0");
+        assert_eq!(args.output_dir, PathBuf::from("task-evidence"));
+        assert_eq!(args.profile, "storage:native-evidence");
+        assert_eq!(args.compression, CfCompression::RawDeflate);
     }
 }
