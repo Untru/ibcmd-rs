@@ -21292,52 +21292,142 @@ fn recognizes_form_item_picture_asset_formats() {
 
 #[test]
 fn extracts_chart_of_characteristic_types_xml_from_metadata_blob() {
-    let uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
-    let list_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-    let blob = deflate_for_test(
-            format!(
-                "\u{feff}{{1,\r\n{{34,11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"ExpenseItems\",{{1,\"en\",\"Expense items\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
+    let uuid = "d003f1f8-d632-4f80-adad-af1583998864";
+    let text = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/raw/d003f1f8-d632-4f80-adad-af1583998864.txt"
+    );
+    let row = metadata_text_row_from_text(uuid, text.trim_start_matches('\u{feff}').to_string())
+        .expect("native CCT row");
+    let rows = std::slice::from_ref(&row);
+    let type_index = build_metadata_type_index_from_texts(rows);
+    let object_refs = build_metadata_object_reference_index_from_texts(rows);
+    let fields = metadata_object_fields(&row.text).expect("native CCT fields");
+    let header = row.header.as_ref().expect("native CCT header");
+    assert_eq!(fields.len(), 59);
+    assert_eq!(metadata_header_field_index(&fields, uuid), Some(13));
+    assert_eq!(fields[51].trim(), "1");
+    assert_eq!(type_index.len(), 6);
+    for (slot, generated_type) in [
+        (1, "ChartOfCharacteristicTypesObject"),
+        (3, "ChartOfCharacteristicTypesRef"),
+        (5, "ChartOfCharacteristicTypesSelection"),
+        (7, "ChartOfCharacteristicTypesList"),
+        (9, "Characteristic"),
+        (11, "ChartOfCharacteristicTypesManager"),
+    ] {
+        assert_eq!(
+            type_index.get(fields[slot].trim()).map(String::as_str),
+            Some(format!("cfg:{generated_type}.{}", header.name).as_str())
         );
-    let form_refs = BTreeMap::from([(
-        list_form_uuid.to_string(),
-        FormSourceReference {
-            relative_path: PathBuf::from(
-                "ChartsOfCharacteristicTypes/ExpenseItems/Forms/ListForm.xml",
-            ),
-            kind: "Form",
-        },
-    )]);
-
-    let extracted = extract_metadata_source_xml_with_refs(
-        &blob,
-        uuid,
+    }
+    let malformed_generated_type = row.text.replacen(fields[12].trim(), "not-a-uuid", 1);
+    let malformed_generated_type_row =
+        metadata_text_row_from_text(uuid, malformed_generated_type).expect("malformed CCT row");
+    assert!(
+        build_metadata_type_index_from_texts(std::slice::from_ref(&malformed_generated_type_row))
+            .is_empty(),
+        "CCT generated-type vector must fail atomically"
+    );
+    let mut characteristics_diagnostic = None;
+    assert!(
+        decode_owner_characteristics(
+            owner_graph::OwnerGraphFamily::ChartOfCharacteristicTypes,
+            &fields,
+            &type_index,
+            &object_refs,
+            &object_refs,
+            &mut characteristics_diagnostic,
+        )
+        .is_some(),
+        "characteristics: {characteristics_diagnostic:?}"
+    );
+    assert!(
+        parse_metadata_type_pattern(fields[18], &type_index).is_some(),
+        "value types"
+    );
+    let standard_outer = split_information_register_braced_fields(fields[38]).unwrap();
+    let standard_payload = split_information_register_braced_fields(standard_outer[1]).unwrap();
+    for ((marker, name), triplet) in CCT_STANDARD_ATTRIBUTES
+        .iter()
+        .copied()
+        .zip(standard_payload[2..].chunks_exact(3))
+    {
+        let bag = parse_information_register_standard_attribute_bag(triplet[2])
+            .unwrap_or_else(|| panic!("{name}: bag"));
+        assert!(bag.has_type_reduction_mode, "{name}: reduction mode");
+        let fill = bag
+            .get(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID)
+            .unwrap_or_else(|| panic!("{name}: fill property"));
+        assert!(
+            parse_cct_standard_attribute_fill_value(
+                fill,
+                marker,
+                &header.name,
+                &type_index,
+                &object_refs,
+            )
+            .is_some(),
+            "{name}: fill value {fill}"
+        );
+    }
+    let mut legacy_standard_payload = standard_payload
+        .iter()
+        .map(|field| (*field).to_string())
+        .collect::<Vec<_>>();
+    let mut legacy_first_bag =
+        split_information_register_braced_fields(&legacy_standard_payload[4])
+            .unwrap()
+            .iter()
+            .map(|field| (*field).to_string())
+            .collect::<Vec<_>>();
+    legacy_first_bag.drain(12..14);
+    legacy_first_bag[0] = "13".to_string();
+    legacy_first_bag[1] = "24".to_string();
+    legacy_standard_payload[4] = format!("{{{}}}", legacy_first_bag.join(","));
+    let legacy_standard_attributes = format!("{{1,{{{}}}}}", legacy_standard_payload.join(","));
+    assert!(
+        parse_cct_standard_attributes(
+            &legacy_standard_attributes,
+            &header.name,
+            &type_index,
+            &object_refs,
+        )
+        .is_none(),
+        "legacy CCT standard-attribute bag must remain closed"
+    );
+    assert!(
+        parse_cct_standard_attributes(fields[38], &header.name, &type_index, &object_refs)
+            .is_some(),
+        "standard attributes"
+    );
+    assert!(
+        parse_cct_input_by_string(fields[33], &header.name).is_some(),
+        "input by string"
+    );
+    let extracted = extract_metadata_source_xml_from_text_row_audited(
+        &row,
+        &type_index,
+        &BTreeSet::new(),
+        &object_refs,
+        &object_refs,
+        &object_refs,
+        &BTreeMap::new(),
+        &CalculationRootRecalculationReferences::default(),
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
-        &form_refs,
         &BTreeMap::new(),
-        &BTreeMap::new(),
-        InfobaseConfigSourceVersion::V2_21,
+        InfobaseConfigSourceVersion::V2_20,
     )
-    .unwrap();
-    let properties = parse_simple_metadata_xml_properties(&extracted.xml).unwrap();
-
+    .expect("native CCT source XML");
     assert_eq!(
         extracted.relative_path,
-        PathBuf::from("ChartsOfCharacteristicTypes").join("ExpenseItems.xml")
+        PathBuf::from("ChartsOfCharacteristicTypes/CorpusCharacteristics.xml")
     );
-    assert_eq!(properties.kind, "ChartOfCharacteristicTypes");
-    assert_eq!(properties.uuid, uuid);
-    assert_eq!(properties.name, "ExpenseItems");
-    let xml = String::from_utf8(extracted.xml).unwrap();
-    assert!(
-        xml.contains(
-            "<DefaultListForm>ChartOfCharacteristicTypes.ExpenseItems.Form.ListForm</DefaultListForm>"
-        ),
-        "{xml}"
+    let expected = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types/native/ChartsOfCharacteristicTypes/CorpusCharacteristics.xml"
     );
+    assert_eq!(extracted.xml, expected);
 }
 
 #[test]

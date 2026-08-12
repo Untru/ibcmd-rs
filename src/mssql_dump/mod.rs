@@ -8348,7 +8348,10 @@ const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
     },
     RawGeneratedTypeSchema {
         object_codes: &[34],
-        conditions: &[],
+        conditions: &[
+            RawGeneratedTypeCondition::HeaderIndex(13),
+            RawGeneratedTypeCondition::FieldUuidRange(1, 12),
+        ],
         slots: &[
             RawGeneratedTypeSlot {
                 field_index: 1,
@@ -20008,8 +20011,7 @@ fn parse_chart_of_characteristic_types_properties_from_text(
             form_refs,
         )?,
         data_lock_control_mode: match fields.get(51)?.trim() {
-            "0" => "Automatic",
-            "1" => "Managed",
+            "1" => "Automatic",
             _ => return None,
         },
         full_text_search: match fields.get(37)?.trim() {
@@ -20240,7 +20242,7 @@ fn parse_cct_standard_attributes(
             return None;
         }
         let bag = parse_information_register_standard_attribute_bag(triplet[2])?;
-        if bag.has_type_reduction_mode {
+        if !bag.has_type_reduction_mode {
             return None;
         }
         let fill_value = parse_cct_standard_attribute_fill_value(

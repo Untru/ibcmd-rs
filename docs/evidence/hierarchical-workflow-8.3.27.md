@@ -132,6 +132,38 @@ fix is deliberately limited to the declarative generated-type slots and their
 exact header/UUID-vector guard; a partial or malformed vector fails atomically.
 No new raw layout or XML property heuristic was added.
 
+## ChartOfCharacteristicTypes micro-corpus on 8.3.27.2214
+
+The next issue #282 slice uses a separate diagnostic corpus at
+`tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types`.
+Latest Unica main at `a527d40962d047c6922c903b37510b30f697da42` compiled a
+single `ChartOfCharacteristicTypes` with `String(100)` through its public
+`unica.meta.compile` MCP handler. The generated XML 2.20 source was accepted
+without correction by pinned platform 8.3.27.2214. Unica therefore shortened
+the seed-authoring step, but the two independent platform rounds remain the
+authority.
+
+The first saved CF is 93,404 bytes. Loading it into a second isolated file
+infobase changes the outer CF hash, while the exact packed payload, unpacked
+payload, and selected native XML stay byte-identical. This proves object code
+`34`, 59 owner fields, header slot 13, and all six ordered generated types. It
+also exposes two stale assumptions in the legacy decoder: all nine standard
+attributes use the modern 25-property bag with
+`TypeReductionMode=TransformValues`, and raw owner slot 51 value `1` is
+exported as `DataLockControlMode=Automatic`.
+
+The production decoder now accepts only that platform-proven contract. The raw
+type index also requires the exact header slot and complete 12-UUID
+type/value vector; a malformed vector fails atomically. The offline regression
+reproduces the complete selected native XML byte-for-byte. It deliberately
+does not admit the old 24-property standard-attribute bag, guess alternative
+data-lock encodings, or infer any non-empty CCT child collection.
+
+This micro-CF workflow is the preferred fast loop for new schema slices: one
+minimal object, selected native export, exact raw extraction, second-round
+stability check, then second-scale offline regression. Full configuration
+round-trips remain reserved for integration evidence that cannot be isolated.
+
 Portable fixtures cover minimal Subsystem content/hierarchy, child-rich
 ExchangePlan and BusinessProcess tabular metadata, Task addressing ownership,
 deterministic deflate output, profile fail-closed behavior, and strict native

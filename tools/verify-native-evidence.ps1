@@ -87,6 +87,14 @@ function Assert-RawNativeEvidenceFixture {
     Assert-FileEvidence $fixtureManifest.object.raw_entry.packed $root
     Assert-FileEvidence $fixtureManifest.object.raw_entry.unpacked $root
     Assert-FileEvidence $fixtureManifest.object.native_xml $root
+    if ($null -ne $fixtureManifest.seed) {
+        $seedPath = Resolve-FixturePath $fixtureManifest.seed.definition_path $root
+        if (-not (Test-Path -LiteralPath $seedPath -PathType Leaf)) {
+            throw "$Kind seed definition is missing: $($fixtureManifest.seed.definition_path)"
+        }
+        Assert-Equal (Get-Item -LiteralPath $seedPath).Length ([long]$fixtureManifest.seed.definition_size) "$Kind seed size"
+        Assert-Equal (Get-FileSha256Hex $seedPath) $fixtureManifest.seed.definition_sha256 "$Kind seed SHA-256"
+    }
 
     $packedPath = Resolve-FixturePath $fixtureManifest.object.raw_entry.packed.path $root
     $unpackedPath = Resolve-FixturePath $fixtureManifest.object.raw_entry.unpacked.path $root
@@ -225,6 +233,11 @@ Assert-RawNativeEvidenceFixture `
     -Issue 282 `
     -Kind 'BusinessProcess' `
     -Uuid 'dad11c2e-08fc-4a6b-8829-8be6c64c15fc'
+Assert-RawNativeEvidenceFixture `
+    -RelativePath 'tests/fixtures/native-evidence/8.3.27.2214/chart-of-characteristic-types' `
+    -Issue 282 `
+    -Kind 'ChartOfCharacteristicTypes' `
+    -Uuid 'd003f1f8-d632-4f80-adad-af1583998864'
 Assert-RawNativeEvidenceCorpus `
     -RelativePath 'tests/fixtures/native-evidence/8.3.27.2214/register-generated-types' `
     -Issue 282 `
@@ -282,4 +295,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + ChartOfCharacteristicTypes + register and plan generated types.'
