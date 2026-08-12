@@ -112,6 +112,66 @@ function Assert-RawNativeEvidenceFixture {
     Assert-Equal (Get-Sha256Hex ([IO.File]::ReadAllBytes($unpackedPath))) (Get-Sha256Hex $decompressed) "$Kind packed/unpacked pair"
 }
 
+function Assert-RawNativeEvidenceCorpus {
+    param(
+        [string]$RelativePath,
+        [int]$Issue,
+        [hashtable]$ExpectedObjects
+    )
+
+    $root = Join-Path $RepositoryRoot $RelativePath
+    $fixtureManifestPath = Join-Path $root 'manifest.json'
+    if (-not (Test-Path -LiteralPath $fixtureManifestPath -PathType Leaf)) {
+        throw "Native evidence corpus manifest is missing: $fixtureManifestPath"
+    }
+    $fixtureManifest = Get-Content -LiteralPath $fixtureManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-Equal $fixtureManifest.schema_version 1 'corpus manifest schema version'
+    Assert-Equal $fixtureManifest.issue $Issue 'corpus issue'
+    Assert-Equal $fixtureManifest.evidence.platform_version '8.3.27.2214' 'corpus platform version'
+    Assert-Equal $fixtureManifest.evidence.source_version '2.20' 'corpus source version'
+
+    $seedPath = Resolve-FixturePath $fixtureManifest.seed.definition_path $root
+    if (-not (Test-Path -LiteralPath $seedPath -PathType Leaf)) {
+        throw "Corpus seed definition is missing: $($fixtureManifest.seed.definition_path)"
+    }
+    Assert-Equal (Get-Item -LiteralPath $seedPath).Length ([long]$fixtureManifest.seed.definition_size) 'corpus seed size'
+    Assert-Equal (Get-FileSha256Hex $seedPath) $fixtureManifest.seed.definition_sha256 'corpus seed SHA-256'
+
+    foreach ($kind in $ExpectedObjects.Keys) {
+        $matches = @($fixtureManifest.objects | Where-Object { $_.kind -eq $kind })
+        Assert-Equal $matches.Count 1 "$kind corpus object count"
+        $object = $matches[0]
+        Assert-Equal $object.uuid $ExpectedObjects[$kind] "$kind corpus UUID"
+        Assert-FileEvidence $object.raw_entry.packed $root
+        Assert-FileEvidence $object.raw_entry.unpacked $root
+        Assert-FileEvidence $object.native_xml $root
+
+        $packedPath = Resolve-FixturePath $object.raw_entry.packed.path $root
+        $unpackedPath = Resolve-FixturePath $object.raw_entry.unpacked.path $root
+        $compressedStream = New-Object IO.MemoryStream(,([IO.File]::ReadAllBytes($packedPath)))
+        $decompressedStream = New-Object IO.MemoryStream
+        $deflateStream = New-Object IO.Compression.DeflateStream(
+            $compressedStream,
+            [IO.Compression.CompressionMode]::Decompress
+        )
+        try {
+            $deflateStream.CopyTo($decompressedStream)
+        } finally {
+            $deflateStream.Dispose()
+            $compressedStream.Dispose()
+        }
+        try {
+            $decompressed = $decompressedStream.ToArray()
+        } finally {
+            $decompressedStream.Dispose()
+        }
+        Assert-Equal $decompressed.Length ([long]$object.raw_entry.unpacked.size) "$kind corpus decoded size"
+        Assert-Equal (Get-Sha256Hex $decompressed) $object.raw_entry.unpacked.sha256 "$kind corpus decoded SHA-256"
+        Assert-Equal (Get-Sha256Hex ([IO.File]::ReadAllBytes($unpackedPath))) (Get-Sha256Hex $decompressed) "$kind corpus packed/unpacked pair"
+    }
+    Assert-Equal (@($fixtureManifest.objects).Count) $ExpectedObjects.Count 'corpus object count'
+}
+
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "Native evidence manifest is missing: $manifestPath"
 }
@@ -165,6 +225,13 @@ Assert-RawNativeEvidenceFixture `
     -Issue 282 `
     -Kind 'BusinessProcess' `
     -Uuid 'dad11c2e-08fc-4a6b-8829-8be6c64c15fc'
+Assert-RawNativeEvidenceCorpus `
+    -RelativePath 'tests/fixtures/native-evidence/8.3.27.2214/register-generated-types' `
+    -Issue 282 `
+    -ExpectedObjects @{
+        AccountingRegister = '8b6ea484-0164-4c68-a0cb-175a31c56186'
+        CalculationRegister = '5ad20ecf-0375-4218-b348-0534286973a5'
+    }
 
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
     $BinaryPath = Join-Path $RepositoryRoot $BinaryPath
@@ -213,4 +280,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + register generated types.'

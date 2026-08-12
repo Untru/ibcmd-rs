@@ -91,6 +91,33 @@ fields, all six ordered collection markers, nil internal UUID slots 13/14, and
 an empty Task `Templates` collection on 8.3.27.2214. It deliberately does not
 claim an encoding for a non-empty Task template collection.
 
+## Register generated-type attestation on 8.3.27.2214
+
+Issue #282 also carries a 73 KB diagnostic corpus at
+`tests/fixtures/native-evidence/8.3.27.2214/register-generated-types`. One
+minimal XML 2.20 configuration contains an `AccountingRegister`, a
+`CalculationRegister`, their required plans, and one shared recorder document.
+The first platform-saved CF is only 90,645 bytes. Loading it into a second
+isolated file infobase changes the outer CF hash, but the two exact raw payloads
+and both selected native XML exports remain byte-identical.
+
+The seed follows Unica main at
+`a527d40962d047c6922c903b37510b30f697da42`, but Unica is not the authority.
+The first seed exposed an internal Unica inconsistency: the chart-of-accounts
+writer emitted `MaxExtDimensionCount=3` by default while its own hint logic
+treated the default as zero. Platform 8.3.27.2214 rejected that source without
+`ExtDimensionTypes`; the attested seed therefore states
+`maxExtDimensionCount=0` explicitly. This is retained as cross-project evidence
+for a focused Unica fix.
+
+The accepted double round proves seven generated types for each register. The
+accounting order begins with `Record`, `ExtDimensions`, `RecordSet`, and
+`RecordKey`, then ends with `Selection`, `List`, and `Manager`. The calculation
+order is `Record`, `Manager`, `Selection`, `List`, `RecordSet`, `RecordKey`, and
+`Recalcs`. The offline regression compares the complete generated-type writer
+block against native XML, including every type/value UUID. No recalculation
+child layout or unrelated register property is inferred.
+
 Portable fixtures cover minimal Subsystem content/hierarchy, child-rich
 ExchangePlan and BusinessProcess tabular metadata, Task addressing ownership,
 deterministic deflate output, profile fail-closed behavior, and strict native

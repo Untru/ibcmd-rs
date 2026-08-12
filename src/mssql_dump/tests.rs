@@ -35205,189 +35205,191 @@ fn extracts_accumulation_register_lock_and_full_text_flags() {
 }
 
 #[test]
-fn extracts_accounting_and_calculation_register_generated_types_internal_info() {
-    let accounting_uuid = "11111111-1111-4111-8111-111111111111";
-    let accounting_object_type_id = "22222222-2222-4222-8222-222222222221";
-    let accounting_object_value_id = "22222222-2222-4222-8222-222222222222";
-    let accounting_manager_type_id = "33333333-3333-4333-8333-333333333331";
-    let accounting_manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let accounting_selection_type_id = "44444444-4444-4444-8444-444444444441";
-    let accounting_selection_value_id = "44444444-4444-4444-8444-444444444442";
-    let accounting_list_type_id = "55555555-5555-4555-8555-555555555551";
-    let accounting_list_value_id = "55555555-5555-4555-8555-555555555552";
-    let accounting_record_set_type_id = "66666666-6666-4666-8666-666666666661";
-    let accounting_record_set_value_id = "66666666-6666-4666-8666-666666666662";
-    let accounting_key_type_id = "77777777-7777-4777-8777-777777777771";
-    let accounting_key_value_id = "77777777-7777-4777-8777-777777777772";
-    let accounting_blob = deflate_for_test(
-        format!(
-            "{{1,\r\n{{22,22,{accounting_object_type_id},{accounting_object_value_id},\
-{accounting_manager_type_id},{accounting_manager_value_id},\
-{accounting_selection_type_id},{accounting_selection_value_id},\
-{accounting_list_type_id},{accounting_list_value_id},\
-{accounting_record_set_type_id},{accounting_record_set_value_id},\
-{accounting_key_type_id},{accounting_key_value_id},\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{accounting_uuid}}},\"Ledger\",{{1,\"en\",\"Ledger\"}},\"\"}}\r\n}},1}}\r\n}}"
-        )
-        .as_bytes(),
-    );
-    let calculation_uuid = "88888888-8888-4888-8888-888888888888";
-    let calculation_object_type_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
-    let calculation_object_value_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
-    let calculation_manager_type_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
-    let calculation_manager_value_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
-    let calculation_selection_type_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
-    let calculation_selection_value_id = "cccccccc-cccc-4ccc-8ccc-ccccccccccc2";
-    let calculation_list_type_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
-    let calculation_list_value_id = "dddddddd-dddd-4ddd-8ddd-ddddddddddd2";
-    let calculation_record_set_type_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
-    let calculation_record_set_value_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2";
-    let calculation_key_type_id = "ffffffff-ffff-4fff-8fff-fffffffffff1";
-    let calculation_key_value_id = "ffffffff-ffff-4fff-8fff-fffffffffff2";
-    let calculation_blob = deflate_for_test(
-        format!(
-            "{{1,\r\n{{21,{calculation_object_type_id},{calculation_object_value_id},\
-{calculation_manager_type_id},{calculation_manager_value_id},\
-{calculation_selection_type_id},{calculation_selection_value_id},\
-{calculation_list_type_id},{calculation_list_value_id},\
-{calculation_record_set_type_id},{calculation_record_set_value_id},\
-{calculation_key_type_id},{calculation_key_value_id},\r\n\
-{{3,\r\n{{1,0,{calculation_uuid}}},\"Premiums\",{{1,\"en\",\"Premiums\"}},\"\"}}\r\n}}\r\n}}"
-        )
-        .as_bytes(),
-    );
+fn validates_platform_proven_register_generated_types_and_writer_order() {
+    struct Fixture {
+        kind: &'static str,
+        uuid: &'static str,
+        packed: &'static [u8],
+        text: &'static str,
+        native_xml: &'static [u8],
+        packed_sha256: &'static str,
+        unpacked_sha256: &'static str,
+        native_xml_sha256: &'static str,
+        expected: &'static [(&'static str, &'static str)],
+    }
 
-    let accounting = extract_metadata_source_xml_with_refs(
-        &accounting_blob,
-        accounting_uuid,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        InfobaseConfigSourceVersion::V2_21,
-    )
-    .unwrap();
-    let accounting_xml = String::from_utf8(accounting.xml).unwrap();
-
-    assert_eq!(
-        accounting.relative_path,
-        PathBuf::from("AccountingRegisters/Ledger.xml")
-    );
-    assert_eq!(accounting_xml.matches("<xr:GeneratedType").count(), 6);
-    assert!(accounting_xml.contains(
-        r#"<xr:GeneratedType name="AccountingRegisterObject.Ledger" category="Object">"#
-    ));
-    assert!(accounting_xml.contains(
-        r#"<xr:GeneratedType name="AccountingRegisterManager.Ledger" category="Manager">"#
-    ));
-    assert!(accounting_xml.contains(
-        r#"<xr:GeneratedType name="AccountingRegisterSelection.Ledger" category="Selection">"#
-    ));
-    assert!(
-        accounting_xml
-            .contains(r#"<xr:GeneratedType name="AccountingRegisterList.Ledger" category="List">"#)
-    );
-    assert!(accounting_xml.contains(
-        r#"<xr:GeneratedType name="AccountingRegisterRecordSet.Ledger" category="RecordSet">"#
-    ));
-    assert!(accounting_xml.contains(
-        r#"<xr:GeneratedType name="AccountingRegisterRecordKey.Ledger" category="RecordKey">"#
-    ));
-    assert!(accounting_xml.contains(&format!(
-        "<xr:TypeId>{accounting_object_type_id}</xr:TypeId>"
-    )));
-    assert!(accounting_xml.contains(&format!(
-        "<xr:ValueId>{accounting_record_set_value_id}</xr:ValueId>"
-    )));
-    assert!(
-        accounting_xml.find("\t\t<InternalInfo>").unwrap()
-            < accounting_xml.find("\t\t<Properties>").unwrap()
-    );
-
-    let calculation = extract_metadata_source_xml_with_refs(
-        &calculation_blob,
-        calculation_uuid,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        InfobaseConfigSourceVersion::V2_21,
-    )
-    .unwrap();
-    let calculation_xml = String::from_utf8(calculation.xml).unwrap();
-
-    assert_eq!(
-        calculation.relative_path,
-        PathBuf::from("CalculationRegisters/Premiums.xml")
-    );
-    assert_eq!(calculation_xml.matches("<xr:GeneratedType").count(), 6);
-    assert!(calculation_xml.contains(
-        r#"<xr:GeneratedType name="CalculationRegisterObject.Premiums" category="Object">"#
-    ));
-    assert!(calculation_xml.contains(
-        r#"<xr:GeneratedType name="CalculationRegisterManager.Premiums" category="Manager">"#
-    ));
-    assert!(calculation_xml.contains(
-        r#"<xr:GeneratedType name="CalculationRegisterSelection.Premiums" category="Selection">"#
-    ));
-    assert!(
-        calculation_xml.contains(
-            r#"<xr:GeneratedType name="CalculationRegisterList.Premiums" category="List">"#
-        )
-    );
-    assert!(calculation_xml.contains(
-        r#"<xr:GeneratedType name="CalculationRegisterRecordSet.Premiums" category="RecordSet">"#
-    ));
-    assert!(calculation_xml.contains(
-        r#"<xr:GeneratedType name="CalculationRegisterRecordKey.Premiums" category="RecordKey">"#
-    ));
-    assert!(calculation_xml.contains(&format!(
-        "<xr:TypeId>{calculation_object_type_id}</xr:TypeId>"
-    )));
-    assert!(calculation_xml.contains(&format!(
-        "<xr:ValueId>{calculation_key_value_id}</xr:ValueId>"
-    )));
-    assert!(
-        calculation_xml.find("\t\t<InternalInfo>").unwrap()
-            < calculation_xml.find("\t\t<Properties>").unwrap()
-    );
-
-    let rows = vec![
-        ConfigRow {
-            file_name: accounting_uuid.to_string(),
-            part_no: 0,
-            data_size: accounting_blob.len() as i64,
-            binary_hex: encode_hex_for_test(&accounting_blob),
+    let fixtures = [
+        Fixture {
+            kind: "AccountingRegister",
+            uuid: "8b6ea484-0164-4c68-a0cb-175a31c56186",
+            packed: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8b6ea484-0164-4c68-a0cb-175a31c56186.deflate"
+            ),
+            text: include_str!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8b6ea484-0164-4c68-a0cb-175a31c56186.txt"
+            ),
+            native_xml: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/AccountingRegisters/CorpusAccountingRegister.xml"
+            ),
+            packed_sha256: "f57a55cef8c67835c466ad6ac08d5c9a279e326d499ead6b219d112c096d4a54",
+            unpacked_sha256: "c50b678b13c2558088ea48762e4add19a4166a5a3c4d176e44b2fa9fd437f4f6",
+            native_xml_sha256: "3ec72bf1f69e658f85b4fe785ea5e96cf32240be05106dc2974b4dbef6fb032e",
+            expected: &[
+                (
+                    "AccountingRegisterRecord.CorpusAccountingRegister",
+                    "Record",
+                ),
+                (
+                    "AccountingRegisterExtDimensions.CorpusAccountingRegister",
+                    "ExtDimensions",
+                ),
+                (
+                    "AccountingRegisterRecordSet.CorpusAccountingRegister",
+                    "RecordSet",
+                ),
+                (
+                    "AccountingRegisterRecordKey.CorpusAccountingRegister",
+                    "RecordKey",
+                ),
+                (
+                    "AccountingRegisterSelection.CorpusAccountingRegister",
+                    "Selection",
+                ),
+                ("AccountingRegisterList.CorpusAccountingRegister", "List"),
+                (
+                    "AccountingRegisterManager.CorpusAccountingRegister",
+                    "Manager",
+                ),
+            ],
         },
-        ConfigRow {
-            file_name: calculation_uuid.to_string(),
-            part_no: 0,
-            data_size: calculation_blob.len() as i64,
-            binary_hex: encode_hex_for_test(&calculation_blob),
+        Fixture {
+            kind: "CalculationRegister",
+            uuid: "5ad20ecf-0375-4218-b348-0534286973a5",
+            packed: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/5ad20ecf-0375-4218-b348-0534286973a5.deflate"
+            ),
+            text: include_str!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/5ad20ecf-0375-4218-b348-0534286973a5.txt"
+            ),
+            native_xml: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/CalculationRegisters/CorpusCalculationRegister.xml"
+            ),
+            packed_sha256: "a7ff330491297f22b4a7d7784d2c2ac776ce7d2d75547786daf908acb8c0a940",
+            unpacked_sha256: "df522317ae39662f57192fd9d25f520a4e68fe0242eebbd07b1b39e0d26fb89a",
+            native_xml_sha256: "8742bbf6c54e5a110a1d54ccc4fa688602c4dd234763c210ae25f0d66c892119",
+            expected: &[
+                (
+                    "CalculationRegisterRecord.CorpusCalculationRegister",
+                    "Record",
+                ),
+                (
+                    "CalculationRegisterManager.CorpusCalculationRegister",
+                    "Manager",
+                ),
+                (
+                    "CalculationRegisterSelection.CorpusCalculationRegister",
+                    "Selection",
+                ),
+                ("CalculationRegisterList.CorpusCalculationRegister", "List"),
+                (
+                    "CalculationRegisterRecordSet.CorpusCalculationRegister",
+                    "RecordSet",
+                ),
+                (
+                    "CalculationRegisterRecordKey.CorpusCalculationRegister",
+                    "RecordKey",
+                ),
+                ("RecalculationsManager.CorpusCalculationRegister", "Recalcs"),
+            ],
         },
     ];
-    let index = build_metadata_type_index(&rows);
 
-    assert_eq!(
-        index.get(accounting_object_type_id).map(String::as_str),
-        Some("cfg:AccountingRegisterObject.Ledger")
-    );
-    assert_eq!(
-        index.get(accounting_record_set_type_id).map(String::as_str),
-        Some("cfg:AccountingRegisterRecordSet.Ledger")
-    );
-    assert_eq!(
-        index.get(calculation_manager_type_id).map(String::as_str),
-        Some("cfg:CalculationRegisterManager.Premiums")
-    );
-    assert_eq!(
-        index.get(calculation_key_type_id).map(String::as_str),
-        Some("cfg:CalculationRegisterRecordKey.Premiums")
-    );
+    for fixture in fixtures {
+        assert_eq!(
+            format!("{:x}", Sha256::digest(fixture.packed)),
+            fixture.packed_sha256
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(fixture.text.as_bytes())),
+            fixture.unpacked_sha256
+        );
+        assert_eq!(
+            inflate_raw_deflate(fixture.packed).expect("native register raw-deflate payload"),
+            fixture.text.as_bytes()
+        );
+
+        let register_text = fixture.text.trim_start_matches('\u{feff}');
+        let header = parse_metadata_header_from_text(register_text, fixture.uuid)
+            .expect("native register header");
+        let fields = metadata_object_fields(register_text).expect("native register owner fields");
+        assert_eq!(fields.first().map(|field| field.trim()), Some("21"));
+        assert_eq!(metadata_header_field_index(&fields, fixture.uuid), Some(15));
+
+        let generated_types = match fixture.kind {
+            "AccountingRegister" => {
+                assert!(is_code21_accounting_register_fields(&fields, fixture.uuid));
+                let mut generated_types = Vec::new();
+                push_accounting_register_generated_type_entries(
+                    &mut generated_types,
+                    &fields,
+                    1,
+                    &header.name,
+                );
+                generated_types
+            }
+            "CalculationRegister" => {
+                assert!(!is_code21_accounting_register_fields(&fields, fixture.uuid));
+                parse_exact_calculation_register_generated_types(&fields, &header)
+                    .expect("exact CalculationRegister layout")
+                    .expect("CalculationRegister generated types")
+            }
+            kind => panic!("unexpected register fixture kind: {kind}"),
+        };
+        assert_eq!(generated_types.len(), 7);
+        assert_eq!(
+            generated_types
+                .iter()
+                .map(|entry| (entry.name.as_str(), entry.category))
+                .collect::<Vec<_>>(),
+            fixture.expected
+        );
+
+        assert_eq!(
+            format!("{:x}", Sha256::digest(fixture.native_xml)),
+            fixture.native_xml_sha256
+        );
+        let native_xml =
+            std::str::from_utf8(fixture.native_xml).expect("native register XML is UTF-8");
+        let internal_info_start = native_xml
+            .find("\t\t<InternalInfo>\r\n")
+            .expect("native register InternalInfo");
+        let internal_info_end = internal_info_start
+            + native_xml[internal_info_start..]
+                .find("\t\t</InternalInfo>\r\n")
+                .expect("native register InternalInfo end")
+            + "\t\t</InternalInfo>\r\n".len();
+        assert_eq!(
+            format_generated_types_internal_info_xml(&generated_types),
+            native_xml[internal_info_start..internal_info_end]
+        );
+        assert!(native_xml.contains(r#"version="2.20""#));
+        assert!(native_xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+
+        let rows = vec![ConfigRow {
+            file_name: fixture.uuid.to_string(),
+            part_no: 0,
+            data_size: fixture.packed.len() as i64,
+            binary_hex: encode_hex_for_test(fixture.packed),
+        }];
+        let index = build_metadata_type_index(&rows);
+        assert_eq!(index.len(), generated_types.len());
+        for generated in &generated_types {
+            assert_eq!(
+                index.get(&generated.type_id).map(String::as_str),
+                Some(format!("cfg:{}", generated.name).as_str())
+            );
+        }
+    }
 }
 
 #[test]
