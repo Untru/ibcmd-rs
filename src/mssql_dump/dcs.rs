@@ -1,11 +1,11 @@
 use super::*;
-use ibcmd_core::dcs::{DcsBuildError, DcsSettings, DcsSettingsEnvelope};
+use ibcmd_core::dcs::{DcsBuildError, DcsSelection, DcsSettings, DcsSettingsEnvelope};
 use ibcmd_core::diagnostic::{PathSegment, PropertyPath};
 use ibcmd_core::opaque::OpaqueFacets;
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
-    DcsSettingsChildrenError, emit_dcs_settings_children, parse_dcs_settings_scalars,
+    DcsSettingsChildrenError, emit_dcs_settings_children_parts, parse_dcs_settings_children,
     rewrite_dcs_settings_children,
 };
 
@@ -71,6 +71,7 @@ impl std::error::Error for CanonicalDcsSettingsAdapterError {}
 
 pub(super) fn emit_canonical_dcs_settings_children(
     context: CanonicalDcsSettingsContext,
+    selection: Option<&DcsSelection>,
     items_view_mode: Option<&str>,
     items_user_setting_id: Option<&str>,
     source_profile: &ProfileId,
@@ -79,6 +80,38 @@ pub(super) fn emit_canonical_dcs_settings_children(
     indent: &str,
     locator: &str,
 ) -> Result<String, CanonicalDcsSettingsAdapterError> {
+    let parts = emit_canonical_dcs_settings_parts(
+        context,
+        selection,
+        items_view_mode,
+        items_user_setting_id,
+        source_profile,
+        target_profile,
+        prefix,
+        indent,
+        locator,
+    )?;
+    let mut output = parts.selection.unwrap_or_default();
+    output.push_str(&parts.tail);
+    Ok(output)
+}
+
+struct CanonicalDcsSettingsParts {
+    selection: Option<String>,
+    tail: String,
+}
+
+fn emit_canonical_dcs_settings_parts(
+    context: CanonicalDcsSettingsContext,
+    selection: Option<&DcsSelection>,
+    items_view_mode: Option<&str>,
+    items_user_setting_id: Option<&str>,
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
+    prefix: &str,
+    indent: &str,
+    locator: &str,
+) -> Result<CanonicalDcsSettingsParts, CanonicalDcsSettingsAdapterError> {
     let items_view_mode = items_view_mode
         .map(EnumToken::new)
         .transpose()
@@ -103,6 +136,7 @@ pub(super) fn emit_canonical_dcs_settings_children(
     let provenance = SourceProvenance::with_locator(source_profile.clone(), anchor, locator)
         .map_err(|error| CanonicalDcsSettingsAdapterError::Provenance(error.to_string()))?;
     let settings = DcsSettings::new(
+        selection.cloned(),
         items_user_setting_id,
         items_view_mode,
         OpaqueFacets::new(Vec::new()).expect("empty opaque facets are valid"),
@@ -115,8 +149,12 @@ pub(super) fn emit_canonical_dcs_settings_children(
             DcsSettingsEnvelope::list_settings(settings)
         }
     };
-    emit_dcs_settings_children(&envelope, target_profile, prefix, indent)
-        .map_err(CanonicalDcsSettingsAdapterError::Serialize)
+    let parts = emit_dcs_settings_children_parts(&envelope, target_profile, prefix, indent)
+        .map_err(CanonicalDcsSettingsAdapterError::Serialize)?;
+    Ok(CanonicalDcsSettingsParts {
+        selection: parts.selection().map(str::to_owned),
+        tail: parts.tail().to_owned(),
+    })
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1072,13 +1110,14 @@ fn canonicalize_data_composition_settings_document(
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Option<String> {
-    let scalars = parse_dcs_settings_scalars(document)?;
+    let children = parse_dcs_settings_children(document)?;
     let mut writer = DataCompositionXmlWriter::new(object_refs);
     writer.write_document(document, DataCompositionDocumentMode::Settings)?;
-    let tail = emit_canonical_dcs_settings_children(
+    let parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::Standalone,
-        scalars.items_view_mode(),
-        scalars.items_user_setting_id(),
+        children.selection(),
+        children.items_view_mode(),
+        children.items_user_setting_id(),
         source_profile,
         target_profile,
         "dcsset",
@@ -1086,7 +1125,12 @@ fn canonicalize_data_composition_settings_document(
         "mssql:dcs/Settings",
     )
     .ok()?;
-    rewrite_dcs_settings_children(&mut writer.output, &scalars, &tail)?;
+    rewrite_dcs_settings_children(
+        &mut writer.output,
+        &children,
+        parts.selection.as_deref(),
+        &parts.tail,
+    )?;
     let settings = writer
         .output
         .trim_start_matches(['\r', '\n', '\t'])
@@ -2695,14 +2739,14 @@ mod tests {
         let settings = concat!(
             "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">",
-            "<selection/>",
+            "<order/>",
             "<itemsUserSettingID>id&lt;&amp;</itemsUserSettingID>",
             "<itemsViewMode>Compact</itemsViewMode>",
             "</Settings>"
         );
-        let scalars = parse_dcs_settings_scalars(settings).unwrap();
-        assert_eq!(scalars.items_view_mode(), Some("Compact"));
-        assert_eq!(scalars.items_user_setting_id(), Some("id<&"));
+        let children = parse_dcs_settings_children(settings).unwrap();
+        assert_eq!(children.items_view_mode(), Some("Compact"));
+        assert_eq!(children.items_user_setting_id(), Some("id<&"));
         let source_profile = ProfileId::parse("provider:mssql-legacy").unwrap();
         let target_profile = ProfileId::parse("xml-2.20").unwrap();
         let canonical_settings = canonicalize_data_composition_settings_document(
@@ -2762,6 +2806,24 @@ mod tests {
         let actual =
             normalize_data_composition_schema_template_xml(raw, &BTreeMap::new(), &BTreeMap::new())
                 .expect("platform-attested DCS body must be exportable");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_8_3_27_xml_2_20_root_auto_selection_exports_byte_exact() {
+        let raw = include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-selection-auto/raw/\
+             f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin"
+        );
+        let expected = include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-selection-auto/native/Reports/\
+             DcsCorpus/Templates/MainSchema/Ext/Template.xml"
+        );
+
+        let actual =
+            normalize_data_composition_schema_template_xml(raw, &BTreeMap::new(), &BTreeMap::new())
+                .expect("platform-attested root Auto selection must be exportable");
 
         assert_eq!(actual, expected);
     }

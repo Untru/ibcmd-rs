@@ -8,12 +8,13 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
-use ibcmd_core::dcs::DcsSettingsEnvelope;
+use ibcmd_core::dcs::{DcsSelectedField, DcsSelectedItem, DcsSelection, DcsSettingsEnvelope};
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
+use ibcmd_core::value::CanonicalText;
 use ibcmd_schema::{
     DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
     WriterRuleCorpus, WriterRuleKey, bundled_dcs_list_settings_tail_policy,
-    bundled_dcs_settings_serialization_policy, bundled_writer_rules,
+    bundled_dcs_selection_policy, bundled_dcs_settings_serialization_policy, bundled_writer_rules,
 };
 use quick_xml::escape::escape;
 
@@ -21,11 +22,12 @@ use crate::node::{AttributeKind, XmlElement, XmlNode};
 use crate::reader::XmlReader;
 
 const DCS_SETTINGS_NAMESPACE: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+const XSI_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
 /// EDT release against which the DCS writer boundary was inspected.
 pub const DCS_WRITER_EVIDENCE_RELEASE: &str = "2025.2.3+30";
 /// Legacy diagnostic identifier retained for source compatibility. The bounded
-/// EDT 2025.2.3+30 slice has no pending typed-envelope decision.
+/// Stable diagnostic for a DCS writer decision that has no platform evidence.
 pub const DCS_WRITER_EVIDENCE_PENDING_CODE: &str = "dcs.writer-evidence-pending";
 /// Stable diagnostic emitted when the embedded corpus cannot prove a claimed rule.
 pub const DCS_WRITER_EVIDENCE_INVALID_CODE: &str = "dcs.writer-evidence-invalid";
@@ -56,6 +58,10 @@ pub enum DcsWriterDecision {
     ItemsViewModeOrder,
     /// Default/absence emission policy of `itemsViewMode`.
     ItemsViewModeDefaultEmission,
+    /// Root selection QName, item variants, order, and empty policy.
+    RootSelectionPolicy,
+    /// Whether Form `ListSettings` has a physical root-selection ingress.
+    FormListSettingsSelectionIngress,
     /// Placement of retained opaque XML relative to typed settings children.
     OpaqueExtensionPlacement,
     /// EDT delegation from Form `ListSettings` into the DCS serializer.
@@ -78,6 +84,10 @@ impl DcsWriterDecision {
             Self::ItemsViewModeOrder => "dcs.DataCompositionSettings.itemsViewMode.order",
             Self::ItemsViewModeDefaultEmission => {
                 "dcs.DataCompositionSettings.itemsViewMode.emit-default"
+            }
+            Self::RootSelectionPolicy => "dcs.DataCompositionSettings.selection.policy",
+            Self::FormListSettingsSelectionIngress => {
+                "form.DynamicListExtInfo.listSettings.selection.ingress"
             }
             Self::OpaqueExtensionPlacement => {
                 "dcs.DataCompositionSettings.opaque-extension.placement"
@@ -154,6 +164,16 @@ pub const DCS_WRITER_EVIDENCE: &[DcsWriterEvidence] = &[
         decision: DcsWriterDecision::ItemsViewModeDefaultEmission,
         status: DcsWriterEvidenceStatus::Verified,
         source: "dcs-writer-evidence:DataCompositionSettings/itemsViewMode",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::RootSelectionPolicy,
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "native-evidence:8.3.27.2214-xml-2.20-dcs-selection-auto/root-selection",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::FormListSettingsSelectionIngress,
+        status: DcsWriterEvidenceStatus::Pending,
+        source: "no-platform-authenticated-form-list-settings-selection-cohort",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::OpaqueExtensionPlacement,
@@ -260,14 +280,20 @@ pub enum DcsSettingsChildrenError {
     Fragment(DcsListSettingsTailError),
 }
 
-/// The two platform-evidenced scalar children read from a DCS settings root.
+/// Platform-evidenced typed children read from a DCS settings root.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DcsSettingsScalars {
+pub struct DcsSettingsTypedChildren {
+    selection: Option<DcsSelection>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
 }
 
-impl DcsSettingsScalars {
+impl DcsSettingsTypedChildren {
+    /// Returns the bounded direct root selection, if present.
+    pub const fn selection(&self) -> Option<&DcsSelection> {
+        self.selection.as_ref()
+    }
+
     /// Returns the direct `itemsViewMode` value, if present.
     pub fn items_view_mode(&self) -> Option<&str> {
         self.items_view_mode.as_deref()
@@ -371,7 +397,7 @@ pub fn emit_form_list_settings_tail(
     Ok(output)
 }
 
-/// Emits the two verified settings children from the shared canonical IR.
+/// Emits the verified settings children from the shared canonical IR.
 ///
 /// The physical wrapper remains caller-owned because standalone DCS and Form
 /// embed the same semantics in different surrounding documents. Both callers
@@ -382,23 +408,120 @@ pub fn emit_dcs_settings_children(
     prefix: &str,
     indent: &str,
 ) -> Result<String, DcsSettingsChildrenError> {
+    let parts = emit_dcs_settings_children_parts(envelope, target_profile, prefix, indent)?;
+    let mut output = parts.selection.unwrap_or_default();
+    output.push_str(&parts.tail);
+    Ok(output)
+}
+
+/// Atomic typed fragments whose positions are governed independently: root
+/// selection precedes order/structure items, while scalar fields form the
+/// verified final tail.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DcsSettingsChildrenParts {
+    selection: Option<String>,
+    tail: String,
+}
+
+impl DcsSettingsChildrenParts {
+    pub fn selection(&self) -> Option<&str> {
+        self.selection.as_deref()
+    }
+    pub fn tail(&self) -> &str {
+        &self.tail
+    }
+}
+
+/// Emits platform-authenticated settings fragments without choosing their
+/// positions in a caller-owned surrounding document.
+pub fn emit_dcs_settings_children_parts(
+    envelope: &DcsSettingsEnvelope,
+    target_profile: &ProfileId,
+    prefix: &str,
+    indent: &str,
+) -> Result<DcsSettingsChildrenParts, DcsSettingsChildrenError> {
     preflight_dcs_settings_serialization(envelope, target_profile)?;
     let settings = envelope.as_settings();
-    emit_form_list_settings_tail(
+    let selection = settings
+        .selection()
+        .map(|selection| emit_dcs_selection(selection, prefix, indent))
+        .transpose()?;
+    let tail = emit_form_list_settings_tail(
         settings.items_view_mode().map(|value| value.as_str()),
         settings.items_user_setting_id().map(|value| value.as_str()),
         prefix,
         indent,
     )
-    .map_err(Into::into)
+    .map_err(DcsSettingsChildrenError::from)?;
+    Ok(DcsSettingsChildrenParts { selection, tail })
 }
 
-/// Reads the two verified direct scalar children from a standalone DCS
-/// `Settings` document.
+fn emit_dcs_selection(
+    selection: &DcsSelection,
+    prefix: &str,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    if !is_xml_prefix(prefix)
+        || indent.len() > 64
+        || !indent.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "selection prefix or indent is invalid",
+        )
+        .into());
+    }
+    let policy = bundled_dcs_selection_policy().map_err(DcsListSettingsTailError::from)?;
+    if !policy.precedes_order_and_structure_items()
+        || !policy.empty_selection_is_unsupported()
+        || selection.items().is_empty()
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "selection placement or empty-emission policy is unsupported",
+        )
+        .into());
+    }
+    let selection_local = expanded_local_name(policy.selection_qname())?;
+    let item_local = expanded_local_name(policy.item_qname())?;
+    let field_local = expanded_local_name(policy.field_qname())?;
+    let field_type = expanded_local_name(policy.field_type_qname())?;
+    let auto_type = expanded_local_name(policy.auto_type_qname())?;
+    let nested = format!("{indent}\t");
+    let field_indent = format!("{nested}\t");
+    let mut output = format!("{indent}<{prefix}:{selection_local}>\r\n");
+    for item in selection.items() {
+        match item {
+            DcsSelectedItem::Field(field) => {
+                output.push_str(&format!(
+                    "{nested}<{prefix}:{item_local} xsi:type=\"{prefix}:{field_type}\">\r\n"
+                ));
+                output.push_str(&format!(
+                    "{field_indent}<{prefix}:{field_local}>{}</{prefix}:{field_local}>\r\n",
+                    escape(field.field().as_str())
+                ));
+                output.push_str(&format!("{nested}</{prefix}:{item_local}>\r\n"));
+            }
+            DcsSelectedItem::Auto => output.push_str(&format!(
+                "{nested}<{prefix}:{item_local} xsi:type=\"{prefix}:{auto_type}\"/>\r\n"
+            )),
+        }
+    }
+    output.push_str(&format!("{indent}</{prefix}:{selection_local}>\r\n"));
+    Ok(output)
+}
+
+fn expanded_local_name(expanded: &str) -> Result<&str, DcsListSettingsTailError> {
+    expanded.rsplit_once('}').map(|(_, local)| local).ok_or(
+        DcsListSettingsTailError::InvalidFormat("verified selection QName is not expanded"),
+    )
+}
+
+/// Reads the verified typed children from a standalone DCS `Settings`
+/// document.
 ///
-/// Unknown siblings are left to their owning codec. Duplicate scalars,
-/// attributes, complex scalar content, or an inexact namespace fail closed.
-pub fn parse_dcs_settings_scalars(document: &str) -> Option<DcsSettingsScalars> {
+/// Unknown siblings and unsupported selections remain with their owning codec.
+/// Duplicate scalars, scalar attributes, complex scalar content, or an inexact
+/// scalar namespace fail closed.
+pub fn parse_dcs_settings_children(document: &str) -> Option<DcsSettingsTypedChildren> {
     let document = XmlReader::from_slice(document.as_bytes()).ok()?;
     let root = document.root();
     if root.name().local() != "Settings"
@@ -406,14 +529,22 @@ pub fn parse_dcs_settings_scalars(document: &str) -> Option<DcsSettingsScalars> 
     {
         return None;
     }
-    let mut scalars = DcsSettingsScalars::default();
+    let mut children = DcsSettingsTypedChildren::default();
+    let mut selection_candidate = None;
+    let mut selection_is_ambiguous = false;
     for node in root.children() {
         let XmlNode::Element(element) = node else {
             continue;
         };
+        if element.name().local() == "selection" {
+            if selection_candidate.replace(element).is_some() {
+                selection_is_ambiguous = true;
+            }
+            continue;
+        }
         let target = match element.name().local() {
-            "itemsViewMode" => &mut scalars.items_view_mode,
-            "itemsUserSettingID" => &mut scalars.items_user_setting_id,
+            "itemsViewMode" => &mut children.items_view_mode,
+            "itemsUserSettingID" => &mut children.items_user_setting_id,
             _ => continue,
         };
         if !xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
@@ -435,23 +566,144 @@ pub fn parse_dcs_settings_scalars(document: &str) -> Option<DcsSettingsScalars> 
         }
         *target = Some(value);
     }
-    Some(scalars)
+    if !selection_is_ambiguous && let Some(element) = selection_candidate {
+        children.selection = parse_dcs_selection(element, root);
+    }
+    Some(children)
 }
 
-/// Replaces the two verified scalar children in a canonical DCS settings
-/// fragment with an already evidence-gated shared serialization.
+fn parse_dcs_selection(element: &XmlElement, root: &XmlElement) -> Option<DcsSelection> {
+    let policy = bundled_dcs_selection_policy().ok()?;
+    if !xml_element_uses_namespace(element, root, policy.namespace_uri())
+        || element
+            .attributes()
+            .iter()
+            .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return None;
+    }
+    let mut items = Vec::new();
+    for node in element.children() {
+        let item = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(item) => item,
+            _ => return None,
+        };
+        if item.name().local() != "item"
+            || !xml_element_uses_namespace(item, root, policy.namespace_uri())
+        {
+            return None;
+        }
+        let item_type = resolved_xsi_type(item, root)?;
+        if item_type == policy.field_type_qname() {
+            let mut field = None;
+            for child in item.children() {
+                let field_element = match child {
+                    XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+                    XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+                    XmlNode::Element(field_element) => field_element,
+                    _ => return None,
+                };
+                if field.is_some()
+                    || field_element.name().local() != "field"
+                    || !xml_element_uses_namespace(field_element, root, policy.namespace_uri())
+                    || field_element
+                        .attributes()
+                        .iter()
+                        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+                {
+                    return None;
+                }
+                let value = simple_element_text(field_element)?;
+                field = Some(DcsSelectedField::new(CanonicalText::new(&value).ok()?).ok()?);
+            }
+            items.push(DcsSelectedItem::Field(field?));
+        } else if item_type == policy.auto_type_qname() {
+            if item.children().iter().any(|child| match child {
+                XmlNode::Text(text) => !text.value().trim().is_empty(),
+                XmlNode::CData(text) => !text.value().trim().is_empty(),
+                _ => true,
+            }) {
+                return None;
+            }
+            items.push(DcsSelectedItem::Auto);
+        } else {
+            return None;
+        }
+    }
+    DcsSelection::new(items).ok()
+}
+
+fn simple_element_text(element: &XmlElement) -> Option<String> {
+    let mut value = String::new();
+    for child in element.children() {
+        match child {
+            XmlNode::Text(text) => value.push_str(text.value()),
+            XmlNode::CData(text) => value.push_str(text.value()),
+            _ => return None,
+        }
+    }
+    (!value.is_empty()).then_some(value)
+}
+
+fn resolved_xsi_type(element: &XmlElement, root: &XmlElement) -> Option<String> {
+    let mut value = None;
+    for attribute in element.attributes() {
+        let AttributeKind::Ordinary(name) = attribute.kind() else {
+            continue;
+        };
+        if name.local() == "type"
+            && namespace_for_prefix(element, root, name.prefix()) == Some(XSI_NAMESPACE)
+        {
+            if value.is_some() {
+                return None;
+            }
+            value = Some(attribute.value());
+        } else {
+            return None;
+        }
+    }
+    let value = value?;
+    let (prefix, local) = value
+        .split_once(':')
+        .map_or((None, value), |(prefix, local)| (Some(prefix), local));
+    if local.is_empty() || (prefix.is_some() && value.matches(':').count() != 1) {
+        return None;
+    }
+    let namespace = namespace_for_prefix(element, root, prefix)?;
+    Some(format!("{{{namespace}}}{local}"))
+}
+
+/// Replaces the verified typed children in a canonical DCS settings fragment
+/// with already evidence-gated serializations.
 ///
 /// This keeps QName recognition and child placement in the XML layer instead
 /// of leaking them into a physical provider adapter.
 pub fn rewrite_dcs_settings_children(
     xml: &mut String,
-    scalars: &DcsSettingsScalars,
-    serialized_children: &str,
+    children: &DcsSettingsTypedChildren,
+    serialized_selection: Option<&str>,
+    serialized_tail: &str,
 ) -> Option<()> {
+    if children.selection.is_some() {
+        remove_first_canonical_dcs_child(xml, "selection")?;
+        let selection = serialized_selection?;
+        let root_start = xml.find("<dcsset:settings")?;
+        let root_open_end = xml[root_start..].find('>')?.checked_add(root_start + 1)?;
+        let insertion = if xml[root_open_end..].starts_with("\r\n") {
+            root_open_end + 2
+        } else {
+            root_open_end
+        };
+        xml.insert_str(insertion, selection);
+    } else if serialized_selection.is_some() {
+        return None;
+    }
     for (remove, local) in [
-        (scalars.items_view_mode.is_some(), "itemsViewMode"),
+        (children.items_view_mode.is_some(), "itemsViewMode"),
         (
-            scalars.items_user_setting_id.is_some(),
+            children.items_user_setting_id.is_some(),
             "itemsUserSettingID",
         ),
     ] {
@@ -459,8 +711,8 @@ pub fn rewrite_dcs_settings_children(
             remove_unique_canonical_dcs_child(xml, local)?;
         }
     }
-    if scalars.items_view_mode.is_none() && scalars.items_user_setting_id.is_none() {
-        return serialized_children.is_empty().then_some(());
+    if children.items_view_mode.is_none() && children.items_user_setting_id.is_none() {
+        return serialized_tail.is_empty().then_some(());
     }
     let closing = "</dcsset:settings>";
     let closing_offset = xml.rfind(closing)?;
@@ -468,16 +720,59 @@ pub fn rewrite_dcs_settings_children(
         .trim_end_matches(['\r', '\n', '\t', ' '])
         .len();
     xml.replace_range(insertion..closing_offset, "");
-    let insertion_text = if serialized_children.is_empty() {
+    let insertion_text = if serialized_tail.is_empty() {
         "\r\n".to_string()
     } else {
-        format!("\r\n{serialized_children}")
+        format!("\r\n{serialized_tail}")
     };
     xml.insert_str(insertion, &insertion_text);
     Some(())
 }
 
+fn remove_first_canonical_dcs_child(xml: &mut String, local: &str) -> Option<()> {
+    let open = format!("<dcsset:{local}>");
+    let empty = format!("<dcsset:{local}/>");
+    let close = format!("</dcsset:{local}>");
+    let (start, end) = if let Some(start) = xml.find(&open) {
+        let content_start = start.checked_add(open.len())?;
+        let relative_end = xml[content_start..].find(&close)?;
+        let end = content_start
+            .checked_add(relative_end)?
+            .checked_add(close.len())?;
+        (start, end)
+    } else {
+        let start = xml.find(&empty)?;
+        (start, start.checked_add(empty.len())?)
+    };
+    let line_start = xml[..start].rfind('\n').map_or(0, |offset| offset + 1);
+    let start = if xml[line_start..start]
+        .bytes()
+        .all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        line_start
+    } else {
+        start
+    };
+    let end = if xml[end..].starts_with("\r\n") {
+        end + 2
+    } else if xml[end..].starts_with('\n') {
+        end + 1
+    } else {
+        end
+    };
+    xml.replace_range(start..end, "");
+    Some(())
+}
+
 fn xml_element_uses_namespace(element: &XmlElement, root: &XmlElement, uri: &str) -> bool {
+    namespace_for_prefix(element, root, element.name().prefix()) == Some(uri)
+}
+
+fn namespace_for_prefix<'a>(
+    element: &'a XmlElement,
+    root: &'a XmlElement,
+    prefix: Option<&str>,
+) -> Option<&'a str> {
     fn declaration<'a>(element: &'a XmlElement, prefix: Option<&str>) -> Option<&'a str> {
         element.attributes().iter().find_map(|attribute| {
             let AttributeKind::Namespace(declared_prefix) = attribute.kind() else {
@@ -486,15 +781,13 @@ fn xml_element_uses_namespace(element: &XmlElement, root: &XmlElement, uri: &str
             (declared_prefix.as_deref() == prefix).then_some(attribute.value())
         })
     }
-
-    let prefix = element.name().prefix();
     declaration(element, prefix).or_else(|| {
         if std::ptr::eq(element, root) {
             None
         } else {
             declaration(root, prefix)
         }
-    }) == Some(uri)
+    })
 }
 
 fn remove_unique_canonical_dcs_child(xml: &mut String, local: &str) -> Option<()> {
@@ -587,8 +880,15 @@ pub fn preflight_dcs_settings_serialization(
         .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
     bundled_dcs_settings_serialization_policy()
         .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    if settings.selection().is_some() {
+        bundled_dcs_selection_policy()
+            .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    }
 
     if matches!(envelope, DcsSettingsEnvelope::ListSettings(_)) {
+        if settings.selection().is_some() {
+            return Err(unsupported_form_selection(envelope, target_profile));
+        }
         verify_form_list_settings_delegate(envelope, target_profile, &writer_rules)?;
     }
 
@@ -619,6 +919,13 @@ pub fn emit_dcs_settings_envelope(
         invalid_evidence(envelope, target_profile, &"invalid verified wrapper QName")
     })?;
     let settings = envelope.as_settings();
+    if settings.selection().is_some() {
+        return Err(invalid_evidence(
+            envelope,
+            target_profile,
+            &"complete envelope selection requires caller-owned namespace prefix and placement",
+        ));
+    }
     for (field, value) in [
         (
             "itemsViewMode",
@@ -754,6 +1061,37 @@ fn unsupported_opaque_placement(
     }
 }
 
+fn unsupported_form_selection(
+    envelope: &DcsSettingsEnvelope,
+    target_profile: &ProfileId,
+) -> DcsSerializationError {
+    let settings = envelope.as_settings();
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::new(DCS_WRITER_EVIDENCE_PENDING_CODE)
+            .expect("static DCS diagnostic code is valid"),
+        Severity::Error,
+        settings.provenance().anchor().object_path().clone(),
+        settings.provenance().anchor().property_path().clone(),
+        "Form ListSettings has no platform-authenticated root-selection ingress",
+    )
+    .expect("static DCS diagnostic is bounded")
+    .with_profiles(
+        Some(settings.provenance().source_profile().clone()),
+        Some(target_profile.clone()),
+    )
+    .with_context("schema.release", DCS_WRITER_EVIDENCE_RELEASE)
+    .expect("static context is bounded")
+    .with_context(
+        "schema.unsupported-key",
+        DcsWriterDecision::FormListSettingsSelectionIngress.schema_key(),
+    )
+    .expect("static unsupported decision fits diagnostic context");
+    DcsSerializationError {
+        diagnostic: Box::new(diagnostic),
+        missing_decisions: vec![DcsWriterDecision::FormListSettingsSelectionIngress],
+    }
+}
+
 fn invalid_xml_value(
     envelope: &DcsSettingsEnvelope,
     target_profile: &ProfileId,
@@ -850,6 +1188,7 @@ mod tests {
             .into_iter()
             .collect();
         let settings = ibcmd_core::dcs::DcsSettings::new(
+            None,
             Some(CanonicalText::new("main-settings").unwrap()),
             Some(EnumToken::new("QuickAccess").unwrap()),
             OpaqueFacets::new(opaque).unwrap(),
@@ -866,6 +1205,7 @@ mod tests {
     fn empty_envelope(list_settings: bool) -> DcsSettingsEnvelope {
         let settings = ibcmd_core::dcs::DcsSettings::new(
             None,
+            None,
             Some(EnumToken::new("QuickAccess").unwrap()),
             OpaqueFacets::new(Vec::new()).unwrap(),
             provenance("platform:8.3.24", "settings"),
@@ -880,6 +1220,7 @@ mod tests {
 
     fn invalid_text_envelope(list_settings: bool, invalid: char) -> DcsSettingsEnvelope {
         let settings = ibcmd_core::dcs::DcsSettings::new(
+            None,
             Some(CanonicalText::new(&format!("bad{invalid}value")).unwrap()),
             None,
             OpaqueFacets::new(Vec::new()).unwrap(),
@@ -895,7 +1236,7 @@ mod tests {
 
     #[test]
     fn every_dcs_writer_decision_is_explicitly_verified_or_pending() {
-        assert_eq!(DCS_WRITER_EVIDENCE.len(), 11);
+        assert_eq!(DCS_WRITER_EVIDENCE.len(), 13);
         assert!(
             DCS_WRITER_EVIDENCE
                 .iter()
@@ -917,6 +1258,7 @@ mod tests {
                 DcsWriterDecision::ItemsViewModeQName,
                 DcsWriterDecision::ItemsViewModeOrder,
                 DcsWriterDecision::ItemsViewModeDefaultEmission,
+                DcsWriterDecision::RootSelectionPolicy,
                 DcsWriterDecision::OpaqueExtensionPlacement,
                 DcsWriterDecision::FormListSettingsDelegate,
             ]
@@ -936,14 +1278,14 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_evidence_matrix_has_no_pending_fact_and_explicit_negative_opaque_source() {
+    fn aggregate_evidence_matrix_exposes_form_selection_gap_and_negative_opaque_source() {
         assert_eq!(
             DCS_WRITER_EVIDENCE
                 .iter()
                 .filter(|entry| entry.status == DcsWriterEvidenceStatus::Pending)
                 .map(|entry| entry.decision)
                 .collect::<Vec<_>>(),
-            []
+            [DcsWriterDecision::FormListSettingsSelectionIngress]
         );
         let opaque = DCS_WRITER_EVIDENCE
             .iter()
@@ -1017,14 +1359,14 @@ mod tests {
     fn settings_scalar_parse_and_rewrite_are_owned_by_the_xml_layer() {
         let document = concat!(
             "<s:Settings xmlns:s=\"http://v8.1c.ru/8.1/data-composition-system/settings\">",
-            "<s:selection/>",
+            "<s:order/>",
             "<s:itemsUserSettingID>id&lt;&amp;</s:itemsUserSettingID>",
             "<s:itemsViewMode>Compact</s:itemsViewMode>",
             "</s:Settings>"
         );
-        let scalars = parse_dcs_settings_scalars(document).unwrap();
-        assert_eq!(scalars.items_view_mode(), Some("Compact"));
-        assert_eq!(scalars.items_user_setting_id(), Some("id<&"));
+        let children = parse_dcs_settings_children(document).unwrap();
+        assert_eq!(children.items_view_mode(), Some("Compact"));
+        assert_eq!(children.items_user_setting_id(), Some("id<&"));
 
         let mut canonical = concat!(
             "<dcsset:settings>\r\n",
@@ -1035,7 +1377,8 @@ mod tests {
         .to_owned();
         rewrite_dcs_settings_children(
             &mut canonical,
-            &scalars,
+            &children,
+            None,
             concat!(
                 "\t<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>\r\n",
                 "\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n"
@@ -1045,6 +1388,115 @@ mod tests {
         assert_eq!(canonical.matches("itemsViewMode").count(), 2);
         assert_eq!(canonical.matches("itemsUserSettingID").count(), 2);
         assert!(canonical.find("Compact").unwrap() < canonical.find("id&lt;&amp;").unwrap());
+    }
+
+    #[test]
+    fn platform_selection_field_and_auto_parse_and_emit_atomically() {
+        let document = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<selection>",
+            "<item xsi:type=\"SelectedItemField\"><field>Name</field></item>",
+            "<item xsi:type=\"SelectedItemAuto\"/>",
+            "<item xsi:type=\"SelectedItemField\"><field>A&lt;&amp;</field></item>",
+            "</selection><order/>",
+            "</Settings>"
+        );
+        let parsed = parse_dcs_settings_children(document).unwrap();
+        let items = parsed.selection().unwrap().items();
+        let [
+            DcsSelectedItem::Field(name),
+            DcsSelectedItem::Auto,
+            DcsSelectedItem::Field(escaped),
+        ] = items
+        else {
+            panic!("unexpected selected-item sequence: {items:?}");
+        };
+        assert_eq!(name.field().as_str(), "Name");
+        assert_eq!(escaped.field().as_str(), "A<&");
+
+        let target = ProfileId::parse("platform:8.3.27").unwrap();
+        let settings = ibcmd_core::dcs::DcsSettings::new(
+            parsed.selection().cloned(),
+            None,
+            None,
+            OpaqueFacets::new(Vec::new()).unwrap(),
+            provenance("platform:8.3.27", "selection"),
+        )
+        .unwrap();
+        let envelope = DcsSettingsEnvelope::settings(settings);
+        let parts = emit_dcs_settings_children_parts(&envelope, &target, "dcsset", "\t").unwrap();
+        assert_eq!(
+            parts.selection().unwrap(),
+            concat!(
+                "\t<dcsset:selection>\r\n",
+                "\t\t<dcsset:item xsi:type=\"dcsset:SelectedItemField\">\r\n",
+                "\t\t\t<dcsset:field>Name</dcsset:field>\r\n",
+                "\t\t</dcsset:item>\r\n",
+                "\t\t<dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/>\r\n",
+                "\t\t<dcsset:item xsi:type=\"dcsset:SelectedItemField\">\r\n",
+                "\t\t\t<dcsset:field>A&lt;&amp;</dcsset:field>\r\n",
+                "\t\t</dcsset:item>\r\n",
+                "\t</dcsset:selection>\r\n"
+            )
+        );
+        assert!(parts.tail().is_empty());
+        assert!(emit_dcs_settings_envelope(&envelope, &target).is_err());
+
+        let form = DcsSettingsEnvelope::list_settings(envelope.as_settings().clone());
+        let error = emit_dcs_settings_children_parts(&form, &target, "dcsset", "\t").unwrap_err();
+        let DcsSettingsChildrenError::Serialization(error) = error else {
+            panic!("Form selection must fail at the evidence boundary");
+        };
+        assert_eq!(
+            error.diagnostic().code().as_str(),
+            DCS_WRITER_EVIDENCE_PENDING_CODE
+        );
+        assert_eq!(
+            error.missing_decisions(),
+            [DcsWriterDecision::FormListSettingsSelectionIngress]
+        );
+    }
+
+    #[test]
+    fn unsupported_selection_shapes_remain_outside_typed_ownership() {
+        for selection in [
+            "<selection/>",
+            "<selection><item xsi:type=\"SelectedItemFolder\"/></selection>",
+            "<selection><item xsi:type=\"SelectedItemAuto\"><use>false</use></item></selection>",
+            "<selection><item xsi:type=\"SelectedItemField\"><field/></item></selection>",
+            "<selection><item extra=\"1\" xsi:type=\"SelectedItemAuto\"/></selection>",
+            "<selection><item xsi:type=\"SelectedItemField\"><field>Name</field><field>Other</field></item></selection>",
+        ] {
+            let document = format!(
+                "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{selection}</Settings>"
+            );
+            let parsed = parse_dcs_settings_children(&document).unwrap();
+            assert!(
+                parsed.selection().is_none(),
+                "typed unsupported selection: {selection}"
+            );
+        }
+
+        let duplicate = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\"><selection><item xsi:type=\"SelectedItemAuto\"/></selection><selection><item xsi:type=\"SelectedItemAuto\"/></selection></Settings>"
+        );
+        assert!(
+            parse_dcs_settings_children(&duplicate)
+                .unwrap()
+                .selection()
+                .is_none()
+        );
+
+        let wrong_namespace = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\"><bad:selection xmlns:bad=\"urn:bad\"><bad:item xsi:type=\"bad:SelectedItemAuto\"/></bad:selection></Settings>"
+        );
+        assert!(
+            parse_dcs_settings_children(&wrong_namespace)
+                .unwrap()
+                .selection()
+                .is_none()
+        );
     }
 
     #[test]

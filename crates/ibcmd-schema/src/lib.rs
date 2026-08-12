@@ -2623,6 +2623,9 @@ const BUNDLED_FORM_CHOICE_LIST_STRING_WRITER_EVIDENCE_JSON: &str =
 /// Embedded, exact EDT writer evidence for the bounded DCS settings tail.
 pub const BUNDLED_DCS_WRITER_EVIDENCE_JSON: &str =
     include_str!("../data/edt-2025.2.3-dcs-writer-evidence.json");
+/// Embedded platform-authenticated policy for the bounded DCS root selection.
+pub const BUNDLED_DCS_SELECTION_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json");
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3270,6 +3273,175 @@ pub struct DcsListSettingsTailPolicy {
 pub struct DcsSettingsSerializationPolicy {
     standalone_document_qname: String,
     form_list_settings_qname: String,
+}
+
+/// Exact QName and placement policy authenticated by the immutable 8.3.27
+/// XML 2.20 DCS micro-CF. Patch build is provenance, not a dialect selector.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsSelectionPolicy {
+    namespace_uri: String,
+    selection_qname: String,
+    item_qname: String,
+    field_qname: String,
+    field_type_qname: String,
+    auto_type_qname: String,
+}
+
+impl DcsSelectionPolicy {
+    pub fn namespace_uri(&self) -> &str {
+        &self.namespace_uri
+    }
+    pub fn selection_qname(&self) -> &str {
+        &self.selection_qname
+    }
+    pub fn item_qname(&self) -> &str {
+        &self.item_qname
+    }
+    pub fn field_qname(&self) -> &str {
+        &self.field_qname
+    }
+    pub fn field_type_qname(&self) -> &str {
+        &self.field_type_qname
+    }
+    pub fn auto_type_qname(&self) -> &str {
+        &self.auto_type_qname
+    }
+    /// The evidenced root selection precedes `order` and structure `item`s.
+    pub const fn precedes_order_and_structure_items(&self) -> bool {
+        true
+    }
+    /// An explicitly empty selection was not present in the platform corpus.
+    pub const fn empty_selection_is_unsupported(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSelectionEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    source: DcsSelectionEvidenceSource,
+    policy: DcsSelectionEvidencePolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSelectionEvidenceSource {
+    platform_version: String,
+    source_version: String,
+    fixture_id: String,
+    raw_body_sha256: String,
+    native_xml_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSelectionEvidencePolicy {
+    namespace: String,
+    selection_qname: String,
+    item_qname: String,
+    field_qname: String,
+    field_type_qname: String,
+    auto_type_qname: String,
+    settings_placement: String,
+    empty_selection_emission: String,
+}
+
+impl DcsSelectionEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 16 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "selection evidence exceeds 16384 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        const NS: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+        let expected = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-settings-selection-v1",
+            ),
+            (
+                "platform line",
+                self.source.platform_version.starts_with("8.3.27."),
+            ),
+            ("source version", self.source.source_version == "2.20"),
+            (
+                "fixture",
+                self.source.fixture_id == "8.3.27.2214-xml-2.20-dcs-selection-auto",
+            ),
+            ("round trips", self.source.round_trips >= 2),
+            ("namespace", self.policy.namespace == NS),
+            (
+                "selection QName",
+                self.policy.selection_qname == format!("{{{NS}}}selection"),
+            ),
+            (
+                "item QName",
+                self.policy.item_qname == format!("{{{NS}}}item"),
+            ),
+            (
+                "field QName",
+                self.policy.field_qname == format!("{{{NS}}}field"),
+            ),
+            (
+                "field type QName",
+                self.policy.field_type_qname == format!("{{{NS}}}SelectedItemField"),
+            ),
+            (
+                "auto type QName",
+                self.policy.auto_type_qname == format!("{{{NS}}}SelectedItemAuto"),
+            ),
+            (
+                "settings placement",
+                self.policy.settings_placement == "before-order-and-structure-items",
+            ),
+            (
+                "empty selection emission",
+                self.policy.empty_selection_emission == "unsupported",
+            ),
+        ];
+        if let Some((field, _)) = expected.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS selection {field} drifted"
+            )));
+        }
+        for (field, digest) in [
+            ("raw body SHA-256", self.source.raw_body_sha256.as_str()),
+            ("native XML SHA-256", self.source.native_xml_sha256.as_str()),
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                    "DCS selection {field} is invalid"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsSelectionPolicy {
+        DcsSelectionPolicy {
+            namespace_uri: self.policy.namespace,
+            selection_qname: self.policy.selection_qname,
+            item_qname: self.policy.item_qname,
+            field_qname: self.policy.field_qname,
+            field_type_qname: self.policy.field_type_qname,
+            auto_type_qname: self.policy.auto_type_qname,
+        }
+    }
 }
 
 impl DcsSettingsSerializationPolicy {
@@ -6272,6 +6444,17 @@ pub fn bundled_dcs_writer_evidence() -> Result<DcsWriterEvidenceCorpus, SchemaEr
     DcsWriterEvidenceCorpus::parse(BUNDLED_DCS_WRITER_EVIDENCE_JSON)
 }
 
+/// Returns the immutable platform-authenticated root selection policy.
+pub fn bundled_dcs_selection_policy() -> Result<DcsSelectionPolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsSelectionPolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsSelectionEvidenceCorpus::parse(BUNDLED_DCS_SELECTION_EVIDENCE_JSON)
+                .map(DcsSelectionEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsListSettingsTailPolicy, SchemaError>> = OnceLock::new();
     POLICY
@@ -8046,6 +8229,34 @@ mod tests {
             corpus.missing_keys[0].status,
             "unsupported-no-lossless-placement"
         );
+    }
+
+    #[test]
+    fn bundled_platform_dcs_selection_policy_is_exact_and_fails_on_drift() {
+        let policy = bundled_dcs_selection_policy().unwrap();
+        assert_eq!(
+            policy.selection_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}selection"
+        );
+        assert_eq!(
+            policy.field_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}SelectedItemField"
+        );
+        assert_eq!(
+            policy.auto_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}SelectedItemAuto"
+        );
+        assert!(policy.precedes_order_and_structure_items());
+        assert!(policy.empty_selection_is_unsupported());
+
+        let mut drift =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_SELECTION_EVIDENCE_JSON).unwrap();
+        drift["policy"]["fieldTypeQname"] = serde_json::json!("{urn:forged}Field");
+        assert!(matches!(
+            DcsSelectionEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("field type QName drifted")
+        ));
     }
 
     #[test]

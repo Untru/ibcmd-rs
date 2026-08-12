@@ -27,6 +27,18 @@ function Get-FileSha256Hex {
     return Get-Sha256Hex ([IO.File]::ReadAllBytes($Path))
 }
 
+function Get-ByteSlice {
+    param(
+        [byte[]]$Bytes,
+        [int]$Offset,
+        [int]$Length
+    )
+
+    $slice = New-Object byte[] $Length
+    [Array]::Copy($Bytes, $Offset, $slice, 0, $Length)
+    return ,$slice
+}
+
 function Resolve-FixturePath {
     param(
         [string]$RelativePath,
@@ -296,6 +308,77 @@ Assert-Equal ([BitConverter]::ToUInt32($dcsDecompressed, 4)) ([uint32]$dcsManife
 Assert-Equal ([BitConverter]::ToUInt64($dcsDecompressed, 8)) ([uint64]$dcsManifest.proven_shape.stored_document_lengths[0]) 'DCS first document length'
 Assert-Equal ([BitConverter]::ToUInt64($dcsDecompressed, 16)) ([uint64]$dcsManifest.proven_shape.stored_document_lengths[1]) 'DCS second document length'
 
+$dcsSelectionRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-selection-auto'
+$dcsSelectionManifestPath = Join-Path $dcsSelectionRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsSelectionManifestPath -PathType Leaf)) {
+    throw "DCS selection evidence manifest is missing: $dcsSelectionManifestPath"
+}
+$dcsSelectionManifest = Get-Content -LiteralPath $dcsSelectionManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsSelectionManifest.schema_version 1 'DCS selection manifest schema version'
+Assert-Equal $dcsSelectionManifest.issue 283 'DCS selection issue'
+Assert-Equal $dcsSelectionManifest.evidence.platform_version '8.3.27.2214' 'DCS selection platform version'
+Assert-Equal $dcsSelectionManifest.evidence.platform_line '8.3.27' 'DCS selection platform line'
+Assert-Equal $dcsSelectionManifest.evidence.source_version '2.20' 'DCS selection source version'
+Assert-FileEvidence $dcsSelectionManifest.seed.patch $dcsSelectionRoot
+Assert-FileEvidence $dcsSelectionManifest.template.raw_entry.packed $dcsSelectionRoot
+Assert-FileEvidence $dcsSelectionManifest.template.raw_entry.unpacked $dcsSelectionRoot
+Assert-FileEvidence $dcsSelectionManifest.template.native_xml $dcsSelectionRoot
+
+$dcsSelectionPolicyPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json'
+if (-not (Test-Path -LiteralPath $dcsSelectionPolicyPath -PathType Leaf)) {
+    throw "DCS selection policy evidence is missing: $dcsSelectionPolicyPath"
+}
+$dcsSelectionPolicy = Get-Content -LiteralPath $dcsSelectionPolicyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsSelectionPolicy.source.fixtureId $dcsSelectionManifest.fixture_id 'DCS selection policy fixture binding'
+Assert-Equal $dcsSelectionPolicy.source.platformVersion $dcsSelectionManifest.evidence.platform_version 'DCS selection policy platform binding'
+Assert-Equal $dcsSelectionPolicy.source.sourceVersion $dcsSelectionManifest.evidence.source_version 'DCS selection policy source binding'
+Assert-Equal $dcsSelectionPolicy.source.rawBodySha256 $dcsSelectionManifest.template.raw_entry.unpacked.sha256 'DCS selection policy body binding'
+Assert-Equal $dcsSelectionPolicy.source.nativeXmlSha256 $dcsSelectionManifest.template.native_xml.sha256 'DCS selection policy XML binding'
+Assert-Equal $dcsSelectionPolicy.source.roundTrips 2 'DCS selection policy round-trip count'
+
+$dcsSelectionPackedPath = Resolve-FixturePath $dcsSelectionManifest.template.raw_entry.packed.path $dcsSelectionRoot
+$dcsSelectionUnpackedPath = Resolve-FixturePath $dcsSelectionManifest.template.raw_entry.unpacked.path $dcsSelectionRoot
+$dcsSelectionCompressedStream = New-Object IO.MemoryStream(,([IO.File]::ReadAllBytes($dcsSelectionPackedPath)))
+$dcsSelectionDecompressedStream = New-Object IO.MemoryStream
+$dcsSelectionDeflateStream = New-Object IO.Compression.DeflateStream(
+    $dcsSelectionCompressedStream,
+    [IO.Compression.CompressionMode]::Decompress
+)
+try {
+    $dcsSelectionDeflateStream.CopyTo($dcsSelectionDecompressedStream)
+} finally {
+    $dcsSelectionDeflateStream.Dispose()
+    $dcsSelectionCompressedStream.Dispose()
+}
+try {
+    $dcsSelectionDecompressed = $dcsSelectionDecompressedStream.ToArray()
+} finally {
+    $dcsSelectionDecompressedStream.Dispose()
+}
+Assert-Equal $dcsSelectionDecompressed.Length ([long]$dcsSelectionManifest.template.raw_entry.unpacked.size) 'DCS selection decoded size'
+Assert-Equal (Get-Sha256Hex $dcsSelectionDecompressed) $dcsSelectionManifest.template.raw_entry.unpacked.sha256 'DCS selection decoded SHA-256'
+Assert-Equal (Get-FileSha256Hex $dcsSelectionUnpackedPath) (Get-Sha256Hex $dcsSelectionDecompressed) 'DCS selection packed/unpacked pair'
+Assert-Equal ([BitConverter]::ToUInt32($dcsSelectionDecompressed, 0)) ([uint32]$dcsSelectionManifest.proven_shape.header_marker) 'DCS selection header marker'
+Assert-Equal ([BitConverter]::ToUInt32($dcsSelectionDecompressed, 4)) ([uint32]$dcsSelectionManifest.proven_shape.settings_document_count) 'DCS selection settings document count'
+$dcsSelectionFirstLength = [int]$dcsSelectionManifest.proven_shape.stored_document_lengths[0]
+$dcsSelectionSecondLength = [int]$dcsSelectionManifest.proven_shape.stored_document_lengths[1]
+Assert-Equal ([BitConverter]::ToUInt64($dcsSelectionDecompressed, 8)) ([uint64]$dcsSelectionFirstLength) 'DCS selection first document length'
+Assert-Equal ([BitConverter]::ToUInt64($dcsSelectionDecompressed, 16)) ([uint64]$dcsSelectionSecondLength) 'DCS selection second document length'
+$dcsSelectionThirdLength = $dcsSelectionDecompressed.Length - 24 - $dcsSelectionFirstLength - $dcsSelectionSecondLength
+Assert-Equal $dcsSelectionThirdLength ([int]$dcsSelectionManifest.proven_shape.trailing_document_length) 'DCS selection trailing document length'
+$dcsSelectionDocuments = @(
+    Get-ByteSlice $dcsSelectionDecompressed 24 $dcsSelectionFirstLength
+    Get-ByteSlice $dcsSelectionDecompressed (24 + $dcsSelectionFirstLength) $dcsSelectionSecondLength
+    Get-ByteSlice $dcsSelectionDecompressed (24 + $dcsSelectionFirstLength + $dcsSelectionSecondLength) $dcsSelectionThirdLength
+)
+for ($index = 0; $index -lt $dcsSelectionDocuments.Count; $index++) {
+    Assert-Equal (Get-Sha256Hex $dcsSelectionDocuments[$index]) $dcsSelectionManifest.proven_shape.document_sha256[$index] "DCS selection document $($index + 1) SHA-256"
+}
+Assert-Equal (Get-Sha256Hex $dcsSelectionDocuments[0]) (Get-Sha256Hex (Get-ByteSlice $dcsDecompressed 24 ([int]$dcsManifest.proven_shape.stored_document_lengths[0]))) 'DCS selection/base schema document equality'
+$dcsBaseThirdOffset = 24 + [int]$dcsManifest.proven_shape.stored_document_lengths[0] + [int]$dcsManifest.proven_shape.stored_document_lengths[1]
+$dcsBaseThirdLength = $dcsDecompressed.Length - $dcsBaseThirdOffset
+Assert-Equal (Get-Sha256Hex $dcsSelectionDocuments[2]) (Get-Sha256Hex (Get-ByteSlice $dcsDecompressed $dcsBaseThirdOffset $dcsBaseThirdLength)) 'DCS selection/base trailing document equality'
+
 $dcsEncodedCfPath = Resolve-FixturePath $dcsManifest.configuration_cf.path $dcsFixtureRoot
 if (-not (Test-Path -LiteralPath $dcsEncodedCfPath -PathType Leaf)) {
     throw "Encoded DCS CF is missing: $($dcsManifest.configuration_cf.path)"
@@ -377,4 +460,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection + ChartOfCharacteristicTypes + register and plan generated types.'

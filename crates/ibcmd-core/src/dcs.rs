@@ -19,12 +19,25 @@ use crate::value::{CanonicalText, EnumToken};
 
 /// Maximum opaque XML extensions retained by one DCS settings value.
 pub const MAX_DCS_OPAQUE_EXTENSIONS: usize = 4_096;
+/// Maximum selected items retained by one DCS settings selection.
+pub const MAX_DCS_SELECTION_ITEMS: usize = 16_384;
 /// Maximum aggregate variable-sized data retained by one DCS settings value.
 pub const MAX_DCS_RETAINED_BYTES: usize = 67_108_864;
 
 /// Failure to construct or revalidate bounded canonical DCS settings.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DcsBuildError {
+    /// A DCS selection was present without any selected items.
+    EmptySelection,
+    /// A selected field did not contain a field path.
+    EmptySelectionField,
+    /// A DCS selection exceeded its direct item bound.
+    TooManySelectionItems {
+        /// Maximum accepted items.
+        maximum: usize,
+        /// Actual items.
+        actual: usize,
+    },
     /// The opaque extension collection exceeded its DCS-specific item bound.
     TooManyOpaqueExtensions {
         /// Maximum accepted extensions.
@@ -70,6 +83,14 @@ pub enum DcsBuildError {
 impl Display for DcsBuildError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::EmptySelection => formatter.write_str(
+                "DCS selection is empty; empty-selection emission is not evidence-backed",
+            ),
+            Self::EmptySelectionField => formatter.write_str("DCS selected field path is empty"),
+            Self::TooManySelectionItems { maximum, actual } => write!(
+                formatter,
+                "DCS selection exceeds {maximum} items (actual {actual})"
+            ),
             Self::TooManyOpaqueExtensions { maximum, actual } => write!(
                 formatter,
                 "DCS settings exceed {maximum} opaque extensions (actual {actual})"
@@ -103,15 +124,157 @@ impl Display for DcsBuildError {
 
 impl Error for DcsBuildError {}
 
+/// Platform-evidenced selected field with an exact data path.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSelectedField {
+    field: CanonicalText,
+}
+
+impl DcsSelectedField {
+    /// Builds a selected field without interpreting or normalizing its path.
+    pub fn new(field: CanonicalText) -> Result<Self, DcsBuildError> {
+        if field.as_str().is_empty() {
+            return Err(DcsBuildError::EmptySelectionField);
+        }
+        Ok(Self { field })
+    }
+
+    /// Returns the exact selected field path.
+    pub const fn field(&self) -> &CanonicalText {
+        &self.field
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSelectedFieldWire {
+    field: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSelectedField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSelectedFieldWire::deserialize(deserializer)?;
+        Self::new(wire.field).map_err(de::Error::custom)
+    }
+}
+
+/// Verified selected-item variants. Unsupported item properties and variants
+/// must remain opaque at the source boundary instead of entering this enum.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum DcsSelectedItem {
+    /// An explicit field selected in source order.
+    Field(DcsSelectedField),
+    /// The platform's property-free automatic selection item.
+    Auto,
+}
+
+/// Non-empty, bounded root settings selection in exact source order.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSelection {
+    items: Vec<DcsSelectedItem>,
+}
+
+impl DcsSelection {
+    /// Builds a selection while preserving duplicates and source order.
+    pub fn new(items: Vec<DcsSelectedItem>) -> Result<Self, DcsBuildError> {
+        if items.is_empty() {
+            return Err(DcsBuildError::EmptySelection);
+        }
+        if items.len() > MAX_DCS_SELECTION_ITEMS {
+            return Err(DcsBuildError::TooManySelectionItems {
+                maximum: MAX_DCS_SELECTION_ITEMS,
+                actual: items.len(),
+            });
+        }
+        Ok(Self { items })
+    }
+
+    /// Returns selected items in exact source order.
+    pub fn items(&self) -> &[DcsSelectedItem] {
+        &self.items
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSelectionWire {
+    items: DcsSelectionItemsWire,
+}
+
+struct DcsSelectionItemsWire(Vec<DcsSelectedItem>);
+
+struct DcsSelectionItemsVisitor;
+
+impl<'de> Visitor<'de> for DcsSelectionItemsVisitor {
+    type Value = DcsSelectionItemsWire;
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "between 1 and {MAX_DCS_SELECTION_ITEMS} DCS selected items"
+        )
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut items = Vec::with_capacity(
+            sequence
+                .size_hint()
+                .unwrap_or_default()
+                .min(MAX_DCS_SELECTION_ITEMS),
+        );
+        while items.len() < MAX_DCS_SELECTION_ITEMS {
+            let Some(item) = sequence.next_element::<DcsSelectedItem>()? else {
+                return Ok(DcsSelectionItemsWire(items));
+            };
+            items.push(item);
+        }
+        if sequence.next_element::<IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom(format_args!(
+                "DCS selection exceeds {MAX_DCS_SELECTION_ITEMS} items"
+            )));
+        }
+        Ok(DcsSelectionItemsWire(items))
+    }
+}
+
+impl<'de> Deserialize<'de> for DcsSelectionItemsWire {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(DcsSelectionItemsVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for DcsSelection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSelectionWire::deserialize(deserializer)?;
+        Self::new(wire.items.0).map_err(de::Error::custom)
+    }
+}
+
 /// Verified typed minimum of `DataCompositionSettings`.
 ///
-/// The two optional fields are structural model semantics. Their XML spelling,
-/// omission rules, and order remain the responsibility of verified writer
-/// rules. Unknown settings children and attributes are retained in exact source
-/// order by `opaque_extensions`.
+/// The optional root selection and scalar fields are structural model
+/// semantics. Their XML spelling, omission rules, and order remain the
+/// responsibility of verified writer rules. Unknown settings children and
+/// attributes are retained in exact source order by `opaque_extensions`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DcsSettings {
+    selection: Option<DcsSelection>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: OpaqueFacets,
@@ -122,23 +285,31 @@ impl DcsSettings {
     /// Builds settings and validates all DCS-specific resource and provenance
     /// invariants.
     pub fn new(
+        selection: Option<DcsSelection>,
         items_user_setting_id: Option<CanonicalText>,
         items_view_mode: Option<EnumToken>,
         opaque_extensions: OpaqueFacets,
         provenance: SourceProvenance,
     ) -> Result<Self, DcsBuildError> {
         validate_settings(
+            selection.as_ref(),
             items_user_setting_id.as_ref(),
             items_view_mode.as_ref(),
             &opaque_extensions,
             &provenance,
         )?;
         Ok(Self {
+            selection,
             items_user_setting_id,
             items_view_mode,
             opaque_extensions,
             provenance,
         })
+    }
+
+    /// Returns the optional root selection.
+    pub const fn selection(&self) -> Option<&DcsSelection> {
+        self.selection.as_ref()
     }
 
     /// Returns the optional exact user-setting identifier.
@@ -165,6 +336,7 @@ impl DcsSettings {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsSettingsWire {
+    selection: Option<DcsSelection>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: DcsOpaqueFacetsWire,
@@ -240,6 +412,7 @@ impl<'de> Deserialize<'de> for DcsSettings {
     {
         let wire = DcsSettingsWire::deserialize(deserializer)?;
         Self::new(
+            wire.selection,
             wire.items_user_setting_id,
             wire.items_view_mode,
             OpaqueFacets::new(wire.opaque_extensions.0).map_err(de::Error::custom)?,
@@ -287,6 +460,7 @@ impl DcsSettingsEnvelope {
 }
 
 fn validate_settings(
+    selection: Option<&DcsSelection>,
     items_user_setting_id: Option<&CanonicalText>,
     items_view_mode: Option<&EnumToken>,
     opaque_extensions: &OpaqueFacets,
@@ -301,6 +475,26 @@ fn validate_settings(
 
     let mut placements = BTreeSet::new();
     let mut retained_bytes = provenance.retained_byte_len();
+    if let Some(selection) = selection {
+        if selection.items().is_empty() {
+            return Err(DcsBuildError::EmptySelection);
+        }
+        if selection.items().len() > MAX_DCS_SELECTION_ITEMS {
+            return Err(DcsBuildError::TooManySelectionItems {
+                maximum: MAX_DCS_SELECTION_ITEMS,
+                actual: selection.items().len(),
+            });
+        }
+        for item in selection.items() {
+            if let DcsSelectedItem::Field(field) = item {
+                if field.field().as_str().is_empty() {
+                    return Err(DcsBuildError::EmptySelectionField);
+                }
+                retained_bytes =
+                    checked_retained_bytes(retained_bytes, field.field().as_str().len())?;
+            }
+        }
+    }
     if let Some(value) = items_user_setting_id {
         retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
     }
@@ -409,12 +603,74 @@ mod tests {
 
     fn settings(extensions: Vec<OpaqueFacet>) -> DcsSettings {
         DcsSettings::new(
+            None,
             Some(CanonicalText::new("main-settings").unwrap()),
             Some(EnumToken::new("QuickAccess").unwrap()),
             OpaqueFacets::new(extensions).unwrap(),
             provenance("platform:8.3.24", "settings"),
         )
         .unwrap()
+    }
+
+    fn selected_field(field: &str) -> DcsSelectedItem {
+        DcsSelectedItem::Field(DcsSelectedField::new(CanonicalText::new(field).unwrap()).unwrap())
+    }
+
+    #[test]
+    fn selection_preserves_order_duplicates_and_wire_shape() {
+        let selection = DcsSelection::new(vec![
+            selected_field("Name"),
+            DcsSelectedItem::Auto,
+            selected_field("Name"),
+        ])
+        .unwrap();
+        let settings = DcsSettings::new(
+            Some(selection),
+            None,
+            None,
+            OpaqueFacets::new(Vec::new()).unwrap(),
+            provenance("platform:8.3.27", "settings"),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            settings.selection().unwrap().items(),
+            [
+                DcsSelectedItem::Field(_),
+                DcsSelectedItem::Auto,
+                DcsSelectedItem::Field(_)
+            ]
+        ));
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#"[{"field":{"field":"Name"}},"auto",{"field":{"field":"Name"}}]"#));
+        assert_eq!(
+            serde_json::from_str::<DcsSettings>(&json).unwrap(),
+            settings
+        );
+    }
+
+    #[test]
+    fn empty_selection_empty_field_and_excessive_items_fail_closed() {
+        assert_eq!(
+            DcsSelection::new(Vec::new()),
+            Err(DcsBuildError::EmptySelection)
+        );
+        assert_eq!(
+            DcsSelectedField::new(CanonicalText::new("").unwrap()),
+            Err(DcsBuildError::EmptySelectionField)
+        );
+        assert!(matches!(
+            DcsSelection::new(vec![DcsSelectedItem::Auto; MAX_DCS_SELECTION_ITEMS + 1]),
+            Err(DcsBuildError::TooManySelectionItems { .. })
+        ));
+
+        let over_limit = serde_json::json!({
+            "items": vec![serde_json::json!("auto"); MAX_DCS_SELECTION_ITEMS + 1]
+        });
+        let error = serde_json::from_value::<DcsSelection>(over_limit)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("exceeds 16384 items"));
     }
 
     #[test]
@@ -473,6 +729,7 @@ mod tests {
             DcsSettings::new(
                 None,
                 None,
+                None,
                 OpaqueFacets::new(vec![mismatched]).unwrap(),
                 provenance("platform:8.3.24", "settings"),
             ),
@@ -488,6 +745,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             DcsSettings::new(
+                None,
                 None,
                 None,
                 OpaqueFacets::new(vec![non_xml_placement]).unwrap(),
@@ -507,6 +765,7 @@ mod tests {
             DcsSettings::new(
                 None,
                 None,
+                None,
                 OpaqueFacets::new(vec![non_xml_media]).unwrap(),
                 provenance("platform:8.3.24", "settings"),
             ),
@@ -522,6 +781,7 @@ mod tests {
             DcsSettings::new(
                 None,
                 None,
+                None,
                 OpaqueFacets::new(vec![first, duplicate]).unwrap(),
                 provenance("platform:8.3.24", "settings"),
             ),
@@ -533,6 +793,7 @@ mod tests {
             .collect();
         assert!(matches!(
             DcsSettings::new(
+                None,
                 None,
                 None,
                 OpaqueFacets::new(extensions).unwrap(),

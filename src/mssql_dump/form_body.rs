@@ -1420,6 +1420,7 @@ fn preflight_form_writer_paths_with_dcs_profiles(
         // complete fragment atomically and has no output or filesystem side effects.
         drop(emit_canonical_dcs_settings_children(
             CanonicalDcsSettingsContext::FormListSettings,
+            None,
             settings.list_settings.items_view_mode.as_deref(),
             settings.list_settings.items_user_setting_id.as_deref(),
             source_profile,
@@ -17796,6 +17797,7 @@ fn format_form_list_settings_xml_with_dcs_profiles(
 ) -> Result<String, FormSchemaWriteError> {
     let tail_xml = emit_canonical_dcs_settings_children(
         CanonicalDcsSettingsContext::FormListSettings,
+        None,
         settings.items_view_mode.as_deref(),
         settings.items_user_setting_id.as_deref(),
         source_profile,
