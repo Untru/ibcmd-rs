@@ -1301,9 +1301,9 @@ where
                     attribute_id,
                     terminal,
                 } => {
-                    let attribute_name = resolve_attribute(&attribute_id).ok_or_else(|| {
-                        FormChoiceParameterLinksParseError::UnresolvedAttribute(attribute_id)
-                    })?;
+                    let attribute_name = resolve_attribute(&attribute_id).ok_or(
+                        FormChoiceParameterLinksParseError::UnresolvedAttribute(attribute_id),
+                    )?;
                     match terminal {
                         FormChoiceParameterLinkTerminal::Absent => attribute_name,
                         FormChoiceParameterLinkTerminal::Standard(terminal) => {
