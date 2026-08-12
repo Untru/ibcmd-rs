@@ -428,8 +428,14 @@ function Get-Sha256 {
     param([Parameter(Mandatory)] [string]$Value)
 
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
-    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
-    return [Convert]::ToHexString($hash).ToLowerInvariant()
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $algorithm.ComputeHash($bytes)
+        return ([BitConverter]::ToString($hash)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
 }
 
 function ConvertFrom-RustEscapedString {
@@ -699,8 +705,25 @@ function Get-LogicalPath {
         [Parameter(Mandatory)] [string]$Path
     )
 
-    return [System.IO.Path]::GetRelativePath(
-        [System.IO.Path]::GetFullPath($Root), [System.IO.Path]::GetFullPath($Path)).Replace('\', '/')
+    $rootPath = [System.IO.Path]::GetFullPath($Root)
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $relativePathMethod = [System.IO.Path].GetMethod(
+        'GetRelativePath', [type[]]@([string], [string]))
+    if ($null -ne $relativePathMethod) {
+        return [System.IO.Path]::GetRelativePath($rootPath, $fullPath).Replace('\', '/')
+    }
+
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $rootPrefix = $rootPath.TrimEnd([char[]]@('/', '\')) + $separator
+    $comparison = if ($separator -eq '\') {
+        [System.StringComparison]::OrdinalIgnoreCase
+    } else {
+        [System.StringComparison]::Ordinal
+    }
+    if (-not $fullPath.StartsWith($rootPrefix, $comparison)) {
+        throw 'Scoped source path is outside repository root.'
+    }
+    return $fullPath.Substring($rootPrefix.Length).Replace('\', '/')
 }
 
 function Add-Occurrence {
@@ -724,7 +747,7 @@ function Add-Occurrence {
 function Get-FileInventory {
     param([Parameter(Mandatory)] [string]$Path)
 
-    $text = Get-Content -LiteralPath $Path -Raw
+    $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
     if ($null -eq $text) { $text = '' }
     foreach ($record in [PhysicalAdapterPolicyScanner]::Scan($text)) {
         $lastSeparator = $record.LastIndexOf('|')
@@ -761,7 +784,22 @@ function Read-Baseline {
         throw 'Physical-adapter baseline is missing.'
     }
     try {
-        $document = (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -AsHashtable -Depth 100)
+        $json = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+        $convertFromJson = Get-Command ConvertFrom-Json
+        if ($convertFromJson.Parameters.ContainsKey('AsHashtable')) {
+            $document = ($json | ConvertFrom-Json -AsHashtable -Depth 100)
+        }
+        else {
+            Add-Type -AssemblyName System.Web.Extensions
+            $serializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+            $serializer.MaxJsonLength = [int]::MaxValue
+            $document = $serializer.DeserializeObject($json)
+            foreach ($file in $document['files']) {
+                foreach ($occurrence in $file['occurrences']) {
+                    $occurrence['count'] = [long]$occurrence['count']
+                }
+            }
+        }
     }
     catch {
         throw 'Physical-adapter baseline is not valid JSON.'

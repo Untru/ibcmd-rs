@@ -43,4 +43,4 @@ raw-to-XML проверки на 8.3.27.2214 / XML 2.20.
 - [x] `cargo fmt`, focused tests и clippy проходят на Windows.
 - [x] OpenSpec strict и corpus runner проходят.
 - [x] CI запускает strict OpenSpec и parity runner на Linux и Windows.
-- [ ] Evidence опубликовано в #318 и канонической памяти #276.
+- [x] Evidence опубликовано в #318 и канонической памяти #276.
