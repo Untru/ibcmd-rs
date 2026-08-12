@@ -107,8 +107,11 @@ The first seed exposed an internal Unica inconsistency: the chart-of-accounts
 writer emitted `MaxExtDimensionCount=3` by default while its own hint logic
 treated the default as zero. Platform 8.3.27.2214 rejected that source without
 `ExtDimensionTypes`; the attested seed therefore states
-`maxExtDimensionCount=0` explicitly. This is retained as cross-project evidence
-for a focused Unica fix.
+`maxExtDimensionCount=0` explicitly. Unica's public Rust handler on that same
+head already emits zero and has a focused test, so no production Unica defect
+is claimed. The discrepancy is retained only for review of its legacy
+model-equivalence fixture; a pull request is warranted only if that fixture is
+still required to match the public handler for this object family.
 
 The accepted double round proves seven generated types for each register. The
 accounting order begins with `Record`, `ExtDimensions`, `RecordSet`, and

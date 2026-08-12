@@ -23,6 +23,7 @@
     "meta_compile_executed_sha256": "f32e88001babe250bf06dc2525a3c6e3ebb70ed293b12e764d2722370d55eff1",
     "python_version": "3.14.3",
     "lxml_version": "6.1.1",
+    "unica_public_handler_status": "already_emits_zero_without_extDimensionTypes_on_a527d40",
     "explicit_correction": "maxExtDimensionCount=0",
     "correction_reason": "The fresh Unica reference generator emitted 3 by default while its own hint path treated the default as 0; pinned 8.3.27.2214 rejected the uncorrected chart without ExtDimensionTypes."
   },
@@ -119,6 +120,7 @@
   ],
   "non_claims": [
     "Unica is not treated as an authority; its seed was corrected after the platform rejected an inconsistent default.",
+    "No production Unica defect is claimed: the public Rust handler on a527d40 already emits zero without ExtDimensionTypes; only its legacy reference-model fixture was stale.",
     "The complete CF files and dependency objects are not committed.",
     "The fixture is diagnostic-only and is never read as a production fallback.",
     "No non-empty recalculation encoding or unrelated register property layout is inferred from this fixture."
