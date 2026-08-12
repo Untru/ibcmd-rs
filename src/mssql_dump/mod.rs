@@ -8431,7 +8431,10 @@ const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
     },
     RawGeneratedTypeSchema {
         object_codes: &[32],
-        conditions: &[],
+        conditions: &[
+            RawGeneratedTypeCondition::HeaderIndex(15),
+            RawGeneratedTypeCondition::FieldUuidRange(1, 14),
+        ],
         slots: &[
             RawGeneratedTypeSlot {
                 field_index: 1,
@@ -8452,6 +8455,14 @@ const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
             RawGeneratedTypeSlot {
                 field_index: 9,
                 generated_type: "ChartOfAccountsManager",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 11,
+                generated_type: "ChartOfAccountsExtDimensionTypes",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 13,
+                generated_type: "ChartOfAccountsExtDimensionTypesRow",
             },
         ],
     },

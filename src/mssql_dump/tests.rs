@@ -35393,6 +35393,212 @@ fn validates_platform_proven_register_generated_types_and_writer_order() {
 }
 
 #[test]
+fn validates_platform_proven_plan_generated_types_and_type_index() {
+    struct Fixture {
+        kind: &'static str,
+        uuid: &'static str,
+        object_code: &'static str,
+        owner_field_count: usize,
+        header_index: usize,
+        packed: &'static [u8],
+        text: &'static str,
+        native_xml: &'static [u8],
+        packed_sha256: &'static str,
+        unpacked_sha256: &'static str,
+        native_xml_sha256: &'static str,
+        definitions: &'static [(usize, usize, &'static str, &'static str)],
+    }
+
+    let fixtures = [
+        Fixture {
+            kind: "ChartOfAccounts",
+            uuid: "7671ada0-5cde-47a2-b49e-8de67818fb10",
+            object_code: "32",
+            owner_field_count: 57,
+            header_index: 15,
+            packed: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/7671ada0-5cde-47a2-b49e-8de67818fb10.deflate"
+            ),
+            text: include_str!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/7671ada0-5cde-47a2-b49e-8de67818fb10.txt"
+            ),
+            native_xml: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/ChartsOfAccounts/CorpusAccounts.xml"
+            ),
+            packed_sha256: "467813bd8fed7c1c5901dbfa7a9eac45293361e1d5f42c37aae22f2b66493cfa",
+            unpacked_sha256: "3b6553f9ef66d373457b5fcda2de4cf8585ad8ea3535454b936636ab4c217a20",
+            native_xml_sha256: "2b13dd60f0b4434ef673d901b9e6f3ec6b1da24ec4d393935d31ac4963cc3737",
+            definitions: &[
+                (1, 2, "ChartOfAccountsObject", "Object"),
+                (3, 4, "ChartOfAccountsRef", "Ref"),
+                (5, 6, "ChartOfAccountsSelection", "Selection"),
+                (7, 8, "ChartOfAccountsList", "List"),
+                (9, 10, "ChartOfAccountsManager", "Manager"),
+                (
+                    11,
+                    12,
+                    "ChartOfAccountsExtDimensionTypes",
+                    "ExtDimensionTypes",
+                ),
+                (
+                    13,
+                    14,
+                    "ChartOfAccountsExtDimensionTypesRow",
+                    "ExtDimensionTypesRow",
+                ),
+            ],
+        },
+        Fixture {
+            kind: "ChartOfCalculationTypes",
+            uuid: "8c132029-d49c-49db-b12b-64519b64d755",
+            object_code: "35",
+            owner_field_count: 63,
+            header_index: 1,
+            packed: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8c132029-d49c-49db-b12b-64519b64d755.deflate"
+            ),
+            text: include_str!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/raw/8c132029-d49c-49db-b12b-64519b64d755.txt"
+            ),
+            native_xml: include_bytes!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/register-generated-types/native/ChartsOfCalculationTypes/CorpusCalculationTypes.xml"
+            ),
+            packed_sha256: "bcc374c0e7e21e2f712fd7d5ea9c50471adf24590ea7a62f50fbfdf3b5c4af25",
+            unpacked_sha256: "6295f2983f300ef9e311324480bea88216cfd9df95c7a48697f5d76d5aeba3a1",
+            native_xml_sha256: "e055ef567f65a0e261c39d644c056ab7004a3e93192dca7cdecdfe887ba89b9a",
+            definitions: &[
+                (2, 3, "ChartOfCalculationTypesObject", "Object"),
+                (4, 5, "ChartOfCalculationTypesRef", "Ref"),
+                (6, 7, "ChartOfCalculationTypesSelection", "Selection"),
+                (8, 9, "ChartOfCalculationTypesList", "List"),
+                (10, 11, "ChartOfCalculationTypesManager", "Manager"),
+                (
+                    12,
+                    13,
+                    "DisplacingCalculationTypes",
+                    "DisplacingCalculationTypes",
+                ),
+                (
+                    14,
+                    15,
+                    "DisplacingCalculationTypesRow",
+                    "DisplacingCalculationTypesRow",
+                ),
+                (16, 17, "BaseCalculationTypes", "BaseCalculationTypes"),
+                (18, 19, "BaseCalculationTypesRow", "BaseCalculationTypesRow"),
+                (20, 21, "LeadingCalculationTypes", "LeadingCalculationTypes"),
+                (
+                    22,
+                    23,
+                    "LeadingCalculationTypesRow",
+                    "LeadingCalculationTypesRow",
+                ),
+            ],
+        },
+    ];
+
+    for fixture in fixtures {
+        assert_eq!(
+            format!("{:x}", Sha256::digest(fixture.packed)),
+            fixture.packed_sha256
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(fixture.text.as_bytes())),
+            fixture.unpacked_sha256
+        );
+        assert_eq!(
+            inflate_raw_deflate(fixture.packed).expect("native plan raw-deflate payload"),
+            fixture.text.as_bytes()
+        );
+
+        let plan_text = fixture.text.trim_start_matches('\u{feff}');
+        let header =
+            parse_metadata_header_from_text(plan_text, fixture.uuid).expect("native plan header");
+        let fields = metadata_object_fields(plan_text).expect("native plan owner fields");
+        assert_eq!(fields.len(), fixture.owner_field_count);
+        assert_eq!(
+            fields.first().map(|field| field.trim()),
+            Some(fixture.object_code)
+        );
+        assert_eq!(
+            metadata_header_field_index(&fields, fixture.uuid),
+            Some(fixture.header_index)
+        );
+
+        let mut seen = BTreeSet::from([fixture.uuid.to_ascii_lowercase()]);
+        let generated_types =
+            parse_chart_generated_types(&fields, &header.name, fixture.definitions, &mut seen)
+                .expect("native plan generated types");
+        assert_eq!(generated_types.len(), fixture.definitions.len());
+        for (generated, (_, _, prefix, category)) in generated_types.iter().zip(fixture.definitions)
+        {
+            assert_eq!(generated.name, format!("{prefix}.{}", header.name));
+            assert_eq!(generated.category, *category);
+        }
+
+        assert_eq!(
+            format!("{:x}", Sha256::digest(fixture.native_xml)),
+            fixture.native_xml_sha256
+        );
+        let native_xml = std::str::from_utf8(fixture.native_xml).expect("native plan XML is UTF-8");
+        let internal_info_start = native_xml
+            .find("\t\t<InternalInfo>\r\n")
+            .expect("native plan InternalInfo");
+        let internal_info_end = internal_info_start
+            + native_xml[internal_info_start..]
+                .find("\t\t</InternalInfo>\r\n")
+                .expect("native plan InternalInfo end")
+            + "\t\t</InternalInfo>\r\n".len();
+        assert_eq!(
+            format_generated_types_internal_info_xml(&generated_types),
+            native_xml[internal_info_start..internal_info_end]
+        );
+        assert!(native_xml.contains(r#"version="2.20""#));
+        assert!(native_xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+        if fixture.kind == "ChartOfAccounts" {
+            assert!(native_xml.contains("<MaxExtDimensionCount>0</MaxExtDimensionCount>"));
+        }
+
+        let rows = vec![ConfigRow {
+            file_name: fixture.uuid.to_string(),
+            part_no: 0,
+            data_size: fixture.packed.len() as i64,
+            binary_hex: encode_hex_for_test(fixture.packed),
+        }];
+        let index = build_metadata_type_index(&rows);
+        assert_eq!(index.len(), generated_types.len());
+        for generated in &generated_types {
+            assert_eq!(
+                index.get(&generated.type_id).map(String::as_str),
+                Some(format!("cfg:{}", generated.name).as_str())
+            );
+        }
+
+        if fixture.kind == "ChartOfAccounts" {
+            let malformed = plan_text.replacen(
+                &generated_types
+                    .last()
+                    .expect("native ChartOfAccounts generated type")
+                    .type_id,
+                "not-a-uuid",
+                1,
+            );
+            let malformed_blob = deflate_for_test(malformed.as_bytes());
+            let malformed_row = ConfigRow {
+                file_name: fixture.uuid.to_string(),
+                part_no: 0,
+                data_size: malformed_blob.len() as i64,
+                binary_hex: encode_hex_for_test(&malformed_blob),
+            };
+            assert!(
+                build_metadata_type_index(&[malformed_row]).is_empty(),
+                "ChartOfAccounts generated-type vector must fail atomically"
+            );
+        }
+    }
+}
+
+#[test]
 fn routes_and_serializes_calculation_register_recalculation() {
     let owner_uuid = "11111111-1111-4111-8111-111111111111";
     let recalculation_uuid = "22222222-2222-4222-8222-222222222222";
@@ -46362,96 +46568,6 @@ fn builds_exchange_plan_code_36_generated_type_index_entries() {
 }
 
 #[test]
-fn builds_chart_of_calculation_types_generated_type_index_entries() {
-    let chart_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-    let generated_types = [
-        (
-            "11111111-1111-4111-8111-111111111101",
-            "11111111-1111-4111-8111-111111111102",
-            "ChartOfCalculationTypesObject",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111103",
-            "11111111-1111-4111-8111-111111111104",
-            "ChartOfCalculationTypesRef",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111105",
-            "11111111-1111-4111-8111-111111111106",
-            "ChartOfCalculationTypesSelection",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111107",
-            "11111111-1111-4111-8111-111111111108",
-            "ChartOfCalculationTypesList",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111109",
-            "11111111-1111-4111-8111-111111111110",
-            "ChartOfCalculationTypesManager",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111111",
-            "11111111-1111-4111-8111-111111111112",
-            "DisplacingCalculationTypes",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111113",
-            "11111111-1111-4111-8111-111111111114",
-            "DisplacingCalculationTypesRow",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111115",
-            "11111111-1111-4111-8111-111111111116",
-            "BaseCalculationTypes",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111117",
-            "11111111-1111-4111-8111-111111111118",
-            "BaseCalculationTypesRow",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111119",
-            "11111111-1111-4111-8111-111111111120",
-            "LeadingCalculationTypes",
-        ),
-        (
-            "11111111-1111-4111-8111-111111111121",
-            "11111111-1111-4111-8111-111111111122",
-            "LeadingCalculationTypesRow",
-        ),
-    ];
-    let generated_type_fields = generated_types
-        .iter()
-        .flat_map(|(type_id, value_id, _)| [*type_id, *value_id])
-        .collect::<Vec<_>>()
-        .join(",");
-    let blob = deflate_for_test(
-        format!(
-            "{{1,\r\n{{35,\r\n{{0,\r\n{{3,\r\n{{1,0,{chart_uuid}}},\"PayrollTypes\",{{1,\"en\",\"Payroll types\"}},\"\"\r\n}}\r\n}},{generated_type_fields}\r\n}},0}}"
-        )
-        .as_bytes(),
-    );
-    let rows = vec![ConfigRow {
-        file_name: chart_uuid.to_string(),
-        part_no: 0,
-        data_size: blob.len() as i64,
-        binary_hex: encode_hex_for_test(&blob),
-    }];
-
-    let index = build_metadata_type_index(&rows);
-
-    assert_eq!(index.len(), generated_types.len());
-    for (type_id, _, generated_type) in generated_types {
-        let expected = format!("cfg:{generated_type}.PayrollTypes");
-        assert_eq!(
-            index.get(type_id).map(String::as_str),
-            Some(expected.as_str())
-        );
-    }
-}
-
-#[test]
 fn resolves_chart_of_calculation_types_generated_types_in_defined_types() {
     let root = std::env::temp_dir().join(format!(
         "ibcmd-rs-mssql-dump-test-{}",
@@ -52853,7 +52969,7 @@ fn extracts_catalog_tabular_section_property_tail() {
 }
 
 #[test]
-fn builds_register_and_chart_reference_type_index_entries() {
+fn builds_register_and_characteristic_chart_reference_type_index_entries() {
     let info_register_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let record_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let record_set_type_id = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
@@ -52872,15 +52988,6 @@ fn builds_register_and_chart_reference_type_index_entries() {
             )
             .as_bytes(),
         );
-    let accounts_uuid = "99999999-9999-4999-8999-999999999991";
-    let accounts_object_type_id = "99999999-9999-4999-8999-999999999992";
-    let accounts_ref_type_id = "99999999-9999-4999-8999-999999999993";
-    let accounts_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{32,{accounts_object_type_id},11111111-1111-4111-8111-111111111111,{accounts_ref_type_id},22222222-2222-4222-8222-222222222222,33333333-3333-4333-8333-333333333333,44444444-4444-4444-8444-444444444444,55555555-5555-4555-8555-555555555555,66666666-6666-4666-8666-666666666666,77777777-7777-4777-8777-777777777777,\r\n{{0,\r\n{{3,\r\n{{1,0,{accounts_uuid}}},\"MainAccounts\",{{1,\"en\",\"Main accounts\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}},0}}\r\n}}"
-            )
-            .as_bytes(),
-        );
     let rows = vec![
         ConfigRow {
             file_name: info_register_uuid.to_string(),
@@ -52893,12 +53000,6 @@ fn builds_register_and_chart_reference_type_index_entries() {
             part_no: 0,
             data_size: chart_blob.len() as i64,
             binary_hex: encode_hex_for_test(&chart_blob),
-        },
-        ConfigRow {
-            file_name: accounts_uuid.to_string(),
-            part_no: 0,
-            data_size: accounts_blob.len() as i64,
-            binary_hex: encode_hex_for_test(&accounts_blob),
         },
     ];
 
@@ -52919,14 +53020,6 @@ fn builds_register_and_chart_reference_type_index_entries() {
     assert_eq!(
         index.get(chart_ref_type_id).map(String::as_str),
         Some("cfg:ChartOfCharacteristicTypesRef.ExpenseItems")
-    );
-    assert_eq!(
-        index.get(accounts_object_type_id).map(String::as_str),
-        Some("cfg:ChartOfAccountsObject.MainAccounts")
-    );
-    assert_eq!(
-        index.get(accounts_ref_type_id).map(String::as_str),
-        Some("cfg:ChartOfAccountsRef.MainAccounts")
     );
 }
 

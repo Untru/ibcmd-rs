@@ -91,15 +91,17 @@ fields, all six ordered collection markers, nil internal UUID slots 13/14, and
 an empty Task `Templates` collection on 8.3.27.2214. It deliberately does not
 claim an encoding for a non-empty Task template collection.
 
-## Register generated-type attestation on 8.3.27.2214
+## Register and plan generated-type attestation on 8.3.27.2214
 
-Issue #282 also carries a 73 KB diagnostic corpus at
+Issue #282 also carries a compact diagnostic corpus at
 `tests/fixtures/native-evidence/8.3.27.2214/register-generated-types`. One
 minimal XML 2.20 configuration contains an `AccountingRegister`, a
 `CalculationRegister`, their required plans, and one shared recorder document.
 The first platform-saved CF is only 90,645 bytes. Loading it into a second
-isolated file infobase changes the outer CF hash, but the two exact raw payloads
-and both selected native XML exports remain byte-identical.
+isolated file infobase changes the outer CF hash, but the four selected exact
+raw payloads and native XML exports remain byte-identical. The initially saved
+CF was therefore reused to attest both plan objects without another import or
+full export.
 
 The seed follows Unica main at
 `a527d40962d047c6922c903b37510b30f697da42`, but Unica is not the authority.
@@ -120,6 +122,15 @@ order is `Record`, `Manager`, `Selection`, `List`, `RecordSet`, `RecordKey`, and
 `Recalcs`. The offline regression compares the complete generated-type writer
 block against native XML, including every type/value UUID. No recalculation
 child layout or unrelated register property is inferred.
+
+The same evidence proves seven generated types for `ChartOfAccounts`, including
+`ExtDimensionTypes` and `ExtDimensionTypesRow`, and eleven generated types for
+`ChartOfCalculationTypes`. The XML writer already emitted the complete native
+blocks, but the raw type index for object code `32` exposed only the first five
+ChartOfAccounts types. The evidence-backed schema now indexes all seven. This
+fix is deliberately limited to the declarative generated-type slots and their
+exact header/UUID-vector guard; a partial or malformed vector fails atomically.
+No new raw layout or XML property heuristic was added.
 
 Portable fixtures cover minimal Subsystem content/hierarchy, child-rich
 ExchangePlan and BusinessProcess tabular metadata, Task addressing ownership,

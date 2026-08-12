@@ -231,6 +231,8 @@ Assert-RawNativeEvidenceCorpus `
     -ExpectedObjects @{
         AccountingRegister = '8b6ea484-0164-4c68-a0cb-175a31c56186'
         CalculationRegister = '5ad20ecf-0375-4218-b348-0534286973a5'
+        ChartOfAccounts = '7671ada0-5cde-47a2-b49e-8de67818fb10'
+        ChartOfCalculationTypes = '8c132029-d49c-49db-b12b-64519b64d755'
     }
 
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
@@ -280,4 +282,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + register generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + register and plan generated types.'
