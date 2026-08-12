@@ -246,6 +246,38 @@ impl From<SchemaError> for DcsListSettingsTailError {
     }
 }
 
+/// Failure to emit the verified scalar children from canonical DCS settings.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DcsSettingsChildrenError {
+    /// The canonical envelope or its evidence gate rejected serialization.
+    Serialization(DcsSerializationError),
+    /// The caller-supplied lexical fragment context is invalid.
+    Fragment(DcsListSettingsTailError),
+}
+
+impl Display for DcsSettingsChildrenError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Serialization(error) => write!(formatter, "{error}"),
+            Self::Fragment(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl Error for DcsSettingsChildrenError {}
+
+impl From<DcsSerializationError> for DcsSettingsChildrenError {
+    fn from(error: DcsSerializationError) -> Self {
+        Self::Serialization(error)
+    }
+}
+
+impl From<DcsListSettingsTailError> for DcsSettingsChildrenError {
+    fn from(error: DcsListSettingsTailError) -> Self {
+        Self::Fragment(error)
+    }
+}
+
 /// Emits only the two verified final children of a caller-owned Form
 /// `ListSettings` wrapper.
 pub fn emit_form_list_settings_tail(
@@ -313,6 +345,28 @@ pub fn emit_form_list_settings_tail(
         output.push_str(">\r\n");
     }
     Ok(output)
+}
+
+/// Emits the two verified settings children from the shared canonical IR.
+///
+/// The physical wrapper remains caller-owned because standalone DCS and Form
+/// embed the same semantics in different surrounding documents. Both callers
+/// still cross the same evidence preflight and omission/order policy here.
+pub fn emit_dcs_settings_children(
+    envelope: &DcsSettingsEnvelope,
+    target_profile: &ProfileId,
+    prefix: &str,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    preflight_dcs_settings_serialization(envelope, target_profile)?;
+    let settings = envelope.as_settings();
+    emit_form_list_settings_tail(
+        settings.items_view_mode().map(|value| value.as_str()),
+        settings.items_user_setting_id().map(|value| value.as_str()),
+        prefix,
+        indent,
+    )
+    .map_err(Into::into)
 }
 
 fn is_xml_prefix(prefix: &str) -> bool {
@@ -792,6 +846,20 @@ mod tests {
         assert!(
             emit_form_list_settings_tail(Some(&"x".repeat(4 * 1024 + 1)), None, "dcsset", "")
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn canonical_settings_children_are_identical_across_physical_contexts() {
+        let target = ProfileId::parse("xml-2.20").unwrap();
+        let standalone =
+            emit_dcs_settings_children(&envelope(false, None), &target, "dcsset", "\t").unwrap();
+        let form =
+            emit_dcs_settings_children(&envelope(true, None), &target, "dcsset", "\t").unwrap();
+        assert_eq!(standalone, form);
+        assert_eq!(
+            standalone,
+            "\t<dcsset:itemsUserSettingID>main-settings</dcsset:itemsUserSettingID>\r\n"
         );
     }
 

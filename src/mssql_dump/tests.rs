@@ -6647,7 +6647,7 @@ fn opaque_choice_list_does_not_recover_malformed_list_settings_source_asset() {
     };
 
     assert!(
-        format!("{error:#}").contains("was rejected: DcsTail"),
+        format!("{error:#}").contains("was rejected: CanonicalDcs"),
         "{error:#}"
     );
     assert!(
@@ -6788,7 +6788,7 @@ fn collect_all_keeps_rejection_without_structured_diagnostics_fatal() {
     };
 
     assert!(
-        format!("{error:#}").contains("was rejected: DcsTail"),
+        format!("{error:#}").contains("was rejected: CanonicalDcs"),
         "{error:#}"
     );
     assert!(
@@ -8794,7 +8794,7 @@ fn opaque_choice_list_does_not_mask_malformed_dynamic_list_settings() {
             None,
             std::slice::from_ref(&malformed_attribute),
         ),
-        Err(FormSchemaWriteError::DcsTail(_))
+        Err(FormSchemaWriteError::CanonicalDcs(_))
     ));
 }
 
@@ -21003,14 +21003,15 @@ fn form_choice_list_uses_verified_schema_order_and_fails_closed_for_opaque_paylo
 }
 
 #[test]
-fn form_list_settings_reports_canonical_dcs_dependency_instead_of_guessing() {
-    assert_eq!(
-        require_canonical_form_list_settings_serializer(),
-        Err(FormSchemaWriteError::CanonicalDcsSerializerPending {
-            rule_id: "form.dynamic-list.list-settings".to_owned(),
-            dependency: "GitHub #283 / build-canonical-dcs-serializer",
-        })
-    );
+fn form_list_settings_uses_the_canonical_dcs_scalar_serializer() {
+    let xml = format_form_list_settings_xml(&FormListSettings {
+        items_view_mode: Some("Compact".to_owned()),
+        items_user_setting_id: Some("canonical-id".to_owned()),
+        ..FormListSettings::default()
+    })
+    .unwrap();
+    assert!(xml.contains("<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>"));
+    assert!(xml.contains("<dcsset:itemsUserSettingID>canonical-id</dcsset:itemsUserSettingID>"));
 }
 
 #[test]

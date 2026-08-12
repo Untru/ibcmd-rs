@@ -1,4 +1,12 @@
 use super::*;
+use ibcmd_core::dcs::{DcsBuildError, DcsSettings, DcsSettingsEnvelope};
+use ibcmd_core::diagnostic::{PathSegment, PropertyPath};
+use ibcmd_core::opaque::OpaqueFacets;
+use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
+use ibcmd_core::value::{CanonicalText, EnumToken};
+use ibcmd_xml::{
+    AttributeKind, DcsSettingsChildrenError, XmlElement, XmlNode, emit_dcs_settings_children,
+};
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
 const DCS_COMMON_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/common";
@@ -26,6 +34,90 @@ const DATA_COMPOSITION_SCHEMA_DOCUMENT_PREFIX: &str = "\u{feff}<?xml version=\"1
 <DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
 const DATA_COMPOSITION_SCHEMA_DOCUMENT_SUFFIX: &str = "\r\n</DataCompositionSchema>";
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(super) enum CanonicalDcsSettingsContext {
+    Standalone,
+    FormListSettings,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum CanonicalDcsSettingsAdapterError {
+    Value {
+        field: &'static str,
+        message: String,
+    },
+    Provenance(String),
+    Build(DcsBuildError),
+    Serialize(DcsSettingsChildrenError),
+}
+
+impl std::fmt::Display for CanonicalDcsSettingsAdapterError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Value { field, message } => {
+                write!(formatter, "invalid canonical DCS {field}: {message}")
+            }
+            Self::Provenance(message) => {
+                write!(formatter, "invalid canonical DCS provenance: {message}")
+            }
+            Self::Build(error) => write!(formatter, "{error}"),
+            Self::Serialize(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for CanonicalDcsSettingsAdapterError {}
+
+pub(super) fn emit_canonical_dcs_settings_children(
+    context: CanonicalDcsSettingsContext,
+    items_view_mode: Option<&str>,
+    items_user_setting_id: Option<&str>,
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
+    prefix: &str,
+    indent: &str,
+    locator: &str,
+) -> Result<String, CanonicalDcsSettingsAdapterError> {
+    let items_view_mode = items_view_mode
+        .map(EnumToken::new)
+        .transpose()
+        .map_err(|error| CanonicalDcsSettingsAdapterError::Value {
+            field: "itemsViewMode",
+            message: error.to_string(),
+        })?;
+    let items_user_setting_id = items_user_setting_id
+        .map(CanonicalText::new)
+        .transpose()
+        .map_err(|error| CanonicalDcsSettingsAdapterError::Value {
+            field: "itemsUserSettingID",
+            message: error.to_string(),
+        })?;
+    let anchor = CanonicalAnchor::new(
+        ObjectPath::new(vec![
+            PathSegment::name("dcs_settings").expect("static DCS object path is valid"),
+        ])
+        .expect("static DCS object path is bounded"),
+        PropertyPath::root(),
+    );
+    let provenance = SourceProvenance::with_locator(source_profile.clone(), anchor, locator)
+        .map_err(|error| CanonicalDcsSettingsAdapterError::Provenance(error.to_string()))?;
+    let settings = DcsSettings::new(
+        items_user_setting_id,
+        items_view_mode,
+        OpaqueFacets::new(Vec::new()).expect("empty opaque facets are valid"),
+        provenance,
+    )
+    .map_err(CanonicalDcsSettingsAdapterError::Build)?;
+    let envelope = match context {
+        CanonicalDcsSettingsContext::Standalone => DcsSettingsEnvelope::settings(settings),
+        CanonicalDcsSettingsContext::FormListSettings => {
+            DcsSettingsEnvelope::list_settings(settings)
+        }
+    };
+    emit_dcs_settings_children(&envelope, target_profile, prefix, indent)
+        .map_err(CanonicalDcsSettingsAdapterError::Serialize)
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum DcsTypeResolution {
     KeepId,
@@ -35,10 +127,29 @@ pub(crate) enum DcsTypeResolution {
 
 pub(crate) type DcsTypeIndex = BTreeMap<String, DcsTypeResolution>;
 
+#[cfg(test)]
 pub(crate) fn normalize_data_composition_schema_template_xml(
     inflated: &[u8],
     type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<u8>> {
+    let source_profile = ProfileId::parse("provider:mssql-legacy").ok()?;
+    let target_profile = ProfileId::parse("xml-2.20").ok()?;
+    normalize_data_composition_schema_template_xml_with_profiles(
+        inflated,
+        type_index,
+        object_refs,
+        &source_profile,
+        &target_profile,
+    )
+}
+
+pub(crate) fn normalize_data_composition_schema_template_xml_with_profiles(
+    inflated: &[u8],
+    type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
 ) -> Option<Vec<u8>> {
     let xml_start = find_bytes(inflated, b"<?xml")?;
     let text = std::str::from_utf8(&inflated[xml_start..]).ok()?;
@@ -54,7 +165,12 @@ pub(crate) fn normalize_data_composition_schema_template_xml(
         .iter()
         .filter(|document| document.contains("<Settings") && document.contains(DCS_SETTINGS_URI))
         .filter_map(|document| {
-            canonicalize_data_composition_settings_document(document, object_refs)
+            canonicalize_data_composition_settings_document(
+                document,
+                object_refs,
+                source_profile,
+                target_profile,
+            )
         })
         .collect::<Vec<_>>();
     let mut xml = canonicalize_data_composition_schema_documents(&schema_documents, object_refs)?;
@@ -952,14 +1068,152 @@ fn direct_settings_variant_insertion_offset(xml: &str) -> Option<usize> {
 fn canonicalize_data_composition_settings_document(
     document: &str,
     object_refs: &BTreeMap<String, String>,
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
 ) -> Option<String> {
+    let (items_view_mode, items_user_setting_id) =
+        direct_data_composition_settings_scalars(document)?;
     let mut writer = DataCompositionXmlWriter::new(object_refs);
     writer.write_document(document, DataCompositionDocumentMode::Settings)?;
+    let tail = emit_canonical_dcs_settings_children(
+        CanonicalDcsSettingsContext::Standalone,
+        items_view_mode.as_deref(),
+        items_user_setting_id.as_deref(),
+        source_profile,
+        target_profile,
+        "dcsset",
+        "\t",
+        "mssql:dcs/Settings",
+    )
+    .ok()?;
+    rewrite_canonical_data_composition_settings_tail(
+        &mut writer.output,
+        items_view_mode.is_some(),
+        items_user_setting_id.is_some(),
+        &tail,
+    )?;
     let settings = writer
         .output
         .trim_start_matches(['\r', '\n', '\t'])
         .to_string();
     Some(indent_data_composition_settings(&settings))
+}
+
+fn direct_data_composition_settings_scalars(
+    document: &str,
+) -> Option<(Option<String>, Option<String>)> {
+    let document = XmlReader::from_slice(document.as_bytes()).ok()?;
+    let root = document.root();
+    if root.name().local() != "Settings"
+        || !xml_element_uses_namespace(root, root, DCS_SETTINGS_URI)
+    {
+        return None;
+    }
+    let mut items_view_mode = None;
+    let mut items_user_setting_id = None;
+    for node in root.children() {
+        let XmlNode::Element(element) = node else {
+            continue;
+        };
+        let target = match element.name().local() {
+            "itemsViewMode" => &mut items_view_mode,
+            "itemsUserSettingID" => &mut items_user_setting_id,
+            _ => continue,
+        };
+        if !xml_element_uses_namespace(element, root, DCS_SETTINGS_URI)
+            || target.is_some()
+            || element
+                .attributes()
+                .iter()
+                .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+        {
+            return None;
+        }
+        let mut value = String::new();
+        for child in element.children() {
+            match child {
+                XmlNode::Text(text) => value.push_str(text.value()),
+                XmlNode::CData(text) => value.push_str(text.value()),
+                _ => return None,
+            }
+        }
+        *target = Some(value);
+    }
+    Some((items_view_mode, items_user_setting_id))
+}
+
+fn xml_element_uses_namespace(element: &XmlElement, root: &XmlElement, uri: &str) -> bool {
+    fn declaration<'a>(element: &'a XmlElement, prefix: Option<&str>) -> Option<&'a str> {
+        element.attributes().iter().find_map(|attribute| {
+            let AttributeKind::Namespace(declared_prefix) = attribute.kind() else {
+                return None;
+            };
+            (declared_prefix.as_deref() == prefix).then_some(attribute.value())
+        })
+    }
+
+    let prefix = element.name().prefix();
+    declaration(element, prefix).or_else(|| {
+        if std::ptr::eq(element, root) {
+            None
+        } else {
+            declaration(root, prefix)
+        }
+    }) == Some(uri)
+}
+
+fn rewrite_canonical_data_composition_settings_tail(
+    xml: &mut String,
+    remove_items_view_mode: bool,
+    remove_items_user_setting_id: bool,
+    tail: &str,
+) -> Option<()> {
+    for (remove, local) in [
+        (remove_items_view_mode, "itemsViewMode"),
+        (remove_items_user_setting_id, "itemsUserSettingID"),
+    ] {
+        if remove {
+            remove_unique_canonical_dcs_child(xml, local)?;
+        }
+    }
+    if !remove_items_view_mode && !remove_items_user_setting_id {
+        return tail.is_empty().then_some(());
+    }
+    let closing = "</dcsset:settings>";
+    let closing_offset = xml.rfind(closing)?;
+    let insertion = xml[..closing_offset]
+        .trim_end_matches(['\r', '\n', '\t', ' '])
+        .len();
+    xml.replace_range(insertion..closing_offset, "");
+    let insertion_text = if tail.is_empty() {
+        "\r\n".to_string()
+    } else {
+        format!("\r\n{tail}")
+    };
+    xml.insert_str(insertion, &insertion_text);
+    Some(())
+}
+
+fn remove_unique_canonical_dcs_child(xml: &mut String, local: &str) -> Option<()> {
+    let open = format!("<dcsset:{local}>");
+    let empty = format!("<dcsset:{local}/>");
+    let close = format!("</dcsset:{local}>");
+    let (start, end) = if let Some(start) = xml.find(&open) {
+        let content_start = start.checked_add(open.len())?;
+        let relative_end = xml[content_start..].find(&close)?;
+        let end = content_start
+            .checked_add(relative_end)?
+            .checked_add(close.len())?;
+        (start, end)
+    } else {
+        let start = xml.find(&empty)?;
+        (start, start.checked_add(empty.len())?)
+    };
+    if xml[end..].contains(&open) || xml[end..].contains(&empty) {
+        return None;
+    }
+    xml.replace_range(start..end, "");
+    Some(())
 }
 
 pub(crate) fn canonicalize_form_data_composition_fragment(
@@ -2556,6 +2810,65 @@ mod tests {
         assert_eq!(variant_bodies[2].matches("<dcsset:settings").count(), 1);
         assert!(variant_bodies[2].contains("<dcsset:field>TertiaryMarker</dcsset:field>"));
         assert!(!variant_bodies[2].contains("PrimaryMarker"));
+    }
+
+    #[test]
+    fn standalone_settings_tail_uses_the_shared_canonical_scalar_path() {
+        let settings = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">",
+            "<selection/>",
+            "<itemsUserSettingID>id&lt;&amp;</itemsUserSettingID>",
+            "<itemsViewMode>Compact</itemsViewMode>",
+            "</Settings>"
+        );
+        assert_eq!(
+            direct_data_composition_settings_scalars(settings).unwrap(),
+            (Some("Compact".to_owned()), Some("id<&".to_owned()))
+        );
+        let source_profile = ProfileId::parse("provider:mssql-legacy").unwrap();
+        let target_profile = ProfileId::parse("xml-2.20").unwrap();
+        let canonical_settings = canonicalize_data_composition_settings_document(
+            settings,
+            &BTreeMap::new(),
+            &source_profile,
+            &target_profile,
+        )
+        .unwrap();
+        assert!(canonical_settings.contains("<dcsset:itemsViewMode>Compact"));
+
+        let raw = format!(
+            "{}{}",
+            concat!(
+                "\0\0\0\0\0\0\0\0",
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+                "<SchemaFile xmlns=\"\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+                "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">",
+                "<settingsVariant><name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Default</name></settingsVariant>",
+                "</dataCompositionSchema></SchemaFile>"
+            ),
+            settings
+        );
+
+        let xml = String::from_utf8(
+            normalize_data_composition_schema_template_xml(
+                raw.as_bytes(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let view = xml
+            .find("<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>")
+            .unwrap();
+        let id = xml
+            .find("<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>")
+            .unwrap();
+        assert!(view < id);
+        assert_eq!(xml.matches("<dcsset:itemsViewMode>").count(), 1);
+        assert_eq!(xml.matches("<dcsset:itemsUserSettingID>").count(), 1);
     }
 
     #[test]

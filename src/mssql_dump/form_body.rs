@@ -66,8 +66,7 @@ use ibcmd_schema::{
     parse_generated_metadata_owner, parse_metadata_data_path,
 };
 use ibcmd_xml::{
-    DcsListSettingsTailError, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
-    emit_form_choice_parameters, emit_form_list_settings_tail,
+    FormChoiceParametersEmitError, emit_form_choice_parameter_links, emit_form_choice_parameters,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -106,6 +105,8 @@ pub(super) struct FormParseContext<'a> {
     object_refs: &'a BTreeMap<String, String>,
     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
     form_owner_reference: Option<&'a str>,
+    dcs_source_profile: ProfileId,
+    dcs_target_profile: ProfileId,
     trace_sink: Option<&'a dyn FormItemTraceSink>,
 }
 
@@ -150,8 +151,21 @@ impl<'a> FormParseContext<'a> {
             object_refs,
             information_register_field_refs,
             form_owner_reference,
+            dcs_source_profile: ProfileId::parse("provider:mssql-legacy")
+                .expect("static MSSQL provider profile is valid"),
+            dcs_target_profile: ProfileId::parse("xml-2.20").expect("static XML profile is valid"),
             trace_sink: None,
         }
+    }
+
+    pub(super) fn with_dcs_profiles(
+        mut self,
+        source_profile: ProfileId,
+        target_profile: ProfileId,
+    ) -> Self {
+        self.dcs_source_profile = source_profile;
+        self.dcs_target_profile = target_profile;
+        self
     }
 
     #[allow(dead_code)]
@@ -404,12 +418,14 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         // Writer-corpus, policy, and other formatter failures are never diagnostic data
         // failures. Exercise every fallible writer path before taking the one recoverable exit;
         // emitted forms continue through the real formatter exactly once below.
-        if let Err(error) = preflight_form_writer_paths(
+        if let Err(error) = preflight_form_writer_paths_with_dcs_profiles(
             &child_items,
             auto_command_bar
                 .as_ref()
                 .map(|command_bar| command_bar.child_items.as_slice()),
             &attributes,
+            &context.dcs_source_profile,
+            &context.dcs_target_profile,
         ) {
             return Some(DetailedFormBodyExtraction::Rejected { diagnostics, error });
         }
@@ -428,7 +444,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     }
 
     let started = Instant::now();
-    let xml = match format_form_body_xml(
+    let xml = match format_form_body_xml_with_dcs_profiles(
         &properties,
         auto_command_bar.as_ref(),
         &events,
@@ -438,6 +454,8 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
         &parameters,
         &commands,
         &command_interface,
+        &context.dcs_source_profile,
+        &context.dcs_target_profile,
     ) {
         Ok(xml) => xml,
         Err(error) => {
@@ -1200,7 +1218,7 @@ pub(super) type CanonicalFormChoiceParameterCluster = FormChoiceParameterCluster
 pub(super) enum FormSchemaWriteError {
     Corpus(SchemaError),
     WriterRule(WriterRuleLookupError),
-    DcsTail(DcsListSettingsTailError),
+    CanonicalDcs(CanonicalDcsSettingsAdapterError),
     UnexpectedPolicy {
         rule_id: String,
         expected: &'static str,
@@ -1221,11 +1239,6 @@ pub(super) enum FormSchemaWriteError {
     },
     UnsupportedTypedChoiceParameterAvailableTypes,
     ChoiceParametersEmit(FormChoiceParametersEmitError),
-    #[allow(dead_code)]
-    CanonicalDcsSerializerPending {
-        rule_id: String,
-        dependency: &'static str,
-    },
 }
 
 impl From<WriterRuleLookupError> for FormSchemaWriteError {
@@ -1240,9 +1253,9 @@ impl From<SchemaError> for FormSchemaWriteError {
     }
 }
 
-impl From<DcsListSettingsTailError> for FormSchemaWriteError {
-    fn from(error: DcsListSettingsTailError) -> Self {
-        Self::DcsTail(error)
+impl From<CanonicalDcsSettingsAdapterError> for FormSchemaWriteError {
+    fn from(error: CanonicalDcsSettingsAdapterError) -> Self {
+        Self::CanonicalDcs(error)
     }
 }
 
@@ -1280,31 +1293,6 @@ fn verified_form_choice_parameters_policy() -> Result<WriterPolicy, FormSchemaWr
         _ => Err(FormSchemaWriteError::UnexpectedPolicy {
             rule_id: rule.id.clone(),
             expected: "form-choice-parameters",
-        }),
-    }
-}
-
-/// Resolves the verified delegate without pretending that #283's canonical DCS serializer
-/// already exists.  Calling this as a Form-layer serializer therefore fails closed.
-#[allow(dead_code)]
-pub(super) fn require_canonical_form_list_settings_serializer() -> Result<(), FormSchemaWriteError>
-{
-    let corpus = bundled_writer_rules()?;
-    let rule = corpus.exact_rule(WriterRuleKey {
-        source_release: "2025.2.3+30",
-        model_type: "DynamicListExtInfo",
-        feature: "listSettings",
-    })?;
-    match &rule.policy {
-        Some(WriterPolicy::FormListSettings { .. }) => {
-            Err(FormSchemaWriteError::CanonicalDcsSerializerPending {
-                rule_id: rule.id.clone(),
-                dependency: "GitHub #283 / build-canonical-dcs-serializer",
-            })
-        }
-        _ => Err(FormSchemaWriteError::UnexpectedPolicy {
-            rule_id: rule.id.clone(),
-            expected: "form-list-settings",
         }),
     }
 }
@@ -1394,10 +1382,30 @@ fn preflight_form_choice_parameter_writer_paths(
     Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn preflight_form_writer_paths(
     child_items: &[FormChildItem],
     auto_command_bar_child_items: Option<&[FormChildItem]>,
     attributes: &[FormAttribute],
+) -> Result<(), FormSchemaWriteError> {
+    let source_profile =
+        ProfileId::parse("provider:mssql-legacy").expect("static MSSQL provider profile is valid");
+    let target_profile = ProfileId::parse("xml-2.20").expect("static XML profile is valid");
+    preflight_form_writer_paths_with_dcs_profiles(
+        child_items,
+        auto_command_bar_child_items,
+        attributes,
+        &source_profile,
+        &target_profile,
+    )
+}
+
+fn preflight_form_writer_paths_with_dcs_profiles(
+    child_items: &[FormChildItem],
+    auto_command_bar_child_items: Option<&[FormChildItem]>,
+    attributes: &[FormAttribute],
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
 ) -> Result<(), FormSchemaWriteError> {
     validate_form_writer_policy_availability_trees(child_items, auto_command_bar_child_items)?;
     preflight_form_choice_parameter_writer_paths(child_items)?;
@@ -1410,11 +1418,15 @@ pub(super) fn preflight_form_writer_paths(
     {
         // This is the only fallible DynamicList/ListSettings formatter path. It returns its
         // complete fragment atomically and has no output or filesystem side effects.
-        drop(emit_form_list_settings_tail(
+        drop(emit_canonical_dcs_settings_children(
+            CanonicalDcsSettingsContext::FormListSettings,
             settings.list_settings.items_view_mode.as_deref(),
             settings.list_settings.items_user_setting_id.as_deref(),
+            source_profile,
+            target_profile,
             "dcsset",
             "\t\t\t\t\t",
+            "mssql:form/ListSettings",
         )?);
     }
     Ok(())
@@ -14174,6 +14186,7 @@ fn format_form_mobile_device_command_bar_content_xml(items: &[String]) -> String
     xml
 }
 
+#[cfg(test)]
 pub(super) fn format_form_body_xml(
     properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
@@ -14184,6 +14197,38 @@ pub(super) fn format_form_body_xml(
     parameters: &[FormParameter],
     commands: &[FormCommand],
     command_interface: &Option<FormCommandInterface>,
+) -> Result<String, FormSchemaWriteError> {
+    let source_profile =
+        ProfileId::parse("provider:mssql-legacy").expect("static MSSQL provider profile is valid");
+    let target_profile = ProfileId::parse("xml-2.20").expect("static XML profile is valid");
+    format_form_body_xml_with_dcs_profiles(
+        properties,
+        auto_command_bar,
+        events,
+        child_items,
+        attributes,
+        attributes_section,
+        parameters,
+        commands,
+        command_interface,
+        &source_profile,
+        &target_profile,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn format_form_body_xml_with_dcs_profiles(
+    properties: &FormBodyProperties,
+    auto_command_bar: Option<&FormAutoCommandBar>,
+    events: &[FormBodyEvent],
+    child_items: &[FormChildItem],
+    attributes: &[FormAttribute],
+    attributes_section: &FormAttributesSection,
+    parameters: &[FormParameter],
+    commands: &[FormCommand],
+    command_interface: &Option<FormCommandInterface>,
+    dcs_source_profile: &ProfileId,
+    dcs_target_profile: &ProfileId,
 ) -> Result<String, FormSchemaWriteError> {
     let mut xml = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcssch=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:ent=\"http://v8.1c.ru/8.1/data/enterprise\" xmlns:lf=\"http://v8.1c.ru/8.2/managed-application/logform\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\
@@ -14394,9 +14439,11 @@ pub(super) fn format_form_body_xml(
         xml.push_str("\t</Events>\r\n");
     }
     xml.push_str(&format_form_child_items_xml(child_items, 1));
-    xml.push_str(&format_form_attributes_section_xml(
+    xml.push_str(&format_form_attributes_section_xml_with_dcs_profiles(
         attributes,
         attributes_section,
+        dcs_source_profile,
+        dcs_target_profile,
     )?);
     if !commands.is_empty() {
         xml.push_str("\t<Commands>\r\n");
@@ -17485,15 +17532,37 @@ pub(super) fn format_form_attributes_xml(attributes: &[FormAttribute]) -> String
         .expect("bundled DCS writer evidence must validate in tests")
 }
 
+#[cfg(test)]
 pub(super) fn format_form_attributes_section_xml(
     attributes: &[FormAttribute],
     attributes_section: &FormAttributesSection,
+) -> Result<String, FormSchemaWriteError> {
+    let source_profile =
+        ProfileId::parse("provider:mssql-legacy").expect("static MSSQL provider profile is valid");
+    let target_profile = ProfileId::parse("xml-2.20").expect("static XML profile is valid");
+    format_form_attributes_section_xml_with_dcs_profiles(
+        attributes,
+        attributes_section,
+        &source_profile,
+        &target_profile,
+    )
+}
+
+fn format_form_attributes_section_xml_with_dcs_profiles(
+    attributes: &[FormAttribute],
+    attributes_section: &FormAttributesSection,
+    dcs_source_profile: &ProfileId,
+    dcs_target_profile: &ProfileId,
 ) -> Result<String, FormSchemaWriteError> {
     if attributes.is_empty() && attributes_section.conditional_appearance_xml.is_none() {
         return Ok("\t<Attributes/>\r\n".to_string());
     }
     let mut xml = "\t<Attributes>\r\n".to_string();
-    xml.push_str(&format_form_attributes_items_xml(attributes)?);
+    xml.push_str(&format_form_attributes_items_xml_with_dcs_profiles(
+        attributes,
+        dcs_source_profile,
+        dcs_target_profile,
+    )?);
     if let Some(conditional_appearance_xml) = &attributes_section.conditional_appearance_xml {
         xml.push_str(&indent_xml_fragment(
             &split_adjacent_xml_tags(conditional_appearance_xml),
@@ -17504,8 +17573,10 @@ pub(super) fn format_form_attributes_section_xml(
     Ok(xml)
 }
 
-pub(super) fn format_form_attributes_items_xml(
+fn format_form_attributes_items_xml_with_dcs_profiles(
     attributes: &[FormAttribute],
+    dcs_source_profile: &ProfileId,
+    dcs_target_profile: &ProfileId,
 ) -> Result<String, FormSchemaWriteError> {
     let mut xml = String::new();
     for attribute in attributes {
@@ -17638,7 +17709,11 @@ pub(super) fn format_form_attributes_items_xml(
                     escape_xml_text(main_table)
                 ));
             }
-            xml.push_str(&format_form_list_settings_xml(&settings.list_settings)?);
+            xml.push_str(&format_form_list_settings_xml_with_dcs_profiles(
+                &settings.list_settings,
+                dcs_source_profile,
+                dcs_target_profile,
+            )?);
             xml.push_str("\t\t\t</Settings>\r\n");
         } else if let Some(spreadsheet_document_settings) = &attribute.spreadsheet_document_settings
         {
@@ -17704,14 +17779,30 @@ pub(super) fn format_form_attribute_column_xml(
     xml
 }
 
+#[cfg(test)]
 pub(super) fn format_form_list_settings_xml(
     settings: &FormListSettings,
 ) -> Result<String, FormSchemaWriteError> {
-    let tail_xml = emit_form_list_settings_tail(
+    let source_profile =
+        ProfileId::parse("provider:mssql-legacy").expect("static MSSQL provider profile is valid");
+    let target_profile = ProfileId::parse("xml-2.20").expect("static XML profile is valid");
+    format_form_list_settings_xml_with_dcs_profiles(settings, &source_profile, &target_profile)
+}
+
+fn format_form_list_settings_xml_with_dcs_profiles(
+    settings: &FormListSettings,
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
+) -> Result<String, FormSchemaWriteError> {
+    let tail_xml = emit_canonical_dcs_settings_children(
+        CanonicalDcsSettingsContext::FormListSettings,
         settings.items_view_mode.as_deref(),
         settings.items_user_setting_id.as_deref(),
+        source_profile,
+        target_profile,
         "dcsset",
         "\t\t\t\t\t",
+        "mssql:form/ListSettings",
     )?;
     if !form_list_settings_standard_section_has_output(settings.filter.as_ref())
         && !form_list_settings_order_has_output(settings.order.as_ref())

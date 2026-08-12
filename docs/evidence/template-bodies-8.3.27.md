@@ -78,6 +78,17 @@ complete selected XML to match the platform output byte-for-byte. This is
 evidence for a shared 8.3.27 / XML 2.20 DCS body contract, not a distinct
 patch-build dialect.
 
+A third isolated 8.3.27.2214 file infobase provides the reverse acceptance
+check. The production compiler rebuilt the native `Template.xml` into a valid
+4,734-byte three-document body, that body alone was overlaid onto the retained
+micro-CF, and pinned `ibcmd` loaded and applied it successfully. A recursive
+export of `Report.DcsCorpus` then matched all five selected round-2 files
+byte-for-byte. The compiler body is intentionally not byte-identical to the
+4,458-byte platform body because namespace declarations use different legal
+lexical placement; the platform canonicalizes both to the same source XML.
+Therefore byte-identical reverse storage spelling is not a correctness gate
+for this slice.
+
 ## Retained evidence
 
 Hashes below are of the inflated native row bytes, not the compressed SQL

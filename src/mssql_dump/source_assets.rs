@@ -1350,6 +1350,10 @@ pub(super) fn write_source_asset(
                 })?;
                 &owned_body
             };
+            let adapter = MssqlLegacyAdapter::from_legacy_selector(context.source_version);
+            let dcs_target_profile =
+                ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
+                    .expect("legacy source-version profiles are valid");
             let form_context = FormParseContext::new(
                 context.type_index,
                 context.type_index_collisions,
@@ -1357,7 +1361,8 @@ pub(super) fn write_source_asset(
                 context.object_refs,
                 context.information_register_field_refs,
                 owner_reference.as_deref(),
-            );
+            )
+            .with_dcs_profiles(adapter.provider_id().clone(), dcs_target_profile);
             let extraction =
                 extract_form_body_xml_from_body_detailed_timed(body, &form_context, Some(timings))
                     .with_context(|| {
@@ -1479,12 +1484,28 @@ pub(super) fn write_source_asset(
                 )
             })?;
             let inflated = body.plaintext().to_vec();
-            let content = normalize_data_composition_schema_template_xml(
-                &inflated,
-                context.dcs_type_index,
-                context.object_refs,
-            )
-            .unwrap_or(inflated);
+            let adapter = MssqlLegacyAdapter::from_legacy_selector(context.source_version);
+            let target_profile =
+                ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
+                    .expect("legacy source-version profiles are valid");
+            let content = match body.layout() {
+                crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument => {
+                    normalize_data_composition_schema_template_xml_with_profiles(
+                        &inflated,
+                        context.dcs_type_index,
+                        context.object_refs,
+                        adapter.provider_id(),
+                        &target_profile,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "failed to normalize native data-composition source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?
+                }
+                crate::compiler::bodies::dcs::DcsBodyLayout::DirectXml => inflated,
+            };
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)
