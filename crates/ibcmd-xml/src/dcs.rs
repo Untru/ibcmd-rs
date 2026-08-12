@@ -17,6 +17,11 @@ use ibcmd_schema::{
 };
 use quick_xml::escape::escape;
 
+use crate::node::{AttributeKind, XmlElement, XmlNode};
+use crate::reader::XmlReader;
+
+const DCS_SETTINGS_NAMESPACE: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+
 /// EDT release against which the DCS writer boundary was inspected.
 pub const DCS_WRITER_EVIDENCE_RELEASE: &str = "2025.2.3+30";
 /// Legacy diagnostic identifier retained for source compatibility. The bounded
@@ -255,6 +260,25 @@ pub enum DcsSettingsChildrenError {
     Fragment(DcsListSettingsTailError),
 }
 
+/// The two platform-evidenced scalar children read from a DCS settings root.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DcsSettingsScalars {
+    items_view_mode: Option<String>,
+    items_user_setting_id: Option<String>,
+}
+
+impl DcsSettingsScalars {
+    /// Returns the direct `itemsViewMode` value, if present.
+    pub fn items_view_mode(&self) -> Option<&str> {
+        self.items_view_mode.as_deref()
+    }
+
+    /// Returns the direct `itemsUserSettingID` value, if present.
+    pub fn items_user_setting_id(&self) -> Option<&str> {
+        self.items_user_setting_id.as_deref()
+    }
+}
+
 impl Display for DcsSettingsChildrenError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
@@ -367,6 +391,132 @@ pub fn emit_dcs_settings_children(
         indent,
     )
     .map_err(Into::into)
+}
+
+/// Reads the two verified direct scalar children from a standalone DCS
+/// `Settings` document.
+///
+/// Unknown siblings are left to their owning codec. Duplicate scalars,
+/// attributes, complex scalar content, or an inexact namespace fail closed.
+pub fn parse_dcs_settings_scalars(document: &str) -> Option<DcsSettingsScalars> {
+    let document = XmlReader::from_slice(document.as_bytes()).ok()?;
+    let root = document.root();
+    if root.name().local() != "Settings"
+        || !xml_element_uses_namespace(root, root, DCS_SETTINGS_NAMESPACE)
+    {
+        return None;
+    }
+    let mut scalars = DcsSettingsScalars::default();
+    for node in root.children() {
+        let XmlNode::Element(element) = node else {
+            continue;
+        };
+        let target = match element.name().local() {
+            "itemsViewMode" => &mut scalars.items_view_mode,
+            "itemsUserSettingID" => &mut scalars.items_user_setting_id,
+            _ => continue,
+        };
+        if !xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
+            || target.is_some()
+            || element
+                .attributes()
+                .iter()
+                .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+        {
+            return None;
+        }
+        let mut value = String::new();
+        for child in element.children() {
+            match child {
+                XmlNode::Text(text) => value.push_str(text.value()),
+                XmlNode::CData(text) => value.push_str(text.value()),
+                _ => return None,
+            }
+        }
+        *target = Some(value);
+    }
+    Some(scalars)
+}
+
+/// Replaces the two verified scalar children in a canonical DCS settings
+/// fragment with an already evidence-gated shared serialization.
+///
+/// This keeps QName recognition and child placement in the XML layer instead
+/// of leaking them into a physical provider adapter.
+pub fn rewrite_dcs_settings_children(
+    xml: &mut String,
+    scalars: &DcsSettingsScalars,
+    serialized_children: &str,
+) -> Option<()> {
+    for (remove, local) in [
+        (scalars.items_view_mode.is_some(), "itemsViewMode"),
+        (
+            scalars.items_user_setting_id.is_some(),
+            "itemsUserSettingID",
+        ),
+    ] {
+        if remove {
+            remove_unique_canonical_dcs_child(xml, local)?;
+        }
+    }
+    if scalars.items_view_mode.is_none() && scalars.items_user_setting_id.is_none() {
+        return serialized_children.is_empty().then_some(());
+    }
+    let closing = "</dcsset:settings>";
+    let closing_offset = xml.rfind(closing)?;
+    let insertion = xml[..closing_offset]
+        .trim_end_matches(['\r', '\n', '\t', ' '])
+        .len();
+    xml.replace_range(insertion..closing_offset, "");
+    let insertion_text = if serialized_children.is_empty() {
+        "\r\n".to_string()
+    } else {
+        format!("\r\n{serialized_children}")
+    };
+    xml.insert_str(insertion, &insertion_text);
+    Some(())
+}
+
+fn xml_element_uses_namespace(element: &XmlElement, root: &XmlElement, uri: &str) -> bool {
+    fn declaration<'a>(element: &'a XmlElement, prefix: Option<&str>) -> Option<&'a str> {
+        element.attributes().iter().find_map(|attribute| {
+            let AttributeKind::Namespace(declared_prefix) = attribute.kind() else {
+                return None;
+            };
+            (declared_prefix.as_deref() == prefix).then_some(attribute.value())
+        })
+    }
+
+    let prefix = element.name().prefix();
+    declaration(element, prefix).or_else(|| {
+        if std::ptr::eq(element, root) {
+            None
+        } else {
+            declaration(root, prefix)
+        }
+    }) == Some(uri)
+}
+
+fn remove_unique_canonical_dcs_child(xml: &mut String, local: &str) -> Option<()> {
+    let open = format!("<dcsset:{local}>");
+    let empty = format!("<dcsset:{local}/>");
+    let close = format!("</dcsset:{local}>");
+    let (start, end) = if let Some(start) = xml.find(&open) {
+        let content_start = start.checked_add(open.len())?;
+        let relative_end = xml[content_start..].find(&close)?;
+        let end = content_start
+            .checked_add(relative_end)?
+            .checked_add(close.len())?;
+        (start, end)
+    } else {
+        let start = xml.find(&empty)?;
+        (start, start.checked_add(empty.len())?)
+    };
+    if xml[end..].contains(&open) || xml[end..].contains(&empty) {
+        return None;
+    }
+    xml.replace_range(start..end, "");
+    Some(())
 }
 
 fn is_xml_prefix(prefix: &str) -> bool {
@@ -861,6 +1011,40 @@ mod tests {
             standalone,
             "\t<dcsset:itemsUserSettingID>main-settings</dcsset:itemsUserSettingID>\r\n"
         );
+    }
+
+    #[test]
+    fn settings_scalar_parse_and_rewrite_are_owned_by_the_xml_layer() {
+        let document = concat!(
+            "<s:Settings xmlns:s=\"http://v8.1c.ru/8.1/data-composition-system/settings\">",
+            "<s:selection/>",
+            "<s:itemsUserSettingID>id&lt;&amp;</s:itemsUserSettingID>",
+            "<s:itemsViewMode>Compact</s:itemsViewMode>",
+            "</s:Settings>"
+        );
+        let scalars = parse_dcs_settings_scalars(document).unwrap();
+        assert_eq!(scalars.items_view_mode(), Some("Compact"));
+        assert_eq!(scalars.items_user_setting_id(), Some("id<&"));
+
+        let mut canonical = concat!(
+            "<dcsset:settings>\r\n",
+            "\t<dcsset:itemsUserSettingID>stale</dcsset:itemsUserSettingID>\r\n",
+            "\t<dcsset:itemsViewMode>stale</dcsset:itemsViewMode>\r\n",
+            "</dcsset:settings>"
+        )
+        .to_owned();
+        rewrite_dcs_settings_children(
+            &mut canonical,
+            &scalars,
+            concat!(
+                "\t<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>\r\n",
+                "\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n"
+            ),
+        )
+        .unwrap();
+        assert_eq!(canonical.matches("itemsViewMode").count(), 2);
+        assert_eq!(canonical.matches("itemsUserSettingID").count(), 2);
+        assert!(canonical.find("Compact").unwrap() < canonical.find("id&lt;&amp;").unwrap());
     }
 
     #[test]

@@ -14,9 +14,10 @@ mod writer;
 pub use dcs::{
     DCS_WRITER_EVIDENCE, DCS_WRITER_EVIDENCE_INVALID_CODE, DCS_WRITER_EVIDENCE_PENDING_CODE,
     DCS_WRITER_EVIDENCE_RELEASE, DcsListSettingsTailError, DcsSerializationError,
-    DcsSerializationPermit, DcsSettingsChildrenError, DcsWriterDecision, DcsWriterEvidence,
-    DcsWriterEvidenceStatus, emit_dcs_settings_children, emit_form_list_settings_tail,
-    preflight_dcs_settings_serialization,
+    DcsSerializationPermit, DcsSettingsChildrenError, DcsSettingsScalars, DcsWriterDecision,
+    DcsWriterEvidence, DcsWriterEvidenceStatus, emit_dcs_settings_children,
+    emit_form_list_settings_tail, parse_dcs_settings_scalars, preflight_dcs_settings_serialization,
+    rewrite_dcs_settings_children,
 };
 pub use dialect::{
     BomRule, DetectionCandidate, DialectDescriptor, DialectDetection, DialectError,
