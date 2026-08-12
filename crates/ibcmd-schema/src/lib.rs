@@ -2631,6 +2631,119 @@ pub const BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON: &str =
 const BUNDLED_FORM_CHOICE_PARAMETERS_LIVE_FIXTURE_JSON: &str =
     include_str!("../../../tests/fixtures/form_choice_parameters_slot27_live.json");
 
+/// Canonical XML value of the Task number auto-prefix policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskNumberAutoPrefix {
+    BusinessProcessNumber,
+}
+
+impl TaskNumberAutoPrefix {
+    pub const fn xml_value(self) -> &'static str {
+        match self {
+            Self::BusinessProcessNumber => "BusinessProcessNumber",
+        }
+    }
+}
+
+/// Decode the physical Task owner slot into its canonical XML policy.
+///
+/// The `0` mapping is authenticated by an isolated two-round native export on
+/// 1C:Enterprise 8.3.27.2214 with XML source version 2.20. Unknown physical
+/// tokens deliberately fail closed.
+pub fn parse_task_number_auto_prefix_slot(value: &str) -> Option<TaskNumberAutoPrefix> {
+    match value.trim() {
+        "0" => Some(TaskNumberAutoPrefix::BusinessProcessNumber),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskNumberAllowedLength {
+    Variable,
+}
+
+impl TaskNumberAllowedLength {
+    pub const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Variable => "Variable",
+        }
+    }
+}
+
+pub fn parse_task_number_allowed_length_slot(value: &str) -> Option<TaskNumberAllowedLength> {
+    match value.trim() {
+        "1" => Some(TaskNumberAllowedLength::Variable),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskChoiceHistoryOnInput {
+    Auto,
+}
+
+impl TaskChoiceHistoryOnInput {
+    pub const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+        }
+    }
+}
+
+pub fn parse_task_choice_history_on_input_slot(value: &str) -> Option<TaskChoiceHistoryOnInput> {
+    match value.trim() {
+        "1" => Some(TaskChoiceHistoryOnInput::Auto),
+        _ => None,
+    }
+}
+
+pub fn parse_task_include_help_in_contents_slot(value: &str) -> Option<bool> {
+    match value.trim() {
+        "1" => Some(false),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskDataLockControlMode {
+    Automatic,
+}
+
+impl TaskDataLockControlMode {
+    pub const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Automatic => "Automatic",
+        }
+    }
+}
+
+pub fn parse_task_data_lock_control_mode_slot(value: &str) -> Option<TaskDataLockControlMode> {
+    match value.trim() {
+        "1" => Some(TaskDataLockControlMode::Automatic),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TaskFullTextSearch {
+    Use,
+}
+
+impl TaskFullTextSearch {
+    pub const fn xml_value(self) -> &'static str {
+        match self {
+            Self::Use => "Use",
+        }
+    }
+}
+
+pub fn parse_task_full_text_search_slot(value: &str) -> Option<TaskFullTextSearch> {
+    match value.trim() {
+        "0" => Some(TaskFullTextSearch::Use),
+        _ => None,
+    }
+}
+
 /// Metadata object families whose generated reference types use the exact
 /// `cfg:<Kind>Ref.<Name>` QName shape.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -6462,6 +6575,57 @@ mod tests {
             assert_eq!(owner.name(), "Владелец");
             assert_eq!(owner.owner_reference(), format!("{token}.Владелец"));
         }
+    }
+
+    #[test]
+    fn task_number_auto_prefix_slot_uses_platform_proven_mapping() {
+        assert_eq!(
+            parse_task_number_auto_prefix_slot("0"),
+            Some(TaskNumberAutoPrefix::BusinessProcessNumber)
+        );
+        assert_eq!(
+            parse_task_number_auto_prefix_slot(" 0 ")
+                .unwrap()
+                .xml_value(),
+            "BusinessProcessNumber"
+        );
+
+        for unknown in ["", "1", "-1", "BusinessProcessNumber"] {
+            assert_eq!(parse_task_number_auto_prefix_slot(unknown), None);
+        }
+    }
+
+    #[test]
+    fn task_scalar_slots_use_platform_proven_xml_mappings() {
+        assert_eq!(
+            parse_task_number_allowed_length_slot("1")
+                .unwrap()
+                .xml_value(),
+            "Variable"
+        );
+        assert_eq!(
+            parse_task_choice_history_on_input_slot("1")
+                .unwrap()
+                .xml_value(),
+            "Auto"
+        );
+        assert_eq!(parse_task_include_help_in_contents_slot("1"), Some(false));
+        assert_eq!(
+            parse_task_data_lock_control_mode_slot("1")
+                .unwrap()
+                .xml_value(),
+            "Automatic"
+        );
+        assert_eq!(
+            parse_task_full_text_search_slot("0").unwrap().xml_value(),
+            "Use"
+        );
+
+        assert!(parse_task_number_allowed_length_slot("0").is_none());
+        assert!(parse_task_choice_history_on_input_slot("0").is_none());
+        assert!(parse_task_include_help_in_contents_slot("0").is_none());
+        assert!(parse_task_data_lock_control_mode_slot("0").is_none());
+        assert!(parse_task_full_text_search_slot("1").is_none());
     }
 
     #[test]

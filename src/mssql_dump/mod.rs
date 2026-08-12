@@ -13,7 +13,12 @@ use ibcmd_core::characteristics::Characteristics;
 use ibcmd_core::diagnostic::{MetadataSourceFailureClass, ObjectPath};
 use ibcmd_core::family::FamilyId;
 use ibcmd_core::storage::StorageImage;
-use ibcmd_schema::{GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner};
+use ibcmd_schema::{
+    GeneratedMetadataReferenceOwnerKind, parse_generated_metadata_reference_owner,
+    parse_task_choice_history_on_input_slot, parse_task_data_lock_control_mode_slot,
+    parse_task_full_text_search_slot, parse_task_include_help_in_contents_slot,
+    parse_task_number_allowed_length_slot, parse_task_number_auto_prefix_slot,
+};
 use ibcmd_xml::schema::{MetadataOrderSection, MetadataOrderVersionPredicate};
 use ibcmd_xml::{
     MetadataOrderError, XmlReader, bundled_metadata_registry, order_metadata_features,
@@ -24149,17 +24154,10 @@ fn parse_task_properties_from_text(
             _ => return None,
         },
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
-        number_allowed_length: match fields.get(20)?.trim() {
-            "0" => "Variable",
-            "1" => "Fixed",
-            _ => return None,
-        },
+        number_allowed_length: parse_task_number_allowed_length_slot(fields.get(20)?)?.xml_value(),
         check_unique: information_register_bool(fields.get(21)?)?,
         autonumbering: information_register_bool(fields.get(23)?)?,
-        task_number_auto_prefix: match fields.get(24)?.trim() {
-            "1" => "BusinessProcessNumber",
-            _ => return None,
-        },
+        task_number_auto_prefix: parse_task_number_auto_prefix_slot(fields.get(24)?)?.xml_value(),
         description_length: parse_exchange_plan_u32(fields.get(22)?)?,
         addressing,
         main_addressing_attribute,
@@ -24193,11 +24191,13 @@ fn parse_task_properties_from_text(
         auxiliary_object_form,
         auxiliary_list_form,
         auxiliary_choice_form,
-        choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(43)?.trim())?,
-        include_help_in_contents: information_register_bool(fields.get(45)?)?,
+        choice_history_on_input: parse_task_choice_history_on_input_slot(fields.get(43)?)?
+            .xml_value(),
+        include_help_in_contents: parse_task_include_help_in_contents_slot(fields.get(45)?)?,
         data_lock_fields,
-        data_lock_control_mode: information_register_data_lock_control_mode_xml(fields.get(32)?)?,
-        full_text_search: register_child_full_text_search_xml(fields.get(33)?.trim())?,
+        data_lock_control_mode: parse_task_data_lock_control_mode_slot(fields.get(32)?)?
+            .xml_value(),
+        full_text_search: parse_task_full_text_search_slot(fields.get(33)?)?.xml_value(),
         object_presentation: parse_information_register_owner_localized_value(fields.get(38)?)?,
         extended_object_presentation: parse_information_register_owner_localized_value(
             fields.get(39)?,

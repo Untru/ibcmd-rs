@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-task-basic",
+  "scope": "diagnostic_only",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-12",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "isolated_file_infobase",
+    "vm": "Parallels Windows 11 ARM64; x86-64 platform under Windows emulation"
+  },
+  "seed": {
+    "generator": "unica-mcp-plugin",
+    "plugin_version": "0.11.0",
+    "release_source_commit_reference": "addbc54637cae8e3307674d0bf3ba44ebf780057",
+    "release_source_identity_note": "Version lineage reference only; not a binary attestation of the installed plugin package.",
+    "latest_main_cross_check_commit": "a527d40962d047c6922c903b37510b30f697da42",
+    "configuration_name": "FastEvidence",
+    "compatibility_mode": "Version8_3_27",
+    "vendor": "Untru",
+    "commands": [
+      "unica.cf.init",
+      "unica.meta.compile"
+    ],
+    "definition_path": "seed/unica-definition.json",
+    "definition_size": 73,
+    "definition_sha256": "6698b626a9d0cebb34e5cc1a2f29a07c912328b9693f5da259e7d8afbdc41102",
+    "authority": "hypothesis_seed_only"
+  },
+  "native_round_trip": {
+    "round_0_generation": "08b92ba4339f6c4fa51b3bc3fc26cf3800000000",
+    "round_1_generation": "4a7ac4972ff13149bce44fe76b9282d200000000",
+    "round_1_cf_size": 79236,
+    "round_1_cf_sha256": "62a2cc9a644034731c47ebba231d84dbbd96ccddff0c3d514ed437e36e6466e8",
+    "round_2_cf_size": 79214,
+    "round_2_cf_sha256": "223edfbb8d12bc9cc8f87a27799c117f3449c7f1cc1238ee6f09cc176325a543",
+    "stable_tree_file_count": 5,
+    "round_1_tree_sha256": "6c79c887be7e29a0900164b95ed9388634d0b57fea24edfc74a8b3ad2eacab1a",
+    "round_2_tree_sha256": "6c79c887be7e29a0900164b95ed9388634d0b57fea24edfc74a8b3ad2eacab1a",
+    "tree_hash_excludes": [
+      "ConfigDumpInfo.xml"
+    ],
+    "stable_diff_count": 0
+  },
+  "configuration_cf": {
+    "storage": "base64",
+    "path": "configuration.cf.b64",
+    "encoded_size": 107010,
+    "encoded_sha256": "e95035b531035e1ced3c83e9613fd26fb412c26d2e89b207c87fb48bcd3794c6",
+    "decoded_size": 79214,
+    "decoded_sha256": "223edfbb8d12bc9cc8f87a27799c117f3449c7f1cc1238ee6f09cc176325a543"
+  },
+  "objects": [
+    {
+      "kind": "Task",
+      "name": "CorpusTask",
+      "uuid": "32838304-a94f-4eb0-b1a6-4e5e855f022c",
+      "raw_entry": {
+        "path": "raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt",
+        "packed_size": 1656,
+        "packed_sha256": "acc845fa359049d1aa109ea81a62041aec10ab2c6c960e0cd8540702a28673f9",
+        "unpacked_size": 18139,
+        "unpacked_sha256": "cf17dcf2e617b65d75acec3ed9d80730894e4cc4f44184e6329651343c808467"
+      },
+      "native_outputs": [
+        {
+          "path": "native/Tasks/CorpusTask.xml",
+          "size": 12318,
+          "sha256": "2bf9a839e78a2d2c907191af653fbe27c210db9a35edc8922571a42e52003480"
+        },
+        {
+          "path": "native/Tasks/CorpusTask/Ext/ObjectModule.bsl",
+          "size": 3,
+          "sha256": "f1945cd6c19e56b3c1c78943ef5ec18116907a4ca1efc40a57d48ab1db7adfc5"
+        }
+      ]
+    }
+  ],
+  "proven_claims": [
+    "The two native XML source trees are byte-identical after excluding ConfigDumpInfo.xml.",
+    "Task owner slot 24 value 0 maps to TaskNumberAutoPrefix BusinessProcessNumber.",
+    "Task owner slot 20 value 1 maps to NumberAllowedLength Variable.",
+    "Task owner slot 43 value 1 maps to ChoiceHistoryOnInput Auto.",
+    "Task owner slot 45 value 1 maps to IncludeHelpInContents false.",
+    "Task owner slot 32 value 1 maps to DataLockControlMode Automatic.",
+    "Task owner slot 33 value 0 maps to FullTextSearch Use.",
+    "The committed raw Task entry decodes to the committed native Task XML byte-for-byte."
+  ],
+  "non_claims": [
+    "The Unica-generated seed is not an authority for raw-to-XML mappings.",
+    "This diagnostic fixture does not satisfy the release-grade real database evidence required by issue #317.",
+    "CF container bytes are not expected to remain stable across native import/export rounds."
+  ]
+}

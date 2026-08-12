@@ -35,7 +35,9 @@ jobs:
           CI: "true"
           NPM_CONFIG_AUDIT: "false"
           NPM_CONFIG_FUND: "false"
-        run: npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
+        run: |
+          npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate add-fast-parity-evidence --strict --no-interactive
 
   quality:
     name: Quality
@@ -168,6 +170,10 @@ jobs:
         env:
           CARGO_NET_OFFLINE: "true"
         run: cargo build --locked --release --no-default-features
+
+      - name: Verify native micro-corpus parity offline
+        shell: pwsh
+        run: ./tools/verify-native-evidence.ps1 -RepositoryRoot . -BinaryPath ${{ matrix.binary }}
 
       - name: Generate deterministic runtime SBOM
         env:

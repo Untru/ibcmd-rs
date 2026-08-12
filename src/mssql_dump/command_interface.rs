@@ -40,8 +40,8 @@ pub(super) struct HomePageWorkAreaItem {
 }
 
 pub(super) struct ClientApplicationInterface {
-    pub(super) top: Option<ClientApplicationInterfaceGroup>,
-    pub(super) left: Option<ClientApplicationInterfaceGroup>,
+    pub(super) top: Vec<ClientApplicationInterfaceNode>,
+    pub(super) left: Vec<ClientApplicationInterfaceNode>,
     pub(super) panel_defs: Vec<String>,
 }
 
@@ -383,8 +383,8 @@ pub(super) fn parse_client_application_interface_text(
         return None;
     }
 
-    let mut top = None;
-    let mut left = None;
+    let mut top = Vec::new();
+    let mut left = Vec::new();
     let mut index = 1usize;
     while index < fields.len() {
         let Some(area_fields) = fields
@@ -427,19 +427,16 @@ pub(super) fn parse_client_application_interface_text(
 
 pub(super) fn parse_client_application_interface_area(
     field: &str,
-) -> Option<Option<ClientApplicationInterfaceGroup>> {
+) -> Option<Vec<ClientApplicationInterfaceNode>> {
     let fields = split_1c_braced_fields(field, 0)?;
     if fields.first()?.trim() != "0" {
         return None;
     }
     let count = fields.get(1)?.trim().parse::<usize>().ok()?;
     if count == 0 {
-        return Some(None);
+        return Some(Vec::new());
     }
-    let group = fields
-        .get(3)
-        .and_then(|field| parse_client_application_interface_group(field, true))?;
-    Some(Some(group))
+    parse_client_application_interface_children_with_panel_wrapper(field, false)
 }
 
 pub(super) fn parse_client_application_interface_group(
@@ -458,12 +455,14 @@ pub(super) fn parse_client_application_interface_group(
     if fields.get(2)?.trim() != "0" {
         return None;
     }
-    let children = parse_client_application_interface_children(fields.get(3)?)?;
+    let children =
+        parse_client_application_interface_children_with_panel_wrapper(fields.get(3)?, true)?;
     Some(ClientApplicationInterfaceGroup { id, children })
 }
 
-pub(super) fn parse_client_application_interface_children(
+fn parse_client_application_interface_children_with_panel_wrapper(
     field: &str,
+    wrap_panels_in_anonymous_group: bool,
 ) -> Option<Vec<ClientApplicationInterfaceNode>> {
     let fields = split_1c_braced_fields(field, 0)?;
     if fields.first()?.trim() != "0" {
@@ -487,12 +486,17 @@ pub(super) fn parse_client_application_interface_children(
         } else {
             let id = parse_non_zero_uuid(child_fields.get(1)?.trim())?;
             let uuid = parse_non_zero_uuid(child_fields.get(2)?.trim())?;
-            children.push(ClientApplicationInterfaceNode::Group(
-                ClientApplicationInterfaceGroup {
-                    id: None,
-                    children: vec![ClientApplicationInterfaceNode::Panel { id, uuid }],
-                },
-            ));
+            let panel = ClientApplicationInterfaceNode::Panel { id, uuid };
+            if wrap_panels_in_anonymous_group {
+                children.push(ClientApplicationInterfaceNode::Group(
+                    ClientApplicationInterfaceGroup {
+                        id: None,
+                        children: vec![panel],
+                    },
+                ));
+            } else {
+                children.push(panel);
+            }
         }
     }
     Some(children)
@@ -676,11 +680,11 @@ pub(super) fn format_client_application_interface_xml(
         "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n",
     );
-    if let Some(group) = &interface.top {
-        push_client_application_interface_area_xml(&mut xml, "top", group);
+    if !interface.top.is_empty() {
+        push_client_application_interface_area_xml(&mut xml, "top", &interface.top);
     }
-    if let Some(group) = &interface.left {
-        push_client_application_interface_area_xml(&mut xml, "left", group);
+    if !interface.left.is_empty() {
+        push_client_application_interface_area_xml(&mut xml, "left", &interface.left);
     }
     for panel_def in &interface.panel_defs {
         xml.push_str(&format!(
@@ -695,11 +699,35 @@ pub(super) fn format_client_application_interface_xml(
 pub(super) fn push_client_application_interface_area_xml(
     xml: &mut String,
     tag: &str,
-    group: &ClientApplicationInterfaceGroup,
+    nodes: &[ClientApplicationInterfaceNode],
 ) {
     xml.push_str(&format!("\t<{tag}>\r\n"));
-    push_client_application_interface_group_xml(xml, group, 2);
+    for node in nodes {
+        push_client_application_interface_node_xml(xml, node, 2);
+    }
     xml.push_str(&format!("\t</{tag}>\r\n"));
+}
+
+fn push_client_application_interface_node_xml(
+    xml: &mut String,
+    node: &ClientApplicationInterfaceNode,
+    indent: usize,
+) {
+    match node {
+        ClientApplicationInterfaceNode::Group(group) => {
+            push_client_application_interface_group_xml(xml, group, indent);
+        }
+        ClientApplicationInterfaceNode::Panel { id, uuid } => {
+            let tab = "\t".repeat(indent);
+            xml.push_str(&format!(
+                "{tab}<panel id=\"{}\">\r\n\
+{tab}\t<uuid>{}</uuid>\r\n\
+{tab}</panel>\r\n",
+                escape_xml_text(id),
+                escape_xml_text(uuid)
+            ));
+        }
+    }
 }
 
 pub(super) fn push_client_application_interface_group_xml(
@@ -714,21 +742,7 @@ pub(super) fn push_client_application_interface_group_xml(
         xml.push_str(&format!("{tab}<group>\r\n"));
     }
     for child in &group.children {
-        match child {
-            ClientApplicationInterfaceNode::Group(child_group) => {
-                push_client_application_interface_group_xml(xml, child_group, indent + 1);
-            }
-            ClientApplicationInterfaceNode::Panel { id, uuid } => {
-                let child_tab = "\t".repeat(indent + 1);
-                xml.push_str(&format!(
-                    "{child_tab}<panel id=\"{}\">\r\n\
-{child_tab}\t<uuid>{}</uuid>\r\n\
-{child_tab}</panel>\r\n",
-                    escape_xml_text(id),
-                    escape_xml_text(uuid)
-                ));
-            }
-        }
+        push_client_application_interface_node_xml(xml, child, indent + 1);
     }
     xml.push_str(&format!("{tab}</group>\r\n"));
 }

@@ -5481,6 +5481,38 @@ fn extracts_client_application_interface_layout() {
 }
 
 #[test]
+fn extracts_platform_8_3_27_direct_client_application_interface_panels() {
+    let body = deflate_for_test(
+        b"\xEF\xBB\xBF{1,{0,1,{0,1,8b252cb5-d895-4c40-8ccb-581ce795fb80,{0,00000000-0000-0000-0000-000000000009,cbab57f2-a0f3-4f0a-89ea-4cb19570ab75,2,0}}},{0,2,{0,0}},{0,3,{0,1,8b252cb5-d895-4c40-8ccb-581ce795fb80,{0,00000000-0000-0000-0000-00000000000a,b553047f-c9aa-4157-978d-448ecad24248,2,0}}},{0,4,{0,0}},2,{b553047f-c9aa-4157-978d-448ecad24248,0},2,{13322b22-3960-4d68-93a6-fe2dd7f28ca3,0},2,{c933ac92-92cd-459d-81cc-e0c8a83ced99,0},2,{cbab57f2-a0f3-4f0a-89ea-4cb19570ab75,0},2,{b2735bd3-d822-4430-ba59-c9e869693b24,0},0}",
+    );
+
+    let interface = parse_client_application_interface_blob(&body).unwrap();
+    let xml = format_client_application_interface_xml(&interface);
+
+    assert_eq!(
+        xml,
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n\
+\t<top>\r\n\
+\t\t<panel id=\"00000000-0000-0000-0000-000000000009\">\r\n\
+\t\t\t<uuid>cbab57f2-a0f3-4f0a-89ea-4cb19570ab75</uuid>\r\n\
+\t\t</panel>\r\n\
+\t</top>\r\n\
+\t<left>\r\n\
+\t\t<panel id=\"00000000-0000-0000-0000-00000000000a\">\r\n\
+\t\t\t<uuid>b553047f-c9aa-4157-978d-448ecad24248</uuid>\r\n\
+\t\t</panel>\r\n\
+\t</left>\r\n\
+\t<panelDef id=\"b553047f-c9aa-4157-978d-448ecad24248\"/>\r\n\
+\t<panelDef id=\"13322b22-3960-4d68-93a6-fe2dd7f28ca3\"/>\r\n\
+\t<panelDef id=\"c933ac92-92cd-459d-81cc-e0c8a83ced99\"/>\r\n\
+\t<panelDef id=\"cbab57f2-a0f3-4f0a-89ea-4cb19570ab75\"/>\r\n\
+\t<panelDef id=\"b2735bd3-d822-4430-ba59-c9e869693b24\"/>\r\n\
+</ClientApplicationInterface>"
+    );
+}
+
+#[test]
 fn extracts_command_interface_subsystems_order() {
     let first_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let second_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
@@ -47207,6 +47239,122 @@ fn extracts_business_process_use_standard_commands_to_metadata_xml() {
             "{xml}"
         );
     }
+}
+
+#[test]
+fn extracts_platform_proven_minimal_task_to_metadata_xml() {
+    let task_uuid = "32838304-a94f-4eb0-b1a6-4e5e855f022c";
+    let task_text = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
+    );
+    let root = split_information_register_braced_fields(task_text.trim_start_matches('\u{feff}'))
+        .expect("platform-proven Task root");
+    assert_eq!(root.len(), 9);
+    assert_eq!(root[0].trim(), "1");
+    assert_eq!(root[2].trim(), "6");
+    let fields =
+        split_information_register_braced_fields(root[1]).expect("platform-proven Task fields");
+    assert_eq!(fields.len(), 52);
+    assert!(root[3..].iter().all(|collection| {
+        parse_task_root_collection(collection).is_some_and(|parsed| parsed.items.is_empty())
+    }));
+
+    let task_blob = deflate_for_test(task_text.as_bytes());
+    let rows = vec![ConfigRow {
+        file_name: task_uuid.to_string(),
+        part_no: 0,
+        data_size: task_blob.len() as i64,
+        binary_hex: encode_hex_for_test(&task_blob),
+    }];
+    let type_index = build_metadata_type_index(&rows);
+    assert_eq!(type_index.len(), 5);
+    assert_eq!(
+        parse_task_generated_types(&fields, "CorpusTask")
+            .expect("Task generated types")
+            .len(),
+        5
+    );
+    assert_eq!(
+        parse_task_field_references(
+            fields[28],
+            "CorpusTask",
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &[("-9", "Description"), ("-2", "Number")],
+        )
+        .expect("Task input-by-string"),
+        vec!["Task.CorpusTask.StandardAttribute.Number"]
+    );
+    assert_eq!(
+        parse_task_field_references(
+            fields[46],
+            "CorpusTask",
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+            &[("-7", "BusinessProcess")],
+        )
+        .expect("Task data-lock fields"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        parse_task_standard_attributes(fields[34], &type_index, &BTreeMap::new())
+            .expect("Task standard attributes")
+            .len(),
+        8
+    );
+    assert!(task_characteristics_is_empty(fields[44]));
+    assert!(owner_graph::task_reserved_tail_is_zero(&fields));
+    assert_eq!(
+        parse_owner_input_modes(fields[47]),
+        Some(("Begin", "DontUse", "Directly"))
+    );
+    let internal_slots =
+        decode_task_internal_uuid_slots(&fields).expect("Task internal UUID slots");
+    assert!(internal_slots.field_13.is_none());
+    assert!(internal_slots.field_14.is_none());
+    let mut diagnostic = None;
+    let properties = parse_task_properties_from_text(
+        task_text,
+        task_uuid,
+        &type_index,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &mut diagnostic,
+    );
+    assert!(
+        properties.is_some(),
+        "platform-proven Task properties failed: {diagnostic:?}"
+    );
+
+    let extracted = extract_metadata_source_xml_with_refs(
+        &task_blob,
+        task_uuid,
+        &type_index,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .expect("platform-proven minimal Task must decode");
+
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("Tasks").join("CorpusTask.xml")
+    );
+    assert_eq!(
+        extracted.xml.as_slice(),
+        include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/native/Tasks/CorpusTask.xml"
+        ),
+        "platform-proven Task XML must remain byte-identical to the native export"
+    );
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert!(xml.contains(r#"<Task uuid="32838304-a94f-4eb0-b1a6-4e5e855f022c">"#));
+    assert!(xml.contains("<Name>CorpusTask</Name>"));
+    assert_eq!(xml.matches("<xr:GeneratedType").count(), 5);
 }
 
 #[test]
