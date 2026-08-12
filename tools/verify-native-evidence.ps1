@@ -64,6 +64,54 @@ function Assert-FileEvidence {
     Assert-Equal (Get-FileSha256Hex $path) $Evidence.sha256 "$($Evidence.path) SHA-256"
 }
 
+function Assert-RawNativeEvidenceFixture {
+    param(
+        [string]$RelativePath,
+        [int]$Issue,
+        [string]$Kind,
+        [string]$Uuid
+    )
+
+    $root = Join-Path $RepositoryRoot $RelativePath
+    $fixtureManifestPath = Join-Path $root 'manifest.json'
+    if (-not (Test-Path -LiteralPath $fixtureManifestPath -PathType Leaf)) {
+        throw "$Kind evidence manifest is missing: $fixtureManifestPath"
+    }
+    $fixtureManifest = Get-Content -LiteralPath $fixtureManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-Equal $fixtureManifest.schema_version 1 "$Kind manifest schema version"
+    Assert-Equal $fixtureManifest.issue $Issue "$Kind issue"
+    Assert-Equal $fixtureManifest.evidence.platform_version '8.3.27.2214' "$Kind platform version"
+    Assert-Equal $fixtureManifest.evidence.source_version '2.20' "$Kind source version"
+    Assert-Equal $fixtureManifest.object.kind $Kind "$Kind object kind"
+    Assert-Equal $fixtureManifest.object.uuid $Uuid "$Kind UUID"
+    Assert-FileEvidence $fixtureManifest.object.raw_entry.packed $root
+    Assert-FileEvidence $fixtureManifest.object.raw_entry.unpacked $root
+    Assert-FileEvidence $fixtureManifest.object.native_xml $root
+
+    $packedPath = Resolve-FixturePath $fixtureManifest.object.raw_entry.packed.path $root
+    $unpackedPath = Resolve-FixturePath $fixtureManifest.object.raw_entry.unpacked.path $root
+    $compressedStream = New-Object IO.MemoryStream(,([IO.File]::ReadAllBytes($packedPath)))
+    $decompressedStream = New-Object IO.MemoryStream
+    $deflateStream = New-Object IO.Compression.DeflateStream(
+        $compressedStream,
+        [IO.Compression.CompressionMode]::Decompress
+    )
+    try {
+        $deflateStream.CopyTo($decompressedStream)
+    } finally {
+        $deflateStream.Dispose()
+        $compressedStream.Dispose()
+    }
+    try {
+        $decompressed = $decompressedStream.ToArray()
+    } finally {
+        $decompressedStream.Dispose()
+    }
+    Assert-Equal $decompressed.Length ([long]$fixtureManifest.object.raw_entry.unpacked.size) "$Kind decoded size"
+    Assert-Equal (Get-Sha256Hex $decompressed) $fixtureManifest.object.raw_entry.unpacked.sha256 "$Kind decoded SHA-256"
+    Assert-Equal (Get-Sha256Hex ([IO.File]::ReadAllBytes($unpackedPath))) (Get-Sha256Hex $decompressed) "$Kind packed/unpacked pair"
+}
+
 if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "Native evidence manifest is missing: $manifestPath"
 }
@@ -107,44 +155,16 @@ foreach ($object in @($manifest.objects)) {
     }
 }
 
-$releaseFixtureRelativePath = 'tests/fixtures/native-evidence/8.3.27.2214/task-assignee'
-$releaseFixtureRoot = Join-Path $RepositoryRoot $releaseFixtureRelativePath
-$releaseManifestPath = Join-Path $releaseFixtureRoot 'manifest.json'
-if (-not (Test-Path -LiteralPath $releaseManifestPath -PathType Leaf)) {
-    throw "Release-grade Task evidence manifest is missing: $releaseManifestPath"
-}
-$releaseManifest = Get-Content -LiteralPath $releaseManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-Assert-Equal $releaseManifest.schema_version 1 'release Task manifest schema version'
-Assert-Equal $releaseManifest.issue 317 'release Task issue'
-Assert-Equal $releaseManifest.evidence.platform_version '8.3.27.2214' 'release Task platform version'
-Assert-Equal $releaseManifest.evidence.source_version '2.20' 'release Task source version'
-Assert-Equal $releaseManifest.object.uuid '3ad08f4a-6202-4099-b6cc-bc116e6731a0' 'release Task UUID'
-Assert-FileEvidence $releaseManifest.object.raw_entry.packed $releaseFixtureRoot
-Assert-FileEvidence $releaseManifest.object.raw_entry.unpacked $releaseFixtureRoot
-Assert-FileEvidence $releaseManifest.object.native_xml $releaseFixtureRoot
-
-$releasePackedPath = Resolve-FixturePath $releaseManifest.object.raw_entry.packed.path $releaseFixtureRoot
-$releaseUnpackedPath = Resolve-FixturePath $releaseManifest.object.raw_entry.unpacked.path $releaseFixtureRoot
-$compressedStream = New-Object IO.MemoryStream(,([IO.File]::ReadAllBytes($releasePackedPath)))
-$decompressedStream = New-Object IO.MemoryStream
-$deflateStream = New-Object IO.Compression.DeflateStream(
-    $compressedStream,
-    [IO.Compression.CompressionMode]::Decompress
-)
-try {
-    $deflateStream.CopyTo($decompressedStream)
-} finally {
-    $deflateStream.Dispose()
-    $compressedStream.Dispose()
-}
-try {
-    $decompressed = $decompressedStream.ToArray()
-} finally {
-    $decompressedStream.Dispose()
-}
-Assert-Equal $decompressed.Length ([long]$releaseManifest.object.raw_entry.unpacked.size) 'release Task decoded size'
-Assert-Equal (Get-Sha256Hex $decompressed) $releaseManifest.object.raw_entry.unpacked.sha256 'release Task decoded SHA-256'
-Assert-Equal (Get-Sha256Hex ([IO.File]::ReadAllBytes($releaseUnpackedPath))) (Get-Sha256Hex $decompressed) 'release Task packed/unpacked pair'
+Assert-RawNativeEvidenceFixture `
+    -RelativePath 'tests/fixtures/native-evidence/8.3.27.2214/task-assignee' `
+    -Issue 317 `
+    -Kind 'Task' `
+    -Uuid '3ad08f4a-6202-4099-b6cc-bc116e6731a0'
+Assert-RawNativeEvidenceFixture `
+    -RelativePath 'tests/fixtures/native-evidence/8.3.27.2214/business-process-duty' `
+    -Issue 282 `
+    -Kind 'BusinessProcess' `
+    -Uuid 'dad11c2e-08fc-4a6b-8829-8be6c64c15fc'
 
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
     $BinaryPath = Join-Path $RepositoryRoot $BinaryPath
@@ -193,4 +213,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task.CorpusTask + Task assignee.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess.'

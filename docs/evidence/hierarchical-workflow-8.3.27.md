@@ -62,6 +62,21 @@ drops unsupported customization.
 Flowchart and source assets remain separate storage artifacts; this issue
 covers the primary metadata rows and their identity/ownership references.
 
+## BusinessProcess attestation on 8.3.27.2214
+
+Issue #282 adds an immutable real-object pair for
+`BusinessProcess.Задание` at
+`tests/fixtures/native-evidence/8.3.27.2214/business-process-duty`. The exact
+native CF element is byte-identical in the parent CF and the isolated lab CF
+saved by `ibcmd 8.3.27.2214`; its native XML 2.20 export is also byte-identical
+to the paired source snapshot.
+
+This evidence confirms the 49-field owner, all five ordered collection markers
+and counts `0/4/0/27/0`, `UseStandardCommands=true`, and the six generated
+types through `BusinessProcessRoutePointRef` in schema/native XML order. Empty
+Template, Command, and TabularSection collections remain fixture-specific; no
+non-empty encoding for them is inferred here.
+
 ## Task attestation on 8.3.27.2214
 
 Issue #317 adds an immutable real-object pair for

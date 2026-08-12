@@ -47073,148 +47073,141 @@ fn extracts_document_child_attribute_data_history_tail() {
 }
 
 #[test]
-fn extracts_business_process_generated_types_to_metadata_xml() {
-    let business_process_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let object_type_id = "11111111-1111-4111-8111-111111111111";
-    let object_value_id = "11111111-1111-4111-8111-111111111112";
-    let ref_type_id = "22222222-2222-4222-8222-222222222221";
-    let ref_value_id = "22222222-2222-4222-8222-222222222222";
-    let selection_type_id = "44444444-4444-4444-8444-444444444441";
-    let selection_value_id = "44444444-4444-4444-8444-444444444442";
-    let list_type_id = "55555555-5555-4555-8555-555555555551";
-    let list_value_id = "55555555-5555-4555-8555-555555555552";
-    let manager_type_id = "33333333-3333-4333-8333-333333333331";
-    let manager_value_id = "33333333-3333-4333-8333-333333333332";
-    let route_point_type_id = "66666666-6666-4666-8666-666666666661";
-    let route_point_value_id = "66666666-6666-4666-8666-666666666662";
-    let list_form_uuid = "77777777-7777-4777-8777-777777777777";
-    let business_process_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{30,0,0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},{manager_type_id},{manager_value_id},{route_point_type_id},{route_point_value_id},\r\n{{3,\r\n{{1,0,{business_process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"approval comment\"}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
-        );
-    let form_refs = BTreeMap::from([(
-        list_form_uuid.to_string(),
-        FormSourceReference {
-            relative_path: PathBuf::from("BusinessProcesses/Approval/Forms/ListForm.xml"),
-            kind: "Form",
-        },
-    )]);
-
-    let extracted = extract_metadata_source_xml_with_refs(
-        &business_process_blob,
-        business_process_uuid,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &form_refs,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        InfobaseConfigSourceVersion::V2_21,
-    )
-    .unwrap();
-    let xml = String::from_utf8(extracted.xml).unwrap();
-
+fn validates_platform_proven_business_process_generated_types_and_writer_order() {
+    let business_process_uuid = "dad11c2e-08fc-4a6b-8829-8be6c64c15fc";
+    let packed = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.deflate"
+    );
+    let business_process_text = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/raw/dad11c2e-08fc-4a6b-8829-8be6c64c15fc.txt"
+    );
     assert_eq!(
-        extracted.relative_path,
-        PathBuf::from("BusinessProcesses").join("Approval.xml")
+        format!("{:x}", Sha256::digest(packed)),
+        "1ce414849209b3f832baa90b171b14d5bf342518644c38c43408c467a524957e"
     );
-    assert!(xml.starts_with('\u{feff}'));
-    assert!(xml.contains(r#"version="2.21""#));
-    assert!(xml.contains("<Comment>approval comment</Comment>"));
-    assert_eq!(xml.matches("<xr:GeneratedType").count(), 6);
-    assert!(
-        xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
-        "{xml}"
+    assert_eq!(
+        format!("{:x}", Sha256::digest(business_process_text.as_bytes())),
+        "0e552316ec845f25a22a60070aef2c565d49142f7569545c00cdcc161d932bea"
     );
-    assert!(
-        xml.contains(
-            r#"<xr:GeneratedType name="BusinessProcessObject.Approval" category="Object">"#
-        )
+    assert_eq!(
+        inflate_raw_deflate(packed).expect("native BusinessProcess raw-deflate payload"),
+        business_process_text.as_bytes()
     );
-    assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
-    assert!(
-        xml.contains(r#"<xr:GeneratedType name="BusinessProcessRef.Approval" category="Ref">"#)
-    );
-    assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
-    assert!(xml.contains(
-        r#"<xr:GeneratedType name="BusinessProcessSelection.Approval" category="Selection">"#
-    ));
-    assert!(xml.contains(&format!("<xr:TypeId>{selection_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{selection_value_id}</xr:ValueId>")));
-    assert!(
-        xml.contains(r#"<xr:GeneratedType name="BusinessProcessList.Approval" category="List">"#)
-    );
-    assert!(xml.contains(&format!("<xr:TypeId>{list_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{list_value_id}</xr:ValueId>")));
-    assert!(xml.contains(
-        r#"<xr:GeneratedType name="BusinessProcessManager.Approval" category="Manager">"#
-    ));
-    assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
-    assert!(xml.contains(
-            r#"<xr:GeneratedType name="BusinessProcessRoutePointRef.Approval" category="RoutePointRef">"#
-        ));
-    assert!(xml.contains(&format!("<xr:TypeId>{route_point_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{route_point_value_id}</xr:ValueId>")));
-    assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
-    assert!(
-        xml.contains("<DefaultListForm>BusinessProcess.Approval.Form.ListForm</DefaultListForm>")
-    );
-}
 
-#[test]
-fn extracts_business_process_use_standard_commands_to_metadata_xml() {
-    let business_process_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let business_process_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{30,0,0,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
-22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
-33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
-44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\
-55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
-66666666-6666-4666-8666-666666666661,66666666-6666-4666-8666-666666666662,\r\n\
-{{3,\r\n{{1,0,{business_process_uuid}}},\"Approval\",{{1,\"en\",\"Approval\"}},\"\"}},0}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let header = parse_metadata_header_from_text(business_process_text, business_process_uuid)
+        .expect("native BusinessProcess header");
+    let decoded = decode_owner_graph(
+        OwnerGraphFamily::BusinessProcess,
+        business_process_text,
+        &header,
+    )
+    .expect("native BusinessProcess owner graph");
+    assert_eq!(decoded.owner_fields.len(), 49);
+    assert_eq!(decoded.owner_fields[0].trim(), "30");
+    assert_eq!(decoded.owner_fields[2].trim(), "1");
+    assert_eq!(
+        decoded
+            .collections
+            .iter()
+            .map(|collection| collection.items.len())
+            .collect::<Vec<_>>(),
+        vec![0, 4, 0, 27, 0]
+    );
+    assert_eq!(
+        decoded
+            .collections
+            .iter()
+            .map(|collection| collection.provenance().marker)
+            .collect::<Vec<_>>(),
+        vec![
+            "3daea016-69b7-4ed4-9453-127911372fe6",
+            "3f7a8120-b71a-4265-98bf-4d9bc09b7719",
+            "7a3e533c-f232-40d5-a932-6a311d2480bf",
+            "87c988de-ecbf-413b-87b0-b9516df05e28",
+            "a3fe6537-d787-40f7-8a06-419d2f0c1cfd",
+        ]
+    );
 
-    for source_version in [
-        InfobaseConfigSourceVersion::V2_20,
-        InfobaseConfigSourceVersion::V2_21,
-    ] {
-        let extracted = extract_metadata_source_xml_with_refs(
-            &business_process_blob,
-            business_process_uuid,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            source_version,
-        )
-        .unwrap();
-        let xml = String::from_utf8(extracted.xml).unwrap();
-
-        assert_eq!(
-            extracted.relative_path,
-            PathBuf::from("BusinessProcesses").join("Approval.xml")
-        );
-        assert!(xml.contains(&format!(r#"version="{}""#, source_version.as_str())));
-        assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
-        assert!(
-            xml.find("<Comment/>").unwrap() < xml.find("<UseStandardCommands>").unwrap(),
-            "{xml}"
-        );
-        assert!(
-            xml.find("<UseStandardCommands>").unwrap() < xml.find("</Properties>").unwrap(),
-            "{xml}"
-        );
+    let expected = [
+        (
+            "BusinessProcessObject.Задание",
+            "Object",
+            "4a670c5f-960b-4b36-b587-59bcea4d8449",
+            "ef743aff-e3c0-40fc-b3b5-7d3b85b46a99",
+        ),
+        (
+            "BusinessProcessRef.Задание",
+            "Ref",
+            "07d25a98-bdd8-4f7b-b87b-172294158755",
+            "76d38a5e-4135-448f-9047-95df317bc687",
+        ),
+        (
+            "BusinessProcessSelection.Задание",
+            "Selection",
+            "d0447d5c-7808-4532-8a98-0cb3974a90bf",
+            "db074c28-d78b-4923-8098-d61176ae2af7",
+        ),
+        (
+            "BusinessProcessList.Задание",
+            "List",
+            "9c74798b-2430-4cda-97f2-44472b8d59ac",
+            "a6c9e1ae-11c9-4e53-9157-eb648ef81567",
+        ),
+        (
+            "BusinessProcessManager.Задание",
+            "Manager",
+            "9f615ee8-8711-4ca9-98d0-f0a258dcdfd2",
+            "78f05877-ade5-4bbd-965c-fc1569544124",
+        ),
+        (
+            "BusinessProcessRoutePointRef.Задание",
+            "RoutePointRef",
+            "35f39a4f-8a59-4b48-aa38-ef5f2640d375",
+            "95eb9992-fb45-4346-80f0-716fadb2c664",
+        ),
+    ];
+    assert_eq!(decoded.generated_types.len(), expected.len());
+    for (generated, expected) in decoded.generated_types.iter().zip(expected) {
+        let actual = generated.clone().into_parts();
+        assert_eq!(actual.0, expected.0);
+        assert_eq!(actual.1, expected.1);
+        assert_eq!(actual.2, expected.2);
+        assert_eq!(actual.3, expected.3);
     }
+
+    let native_xml = include_bytes!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/business-process-duty/native/BusinessProcesses/Задание.xml"
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(native_xml)),
+        "565d2d12cb11321f8195b32ed8d93c50fb5d41c0a472e9e72f7b46e7235d13f3"
+    );
+    let native_xml = std::str::from_utf8(native_xml).expect("native BusinessProcess XML is UTF-8");
+    let generated_types = decoded
+        .generated_types
+        .iter()
+        .cloned()
+        .map(GeneratedTypeEntry::from)
+        .collect::<Vec<_>>();
+    let formatted_internal_info = format_generated_types_internal_info_xml(&generated_types);
+    let internal_info_start = native_xml
+        .find("\t\t<InternalInfo>\r\n")
+        .expect("native BusinessProcess InternalInfo");
+    let internal_info_end = internal_info_start
+        + native_xml[internal_info_start..]
+            .find("\t\t</InternalInfo>\r\n")
+            .expect("native BusinessProcess InternalInfo end")
+        + "\t\t</InternalInfo>\r\n".len();
+    assert_eq!(
+        formatted_internal_info,
+        native_xml[internal_info_start..internal_info_end]
+    );
+    assert!(native_xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+    assert_eq!(native_xml.matches("\t\t\t<Form>").count(), 4);
+    assert_eq!(native_xml.matches("\t\t\t<Attribute uuid=").count(), 27);
+    assert!(!native_xml.contains("\t\t\t<Template>"));
+    assert!(!native_xml.contains("\t\t\t<Command uuid="));
+    assert!(!native_xml.contains("\t\t\t<TabularSection uuid="));
 }
 
 #[test]
