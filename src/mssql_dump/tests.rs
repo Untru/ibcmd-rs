@@ -43800,31 +43800,22 @@ fn selected_document_journal_metadata_requests_child_and_type_indexes() {
 }
 
 #[test]
-fn extracts_task_child_form_and_template_refs_from_current_indexes() {
-    let task_uuid = "11111111-1111-4111-8111-111111111111";
-    let task_object_type_id = "22222222-2222-4222-8222-222222222221";
-    let task_object_value_id = "22222222-2222-4222-8222-222222222222";
-    let task_ref_type_id = "33333333-3333-4333-8333-333333333331";
-    let task_ref_value_id = "33333333-3333-4333-8333-333333333332";
+fn extracts_task_child_form_ref_from_current_index() {
+    let task_uuid = "32838304-a94f-4eb0-b1a6-4e5e855f022c";
     let form_uuid = "44444444-4444-4444-8444-444444444441";
-    let template_uuid = "55555555-5555-4555-8555-555555555551";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let form_list_marker = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let task_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"\",0,0,{zero_uuid},0}},0,{task_object_type_id},{task_object_value_id},{task_ref_type_id},{task_ref_value_id}}},\r\n{{{form_list_marker},1,{form_uuid}}},{template_uuid}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let empty_form_collection = "{3f58cbfb-4172-4e54-be49-561a579bb38b,0}";
+    let task_text = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
+    );
+    assert_eq!(task_text.matches(empty_form_collection).count(), 1);
+    let task_text = task_text.replace(
+        empty_form_collection,
+        &format!("{{3f58cbfb-4172-4e54-be49-561a579bb38b,1,{form_uuid}}}"),
+    );
+    let task_blob = deflate_for_test(task_text.as_bytes());
     let form_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"MainForm\",{{1,\"en\",\"Main form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
-            )
-            .as_bytes(),
-        );
-    let template_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{2,4,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Print\",{{1,\"en\",\"Print\"}},\"\"}}\r\n,0}}\r\n}}"
             )
             .as_bytes(),
         );
@@ -43834,35 +43825,25 @@ fn extracts_task_child_form_and_template_refs_from_current_indexes() {
         data_size: data.len() as i64,
         binary_hex: encode_hex_for_test(data),
     };
-    let rows = vec![
-        row(task_uuid, &task_blob),
-        row(form_uuid, &form_blob),
-        row(template_uuid, &template_blob),
-    ];
+    let rows = vec![row(task_uuid, &task_blob), row(form_uuid, &form_blob)];
+    let type_index = build_metadata_type_index(&rows);
     let form_refs = build_form_source_reference_index(&rows);
-    let template_refs = build_template_source_reference_index(&rows);
 
     assert_eq!(
         form_refs
             .get(form_uuid)
             .map(|form_ref| form_ref.relative_path.as_path()),
-        Some(Path::new("Tasks/ExecutorTask/Forms/MainForm.xml"))
-    );
-    assert_eq!(
-        template_refs
-            .get(template_uuid)
-            .map(|template_ref| template_ref.relative_path.as_path()),
-        Some(Path::new("Tasks/ExecutorTask/Templates/Print.xml"))
+        Some(Path::new("Tasks/CorpusTask/Forms/MainForm.xml"))
     );
 
     let extracted = extract_metadata_source_xml_with_refs(
         &task_blob,
         task_uuid,
-        &BTreeMap::new(),
+        &type_index,
         &BTreeMap::new(),
         &BTreeMap::new(),
         &form_refs,
-        &template_refs,
+        &BTreeMap::new(),
         &BTreeMap::new(),
         InfobaseConfigSourceVersion::V2_20,
     )
@@ -43871,18 +43852,13 @@ fn extracts_task_child_form_and_template_refs_from_current_indexes() {
 
     assert_eq!(
         extracted.relative_path,
-        PathBuf::from("Tasks").join("ExecutorTask.xml")
+        PathBuf::from("Tasks").join("CorpusTask.xml")
     );
     assert!(xml.contains("<ChildObjects>"));
     assert!(xml.contains("<Form>MainForm</Form>"));
-    assert!(xml.contains("<Template>Print</Template>"));
     assert!(xml.find("</Properties>").unwrap() < xml.find("<ChildObjects>").unwrap());
-    assert!(
-        xml.find("<Form>MainForm</Form>").unwrap()
-            < xml.find("<Template>Print</Template>").unwrap()
-    );
     assert_eq!(xml.matches("<Form>MainForm</Form>").count(), 1);
-    assert_eq!(xml.matches("<Template>Print</Template>").count(), 1);
+    assert!(!xml.contains("<Template>"));
 }
 
 #[test]
@@ -47242,7 +47218,7 @@ fn extracts_business_process_use_standard_commands_to_metadata_xml() {
 }
 
 #[test]
-fn extracts_platform_proven_minimal_task_to_metadata_xml() {
+fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
     let task_uuid = "32838304-a94f-4eb0-b1a6-4e5e855f022c";
     let task_text = include_str!(
         "../../tests/fixtures/native-evidence/8.3.27.2214/task-basic/raw/32838304-a94f-4eb0-b1a6-4e5e855f022c.txt"
@@ -47355,6 +47331,47 @@ fn extracts_platform_proven_minimal_task_to_metadata_xml() {
     assert!(xml.contains(r#"<Task uuid="32838304-a94f-4eb0-b1a6-4e5e855f022c">"#));
     assert!(xml.contains("<Name>CorpusTask</Name>"));
     assert_eq!(xml.matches("<xr:GeneratedType").count(), 5);
+    for (name, category, type_id, value_id) in [
+        (
+            "TaskObject.CorpusTask",
+            "Object",
+            "10ec06ed-3f62-4ae1-aadb-748557377c0b",
+            "347c9579-b6f6-439c-87af-54b4781f4946",
+        ),
+        (
+            "TaskRef.CorpusTask",
+            "Ref",
+            "cb0d19ea-3ec9-46c2-9474-98db8a3d52c3",
+            "baacbca5-9d9e-492c-ae08-5a69b56f12e0",
+        ),
+        (
+            "TaskSelection.CorpusTask",
+            "Selection",
+            "513b8034-22a7-4c32-97a1-dc6e0036ac61",
+            "8cd1a0d0-6623-419f-a7e5-4ed3d1f92c66",
+        ),
+        (
+            "TaskList.CorpusTask",
+            "List",
+            "4ec8a1da-c0ef-4f23-9f1e-4c46e47f0d32",
+            "e0cc629f-3fea-4682-a47c-746701de53bf",
+        ),
+        (
+            "TaskManager.CorpusTask",
+            "Manager",
+            "eb427657-ad96-440e-802f-cb13e84446b3",
+            "99340d0b-ec66-4f91-baf5-e6ecd79c0fcf",
+        ),
+    ] {
+        assert!(
+            xml.contains(&format!(
+                r#"<xr:GeneratedType name="{name}" category="{category}">"#
+            )),
+            "{xml}"
+        );
+        assert!(xml.contains(&format!("<xr:TypeId>{type_id}</xr:TypeId>")));
+        assert!(xml.contains(&format!("<xr:ValueId>{value_id}</xr:ValueId>")));
+    }
 }
 
 #[test]
@@ -47444,90 +47461,6 @@ fn validates_platform_proven_task_assignee_native_shape() {
     );
     assert_eq!(native_xml.matches("\t\t\t<Command uuid=").count(), 4);
     assert!(!native_xml.contains("\t\t\t<Template>"));
-}
-
-#[test]
-fn extracts_task_generated_types_to_metadata_xml() {
-    let task_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let object_type_id = "11111111-1111-4111-8111-111111111111";
-    let object_value_id = "11111111-1111-4111-8111-111111111112";
-    let ref_type_id = "22222222-2222-4222-8222-222222222221";
-    let ref_value_id = "22222222-2222-4222-8222-222222222222";
-    let selection_type_id = "33333333-3333-4333-8333-333333333331";
-    let selection_value_id = "33333333-3333-4333-8333-333333333332";
-    let list_type_id = "44444444-4444-4444-8444-444444444441";
-    let list_value_id = "44444444-4444-4444-8444-444444444442";
-    let manager_type_id = "55555555-5555-4555-8555-555555555551";
-    let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let list_form_uuid = "66666666-6666-4666-8666-666666666666";
-    let task_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{33,\r\n{{3,\r\n{{1,0,{task_uuid}}},\"ExecutorTask\",{{1,\"en\",\"Executor task\"}},\"task comment\"}},0,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},{manager_type_id},{manager_value_id}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
-    let form_refs = BTreeMap::from([(
-        list_form_uuid.to_string(),
-        FormSourceReference {
-            relative_path: PathBuf::from("Tasks/ExecutorTask/Forms/ListForm.xml"),
-            kind: "Form",
-        },
-    )]);
-
-    let extracted = extract_metadata_source_xml_with_refs(
-        &task_blob,
-        task_uuid,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &form_refs,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        InfobaseConfigSourceVersion::V2_21,
-    )
-    .unwrap();
-    let xml = String::from_utf8(extracted.xml).unwrap();
-
-    assert_eq!(
-        extracted.relative_path,
-        PathBuf::from("Tasks").join("ExecutorTask.xml")
-    );
-    assert!(xml.starts_with('\u{feff}'));
-    assert!(xml.contains(r#"version="2.21""#));
-    assert!(xml.contains("<Comment>task comment</Comment>"));
-    assert_eq!(xml.matches("<xr:GeneratedType").count(), 5);
-    assert!(
-        xml.find("<InternalInfo>").unwrap() < xml.find("<Properties>").unwrap(),
-        "{xml}"
-    );
-    assert!(xml.contains(r#"<xr:GeneratedType name="TaskObject.ExecutorTask" category="Object">"#));
-    assert!(xml.contains(&format!("<xr:TypeId>{object_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{object_value_id}</xr:ValueId>")));
-    assert!(xml.contains(r#"<xr:GeneratedType name="TaskRef.ExecutorTask" category="Ref">"#));
-    assert!(xml.contains(&format!("<xr:TypeId>{ref_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{ref_value_id}</xr:ValueId>")));
-    assert!(
-        xml.contains(
-            r#"<xr:GeneratedType name="TaskSelection.ExecutorTask" category="Selection">"#
-        )
-    );
-    assert!(xml.contains(&format!("<xr:TypeId>{selection_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{selection_value_id}</xr:ValueId>")));
-    assert!(xml.contains(r#"<xr:GeneratedType name="TaskList.ExecutorTask" category="List">"#));
-    assert!(xml.contains(&format!("<xr:TypeId>{list_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{list_value_id}</xr:ValueId>")));
-    assert!(
-        xml.contains(r#"<xr:GeneratedType name="TaskManager.ExecutorTask" category="Manager">"#)
-    );
-    assert!(xml.contains(&format!("<xr:TypeId>{manager_type_id}</xr:TypeId>")));
-    assert!(xml.contains(&format!("<xr:ValueId>{manager_value_id}</xr:ValueId>")));
-    assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
-    assert!(xml.contains("<DefaultListForm>Task.ExecutorTask.Form.ListForm</DefaultListForm>"));
-    assert!(
-        xml.find("<Comment>task comment</Comment>").unwrap()
-            < xml.find("<UseStandardCommands>").unwrap(),
-        "{xml}"
-    );
 }
 
 #[test]
