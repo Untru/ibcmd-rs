@@ -35,6 +35,9 @@
 
 **Статус:** `[ ]`
 
+- [x] DCS body layout и raw -> native `Template.xml` byte parity подтверждены
+  двумя изолированными roundtrip на 8.3.27.2214 / XML 2.20; micro-CF проходит
+  production `cf export` offline.
 - [ ] EDT roundtrip fixtures проходят.
 - [ ] IBCMD parity fixtures проходят.
 - [ ] GitHub #283 получает evidence.

@@ -1163,7 +1163,10 @@ fn insert_data_composition_settings(xml: &mut String, settings: &[String]) -> Op
     // settingsVariant elements positionally. Insert from the end so the byte
     // offsets collected from the unchanged schema remain valid.
     for (offsets, settings_block) in offsets.iter().zip(settings).rev() {
-        xml.insert_str(offsets.closing, settings_block);
+        let insertion = xml[..offsets.closing]
+            .trim_end_matches(['\r', '\n', '\t', ' '])
+            .len();
+        xml.insert_str(insertion, settings_block);
     }
     Some(())
 }
@@ -2553,6 +2556,24 @@ mod tests {
         assert_eq!(variant_bodies[2].matches("<dcsset:settings").count(), 1);
         assert!(variant_bodies[2].contains("<dcsset:field>TertiaryMarker</dcsset:field>"));
         assert!(!variant_bodies[2].contains("PrimaryMarker"));
+    }
+
+    #[test]
+    fn platform_8_3_27_xml_2_20_dcs_body_exports_byte_exact() {
+        let raw = include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/raw/\
+             f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin"
+        );
+        let expected = include_bytes!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/native/Reports/\
+             DcsCorpus/Templates/MainSchema/Ext/Template.xml"
+        );
+
+        let actual =
+            normalize_data_composition_schema_template_xml(raw, &BTreeMap::new(), &BTreeMap::new())
+                .expect("platform-attested DCS body must be exportable");
+
+        assert_eq!(actual, expected);
     }
 
     #[test]

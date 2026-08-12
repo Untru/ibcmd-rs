@@ -1,7 +1,8 @@
 # Template bodies on 8.3.27
 
 Status: bounded evidence for the standalone compiler profile
-`platform-8.3.27.1989`.
+`platform-8.3.27.1989`, with an additional DCS-only two-round attestation on
+`8.3.27.2214` / XML `2.20`.
 
 The native layouts were recovered from the independently retained inflated
 `Config` corpus under
@@ -67,6 +68,16 @@ document remain explicit blockers. Historical direct-XML DCS rows remain
 readable only through the named compatibility decoder; the profile-selected
 writer and strict decoder accept only the three-document layout.
 
+The diagnostic fixture under
+`tests/fixtures/native-evidence/8.3.27.2214/dcs-core` independently confirms
+the same header and three-document layout on patch build `8.3.27.2214`. Its
+raw-deflate stream, 4,458-byte unpacked body, and selected native
+`Template.xml` are byte-identical across two isolated file-infobase rounds.
+The fixture also drives the normal offline `cf export` path and requires the
+complete selected XML to match the platform output byte-for-byte. This is
+evidence for a shared 8.3.27 / XML 2.20 DCS body contract, not a distinct
+patch-build dialect.
+
 ## Retained evidence
 
 Hashes below are of the inflated native row bytes, not the compressed SQL
@@ -89,11 +100,14 @@ explicit rather than being presented as corpus evidence.
 
 ## Version and compatibility boundary
 
-The codecs are enabled only when the platform build is `8.3.27.1989`, the
-storage profile is `storage:mssql-config-configsave`, and all three constants
-above select the exact evidenced layouts. The bundled 8.3.24 and 8.5.1
-profiles do not inherit them. Support for another platform version therefore
-requires explicit profile evidence and cannot silently reuse these bytes.
+The complete standalone compiler profile remains enabled only when the
+platform build is `8.3.27.1989`, the storage profile is
+`storage:mssql-config-configsave`, and all three constants above select the
+exact evidenced layouts. That conservative whole-profile gate must not be
+confused with the DCS component contract: the additional `8.3.27.2214`
+fixture demonstrates that this DCS layout is shared inside the 8.3.27 / XML
+2.20 family. It does not by itself attest every other metadata/body constant
+on `8.3.27.2214`, and the bundled 8.3.24 and 8.5.1 profiles do not inherit it.
 
 ## Verification
 

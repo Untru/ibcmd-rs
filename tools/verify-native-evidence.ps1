@@ -248,6 +248,65 @@ Assert-RawNativeEvidenceCorpus `
         ChartOfCalculationTypes = '8c132029-d49c-49db-b12b-64519b64d755'
     }
 
+$dcsFixtureRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-core'
+$dcsManifestPath = Join-Path $dcsFixtureRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsManifestPath -PathType Leaf)) {
+    throw "DCS evidence manifest is missing: $dcsManifestPath"
+}
+$dcsManifest = Get-Content -LiteralPath $dcsManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsManifest.schema_version 1 'DCS manifest schema version'
+Assert-Equal $dcsManifest.issue 283 'DCS issue'
+Assert-Equal $dcsManifest.evidence.platform_version '8.3.27.2214' 'DCS platform version'
+Assert-Equal $dcsManifest.evidence.source_version '2.20' 'DCS source version'
+foreach ($definition in @(
+    $dcsManifest.seed.report_definition,
+    $dcsManifest.seed.dcs_definition,
+    $dcsManifest.seed.generated_template
+)) {
+    Assert-FileEvidence $definition $dcsFixtureRoot
+}
+Assert-FileEvidence $dcsManifest.template.raw_entry.packed $dcsFixtureRoot
+Assert-FileEvidence $dcsManifest.template.raw_entry.unpacked $dcsFixtureRoot
+Assert-FileEvidence $dcsManifest.template.native_xml $dcsFixtureRoot
+
+$dcsPackedPath = Resolve-FixturePath $dcsManifest.template.raw_entry.packed.path $dcsFixtureRoot
+$dcsUnpackedPath = Resolve-FixturePath $dcsManifest.template.raw_entry.unpacked.path $dcsFixtureRoot
+$dcsCompressedStream = New-Object IO.MemoryStream(,([IO.File]::ReadAllBytes($dcsPackedPath)))
+$dcsDecompressedStream = New-Object IO.MemoryStream
+$dcsDeflateStream = New-Object IO.Compression.DeflateStream(
+    $dcsCompressedStream,
+    [IO.Compression.CompressionMode]::Decompress
+)
+try {
+    $dcsDeflateStream.CopyTo($dcsDecompressedStream)
+} finally {
+    $dcsDeflateStream.Dispose()
+    $dcsCompressedStream.Dispose()
+}
+try {
+    $dcsDecompressed = $dcsDecompressedStream.ToArray()
+} finally {
+    $dcsDecompressedStream.Dispose()
+}
+Assert-Equal $dcsDecompressed.Length ([long]$dcsManifest.template.raw_entry.unpacked.size) 'DCS decoded size'
+Assert-Equal (Get-Sha256Hex $dcsDecompressed) $dcsManifest.template.raw_entry.unpacked.sha256 'DCS decoded SHA-256'
+Assert-Equal (Get-Sha256Hex ([IO.File]::ReadAllBytes($dcsUnpackedPath))) (Get-Sha256Hex $dcsDecompressed) 'DCS packed/unpacked pair'
+Assert-Equal ([BitConverter]::ToUInt32($dcsDecompressed, 0)) ([uint32]$dcsManifest.proven_shape.header_marker) 'DCS header marker'
+Assert-Equal ([BitConverter]::ToUInt32($dcsDecompressed, 4)) ([uint32]$dcsManifest.proven_shape.settings_document_count) 'DCS settings document count'
+Assert-Equal ([BitConverter]::ToUInt64($dcsDecompressed, 8)) ([uint64]$dcsManifest.proven_shape.stored_document_lengths[0]) 'DCS first document length'
+Assert-Equal ([BitConverter]::ToUInt64($dcsDecompressed, 16)) ([uint64]$dcsManifest.proven_shape.stored_document_lengths[1]) 'DCS second document length'
+
+$dcsEncodedCfPath = Resolve-FixturePath $dcsManifest.configuration_cf.path $dcsFixtureRoot
+if (-not (Test-Path -LiteralPath $dcsEncodedCfPath -PathType Leaf)) {
+    throw "Encoded DCS CF is missing: $($dcsManifest.configuration_cf.path)"
+}
+Assert-Equal (Get-Item -LiteralPath $dcsEncodedCfPath).Length ([long]$dcsManifest.configuration_cf.encoded_size) 'encoded DCS CF size'
+Assert-Equal (Get-FileSha256Hex $dcsEncodedCfPath) $dcsManifest.configuration_cf.encoded_sha256 'encoded DCS CF SHA-256'
+$dcsEncodedCf = Get-Content -LiteralPath $dcsEncodedCfPath -Raw -Encoding ASCII
+$dcsCfBytes = [Convert]::FromBase64String(($dcsEncodedCf -replace '\s', ''))
+Assert-Equal $dcsCfBytes.Length ([long]$dcsManifest.configuration_cf.decoded_size) 'decoded DCS CF size'
+Assert-Equal (Get-Sha256Hex $dcsCfBytes) $dcsManifest.configuration_cf.decoded_sha256 'decoded DCS CF SHA-256'
+
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
     $BinaryPath = Join-Path $RepositoryRoot $BinaryPath
 }
@@ -258,6 +317,8 @@ if (-not (Test-Path -LiteralPath $BinaryPath -PathType Leaf)) {
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("ibcmd-rs-native-evidence-" + [Guid]::NewGuid().ToString('N'))
 $cfPath = Join-Path $temporaryRoot 'configuration.cf'
 $outputRoot = Join-Path $temporaryRoot 'export'
+$dcsCfPath = Join-Path $temporaryRoot 'dcs-configuration.cf'
+$dcsOutputRoot = Join-Path $temporaryRoot 'dcs-export'
 $stderrPath = Join-Path $temporaryRoot 'stderr.txt'
 [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
 
@@ -289,10 +350,31 @@ try {
             Assert-Equal (Get-FileSha256Hex $candidatePath) $expected.sha256 "$candidateRelativePath exported SHA-256"
         }
     }
+
+    [IO.File]::WriteAllBytes($dcsCfPath, $dcsCfBytes)
+    $dcsStdout = & $BinaryPath cf export --source-version 2.20 $dcsCfPath $dcsOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        $stderr = if (Test-Path -LiteralPath $stderrPath) {
+            Get-Content -LiteralPath $stderrPath -Raw
+        } else {
+            ''
+        }
+        throw "DCS CF export failed with exit code $LASTEXITCODE. $stderr"
+    }
+    $dcsReport = ($dcsStdout -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $dcsReport.ok $true 'DCS CF export status'
+    Assert-Equal $dcsReport.export.storage.failed 0 'failed DCS storage entries'
+    $dcsCandidateRelativePath = $dcsManifest.template.native_xml.path -replace '^native/', ''
+    $dcsCandidatePath = Join-Path $dcsOutputRoot ($dcsCandidateRelativePath.Replace('/', [IO.Path]::DirectorySeparatorChar))
+    if (-not (Test-Path -LiteralPath $dcsCandidatePath -PathType Leaf)) {
+        throw "Exported DCS evidence output is missing: $dcsCandidateRelativePath"
+    }
+    Assert-Equal (Get-Item -LiteralPath $dcsCandidatePath).Length ([long]$dcsManifest.template.native_xml.size) "$dcsCandidateRelativePath exported size"
+    Assert-Equal (Get-FileSha256Hex $dcsCandidatePath) $dcsManifest.template.native_xml.sha256 "$dcsCandidateRelativePath exported SHA-256"
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS + ChartOfCharacteristicTypes + register and plan generated types.'

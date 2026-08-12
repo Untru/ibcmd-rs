@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-core",
+  "scope": "diagnostic_only_immutable_native_evidence",
+  "issue": 283,
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-08-12",
+    "platform_version": "8.3.27.2214",
+    "source_version": "2.20",
+    "ibcmd_path": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ibcmd.exe",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b",
+    "database_kind": "two_isolated_file_infobases",
+    "vm": "Parallels Windows 11 ARM64; x86-64 platform under Windows emulation"
+  },
+  "seed": {
+    "kind": "unica_main_hypothesis_then_platform_attested",
+    "unica_main_sha": "a527d40962d047c6922c903b37510b30f697da42",
+    "commands": [
+      "unica.cf.init",
+      "unica.meta.compile",
+      "unica.template.add",
+      "unica.dcs.compile",
+      "unica.dcs.info"
+    ],
+    "report_definition": {
+      "path": "seed/unica-main-report.json",
+      "size": 73,
+      "sha256": "1917a90a7a1c9f047f20ac28d0503229dd403fa2a5ef68a5d982b22197e2ff1a"
+    },
+    "dcs_definition": {
+      "path": "seed/unica-main-dcs.json",
+      "size": 680,
+      "sha256": "55eebfe0cdc0af3597205ba468aa3be7b80c61020e4f5e6d6c7fba8fafdad733"
+    },
+    "generated_template": {
+      "path": "seed/unica-main-template.xml",
+      "size": 3802,
+      "sha256": "bf1ebf1bcb4cf0992060989915a005c6cc18ef5da94ea3d978b6506b22331319"
+    },
+    "authority": "hypothesis_seed_only",
+    "platform_correction": "lexical_newline_canonicalization_only"
+  },
+  "platform_attestation": {
+    "procedure": [
+      "Import and apply the Unica-generated XML 2.20 source tree in a new isolated file infobase with pinned ibcmd 8.3.27.2214.",
+      "Save the first CF, recursively export only Report.DcsCorpus, and extract the exact template UUID .0 element as explicit raw-deflate.",
+      "Load the first CF into a second isolated file infobase, save a second CF, and repeat the selected export and exact raw extraction.",
+      "Compare both selected native XML trees and both packed and unpacked template body payloads byte-for-byte."
+    ],
+    "round_1_cf": {
+      "size": 81389,
+      "sha256": "91ffa78b699e1c9ca8f847269f0aa7775fe02e556893184b9dee3e5e15637b6b"
+    },
+    "round_2_cf": {
+      "size": 81389,
+      "sha256": "d5cc56c9e63720d07a3b0d92cc75507bda7c7e27e0e9eebb20fdfdecc550c6a8"
+    },
+    "packed_equal_between_rounds": true,
+    "unpacked_equal_between_rounds": true,
+    "selected_native_xml_equal_between_rounds": true
+  },
+  "configuration_cf": {
+    "storage": "base64",
+    "path": "configuration.cf.b64",
+    "encoded_size": 108521,
+    "encoded_sha256": "018be3b0505e1cda246a47603eaf7ea73529cb1273e3f2059cee97666228b9c7",
+    "decoded_size": 81389,
+    "decoded_sha256": "d5cc56c9e63720d07a3b0d92cc75507bda7c7e27e0e9eebb20fdfdecc550c6a8"
+  },
+  "template": {
+    "owner_kind": "Report",
+    "owner_name": "DcsCorpus",
+    "owner_uuid": "688ec52f-a520-4868-95c1-832c78c4813c",
+    "name": "MainSchema",
+    "uuid": "f4db0f6c-34f4-4449-995d-6265516e5fa8",
+    "raw_entry": {
+      "compression": "raw-deflate",
+      "packed": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate",
+        "size": 1008,
+        "sha256": "6c9d6e02140f1410bf92650d5fe717b07cd66ec45db1567ab4b2ae7dc0782a8b"
+      },
+      "unpacked": {
+        "path": "raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin",
+        "size": 4458,
+        "sha256": "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510"
+      }
+    },
+    "native_xml": {
+      "path": "native/Reports/DcsCorpus/Templates/MainSchema/Ext/Template.xml",
+      "size": 3909,
+      "sha256": "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f"
+    }
+  },
+  "proven_shape": {
+    "body_layout": "dcs-schema-three-document-v1",
+    "header_marker": 0,
+    "settings_document_count": 1,
+    "stored_document_lengths": [3029, 1142],
+    "trailing_document_length": 263,
+    "document_roots": ["SchemaFile", "Settings", "SchemaFile"],
+    "settings_variant_count": 1,
+    "data_set_kinds": ["DataSetObject"],
+    "data_set_field_count": 2,
+    "calculated_field_count": 1,
+    "total_field_count": 2,
+    "parameter_count": 1
+  },
+  "proven_claims": [
+    "Pinned 8.3.27.2214 accepted and applied the unmodified semantic Unica DCS seed; the only source rewrite was platform CRLF and terminal-newline canonicalization.",
+    "The packed raw-deflate body, unpacked three-document body, and selected native Template.xml are byte-identical across two independent platform rounds.",
+    "The 8.3.27.2214 body uses the same dcs-schema-three-document-v1 structure previously observed on 8.3.27.1989, supporting a shared 8.3.27 XML 2.20 DCS body contract rather than a patch-build-specific dialect.",
+    "The production DCS exporter reproduces the complete selected native Template.xml byte-for-byte from the committed raw body.",
+    "The committed micro CF exercises the normal offline cf export production path without SQL, EDT, or a live 1C platform."
+  ],
+  "non_claims": [
+    "Unica is not treated as an authority; it supplied only the initial source hypothesis.",
+    "No claim is made that every platform or storage layout outside the 8.3.27 XML 2.20 DCS body contract is identical.",
+    "No inline AreaTemplate, multiple settings variants, multiple Settings documents, Form ListSettings, opaque extension placement, or current-configuration reference is inferred from this fixture.",
+    "The current base-free DCS compiler is not claimed to reconstruct this native body byte-for-byte; this fixture proves the decode/export path.",
+    "The fixture is diagnostic-only and is never read as a production fallback."
+  ]
+}
