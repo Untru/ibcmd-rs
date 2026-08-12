@@ -1,16 +1,18 @@
-$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$validatorPath = Join-Path $repositoryRoot 'tools\validate-edt-corpus.ps1'
-$hostExecutableName = if ($PSVersionTable.PSEdition -eq 'Core') {
-    'pwsh.exe'
-} else {
-    'powershell.exe'
-}
-$hostExecutable = Join-Path $PSHOME $hostExecutableName
-if (-not (Test-Path -LiteralPath $hostExecutable -PathType Leaf)) {
-    throw "PowerShell host executable not found: $hostExecutable"
-}
-
 Describe 'EDT corpus governance validator' {
+    BeforeAll {
+        $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+        $validatorPath = Join-Path $repositoryRoot 'tools\validate-edt-corpus.ps1'
+        $hostExecutableName = if ($PSVersionTable.PSEdition -eq 'Core') {
+            'pwsh.exe'
+        } else {
+            'powershell.exe'
+        }
+        $hostExecutable = Join-Path $PSHOME $hostExecutableName
+        if (-not (Test-Path -LiteralPath $hostExecutable -PathType Leaf)) {
+            throw "PowerShell host executable not found: $hostExecutable"
+        }
+    }
+
     It 'accepts portable repository-relative paths and rejects hostile absolute paths' {
         $output = & $hostExecutable -NoLogo -NoProfile -File $validatorPath `
             -RepositoryRoot $repositoryRoot -SelfTest 2>&1
