@@ -61,11 +61,38 @@ function Get-TrackedFiles {
         throw 'git is required to validate the tracked EDT-derived corpus.'
     }
 
-    $trackedFiles = @(& git -C $Root ls-files)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Unable to list tracked files in '$Root'."
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $git.Source
+    $startInfo.WorkingDirectory = [System.IO.Path]::GetFullPath($Root)
+    $startInfo.Arguments = '-c core.quotePath=false ls-files -z'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $startInfo.StandardErrorEncoding = [System.Text.UTF8Encoding]::new($false)
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) {
+            throw "Unable to start git to list tracked files in '$Root'."
+        }
+        $output = $process.StandardOutput.ReadToEnd()
+        $errorOutput = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        if ($process.ExitCode -ne 0) {
+            throw "Unable to list tracked files in '$Root': $($errorOutput.Trim())"
+        }
+    }
+    finally {
+        $process.Dispose()
     }
 
+    $trackedFiles = @($output.Split(
+        [char[]]@([char]0),
+        [System.StringSplitOptions]::RemoveEmptyEntries
+    ))
     return @($trackedFiles | ForEach-Object { Join-Path $Root $_ })
 }
 
