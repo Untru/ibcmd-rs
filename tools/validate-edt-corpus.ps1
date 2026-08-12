@@ -340,7 +340,7 @@ function Assert-EdtCorpusFile {
         throw "$DisplayPath is not an approved cleansed JSON corpus file."
     }
 
-    $text = Get-Content -LiteralPath $Path -Raw
+    $text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
     Assert-TextContainsPortablePaths -Text $text -DisplayPath $DisplayPath
 
     try {
