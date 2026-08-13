@@ -15,6 +15,8 @@ use std::fmt::{self, Display, Formatter};
 use crate::{DcsSettingsDocumentAnalysisError, analyze_dcs_settings_document};
 
 const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+const XML_DECLARATION: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+const SCHEMA_FILE_OPEN: &str = "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
 const MAX_XML_DEPTH: usize = 256;
 const MAX_XML_EVENTS: usize = 1_000_000;
 const EMPTY_SETTINGS_DOCUMENT: &str = "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>";
@@ -52,6 +54,38 @@ pub enum DcsSchemaTemplateError {
 pub struct DetachedDcsSchemaTemplateSource {
     schema_without_settings: String,
     settings_documents: Vec<String>,
+}
+
+/// Owned physical XML documents produced from the bounded source compiler
+/// cohort. Binary framing and compression deliberately remain outside the XML
+/// layer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsSchemaTemplateOwnedDocuments {
+    primary_schema_file: Vec<u8>,
+    settings: Vec<Vec<u8>>,
+    terminal_schema_file: Vec<u8>,
+}
+
+impl DcsSchemaTemplateOwnedDocuments {
+    pub fn primary_schema_file(&self) -> &[u8] {
+        &self.primary_schema_file
+    }
+
+    pub fn settings(&self) -> &[Vec<u8>] {
+        &self.settings
+    }
+
+    pub fn terminal_schema_file(&self) -> &[u8] {
+        &self.terminal_schema_file
+    }
+
+    pub fn into_documents(self) -> Vec<Vec<u8>> {
+        let mut documents = Vec::with_capacity(self.settings.len() + 2);
+        documents.push(self.primary_schema_file);
+        documents.extend(self.settings);
+        documents.push(self.terminal_schema_file);
+        documents
+    }
 }
 
 impl DetachedDcsSchemaTemplateSource {
@@ -212,6 +246,97 @@ pub fn detach_dcs_settings_from_source_variants(
         schema_without_settings,
         settings_documents,
     })
+}
+
+/// Converts the attested source wrapper into native XML document roles. The
+/// schema subtree stays source-owned: this operation only detaches Settings,
+/// applies the evidenced root-case/wrapper mapping, and creates the evidenced
+/// empty terminal SchemaFile.
+pub fn compile_dcs_schema_template_source_documents(
+    source: &[u8],
+) -> Result<DcsSchemaTemplateOwnedDocuments, DcsSchemaTemplateError> {
+    let policy = bundled_dcs_schema_template_envelope_policy()
+        .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
+    let text = std::str::from_utf8(source)
+        .map_err(|_| DcsSchemaTemplateError::Malformed("DCS source is not UTF-8".to_string()))?;
+    let source_body = strip_source_document_shell(text)?;
+    if !source_body.starts_with("<DataCompositionSchema") {
+        return Err(DcsSchemaTemplateError::UnsupportedSource(
+            "prefixed or indirect DataCompositionSchema roots are outside the attested compiler cohort",
+        ));
+    }
+    let detached = detach_dcs_settings_from_source_variants(source_body)?;
+    let mut native_schema = detached.schema_without_settings;
+    rename_attested_source_schema_root(&mut native_schema)?;
+
+    let primary = xml_document(&format!(
+        "{SCHEMA_FILE_OPEN}\r\n{}\r\n</SchemaFile>",
+        native_schema.trim_end()
+    ));
+    let settings = detached
+        .settings_documents
+        .iter()
+        .map(|document| xml_document(document))
+        .collect::<Vec<_>>();
+    let terminal = xml_document(&format!(
+        "{SCHEMA_FILE_OPEN}\r\n\t<dataCompositionSchema xmlns=\"{}\"/>\r\n</SchemaFile>",
+        policy.schema_namespace_uri()
+    ));
+
+    let borrowed = std::iter::once(primary.as_slice())
+        .chain(settings.iter().map(Vec::as_slice))
+        .chain(std::iter::once(terminal.as_slice()))
+        .collect::<Vec<_>>();
+    analyze_dcs_schema_template_documents(&borrowed)?;
+    Ok(DcsSchemaTemplateOwnedDocuments {
+        primary_schema_file: primary,
+        settings,
+        terminal_schema_file: terminal,
+    })
+}
+
+fn strip_source_document_shell(source: &str) -> Result<&str, DcsSchemaTemplateError> {
+    let mut body = source.trim_start_matches('\u{feff}').trim_start();
+    if let Some(after_decl) = body.strip_prefix("<?xml") {
+        let end = after_decl.find("?>").ok_or_else(|| {
+            DcsSchemaTemplateError::Malformed("DCS XML declaration is not closed".to_string())
+        })?;
+        body = after_decl[end + 2..].trim_start_matches(['\r', '\n', ' ', '\t']);
+    }
+    Ok(body)
+}
+
+fn rename_attested_source_schema_root(xml: &mut String) -> Result<(), DcsSchemaTemplateError> {
+    const SOURCE_ROOT: &str = "DataCompositionSchema";
+    const SOURCE_CLOSE: &str = "</DataCompositionSchema>";
+    let opening = xml
+        .strip_prefix('<')
+        .is_some_and(|body| body.starts_with(SOURCE_ROOT));
+    let trimmed_len = xml.trim_end_matches(['\r', '\n', '\t', ' ']).len();
+    let closing = trimmed_len.checked_sub(SOURCE_CLOSE.len());
+    if !opening
+        || closing.is_none()
+        || xml.get(closing.unwrap_or_default()..trimmed_len) != Some(SOURCE_CLOSE)
+    {
+        return Err(DcsSchemaTemplateError::UnsupportedSource(
+            "source DataCompositionSchema root spelling is outside the attested compiler cohort",
+        ));
+    }
+    xml.replace_range(1..1 + SOURCE_ROOT.len(), "dataCompositionSchema");
+    let closing = closing.expect("closing offset is checked");
+    xml.replace_range(
+        closing + 2..closing + 2 + SOURCE_ROOT.len(),
+        "dataCompositionSchema",
+    );
+    Ok(())
+}
+
+fn xml_document(body: &str) -> Vec<u8> {
+    let mut document = Vec::with_capacity(UTF8_BOM.len() + XML_DECLARATION.len() + body.len());
+    document.extend_from_slice(UTF8_BOM);
+    document.extend_from_slice(XML_DECLARATION);
+    document.extend_from_slice(body.as_bytes());
+    document
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -731,6 +856,36 @@ fn direct_variant_closing_offsets(
 mod tests {
     use super::*;
 
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut length = 0usize;
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            quartet[length] = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => 64,
+                _ => panic!("invalid fixture base64 byte {byte}"),
+            };
+            length += 1;
+            if length == 4 {
+                output.push((quartet[0] << 2) | (quartet[1] >> 4));
+                if quartet[2] != 64 {
+                    output.push((quartet[1] << 4) | (quartet[2] >> 2));
+                }
+                if quartet[3] != 64 {
+                    output.push((quartet[2] << 6) | quartet[3]);
+                }
+                length = 0;
+            }
+        }
+        assert_eq!(length, 0);
+        output
+    }
+
     #[test]
     fn binds_only_direct_variants_positionally() {
         let source = r#"<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings"><settingsVariant><dcsset:name>A</dcsset:name></settingsVariant><settingsVariant><dcsset:name>B</dcsset:name></settingsVariant></DataCompositionSchema>"#;
@@ -767,6 +922,43 @@ mod tests {
         );
         assert_eq!(detached.settings_documents().len(), 1);
         assert!(detached.settings_documents()[0].contains("<dcsset:selection/>"));
+    }
+
+    #[test]
+    fn platform_multi_variant_source_builds_owned_native_document_roles() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-multi-variant-envelope/native-template.xml.b64"
+        )));
+        let documents = compile_dcs_schema_template_source_documents(&source).unwrap();
+        assert_eq!(documents.settings().len(), 2);
+        assert!(documents.primary_schema_file().starts_with(UTF8_BOM));
+        assert!(
+            documents
+                .primary_schema_file()
+                .windows(b"<dataCompositionSchema".len())
+                .any(|window| window == b"<dataCompositionSchema")
+        );
+        let borrowed = std::iter::once(documents.primary_schema_file())
+            .chain(documents.settings().iter().map(Vec::as_slice))
+            .chain(std::iter::once(documents.terminal_schema_file()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            analyze_dcs_schema_template_documents(&borrowed)
+                .unwrap()
+                .settings()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn source_document_constructor_rejects_unattested_root_spellings() {
+        let prefixed = br#"<s:DataCompositionSchema xmlns:s="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings"><s:settingsVariant><dcsset:settings/></s:settingsVariant></s:DataCompositionSchema>"#;
+        assert!(matches!(
+            compile_dcs_schema_template_source_documents(prefixed),
+            Err(DcsSchemaTemplateError::UnsupportedSource(_))
+        ));
     }
 
     #[test]

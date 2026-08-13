@@ -66,12 +66,12 @@ filter/settings content; the existing exporter inserts it back into the same
 variant. Header lengths, BOMs, roots, namespaces, XML balance, depth and node
 counts are validated before a body is accepted.
 
-The reverse compiler's evidenced emission cohort has one settings variant.
-Missing or multiple variants and inline `AreaTemplate` values that require the
-separately indexed native area document remain explicit compiler blockers.
+The reverse compiler's evidenced emission cohort has one or two direct
+settings variants. More than two variants and inline `AreaTemplate` values
+that require the separately indexed native area document remain explicit
+compiler blockers.
 Historical direct-XML DCS rows remain readable only through the named
-compatibility decoder; the profile-selected writer remains limited to the
-single-variant cohort.
+compatibility decoder.
 
 The diagnostic fixture under
 `tests/fixtures/native-evidence/8.3.27.2214/dcs-core` independently confirms
@@ -102,10 +102,11 @@ lengths are `3467`, `1142`, and `826`, and the 263-byte terminal `SchemaFile`
 occupies the remainder. Two external `Settings` documents bind positionally
 to the two source variants. Selected XML, packed body, and unpacked body are
 byte-identical across two fresh platform rounds, and the retained CF drives
-the normal offline `cf export` and raw-row verifier paths. This proves the
-envelope and delegation shape only; it does not claim a multi-variant reverse
-compiler, a full typed schema model, alternate bindings, or cross-profile
-replay.
+the normal offline `cf export` and raw-row verifier paths. The fixture proves
+the envelope and delegation shape only, not a full typed schema model,
+alternate bindings, or cross-profile replay. The common namespace-aware
+binder and reverse compiler now consume this exact one-to-two variant evidence
+boundary.
 
 ## Retained evidence
 

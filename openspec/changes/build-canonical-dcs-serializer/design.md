@@ -18,9 +18,9 @@ Form ListSettings.
 Физический schema/template envelope отдельно подтверждён на одном и двух
 прямых root `settingsVariant`: поле `u32` по смещению 4 является числом внешних
 `Settings`, за ним следуют `settings_count + 1` длин `u64`, а settings documents
-делегируются вариантам позиционно. Это evidence для framing и source-owned
-placement, но не готовая поддержка нескольких вариантов reverse compiler и не
-полная typed schema model.
+делегируются вариантам позиционно. Bounded reverse compiler для одного-двух
+вариантов использует этот общий binder; это всё ещё не полная typed schema
+model, а cardinality больше двух остаётся unsupported.
 
 Source-owned delegation не является вторым сериализатором: неизменённое
 поддерево остаётся у одного доказанного physical owner. Его мутация, перенос в

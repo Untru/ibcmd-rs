@@ -9,7 +9,7 @@ use ibcmd_core::profile::EffectiveProfile;
 use ibcmd_xml::{
     DcsChildParseOutcome, DcsSchemaTemplateError, DcsSettingsDocumentAnalysisError,
     analyze_dcs_schema_template_documents, analyze_dcs_settings_document,
-    detach_dcs_settings_from_source_variants,
+    compile_dcs_schema_template_source_documents,
 };
 use quick_xml::NsReader;
 use quick_xml::events::Event;
@@ -31,6 +31,7 @@ const DCS_HEADER_BYTES: usize = MIN_DCS_HEADER_BYTES;
 const MAX_XML_DEPTH: usize = 256;
 const MAX_XML_NODES: usize = 1_000_000;
 
+#[cfg(test)]
 const SCHEMA_FILE_OPEN: &str = "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
 #[cfg(test)]
 const EMPTY_SETTINGS: &str = "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>";
@@ -201,8 +202,12 @@ fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
         ));
     }
 
-    let (inner, settings) = source_schema_to_native_parts(xml)?;
-    for settings_document in &settings {
+    let documents =
+        compile_dcs_schema_template_source_documents(xml).map_err(map_template_error)?;
+    for settings_document in documents.settings() {
+        let settings_document = std::str::from_utf8(settings_document).map_err(|_| {
+            DcsCodecError::InvalidXml("native Settings document is not UTF-8".to_string())
+        })?;
         let settings_analysis =
             analyze_dcs_settings_document(settings_document).map_err(|error| match error {
                 DcsSettingsDocumentAnalysisError::Malformed(error) => {
@@ -243,19 +248,13 @@ fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
             ));
         }
     }
-    let first = xml_document(&format!("{SCHEMA_FILE_OPEN}\r\n{inner}\r\n</SchemaFile>"));
-    let settings = settings
-        .iter()
-        .map(|value| xml_document(value))
-        .collect::<Vec<_>>();
-    let third = xml_document(&format!(
-        "{SCHEMA_FILE_OPEN}\r\n\t<dataCompositionSchema xmlns=\"{}\"/>\r\n</SchemaFile>",
-        std::str::from_utf8(SCHEMA_NS).expect("schema namespace is UTF-8")
-    ));
+    let first = documents.primary_schema_file();
+    let settings = documents.settings();
+    let third = documents.terminal_schema_file();
 
     let settings_count = u32::try_from(settings.len())
         .map_err(|_| DcsCodecError::LimitExceeded("DCS settings document count"))?;
-    let stored_documents = std::iter::once(&first).chain(settings.iter());
+    let stored_documents = std::iter::once(first).chain(settings.iter().map(Vec::as_slice));
     let lengths = stored_documents
         .clone()
         .map(|document| {
@@ -284,11 +283,11 @@ fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
     for length in lengths {
         plain.extend_from_slice(&length.to_le_bytes());
     }
-    plain.extend_from_slice(&first);
+    plain.extend_from_slice(first);
     for document in settings {
-        plain.extend_from_slice(&document);
+        plain.extend_from_slice(document);
     }
-    plain.extend_from_slice(&third);
+    plain.extend_from_slice(third);
     Ok(plain)
 }
 
@@ -394,43 +393,13 @@ fn read_len(input: &[u8], offset: usize, field: &'static str) -> Result<usize, D
     usize::try_from(u64::from_le_bytes(bytes)).map_err(|_| DcsCodecError::LimitExceeded(field))
 }
 
+#[cfg(test)]
 fn xml_document(body: &str) -> Vec<u8> {
     let mut document = Vec::with_capacity(UTF8_BOM.len() + 45 + body.len());
     document.extend_from_slice(UTF8_BOM);
     document.extend_from_slice(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
     document.extend_from_slice(body.as_bytes());
     document
-}
-
-fn source_schema_to_native_parts(xml: &[u8]) -> Result<(String, Vec<String>), DcsCodecError> {
-    let text = std::str::from_utf8(xml)
-        .map_err(|_| DcsCodecError::InvalidXml("DCS source is not UTF-8".to_string()))?;
-    let mut body = text.trim_start_matches('\u{feff}').trim_start();
-    if let Some(after_decl) = body.strip_prefix("<?xml") {
-        let end = after_decl.find("?>").ok_or_else(|| {
-            DcsCodecError::InvalidXml("DCS XML declaration is not closed".to_string())
-        })?;
-        body = after_decl[end + 2..].trim_start_matches(['\r', '\n', ' ', '\t']);
-    }
-    if !body.starts_with("<DataCompositionSchema") {
-        return Err(DcsCodecError::UnsupportedSource(
-            "prefixed or indirect DataCompositionSchema roots are not evidenced",
-        ));
-    }
-    let detached = detach_dcs_settings_from_source_variants(body).map_err(map_template_error)?;
-    let mut body = detached.schema_without_settings().to_owned();
-    let settings = detached.settings_documents().to_vec();
-    body.replace_range(
-        1..1 + "DataCompositionSchema".len(),
-        "dataCompositionSchema",
-    );
-    if let Some(close) = body.rfind("</DataCompositionSchema>") {
-        body.replace_range(
-            close + 2..close + 2 + "DataCompositionSchema".len(),
-            "dataCompositionSchema",
-        );
-    }
-    Ok((body.trim_end().to_string(), settings))
 }
 
 #[derive(Default)]
@@ -638,6 +607,7 @@ mod tests {
 
     use super::*;
     use crate::compiler::families::native::deflate_bytes;
+    use sha2::{Digest, Sha256};
 
     fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
         let mut output = Vec::new();
@@ -725,6 +695,32 @@ mod tests {
         assert!(exported.contains("<DataCompositionSchema "));
         assert!(exported.contains("<name>Source1</name>"));
         assert!(exported.contains("<dataSourceType>Local</dataSourceType>"));
+    }
+
+    #[test]
+    fn common_document_builder_preserves_platform_accepted_compiler_body() {
+        let source = include_bytes!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-core/native/",
+            "Reports/DcsCorpus/Templates/MainSchema/Ext/Template.xml"
+        ));
+        let packed =
+            compile_dcs(&DcsCodecProfile::fixture(), DcsTemplateKind::Schema, source).unwrap();
+        let decoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        assert_eq!(decoded.plaintext().len(), 4_734);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(decoded.plaintext())),
+            "928de9e6a9fbcfe89530e5d02fe8f08c0efe491c392b671fa61c4c36d48ec81a"
+        );
+        assert_eq!(packed.len(), 1_026);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "5b8f758dc3d64e56b744b7554148245b0bf1f3023ce5aa81df63bcd730058ca8"
+        );
     }
 
     #[test]
@@ -944,9 +940,9 @@ mod tests {
         )
         .expect("compiled source-owned body must remain exportable");
 
-        let (_, settings) = source_schema_to_native_parts(&exported).unwrap();
-        assert_eq!(settings.len(), 1);
-        let settings = &settings[0];
+        let documents = compile_dcs_schema_template_source_documents(&exported).unwrap();
+        assert_eq!(documents.settings().len(), 1);
+        let settings = std::str::from_utf8(&documents.settings()[0]).unwrap();
         let analysis = analyze_dcs_settings_document(settings).unwrap();
         assert_eq!(analysis.source_owned().len(), 2);
         assert!(settings.contains("<dcscor:parameter>Caption</dcscor:parameter>"));

@@ -38,8 +38,9 @@ pub use dcs::{
     preflight_dcs_settings_serialization, rewrite_dcs_settings_children,
 };
 pub use dcs_template::{
-    DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DetachedDcsSchemaTemplateSource,
-    analyze_dcs_schema_template_documents, bind_dcs_settings_to_source_variants,
+    DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DcsSchemaTemplateOwnedDocuments,
+    DetachedDcsSchemaTemplateSource, analyze_dcs_schema_template_documents,
+    bind_dcs_settings_to_source_variants, compile_dcs_schema_template_source_documents,
     detach_dcs_settings_from_source_variants,
 };
 pub use dialect::{

@@ -46,6 +46,10 @@
   variants namespace-aware и обслуживает reverse compiler для доказанных
   одного-двух variants; доказанный production MSSQL route использует decoder
   ranges и не пересканирует plaintext по `<?xml`.
+- [x] Source-to-native document construction для этого bounded cohort также
+  принадлежит общему XML layer: compiler больше не владеет BOM/declaration,
+  `SchemaFile`, root-case mapping или empty terminal document; получаемое тело
+  совпадает с уже принятым pinned-платформой compiler artifact.
 - [ ] Полный typed schema API и общий inner-schema renderer ещё не реализованы:
   schema shell остаётся source-owned, а legacy renderer временно владеет
   TypeId/current-config/AreaTemplate lexical conversion и явно отделённым
