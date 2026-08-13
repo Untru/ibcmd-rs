@@ -1364,6 +1364,60 @@ mod tests {
     }
 
     #[test]
+    fn platform_output_parameters_native_packed_body_exports_exact_native_template_except_the_undocumented_name()
+     {
+        let profile = DcsCodecProfile::fixture();
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-output-parameters/raw-packed.bin.b64"
+        )));
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-output-parameters/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "1bab2e8e93c491f33d094473d8456e7877c1673d45656cca9d4729ea40c82fd7"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&native_template)),
+            "bc27a20de1bb75a83b3727ac457db04791cdd092c64e2e31e5b58ebecf296ddb"
+        );
+
+        // Decodes the platform's own deflate-compressed bytes directly --
+        // not anything ibcmd-rs compiled -- so the exact re-export match
+        // below is independent of our own compiler direction being
+        // correct.
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &packed)
+            .expect("genuine platform-packed body must decode");
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("genuine platform primary schema must remain exportable");
+
+        // KNOWN GAP (out of this work package's scope -- see
+        // `platform_output_parameters_exports_through_common_codec_except_the_undocumented_name`
+        // in src/mssql_dump/dcs.rs for the full explanation): the shared
+        // normalizer's `output_parameters` lexical canonicalization
+        // (storage "Title" -> source "Заголовок") is not wired into this
+        // adapter path, so the exported document matches native-template.xml
+        // byte-for-byte everywhere except that one parameter-name text
+        // node, which stays storage-spelled.
+        let expected_text = std::str::from_utf8(&native_template).unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        let patched_exported = exported_text.replace(
+            "<dcscor:parameter>Title</dcscor:parameter>",
+            "<dcscor:parameter>Заголовок</dcscor:parameter>",
+        );
+        assert_eq!(patched_exported, expected_text);
+    }
+
+    #[test]
     fn platform_parameter_scalar_types_native_packed_body_exports_exact_native_template() {
         let profile = DcsCodecProfile::fixture();
         let packed = decode_base64_fixture(include_str!(concat!(
@@ -1399,6 +1453,77 @@ mod tests {
             )
             .expect("genuine platform primary schema must remain exportable");
         assert_eq!(exported, native_template);
+    }
+
+    #[test]
+    fn platform_output_parameters_source_compiles_and_round_trips() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-output-parameters/native-template.xml.b64"
+        )));
+
+        // seed(source) XML -> body: the settings document's compile
+        // direction is blind passthrough (source bytes copied into the
+        // compiled blob unchanged -- see
+        // `schema_compiler_compile_direction_does_not_yet_gate_output_parameters_cohort`
+        // above), so this must succeed even though the compile direction
+        // does not deeply validate the outputParameters cohort.
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+
+        // body -> XML: re-exporting the compiled body must reproduce the
+        // evidenced outputParameters item verbatim. Unlike the genuine
+        // storage-bytes test above, there is no "Title" vs. "Заголовок" gap
+        // to document here: the compiled blob embeds the *source*-spelled
+        // settings-document bytes unchanged (blind passthrough), so the
+        // typed decode/export path parses the source spelling directly and
+        // there is nothing to canonicalize.
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<dcscor:parameter>Заголовок</dcscor:parameter>"));
+        assert!(
+            exported_text
+                .contains("<dcscor:value xsi:type=\"xs:string\">Probe Title</dcscor:value>")
+        );
+        assert!(exported_text.contains("<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">"));
+        // Placement: outputParameters immediately after order, immediately
+        // before the terminal StructureItemGroup item.
+        let order_close_at = exported_text.find("</dcsset:order>").unwrap();
+        let output_parameters_at = exported_text.find("<dcsset:outputParameters>").unwrap();
+        let structure_item_group_at = exported_text
+            .find("<dcsset:item xsi:type=\"dcsset:StructureItemGroup\">")
+            .unwrap();
+        assert!(order_close_at < output_parameters_at);
+        assert!(output_parameters_at < structure_item_group_at);
+
+        // body -> XML -> body: recompiling the exported source and
+        // re-decoding must reproduce the same outputParameters content.
+        let recompiled_blob = compile_dcs(&profile, DcsTemplateKind::Schema, &exported).unwrap();
+        let recompiled = decode_dcs(&profile, DcsTemplateKind::Schema, &recompiled_blob).unwrap();
+        let reexported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &recompiled.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let reexported_text = std::str::from_utf8(&reexported).unwrap();
+        assert!(reexported_text.contains("<dcscor:parameter>Заголовок</dcscor:parameter>"));
+        assert!(
+            reexported_text
+                .contains("<dcscor:value xsi:type=\"xs:string\">Probe Title</dcscor:value>")
+        );
     }
 
     #[test]
@@ -1491,8 +1616,14 @@ mod tests {
 
     #[test]
     fn schema_compiler_rejects_every_unowned_settings_child() {
+        // `outputParameters` is intentionally not in this list any more:
+        // this work package (dcs-output-parameters) admits it as a
+        // recognized typed element, so it is no longer "unowned" at the
+        // structural-audit level -- see
+        // `schema_compiler_compile_direction_does_not_yet_gate_output_parameters_cohort`
+        // below for what the compile direction currently does (and does
+        // not) enforce for it.
         for unknown in [
-            "<dcsset:outputParameters/>",
             "<dcsset:futureProbe/>",
             "<probe:futureProbe xmlns:probe=\"urn:ibcmd-rs:dcs-probe\"/>",
         ] {
@@ -1509,6 +1640,41 @@ mod tests {
                 Err(DcsCodecError::UnsupportedSource(_))
             ));
         }
+    }
+
+    /// KNOWN GAP (out of this work package's scope -- physical adapters get
+    /// test-only additions, never production logic changes): unlike
+    /// selection/filter/order/conditionalAppearance,
+    /// `compile_schema_plain`'s explicit `Unsupported`-outcome checklist has
+    /// no `output_parameters()` arm, so a cohort violation here (here: an
+    /// empty `<dcsset:outputParameters/>`, which the shared `ibcmd-xml`
+    /// codec reports as `Unsupported("outputParameters must contain
+    /// exactly one item")`) is not rejected at compile time -- the pre
+    /// existing blind-passthrough architecture just copies the settings
+    /// document's source bytes into the compiled blob unchanged. Fail-closed
+    /// enforcement for outputParameters is proven and guaranteed on the
+    /// decode/parse direction only (see the `output_parameters_rejects_*`
+    /// tests in crates/ibcmd-xml/src/dcs.rs). This mirrors the same,
+    /// deliberate choice already made for the primary schema's scalar
+    /// parameters in db73e1e ("the compile direction's pre-existing
+    /// primary-schema passthrough is documented, not extended").
+    #[test]
+    fn schema_compiler_compile_direction_does_not_yet_gate_output_parameters_cohort() {
+        let source = String::from_utf8(SIMPLE_SCHEMA.to_vec()).unwrap().replace(
+            "<dcsset:settings/>",
+            "<dcsset:settings><dcsset:outputParameters/></dcsset:settings>",
+        );
+        assert!(
+            compile_dcs(
+                &DcsCodecProfile::fixture(),
+                DcsTemplateKind::Schema,
+                source.as_bytes()
+            )
+            .is_ok(),
+            "compile direction currently does not gate the outputParameters cohort; \
+             if this now fails, the gap has been closed and this test (and its doc \
+             comment) should be updated to assert rejection instead"
+        );
     }
 
     #[test]

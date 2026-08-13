@@ -3102,9 +3102,62 @@ mod tests {
     }
 
     #[test]
+    fn platform_output_parameters_exports_through_common_codec_except_the_undocumented_name() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-output-parameters/raw-packed.bin.b64"
+        )));
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-output-parameters/native-template.xml.b64"
+        )));
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
+
+        // KNOWN GAP (out of this work package's scope -- physical adapters
+        // get test-only additions, never production logic changes):
+        // `canonicalize_data_composition_settings_document` and
+        // `CanonicalDcsSettingsInput` in this file have no dedicated
+        // `output_parameters` field/branch, so the generic namespace-prefix
+        // rewrite still correctly re-prefixes `<dcsset:outputParameters>`
+        // and the item's `xsi:type="dcsset:SettingsParameterValue"` (that
+        // part is namespace-URI-driven, not field-specific), but the
+        // dedicated lexical canonicalization this work package added to the
+        // shared `ibcmd-xml` codec (storage "Title" -> source "Заголовок")
+        // is never invoked from this adapter path. The exported document is
+        // therefore byte-identical to native-template.xml everywhere except
+        // that one parameter-name text node, which stays storage-spelled.
+        let expected_text = std::str::from_utf8(&native_template).unwrap();
+        let actual_text = std::str::from_utf8(&actual).unwrap();
+        assert!(actual_text.contains("<dcscor:parameter>Title</dcscor:parameter>"));
+        assert!(!actual_text.contains("Заголовок"));
+        let patched_actual = actual_text.replace(
+            "<dcscor:parameter>Title</dcscor:parameter>",
+            "<dcscor:parameter>Заголовок</dcscor:parameter>",
+        );
+        assert_eq!(patched_actual, expected_text);
+    }
+
+    #[test]
     fn unknown_settings_children_never_reach_the_generic_normalizer() {
+        // `outputParameters` is intentionally not in this list: this work
+        // package admits it as a recognized typed element (evidence:
+        // dcs-output-parameters), so an occurrence with no items no longer
+        // qualifies as "unowned" -- the dedicated cohort-shape fail-closed
+        // cases for it are covered by the ibcmd-xml unit tests instead
+        // (`output_parameters_rejects_*` in crates/ibcmd-xml/src/dcs.rs).
         for unknown in [
-            "<outputParameters/>",
             "<futureProbe/>",
             "<probe:futureProbe xmlns:probe=\"urn:ibcmd-rs:dcs-probe\"/>",
         ] {

@@ -2692,6 +2692,15 @@ pub const BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON: &str = include_s
 pub const BUNDLED_DCS_PARAMETER_SCALAR_TYPES_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-parameter-scalar-types/manifest.json"
 );
+/// Immutable platform-authenticated `dcsset:outputParameters` coordinate:
+/// one item (parameter `Заголовок`, xs:string value `Probe Title`)
+/// immediately after `dcsset:order` and immediately before the terminal
+/// `StructureItemGroup` item. Native-only round trips (no live
+/// compiler-acceptance verification); see cohort/non_claims in the
+/// manifest.
+pub const BUNDLED_DCS_OUTPUT_PARAMETERS_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-output-parameters/manifest.json"
+);
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -10588,6 +10597,212 @@ pub fn bundled_dcs_settings_source_owned_policy()
             .map(DcsSettingsSourceOwnedEvidenceCorpus::into_policy)
         })
         .clone()
+}
+
+/// Exact `dcsset:outputParameters` coordinate authenticated by the
+/// dedicated 2214 output-parameters cohort: one item with source parameter
+/// name `Заголовок` and xs:string value `Probe Title`, positioned
+/// immediately after `dcsset:order` and immediately before the terminal
+/// `StructureItemGroup` item. Reuses the settings/core/XML-Schema
+/// namespaces and the `SettingsParameterValue` type QName already
+/// evidence-bound by [`DcsSettingsSourceOwnedPolicy`] for `dataParameters`
+/// -- this corpus's own negative_observations confirm that xsi:type is the
+/// platform's general canonical marker for `dcsset:*` parameter-value
+/// containers, not something specific to one container.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsOutputParametersPolicy {
+    output_parameters_qname: String,
+    item_qname: String,
+    parameter_qname: String,
+    value_qname: String,
+    settings_parameter_value_type_qname: String,
+    source_parameter_name: String,
+    /// The storage side canonicalizes this parameter's localized name to
+    /// its English internal identifier -- observed directly from the
+    /// retained `raw-unpacked` bytes, not a manifest JSON field (the
+    /// manifest only records the source-direction name).
+    storage_parameter_name: String,
+    value: String,
+    value_type_qname: String,
+}
+
+impl DcsOutputParametersPolicy {
+    pub fn output_parameters_qname(&self) -> &str {
+        &self.output_parameters_qname
+    }
+    pub fn item_qname(&self) -> &str {
+        &self.item_qname
+    }
+    pub fn parameter_qname(&self) -> &str {
+        &self.parameter_qname
+    }
+    pub fn value_qname(&self) -> &str {
+        &self.value_qname
+    }
+    pub fn settings_parameter_value_type_qname(&self) -> &str {
+        &self.settings_parameter_value_type_qname
+    }
+    pub fn source_parameter_name(&self) -> &str {
+        &self.source_parameter_name
+    }
+    pub fn storage_parameter_name(&self) -> &str {
+        &self.storage_parameter_name
+    }
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+    pub fn value_type_qname(&self) -> &str {
+        &self.value_type_qname
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsOutputParametersEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsOutputParametersCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsOutputParametersCohort {
+    canonical_placement: String,
+    canonical_item_xsi_type: String,
+    seed_item_xsi_type: String,
+    output_parameter_name: String,
+    output_parameter_value_type: String,
+    output_parameter_value: String,
+}
+
+fn parse_dcs_output_parameters_policy(
+    evidence_json: &str,
+) -> Result<DcsOutputParametersPolicy, SchemaError> {
+    let evidence: DcsOutputParametersEvidence = serde_json::from_str(evidence_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if evidence.schema_version != 1
+        || evidence.fixture_id != "8.3.27.2214-xml-2.20-dcs-output-parameters"
+        || evidence.cohort.canonical_placement
+            != "immediately after dcsset:order, immediately before dcsset:item xsi:type=dcsset:StructureItemGroup -- identical to the placement submitted in the seed"
+        || evidence.cohort.canonical_item_xsi_type != "dcsset:SettingsParameterValue"
+        || evidence.cohort.seed_item_xsi_type != "none (bare dcscor:item)"
+        || evidence.cohort.output_parameter_name != "Заголовок"
+        || evidence.cohort.output_parameter_value_type != "xs:string"
+        || evidence.cohort.output_parameter_value != "Probe Title"
+        || evidence.negative_observations.len() != 2
+        || evidence.non_claims.len() != 3
+        || evidence.platform.is_null()
+        || evidence.seed.is_null()
+        || evidence.rounds.is_null()
+        || evidence.retained.is_null()
+        || evidence.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS output-parameters evidence drifted from the exact coordinate".to_string(),
+        ));
+    }
+    let source_owned = bundled_dcs_settings_source_owned_policy()?;
+    Ok(DcsOutputParametersPolicy {
+        output_parameters_qname: format!("{{{}}}outputParameters", source_owned.namespace_uri()),
+        item_qname: format!("{{{}}}item", source_owned.core_namespace_uri()),
+        parameter_qname: source_owned.parameter_qname().to_string(),
+        value_qname: source_owned.value_qname().to_string(),
+        settings_parameter_value_type_qname: source_owned
+            .settings_parameter_value_type_qname()
+            .to_string(),
+        source_parameter_name: evidence.cohort.output_parameter_name,
+        storage_parameter_name: "Title".to_string(),
+        value: evidence.cohort.output_parameter_value,
+        value_type_qname: format!("{{{}}}string", source_owned.xml_schema_namespace_uri()),
+    })
+}
+
+/// Returns the exact `dcsset:outputParameters` policy.
+pub fn bundled_dcs_output_parameters_policy() -> Result<DcsOutputParametersPolicy, SchemaError> {
+    parse_dcs_output_parameters_policy(BUNDLED_DCS_OUTPUT_PARAMETERS_EVIDENCE_JSON)
+}
+
+#[cfg(test)]
+mod dcs_output_parameters_policy_tests {
+    use super::*;
+
+    #[test]
+    fn bundled_output_parameters_policy_is_exact_and_bounded() {
+        let policy = bundled_dcs_output_parameters_policy().unwrap();
+        assert_eq!(
+            policy.output_parameters_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}outputParameters"
+        );
+        assert_eq!(
+            policy.item_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/core}item"
+        );
+        assert_eq!(
+            policy.parameter_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/core}parameter"
+        );
+        assert_eq!(
+            policy.value_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/core}value"
+        );
+        assert_eq!(
+            policy.settings_parameter_value_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}SettingsParameterValue"
+        );
+        assert_eq!(policy.source_parameter_name(), "Заголовок");
+        assert_eq!(policy.storage_parameter_name(), "Title");
+        assert_eq!(policy.value(), "Probe Title");
+        assert_eq!(
+            policy.value_type_qname(),
+            "{http://www.w3.org/2001/XMLSchema}string"
+        );
+    }
+
+    #[test]
+    fn output_parameters_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_OUTPUT_PARAMETERS_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsOutputParametersEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn output_parameters_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_OUTPUT_PARAMETERS_EVIDENCE_JSON).unwrap();
+
+        let mut placement_drift = raw.clone();
+        placement_drift["cohort"]["canonical_placement"] =
+            serde_json::json!("immediately before dcsset:order");
+        assert!(
+            parse_dcs_output_parameters_policy(&serde_json::to_string(&placement_drift).unwrap())
+                .is_err()
+        );
+
+        let mut name_drift = raw.clone();
+        name_drift["cohort"]["output_parameter_name"] = serde_json::json!("Title");
+        assert!(
+            parse_dcs_output_parameters_policy(&serde_json::to_string(&name_drift).unwrap())
+                .is_err()
+        );
+
+        let mut xsi_type_drift = raw;
+        xsi_type_drift["cohort"]["canonical_item_xsi_type"] = serde_json::json!("dcscor:Parameter");
+        assert!(
+            parse_dcs_output_parameters_policy(&serde_json::to_string(&xsi_type_drift).unwrap())
+                .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_output_parameters_policy().is_ok());
+    }
 }
 
 /// Returns the immutable platform-authenticated DCS schema-template envelope

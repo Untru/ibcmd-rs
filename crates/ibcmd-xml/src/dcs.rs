@@ -12,17 +12,18 @@ use ibcmd_core::dcs::{
     DcsAppearanceColor, DcsAppearanceParameter, DcsConditionalAppearance,
     DcsConditionalAppearanceItem, DcsFilter, DcsFilterComparison, DcsFilterComparisonType,
     DcsFilterItem, DcsFilterValue, DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType,
-    DcsSelectedField, DcsSelectedItem, DcsSelection, DcsSettingsEnvelope,
+    DcsOutputParameters, DcsSelectedField, DcsSelectedItem, DcsSelection, DcsSettingsEnvelope,
     MAX_DCS_CONDITIONAL_APPEARANCE_ITEMS, MAX_DCS_FILTER_ITEMS, MAX_DCS_ORDER_ITEMS,
     MAX_DCS_RETAINED_BYTES,
 };
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_schema::{
-    DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
-    WriterRuleCorpus, WriterRuleKey, bundled_dcs_conditional_appearance_policy,
+    DcsListSettingsTailField, DcsOutputParametersPolicy, FormListSettingsNullValue, SchemaError,
+    WriterPolicy, WriterRuleCorpus, WriterRuleKey, bundled_dcs_conditional_appearance_policy,
     bundled_dcs_filter_policy, bundled_dcs_form_attributes_conditional_appearance_policy,
-    bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy, bundled_dcs_selection_policy,
+    bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy,
+    bundled_dcs_output_parameters_policy, bundled_dcs_selection_policy,
     bundled_dcs_settings_serialization_policy, bundled_dcs_settings_source_owned_policy,
     bundled_writer_rules,
 };
@@ -357,6 +358,7 @@ pub struct DcsSettingsTypedChildren {
     filter: DcsChildParseOutcome<DcsFilter>,
     order: DcsChildParseOutcome<DcsOrder>,
     conditional_appearance: DcsChildParseOutcome<DcsConditionalAppearance>,
+    output_parameters: DcsChildParseOutcome<DcsOutputParameters>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
 }
@@ -388,6 +390,12 @@ impl DcsSettingsTypedChildren {
     /// Returns the presence-aware root conditional-appearance parse result.
     pub const fn conditional_appearance(&self) -> &DcsChildParseOutcome<DcsConditionalAppearance> {
         &self.conditional_appearance
+    }
+
+    /// Returns the presence-aware root `dcsset:outputParameters` parse
+    /// result.
+    pub const fn output_parameters(&self) -> &DcsChildParseOutcome<DcsOutputParameters> {
+        &self.output_parameters
     }
 
     /// Returns the direct `itemsViewMode` value, if present.
@@ -661,6 +669,7 @@ pub fn emit_dcs_settings_children(
     output.push_str(parts.filter.as_deref().unwrap_or_default());
     output.push_str(parts.order.as_deref().unwrap_or_default());
     output.push_str(parts.conditional_appearance.as_deref().unwrap_or_default());
+    output.push_str(parts.output_parameters.as_deref().unwrap_or_default());
     output.push_str(&parts.tail);
     Ok(output)
 }
@@ -674,6 +683,7 @@ pub struct DcsSettingsChildrenParts {
     filter: Option<String>,
     order: Option<String>,
     conditional_appearance: Option<String>,
+    output_parameters: Option<String>,
     tail: String,
 }
 
@@ -689,6 +699,13 @@ impl DcsSettingsChildrenParts {
     }
     pub fn conditional_appearance(&self) -> Option<&str> {
         self.conditional_appearance.as_deref()
+    }
+    /// Returns the emitted `dcsset:outputParameters` fragment, if present.
+    /// The caller is responsible for placing it immediately after `order`
+    /// and immediately before the source-owned `StructureItemGroup` item,
+    /// matching its evidenced position.
+    pub fn output_parameters(&self) -> Option<&str> {
+        self.output_parameters.as_deref()
     }
     pub fn tail(&self) -> &str {
         &self.tail
@@ -721,6 +738,10 @@ pub fn emit_dcs_settings_children_parts(
         .conditional_appearance()
         .map(|value| emit_dcs_conditional_appearance_fragment(value, prefix, indent))
         .transpose()?;
+    let output_parameters = settings
+        .output_parameters()
+        .map(|value| emit_dcs_output_parameters_fragment(value, prefix, indent))
+        .transpose()?;
     let tail = emit_form_list_settings_tail(
         settings.items_view_mode().map(|value| value.as_str()),
         settings.items_user_setting_id().map(|value| value.as_str()),
@@ -733,6 +754,7 @@ pub fn emit_dcs_settings_children_parts(
         filter,
         order,
         conditional_appearance,
+        output_parameters,
         tail,
     })
 }
@@ -1390,6 +1412,56 @@ fn validate_form_attributes_conditional_appearance_for_emission(
     Ok(())
 }
 
+/// Emits an embedded standalone `dcsset:outputParameters` child from the
+/// shared canonical semantics. Always uses the source-direction (Cyrillic)
+/// parameter spelling and the `dcscor:` item prefix, matching
+/// `native-template.xml` byte for byte; the caller owns only its
+/// surrounding physical wrapper and exact placement relative to the
+/// source-owned `StructureItemGroup` item.
+pub fn emit_dcs_output_parameters_fragment(
+    value: &DcsOutputParameters,
+    prefix: &str,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    if !is_xml_prefix(prefix)
+        || indent.len() > 64
+        || !indent.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "outputParameters prefix or indent is invalid",
+        )
+        .into());
+    }
+    let policy = bundled_dcs_output_parameters_policy().map_err(DcsListSettingsTailError::from)?;
+    if value.parameter().as_str() != policy.source_parameter_name()
+        || value.value().as_str() != policy.value()
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "outputParameters value is outside the evidenced cohort",
+        )
+        .into());
+    }
+    let root_local = expanded_local_name(policy.output_parameters_qname())?;
+    let item_type_local = expanded_local_name(policy.settings_parameter_value_type_qname())?;
+    let item_indent = format!("{indent}\t");
+    let scalar_indent = format!("{item_indent}\t");
+    let mut output = format!("{indent}<{prefix}:{root_local}>\r\n");
+    output.push_str(&format!(
+        "{item_indent}<dcscor:item xsi:type=\"{prefix}:{item_type_local}\">\r\n"
+    ));
+    output.push_str(&format!(
+        "{scalar_indent}<dcscor:parameter>{}</dcscor:parameter>\r\n",
+        escape(value.parameter().as_str())
+    ));
+    output.push_str(&format!(
+        "{scalar_indent}<dcscor:value xsi:type=\"xs:string\">{}</dcscor:value>\r\n",
+        escape(value.value().as_str())
+    ));
+    output.push_str(&format!("{item_indent}</dcscor:item>\r\n"));
+    output.push_str(&format!("{indent}</{prefix}:{root_local}>\r\n"));
+    Ok(output)
+}
+
 /// Emits an embedded standalone/Form order child from the shared canonical
 /// semantics. The caller owns only its surrounding physical wrapper.
 pub fn emit_dcs_order_fragment(
@@ -1858,7 +1930,68 @@ fn parse_dcs_settings_children_root(
             );
         }
     }
+    children.output_parameters = parse_dcs_settings_output_parameters(root)?;
     Ok(children)
+}
+
+/// Locates and parses the direct `dcsset:outputParameters` child, if any,
+/// independently of the main child loop above (its placement rule --
+/// immediately after `order` and immediately before the terminal
+/// `StructureItemGroup` item -- needs the full direct-element ordinal
+/// sequence, which the forward-scanning loop above does not track). More
+/// than one direct outputParameters child, or a placement that is not
+/// exactly adjacent on both sides, fails closed rather than being silently
+/// accepted or reordered.
+fn parse_dcs_settings_output_parameters(
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsOutputParameters>, DcsSettingsParseError> {
+    let policy = bundled_dcs_output_parameters_policy().map_err(|_| DcsSettingsParseError {
+        reason: "bundled DCS output-parameters evidence is invalid",
+    })?;
+    let direct_elements = root
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(element) => Some(element),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let order_ordinal = direct_elements.iter().position(|element| {
+        element.name().local() == "order"
+            && xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
+    });
+    let output_positions = direct_elements
+        .iter()
+        .enumerate()
+        .filter(|(_, element)| {
+            element_has_expanded_qname(element, root, policy.output_parameters_qname())
+        })
+        .map(|(ordinal, _)| ordinal)
+        .collect::<Vec<_>>();
+    let ordinal = match output_positions.as_slice() {
+        [] => return Ok(DcsChildParseOutcome::Absent),
+        [ordinal] => *ordinal,
+        _ => {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "duplicate direct outputParameters child has no authenticated ownership",
+            ));
+        }
+    };
+    let placement_ok = order_ordinal.is_some_and(|order_ordinal| order_ordinal + 1 == ordinal)
+        && ordinal + 2 == direct_elements.len();
+    let element = direct_elements[ordinal];
+    match parse_dcs_output_parameters(element, root, &policy)? {
+        DcsChildParseOutcome::Typed(value) if placement_ok => {
+            Ok(DcsChildParseOutcome::Typed(value))
+        }
+        DcsChildParseOutcome::Typed(_) => Ok(DcsChildParseOutcome::Unsupported(
+            "root outputParameters placement is outside the evidenced settings sequence",
+        )),
+        DcsChildParseOutcome::Unsupported(reason) => Ok(DcsChildParseOutcome::Unsupported(reason)),
+        DcsChildParseOutcome::Absent => Err(DcsSettingsParseError {
+            reason: "outputParameters parser returned absence for a present item",
+        }),
+    }
 }
 
 fn audit_dcs_settings_direct_children(
@@ -1965,9 +2098,15 @@ fn audit_dcs_settings_direct_children(
                 | "filter"
                 | "order"
                 | "conditionalAppearance"
+                | "outputParameters"
                 | "itemsViewMode"
                 | "itemsUserSettingID"
         ) {
+            // outputParameters is a NEW typed element (unlike dataParameters
+            // above, which remains opaque/source-owned): its shape and
+            // exact placement are validated by the typed parser instead,
+            // matching how selection/filter/order/conditionalAppearance are
+            // deferred here too.
             continue;
         }
 
@@ -2115,6 +2254,103 @@ fn split_expanded_qname(expanded: &str) -> Option<(&str, &str)> {
     let expanded = expanded.strip_prefix('{')?;
     let (namespace, local) = expanded.split_once('}')?;
     (!namespace.is_empty() && !local.is_empty()).then_some((namespace, local))
+}
+
+/// Parses one `dcsset:outputParameters` element (presence and placement are
+/// already established by the caller). The single evidenced item's
+/// parameter name is accepted in either lexical spelling the platform is
+/// known to use (`Заголовок` in source XML, `Title` in storage) since this
+/// parser is shared by both directions; the returned IR always canonicalizes
+/// to the source spelling, matching the emit side's own single spelling.
+fn parse_dcs_output_parameters(
+    element: &XmlElement,
+    root: &XmlElement,
+    policy: &DcsOutputParametersPolicy,
+) -> Result<DcsChildParseOutcome<DcsOutputParameters>, DcsSettingsParseError> {
+    if has_ordinary_attributes(element) {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters attributes are unsupported",
+        ));
+    }
+    let Some(items) = exact_element_children(element) else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters contains non-element content",
+        ));
+    };
+    if items.len() != 1 {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters must contain exactly one item",
+        ));
+    }
+    let item = items[0];
+    if !element_has_expanded_qname(item, root, policy.item_qname())
+        || resolved_xsi_type(item, root).as_deref()
+            != Some(policy.settings_parameter_value_type_qname())
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters item shape is outside the evidenced cohort",
+        ));
+    }
+    let Some(children) = exact_element_children(item) else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters item contains non-element content",
+        ));
+    };
+    if children.len() != 2 {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters item must contain parameter and value",
+        ));
+    }
+    let parameter = children[0];
+    let value = children[1];
+    if has_ordinary_attributes(parameter)
+        || !element_has_expanded_qname(parameter, root, policy.parameter_qname())
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters parameter element is outside the evidenced cohort",
+        ));
+    }
+    let Some(parameter_text) = simple_element_text(parameter) else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters parameter text is missing or complex",
+        ));
+    };
+    if parameter_text != policy.source_parameter_name()
+        && parameter_text != policy.storage_parameter_name()
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters parameter name is outside the evidenced cohort",
+        ));
+    }
+    if !element_has_expanded_qname(value, root, policy.value_qname())
+        || resolved_xsi_type(value, root).as_deref() != Some(policy.value_type_qname())
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters value element is outside the evidenced cohort",
+        ));
+    }
+    let Some(value_text) = simple_element_text(value) else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters value text is missing or complex",
+        ));
+    };
+    if value_text != policy.value() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "outputParameters value is outside the evidenced cohort",
+        ));
+    }
+    let parameter =
+        CanonicalText::new(policy.source_parameter_name()).map_err(|_| DcsSettingsParseError {
+            reason: "bundled DCS output-parameters evidence is invalid",
+        })?;
+    let value = CanonicalText::new(&value_text).map_err(|_| DcsSettingsParseError {
+        reason: "outputParameters value violates canonical text bounds",
+    })?;
+    DcsOutputParameters::new(parameter, value)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "outputParameters item violates canonical bounds",
+        })
 }
 
 fn parse_dcs_filter(
@@ -3999,10 +4235,21 @@ pub fn preflight_dcs_settings_serialization(
         bundled_dcs_conditional_appearance_policy()
             .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
     }
+    if settings.output_parameters().is_some() {
+        bundled_dcs_output_parameters_policy()
+            .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    }
 
     if matches!(envelope, DcsSettingsEnvelope::ListSettings(_)) {
         if settings.selection().is_some() {
             return Err(unsupported_form_selection(envelope, target_profile));
+        }
+        if settings.output_parameters().is_some() {
+            return Err(invalid_evidence(
+                envelope,
+                target_profile,
+                &"outputParameters is only evidenced in a standalone DCS settings document",
+            ));
         }
         verify_form_list_settings_delegate(envelope, target_profile, &writer_rules)?;
     }
@@ -4658,6 +4905,7 @@ mod tests {
             filter: None,
             order: None,
             conditional_appearance: None,
+            output_parameters: None,
             tail: concat!(
                 "\t<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>\r\n",
                 "\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n"
@@ -5071,6 +5319,7 @@ mod tests {
                     filter: None,
                     order: Some(order),
                     conditional_appearance: None,
+                    output_parameters: None,
                     tail: "\t<dcsset:itemsViewMode>Normal</dcsset:itemsViewMode>\r\n".to_owned(),
                 },
             )
@@ -5400,6 +5649,241 @@ mod tests {
             .reason(),
             "inactive Form Attributes storage Settings is not empty"
         );
+    }
+
+    /// The output-parameters cohort's manifest retains only the combined
+    /// `raw-unpacked` envelope; slice the standalone Settings document from
+    /// its length-prefixed header the same way other DCS-family tests do.
+    fn output_parameters_settings_document() -> Vec<u8> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-output-parameters/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        body[24 + first..24 + first + second].to_vec()
+    }
+
+    #[test]
+    fn platform_output_parameters_settings_document_parses_and_emits_exact_fragment() {
+        let settings = output_parameters_settings_document();
+        let settings_text = String::from_utf8(settings).unwrap();
+        let settings_text = settings_text.trim_start_matches('\u{feff}');
+        let analysis = analyze_dcs_settings_document(settings_text).unwrap();
+        // outputParameters itself is NOT source-owned (it is fully typed);
+        // only the terminal StructureItemGroup item remains source-owned.
+        assert_eq!(analysis.source_owned().len(), 1);
+        assert_eq!(
+            analysis.source_owned()[0].kind(),
+            DcsSourceOwnedChildKind::StructureItemGroupAutoV1
+        );
+        let DcsChildParseOutcome::Typed(value) = analysis.typed().output_parameters() else {
+            panic!(
+                "expected typed outputParameters, got {:?}",
+                analysis.typed().output_parameters()
+            );
+        };
+        assert_eq!(value.parameter().as_str(), "Заголовок");
+        assert_eq!(value.value().as_str(), "Probe Title");
+
+        // Cross-check against the source-direction fragment embedded
+        // verbatim in native-template.xml's inline <dcsset:settings>: the
+        // shared codec must parse both the storage spelling (`Title`,
+        // above) and the source spelling to the identical typed value, and
+        // must re-emit exactly the source-direction bytes.
+        let native = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-output-parameters/native-template.xml.b64"
+        )));
+        let native_text = String::from_utf8(native).unwrap();
+        let start = native_text.find("<dcsset:outputParameters>").unwrap();
+        let close_tag = "</dcsset:outputParameters>";
+        let end = native_text[start..].find(close_tag).unwrap() + start + close_tag.len();
+        let expected_fragment = &native_text[start..end];
+        let indent_start = native_text[..start].rfind('\n').map_or(0, |i| i + 1);
+        let indent = &native_text[indent_start..start];
+
+        let emitted = emit_dcs_output_parameters_fragment(value, "dcsset", indent).unwrap();
+        assert_eq!(
+            emitted
+                .strip_prefix(indent)
+                .unwrap()
+                .strip_suffix("\r\n")
+                .unwrap(),
+            expected_fragment
+        );
+
+        // The same inline fragment, parsed directly (source spelling), must
+        // resolve to the identical typed value.
+        let wrapped = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\"><dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection><dcsset:order/>{expected_fragment}<dcsset:item xsi:type=\"dcsset:StructureItemGroup\"><dcsset:order><dcsset:item xsi:type=\"dcsset:OrderItemAuto\"/></dcsset:order><dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection></dcsset:item></Settings>"
+        );
+        let reparsed = parse_dcs_settings_children_strict(&wrapped).unwrap();
+        let DcsChildParseOutcome::Typed(reparsed_value) = reparsed.output_parameters() else {
+            panic!(
+                "expected typed outputParameters from source spelling, got {:?}",
+                reparsed.output_parameters()
+            );
+        };
+        assert_eq!(reparsed_value, value);
+    }
+
+    /// Fail-closed: an outputParameters item whose xsi:type is not the
+    /// evidenced `dcsset:SettingsParameterValue` marker is outside the
+    /// admitted cohort and must not be silently accepted or reinterpreted.
+    #[test]
+    fn output_parameters_rejects_item_outside_cohort() {
+        let doc = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">\
+             <dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>\
+             <dcsset:order/>\
+             <dcsset:outputParameters><dcscor:item xsi:type=\"dcsset:SelectedItemAuto\">\
+             <dcscor:parameter>Заголовок</dcscor:parameter>\
+             <dcscor:value xsi:type=\"xs:string\">Probe Title</dcscor:value>\
+             </dcscor:item></dcsset:outputParameters>\
+             <dcsset:item xsi:type=\"dcsset:StructureItemGroup\">\
+             <dcsset:order><dcsset:item xsi:type=\"dcsset:OrderItemAuto\"/></dcsset:order>\
+             <dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>\
+             </dcsset:item></Settings>"
+        );
+        let children = parse_dcs_settings_children_strict(&doc).unwrap();
+        assert!(matches!(
+            children.output_parameters(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+    }
+
+    /// Fail-closed: the manifest's only proven placement is immediately
+    /// after `order` and immediately before the terminal StructureItemGroup
+    /// item. Neither an earlier position (before `order`) nor an
+    /// interposed sibling between `outputParameters` and the terminal item
+    /// is evidenced, so both must fail closed rather than be accepted by
+    /// approximation.
+    #[test]
+    fn output_parameters_rejects_wrong_block_position() {
+        let output_parameters_block = concat!(
+            "<dcsset:outputParameters><dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">",
+            "<dcscor:parameter>Заголовок</dcscor:parameter>",
+            "<dcscor:value xsi:type=\"xs:string\">Probe Title</dcscor:value>",
+            "</dcscor:item></dcsset:outputParameters>"
+        );
+        let terminal_item = concat!(
+            "<dcsset:item xsi:type=\"dcsset:StructureItemGroup\">",
+            "<dcsset:order><dcsset:item xsi:type=\"dcsset:OrderItemAuto\"/></dcsset:order>",
+            "<dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>",
+            "</dcsset:item>"
+        );
+        let selection = "<dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>";
+
+        // Before `order` entirely: order_ordinal no longer immediately
+        // precedes the outputParameters ordinal.
+        let before_order = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{selection}{output_parameters_block}<dcsset:order/>{terminal_item}</Settings>"
+        );
+        let children = parse_dcs_settings_children_strict(&before_order).unwrap();
+        assert!(matches!(
+            children.output_parameters(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+
+        // Correctly after `order`, but NOT immediately before the terminal
+        // item (an unrelated scalar sibling is interposed).
+        let not_immediately_before_terminal = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{selection}<dcsset:order/>{output_parameters_block}<dcsset:itemsUserSettingID>probe</dcsset:itemsUserSettingID>{terminal_item}</Settings>"
+        );
+        let children =
+            parse_dcs_settings_children_strict(&not_immediately_before_terminal).unwrap();
+        assert!(matches!(
+            children.output_parameters(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+    }
+
+    /// Fail-closed: a parameter name that is neither the evidenced source
+    /// spelling ("Заголовок") nor the evidenced storage spelling ("Title")
+    /// has no basis in this corpus and must not be accepted.
+    #[test]
+    fn output_parameters_rejects_unknown_parameter_name() {
+        let doc = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">\
+             <dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>\
+             <dcsset:order/>\
+             <dcsset:outputParameters><dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">\
+             <dcscor:parameter>Другое</dcscor:parameter>\
+             <dcscor:value xsi:type=\"xs:string\">Probe Title</dcscor:value>\
+             </dcscor:item></dcsset:outputParameters>\
+             <dcsset:item xsi:type=\"dcsset:StructureItemGroup\">\
+             <dcsset:order><dcsset:item xsi:type=\"dcsset:OrderItemAuto\"/></dcsset:order>\
+             <dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>\
+             </dcsset:item></Settings>"
+        );
+        let children = parse_dcs_settings_children_strict(&doc).unwrap();
+        assert!(matches!(
+            children.output_parameters(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+    }
+
+    /// Fail-closed: the corpus proves exactly one item inside exactly one
+    /// outputParameters block. Neither multiple items inside one block nor
+    /// multiple sibling blocks is evidenced.
+    #[test]
+    fn output_parameters_rejects_multiple_items() {
+        let item = concat!(
+            "<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">",
+            "<dcscor:parameter>Заголовок</dcscor:parameter>",
+            "<dcscor:value xsi:type=\"xs:string\">Probe Title</dcscor:value>",
+            "</dcscor:item>"
+        );
+        let terminal_item = concat!(
+            "<dcsset:item xsi:type=\"dcsset:StructureItemGroup\">",
+            "<dcsset:order><dcsset:item xsi:type=\"dcsset:OrderItemAuto\"/></dcsset:order>",
+            "<dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>",
+            "</dcsset:item>"
+        );
+        let selection = "<dcsset:selection><dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/></dcsset:selection>";
+
+        // Two items inside one outputParameters block.
+        let two_items_one_block = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{selection}<dcsset:order/><dcsset:outputParameters>{item}{item}</dcsset:outputParameters>{terminal_item}</Settings>"
+        );
+        let children = parse_dcs_settings_children_strict(&two_items_one_block).unwrap();
+        assert!(matches!(
+            children.output_parameters(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+
+        // Two separate outputParameters blocks (each with one item).
+        let two_blocks = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{selection}<dcsset:order/><dcsset:outputParameters>{item}</dcsset:outputParameters><dcsset:outputParameters>{item}</dcsset:outputParameters>{terminal_item}</Settings>"
+        );
+        let children = parse_dcs_settings_children_strict(&two_blocks).unwrap();
+        assert!(matches!(
+            children.output_parameters(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+    }
+
+    /// Fail-closed: bytes corrupted mid-document (here, the genuine
+    /// evidence bytes truncated at their midpoint) must not be silently
+    /// coerced into a partial parse; the whole document analysis must fail
+    /// with a typed `Malformed` error.
+    #[test]
+    fn output_parameters_settings_document_rejects_corrupted_bytes() {
+        let settings = output_parameters_settings_document();
+        let settings_text = String::from_utf8(settings).unwrap();
+        let settings_text = settings_text.trim_start_matches('\u{feff}');
+        let mut half = settings_text.len() / 2;
+        while !settings_text.is_char_boundary(half) {
+            half -= 1;
+        }
+        let corrupted = &settings_text[..half];
+        assert!(matches!(
+            analyze_dcs_settings_document(corrupted),
+            Err(DcsSettingsDocumentAnalysisError::Malformed(_))
+        ));
     }
 
     fn exact_source_owned_settings() -> String {

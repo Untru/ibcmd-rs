@@ -129,6 +129,8 @@ pub enum DcsBuildError {
     },
     /// Aggregate retained-byte arithmetic overflowed.
     RetainedByteCountOverflow,
+    /// A DCS output-parameter item's name was empty.
+    EmptyOutputParameterName,
 }
 
 impl Display for DcsBuildError {
@@ -206,6 +208,9 @@ impl Display for DcsBuildError {
             ),
             Self::RetainedByteCountOverflow => {
                 formatter.write_str("DCS retained-byte count overflowed")
+            }
+            Self::EmptyOutputParameterName => {
+                formatter.write_str("DCS output-parameter name is empty")
             }
         }
     }
@@ -922,6 +927,54 @@ impl<'de> Deserialize<'de> for DcsConditionalAppearance {
     }
 }
 
+/// The single evidenced `dcsset:outputParameters` item, authenticated by the
+/// dedicated 2214 output-parameters cohort. Only one item, of xs:string
+/// value type, is evidenced; a second item or any other value type is
+/// outside the admitted cohort. The storage side canonicalizes the
+/// parameter's localized name (`Заголовок` -> `Title`) while source XML
+/// keeps the source spelling -- that lexical/QName concern remains
+/// schema/XML policy, this IR owns only the semantic name/value pair.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsOutputParameters {
+    parameter: CanonicalText,
+    value: CanonicalText,
+}
+
+impl DcsOutputParameters {
+    pub fn new(parameter: CanonicalText, value: CanonicalText) -> Result<Self, DcsBuildError> {
+        if parameter.as_str().is_empty() {
+            return Err(DcsBuildError::EmptyOutputParameterName);
+        }
+        Ok(Self { parameter, value })
+    }
+
+    pub const fn parameter(&self) -> &CanonicalText {
+        &self.parameter
+    }
+
+    pub const fn value(&self) -> &CanonicalText {
+        &self.value
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsOutputParametersWire {
+    parameter: CanonicalText,
+    value: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsOutputParameters {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsOutputParametersWire::deserialize(deserializer)?;
+        Self::new(wire.parameter, wire.value).map_err(de::Error::custom)
+    }
+}
+
 /// Verified typed minimum of `DataCompositionSettings`.
 ///
 /// The optional root selection and scalar fields are structural model
@@ -935,6 +988,7 @@ pub struct DcsSettings {
     filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
     conditional_appearance: Option<DcsConditionalAppearance>,
+    output_parameters: Option<DcsOutputParameters>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: OpaqueFacets,
@@ -960,6 +1014,11 @@ impl DcsSettings {
     /// Returns the optional root/Form conditional-appearance settings.
     pub const fn conditional_appearance(&self) -> Option<&DcsConditionalAppearance> {
         self.conditional_appearance.as_ref()
+    }
+
+    /// Returns the optional root `dcsset:outputParameters` item.
+    pub const fn output_parameters(&self) -> Option<&DcsOutputParameters> {
+        self.output_parameters.as_ref()
     }
 
     /// Returns the optional exact user-setting identifier.
@@ -992,6 +1051,7 @@ pub struct DcsSettingsBuilder {
     filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
     conditional_appearance: Option<DcsConditionalAppearance>,
+    output_parameters: Option<DcsOutputParameters>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: OpaqueFacets,
@@ -1005,6 +1065,7 @@ impl DcsSettingsBuilder {
             filter: None,
             order: None,
             conditional_appearance: None,
+            output_parameters: None,
             items_user_setting_id: None,
             items_view_mode: None,
             opaque_extensions: OpaqueFacets::new(Vec::new())
@@ -1033,6 +1094,11 @@ impl DcsSettingsBuilder {
         self
     }
 
+    pub fn output_parameters(mut self, value: Option<DcsOutputParameters>) -> Self {
+        self.output_parameters = value;
+        self
+    }
+
     pub fn items_user_setting_id(mut self, value: Option<CanonicalText>) -> Self {
         self.items_user_setting_id = value;
         self
@@ -1054,6 +1120,7 @@ impl DcsSettingsBuilder {
             filter: self.filter,
             order: self.order,
             conditional_appearance: self.conditional_appearance,
+            output_parameters: self.output_parameters,
             items_user_setting_id: self.items_user_setting_id,
             items_view_mode: self.items_view_mode,
             opaque_extensions: self.opaque_extensions,
@@ -1071,6 +1138,8 @@ struct DcsSettingsWire {
     filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
     conditional_appearance: Option<DcsConditionalAppearance>,
+    #[serde(default)]
+    output_parameters: Option<DcsOutputParameters>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: DcsOpaqueFacetsWire,
@@ -1150,6 +1219,7 @@ impl<'de> Deserialize<'de> for DcsSettings {
             .filter(wire.filter)
             .order(wire.order)
             .conditional_appearance(wire.conditional_appearance)
+            .output_parameters(wire.output_parameters)
             .items_user_setting_id(wire.items_user_setting_id)
             .items_view_mode(wire.items_view_mode)
             .opaque_extensions(
@@ -1203,6 +1273,7 @@ fn validate_settings(settings: &DcsSettings) -> Result<(), DcsBuildError> {
         filter,
         order,
         conditional_appearance,
+        output_parameters,
         items_user_setting_id,
         items_view_mode,
         opaque_extensions,
@@ -1338,6 +1409,12 @@ fn validate_settings(settings: &DcsSettings) -> Result<(), DcsBuildError> {
         if let Some(value) = conditional_appearance.user_setting_id() {
             retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
         }
+    }
+    if let Some(output_parameters) = output_parameters {
+        retained_bytes =
+            checked_retained_bytes(retained_bytes, output_parameters.parameter().as_str().len())?;
+        retained_bytes =
+            checked_retained_bytes(retained_bytes, output_parameters.value().as_str().len())?;
     }
     if let Some(value) = items_user_setting_id {
         retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
@@ -1753,6 +1830,46 @@ mod tests {
         )
         .unwrap();
         assert!(metadata_only.items().is_empty());
+    }
+
+    #[test]
+    fn output_parameters_are_bounded_and_serde_stable() {
+        let output = DcsOutputParameters::new(
+            CanonicalText::new("Заголовок").unwrap(),
+            CanonicalText::new("Probe Title").unwrap(),
+        )
+        .unwrap();
+        let settings = DcsSettingsBuilder::new(provenance("platform:8.3.27", "settings"))
+            .output_parameters(Some(output))
+            .build()
+            .unwrap();
+        let value = settings.output_parameters().unwrap();
+        assert_eq!(value.parameter().as_str(), "Заголовок");
+        assert_eq!(value.value().as_str(), "Probe Title");
+        assert_eq!(
+            serde_json::from_str::<DcsSettings>(&serde_json::to_string(&settings).unwrap())
+                .unwrap(),
+            settings
+        );
+
+        // Absent by default: existing settings values (with no
+        // outputParameters at all) keep round-tripping unaffected.
+        let without = DcsSettingsBuilder::new(provenance("platform:8.3.27", "settings"))
+            .build()
+            .unwrap();
+        assert!(without.output_parameters().is_none());
+        assert_eq!(
+            serde_json::from_str::<DcsSettings>(&serde_json::to_string(&without).unwrap()).unwrap(),
+            without
+        );
+
+        assert!(matches!(
+            DcsOutputParameters::new(
+                CanonicalText::new("").unwrap(),
+                CanonicalText::new("Probe Title").unwrap(),
+            ),
+            Err(DcsBuildError::EmptyOutputParameterName)
+        ));
     }
 
     #[test]
