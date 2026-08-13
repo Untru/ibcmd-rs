@@ -16,12 +16,14 @@ pub use dcs::{
     DCS_WRITER_EVIDENCE_RELEASE, DcsChildParseOutcome, DcsListSettingsTailError,
     DcsSerializationError, DcsSerializationPermit, DcsSettingsChildrenError,
     DcsSettingsChildrenParts, DcsSettingsParseError, DcsSettingsTypedChildren, DcsWriterDecision,
-    DcsWriterEvidence, DcsWriterEvidenceStatus, emit_dcs_order_fragment,
-    emit_dcs_order_storage_document, emit_dcs_settings_children, emit_dcs_settings_children_parts,
-    emit_form_list_settings_tail, parse_dcs_order_storage_document, parse_dcs_settings_children,
-    parse_dcs_settings_children_strict, parse_form_list_settings_orders,
-    platform_default_form_list_settings_order, preflight_dcs_settings_serialization,
-    rewrite_dcs_settings_children,
+    DcsWriterEvidence, DcsWriterEvidenceStatus, emit_dcs_filter_fragment,
+    emit_dcs_filter_storage_document, emit_dcs_order_fragment, emit_dcs_order_storage_document,
+    emit_dcs_settings_children, emit_dcs_settings_children_parts, emit_form_list_settings_tail,
+    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
+    parse_dcs_settings_children, parse_dcs_settings_children_strict,
+    parse_form_list_settings_filters, parse_form_list_settings_orders,
+    platform_default_form_list_settings_filter, platform_default_form_list_settings_order,
+    preflight_dcs_settings_serialization, rewrite_dcs_settings_children,
 };
 pub use dialect::{
     BomRule, DetectionCandidate, DialectDescriptor, DialectDetection, DialectError,
@@ -63,9 +65,9 @@ pub use writer::{LexicalPolicy, WriteError, XmlWriter};
 /// `ibcmd-xml -> ibcmd-schema`; physical decoders never own XML ordering rules.
 pub mod schema {
     pub use ibcmd_schema::{
-        BundleInventory, CorpusSource, DcsListSettingsTailField, DcsListSettingsTailPolicy,
-        DcsWriterEvidenceCorpus, EvidenceStatus, EvidenceValue, FeatureClassifierKind,
-        FeatureEvidence, FeatureKind, FeatureSemanticKey, FeatureSemantics,
+        BundleInventory, CorpusSource, DcsFilterPolicy, DcsListSettingsTailField,
+        DcsListSettingsTailPolicy, DcsWriterEvidenceCorpus, EvidenceStatus, EvidenceValue,
+        FeatureClassifierKind, FeatureEvidence, FeatureKind, FeatureSemanticKey, FeatureSemantics,
         FeatureSemanticsClassifier, FeatureSemanticsCorpus, FeatureSemanticsPackage,
         FeatureSemanticsSummary, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
         FormChoiceParameterClusterMember, FormChoiceParameterLink,
@@ -74,7 +76,7 @@ pub mod schema {
         MetadataOrderOperationKind, MetadataOrderRecord, MetadataOrderSection,
         MetadataOrderVersionPredicate, ModelClassifier, ModelInventory, ModelMember, ModelPackage,
         PackageFeatureCorpus, PackageFeatureSummary, RuleEvidence, SchemaError, WriterRule,
-        WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior,
+        WriterRuleCorpus, XcoreFeatureQualifier, XmlFeatureBehavior, bundled_dcs_filter_policy,
         bundled_dcs_list_settings_tail_policy, bundled_dcs_writer_evidence,
         bundled_feature_semantics, bundled_metadata_order, bundled_model_inventory,
         bundled_package_features, bundled_writer_rules, form_choice_parameter_cluster_order,

@@ -7,9 +7,9 @@
   },
   "summary": {
     "entries": 4966,
-    "typed": 3,
+    "typed": 20,
     "opaqueLossless": 0,
-    "unsupported": 4963,
+    "unsupported": 4946,
     "platformOnly": 0
   },
   "familyAggregates": [
@@ -32,9 +32,9 @@
     {
       "family": "dcs",
       "entries": 511,
-      "typed": 2,
+      "typed": 19,
       "opaqueLossless": 0,
-      "unsupported": 509,
+      "unsupported": 492,
       "platformOnly": 0
     },
     {
@@ -453,7 +453,7 @@
       "package": "com._1c.g5.v8.dt.dcs.model.settings",
       "classifierKind": "class",
       "featureKind": "attribute",
-      "features": 109
+      "features": 102
     },
     {
       "rule": "unsupported/schema.unmapped",
@@ -461,7 +461,7 @@
       "package": "com._1c.g5.v8.dt.dcs.model.settings",
       "classifierKind": "class",
       "featureKind": "containment",
-      "features": 133
+      "features": 123
     },
     {
       "rule": "unsupported/schema.unmapped",
@@ -23970,19 +23970,20 @@
         "feature": "items"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsFilter",
+      "canonicalField": "items",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -23992,19 +23993,20 @@
         "feature": "userSettingID"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsFilter",
+      "canonicalField": "user_setting_id",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -24036,19 +24038,20 @@
         "feature": "viewMode"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsFilter",
+      "canonicalField": "view_mode",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -24080,19 +24083,20 @@
         "feature": "comparisonType"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsFilterComparison",
+      "canonicalField": "comparison_type",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -24102,19 +24106,20 @@
         "feature": "left"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsFilterComparison",
+      "canonicalField": "field",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -24146,19 +24151,20 @@
         "feature": "right"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsFilterComparison",
+      "canonicalField": "right",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25268,19 +25274,20 @@
         "feature": "items"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsOrder",
+      "canonicalField": "items",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25290,19 +25297,20 @@
         "feature": "userSettingID"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsOrder",
+      "canonicalField": "user_setting_id",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25334,19 +25342,20 @@
         "feature": "viewMode"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsOrder",
+      "canonicalField": "view_mode",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25356,19 +25365,20 @@
         "feature": "field"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsOrderField",
+      "canonicalField": "field",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25378,19 +25388,20 @@
         "feature": "orderType"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsOrderField",
+      "canonicalField": "order_type",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25400,19 +25411,20 @@
         "feature": "use"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsOrderField",
+      "canonicalField": "use_value",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25620,19 +25632,20 @@
         "feature": "field"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsSelectedField",
+      "canonicalField": "field",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25840,19 +25853,20 @@
         "feature": "items"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsSelection",
+      "canonicalField": "items",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -25994,19 +26008,20 @@
         "feature": "filter"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsSettings",
+      "canonicalField": "filter",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -26104,19 +26119,20 @@
         "feature": "order"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsSettings",
+      "canonicalField": "order",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {
@@ -26148,19 +26164,20 @@
         "feature": "selection"
       },
       "family": "dcs",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsSettings",
+      "canonicalField": "selection",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/settings.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json",
+          "model/settings.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {

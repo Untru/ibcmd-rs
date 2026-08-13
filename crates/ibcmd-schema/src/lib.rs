@@ -2629,6 +2629,9 @@ pub const BUNDLED_DCS_SELECTION_EVIDENCE_JSON: &str =
 /// Embedded platform-authenticated policy for the shared DCS order cohort.
 pub const BUNDLED_DCS_ORDER_EVIDENCE_JSON: &str =
     include_str!("../data/platform-8.3.27-xml-2.20-dcs-order-evidence.json");
+/// Embedded platform-authenticated policy for the shared DCS filter cohort.
+pub const BUNDLED_DCS_FILTER_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json");
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3310,6 +3313,110 @@ pub struct DcsOrderPolicy {
     metadata_only_user_setting_id: String,
 }
 
+/// Exact filter QName, type, ordering, default, and storage policy proven by
+/// clean-room standalone and Form round-trips on 8.3.27/XML 2.20.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsFilterPolicy {
+    namespace_uri: String,
+    core_namespace_uri: String,
+    xml_schema_namespace_uri: String,
+    filter_qname: String,
+    storage_filter_qname: String,
+    item_qname: String,
+    use_qname: String,
+    left_qname: String,
+    comparison_type_qname: String,
+    right_qname: String,
+    view_mode_qname: String,
+    user_setting_id_qname: String,
+    comparison_item_type_qname: String,
+    left_field_type_qname: String,
+    right_string_type_qname: String,
+    supported_comparison_types: Vec<String>,
+    max_emitted_items: usize,
+    supported_view_modes: Vec<String>,
+    metadata_only_user_setting_id: String,
+    comparison_storage_record_type_uuid: String,
+}
+
+impl DcsFilterPolicy {
+    pub fn namespace_uri(&self) -> &str {
+        &self.namespace_uri
+    }
+    pub fn core_namespace_uri(&self) -> &str {
+        &self.core_namespace_uri
+    }
+    pub fn xml_schema_namespace_uri(&self) -> &str {
+        &self.xml_schema_namespace_uri
+    }
+    pub fn filter_qname(&self) -> &str {
+        &self.filter_qname
+    }
+    pub fn storage_filter_qname(&self) -> &str {
+        &self.storage_filter_qname
+    }
+    pub fn item_qname(&self) -> &str {
+        &self.item_qname
+    }
+    pub fn use_qname(&self) -> &str {
+        &self.use_qname
+    }
+    pub fn left_qname(&self) -> &str {
+        &self.left_qname
+    }
+    pub fn comparison_type_qname(&self) -> &str {
+        &self.comparison_type_qname
+    }
+    pub fn right_qname(&self) -> &str {
+        &self.right_qname
+    }
+    pub fn view_mode_qname(&self) -> &str {
+        &self.view_mode_qname
+    }
+    pub fn user_setting_id_qname(&self) -> &str {
+        &self.user_setting_id_qname
+    }
+    pub fn comparison_item_type_qname(&self) -> &str {
+        &self.comparison_item_type_qname
+    }
+    pub fn left_field_type_qname(&self) -> &str {
+        &self.left_field_type_qname
+    }
+    pub fn right_string_type_qname(&self) -> &str {
+        &self.right_string_type_qname
+    }
+    pub fn supported_comparison_types(&self) -> &[String] {
+        &self.supported_comparison_types
+    }
+    pub const fn supported_use_values(&self) -> &'static [Option<bool>] {
+        &[None]
+    }
+    pub const fn max_emitted_items(&self) -> usize {
+        self.max_emitted_items
+    }
+    pub fn supported_view_modes(&self) -> &[String] {
+        &self.supported_view_modes
+    }
+    pub fn metadata_only_user_setting_id(&self) -> &str {
+        &self.metadata_only_user_setting_id
+    }
+    pub fn comparison_storage_record_type_uuid(&self) -> &str {
+        &self.comparison_storage_record_type_uuid
+    }
+    pub const fn follows_selection_and_precedes_order_and_structure_items(&self) -> bool {
+        true
+    }
+    pub const fn propertyless_empty_filter_is_unsupported(&self) -> bool {
+        true
+    }
+    pub const fn metadata_only_filter_requires_view_mode_and_user_setting_id(&self) -> bool {
+        true
+    }
+    pub const fn metadata_only_storage_property_is_absent(&self) -> bool {
+        true
+    }
+}
+
 impl DcsOrderPolicy {
     pub fn namespace_uri(&self) -> &str {
         &self.namespace_uri
@@ -3535,6 +3642,108 @@ struct DcsOrderEvidencePolicy {
     propertyless_empty_order_emission: String,
     metadata_only_order_emission: String,
     root_auto_emission: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFilterEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    source: DcsFilterContractSource,
+    sources: DcsFilterEvidenceSources,
+    policy: DcsFilterEvidencePolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFilterContractSource {
+    product: String,
+    release: String,
+    derivation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFilterEvidenceSources {
+    comparison: DcsFilterComparisonEvidenceSource,
+    metadata_only: DcsFilterMetadataOnlyEvidenceSource,
+    unica_cross_evidence: DcsFilterUnicaEvidenceSource,
+    source_version: String,
+    platform_line: String,
+    ibcmd_sha256: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFilterComparisonEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    form_raw_body_sha256: String,
+    form_native_xml_sha256: String,
+    form_storage_filter_sha256: String,
+    form_embedded_filter_sha256: String,
+    standalone_raw_body_sha256: String,
+    standalone_native_xml_sha256: String,
+    standalone_filter_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFilterMetadataOnlyEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    form_raw_body_sha256: String,
+    form_native_xml_sha256: String,
+    form_embedded_filter_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFilterUnicaEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    repository_revision: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFilterEvidencePolicy {
+    namespace: String,
+    core_namespace: String,
+    xml_schema_namespace: String,
+    filter_qname: String,
+    storage_filter_qname: String,
+    item_qname: String,
+    use_qname: String,
+    left_qname: String,
+    comparison_type_qname: String,
+    right_qname: String,
+    view_mode_qname: String,
+    user_setting_id_qname: String,
+    comparison_item_type_qname: String,
+    left_field_type_qname: String,
+    right_string_type_qname: String,
+    settings_placement: String,
+    item_child_order: Vec<String>,
+    filter_child_order: Vec<String>,
+    supported_comparison_types: Vec<String>,
+    supported_use_values: Vec<String>,
+    supported_right_types: Vec<String>,
+    max_emitted_items: usize,
+    supported_view_modes: Vec<String>,
+    metadata_only_user_setting_id: String,
+    comparison_storage_record_type_uuid: String,
+    metadata_only_embedded_emission: String,
+    metadata_only_storage_representation: String,
+    propertyless_empty_filter_emission: String,
 }
 
 impl DcsSelectionEvidenceCorpus {
@@ -3879,6 +4088,277 @@ impl DcsOrderEvidenceCorpus {
             max_emitted_items: self.policy.max_emitted_items,
             supported_view_modes: self.policy.supported_view_modes,
             metadata_only_user_setting_id: self.policy.metadata_only_user_setting_id,
+        }
+    }
+}
+
+impl DcsFilterEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 32 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "filter evidence exceeds 32768 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        const NS: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+        const CORE_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/core";
+        const XS_NS: &str = "http://www.w3.org/2001/XMLSchema";
+        let comparison = &self.sources.comparison;
+        let metadata_only = &self.sources.metadata_only;
+        let unica = &self.sources.unica_cross_evidence;
+        let expected = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-settings-filter-v1",
+            ),
+            (
+                "contract source product",
+                self.source.product == "1C:Enterprise Platform",
+            ),
+            (
+                "contract source release",
+                self.source.release == "8.3.27 / XML 2.20",
+            ),
+            (
+                "contract source derivation",
+                !self.source.derivation.trim().is_empty(),
+            ),
+            ("platform line", self.sources.platform_line == "8.3.27"),
+            ("source version", self.sources.source_version == "2.20"),
+            (
+                "comparison product",
+                comparison.product == "1C:Enterprise Platform",
+            ),
+            (
+                "metadata-only product",
+                metadata_only.product == "1C:Enterprise Platform",
+            ),
+            (
+                "Unica product",
+                unica.product == "1C:Enterprise Platform via the public Unica corpus",
+            ),
+            ("comparison release", comparison.release == "8.3.27.2214"),
+            (
+                "metadata-only release",
+                metadata_only.release == comparison.release,
+            ),
+            ("Unica release", unica.release == "8.3.27.2074"),
+            (
+                "comparison derivation",
+                !comparison.derivation.trim().is_empty(),
+            ),
+            (
+                "metadata-only derivation",
+                !metadata_only.derivation.trim().is_empty(),
+            ),
+            ("Unica derivation", !unica.derivation.trim().is_empty()),
+            (
+                "fixture",
+                comparison.fixture_id == "8.3.27.2214-xml-2.20-dcs-filter"
+                    && metadata_only.fixture_id == comparison.fixture_id,
+            ),
+            ("comparison rounds", comparison.round_trips >= 2),
+            ("metadata-only rounds", metadata_only.round_trips >= 2),
+            ("Unica rounds", unica.round_trips >= 2),
+            (
+                "Unica revision",
+                unica.repository_revision == "a527d40962d047c6922c903b37510b30f697da42",
+            ),
+            ("namespace", self.policy.namespace == NS),
+            ("core namespace", self.policy.core_namespace == CORE_NS),
+            (
+                "XML Schema namespace",
+                self.policy.xml_schema_namespace == XS_NS,
+            ),
+            (
+                "filter QName",
+                self.policy.filter_qname == format!("{{{NS}}}filter"),
+            ),
+            (
+                "storage Filter QName",
+                self.policy.storage_filter_qname == format!("{{{NS}}}Filter"),
+            ),
+            (
+                "item QName",
+                self.policy.item_qname == format!("{{{NS}}}item"),
+            ),
+            ("use QName", self.policy.use_qname == format!("{{{NS}}}use")),
+            (
+                "left QName",
+                self.policy.left_qname == format!("{{{NS}}}left"),
+            ),
+            (
+                "comparison type QName",
+                self.policy.comparison_type_qname == format!("{{{NS}}}comparisonType"),
+            ),
+            (
+                "right QName",
+                self.policy.right_qname == format!("{{{NS}}}right"),
+            ),
+            (
+                "view mode QName",
+                self.policy.view_mode_qname == format!("{{{NS}}}viewMode"),
+            ),
+            (
+                "user setting ID QName",
+                self.policy.user_setting_id_qname == format!("{{{NS}}}userSettingID"),
+            ),
+            (
+                "comparison item type QName",
+                self.policy.comparison_item_type_qname == format!("{{{NS}}}FilterItemComparison"),
+            ),
+            (
+                "left field type QName",
+                self.policy.left_field_type_qname == format!("{{{CORE_NS}}}Field"),
+            ),
+            (
+                "right string type QName",
+                self.policy.right_string_type_qname == format!("{{{XS_NS}}}string"),
+            ),
+            (
+                "settings placement",
+                self.policy.settings_placement
+                    == "after-selection-before-order-and-structure-items",
+            ),
+            (
+                "item child order",
+                self.policy.item_child_order == ["use?", "left", "comparisonType", "right"],
+            ),
+            (
+                "filter child order",
+                self.policy.filter_child_order == ["items", "viewMode?", "userSettingID?"],
+            ),
+            (
+                "supported comparisons",
+                self.policy.supported_comparison_types == ["Equal"],
+            ),
+            (
+                "supported use values",
+                self.policy.supported_use_values == ["omitted"],
+            ),
+            (
+                "supported right types",
+                self.policy.supported_right_types == ["string"],
+            ),
+            ("maximum emitted items", self.policy.max_emitted_items == 1),
+            (
+                "supported view modes",
+                self.policy.supported_view_modes == ["Normal"],
+            ),
+            (
+                "metadata-only user setting ID",
+                self.policy.metadata_only_user_setting_id == "dfcece9d-5077-440b-b6b3-45a5cb4538eb",
+            ),
+            (
+                "comparison storage record type UUID",
+                Uuid::parse_str(&self.policy.comparison_storage_record_type_uuid)
+                    .is_ok_and(|value| !value.is_nil()),
+            ),
+            (
+                "metadata-only embedded emission",
+                self.policy.metadata_only_embedded_emission
+                    == "requires-viewMode-and-userSettingID",
+            ),
+            (
+                "metadata-only storage representation",
+                self.policy.metadata_only_storage_representation
+                    == "Filter-property-absent-when-AutoSaveUserSettings-true",
+            ),
+            (
+                "propertyless empty filter emission",
+                self.policy.propertyless_empty_filter_emission == "unsupported",
+            ),
+        ];
+        if let Some((field, _)) = expected.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS filter {field} drifted"
+            )));
+        }
+        for (field, digest) in [
+            ("ibcmd SHA-256", self.sources.ibcmd_sha256.as_str()),
+            (
+                "comparison Form raw body SHA-256",
+                comparison.form_raw_body_sha256.as_str(),
+            ),
+            (
+                "comparison Form native XML SHA-256",
+                comparison.form_native_xml_sha256.as_str(),
+            ),
+            (
+                "comparison Form storage Filter SHA-256",
+                comparison.form_storage_filter_sha256.as_str(),
+            ),
+            (
+                "comparison Form embedded filter SHA-256",
+                comparison.form_embedded_filter_sha256.as_str(),
+            ),
+            (
+                "standalone raw body SHA-256",
+                comparison.standalone_raw_body_sha256.as_str(),
+            ),
+            (
+                "standalone native XML SHA-256",
+                comparison.standalone_native_xml_sha256.as_str(),
+            ),
+            (
+                "standalone filter SHA-256",
+                comparison.standalone_filter_sha256.as_str(),
+            ),
+            (
+                "metadata-only Form raw body SHA-256",
+                metadata_only.form_raw_body_sha256.as_str(),
+            ),
+            (
+                "metadata-only Form native XML SHA-256",
+                metadata_only.form_native_xml_sha256.as_str(),
+            ),
+            (
+                "metadata-only Form embedded filter SHA-256",
+                metadata_only.form_embedded_filter_sha256.as_str(),
+            ),
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                    "DCS filter {field} is invalid"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsFilterPolicy {
+        DcsFilterPolicy {
+            namespace_uri: self.policy.namespace,
+            core_namespace_uri: self.policy.core_namespace,
+            xml_schema_namespace_uri: self.policy.xml_schema_namespace,
+            filter_qname: self.policy.filter_qname,
+            storage_filter_qname: self.policy.storage_filter_qname,
+            item_qname: self.policy.item_qname,
+            use_qname: self.policy.use_qname,
+            left_qname: self.policy.left_qname,
+            comparison_type_qname: self.policy.comparison_type_qname,
+            right_qname: self.policy.right_qname,
+            view_mode_qname: self.policy.view_mode_qname,
+            user_setting_id_qname: self.policy.user_setting_id_qname,
+            comparison_item_type_qname: self.policy.comparison_item_type_qname,
+            left_field_type_qname: self.policy.left_field_type_qname,
+            right_string_type_qname: self.policy.right_string_type_qname,
+            supported_comparison_types: self.policy.supported_comparison_types,
+            max_emitted_items: self.policy.max_emitted_items,
+            supported_view_modes: self.policy.supported_view_modes,
+            metadata_only_user_setting_id: self.policy.metadata_only_user_setting_id,
+            comparison_storage_record_type_uuid: self.policy.comparison_storage_record_type_uuid,
         }
     }
 }
@@ -6905,6 +7385,17 @@ pub fn bundled_dcs_order_policy() -> Result<DcsOrderPolicy, SchemaError> {
         .clone()
 }
 
+/// Returns the immutable platform-authenticated standalone/Form filter policy.
+pub fn bundled_dcs_filter_policy() -> Result<DcsFilterPolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsFilterPolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsFilterEvidenceCorpus::parse(BUNDLED_DCS_FILTER_EVIDENCE_JSON)
+                .map(DcsFilterEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsListSettingsTailPolicy, SchemaError>> = OnceLock::new();
     POLICY
@@ -8217,9 +8708,9 @@ mod tests {
         let corpus = bundled_canonical_coverage().unwrap();
         assert_eq!(corpus.source.release, "2025.2.3+30");
         assert_eq!(corpus.summary.entries, 4_966);
-        assert_eq!(corpus.summary.typed, 3);
+        assert_eq!(corpus.summary.typed, 20);
         assert_eq!(corpus.summary.opaque_lossless, 0);
-        assert_eq!(corpus.summary.unsupported, 4_963);
+        assert_eq!(corpus.summary.unsupported, 4_946);
         assert_eq!(corpus.summary.platform_only, 0);
 
         let family_count = |family: &str| {
@@ -8251,7 +8742,7 @@ mod tests {
                 .iter()
                 .map(|item| item.features)
                 .sum::<usize>(),
-            4_963
+            4_946
         );
         assert!(
             corpus
@@ -8271,6 +8762,25 @@ mod tests {
                 ))
                 .collect::<Vec<_>>(),
             [
+                ("DataCompositionFilter", "items", "items"),
+                ("DataCompositionFilter", "userSettingID", "user_setting_id"),
+                ("DataCompositionFilter", "viewMode", "view_mode"),
+                (
+                    "DataCompositionFilterItem",
+                    "comparisonType",
+                    "comparison_type"
+                ),
+                ("DataCompositionFilterItem", "left", "field"),
+                ("DataCompositionFilterItem", "right", "right"),
+                ("DataCompositionOrder", "items", "items"),
+                ("DataCompositionOrder", "userSettingID", "user_setting_id"),
+                ("DataCompositionOrder", "viewMode", "view_mode"),
+                ("DataCompositionOrderItem", "field", "field"),
+                ("DataCompositionOrderItem", "orderType", "order_type"),
+                ("DataCompositionOrderItem", "use", "use_value"),
+                ("DataCompositionSelectedField", "field", "field"),
+                ("DataCompositionSelectedFields", "items", "items"),
+                ("DataCompositionSettings", "filter", "filter"),
                 (
                     "DataCompositionSettings",
                     "itemsUserSettingID",
@@ -8281,6 +8791,8 @@ mod tests {
                     "itemsViewMode",
                     "items_view_mode"
                 ),
+                ("DataCompositionSettings", "order", "order"),
+                ("DataCompositionSettings", "selection", "selection"),
                 ("DynamicListExtInfo", "listSettings", "settings"),
             ]
         );
@@ -8742,6 +9254,56 @@ mod tests {
         drift["policy"]["itemChildOrder"] = serde_json::json!(["field", "use?", "orderType"]);
         assert!(matches!(
             DcsOrderEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("item child order drifted")
+        ));
+    }
+
+    #[test]
+    fn bundled_platform_dcs_filter_policy_binds_all_physical_contexts_and_defaults() {
+        let policy = bundled_dcs_filter_policy().unwrap();
+        assert_eq!(
+            policy.filter_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}filter"
+        );
+        assert_eq!(
+            policy.storage_filter_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}Filter"
+        );
+        assert_eq!(
+            policy.comparison_item_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}FilterItemComparison"
+        );
+        assert_eq!(
+            policy.left_field_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/core}Field"
+        );
+        assert_eq!(
+            policy.right_string_type_qname(),
+            "{http://www.w3.org/2001/XMLSchema}string"
+        );
+        assert_eq!(policy.supported_comparison_types(), &["Equal"]);
+        assert_eq!(policy.supported_use_values(), &[None]);
+        assert_eq!(policy.max_emitted_items(), 1);
+        assert_eq!(policy.supported_view_modes(), &["Normal"]);
+        assert_eq!(
+            policy.metadata_only_user_setting_id(),
+            "dfcece9d-5077-440b-b6b3-45a5cb4538eb"
+        );
+        assert_eq!(
+            policy.comparison_storage_record_type_uuid(),
+            "f6841c6b-6c71-4c82-ae9e-d08b49db326c"
+        );
+        assert!(policy.follows_selection_and_precedes_order_and_structure_items());
+        assert!(policy.propertyless_empty_filter_is_unsupported());
+        assert!(policy.metadata_only_filter_requires_view_mode_and_user_setting_id());
+        assert!(policy.metadata_only_storage_property_is_absent());
+
+        let mut drift =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_FILTER_EVIDENCE_JSON).unwrap();
+        drift["policy"]["itemChildOrder"] = serde_json::json!(["left", "right", "comparisonType"]);
+        assert!(matches!(
+            DcsFilterEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("item child order drifted")
         ));

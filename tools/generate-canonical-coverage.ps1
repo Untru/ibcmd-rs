@@ -25,12 +25,39 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function ConvertTo-HashtableValue {
+    param($Value)
+
+    if ($null -eq $Value -or $Value -is [string] -or $Value.GetType().IsValueType) {
+        return $Value
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = @{}
+        foreach ($key in $Value.Keys) {
+            $result[[string]$key] = ConvertTo-HashtableValue $Value[$key]
+        }
+        return $result
+    }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $result = @{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $result[$property.Name] = ConvertTo-HashtableValue $property.Value
+        }
+        return $result
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = @($Value | ForEach-Object { ConvertTo-HashtableValue $_ })
+        return ,$items
+    }
+    return $Value
+}
+
 function Read-JsonObject {
     param([Parameter(Mandatory = $true)] [string]$Path)
 
     try {
-        $value = (Get-Content -LiteralPath $Path -Raw -Encoding utf8) |
-            ConvertFrom-Json -AsHashtable -Depth 100
+        $parsed = (Get-Content -LiteralPath $Path -Raw -Encoding utf8) | ConvertFrom-Json
+        $value = ConvertTo-HashtableValue $parsed
     }
     catch {
         throw "Unable to read JSON '$Path': $($_.Exception.Message)"
@@ -264,6 +291,65 @@ function New-BootstrapCoverageEntry {
     }
 }
 
+function New-TypedCoverageEntry {
+    param(
+        [Parameter(Mandatory = $true)] [System.Collections.IDictionary]$Feature,
+        [Parameter(Mandatory = $true)] [System.Collections.IDictionary]$Mapping
+    )
+
+    return [ordered]@{
+        key = [ordered]@{
+            namespaceUri = $Feature.namespaceUri
+            classifier = $Feature.classifier
+            feature = $Feature.feature
+        }
+        family = $Feature.family
+        status = 'typed'
+        canonicalType = $Mapping.canonicalType
+        canonicalField = $Mapping.canonicalField
+        opaquePlacement = $null
+        diagnosticCode = $null
+        evidence = [ordered]@{
+            status = 'verified'
+            kind = 'canonical-code-inspection-and-platform-evidence'
+            sources = @(
+                'crates/ibcmd-core/src/dcs.rs',
+                $Mapping.policy,
+                $Feature.resource
+            ) | Sort-Object
+            note = 'Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission.'
+        }
+    }
+}
+
+$settingsNamespaceUri = 'http://g5.1c.ru/v8/dt/data-composition-system/settings'
+$typedCoverageDefinitions = @(
+    @{ classifier = 'DataCompositionSettings'; feature = 'selection'; canonicalType = 'DcsSettings'; canonicalField = 'selection'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json' },
+    @{ classifier = 'DataCompositionSettings'; feature = 'order'; canonicalType = 'DcsSettings'; canonicalField = 'order'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
+    @{ classifier = 'DataCompositionSettings'; feature = 'filter'; canonicalType = 'DcsSettings'; canonicalField = 'filter'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionSelectedFields'; feature = 'items'; canonicalType = 'DcsSelection'; canonicalField = 'items'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json' },
+    @{ classifier = 'DataCompositionSelectedField'; feature = 'field'; canonicalType = 'DcsSelectedField'; canonicalField = 'field'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json' },
+    @{ classifier = 'DataCompositionOrder'; feature = 'items'; canonicalType = 'DcsOrder'; canonicalField = 'items'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
+    @{ classifier = 'DataCompositionOrder'; feature = 'viewMode'; canonicalType = 'DcsOrder'; canonicalField = 'view_mode'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
+    @{ classifier = 'DataCompositionOrder'; feature = 'userSettingID'; canonicalType = 'DcsOrder'; canonicalField = 'user_setting_id'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
+    @{ classifier = 'DataCompositionOrderItem'; feature = 'field'; canonicalType = 'DcsOrderField'; canonicalField = 'field'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
+    @{ classifier = 'DataCompositionOrderItem'; feature = 'orderType'; canonicalType = 'DcsOrderField'; canonicalField = 'order_type'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
+    @{ classifier = 'DataCompositionOrderItem'; feature = 'use'; canonicalType = 'DcsOrderField'; canonicalField = 'use_value'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json' },
+    @{ classifier = 'DataCompositionFilter'; feature = 'items'; canonicalType = 'DcsFilter'; canonicalField = 'items'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionFilter'; feature = 'viewMode'; canonicalType = 'DcsFilter'; canonicalField = 'view_mode'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionFilter'; feature = 'userSettingID'; canonicalType = 'DcsFilter'; canonicalField = 'user_setting_id'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionFilterItem'; feature = 'comparisonType'; canonicalType = 'DcsFilterComparison'; canonicalField = 'comparison_type'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionFilterItem'; feature = 'left'; canonicalType = 'DcsFilterComparison'; canonicalField = 'field'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' },
+    @{ classifier = 'DataCompositionFilterItem'; feature = 'right'; canonicalType = 'DcsFilterComparison'; canonicalField = 'right'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json' }
+)
+$typedCoverageMappings = [System.Collections.Generic.Dictionary[string, object]]::new(
+    [System.StringComparer]::Ordinal
+)
+foreach ($mapping in $typedCoverageDefinitions) {
+    $id = Get-KeyId -NamespaceUri $settingsNamespaceUri -Classifier $mapping.classifier -Feature $mapping.feature
+    $typedCoverageMappings.Add($id, $mapping)
+}
+
 $input = Read-JsonObject -Path $InputFeatureSemantics
 $inputSource = Get-RequiredValue -Object $input -Name 'source' -Context 'feature semantics corpus'
 if (-not ($inputSource -is [System.Collections.IDictionary])) {
@@ -344,7 +430,10 @@ if (-not [string]::IsNullOrWhiteSpace($ExistingCoverage)) {
 $entries = @()
 foreach ($id in $features.Keys) {
     $feature = $features[$id]
-    if ($existingEntries.ContainsKey($id) -and -not (Test-BootstrapPlaceholder -Entry $existingEntries[$id])) {
+    if ($typedCoverageMappings.ContainsKey($id)) {
+        $entries += New-TypedCoverageEntry -Feature $feature -Mapping $typedCoverageMappings[$id]
+    }
+    elseif ($existingEntries.ContainsKey($id) -and -not (Test-BootstrapPlaceholder -Entry $existingEntries[$id])) {
         $preserved = $existingEntries[$id]
         $preserved.family = $feature.family
         $entries += $preserved

@@ -1,0 +1,31 @@
+{
+  "dataSets": [
+    {
+      "name": "ProbeData",
+      "objectName": "ProbeData",
+      "fields": [
+        {
+          "field": "SortKey",
+          "type": "string(20)"
+        }
+      ]
+    }
+  ],
+  "settingsVariants": [
+    {
+      "name": "Main",
+      "title": "Main",
+      "settings": {
+        "selection": ["SortKey"],
+        "filter": [
+          {
+            "field": "SortKey",
+            "op": "=",
+            "value": "A"
+          }
+        ],
+        "structure": "details"
+      }
+    }
+  ]
+}

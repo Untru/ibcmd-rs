@@ -23,6 +23,8 @@ pub const MAX_DCS_OPAQUE_EXTENSIONS: usize = 4_096;
 pub const MAX_DCS_SELECTION_ITEMS: usize = 16_384;
 /// Maximum order items retained by one DCS settings order.
 pub const MAX_DCS_ORDER_ITEMS: usize = 16_384;
+/// Maximum filter items retained by one DCS settings filter.
+pub const MAX_DCS_FILTER_ITEMS: usize = 16_384;
 /// Maximum aggregate variable-sized data retained by one DCS settings value.
 pub const MAX_DCS_RETAINED_BYTES: usize = 67_108_864;
 
@@ -54,6 +56,22 @@ pub enum DcsBuildError {
     /// The only observed explicit `use` value is `false`; `true` must not be
     /// normalized into an omission without default evidence.
     UnsupportedOrderUseTrue,
+    /// A DCS filter was present without items or the complete evidenced
+    /// metadata-only pair.
+    EmptyFilter,
+    /// A comparison left operand did not contain a field path.
+    EmptyFilterField,
+    /// The first evidenced right operand is a non-empty string.
+    EmptyFilterStringValue,
+    /// A DCS filter exceeded its direct item bound.
+    TooManyFilterItems {
+        /// Maximum accepted items.
+        maximum: usize,
+        /// Actual items.
+        actual: usize,
+    },
+    /// No explicit `use` value is authenticated for the first filter cohort.
+    UnsupportedFilterUse,
     /// The opaque extension collection exceeded its DCS-specific item bound.
     TooManyOpaqueExtensions {
         /// Maximum accepted extensions.
@@ -117,6 +135,20 @@ impl Display for DcsBuildError {
             ),
             Self::UnsupportedOrderUseTrue => formatter.write_str(
                 "DCS order use=true is not evidence-backed; preserve it at the owning boundary",
+            ),
+            Self::EmptyFilter => formatter.write_str(
+                "DCS filter has neither items nor the complete evidenced metadata-only pair",
+            ),
+            Self::EmptyFilterField => formatter.write_str("DCS filter field path is empty"),
+            Self::EmptyFilterStringValue => {
+                formatter.write_str("DCS filter string comparison value is empty")
+            }
+            Self::TooManyFilterItems { maximum, actual } => write!(
+                formatter,
+                "DCS filter exceeds {maximum} items (actual {actual})"
+            ),
+            Self::UnsupportedFilterUse => formatter.write_str(
+                "DCS filter explicit use is not evidence-backed; preserve it at the owning boundary",
             ),
             Self::TooManyOpaqueExtensions { maximum, actual } => write!(
                 formatter,
@@ -486,6 +518,238 @@ impl<'de> Deserialize<'de> for DcsOrder {
     }
 }
 
+/// Platform-evidenced comparison token for the bounded filter cohort.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DcsFilterComparisonType {
+    Equal,
+}
+
+/// Platform-evidenced typed right operands. New value kinds require their own
+/// XML/profile evidence before entering the canonical writer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum DcsFilterValue {
+    String(CanonicalText),
+}
+
+impl DcsFilterValue {
+    pub fn string(value: CanonicalText) -> Result<Self, DcsBuildError> {
+        if value.as_str().is_empty() {
+            return Err(DcsBuildError::EmptyFilterStringValue);
+        }
+        Ok(Self::String(value))
+    }
+
+    pub const fn as_string(&self) -> &CanonicalText {
+        match self {
+            Self::String(value) => value,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum DcsFilterValueWire {
+    String(CanonicalText),
+}
+
+impl<'de> Deserialize<'de> for DcsFilterValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match DcsFilterValueWire::deserialize(deserializer)? {
+            DcsFilterValueWire::String(value) => Self::string(value).map_err(de::Error::custom),
+        }
+    }
+}
+
+/// One comparison item with exact presence-aware operands.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsFilterComparison {
+    use_value: Option<bool>,
+    field: CanonicalText,
+    comparison_type: DcsFilterComparisonType,
+    right: DcsFilterValue,
+}
+
+impl DcsFilterComparison {
+    pub fn new(
+        use_value: Option<bool>,
+        field: CanonicalText,
+        comparison_type: DcsFilterComparisonType,
+        right: DcsFilterValue,
+    ) -> Result<Self, DcsBuildError> {
+        if use_value.is_some() {
+            return Err(DcsBuildError::UnsupportedFilterUse);
+        }
+        if field.as_str().is_empty() {
+            return Err(DcsBuildError::EmptyFilterField);
+        }
+        if right.as_string().as_str().is_empty() {
+            return Err(DcsBuildError::EmptyFilterStringValue);
+        }
+        Ok(Self {
+            use_value,
+            field,
+            comparison_type,
+            right,
+        })
+    }
+
+    pub const fn use_value(&self) -> Option<bool> {
+        self.use_value
+    }
+
+    pub const fn field(&self) -> &CanonicalText {
+        &self.field
+    }
+
+    pub const fn comparison_type(&self) -> DcsFilterComparisonType {
+        self.comparison_type
+    }
+
+    pub const fn right(&self) -> &DcsFilterValue {
+        &self.right
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsFilterComparisonWire {
+    use_value: Option<bool>,
+    field: CanonicalText,
+    comparison_type: DcsFilterComparisonType,
+    right: DcsFilterValue,
+}
+
+impl<'de> Deserialize<'de> for DcsFilterComparison {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsFilterComparisonWire::deserialize(deserializer)?;
+        Self::new(wire.use_value, wire.field, wire.comparison_type, wire.right)
+            .map_err(de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum DcsFilterItem {
+    Comparison(DcsFilterComparison),
+}
+
+/// Bounded filter in exact source order. The only empty form admitted by core
+/// is the complete metadata-only pair observed in native Form output.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsFilter {
+    items: Vec<DcsFilterItem>,
+    view_mode: Option<EnumToken>,
+    user_setting_id: Option<CanonicalText>,
+}
+
+impl DcsFilter {
+    pub fn new(
+        items: Vec<DcsFilterItem>,
+        view_mode: Option<EnumToken>,
+        user_setting_id: Option<CanonicalText>,
+    ) -> Result<Self, DcsBuildError> {
+        if items.is_empty() && (view_mode.is_none() || user_setting_id.is_none()) {
+            return Err(DcsBuildError::EmptyFilter);
+        }
+        if items.len() > MAX_DCS_FILTER_ITEMS {
+            return Err(DcsBuildError::TooManyFilterItems {
+                maximum: MAX_DCS_FILTER_ITEMS,
+                actual: items.len(),
+            });
+        }
+        Ok(Self {
+            items,
+            view_mode,
+            user_setting_id,
+        })
+    }
+
+    pub fn items(&self) -> &[DcsFilterItem] {
+        &self.items
+    }
+
+    pub const fn view_mode(&self) -> Option<&EnumToken> {
+        self.view_mode.as_ref()
+    }
+
+    pub const fn user_setting_id(&self) -> Option<&CanonicalText> {
+        self.user_setting_id.as_ref()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsFilterWire {
+    items: DcsFilterItemsWire,
+    view_mode: Option<EnumToken>,
+    user_setting_id: Option<CanonicalText>,
+}
+
+struct DcsFilterItemsWire(Vec<DcsFilterItem>);
+
+struct DcsFilterItemsVisitor;
+
+impl<'de> Visitor<'de> for DcsFilterItemsVisitor {
+    type Value = DcsFilterItemsWire;
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(formatter, "at most {MAX_DCS_FILTER_ITEMS} DCS filter items")
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut items = Vec::with_capacity(
+            sequence
+                .size_hint()
+                .unwrap_or_default()
+                .min(MAX_DCS_FILTER_ITEMS),
+        );
+        while items.len() < MAX_DCS_FILTER_ITEMS {
+            let Some(item) = sequence.next_element::<DcsFilterItem>()? else {
+                return Ok(DcsFilterItemsWire(items));
+            };
+            items.push(item);
+        }
+        if sequence.next_element::<IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom(format_args!(
+                "DCS filter exceeds {MAX_DCS_FILTER_ITEMS} items"
+            )));
+        }
+        Ok(DcsFilterItemsWire(items))
+    }
+}
+
+impl<'de> Deserialize<'de> for DcsFilterItemsWire {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(DcsFilterItemsVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for DcsFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsFilterWire::deserialize(deserializer)?;
+        Self::new(wire.items.0, wire.view_mode, wire.user_setting_id).map_err(de::Error::custom)
+    }
+}
+
 /// Verified typed minimum of `DataCompositionSettings`.
 ///
 /// The optional root selection and scalar fields are structural model
@@ -496,6 +760,7 @@ impl<'de> Deserialize<'de> for DcsOrder {
 #[serde(deny_unknown_fields)]
 pub struct DcsSettings {
     selection: Option<DcsSelection>,
+    filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
@@ -506,6 +771,7 @@ pub struct DcsSettings {
 impl DcsSettings {
     fn from_parts(
         selection: Option<DcsSelection>,
+        filter: Option<DcsFilter>,
         order: Option<DcsOrder>,
         items_user_setting_id: Option<CanonicalText>,
         items_view_mode: Option<EnumToken>,
@@ -514,6 +780,7 @@ impl DcsSettings {
     ) -> Result<Self, DcsBuildError> {
         validate_settings(
             selection.as_ref(),
+            filter.as_ref(),
             order.as_ref(),
             items_user_setting_id.as_ref(),
             items_view_mode.as_ref(),
@@ -522,6 +789,7 @@ impl DcsSettings {
         )?;
         Ok(Self {
             selection,
+            filter,
             order,
             items_user_setting_id,
             items_view_mode,
@@ -533,6 +801,11 @@ impl DcsSettings {
     /// Returns the optional root selection.
     pub const fn selection(&self) -> Option<&DcsSelection> {
         self.selection.as_ref()
+    }
+
+    /// Returns the optional root/Form filter.
+    pub const fn filter(&self) -> Option<&DcsFilter> {
+        self.filter.as_ref()
     }
 
     /// Returns the optional root order.
@@ -567,6 +840,7 @@ impl DcsSettings {
 #[derive(Clone, Debug)]
 pub struct DcsSettingsBuilder {
     selection: Option<DcsSelection>,
+    filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
@@ -578,6 +852,7 @@ impl DcsSettingsBuilder {
     pub fn new(provenance: SourceProvenance) -> Self {
         Self {
             selection: None,
+            filter: None,
             order: None,
             items_user_setting_id: None,
             items_view_mode: None,
@@ -589,6 +864,11 @@ impl DcsSettingsBuilder {
 
     pub fn selection(mut self, selection: Option<DcsSelection>) -> Self {
         self.selection = selection;
+        self
+    }
+
+    pub fn filter(mut self, filter: Option<DcsFilter>) -> Self {
+        self.filter = filter;
         self
     }
 
@@ -615,6 +895,7 @@ impl DcsSettingsBuilder {
     pub fn build(self) -> Result<DcsSettings, DcsBuildError> {
         DcsSettings::from_parts(
             self.selection,
+            self.filter,
             self.order,
             self.items_user_setting_id,
             self.items_view_mode,
@@ -628,6 +909,7 @@ impl DcsSettingsBuilder {
 #[serde(deny_unknown_fields)]
 struct DcsSettingsWire {
     selection: Option<DcsSelection>,
+    filter: Option<DcsFilter>,
     order: Option<DcsOrder>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
@@ -705,6 +987,7 @@ impl<'de> Deserialize<'de> for DcsSettings {
         let wire = DcsSettingsWire::deserialize(deserializer)?;
         DcsSettingsBuilder::new(wire.provenance)
             .selection(wire.selection)
+            .filter(wire.filter)
             .order(wire.order)
             .items_user_setting_id(wire.items_user_setting_id)
             .items_view_mode(wire.items_view_mode)
@@ -755,6 +1038,7 @@ impl DcsSettingsEnvelope {
 
 fn validate_settings(
     selection: Option<&DcsSelection>,
+    filter: Option<&DcsFilter>,
     order: Option<&DcsOrder>,
     items_user_setting_id: Option<&CanonicalText>,
     items_view_mode: Option<&EnumToken>,
@@ -788,6 +1072,43 @@ fn validate_settings(
                 retained_bytes =
                     checked_retained_bytes(retained_bytes, field.field().as_str().len())?;
             }
+        }
+    }
+    if let Some(filter) = filter {
+        if filter.items().is_empty()
+            && (filter.view_mode().is_none() || filter.user_setting_id().is_none())
+        {
+            return Err(DcsBuildError::EmptyFilter);
+        }
+        if filter.items().len() > MAX_DCS_FILTER_ITEMS {
+            return Err(DcsBuildError::TooManyFilterItems {
+                maximum: MAX_DCS_FILTER_ITEMS,
+                actual: filter.items().len(),
+            });
+        }
+        for item in filter.items() {
+            let DcsFilterItem::Comparison(comparison) = item;
+            if comparison.use_value().is_some() {
+                return Err(DcsBuildError::UnsupportedFilterUse);
+            }
+            if comparison.field().as_str().is_empty() {
+                return Err(DcsBuildError::EmptyFilterField);
+            }
+            if comparison.right().as_string().as_str().is_empty() {
+                return Err(DcsBuildError::EmptyFilterStringValue);
+            }
+            retained_bytes =
+                checked_retained_bytes(retained_bytes, comparison.field().as_str().len())?;
+            retained_bytes = checked_retained_bytes(
+                retained_bytes,
+                comparison.right().as_string().as_str().len(),
+            )?;
+        }
+        if let Some(value) = filter.view_mode() {
+            retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
+        }
+        if let Some(value) = filter.user_setting_id() {
+            retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
         }
     }
     if let Some(order) = order {
@@ -946,6 +1267,18 @@ mod tests {
                 use_value,
                 CanonicalText::new(field).unwrap(),
                 DcsOrderType::Asc,
+            )
+            .unwrap(),
+        )
+    }
+
+    fn filter_comparison(field: &str, right: &str) -> DcsFilterItem {
+        DcsFilterItem::Comparison(
+            DcsFilterComparison::new(
+                None,
+                CanonicalText::new(field).unwrap(),
+                DcsFilterComparisonType::Equal,
+                DcsFilterValue::string(CanonicalText::new(right).unwrap()).unwrap(),
             )
             .unwrap(),
         )
@@ -1117,6 +1450,79 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("exceeds 16384 items"));
+    }
+
+    #[test]
+    fn filter_preserves_typed_operands_metadata_and_wire_shape() {
+        let filter = DcsFilter::new(
+            vec![filter_comparison("SortKey", "A")],
+            Some(EnumToken::new("Normal").unwrap()),
+            Some(CanonicalText::new("dfcece9d-5077-440b-b6b3-45a5cb4538eb").unwrap()),
+        )
+        .unwrap();
+        let settings = DcsSettingsBuilder::new(provenance("platform:8.3.27", "settings"))
+            .filter(Some(filter))
+            .build()
+            .unwrap();
+        let DcsFilterItem::Comparison(comparison) = &settings.filter().unwrap().items()[0];
+        assert_eq!(comparison.use_value(), None);
+        assert_eq!(comparison.field().as_str(), "SortKey");
+        assert_eq!(comparison.comparison_type(), DcsFilterComparisonType::Equal);
+        assert_eq!(comparison.right().as_string().as_str(), "A");
+        let json = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSettings>(&json).unwrap(),
+            settings
+        );
+
+        let metadata_only = DcsFilter::new(
+            Vec::new(),
+            Some(EnumToken::new("Normal").unwrap()),
+            Some(CanonicalText::new("dfcece9d-5077-440b-b6b3-45a5cb4538eb").unwrap()),
+        )
+        .unwrap();
+        assert!(metadata_only.items().is_empty());
+    }
+
+    #[test]
+    fn unsupported_filter_shapes_fail_closed_and_deserialize_bounded() {
+        assert_eq!(
+            DcsFilter::new(Vec::new(), None, None),
+            Err(DcsBuildError::EmptyFilter)
+        );
+        assert_eq!(
+            DcsFilterComparison::new(
+                Some(false),
+                CanonicalText::new("SortKey").unwrap(),
+                DcsFilterComparisonType::Equal,
+                DcsFilterValue::string(CanonicalText::new("A").unwrap()).unwrap(),
+            ),
+            Err(DcsBuildError::UnsupportedFilterUse)
+        );
+        assert_eq!(
+            DcsFilterValue::string(CanonicalText::new("").unwrap()),
+            Err(DcsBuildError::EmptyFilterStringValue)
+        );
+        assert!(matches!(
+            DcsFilter::new(
+                vec![filter_comparison("SortKey", "A"); MAX_DCS_FILTER_ITEMS + 1],
+                None,
+                None,
+            ),
+            Err(DcsBuildError::TooManyFilterItems { .. })
+        ));
+        let item = serde_json::to_value(filter_comparison("SortKey", "A")).unwrap();
+        let over_limit = serde_json::json!({
+            "items": vec![item; MAX_DCS_FILTER_ITEMS + 1],
+            "view_mode": null,
+            "user_setting_id": null
+        });
+        assert!(
+            serde_json::from_value::<DcsFilter>(over_limit)
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds 16384 items")
+        );
     }
 
     #[test]

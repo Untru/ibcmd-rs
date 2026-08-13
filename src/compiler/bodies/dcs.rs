@@ -5,6 +5,7 @@ use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::EffectiveProfile;
+use ibcmd_xml::{DcsChildParseOutcome, parse_dcs_settings_children_strict};
 use quick_xml::NsReader;
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
@@ -183,6 +184,16 @@ fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
     }
 
     let (inner, settings) = source_schema_to_native_parts(xml)?;
+    let typed_settings = parse_dcs_settings_children_strict(&settings)
+        .map_err(|error| DcsCodecError::InvalidXml(error.to_string()))?;
+    if matches!(
+        typed_settings.filter(),
+        DcsChildParseOutcome::Unsupported(_)
+    ) {
+        return Err(DcsCodecError::UnsupportedSource(
+            "DCS filter is outside the platform-authenticated compiler cohort",
+        ));
+    }
     let first = xml_document(&format!("{SCHEMA_FILE_OPEN}\r\n{inner}\r\n</SchemaFile>"));
     let second = xml_document(&settings);
     let third = xml_document(&format!(
@@ -771,8 +782,8 @@ mod tests {
     fn non_empty_settings_survive_semantic_round_trip() {
         let profile = DcsCodecProfile::fixture();
         let source = br#"<?xml version="1.0" encoding="UTF-8"?>
-<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings><dcsset:filter><dcsset:viewMode>Normal</dcsset:viewMode></dcsset:filter></dcsset:settings></settingsVariant>
+<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings><dcsset:selection><dcsset:item xsi:type="dcsset:SelectedItemField"><dcsset:field>SortKey</dcsset:field></dcsset:item></dcsset:selection><dcsset:filter><dcsset:item xsi:type="dcsset:FilterItemComparison"><dcsset:left xsi:type="dcscor:Field">SortKey</dcsset:left><dcsset:comparisonType>Equal</dcsset:comparisonType><dcsset:right xsi:type="xs:string">A</dcsset:right></dcsset:item></dcsset:filter></dcsset:settings></settingsVariant>
 </DataCompositionSchema>"#;
 
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, source).unwrap();
@@ -785,8 +796,24 @@ mod tests {
         .expect("settings document must remain exportable");
         let exported = String::from_utf8(exported).unwrap();
         assert!(exported.contains("<dcsset:settings"));
-        assert!(exported.contains("<dcsset:viewMode>Normal</dcsset:viewMode>"));
+        assert!(exported.contains("<dcsset:comparisonType>Equal</dcsset:comparisonType>"));
+        assert!(exported.contains("<dcsset:right xsi:type=\"xs:string\">A</dcsset:right>"));
         assert_eq!(exported.matches("<settingsVariant>").count(), 1);
+    }
+
+    #[test]
+    fn schema_compiler_rejects_filter_outside_platform_authenticated_cohort() {
+        let profile = DcsCodecProfile::fixture();
+        let source = br#"<?xml version="1.0" encoding="UTF-8"?>
+<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings><dcsset:filter><dcsset:viewMode>Normal</dcsset:viewMode></dcsset:filter></dcsset:settings></settingsVariant>
+</DataCompositionSchema>"#;
+
+        assert!(matches!(
+            compile_dcs(&profile, DcsTemplateKind::Schema, source),
+            Err(DcsCodecError::UnsupportedSource(reason))
+                if reason == "DCS filter is outside the platform-authenticated compiler cohort"
+        ));
     }
 
     #[test]

@@ -9,15 +9,17 @@ use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::dcs::{
+    DcsFilter, DcsFilterComparison, DcsFilterComparisonType, DcsFilterItem, DcsFilterValue,
     DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType, DcsSelectedField, DcsSelectedItem,
-    DcsSelection, DcsSettingsEnvelope, MAX_DCS_ORDER_ITEMS, MAX_DCS_RETAINED_BYTES,
+    DcsSelection, DcsSettingsEnvelope, MAX_DCS_FILTER_ITEMS, MAX_DCS_ORDER_ITEMS,
+    MAX_DCS_RETAINED_BYTES,
 };
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_schema::{
     DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
-    WriterRuleCorpus, WriterRuleKey, bundled_dcs_list_settings_tail_policy,
-    bundled_dcs_order_policy, bundled_dcs_selection_policy,
+    WriterRuleCorpus, WriterRuleKey, bundled_dcs_filter_policy,
+    bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy, bundled_dcs_selection_policy,
     bundled_dcs_settings_serialization_policy, bundled_writer_rules,
 };
 use quick_xml::Reader as QuickXmlReader;
@@ -74,6 +76,10 @@ pub enum DcsWriterDecision {
     RootOrderPolicy,
     /// Form `ListSettings` embedded/storage order ingress.
     FormListSettingsOrderIngress,
+    /// Root filter QName, comparison shape, child order, and placement.
+    RootFilterPolicy,
+    /// Form `ListSettings` embedded/storage/default filter ingress.
+    FormListSettingsFilterIngress,
     /// Placement of retained opaque XML relative to typed settings children.
     OpaqueExtensionPlacement,
     /// EDT delegation from Form `ListSettings` into the DCS serializer.
@@ -104,6 +110,10 @@ impl DcsWriterDecision {
             Self::RootOrderPolicy => "dcs.DataCompositionSettings.order.policy",
             Self::FormListSettingsOrderIngress => {
                 "form.DynamicListExtInfo.listSettings.order.ingress"
+            }
+            Self::RootFilterPolicy => "dcs.DataCompositionSettings.filter.policy",
+            Self::FormListSettingsFilterIngress => {
+                "form.DynamicListExtInfo.listSettings.filter.ingress"
             }
             Self::OpaqueExtensionPlacement => {
                 "dcs.DataCompositionSettings.opaque-extension.placement"
@@ -200,6 +210,16 @@ pub const DCS_WRITER_EVIDENCE: &[DcsWriterEvidence] = &[
         decision: DcsWriterDecision::FormListSettingsOrderIngress,
         status: DcsWriterEvidenceStatus::Verified,
         source: "native-evidence:8.3.27.2214-xml-2.20-dcs-order/form",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::RootFilterPolicy,
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "native-evidence:8.3.27.2214-xml-2.20-dcs-filter/standalone",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::FormListSettingsFilterIngress,
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "native-evidence:8.3.27.2214-xml-2.20-dcs-filter/form",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::OpaqueExtensionPlacement,
@@ -310,6 +330,7 @@ pub enum DcsSettingsChildrenError {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DcsSettingsTypedChildren {
     selection: Option<DcsSelection>,
+    filter: DcsChildParseOutcome<DcsFilter>,
     order: DcsChildParseOutcome<DcsOrder>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
@@ -319,6 +340,11 @@ impl DcsSettingsTypedChildren {
     /// Returns the bounded direct root selection, if present.
     pub const fn selection(&self) -> Option<&DcsSelection> {
         self.selection.as_ref()
+    }
+
+    /// Returns the presence-aware root filter parse result.
+    pub const fn filter(&self) -> &DcsChildParseOutcome<DcsFilter> {
+        &self.filter
     }
 
     /// Returns the presence-aware root order parse result.
@@ -474,6 +500,7 @@ pub fn emit_dcs_settings_children(
 ) -> Result<String, DcsSettingsChildrenError> {
     let parts = emit_dcs_settings_children_parts(envelope, target_profile, prefix, indent)?;
     let mut output = parts.selection.unwrap_or_default();
+    output.push_str(parts.filter.as_deref().unwrap_or_default());
     output.push_str(parts.order.as_deref().unwrap_or_default());
     output.push_str(&parts.tail);
     Ok(output)
@@ -485,6 +512,7 @@ pub fn emit_dcs_settings_children(
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DcsSettingsChildrenParts {
     selection: Option<String>,
+    filter: Option<String>,
     order: Option<String>,
     tail: String,
 }
@@ -492,6 +520,9 @@ pub struct DcsSettingsChildrenParts {
 impl DcsSettingsChildrenParts {
     pub fn selection(&self) -> Option<&str> {
         self.selection.as_deref()
+    }
+    pub fn filter(&self) -> Option<&str> {
+        self.filter.as_deref()
     }
     pub fn order(&self) -> Option<&str> {
         self.order.as_deref()
@@ -515,6 +546,10 @@ pub fn emit_dcs_settings_children_parts(
         .selection()
         .map(|selection| emit_dcs_selection(selection, prefix, indent))
         .transpose()?;
+    let filter = settings
+        .filter()
+        .map(|filter| emit_dcs_filter_fragment(filter, prefix, indent))
+        .transpose()?;
     let order = settings
         .order()
         .map(|order| emit_dcs_order_fragment(order, prefix, indent))
@@ -528,6 +563,7 @@ pub fn emit_dcs_settings_children_parts(
     .map_err(DcsSettingsChildrenError::from)?;
     Ok(DcsSettingsChildrenParts {
         selection,
+        filter,
         order,
         tail,
     })
@@ -583,6 +619,225 @@ fn emit_dcs_selection(
         }
     }
     output.push_str(&format!("{indent}</{prefix}:{selection_local}>\r\n"));
+    Ok(output)
+}
+
+/// Emits an embedded standalone/Form filter child from shared canonical
+/// semantics. Context-specific admissibility is checked by the envelope
+/// preflight before this lexical writer is reached.
+pub fn emit_dcs_filter_fragment(
+    filter: &DcsFilter,
+    prefix: &str,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    if !is_xml_prefix(prefix)
+        || indent.len() > 64
+        || !indent.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        return Err(
+            DcsListSettingsTailError::InvalidFormat("filter prefix or indent is invalid").into(),
+        );
+    }
+    emit_dcs_filter(filter, Some(prefix), indent)
+}
+
+/// Emits the exact physical `<Filter>` document stored for a non-default Form
+/// filter. The authenticated metadata-only Form value returns `None` because
+/// pinned platform storage omits the `Filter` property entirely.
+pub fn emit_dcs_filter_storage_document(
+    filter: &DcsFilter,
+) -> Result<Option<Vec<u8>>, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_filter_policy().map_err(DcsListSettingsTailError::from)?;
+    validate_dcs_filter_for_emission(filter, &policy)?;
+    if filter.items().is_empty() {
+        return Ok(None);
+    }
+    let root = expanded_local_name(policy.storage_filter_qname())?;
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<{root} xmlns=\"{}\" xmlns:xs=\"{}\" xmlns:xsi=\"{XSI_NAMESPACE}\">\r\n",
+        policy.namespace_uri(),
+        policy.xml_schema_namespace_uri()
+    );
+    xml.push_str(&emit_dcs_filter_contents(filter, None, "\t", &policy)?);
+    xml.push_str("</");
+    xml.push_str(root);
+    xml.push('>');
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(Some(bytes))
+}
+
+/// Builds the exact metadata-only Form filter reconstructed by the pinned
+/// platform when `AutoSaveUserSettings=true` and no physical Filter property
+/// exists in the body.
+pub fn platform_default_form_list_settings_filter() -> Result<DcsFilter, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_filter_policy().map_err(DcsListSettingsTailError::from)?;
+    let Some(view_mode) = policy.supported_view_modes().first() else {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "metadata-only Form filter view mode is not evidenced",
+        )
+        .into());
+    };
+    let view_mode = EnumToken::new(view_mode)
+        .map_err(|_| DcsListSettingsTailError::InvalidValue("filter viewMode"))?;
+    let user_setting_id = CanonicalText::new(policy.metadata_only_user_setting_id())
+        .map_err(|_| DcsListSettingsTailError::InvalidValue("filter userSettingID"))?;
+    DcsFilter::new(Vec::new(), Some(view_mode), Some(user_setting_id)).map_err(|_| {
+        DcsListSettingsTailError::InvalidFormat(
+            "metadata-only Form filter violates canonical bounds",
+        )
+        .into()
+    })
+}
+
+fn emit_dcs_filter(
+    filter: &DcsFilter,
+    prefix: Option<&str>,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_filter_policy().map_err(DcsListSettingsTailError::from)?;
+    validate_dcs_filter_for_emission(filter, &policy)?;
+    let local = expanded_local_name(policy.filter_qname())?;
+    let qualified = |local: &str| match prefix {
+        Some(prefix) => format!("{prefix}:{local}"),
+        None => local.to_owned(),
+    };
+    let mut output = format!("{indent}<{}>\r\n", qualified(local));
+    output.push_str(&emit_dcs_filter_contents(
+        filter,
+        prefix,
+        &format!("{indent}\t"),
+        &policy,
+    )?);
+    output.push_str(&format!("{indent}</{}>\r\n", qualified(local)));
+    Ok(output)
+}
+
+fn validate_dcs_filter_for_emission(
+    filter: &DcsFilter,
+    policy: &ibcmd_schema::DcsFilterPolicy,
+) -> Result<(), DcsSettingsChildrenError> {
+    if !policy.follows_selection_and_precedes_order_and_structure_items()
+        || !policy.propertyless_empty_filter_is_unsupported()
+        || !policy.metadata_only_filter_requires_view_mode_and_user_setting_id()
+        || filter.items().len() > policy.max_emitted_items()
+        || (filter.items().is_empty()
+            && (filter.view_mode().is_none() || filter.user_setting_id().is_none()))
+        || filter.view_mode().is_some() != filter.user_setting_id().is_some()
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "filter placement, cardinality, metadata, or empty-emission policy is unsupported",
+        )
+        .into());
+    }
+    if let Some(view_mode) = filter.view_mode()
+        && !policy
+            .supported_view_modes()
+            .iter()
+            .any(|supported| supported == view_mode.as_str())
+    {
+        return Err(DcsListSettingsTailError::InvalidValue("filter viewMode").into());
+    }
+    if let Some(user_setting_id) = filter.user_setting_id()
+        && user_setting_id.as_str() != policy.metadata_only_user_setting_id()
+    {
+        return Err(DcsListSettingsTailError::InvalidValue("filter userSettingID").into());
+    }
+    for item in filter.items() {
+        let DcsFilterItem::Comparison(comparison) = item;
+        if comparison.use_value().is_some()
+            || comparison.comparison_type() != DcsFilterComparisonType::Equal
+            || comparison.field().as_str().is_empty()
+            || comparison.right().as_string().as_str().is_empty()
+        {
+            return Err(DcsListSettingsTailError::InvalidFormat(
+                "filter comparison is outside the platform-evidenced cohort",
+            )
+            .into());
+        }
+        for value in [
+            comparison.field().as_str(),
+            comparison.right().as_string().as_str(),
+        ] {
+            if value.chars().any(|character| !is_xml_1_0_char(character)) {
+                return Err(DcsListSettingsTailError::InvalidValue("filter comparison").into());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn emit_dcs_filter_contents(
+    filter: &DcsFilter,
+    prefix: Option<&str>,
+    indent: &str,
+    policy: &ibcmd_schema::DcsFilterPolicy,
+) -> Result<String, DcsSettingsChildrenError> {
+    let qualified = |expanded: &str| -> Result<String, DcsListSettingsTailError> {
+        let local = expanded_local_name(expanded)?;
+        Ok(match prefix {
+            Some(prefix) => format!("{prefix}:{local}"),
+            None => local.to_owned(),
+        })
+    };
+    let item_name = qualified(policy.item_qname())?;
+    let use_name = qualified(policy.use_qname())?;
+    let left_name = qualified(policy.left_qname())?;
+    let comparison_type_name = qualified(policy.comparison_type_qname())?;
+    let right_name = qualified(policy.right_qname())?;
+    let comparison_item_type = expanded_local_name(policy.comparison_item_type_qname())?;
+    let left_field_type = expanded_local_name(policy.left_field_type_qname())?;
+    let right_string_type = expanded_local_name(policy.right_string_type_qname())?;
+    let nested = format!("{indent}\t");
+    let mut output = String::new();
+    for item in filter.items() {
+        let DcsFilterItem::Comparison(comparison) = item;
+        let item_type = match prefix {
+            Some(prefix) => format!("{prefix}:{comparison_item_type}"),
+            None => comparison_item_type.to_owned(),
+        };
+        output.push_str(&format!(
+            "{indent}<{item_name} xsi:type=\"{item_type}\">\r\n"
+        ));
+        if let Some(use_value) = comparison.use_value() {
+            output.push_str(&format!(
+                "{nested}<{use_name}>{}</{use_name}>\r\n",
+                if use_value { "true" } else { "false" }
+            ));
+        }
+        let left_namespace = if prefix.is_none() {
+            format!(" xmlns:dcscor=\"{}\"", policy.core_namespace_uri())
+        } else {
+            String::new()
+        };
+        output.push_str(&format!(
+            "{nested}<{left_name}{left_namespace} xsi:type=\"dcscor:{left_field_type}\">{}</{left_name}>\r\n",
+            escape(comparison.field().as_str())
+        ));
+        output.push_str(&format!(
+            "{nested}<{comparison_type_name}>Equal</{comparison_type_name}>\r\n"
+        ));
+        output.push_str(&format!(
+            "{nested}<{right_name} xsi:type=\"xs:{right_string_type}\">{}</{right_name}>\r\n",
+            escape(comparison.right().as_string().as_str())
+        ));
+        output.push_str(&format!("{indent}</{item_name}>\r\n"));
+    }
+    for (qname, value) in [
+        (
+            policy.view_mode_qname(),
+            filter.view_mode().map(|value| value.as_str()),
+        ),
+        (
+            policy.user_setting_id_qname(),
+            filter.user_setting_id().map(|value| value.as_str()),
+        ),
+    ] {
+        if let Some(value) = value {
+            let name = qualified(qname)?;
+            output.push_str(&format!("{indent}<{name}>{}</{name}>\r\n", escape(value)));
+        }
+    }
     Ok(output)
 }
 
@@ -825,6 +1080,10 @@ pub fn parse_dcs_settings_children_strict(
     let mut children = DcsSettingsTypedChildren::default();
     let mut selection_candidate = None;
     let mut selection_is_ambiguous = false;
+    let mut filter_candidate = None;
+    let mut filter_placement_is_unsupported = false;
+    let mut filter_window_closed = false;
+    let mut saw_filter = false;
     let mut order_candidate = None;
     let mut order_placement_is_unsupported = false;
     let mut order_window_closed = false;
@@ -834,12 +1093,27 @@ pub fn parse_dcs_settings_children_strict(
             continue;
         };
         if element.name().local() == "selection" {
+            if saw_filter && xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE) {
+                filter_placement_is_unsupported = true;
+            }
             if saw_order && xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE) {
                 order_placement_is_unsupported = true;
             }
             if selection_candidate.replace(element).is_some() {
                 selection_is_ambiguous = true;
             }
+            continue;
+        }
+        if element.name().local() == "filter" {
+            if filter_candidate.replace(element).is_some() {
+                return Err(DcsSettingsParseError {
+                    reason: "duplicate direct filter child",
+                });
+            }
+            if filter_window_closed || saw_order || selection_candidate.is_none() {
+                filter_placement_is_unsupported = true;
+            }
+            saw_filter = true;
             continue;
         }
         if element.name().local() == "order" {
@@ -852,12 +1126,14 @@ pub fn parse_dcs_settings_children_strict(
                 order_placement_is_unsupported = true;
             }
             saw_order = true;
+            filter_window_closed = true;
             continue;
         }
         if xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
             && matches!(
                 element.name().local(),
-                "conditionalAppearance"
+                "dataParameters"
+                    | "conditionalAppearance"
                     | "outputParameters"
                     | "item"
                     | "additionalProperties"
@@ -866,6 +1142,7 @@ pub fn parse_dcs_settings_children_strict(
                     | "itemsUserSettingPresentation"
             )
         {
+            filter_window_closed = true;
             order_window_closed = true;
         }
         let target = match element.name().local() {
@@ -901,6 +1178,23 @@ pub fn parse_dcs_settings_children_strict(
     if !selection_is_ambiguous && let Some(element) = selection_candidate {
         children.selection = parse_dcs_selection(element, root);
     }
+    if let Some(element) = filter_candidate {
+        children.filter = parse_dcs_filter(element, root)?;
+        if filter_placement_is_unsupported
+            && matches!(&children.filter, DcsChildParseOutcome::Typed(_))
+        {
+            children.filter = DcsChildParseOutcome::Unsupported(
+                "root filter placement is outside the evidenced settings sequence",
+            );
+        }
+        if let DcsChildParseOutcome::Typed(filter) = &children.filter
+            && (filter.view_mode().is_some() || filter.user_setting_id().is_some())
+        {
+            children.filter = DcsChildParseOutcome::Unsupported(
+                "standalone root filter metadata is outside the evidenced cohort",
+            );
+        }
+    }
     if let Some(element) = order_candidate {
         children.order = parse_dcs_order(element, root)?;
         if order_placement_is_unsupported
@@ -912,6 +1206,381 @@ pub fn parse_dcs_settings_children_strict(
         }
     }
     Ok(children)
+}
+
+fn parse_dcs_filter(
+    element: &XmlElement,
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsFilter>, DcsSettingsParseError> {
+    let policy = bundled_dcs_filter_policy().map_err(|_| DcsSettingsParseError {
+        reason: "bundled filter evidence is invalid",
+    })?;
+    if !xml_element_uses_namespace(element, root, policy.namespace_uri()) {
+        return Err(DcsSettingsParseError {
+            reason: "filter child uses the wrong namespace",
+        });
+    }
+    if element
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "filter attributes are unsupported",
+        ));
+    }
+
+    let mut items = Vec::new();
+    let mut view_mode = None;
+    let mut user_setting_id = None;
+    let mut tail_started = false;
+    for node in element.children() {
+        let child = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(child) => child,
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "filter contains non-element content",
+                });
+            }
+        };
+        if !xml_element_uses_namespace(child, root, policy.namespace_uri()) {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "filter child namespace is unsupported",
+            ));
+        }
+        match child.name().local() {
+            "item" if !tail_started => match parse_dcs_filter_item(child, root, &policy)? {
+                DcsChildParseOutcome::Typed(item) => items.push(item),
+                DcsChildParseOutcome::Unsupported(reason) => {
+                    return Ok(DcsChildParseOutcome::Unsupported(reason));
+                }
+                DcsChildParseOutcome::Absent => {
+                    return Err(DcsSettingsParseError {
+                        reason: "filter item parser returned absence for a present item",
+                    });
+                }
+            },
+            "viewMode" if view_mode.is_none() && user_setting_id.is_none() => {
+                tail_started = true;
+                view_mode = Some(parse_simple_filter_child(child)?);
+            }
+            "userSettingID" if user_setting_id.is_none() => {
+                tail_started = true;
+                user_setting_id = Some(parse_simple_filter_child(child)?);
+            }
+            "item" | "viewMode" | "userSettingID" => {
+                return Err(DcsSettingsParseError {
+                    reason: "filter child is duplicated or out of sequence",
+                });
+            }
+            _ => {
+                return Ok(DcsChildParseOutcome::Unsupported(
+                    "filter child kind is unsupported",
+                ));
+            }
+        }
+        if items.len() > MAX_DCS_FILTER_ITEMS {
+            return Err(DcsSettingsParseError {
+                reason: "filter exceeds the item bound",
+            });
+        }
+    }
+    if items.is_empty() && (view_mode.is_none() || user_setting_id.is_none()) {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "metadata-only filter requires both viewMode and userSettingID",
+        ));
+    }
+    if items.len() > policy.max_emitted_items() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "filter cardinality is outside the platform-evidenced emission cohort",
+        ));
+    }
+    if view_mode.is_some() != user_setting_id.is_some() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "filter metadata is outside the evidenced complete pair",
+        ));
+    }
+    if let Some(value) = view_mode.as_deref()
+        && !policy
+            .supported_view_modes()
+            .iter()
+            .any(|supported| supported == value)
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "filter viewMode is outside the platform-evidenced set",
+        ));
+    }
+    if let Some(value) = user_setting_id.as_deref()
+        && value != policy.metadata_only_user_setting_id()
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "filter userSettingID is outside the platform-evidenced value",
+        ));
+    }
+    let view_mode = view_mode
+        .as_deref()
+        .map(EnumToken::new)
+        .transpose()
+        .map_err(|_| DcsSettingsParseError {
+            reason: "filter viewMode is invalid",
+        })?;
+    let user_setting_id = user_setting_id
+        .as_deref()
+        .map(CanonicalText::new)
+        .transpose()
+        .map_err(|_| DcsSettingsParseError {
+            reason: "filter userSettingID is invalid",
+        })?;
+    DcsFilter::new(items, view_mode, user_setting_id)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "filter violates canonical bounds",
+        })
+}
+
+fn parse_dcs_filter_item(
+    item: &XmlElement,
+    root: &XmlElement,
+    policy: &ibcmd_schema::DcsFilterPolicy,
+) -> Result<DcsChildParseOutcome<DcsFilterItem>, DcsSettingsParseError> {
+    let Some(item_type) = resolved_xsi_type(item, root) else {
+        return Err(DcsSettingsParseError {
+            reason: "filter item lacks one exact xsi:type",
+        });
+    };
+    if item_type != policy.comparison_item_type_qname() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "filter item type is unsupported",
+        ));
+    }
+    let mut field = None;
+    let mut comparison_type = None;
+    let mut right = None;
+    let mut phase = 0u8;
+    for node in item.children() {
+        let child = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(child) => child,
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "filter item contains non-element content",
+                });
+            }
+        };
+        if !xml_element_uses_namespace(child, root, policy.namespace_uri()) {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "filter item child namespace is unsupported",
+            ));
+        }
+        match child.name().local() {
+            "use" if phase == 0 => {
+                let value = parse_simple_filter_child(child)?;
+                match value.as_str() {
+                    "true" | "false" => {}
+                    _ => {
+                        return Err(DcsSettingsParseError {
+                            reason: "filter use is not a boolean token",
+                        });
+                    }
+                };
+                return Ok(DcsChildParseOutcome::Unsupported(
+                    "explicit filter use is outside the platform-evidenced cohort",
+                ));
+            }
+            "left" if phase <= 1 && field.is_none() => {
+                let (value, value_type) = parse_typed_filter_child(child, root)?;
+                if value_type != policy.left_field_type_qname() {
+                    return Ok(DcsChildParseOutcome::Unsupported(
+                        "filter left type is unsupported",
+                    ));
+                }
+                field = Some(value);
+                phase = 2;
+            }
+            "comparisonType" if phase == 2 && comparison_type.is_none() => {
+                let value = parse_simple_filter_child(child)?;
+                comparison_type = match value.as_str() {
+                    "Equal" => Some(DcsFilterComparisonType::Equal),
+                    _ => {
+                        return Ok(DcsChildParseOutcome::Unsupported(
+                            "comparisonType is outside the platform-evidenced set",
+                        ));
+                    }
+                };
+                phase = 3;
+            }
+            "right" if phase == 3 && right.is_none() => {
+                let (value, value_type) = parse_typed_filter_child(child, root)?;
+                if value_type != policy.right_string_type_qname() {
+                    return Ok(DcsChildParseOutcome::Unsupported(
+                        "filter right type is unsupported",
+                    ));
+                }
+                let value = CanonicalText::new(&value).map_err(|_| DcsSettingsParseError {
+                    reason: "filter string value is invalid",
+                })?;
+                right = Some(
+                    DcsFilterValue::string(value).map_err(|_| DcsSettingsParseError {
+                        reason: "filter string value is outside canonical bounds",
+                    })?,
+                );
+                phase = 4;
+            }
+            "use" | "left" | "comparisonType" | "right" => {
+                return Err(DcsSettingsParseError {
+                    reason: "filter item child is duplicated or out of sequence",
+                });
+            }
+            _ => {
+                return Ok(DcsChildParseOutcome::Unsupported(
+                    "filter item child kind is unsupported",
+                ));
+            }
+        }
+    }
+    let (Some(field), Some(comparison_type), Some(right)) = (field, comparison_type, right) else {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "filter comparison is missing an operand outside the evidenced complete cohort",
+        ));
+    };
+    let field = CanonicalText::new(&field).map_err(|_| DcsSettingsParseError {
+        reason: "filter field is invalid",
+    })?;
+    DcsFilterComparison::new(None, field, comparison_type, right)
+        .map(DcsFilterItem::Comparison)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "filter comparison violates canonical bounds",
+        })
+}
+
+fn parse_simple_filter_child(element: &XmlElement) -> Result<String, DcsSettingsParseError> {
+    if element
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Err(DcsSettingsParseError {
+            reason: "filter scalar child has attributes",
+        });
+    }
+    simple_element_text(element).ok_or(DcsSettingsParseError {
+        reason: "filter scalar child is empty or complex",
+    })
+}
+
+fn parse_typed_filter_child(
+    element: &XmlElement,
+    root: &XmlElement,
+) -> Result<(String, String), DcsSettingsParseError> {
+    let value_type = resolved_xsi_type(element, root).ok_or(DcsSettingsParseError {
+        reason: "filter operand lacks one exact xsi:type",
+    })?;
+    let value = simple_element_text(element).ok_or(DcsSettingsParseError {
+        reason: "filter operand is empty or complex",
+    })?;
+    Ok((value, value_type))
+}
+
+/// Parses the physical BOM/base64 `<Filter>` document stored by Form dynamic
+/// lists through the same strict canonical filter boundary.
+pub fn parse_dcs_filter_storage_document(
+    bytes: &[u8],
+) -> Result<DcsChildParseOutcome<DcsFilter>, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "storage Filter document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "storage Filter document is not well-formed XML",
+    })?;
+    let root = document.root();
+    let policy = bundled_dcs_filter_policy().map_err(|_| DcsSettingsParseError {
+        reason: "bundled filter evidence is invalid",
+    })?;
+    if root.name().local() != "Filter"
+        || !xml_element_uses_namespace(root, root, policy.namespace_uri())
+    {
+        return Err(DcsSettingsParseError {
+            reason: "storage root is not the settings-namespace Filter element",
+        });
+    }
+    let outcome = parse_dcs_filter(root, root)?;
+    if let DcsChildParseOutcome::Typed(filter) = &outcome
+        && filter.items().is_empty()
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "metadata-only storage Filter is not the platform-authenticated representation",
+        ));
+    }
+    Ok(outcome)
+}
+
+/// Extracts every direct Form `ListSettings/filter` in document order.
+pub fn parse_form_list_settings_filters(
+    bytes: &[u8],
+) -> Result<Vec<DcsChildParseOutcome<DcsFilter>>, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "Form document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "Form document is not well-formed XML",
+    })?;
+    let root = document.root();
+    let mut filters = Vec::new();
+    collect_form_list_settings_filters(root, root, &mut filters)?;
+    Ok(filters)
+}
+
+fn collect_form_list_settings_filters(
+    element: &XmlElement,
+    root: &XmlElement,
+    filters: &mut Vec<DcsChildParseOutcome<DcsFilter>>,
+) -> Result<(), DcsSettingsParseError> {
+    if element.name().local() == "ListSettings" {
+        if !xml_element_uses_namespace(element, root, FORM_LOG_NAMESPACE) {
+            return Err(DcsSettingsParseError {
+                reason: "Form ListSettings uses the wrong namespace",
+            });
+        }
+        let mut filter = None;
+        for child in element.children() {
+            let XmlNode::Element(child) = child else {
+                continue;
+            };
+            if child.name().local() == "filter" {
+                if filter.is_some() {
+                    return Err(DcsSettingsParseError {
+                        reason: "duplicate direct Form ListSettings filter child",
+                    });
+                }
+                filter = Some(parse_dcs_filter(child, root)?);
+            }
+        }
+        if let Some(mut filter) = filter {
+            if let DcsChildParseOutcome::Typed(value) = &filter
+                && (value.view_mode().is_none() || value.user_setting_id().is_none())
+            {
+                filter = DcsChildParseOutcome::Unsupported(
+                    "Form filter requires the exact platform-authenticated metadata pair",
+                );
+            }
+            filters.push(filter);
+        }
+        return Ok(());
+    }
+    for child in element.children() {
+        if let XmlNode::Element(child) = child {
+            collect_form_list_settings_filters(child, root, filters)?;
+        }
+    }
+    Ok(())
 }
 
 fn parse_dcs_order(
@@ -1337,23 +2006,31 @@ fn resolved_xsi_type(element: &XmlElement, root: &XmlElement) -> Option<String> 
 pub fn rewrite_dcs_settings_children(
     xml: &mut String,
     children: &DcsSettingsTypedChildren,
-    serialized_selection: Option<&str>,
-    serialized_order: Option<&str>,
-    serialized_tail: &str,
+    serialized: &DcsSettingsChildrenParts,
 ) -> Option<()> {
     let mut rewritten = xml.clone();
     if children.selection.is_some() {
-        let selection = serialized_selection?;
+        let selection = serialized.selection()?;
         replace_direct_canonical_dcs_child(&mut rewritten, "selection", selection)?;
-    } else if serialized_selection.is_some() {
+    } else if serialized.selection().is_some() {
         return None;
+    }
+    match children.filter() {
+        DcsChildParseOutcome::Typed(_) => {
+            replace_direct_canonical_dcs_child(&mut rewritten, "filter", serialized.filter()?)?;
+        }
+        DcsChildParseOutcome::Absent | DcsChildParseOutcome::Unsupported(_) => {
+            if serialized.filter().is_some() {
+                return None;
+            }
+        }
     }
     match children.order() {
         DcsChildParseOutcome::Typed(_) => {
-            replace_direct_canonical_dcs_child(&mut rewritten, "order", serialized_order?)?;
+            replace_direct_canonical_dcs_child(&mut rewritten, "order", serialized.order()?)?;
         }
         DcsChildParseOutcome::Absent | DcsChildParseOutcome::Unsupported(_) => {
-            if serialized_order.is_some() {
+            if serialized.order().is_some() {
                 return None;
             }
         }
@@ -1370,7 +2047,7 @@ pub fn rewrite_dcs_settings_children(
         }
     }
     if children.items_view_mode.is_none() && children.items_user_setting_id.is_none() {
-        if serialized_tail.is_empty() {
+        if serialized.tail().is_empty() {
             *xml = rewritten;
             return Some(());
         }
@@ -1382,10 +2059,10 @@ pub fn rewrite_dcs_settings_children(
         .trim_end_matches(['\r', '\n', '\t', ' '])
         .len();
     rewritten.replace_range(insertion..closing_offset, "");
-    let insertion_text = if serialized_tail.is_empty() {
+    let insertion_text = if serialized.tail().is_empty() {
         "\r\n".to_string()
     } else {
-        format!("\r\n{serialized_tail}")
+        format!("\r\n{}", serialized.tail())
     };
     rewritten.insert_str(insertion, &insertion_text);
     *xml = rewritten;
@@ -1602,6 +2279,10 @@ pub fn preflight_dcs_settings_serialization(
         bundled_dcs_selection_policy()
             .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
     }
+    if settings.filter().is_some() {
+        bundled_dcs_filter_policy()
+            .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    }
     if settings.order().is_some() {
         bundled_dcs_order_policy()
             .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
@@ -1612,6 +2293,25 @@ pub fn preflight_dcs_settings_serialization(
             return Err(unsupported_form_selection(envelope, target_profile));
         }
         verify_form_list_settings_delegate(envelope, target_profile, &writer_rules)?;
+    }
+
+    if let Some(filter) = settings.filter() {
+        let form_context = matches!(envelope, DcsSettingsEnvelope::ListSettings(_));
+        let has_metadata = filter.view_mode().is_some() || filter.user_setting_id().is_some();
+        if form_context && !has_metadata {
+            return Err(invalid_evidence(
+                envelope,
+                target_profile,
+                &"Form filter requires the exact platform-authenticated metadata pair",
+            ));
+        }
+        if !form_context && has_metadata {
+            return Err(invalid_evidence(
+                envelope,
+                target_profile,
+                &"standalone root filter metadata is outside the evidenced cohort",
+            ));
+        }
     }
 
     Ok(DcsSerializationPermit {
@@ -1641,11 +2341,11 @@ pub fn emit_dcs_settings_envelope(
         invalid_evidence(envelope, target_profile, &"invalid verified wrapper QName")
     })?;
     let settings = envelope.as_settings();
-    if settings.selection().is_some() || settings.order().is_some() {
+    if settings.selection().is_some() || settings.filter().is_some() || settings.order().is_some() {
         return Err(invalid_evidence(
             envelope,
             target_profile,
-            &"complete envelope selection/order requires caller-owned namespace prefix and placement",
+            &"complete envelope selection/filter/order requires caller-owned namespace prefix and placement",
         ));
     }
     for (field, value) in [
@@ -1984,7 +2684,7 @@ mod tests {
 
     #[test]
     fn every_dcs_writer_decision_is_explicitly_verified_or_pending() {
-        assert_eq!(DCS_WRITER_EVIDENCE.len(), 15);
+        assert_eq!(DCS_WRITER_EVIDENCE.len(), 17);
         assert!(
             DCS_WRITER_EVIDENCE
                 .iter()
@@ -2009,9 +2709,99 @@ mod tests {
                 DcsWriterDecision::RootSelectionPolicy,
                 DcsWriterDecision::RootOrderPolicy,
                 DcsWriterDecision::FormListSettingsOrderIngress,
+                DcsWriterDecision::RootFilterPolicy,
+                DcsWriterDecision::FormListSettingsFilterIngress,
                 DcsWriterDecision::OpaqueExtensionPlacement,
                 DcsWriterDecision::FormListSettingsDelegate,
             ]
+        );
+    }
+
+    #[test]
+    fn committed_filter_fragments_drive_all_three_physical_contexts() {
+        let storage = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-comparison-storage.xml.b64"
+        ));
+        let form_fragment = String::from_utf8(decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-comparison-embedded.xml.b64"
+        )))
+        .unwrap();
+        let standalone_fragment = String::from_utf8(decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/standalone-filter.xml.b64"
+        )))
+        .unwrap();
+        let metadata_fragment = String::from_utf8(decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-metadata-only-embedded.xml.b64"
+        )))
+        .unwrap();
+
+        let DcsChildParseOutcome::Typed(storage_filter) =
+            parse_dcs_filter_storage_document(&storage).unwrap()
+        else {
+            panic!("platform storage Filter must be typed");
+        };
+        assert_eq!(
+            emit_dcs_filter_storage_document(&storage_filter)
+                .unwrap()
+                .unwrap(),
+            storage
+        );
+
+        let form = format!(
+            "<Form xmlns=\"{FORM_LOG_NAMESPACE}\" xmlns:dcscor=\"{}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\"><ListSettings>{form_fragment}</ListSettings></Form>",
+            bundled_dcs_filter_policy().unwrap().core_namespace_uri()
+        );
+        let form_filters = parse_form_list_settings_filters(form.as_bytes()).unwrap();
+        let [DcsChildParseOutcome::Typed(form_filter)] = form_filters.as_slice() else {
+            panic!("platform embedded Form filter must be typed");
+        };
+        assert_eq!(form_filter, &storage_filter);
+        let emitted = emit_dcs_filter_fragment(form_filter, "dcsset", "\t\t\t\t\t").unwrap();
+        assert_eq!(
+            emitted
+                .strip_prefix("\t\t\t\t\t")
+                .unwrap()
+                .trim_end_matches("\r\n"),
+            form_fragment
+        );
+
+        let standalone = format!(
+            "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcscor=\"{}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\"><selection><item xsi:type=\"SelectedItemAuto\"/></selection>{standalone_fragment}</Settings>",
+            bundled_dcs_filter_policy().unwrap().core_namespace_uri()
+        );
+        let children = parse_dcs_settings_children_strict(&standalone).unwrap();
+        let DcsChildParseOutcome::Typed(standalone_filter) = children.filter() else {
+            panic!("platform standalone filter must be typed");
+        };
+        assert_eq!(standalone_filter.items(), storage_filter.items());
+        let emitted = emit_dcs_filter_fragment(standalone_filter, "dcsset", "\t\t\t").unwrap();
+        assert_eq!(
+            emitted
+                .strip_prefix("\t\t\t")
+                .unwrap()
+                .trim_end_matches("\r\n"),
+            standalone_fragment
+        );
+
+        let metadata_form = format!(
+            "<Form xmlns=\"{FORM_LOG_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\"><ListSettings>{metadata_fragment}</ListSettings></Form>"
+        );
+        let metadata_filters = parse_form_list_settings_filters(metadata_form.as_bytes()).unwrap();
+        let [DcsChildParseOutcome::Typed(metadata_filter)] = metadata_filters.as_slice() else {
+            panic!("platform metadata-only Form filter must be typed");
+        };
+        assert!(metadata_filter.items().is_empty());
+        assert_eq!(
+            emit_dcs_filter_storage_document(metadata_filter).unwrap(),
+            None
+        );
+        let emitted = emit_dcs_filter_fragment(metadata_filter, "dcsset", "\t\t\t\t\t").unwrap();
+        assert_eq!(
+            emitted
+                .strip_prefix("\t\t\t\t\t")
+                .unwrap()
+                .trim_end_matches("\r\n"),
+            metadata_fragment
         );
     }
 
@@ -2125,17 +2915,17 @@ mod tests {
             "</dcsset:settings>"
         )
         .to_owned();
-        rewrite_dcs_settings_children(
-            &mut canonical,
-            &children,
-            None,
-            None,
-            concat!(
+        let parts = DcsSettingsChildrenParts {
+            selection: None,
+            filter: None,
+            order: None,
+            tail: concat!(
                 "\t<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>\r\n",
                 "\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n"
-            ),
-        )
-        .unwrap();
+            )
+            .to_owned(),
+        };
+        rewrite_dcs_settings_children(&mut canonical, &children, &parts).unwrap();
         assert_eq!(canonical.matches("itemsViewMode").count(), 2);
         assert_eq!(canonical.matches("itemsUserSettingID").count(), 2);
         assert!(canonical.find("Compact").unwrap() < canonical.find("id&lt;&amp;").unwrap());
@@ -2496,8 +3286,11 @@ mod tests {
             "</dcsset:settings>"
         )
         .to_owned();
-        rewrite_dcs_settings_children(&mut canonical, &children, None, Some(&replacement), "")
-            .unwrap();
+        let parts = DcsSettingsChildrenParts {
+            order: Some(replacement),
+            ..DcsSettingsChildrenParts::default()
+        };
+        rewrite_dcs_settings_children(&mut canonical, &children, &parts).unwrap();
         assert!(canonical.contains("<dcsset:field>Name</dcsset:field>"));
         assert_eq!(canonical.matches("<dcsset:order>").count(), 1);
         assert_eq!(canonical.matches("<dcsset:order/>").count(), 1);
@@ -2532,9 +3325,12 @@ mod tests {
             rewrite_dcs_settings_children(
                 &mut canonical,
                 &children,
-                Some(&selection),
-                Some(&order),
-                "\t<dcsset:itemsViewMode>Normal</dcsset:itemsViewMode>\r\n",
+                &DcsSettingsChildrenParts {
+                    selection: Some(selection),
+                    filter: None,
+                    order: Some(order),
+                    tail: "\t<dcsset:itemsViewMode>Normal</dcsset:itemsViewMode>\r\n".to_owned(),
+                },
             )
             .is_none()
         );

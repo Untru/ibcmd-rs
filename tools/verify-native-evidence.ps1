@@ -76,6 +76,52 @@ function Assert-FileEvidence {
     Assert-Equal (Get-FileSha256Hex $path) $Evidence.sha256 "$($Evidence.path) SHA-256"
 }
 
+function Get-Base64EvidenceBytes {
+    param(
+        $Evidence,
+        [string]$Root
+    )
+
+    $path = Resolve-FixturePath $Evidence.path $Root
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Base64 evidence file is missing: $($Evidence.path)"
+    }
+    $item = Get-Item -LiteralPath $path
+    if ($null -ne $Evidence.encoded_size) {
+        Assert-Equal $item.Length ([long]$Evidence.encoded_size) "$($Evidence.path) encoded size"
+    }
+    if ($null -ne $Evidence.encoded_sha256) {
+        Assert-Equal (Get-FileSha256Hex $path) $Evidence.encoded_sha256 "$($Evidence.path) encoded SHA-256"
+    }
+    $encoded = Get-Content -LiteralPath $path -Raw -Encoding ASCII
+    $decoded = [Convert]::FromBase64String(($encoded -replace '\s', ''))
+    $expectedSize = if ($null -ne $Evidence.decoded_size) { $Evidence.decoded_size } else { $Evidence.size }
+    Assert-Equal $decoded.Length ([long]$expectedSize) "$($Evidence.path) decoded size"
+    $expectedSha = if ($null -ne $Evidence.decoded_sha256) { $Evidence.decoded_sha256 } else { $Evidence.sha256 }
+    Assert-Equal (Get-Sha256Hex $decoded) $expectedSha "$($Evidence.path) decoded SHA-256"
+    return ,$decoded
+}
+
+function Get-Utf8XmlFragmentBytes {
+    param(
+        [string]$Path,
+        [string]$OpeningTag,
+        [string]$ClosingTag
+    )
+
+    $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($Path))
+    $start = $text.IndexOf($OpeningTag, [StringComparison]::Ordinal)
+    if ($start -lt 0) {
+        throw "XML fragment opening tag '$OpeningTag' is missing from: $Path"
+    }
+    $end = $text.IndexOf($ClosingTag, $start, [StringComparison]::Ordinal)
+    if ($end -lt 0) {
+        throw "XML fragment closing tag '$ClosingTag' is missing from: $Path"
+    }
+    $fragment = $text.Substring($start, $end - $start + $ClosingTag.Length)
+    return ,[Text.Encoding]::UTF8.GetBytes($fragment)
+}
+
 function Assert-RawNativeEvidenceFixture {
     param(
         [string]$RelativePath,
@@ -456,6 +502,69 @@ Assert-Equal $dcsOrderPolicy.sources.unicaDesc.repositoryRevision $dcsOrderManif
 Assert-Equal (@($dcsOrderPolicy.policy.supportedViewModes) -join ',') 'Normal' 'DCS order emission view modes'
 Assert-Equal $dcsOrderPolicy.policy.maxEmittedItems 1 'DCS order emission cardinality'
 
+$dcsFilterRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-filter'
+$dcsFilterManifestPath = Join-Path $dcsFilterRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsFilterManifestPath -PathType Leaf)) {
+    throw "DCS filter evidence manifest is missing: $dcsFilterManifestPath"
+}
+$dcsFilterManifest = Get-Content -LiteralPath $dcsFilterManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsFilterManifest.schema_version 1 'DCS filter manifest schema version'
+Assert-Equal $dcsFilterManifest.issue 283 'DCS filter issue'
+Assert-Equal $dcsFilterManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-filter' 'DCS filter fixture ID'
+Assert-Equal $dcsFilterManifest.evidence.platform_line '8.3.27' 'DCS filter platform line'
+Assert-Equal $dcsFilterManifest.evidence.platform_version '8.3.27.2214' 'DCS filter platform version'
+Assert-Equal $dcsFilterManifest.evidence.source_version '2.20' 'DCS filter source version'
+Assert-Equal $dcsFilterManifest.comparison_cohort.selected_native_equal_between_rounds $true 'DCS filter comparison native equality'
+Assert-Equal $dcsFilterManifest.metadata_only_cohort.selected_native_equal_between_rounds $true 'DCS filter metadata-only native equality'
+
+foreach ($seed in @($dcsFilterManifest.seed.objects_definition, $dcsFilterManifest.seed.dcs_definition)) {
+    $seedPath = Resolve-FixturePath $seed.path $dcsFilterRoot
+    Assert-Equal (Get-Item -LiteralPath $seedPath).Length ([long]$seed.size) "$($seed.path) size"
+    Assert-Equal (Get-FileSha256Hex $seedPath) $seed.sha256 "$($seed.path) SHA-256"
+}
+$dcsFilterComparisonCfBytes = Get-Base64EvidenceBytes $dcsFilterManifest.comparison_cohort.configuration_cf $dcsFilterRoot
+$dcsFilterMetadataCfBytes = Get-Base64EvidenceBytes $dcsFilterManifest.metadata_only_cohort.configuration_cf $dcsFilterRoot
+foreach ($fragment in @(
+    $dcsFilterManifest.comparison_cohort.form.native_xml,
+    $dcsFilterManifest.comparison_cohort.form.storage_filter,
+    $dcsFilterManifest.comparison_cohort.form.embedded_filter,
+    $dcsFilterManifest.comparison_cohort.standalone.native_xml,
+    $dcsFilterManifest.comparison_cohort.standalone.filter_fragment,
+    $dcsFilterManifest.metadata_only_cohort.native_xml,
+    $dcsFilterManifest.metadata_only_cohort.embedded_filter
+)) {
+    $null = Get-Base64EvidenceBytes $fragment $dcsFilterRoot
+}
+
+$dcsFilterPolicyPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-filter-evidence.json'
+if (-not (Test-Path -LiteralPath $dcsFilterPolicyPath -PathType Leaf)) {
+    throw "DCS filter policy evidence is missing: $dcsFilterPolicyPath"
+}
+$dcsFilterPolicy = Get-Content -LiteralPath $dcsFilterPolicyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsFilterPolicy.schemaVersion 1 'DCS filter policy schema version'
+Assert-Equal $dcsFilterPolicy.contract $dcsFilterManifest.contract 'DCS filter policy contract binding'
+Assert-Equal $dcsFilterPolicy.source.product '1C:Enterprise Platform' 'DCS filter contract product'
+Assert-Equal $dcsFilterPolicy.sources.platformLine $dcsFilterManifest.evidence.platform_line 'DCS filter platform-line binding'
+Assert-Equal $dcsFilterPolicy.sources.sourceVersion $dcsFilterManifest.evidence.source_version 'DCS filter source-version binding'
+Assert-Equal $dcsFilterPolicy.sources.ibcmdSha256 $dcsFilterManifest.evidence.ibcmd_sha256 'DCS filter ibcmd binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.fixtureId $dcsFilterManifest.fixture_id 'DCS filter comparison fixture binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.release $dcsFilterManifest.evidence.platform_version 'DCS filter comparison release binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.formRawBodySha256 $dcsFilterManifest.comparison_cohort.form.body_row.unpacked_sha256 'DCS filter Form body binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.formNativeXmlSha256 $dcsFilterManifest.comparison_cohort.form.native_xml.sha256 'DCS filter Form XML binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.formStorageFilterSha256 $dcsFilterManifest.comparison_cohort.form.storage_filter.sha256 'DCS filter storage binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.formEmbeddedFilterSha256 $dcsFilterManifest.comparison_cohort.form.embedded_filter.sha256 'DCS filter embedded binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.standaloneRawBodySha256 $dcsFilterManifest.comparison_cohort.standalone.body_row.unpacked_sha256 'DCS filter standalone body binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.standaloneNativeXmlSha256 $dcsFilterManifest.comparison_cohort.standalone.native_xml.sha256 'DCS filter standalone XML binding'
+Assert-Equal $dcsFilterPolicy.sources.comparison.standaloneFilterSha256 $dcsFilterManifest.comparison_cohort.standalone.filter_fragment.sha256 'DCS filter standalone fragment binding'
+Assert-Equal $dcsFilterPolicy.sources.metadataOnly.formRawBodySha256 $dcsFilterManifest.metadata_only_cohort.form_body_row.unpacked_sha256 'DCS filter metadata-only body binding'
+Assert-Equal $dcsFilterPolicy.sources.metadataOnly.formNativeXmlSha256 $dcsFilterManifest.metadata_only_cohort.native_xml.sha256 'DCS filter metadata-only XML binding'
+Assert-Equal $dcsFilterPolicy.sources.metadataOnly.formEmbeddedFilterSha256 $dcsFilterManifest.metadata_only_cohort.embedded_filter.sha256 'DCS filter metadata-only fragment binding'
+Assert-Equal $dcsFilterPolicy.policy.comparisonStorageRecordTypeUuid $dcsFilterManifest.comparison_cohort.form.storage_record_type_uuid 'DCS filter storage UUID binding'
+Assert-Equal $dcsFilterPolicy.policy.metadataOnlyStorageRepresentation 'Filter-property-absent-when-AutoSaveUserSettings-true' 'DCS filter metadata-only storage policy'
+Assert-Equal (@($dcsFilterPolicy.policy.supportedComparisonTypes) -join ',') 'Equal' 'DCS filter comparison token'
+Assert-Equal (@($dcsFilterPolicy.policy.supportedRightTypes) -join ',') 'string' 'DCS filter right type'
+Assert-Equal $dcsFilterPolicy.policy.maxEmittedItems 1 'DCS filter emission cardinality'
+
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
     $BinaryPath = Join-Path $RepositoryRoot $BinaryPath
 }
@@ -468,6 +577,10 @@ $cfPath = Join-Path $temporaryRoot 'configuration.cf'
 $outputRoot = Join-Path $temporaryRoot 'export'
 $dcsCfPath = Join-Path $temporaryRoot 'dcs-configuration.cf'
 $dcsOutputRoot = Join-Path $temporaryRoot 'dcs-export'
+$dcsFilterComparisonCfPath = Join-Path $temporaryRoot 'dcs-filter-comparison.cf'
+$dcsFilterComparisonOutputRoot = Join-Path $temporaryRoot 'dcs-filter-comparison-export'
+$dcsFilterMetadataCfPath = Join-Path $temporaryRoot 'dcs-filter-metadata-only.cf'
+$dcsFilterMetadataOutputRoot = Join-Path $temporaryRoot 'dcs-filter-metadata-only-export'
 $stderrPath = Join-Path $temporaryRoot 'stderr.txt'
 [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
 
@@ -520,10 +633,58 @@ try {
     }
     Assert-Equal (Get-Item -LiteralPath $dcsCandidatePath).Length ([long]$dcsManifest.template.native_xml.size) "$dcsCandidateRelativePath exported size"
     Assert-Equal (Get-FileSha256Hex $dcsCandidatePath) $dcsManifest.template.native_xml.sha256 "$dcsCandidateRelativePath exported SHA-256"
+
+    [IO.File]::WriteAllBytes($dcsFilterComparisonCfPath, $dcsFilterComparisonCfBytes)
+    $dcsFilterComparisonStdout = & $BinaryPath cf export --source-version 2.20 $dcsFilterComparisonCfPath $dcsFilterComparisonOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+        throw "DCS filter comparison CF export failed with exit code $LASTEXITCODE. $stderr"
+    }
+    $dcsFilterComparisonReport = ($dcsFilterComparisonStdout -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $dcsFilterComparisonReport.ok $true 'DCS filter comparison export status'
+    Assert-Equal $dcsFilterComparisonReport.export.storage.failed 0 'DCS filter comparison failed storage entries'
+    $comparisonFormPath = Join-Path $dcsFilterComparisonOutputRoot 'Catalogs\FilterProbe\Forms\ListForm\Ext\Form.xml'
+    $comparisonFilterBytes = Get-Utf8XmlFragmentBytes $comparisonFormPath '<dcsset:filter>' '</dcsset:filter>'
+    Assert-Equal $comparisonFilterBytes.Length ([long]$dcsFilterManifest.comparison_cohort.form.embedded_filter.decoded_size) 'DCS filter comparison embedded fragment exported size'
+    Assert-Equal (Get-Sha256Hex $comparisonFilterBytes) $dcsFilterManifest.comparison_cohort.form.embedded_filter.sha256 'DCS filter comparison embedded fragment exported SHA-256'
+
+    $comparisonTemplatePath = Join-Path $dcsFilterComparisonOutputRoot 'Reports\FilterProbeReport\Templates\MainSchema\Ext\Template.xml'
+    Assert-Equal (Get-Item -LiteralPath $comparisonTemplatePath).Length ([long]$dcsFilterManifest.comparison_cohort.standalone.native_xml.decoded_size) 'DCS filter standalone Template exported size'
+    Assert-Equal (Get-FileSha256Hex $comparisonTemplatePath) $dcsFilterManifest.comparison_cohort.standalone.native_xml.sha256 'DCS filter standalone Template exported SHA-256'
+    $verifyComparison = & $BinaryPath cf verify $dcsFilterComparisonCfPath --compression raw-deflate `
+        --element $dcsFilterManifest.comparison_cohort.form.body_key `
+        --element $dcsFilterManifest.comparison_cohort.standalone.body_key `
+        --expect-sha256 "$($dcsFilterManifest.comparison_cohort.form.body_key)=$($dcsFilterManifest.comparison_cohort.form.body_row.unpacked_sha256)" `
+        --expect-sha256 "$($dcsFilterManifest.comparison_cohort.standalone.body_key)=$($dcsFilterManifest.comparison_cohort.standalone.body_row.unpacked_sha256)" 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS filter comparison raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($verifyComparison -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS filter comparison raw rows'
+
+    [IO.File]::WriteAllBytes($dcsFilterMetadataCfPath, $dcsFilterMetadataCfBytes)
+    $dcsFilterMetadataStdout = & $BinaryPath cf export --source-version 2.20 $dcsFilterMetadataCfPath $dcsFilterMetadataOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+        throw "DCS filter metadata-only CF export failed with exit code $LASTEXITCODE. $stderr"
+    }
+    $dcsFilterMetadataReport = ($dcsFilterMetadataStdout -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $dcsFilterMetadataReport.ok $true 'DCS filter metadata-only export status'
+    Assert-Equal $dcsFilterMetadataReport.export.storage.failed 0 'DCS filter metadata-only failed storage entries'
+    $metadataCandidatePath = Join-Path $dcsFilterMetadataOutputRoot 'Catalogs\FilterProbe\Forms\ListForm\Ext\Form.xml'
+    $metadataFilterBytes = Get-Utf8XmlFragmentBytes $metadataCandidatePath '<dcsset:filter>' '</dcsset:filter>'
+    Assert-Equal $metadataFilterBytes.Length ([long]$dcsFilterManifest.metadata_only_cohort.embedded_filter.decoded_size) 'DCS filter metadata-only embedded fragment exported size'
+    Assert-Equal (Get-Sha256Hex $metadataFilterBytes) $dcsFilterManifest.metadata_only_cohort.embedded_filter.sha256 'DCS filter metadata-only embedded fragment exported SHA-256'
+    $verifyMetadata = & $BinaryPath cf verify $dcsFilterMetadataCfPath --compression raw-deflate `
+        --element $dcsFilterManifest.comparison_cohort.form.body_key `
+        --expect-sha256 "$($dcsFilterManifest.comparison_cohort.form.body_key)=$($dcsFilterManifest.metadata_only_cohort.form_body_row.unpacked_sha256)" 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS filter metadata-only raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($verifyMetadata -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS filter metadata-only raw row'
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter + ChartOfCharacteristicTypes + register and plan generated types.'

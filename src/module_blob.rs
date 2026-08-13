@@ -9,14 +9,15 @@ use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
-use ibcmd_core::dcs::DcsOrder;
+use ibcmd_core::dcs::{DcsFilter, DcsOrder};
 use ibcmd_schema::{
-    FormTextDocumentContextMenuMultiplicity, form_layout_single_child_item_slot_indices,
-    parse_form_text_document_context_menu_multiplicity,
+    FormTextDocumentContextMenuMultiplicity, bundled_dcs_filter_policy,
+    form_layout_single_child_item_slot_indices, parse_form_text_document_context_menu_multiplicity,
 };
 use ibcmd_xml::{
-    DcsChildParseOutcome, emit_dcs_order_storage_document, parse_dcs_order_storage_document,
-    parse_form_list_settings_orders,
+    DcsChildParseOutcome, emit_dcs_filter_storage_document, emit_dcs_order_storage_document,
+    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
+    parse_form_list_settings_filters, parse_form_list_settings_orders,
 };
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
@@ -220,11 +221,16 @@ struct FormXmlDynamicListField {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlListSettings {
-    filter: Option<FormXmlListSettingsStandardSection>,
+    filter: Option<FormXmlListSettingsFilter>,
     order: Option<FormXmlListSettingsOrder>,
     conditional_appearance: Option<FormXmlListSettingsStandardSection>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct FormXmlListSettingsFilter {
+    canonical: DcsFilter,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -6559,6 +6565,9 @@ fn sanitize_source_path_segment(value: &str) -> String {
 }
 
 fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
+    let canonical_filters = parse_form_list_settings_filters(xml)
+        .map_err(|error| anyhow!("cannot parse Form ListSettings filter: {error}"))?;
+    let mut canonical_filters = canonical_filters.into_iter();
     let canonical_orders = parse_form_list_settings_orders(xml)
         .map_err(|error| anyhow!("cannot parse Form ListSettings order: {error}"))?;
     let mut canonical_orders = canonical_orders.into_iter();
@@ -6786,17 +6795,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     current_dynamic_list_field = Some(FormXmlDynamicListField::default());
                 } else if local == "item"
-                    && (path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "filter",
-                        ],
-                    ) || path_ends_with(
+                    && path_ends_with(
                         &path,
                         &[
                             "Form",
@@ -6806,7 +6805,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "ListSettings",
                             "conditionalAppearance",
                         ],
-                    ))
+                    )
                 {
                     current_list_settings_field_item =
                         Some(FormXmlListSettingsFieldItem::default());
@@ -8728,62 +8727,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             settings.fields.push(field);
                         }
                     }
-                    "viewMode"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "filter",
-                                "viewMode",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .filter
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .view_mode = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "userSettingID"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "filter",
-                                "userSettingID",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .filter
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .user_setting_id = Some(text_value.trim().to_string());
-                        }
-                    }
                     "field" if path_ends_with_form_list_settings_standard_item_field(&path) => {
                         if let Some(item) = current_list_settings_field_item.as_mut() {
                             item.field = Some(text_value.trim().to_string());
                         }
                     }
-                    "item"
+                    "filter"
                         if path_ends_with(
                             &path,
                             &[
@@ -8793,22 +8742,28 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Settings",
                                 "ListSettings",
                                 "filter",
-                                "item",
                             ],
                         ) =>
                     {
-                        if let Some(item) = current_list_settings_field_item.take()
-                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                            && let Some(settings) = current_attribute
-                                .as_mut()
-                                .and_then(|attribute| attribute.settings.as_mut())
+                        let canonical = match canonical_filters.next() {
+                            Some(DcsChildParseOutcome::Typed(filter)) => filter,
+                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
+                                return Err(anyhow!(
+                                    "unsupported Form ListSettings filter: {reason}"
+                                ));
+                            }
+                            Some(DcsChildParseOutcome::Absent) | None => {
+                                return Err(anyhow!(
+                                    "Form ListSettings filter has no canonical parse result"
+                                ));
+                            }
+                        };
+                        if let Some(settings) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.settings.as_mut())
                         {
-                            settings
-                                .list_settings
-                                .filter
-                                .get_or_insert_with(FormXmlListSettingsStandardSection::default)
-                                .items
-                                .push(item);
+                            settings.list_settings.filter =
+                                Some(FormXmlListSettingsFilter { canonical });
                         }
                     }
                     "item"
@@ -10185,6 +10140,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
         buffer.clear();
     }
 
+    if canonical_filters.next().is_some() {
+        return Err(anyhow!(
+            "Form ListSettings filter parse results were not consumed by the Form structure"
+        ));
+    }
     if canonical_orders.next().is_some() {
         return Err(anyhow!(
             "Form ListSettings order parse results were not consumed by the Form structure"
@@ -10195,18 +10155,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
 
 fn path_ends_with_form_list_settings_standard_item_field(path: &[String]) -> bool {
     path_ends_with(
-        path,
-        &[
-            "Form",
-            "Attributes",
-            "Attribute",
-            "Settings",
-            "ListSettings",
-            "filter",
-            "item",
-            "field",
-        ],
-    ) || path_ends_with(
         path,
         &[
             "Form",
@@ -18363,10 +18311,9 @@ fn format_form_dynamic_list_settings_new(
         pairs.push(("ManualQuery", format_form_setting_bool(manual_query)));
     }
     if let Some(filter) = &settings.list_settings.filter {
-        pairs.push((
-            "Filter",
-            format_form_setting_dcs_standard_section(filter, "Filter", "", "Filter")?,
-        ));
+        if let Some(value) = format_form_setting_dcs_filter(filter)? {
+            pairs.push(("Filter", value));
+        }
     }
     if let Some(order) = &settings.list_settings.order {
         pairs.push(("Order", format_form_setting_dcs_order(order, "", "Order")?));
@@ -18448,6 +18395,9 @@ fn patch_form_dynamic_list_settings(
             &format_form_setting_dynamic_list_fields(&settings.fields),
         )?;
     }
+    if let Some(filter) = &settings.list_settings.filter {
+        patch_form_setting_dcs_filter(text, "Filter", filter)?;
+    }
     let mut list_replacements = Vec::new();
     let list_settings_text = text.clone();
     if let Some(order) = &settings.list_settings.order {
@@ -18483,15 +18433,6 @@ fn patch_form_dynamic_list_settings(
             &mut list_replacements,
         )?;
     }
-    if let Some(filter) = &settings.list_settings.filter {
-        push_form_setting_dcs_standard_replacement(
-            &list_settings_text,
-            "Filter",
-            filter,
-            "Filter",
-            &mut list_replacements,
-        )?;
-    }
     list_replacements.sort_by_key(|(range, _)| range.start);
     for (range, replacement) in list_replacements.into_iter().rev() {
         text.replace_range(range, &replacement);
@@ -18515,6 +18456,112 @@ fn patch_form_setting_value(text: &mut String, key: &str, replacement: &str) -> 
         }
     }
     Ok(false)
+}
+
+fn patch_form_setting_dcs_filter(
+    text: &mut String,
+    key: &str,
+    filter: &FormXmlListSettingsFilter,
+) -> Result<()> {
+    let replacement = format_form_setting_dcs_filter(filter)?;
+    match replacement {
+        Some(replacement) => {
+            let expected_uuid = bundled_dcs_filter_policy()
+                .map_err(|error| anyhow!("cannot load DCS filter storage policy: {error}"))?
+                .comparison_storage_record_type_uuid()
+                .to_string();
+            if let Some(range) = find_form_setting_value_range(text, key)
+                && find_form_setting_ref_uuid(text, key).as_deref() == Some(expected_uuid.as_str())
+                && form_existing_dcs_filter_matches(&text[range.clone()], filter)?
+            {
+                return Ok(());
+            }
+            upsert_form_setting_pair(text, key, &replacement)
+        }
+        None => remove_form_setting_pair(text, key),
+    }
+}
+
+fn upsert_form_setting_pair(text: &mut String, key: &str, replacement: &str) -> Result<()> {
+    if patch_form_setting_value(text, key, replacement)? {
+        return Ok(());
+    }
+    let fields = scan_braced_fields(text, 0)?;
+    let count = validate_form_settings_pair_list(text, &fields)?;
+    let insert_at = text
+        .rfind('}')
+        .ok_or_else(|| anyhow!("Form settings pair list is not closed"))?;
+    text.insert_str(
+        insert_at,
+        &format!(",{},{}", format_1c_string(key), replacement),
+    );
+    let fields = scan_braced_fields(text, 0)?;
+    let count_range = fields
+        .get(1)
+        .cloned()
+        .ok_or_else(|| anyhow!("Form settings pair count is missing"))?;
+    text.replace_range(count_range, &(count + 1).to_string());
+    Ok(())
+}
+
+fn remove_form_setting_pair(text: &mut String, key: &str) -> Result<()> {
+    let fields = scan_braced_fields(text, 0)?;
+    let count = validate_form_settings_pair_list(text, &fields)?;
+    let Some((key_range, value_range)) = fields
+        .iter()
+        .skip(2)
+        .collect::<Vec<_>>()
+        .chunks_exact(2)
+        .find_map(|pair| {
+            let parsed = parse_1c_quoted_string(&text[pair[0].clone()]).ok()?;
+            (parsed == key).then(|| ((*pair[0]).clone(), (*pair[1]).clone()))
+        })
+    else {
+        return Ok(());
+    };
+    let mut remove_start = key_range.start;
+    while remove_start > 0
+        && text
+            .as_bytes()
+            .get(remove_start - 1)
+            .is_some_and(u8::is_ascii_whitespace)
+    {
+        remove_start -= 1;
+    }
+    if text.as_bytes().get(remove_start.wrapping_sub(1)) != Some(&b',') {
+        return Err(anyhow!(
+            "Form setting {key} is not preceded by a pair separator"
+        ));
+    }
+    text.replace_range(remove_start - 1..value_range.end, "");
+    let fields = scan_braced_fields(text, 0)?;
+    let count_range = fields
+        .get(1)
+        .cloned()
+        .ok_or_else(|| anyhow!("Form settings pair count is missing"))?;
+    text.replace_range(count_range, &(count - 1).to_string());
+    Ok(())
+}
+
+fn validate_form_settings_pair_list(text: &str, fields: &[Range<usize>]) -> Result<usize> {
+    if fields
+        .first()
+        .and_then(|range| text[range.clone()].trim().parse::<u8>().ok())
+        != Some(0)
+    {
+        return Err(anyhow!("Form settings pair list has an unsupported marker"));
+    }
+    let count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Form settings pair count is invalid"))?;
+    if fields.len() != 2 + count.saturating_mul(2) {
+        return Err(anyhow!(
+            "Form settings pair count {count} does not match {} fields",
+            fields.len()
+        ));
+    }
+    Ok(count)
 }
 
 fn form_setting_metadata_ref_contains_uuid(value: &str, uuid: &str) -> bool {
@@ -18626,6 +18673,18 @@ fn form_existing_dcs_order_matches(
     let parsed = parse_dcs_order_storage_document(xml.as_bytes())
         .map_err(|error| anyhow!("invalid existing Form Order document: {error}"))?;
     Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == expected))
+}
+
+fn form_existing_dcs_filter_matches(
+    existing: &str,
+    filter: &FormXmlListSettingsFilter,
+) -> Result<bool> {
+    let Some(xml) = form_setting_base64_xml(existing)? else {
+        return Ok(false);
+    };
+    let parsed = parse_dcs_filter_storage_document(xml.as_bytes())
+        .map_err(|error| anyhow!("invalid existing Form Filter document: {error}"))?;
+    Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == filter.canonical))
 }
 
 fn form_existing_dcs_standard_section_matches(
@@ -18912,6 +18971,22 @@ fn format_form_setting_dcs_order(
     ))
 }
 
+fn format_form_setting_dcs_filter(filter: &FormXmlListSettingsFilter) -> Result<Option<String>> {
+    let bytes = emit_dcs_filter_storage_document(&filter.canonical)
+        .map_err(|error| anyhow!("cannot emit canonical Form Filter document: {error}"))?;
+    let Some(bytes) = bytes else {
+        return Ok(None);
+    };
+    let existing_uuid = bundled_dcs_filter_policy()
+        .map_err(|error| anyhow!("cannot load DCS filter storage policy: {error}"))?
+        .comparison_storage_record_type_uuid()
+        .to_string();
+    Ok(Some(format!(
+        "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
+        encode_base64(&bytes)
+    )))
+}
+
 fn format_form_setting_dcs_standard_section(
     section: &FormXmlListSettingsStandardSection,
     root_name: &str,
@@ -18936,7 +19011,6 @@ fn format_form_setting_dcs_standard_section(
 
 fn default_form_setting_ref_uuid(key: &str) -> &'static str {
     match key {
-        "Filter" => "21743ff3-2db3-4cfc-9404-90ed8209437f",
         "ConditionalAppearance" => "31743ff3-2db3-4cfc-9404-90ed8209437f",
         _ => "11743ff3-2db3-4cfc-9404-90ed8209437f",
     }
@@ -30912,7 +30986,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             br##"{4,{7,{"layout"}},"Old module",{4,1,{9,{1},0,"OldList",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,9,"QueryText",{"S","Old query"},"MainTable",{"#",88888888-8888-4888-8888-888888888888},"DynamicalDataSelection",{"B",1},"ManualQuery",{"B",0},"Filter",{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}},"Order",{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}},"ConditionalAppearance",{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}},"ItemsViewMode",{"S","Normal"},"ItemsUserSettingID",{"S","911b6018-f537-43e8-a417-da56b22f9aec"}},{0,0}}},{0,0},{0,0},{0}}"##,
         )?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
 	<Attributes>
 		<Attribute name="Список" id="1">
 			<Type>
@@ -30926,8 +31000,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<MainTable>Catalog.Products</MainTable>
 				<ListSettings>
 					<dcsset:filter>
-						<dcsset:viewMode>Quick</dcsset:viewMode>
-						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
 					</dcsset:filter>
 					<dcsset:order>
 						<dcsset:item xsi:type="dcsset:OrderItemField">
@@ -30969,7 +31043,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(parsed.layout, r#"{7,{"layout"}}"#);
         assert_eq!(parsed.module_text, "Old module");
         assert!(parsed.trailing[0].contains(r#""Список""#));
-        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,9,"#));
+        assert!(parsed.trailing[0].contains(r#",1,0,0,0,{0,8,"#));
         assert!(
             parsed.trailing[0]
                 .contains(r#""QueryText",{"S","ВЫБРАТЬ Ссылка ИЗ Справочник.Товары"}"#)
@@ -30978,16 +31052,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
         assert!(parsed.trailing[0].contains("\"MainTable\",{\"#\","));
         assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
-        assert!(
-            parsed.trailing[0]
-                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
-        );
-        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
-        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
-        assert!(
-            filter_xml
-                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Filter\""));
         assert!(
             parsed.trailing[0]
                 .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
@@ -31080,14 +31145,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     }
 
     #[test]
-    fn packs_form_body_xml_existing_dynamic_filter_preserves_unspecified_items()
+    fn packs_form_body_xml_metadata_only_filter_removes_physical_filter_property()
     -> anyhow::Result<()> {
         let filter_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
 \t<item xsi:type=\"FilterItemComparison\">\r\n\
-\t\t<left>ЭтоГруппа</left>\r\n\
+\t\t<left xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Field\">Old</left>\r\n\
 \t\t<comparisonType>Equal</comparisonType>\r\n\
-\t\t<right>false</right>\r\n\
+\t\t<right xsi:type=\"xs:string\">Old</right>\r\n\
 \t</item>\r\n\
 \t<viewMode>Normal</viewMode>\r\n\
 \t<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>\r\n\
@@ -31100,7 +31165,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         let base = super::deflate_raw(base_text.as_bytes())?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
 	<Attributes>
 		<Attribute name="List" id="1">
 			<Type>
@@ -31123,32 +31188,20 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
-        let filter_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
-
-        assert!(
-            filter_after.contains("FilterItemComparison"),
-            "{filter_after}"
-        );
-        assert!(
-            filter_after.contains("<left>ЭтоГруппа</left>"),
-            "{filter_after}"
-        );
-        assert!(
-            filter_after
-                .contains("<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Filter\""));
+        assert!(parsed.trailing[0].contains("\"DynamicalDataSelection\""));
         Ok(())
     }
 
     #[test]
-    fn packs_form_body_xml_existing_dynamic_filter_field_items_preserve_unspecified_items()
+    fn packs_form_body_xml_replaces_filter_through_platform_evidenced_comparison()
     -> anyhow::Result<()> {
         let filter_xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
+<Filter xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\
 \t<item xsi:type=\"FilterItemComparison\">\r\n\
-\t\t<left>ЭтоГруппа</left>\r\n\
+\t\t<left xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Field\">Old</left>\r\n\
 \t\t<comparisonType>Equal</comparisonType>\r\n\
-\t\t<right>false</right>\r\n\
+\t\t<right xsi:type=\"xs:string\">Old</right>\r\n\
 \t</item>\r\n\
 \t<viewMode>Normal</viewMode>\r\n\
 \t<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>\r\n\
@@ -31161,7 +31214,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         );
         let base = super::deflate_raw(base_text.as_bytes())?;
         let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
 	<Attributes>
 		<Attribute name="List" id="1">
 			<Type>
@@ -31170,11 +31223,13 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 			<Settings xsi:type="DynamicList">
 				<ListSettings>
 					<dcsset:filter>
-						<dcsset:item xsi:type="dcsset:FieldItem">
-							<dcsset:field>Code</dcsset:field>
+						<dcsset:item xsi:type="dcsset:FilterItemComparison">
+							<dcsset:left xsi:type="dcscor:Field">Code</dcsset:left>
+							<dcsset:comparisonType>Equal</dcsset:comparisonType>
+							<dcsset:right xsi:type="xs:string">A</dcsset:right>
 						</dcsset:item>
-						<dcsset:viewMode>Quick</dcsset:viewMode>
-						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
 					</dcsset:filter>
 				</ListSettings>
 			</Settings>
@@ -31190,28 +31245,37 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             .as_ref()
             .and_then(|settings| settings.list_settings.filter.as_ref())
             .ok_or_else(|| anyhow::anyhow!("filter was not parsed from form XML"))?;
-        assert_eq!(parsed_filter.items[0].field.as_deref(), Some("Code"));
+        assert!(matches!(
+            parsed_filter.canonical.items(),
+            [ibcmd_core::dcs::DcsFilterItem::Comparison(comparison)]
+                if comparison.field().as_str() == "Code"
+                    && comparison.right().as_string().as_str() == "A"
+        ));
 
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
         let filter_after = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
 
+        assert!(filter_after.contains(">Code</left>"), "{filter_after}");
         assert!(
-            filter_after.contains("<field>Code</field>"),
+            filter_after.contains("<right xsi:type=\"xs:string\">A</right>"),
             "{filter_after}"
         );
         assert!(
             filter_after.contains("FilterItemComparison"),
             "{filter_after}"
         );
-        assert!(
-            filter_after.contains("<left>ЭтоГруппа</left>"),
-            "{filter_after}"
-        );
-        assert!(filter_after.contains("<viewMode>Quick</viewMode>"));
+        assert!(!filter_after.contains(">Old</left>"));
+        assert!(filter_after.contains("<viewMode>Normal</viewMode>"));
         assert!(
             filter_after
-                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
+                .contains("<userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</userSettingID>")
+        );
+        let filter_uuid = ibcmd_schema::bundled_dcs_filter_policy()?
+            .comparison_storage_record_type_uuid()
+            .to_string();
+        assert!(
+            parsed.trailing[0].contains(&format!("\"Filter\",{{\"#\",{filter_uuid},{{#base64:"))
         );
         Ok(())
     }
@@ -31434,8 +31498,8 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 				<MainTable>Catalog.Products</MainTable>
 				<ListSettings>
 					<dcsset:filter>
-						<dcsset:viewMode>Quick</dcsset:viewMode>
-						<dcsset:userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</dcsset:userSettingID>
+						<dcsset:viewMode>Normal</dcsset:viewMode>
+						<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>
 					</dcsset:filter>
 					<dcsset:order>
 						<dcsset:item xsi:type="dcsset:OrderItemField">
@@ -31483,16 +31547,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(parsed.trailing[0].contains(r#""DynamicalDataSelection",{"B",0}"#));
         assert!(parsed.trailing[0].contains(r#""ManualQuery",{"B",1}"#));
         assert!(parsed.trailing[0].contains("99999999-9999-4999-8999-999999999999"));
-        assert!(
-            parsed.trailing[0]
-                .contains("\"Filter\",{\"#\",21743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")
-        );
-        let filter_xml = form_setting_base64_xml_for_test(&parsed.trailing[0], "Filter")?;
-        assert!(filter_xml.contains("<viewMode>Quick</viewMode>"));
-        assert!(
-            filter_xml
-                .contains("<userSettingID>aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa</userSettingID>")
-        );
+        assert!(!parsed.trailing[0].contains("\"Filter\""));
         assert!(
             parsed.trailing[0]
                 .contains("\"Order\",{\"#\",11743ff3-2db3-4cfc-9404-90ed8209437f,{#base64:")

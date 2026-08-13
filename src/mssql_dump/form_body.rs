@@ -44,7 +44,7 @@ use crate::form_schema::{
     form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
     form_tooltip_representation_xml_order,
 };
-use ibcmd_core::dcs::DcsOrder;
+use ibcmd_core::dcs::{DcsFilter, DcsOrder};
 #[cfg(test)]
 use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_item;
 #[cfg(test)]
@@ -68,7 +68,8 @@ use ibcmd_schema::{
 };
 use ibcmd_xml::{
     DcsChildParseOutcome, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
-    emit_form_choice_parameters, parse_dcs_order_storage_document,
+    emit_form_choice_parameters, parse_dcs_filter_storage_document,
+    parse_dcs_order_storage_document, platform_default_form_list_settings_filter,
     platform_default_form_list_settings_order,
 };
 use sha2::{Digest, Sha256};
@@ -792,7 +793,7 @@ pub(super) struct FormAttributesSection {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct FormListSettings {
-    pub(super) filter: Option<FormListSettingsStandardSection>,
+    pub(super) filter: Option<FormListSettingsFilter>,
     pub(super) order: Option<FormListSettingsOrder>,
     pub(super) conditional_appearance: Option<FormListSettingsStandardSection>,
     pub(super) items_view_mode: Option<String>,
@@ -813,6 +814,25 @@ pub(super) enum FormListSettingsOrder {
         bytes: Vec<u8>,
         reason: &'static str,
     },
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormListSettingsFilter {
+    Typed(DcsFilter),
+    OpaqueStorage {
+        bytes: Vec<u8>,
+        reason: &'static str,
+    },
+}
+
+impl FormListSettingsFilter {
+    #[cfg(test)]
+    pub(super) const fn typed(&self) -> Option<&DcsFilter> {
+        match self {
+            Self::Typed(filter) => Some(filter),
+            Self::OpaqueStorage { .. } => None,
+        }
+    }
 }
 
 impl FormListSettingsOrder {
@@ -1250,6 +1270,9 @@ pub(super) enum FormSchemaWriteError {
     OpaqueDcsOrder {
         reason: &'static str,
     },
+    OpaqueDcsFilter {
+        reason: &'static str,
+    },
 }
 
 impl From<WriterRuleLookupError> for FormSchemaWriteError {
@@ -1427,6 +1450,13 @@ fn preflight_form_writer_paths_with_dcs_profiles(
         .iter()
         .filter_map(|attribute| attribute.settings.as_ref())
     {
+        let canonical_filter = match settings.list_settings.filter.as_ref() {
+            Some(FormListSettingsFilter::Typed(filter)) => Some(filter),
+            Some(FormListSettingsFilter::OpaqueStorage { reason, .. }) => {
+                return Err(FormSchemaWriteError::OpaqueDcsFilter { reason });
+            }
+            None => None,
+        };
         let canonical_order = match settings.list_settings.order.as_ref() {
             Some(FormListSettingsOrder::Typed(order)) => Some(order),
             Some(FormListSettingsOrder::OpaqueStorage { reason, .. }) => {
@@ -1438,10 +1468,13 @@ fn preflight_form_writer_paths_with_dcs_profiles(
         // complete fragment atomically and has no output or filesystem side effects.
         drop(emit_canonical_dcs_settings_children(
             CanonicalDcsSettingsContext::FormListSettings,
-            None,
-            canonical_order,
-            settings.list_settings.items_view_mode.as_deref(),
-            settings.list_settings.items_user_setting_id.as_deref(),
+            CanonicalDcsSettingsInput {
+                filter: canonical_filter,
+                order: canonical_order,
+                items_view_mode: settings.list_settings.items_view_mode.as_deref(),
+                items_user_setting_id: settings.list_settings.items_user_setting_id.as_deref(),
+                ..CanonicalDcsSettingsInput::default()
+            },
             source_profile,
             target_profile,
             "dcsset",
@@ -2969,11 +3002,9 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
         && list_settings.items_view_mode.is_none()
         && list_settings.items_user_setting_id.is_none()
     {
-        list_settings.filter = Some(FormListSettingsStandardSection {
-            view_mode: Some("Normal".to_string()),
-            user_setting_id: Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb".to_string()),
-            raw_xml: None,
-        });
+        list_settings.filter = Some(FormListSettingsFilter::Typed(
+            default_form_list_settings_filter(),
+        ));
         list_settings.order = Some(FormListSettingsOrder::Typed(
             default_form_list_settings_order(),
         ));
@@ -2989,11 +3020,9 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
     }
     if has_any_list_settings {
         if list_settings.filter.is_none() {
-            list_settings.filter = Some(FormListSettingsStandardSection {
-                view_mode: Some("Normal".to_string()),
-                user_setting_id: Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb".to_string()),
-                raw_xml: None,
-            });
+            list_settings.filter = Some(FormListSettingsFilter::Typed(
+                default_form_list_settings_filter(),
+            ));
         }
         if list_settings.order.is_none() {
             list_settings.order = Some(FormListSettingsOrder::Typed(
@@ -3020,6 +3049,11 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
 fn default_form_list_settings_order() -> DcsOrder {
     platform_default_form_list_settings_order()
         .expect("bundled platform-authenticated metadata-only Form order is valid")
+}
+
+fn default_form_list_settings_filter() -> DcsFilter {
+    platform_default_form_list_settings_filter()
+        .expect("bundled platform-authenticated metadata-only Form filter is valid")
 }
 
 pub(super) fn parse_form_attribute_save_fields(
@@ -3474,14 +3508,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
                 dynamic_data_read_explicit = true;
                 dynamic_data_read = !parse_form_setting_bool(window[1]).unwrap_or(true)
             }
-            "Filter" => {
-                list_settings.filter = parse_form_list_settings_standard_section(
-                    window[1],
-                    "Filter",
-                    "filter",
-                    object_refs,
-                )
-            }
+            "Filter" => list_settings.filter = parse_form_list_settings_filter(window[1]),
             "Order" => list_settings.order = parse_form_list_settings_order(window[1], object_refs),
             "ConditionalAppearance" => {
                 list_settings.conditional_appearance = parse_form_list_settings_standard_section(
@@ -3981,6 +4008,27 @@ pub(super) fn parse_form_list_settings_order(
             reason: "present storage Order parsed as absent",
         }),
         Err(error) => Some(FormListSettingsOrder::OpaqueStorage {
+            bytes,
+            reason: error.reason(),
+        }),
+    }
+}
+
+pub(super) fn parse_form_list_settings_filter(field: &str) -> Option<FormListSettingsFilter> {
+    let payload = extract_base64_payload(field)?;
+    let bytes = decode_base64_mime(payload)?;
+    match parse_dcs_filter_storage_document(&bytes) {
+        Ok(DcsChildParseOutcome::Typed(canonical)) => {
+            Some(FormListSettingsFilter::Typed(canonical))
+        }
+        Ok(DcsChildParseOutcome::Unsupported(reason)) => {
+            Some(FormListSettingsFilter::OpaqueStorage { bytes, reason })
+        }
+        Ok(DcsChildParseOutcome::Absent) => Some(FormListSettingsFilter::OpaqueStorage {
+            bytes,
+            reason: "present storage Filter parsed as absent",
+        }),
+        Err(error) => Some(FormListSettingsFilter::OpaqueStorage {
             bytes,
             reason: error.reason(),
         }),
@@ -17727,6 +17775,13 @@ fn format_form_list_settings_xml_with_dcs_profiles(
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Result<String, FormSchemaWriteError> {
+    let canonical_filter = match settings.filter.as_ref() {
+        Some(FormListSettingsFilter::Typed(filter)) => Some(filter),
+        Some(FormListSettingsFilter::OpaqueStorage { reason, .. }) => {
+            return Err(FormSchemaWriteError::OpaqueDcsFilter { reason });
+        }
+        None => None,
+    };
     let canonical_order = match settings.order.as_ref() {
         Some(FormListSettingsOrder::Typed(order)) => Some(order),
         Some(FormListSettingsOrder::OpaqueStorage { reason, .. }) => {
@@ -17734,51 +17789,36 @@ fn format_form_list_settings_xml_with_dcs_profiles(
         }
         None => None,
     };
-    let canonical_order_fragment = emit_canonical_dcs_settings_children(
+    let canonical_parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::FormListSettings,
-        None,
-        canonical_order,
-        None,
-        None,
-        source_profile,
-        target_profile,
-        "dcsset",
-        "\t\t\t\t\t",
-        "mssql:form/ListSettings/order",
-    )?;
-    let tail_xml = emit_canonical_dcs_settings_children(
-        CanonicalDcsSettingsContext::FormListSettings,
-        None,
-        None,
-        settings.items_view_mode.as_deref(),
-        settings.items_user_setting_id.as_deref(),
+        CanonicalDcsSettingsInput {
+            filter: canonical_filter,
+            order: canonical_order,
+            items_view_mode: settings.items_view_mode.as_deref(),
+            items_user_setting_id: settings.items_user_setting_id.as_deref(),
+            ..CanonicalDcsSettingsInput::default()
+        },
         source_profile,
         target_profile,
         "dcsset",
         "\t\t\t\t\t",
         "mssql:form/ListSettings",
     )?;
-    if !form_list_settings_standard_section_has_output(settings.filter.as_ref())
+    if !form_list_settings_filter_has_output(settings.filter.as_ref())
         && !form_list_settings_order_has_output(settings.order.as_ref())
         && !form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
-        && tail_xml.is_empty()
+        && canonical_parts.tail().is_empty()
     {
         return Ok(String::new());
     }
     let mut xml = "\t\t\t\t<ListSettings>\r\n".to_string();
-    if form_list_settings_standard_section_has_output(settings.filter.as_ref())
-        && let Some(filter) = &settings.filter
+    if form_list_settings_filter_has_output(settings.filter.as_ref())
+        && let Some(filter) = canonical_parts.filter()
     {
-        if let Some(raw_xml) = &filter.raw_xml {
-            xml.push_str(&indent_xml_fragment(raw_xml, "\t\t\t\t\t"));
-        } else {
-            xml.push_str(&format_form_list_settings_standard_section_xml(
-                "filter", filter,
-            ));
-        }
+        xml.push_str(filter);
     }
     if form_list_settings_order_has_output(settings.order.as_ref()) && settings.order.is_some() {
-        xml.push_str(&canonical_order_fragment);
+        xml.push_str(canonical_parts.order().unwrap_or_default());
     }
     if form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
         && let Some(conditional_appearance) = &settings.conditional_appearance
@@ -17792,9 +17832,15 @@ fn format_form_list_settings_xml_with_dcs_profiles(
             ));
         }
     }
-    xml.push_str(&tail_xml);
+    xml.push_str(canonical_parts.tail());
     xml.push_str("\t\t\t\t</ListSettings>\r\n");
     Ok(xml)
+}
+
+pub(super) fn form_list_settings_filter_has_output(
+    filter: Option<&FormListSettingsFilter>,
+) -> bool {
+    filter.is_some()
 }
 
 pub(super) fn form_list_settings_standard_section_has_output(

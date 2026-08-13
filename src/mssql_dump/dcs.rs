@@ -1,14 +1,14 @@
 use super::*;
 use ibcmd_core::dcs::{
-    DcsBuildError, DcsOrder, DcsSelection, DcsSettingsBuilder, DcsSettingsEnvelope,
+    DcsBuildError, DcsFilter, DcsOrder, DcsSelection, DcsSettingsBuilder, DcsSettingsEnvelope,
 };
 use ibcmd_core::diagnostic::{PathSegment, PropertyPath};
 use ibcmd_core::opaque::OpaqueFacets;
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
-    DcsSettingsChildrenError, emit_dcs_settings_children_parts, parse_dcs_settings_children,
-    rewrite_dcs_settings_children,
+    DcsSettingsChildrenError, DcsSettingsChildrenParts, emit_dcs_settings_children_parts,
+    parse_dcs_settings_children, rewrite_dcs_settings_children,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -71,12 +71,18 @@ impl std::fmt::Display for CanonicalDcsSettingsAdapterError {
 
 impl std::error::Error for CanonicalDcsSettingsAdapterError {}
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct CanonicalDcsSettingsInput<'a> {
+    pub(super) selection: Option<&'a DcsSelection>,
+    pub(super) filter: Option<&'a DcsFilter>,
+    pub(super) order: Option<&'a DcsOrder>,
+    pub(super) items_view_mode: Option<&'a str>,
+    pub(super) items_user_setting_id: Option<&'a str>,
+}
+
 pub(super) fn emit_canonical_dcs_settings_children(
     context: CanonicalDcsSettingsContext,
-    selection: Option<&DcsSelection>,
-    order: Option<&DcsOrder>,
-    items_view_mode: Option<&str>,
-    items_user_setting_id: Option<&str>,
+    input: CanonicalDcsSettingsInput<'_>,
     source_profile: &ProfileId,
     target_profile: &ProfileId,
     prefix: &str,
@@ -85,48 +91,39 @@ pub(super) fn emit_canonical_dcs_settings_children(
 ) -> Result<String, CanonicalDcsSettingsAdapterError> {
     let parts = emit_canonical_dcs_settings_parts(
         context,
-        selection,
-        order,
-        items_view_mode,
-        items_user_setting_id,
+        input,
         source_profile,
         target_profile,
         prefix,
         indent,
         locator,
     )?;
-    let mut output = parts.selection.unwrap_or_default();
-    output.push_str(parts.order.as_deref().unwrap_or_default());
-    output.push_str(&parts.tail);
+    let mut output = parts.selection().unwrap_or_default().to_owned();
+    output.push_str(parts.filter().unwrap_or_default());
+    output.push_str(parts.order().unwrap_or_default());
+    output.push_str(parts.tail());
     Ok(output)
 }
 
-struct CanonicalDcsSettingsParts {
-    selection: Option<String>,
-    order: Option<String>,
-    tail: String,
-}
-
-fn emit_canonical_dcs_settings_parts(
+pub(super) fn emit_canonical_dcs_settings_parts(
     context: CanonicalDcsSettingsContext,
-    selection: Option<&DcsSelection>,
-    order: Option<&DcsOrder>,
-    items_view_mode: Option<&str>,
-    items_user_setting_id: Option<&str>,
+    input: CanonicalDcsSettingsInput<'_>,
     source_profile: &ProfileId,
     target_profile: &ProfileId,
     prefix: &str,
     indent: &str,
     locator: &str,
-) -> Result<CanonicalDcsSettingsParts, CanonicalDcsSettingsAdapterError> {
-    let items_view_mode = items_view_mode
+) -> Result<DcsSettingsChildrenParts, CanonicalDcsSettingsAdapterError> {
+    let items_view_mode = input
+        .items_view_mode
         .map(EnumToken::new)
         .transpose()
         .map_err(|error| CanonicalDcsSettingsAdapterError::Value {
             field: "itemsViewMode",
             message: error.to_string(),
         })?;
-    let items_user_setting_id = items_user_setting_id
+    let items_user_setting_id = input
+        .items_user_setting_id
         .map(CanonicalText::new)
         .transpose()
         .map_err(|error| CanonicalDcsSettingsAdapterError::Value {
@@ -143,8 +140,9 @@ fn emit_canonical_dcs_settings_parts(
     let provenance = SourceProvenance::with_locator(source_profile.clone(), anchor, locator)
         .map_err(|error| CanonicalDcsSettingsAdapterError::Provenance(error.to_string()))?;
     let settings = DcsSettingsBuilder::new(provenance)
-        .selection(selection.cloned())
-        .order(order.cloned())
+        .selection(input.selection.cloned())
+        .filter(input.filter.cloned())
+        .order(input.order.cloned())
         .items_user_setting_id(items_user_setting_id)
         .items_view_mode(items_view_mode)
         .opaque_extensions(OpaqueFacets::new(Vec::new()).expect("empty opaque facets are valid"))
@@ -156,13 +154,8 @@ fn emit_canonical_dcs_settings_parts(
             DcsSettingsEnvelope::list_settings(settings)
         }
     };
-    let parts = emit_dcs_settings_children_parts(&envelope, target_profile, prefix, indent)
-        .map_err(CanonicalDcsSettingsAdapterError::Serialize)?;
-    Ok(CanonicalDcsSettingsParts {
-        selection: parts.selection().map(str::to_owned),
-        order: parts.order().map(str::to_owned),
-        tail: parts.tail().to_owned(),
-    })
+    emit_dcs_settings_children_parts(&envelope, target_profile, prefix, indent)
+        .map_err(CanonicalDcsSettingsAdapterError::Serialize)
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1123,14 +1116,21 @@ fn canonicalize_data_composition_settings_document(
     writer.write_document(document, DataCompositionDocumentMode::Settings)?;
     let parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::Standalone,
-        children.selection(),
-        match children.order() {
-            ibcmd_xml::DcsChildParseOutcome::Typed(order) => Some(order),
-            ibcmd_xml::DcsChildParseOutcome::Absent
-            | ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => None,
+        CanonicalDcsSettingsInput {
+            selection: children.selection(),
+            filter: match children.filter() {
+                ibcmd_xml::DcsChildParseOutcome::Typed(filter) => Some(filter),
+                ibcmd_xml::DcsChildParseOutcome::Absent
+                | ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => None,
+            },
+            order: match children.order() {
+                ibcmd_xml::DcsChildParseOutcome::Typed(order) => Some(order),
+                ibcmd_xml::DcsChildParseOutcome::Absent
+                | ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => None,
+            },
+            items_view_mode: children.items_view_mode(),
+            items_user_setting_id: children.items_user_setting_id(),
         },
-        children.items_view_mode(),
-        children.items_user_setting_id(),
         source_profile,
         target_profile,
         "dcsset",
@@ -1138,13 +1138,7 @@ fn canonicalize_data_composition_settings_document(
         "mssql:dcs/Settings",
     )
     .ok()?;
-    rewrite_dcs_settings_children(
-        &mut writer.output,
-        &children,
-        parts.selection.as_deref(),
-        parts.order.as_deref(),
-        &parts.tail,
-    )?;
+    rewrite_dcs_settings_children(&mut writer.output, &children, &parts)?;
     let settings = writer
         .output
         .trim_start_matches(['\r', '\n', '\t'])

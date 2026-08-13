@@ -7,7 +7,7 @@ use crate::metadata_owner_graph::{
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
 use ibcmd_core::characteristics::{CharacteristicFilterValue, CharacteristicReference};
-use ibcmd_core::dcs::{DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType};
+use ibcmd_core::dcs::{DcsFilter, DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType};
 use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::semantic::semantic_digest;
 use ibcmd_core::validate::validate_configuration;
@@ -7741,10 +7741,29 @@ fn extracts_form_attributes_and_commands_from_body_tail() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let parameter_type_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
-    let form_body = deflate_for_test(
-            format!(
-                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,9,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}},"Filter",{{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}}}},"Order",{{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}}}},"ConditionalAppearance",{{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}}}},"ItemsViewMode",{{"S","Normal"}},"ItemsUserSettingID",{{"S","911b6018-f537-43e8-a417-da56b22f9aec"}}}},{{0,0}}}}}},{{0,1,{{0,"Счет",{{"Pattern",{{"#",{parameter_type_uuid}}}}},1}}}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
+    let with_evidenced_filter = |mut text: String| {
+        let filter_start = text.find(",\"Filter\",").unwrap();
+        let marker = "{#base64:";
+        let payload_start =
+            text[filter_start..].find(marker).unwrap() + filter_start + marker.len();
+        let payload_end = text[payload_start..].find('}').unwrap() + payload_start;
+        text.replace_range(
+            payload_start..payload_end,
+            include_str!(
+                "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-filter/form-comparison-storage.xml.b64"
             )
+            .trim(),
+        );
+        text = text.replace(
+            "21743ff3-2db3-4cfc-9404-90ed8209437f",
+            "f6841c6b-6c71-4c82-ae9e-d08b49db326c",
+        );
+        text
+    };
+    let form_body = deflate_for_test(
+            with_evidenced_filter(format!(
+                r##"{{4,{{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{{1,0}},0,0,1,1,1,0,1,1,1}},"",{{4,1,{{9,{{1}},0,"Список",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},1,0,0,0,{{0,9,"QueryText",{{"S","ВЫБРАТЬ Ссылка, Наименование ИЗ Справочник.Товары"}},"MainTable",{{"#",fc01b5df-97fe-449b-83d4-218a090e681e,{catalog_uuid}}},"DynamicalDataSelection",{{"B",0}},"ManualQuery",{{"B",1}},"Filter",{{"#",21743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxGaWx0ZXIgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ZGZjZWNlOWQtNTA3Ny00NDBiLWI2YjMtNDVhNWNiNDUzOGViPC91c2VyU2V0dGluZ0lEPg0KPC9GaWx0ZXI+}}}},"Order",{{"#",11743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxPcmRlciB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6eHM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIj4NCgk8aXRlbSB4c2k6dHlwZT0iT3JkZXJJdGVtRmllbGQiPg0KCQk8ZmllbGQ+0J3QsNC40LzQtdC90L7QstCw0L3QuNC10J/QvtC70L3QvtC1PC9maWVsZD4NCgkJPG9yZGVyVHlwZT5Bc2M8L29yZGVyVHlwZT4NCgk8L2l0ZW0+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+ODg2MTk3NjUtY2NiMy00NmM2LWFjNTItMzhlOWM5OTJlYmQ0PC91c2VyU2V0dGluZ0lEPg0KPC9PcmRlcj4=}}}},"ConditionalAppearance",{{"#",31743ff3-2db3-4cfc-9404-90ed8209437f,{{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxDb25kaXRpb25hbEFwcGVhcmFuY2UgeG1sbnM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vc2V0dGluZ3MiIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+DQoJPHZpZXdNb2RlPk5vcm1hbDwvdmlld01vZGU+DQoJPHVzZXJTZXR0aW5nSUQ+Yjc1ZmVjY2UtOTQyYi00YWVkLWFiYzktZTZhMDJlNDYwZmIzPC91c2VyU2V0dGluZ0lEPg0KPC9Db25kaXRpb25hbEFwcGVhcmFuY2U+}}}},"ItemsViewMode",{{"S","Normal"}},"ItemsUserSettingID",{{"S","911b6018-f537-43e8-a417-da56b22f9aec"}}}},{{0,0}}}}}},{{0,1,{{0,"Счет",{{"Pattern",{{"#",{parameter_type_uuid}}}}},1}}}},{{0,1,{{11,{{2,409b9a53-7f7e-4178-86c1-33176c7c7a7a}},"Выполнить",{{1,1,{{"ru","Выполнить"}}}},{{1,1,{{"ru","Выполнить действие"}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0,0}},{{4,0,{{0}},"",-1,-1,1,0,""}},"Выполнить",3,0,0,{{0,1,{option_uuid}}},1,0,1,0,0,1,0,0}}}},{{0}},0,0}}"##
+            ))
             .as_bytes(),
         );
     let object_refs = BTreeMap::from([
@@ -7760,7 +7779,6 @@ fn extracts_form_attributes_and_commands_from_body_tail() {
     ]);
 
     let form_xml = extract_form_body_xml(&form_body, &object_refs).unwrap();
-
     assert!(form_xml.contains(r#"<Attribute name="Список" id="1">"#));
     assert!(form_xml.contains("<v8:Type>cfg:DynamicList</v8:Type>"));
     assert!(form_xml.contains("<MainAttribute>true</MainAttribute>"));
@@ -8403,7 +8421,9 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
             .list_settings
             .filter
             .as_ref()
-            .and_then(|v| v.view_mode.as_deref()),
+            .and_then(FormListSettingsFilter::typed)
+            .and_then(DcsFilter::view_mode)
+            .map(|value| value.as_str()),
         Some("Normal")
     );
     assert_eq!(
@@ -8411,7 +8431,9 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
             .list_settings
             .filter
             .as_ref()
-            .and_then(|v| v.user_setting_id.as_deref()),
+            .and_then(FormListSettingsFilter::typed)
+            .and_then(DcsFilter::user_setting_id)
+            .map(CanonicalText::as_str),
         Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb")
     );
     assert_eq!(
@@ -8662,7 +8684,7 @@ fn malformed_present_storage_order_is_retained_and_fails_closed() {
 }
 
 #[test]
-fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
+fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
     let mut settings = FormDynamicListSettings {
         auto_save_user_settings: true,
         manual_query: false,
@@ -8675,7 +8697,7 @@ fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
         fields: Vec::new(),
         server_state_xml: None,
         list_settings: FormListSettings {
-            filter: Some(FormListSettingsStandardSection::default()),
+            filter: None,
             order: Some(FormListSettingsOrder::Typed(
                 DcsOrder::new(
                     vec![DcsOrderItem::Field(
@@ -8725,11 +8747,14 @@ fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
         type_description_settings: None,
     }]);
 
-    assert!(!xml.contains("<dcsset:filter>"), "{xml}");
+    assert!(xml.contains("<dcsset:filter>"), "{xml}");
     assert!(
-        !xml.contains("<dcsset:viewMode>Normal</dcsset:viewMode>"),
+        xml.contains("<dcsset:viewMode>Normal</dcsset:viewMode>"),
         "{xml}"
     );
+    assert!(xml.contains(
+        "<dcsset:userSettingID>dfcece9d-5077-440b-b6b3-45a5cb4538eb</dcsset:userSettingID>"
+    ));
     assert!(xml.contains(
         "<dcsset:userSettingID>f5abd21c-a9fb-4b17-8ed5-0505541ef807</dcsset:userSettingID>"
     ));
@@ -8757,13 +8782,7 @@ fn omits_list_settings_wrapper_when_tail_has_only_evidence_defaults() {
 #[test]
 fn rejects_opaque_order_before_formatting_list_settings() {
     let complex_settings = FormListSettings {
-        filter: Some(FormListSettingsStandardSection {
-            raw_xml: Some(
-                "<dcsset:filter><dcsset:item>opaque-filter</dcsset:item></dcsset:filter>"
-                    .to_string(),
-            ),
-            ..FormListSettingsStandardSection::default()
-        }),
+        filter: None,
         order: Some(FormListSettingsOrder::OpaqueStorage {
             bytes: b"<Order><item>opaque-order</item></Order>".to_vec(),
             reason: "unsupported test order",
