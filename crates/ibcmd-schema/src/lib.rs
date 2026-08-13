@@ -2663,6 +2663,10 @@ pub const BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON: &str = include_str!(
 pub const BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-template/manifest.json"
 );
+/// Immutable platform-authenticated AreaTemplate appearance/appIndex coordinate.
+pub const BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-template-appearance/manifest.json"
+);
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3735,6 +3739,7 @@ pub struct DcsAreaTemplatePolicy {
     cell_order: Vec<String>,
     field_order: Vec<String>,
     parameter_order: Vec<String>,
+    supports_parameter_appearance: bool,
 }
 
 impl DcsAreaTemplatePolicy {
@@ -3774,6 +3779,15 @@ impl DcsAreaTemplatePolicy {
     pub fn parameter_order(&self) -> &[String] {
         &self.parameter_order
     }
+    pub const fn supports_parameter_appearance(&self) -> bool {
+        self.supports_parameter_appearance
+    }
+    pub fn appearance_parameter(&self) -> &str {
+        "Расшифровка"
+    }
+    pub fn table_cell_appearance_type_qname(&self) -> String {
+        format!("{{{}}}TableCellAppearance", self.area_namespace_uri())
+    }
     pub fn area_template_type_qname(&self) -> String {
         format!("{{{}}}AreaTemplate", self.area_namespace_uri())
     }
@@ -3804,6 +3818,7 @@ struct DcsAreaTemplateEvidence {
     rounds: serde_json::Value,
     retained: serde_json::Value,
     document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
     cohort: DcsAreaTemplateEvidenceCohort,
     non_claims: Vec<String>,
 }
@@ -3822,6 +3837,37 @@ struct DcsAreaTemplateEvidenceCohort {
     expression: String,
     has_root_appearance: bool,
     has_app_index: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateAppearanceEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    compiler_acceptance: serde_json::Value,
+    cohort: DcsAreaTemplateAppearanceCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateAppearanceCohort {
+    template_name: String,
+    source_cell_order: Vec<String>,
+    storage_cell_order: Vec<String>,
+    appearance_parameter: String,
+    appearance_value_type: String,
+    appearance_value: String,
+    side_table_type: String,
+    app_index: u32,
+    side_table_count: u32,
+    referenced_indexes_cover_table: bool,
 }
 
 impl DcsSchemaTemplateEnvelopePolicy {
@@ -10446,9 +10492,38 @@ pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, Schem
         || evidence.rounds.is_null()
         || evidence.retained.is_null()
         || evidence.document_topology.is_null()
+        || evidence.compiler_acceptance.is_null()
     {
         return Err(SchemaError::InvalidJson(
             "DCS AreaTemplate evidence drifted from the exact coordinate".to_string(),
+        ));
+    }
+    let appearance: DcsAreaTemplateAppearanceEvidence =
+        serde_json::from_str(BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if appearance.schema_version != 1
+        || appearance.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-template-appearance-parameter"
+        || appearance.cohort.template_name != evidence.cohort.template_name
+        || appearance.cohort.source_cell_order != ["item:Field", "appearance"]
+        || appearance.cohort.storage_cell_order != ["item:Field", "appIndex"]
+        || appearance.cohort.appearance_parameter != "Расшифровка"
+        || appearance.cohort.appearance_value_type != "Parameter"
+        || appearance.cohort.appearance_value != evidence.cohort.parameter_name
+        || appearance.cohort.side_table_type != "TableCellAppearance"
+        || appearance.cohort.app_index != 0
+        || appearance.cohort.side_table_count != 1
+        || !appearance.cohort.referenced_indexes_cover_table
+        || appearance.negative_observations.len() != 3
+        || appearance.non_claims.len() < 4
+        || appearance.platform.is_null()
+        || appearance.seed.is_null()
+        || appearance.rounds.is_null()
+        || appearance.retained.is_null()
+        || appearance.document_topology.is_null()
+        || appearance.compiler_acceptance.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS AreaTemplate appearance evidence drifted from the exact coordinate".to_string(),
         ));
     }
     Ok(DcsAreaTemplatePolicy {
@@ -10461,6 +10536,7 @@ pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, Schem
         cell_order: evidence.cohort.cell_order,
         field_order: evidence.cohort.field_order,
         parameter_order: evidence.cohort.parameter_order,
+        supports_parameter_appearance: true,
     })
 }
 
@@ -10475,6 +10551,8 @@ mod dcs_area_template_policy_tests {
         assert_eq!(policy.parameter_name(), "Probe");
         assert_eq!(policy.expression(), "\"Probe\"");
         assert_eq!(policy.root_order().len(), 3);
+        assert!(policy.supports_parameter_appearance());
+        assert_eq!(policy.appearance_parameter(), "Расшифровка");
         assert_eq!(
             policy.parameter_value_type_qname(),
             "{http://v8.1c.ru/8.1/data-composition-system/core}Parameter"

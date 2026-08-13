@@ -286,8 +286,8 @@ pub fn parse_dcs_area_template_storage_document(
     require_name(&document, None, "SchemaFile")?;
     require_no_attributes(&document)?;
     let wrapper = elements(&document)?;
-    if wrapper.len() != 1 {
-        return unsupported("AreaTemplate SchemaFile must contain exactly one schema root");
+    if wrapper.is_empty() || wrapper.len() > 2 {
+        return unsupported("AreaTemplate SchemaFile has unsupported root cardinality");
     }
     let root = wrapper[0];
     require_name(
@@ -300,7 +300,16 @@ pub fn parse_dcs_area_template_storage_document(
     if top.len() != 1 {
         return unsupported("AreaTemplate schema must contain exactly one template");
     }
-    parse_area_template_element(top[0], source_profile, locator, &ap)
+    let area = parse_area_template_element(top[0], source_profile, locator, &ap)?;
+    if wrapper.len() == 2 {
+        require_storage_area_appearance(wrapper[1], &p, &ap)?;
+        if !area.has_parameter_appearance() {
+            return unsupported("AreaTemplate side table has no matching appIndex");
+        }
+    } else if area.has_parameter_appearance() {
+        return unsupported("AreaTemplate appIndex has no appearance side table");
+    }
+    Ok(area)
 }
 
 /// Finds and parses the single direct style-free AreaTemplate in a source
@@ -353,7 +362,7 @@ fn parse_area_template_element(
     require_type(template[1], &p, &ap.area_template_type_qname())?;
     require_name(template[2], Some(p.schema_namespace_uri()), "parameter")?;
     require_type(template[2], &p, &ap.expression_parameter_type_qname())?;
-    parse_exact_area_body(template[1], &p, ap)?;
+    let parameter_appearance = parse_exact_area_body(template[1], &p, ap)?;
     let parameter = elements(template[2])?;
     if parameter.len() != 2 {
         return unsupported("AreaTemplate parameter must contain name and expression");
@@ -372,20 +381,25 @@ fn parse_area_template_element(
     );
     let provenance = SourceProvenance::with_locator(source_profile, anchor, locator)
         .map_err(|e| DcsInnerSchemaError::Malformed(e.to_string()))?;
-    DcsSchemaAreaTemplate::new(
+    let area = DcsSchemaAreaTemplate::new(
         canonical(text(template[0])?)?,
         canonical(text(parameter[0])?)?,
         canonical(text(parameter[1])?)?,
         provenance,
     )
-    .map_err(DcsInnerSchemaError::Build)
+    .map_err(DcsInnerSchemaError::Build)?;
+    Ok(if parameter_appearance {
+        area.with_parameter_appearance()
+    } else {
+        area
+    })
 }
 
 fn parse_exact_area_body(
     area: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-) -> Result<(), DcsInnerSchemaError> {
+) -> Result<bool, DcsInnerSchemaError> {
     let area_ns = ap.area_namespace_uri();
     let rows = elements(area)?;
     if rows.len() != 1 {
@@ -400,8 +414,8 @@ fn parse_exact_area_body(
     require_name(row[0], Some(area_ns), "tableCell")?;
     require_no_attributes(row[0])?;
     let cell = elements(row[0])?;
-    if cell.len() != 1 {
-        return unsupported("AreaTemplate cell must contain exactly one Field item");
+    if cell.is_empty() || cell.len() > 2 {
+        return unsupported("AreaTemplate cell child cardinality is outside the cohort");
     }
     require_name(cell[0], Some(area_ns), "item")?;
     require_type(cell[0], p, &ap.field_type_qname())?;
@@ -413,6 +427,73 @@ fn parse_exact_area_body(
     require_type(field[0], p, &ap.parameter_value_type_qname())?;
     if text_allowing_attributes(field[0])? != ap.parameter_name() {
         return unsupported("AreaTemplate field value is outside the exact coordinate");
+    }
+    match cell.get(1) {
+        None => Ok(false),
+        Some(appearance)
+            if appearance.namespace.as_deref() == Some(area_ns)
+                && appearance.local == "appearance" =>
+        {
+            require_source_area_appearance(appearance, p, ap)?;
+            Ok(true)
+        }
+        Some(index) if index.namespace.as_deref() == Some(area_ns) && index.local == "appIndex" => {
+            require_no_attributes(index)?;
+            if text(index)? != "0" {
+                return unsupported("AreaTemplate appIndex is outside the exact coordinate");
+            }
+            Ok(true)
+        }
+        Some(_) => unsupported("AreaTemplate cell second child is outside the exact coordinate"),
+    }
+}
+
+fn require_source_area_appearance(
+    appearance: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<(), DcsInnerSchemaError> {
+    require_no_attributes(appearance)?;
+    require_parameter_appearance_body(appearance, p, ap, false)
+}
+
+fn require_storage_area_appearance(
+    appearance: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<(), DcsInnerSchemaError> {
+    require_name(appearance, Some(ap.area_namespace_uri()), "appearance")?;
+    require_type(appearance, p, &ap.table_cell_appearance_type_qname())?;
+    require_parameter_appearance_body(appearance, p, ap, true)
+}
+
+fn require_parameter_appearance_body(
+    appearance: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+    _storage: bool,
+) -> Result<(), DcsInnerSchemaError> {
+    let items = elements(appearance)?;
+    if items.len() != 1 {
+        return unsupported("AreaTemplate appearance must contain exactly one item");
+    }
+    let item = items[0];
+    require_name(item, Some(ap.core_namespace_uri()), "item")?;
+    require_no_attributes(item)?;
+    let children = elements(item)?;
+    if children.len() != 2 {
+        return unsupported("AreaTemplate appearance item must contain parameter and value");
+    }
+    require_name(children[0], Some(ap.core_namespace_uri()), "parameter")?;
+    require_no_attributes(children[0])?;
+    require_name(children[1], Some(ap.core_namespace_uri()), "value")?;
+    require_type(children[1], p, &ap.parameter_value_type_qname())?;
+    let parameter = text(children[0])?;
+    let parameter = parameter.trim();
+    if parameter != ap.appearance_parameter()
+        || text_allowing_attributes(children[1])? != ap.parameter_name()
+    {
+        return unsupported("AreaTemplate appearance value is outside the exact coordinate");
     }
     Ok(())
 }
@@ -674,6 +755,18 @@ pub fn emit_dcs_area_template_source_fragment(
         "<dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
     );
     line(&mut out, 5, "</dcsat:item>");
+    if area.has_parameter_appearance() {
+        line(&mut out, 5, "<dcsat:appearance>");
+        line(&mut out, 6, "<dcscor:item>");
+        scalar(&mut out, 7, "dcscor:parameter", "Расшифровка");
+        line(
+            &mut out,
+            7,
+            "<dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value>",
+        );
+        line(&mut out, 6, "</dcscor:item>");
+        line(&mut out, 5, "</dcsat:appearance>");
+    }
     line(&mut out, 4, "</dcsat:tableCell>");
     line(&mut out, 3, "</dcsat:item>");
     line(&mut out, 2, "</template>");
@@ -731,6 +824,9 @@ pub fn emit_dcs_area_template_storage_document(
         "<dcsat:value xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
     );
     line(&mut out, 6, "</dcsat:item>");
+    if area.has_parameter_appearance() {
+        scalar(&mut out, 6, "dcsat:appIndex", "0");
+    }
     line(&mut out, 5, "</dcsat:tableCell>");
     line(&mut out, 4, "</dcsat:item>");
     line(&mut out, 3, "</template>");
@@ -748,6 +844,22 @@ pub fn emit_dcs_area_template_storage_document(
     line(&mut out, 3, "</parameter>");
     line(&mut out, 2, "</template>");
     line(&mut out, 1, "</dataCompositionSchema>");
+    if area.has_parameter_appearance() {
+        line(
+            &mut out,
+            1,
+            "<appearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"TableCellAppearance\">",
+        );
+        line(
+            &mut out,
+            2,
+            "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">",
+        );
+        scalar(&mut out, 3, "parameter", "Расшифровка");
+        line(&mut out, 3, "<value xsi:type=\"Parameter\">Probe</value>");
+        line(&mut out, 2, "</item>");
+        line(&mut out, 1, "</appearance>");
+    }
     out.push_str("\r\n</SchemaFile>");
     Ok(out.into_bytes())
 }
@@ -1578,6 +1690,13 @@ mod tests {
         )))
     }
 
+    fn area_template_appearance_document() -> Vec<u8> {
+        decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template-appearance/area-schema-file.xml.b64"
+        )))
+    }
+
     fn inline_settings(source: &str) -> DcsInlineSettingsFragment {
         let start = source.find("<dcsset:settings").unwrap();
         let close = "</dcsset:settings>";
@@ -1605,6 +1724,39 @@ mod tests {
         .unwrap();
         let emitted = String::from_utf8(emitted).unwrap().replace("\r\n", "\n");
         assert_eq!(emitted.trim_end(), source.trim_end());
+    }
+
+    #[test]
+    fn platform_area_appearance_side_table_parses_and_emits_exact_documents() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template-appearance/native-template.xml.b64"
+        )));
+        let area = parse_dcs_area_template_storage_document(
+            &area_template_appearance_document(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-area-template-appearance",
+        )
+        .unwrap();
+        assert!(area.has_parameter_appearance());
+        assert_eq!(
+            emit_dcs_area_template_storage_document(&area).unwrap(),
+            area_template_appearance_document()
+        );
+        let parsed_source = parse_dcs_area_template_source_document(
+            &source,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:dcs-area-template-appearance/source",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed_source.name(), area.name());
+        assert_eq!(parsed_source.parameter_name(), area.parameter_name());
+        assert_eq!(parsed_source.expression(), area.expression());
+        assert_eq!(
+            parsed_source.has_parameter_appearance(),
+            area.has_parameter_appearance()
+        );
     }
 
     #[test]

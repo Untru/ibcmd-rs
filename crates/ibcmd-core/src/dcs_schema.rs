@@ -37,6 +37,7 @@ pub struct DcsSchemaAreaTemplate {
     name: CanonicalText,
     parameter_name: CanonicalText,
     expression: CanonicalText,
+    parameter_appearance: bool,
     provenance: SourceProvenance,
 }
 
@@ -60,8 +61,16 @@ impl DcsSchemaAreaTemplate {
             name,
             parameter_name,
             expression,
+            parameter_appearance: false,
             provenance,
         })
+    }
+
+    /// Enables the exact `Расшифровка = Parameter(Probe)` table-cell
+    /// appearance authenticated by the dedicated 2214 side-table cohort.
+    pub fn with_parameter_appearance(mut self) -> Self {
+        self.parameter_appearance = true;
+        self
     }
 
     pub const fn name(&self) -> &CanonicalText {
@@ -72,6 +81,9 @@ impl DcsSchemaAreaTemplate {
     }
     pub const fn expression(&self) -> &CanonicalText {
         &self.expression
+    }
+    pub const fn has_parameter_appearance(&self) -> bool {
+        self.parameter_appearance
     }
     pub const fn provenance(&self) -> &SourceProvenance {
         &self.provenance
@@ -84,19 +96,26 @@ struct DcsSchemaAreaTemplateWire {
     name: CanonicalText,
     parameter_name: CanonicalText,
     expression: CanonicalText,
+    #[serde(default)]
+    parameter_appearance: bool,
     provenance: SourceProvenance,
 }
 
 impl<'de> Deserialize<'de> for DcsSchemaAreaTemplate {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let wire = DcsSchemaAreaTemplateWire::deserialize(deserializer)?;
-        Self::new(
+        let value = Self::new(
             wire.name,
             wire.parameter_name,
             wire.expression,
             wire.provenance,
         )
-        .map_err(de::Error::custom)
+        .map_err(de::Error::custom)?;
+        Ok(if wire.parameter_appearance {
+            value.with_parameter_appearance()
+        } else {
+            value
+        })
     }
 }
 
@@ -1599,6 +1618,14 @@ mod tests {
         let mut drift: serde_json::Value = serde_json::from_str(&json).unwrap();
         drift["expression"] = serde_json::json!("Other");
         assert!(serde_json::from_value::<DcsSchemaAreaTemplate>(drift).is_err());
+
+        let styled = value.with_parameter_appearance();
+        assert!(styled.has_parameter_appearance());
+        let json = serde_json::to_string(&styled).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaAreaTemplate>(&json).unwrap(),
+            styled
+        );
     }
 
     fn variant(name: &str) -> DcsSchemaSettingsVariantShell {

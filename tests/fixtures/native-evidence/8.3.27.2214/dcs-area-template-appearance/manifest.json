@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-area-template-appearance-parameter",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "Unica retained AreaTemplate vocabulary plus historical side-table cross-evidence; platform output is the authority",
+    "path": "seed/Template.xml",
+    "size": 4789,
+    "sha256": "dc4d150c640613687255f4745e04975d45e82581039bddd8e8159e6b12ccdb25"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "277c6847b2ae37bbadefdc939c1e9b0d7d2f4577bc8c11d8e053f2270485f232",
+    "round_2_cf_sha256": "e3309b1bbde2117fce7995e82b50259cd4c8cf3529f35a3b0277574dadbf86fb",
+    "native_template_sha256": "05afaf76bee2a1256cd7ef74ef87611012d93e81e281e2f8dfcceabb4ec4c9ab",
+    "packed_body_sha256": "139c04c1fc27eda598d987ea22bc4654850d9b7ac38d815b0aeec3a8d2438362",
+    "unpacked_body_sha256": "0b1b8c051c0dffdb8546068733347900f310e7c921ca6ecc275bbeb87845af22",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": { "path": "configuration.cf.b64", "decoded_size": 81622, "sha256": "e3309b1bbde2117fce7995e82b50259cd4c8cf3529f35a3b0277574dadbf86fb" },
+    "native_template": { "path": "native-template.xml.b64", "decoded_size": 4800, "sha256": "05afaf76bee2a1256cd7ef74ef87611012d93e81e281e2f8dfcceabb4ec4c9ab" },
+    "packed_body": { "path": "raw-packed.bin.b64", "decoded_size": 1241, "sha256": "139c04c1fc27eda598d987ea22bc4654850d9b7ac38d815b0aeec3a8d2438362" },
+    "unpacked_body": { "path": "raw-unpacked.bin.b64", "decoded_size": 5566, "sha256": "0b1b8c051c0dffdb8546068733347900f310e7c921ca6ecc275bbeb87845af22" },
+    "area_schema_file": { "path": "area-schema-file.xml.b64", "decoded_size": 1371, "sha256": "1b7c1fa8675ee9ef7d5245b387f7a25fc610a4c22f6f29cf57965b9bbbcceaec" }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [3029, 1142],
+    "primary_schema_sha256": "5124cc181b46586289d2a1ff667f2e8e659c27beefcf806f1f54cc256d82be0c",
+    "settings_sha256": "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4",
+    "trailing_area_schema_file_size": 1371,
+    "trailing_area_schema_file_sha256": "1b7c1fa8675ee9ef7d5245b387f7a25fc610a4c22f6f29cf57965b9bbbcceaec",
+    "primary_and_settings_equal_dcs_core": true
+  },
+  "compiler_acceptance": {
+    "status": "accepted",
+    "method": "ibcmd-rs common source compiler body overlaid into the retained clean-room CF, loaded and applied in a fresh ru_RU file infobase, saved, then Report.DcsCorpus recursively exported by the pinned original ibcmd",
+    "candidate_body_unpacked_size": 5842,
+    "candidate_body_unpacked_sha256": "c348039f232f44a5ea1b7299c247ee90894bf5dabd268304133f208bb402420c",
+    "candidate_cf_sha256": "13355e67b294d06df70383a8db00575670f63e871686a994851ed8712d9060ff",
+    "platform_saved_cf_size": 81645,
+    "platform_saved_cf_sha256": "e29d45a23dca5a7cb7c068accd0dce7dcb4a8156a8725cf28770c142129b845a",
+    "reexported_template_size": 4800,
+    "reexported_template_sha256": "05afaf76bee2a1256cd7ef74ef87611012d93e81e281e2f8dfcceabb4ec4c9ab",
+    "reexport_matches_two_round_native_template": true
+  },
+  "cohort": {
+    "template_name": "AreaProbe",
+    "source_cell_order": ["item:Field", "appearance"],
+    "storage_cell_order": ["item:Field", "appIndex"],
+    "appearance_parameter": "Расшифровка",
+    "appearance_value_type": "Parameter",
+    "appearance_value": "Probe",
+    "side_table_type": "TableCellAppearance",
+    "app_index": 0,
+    "side_table_count": 1,
+    "referenced_indexes_cover_table": true
+  },
+  "negative_observations": [
+    "The same appearance nested under Field was discarded by the platform.",
+    "The same appearance after the Field item in tableCell was discarded by the platform.",
+    "Only the source order item then appearance produced a retained source appearance and storage appIndex side table."
+  ],
+  "non_claims": [
+    "No color, StyleItem, picture, font, border, localized text value, multiple appearance items, indexes, cells or templates is inferred.",
+    "No repeated-index or sparse-index behavior is inferred from the exact single-index coordinate.",
+    "No field/group/header/footer template binding, defaultSettings, other patch build or EDT round trip is inferred.",
+    "Reverse compiler acceptance is proven only for the exact Parameter appearance/appIndex coordinate."
+  ]
+}

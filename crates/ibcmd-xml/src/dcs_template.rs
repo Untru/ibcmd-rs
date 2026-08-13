@@ -1037,6 +1037,21 @@ mod tests {
     }
 
     #[test]
+    fn platform_area_appearance_source_compiles_to_exact_side_table() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template-appearance/native-template.xml.b64"
+        )));
+        let expected_area = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template-appearance/area-schema-file.xml.b64"
+        )));
+        let documents = compile_dcs_schema_template_source_documents(&source).unwrap();
+        assert_eq!(documents.settings().len(), 1);
+        assert_eq!(documents.terminal_schema_file(), expected_area);
+    }
+
+    #[test]
     fn binds_only_direct_variants_positionally() {
         let source = r#"<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings"><settingsVariant><dcsset:name>A</dcsset:name></settingsVariant><settingsVariant><dcsset:name>B</dcsset:name></settingsVariant></DataCompositionSchema>"#;
         let blocks = vec![

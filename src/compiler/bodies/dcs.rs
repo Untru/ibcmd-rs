@@ -1071,6 +1071,42 @@ mod tests {
     }
 
     #[test]
+    fn platform_area_appearance_compiles_to_exact_app_index_side_table() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template-appearance/native-template.xml.b64"
+        )));
+        let expected_area = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template-appearance/area-schema-file.xml.b64"
+        )));
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+        if let Ok(path) = std::env::var("IBCMD_DCS_CANDIDATE_OUT") {
+            std::fs::write(path, decoded.plaintext()).unwrap();
+        }
+        assert_eq!(
+            decoded.documents().last().copied(),
+            Some(expected_area.as_slice())
+        );
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<dcscor:parameter>Расшифровка</dcscor:parameter>"));
+        assert!(!exported_text.contains("appIndex"));
+        let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
+        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+    }
+
+    #[test]
     fn schema_compiler_rejects_every_unowned_settings_child() {
         for unknown in [
             "<dcsset:outputParameters/>",
