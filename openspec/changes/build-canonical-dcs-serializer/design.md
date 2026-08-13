@@ -22,9 +22,10 @@ Form ListSettings.
 вариантов использует этот общий binder. Первый typed inner-schema cohort также
 общий: Local/Object simple one-string-field и rich string/decimal cohorts,
 calculated field, ungrouped totals, scalar parameter и variant shells проходят через canonical IR и
-evidence-gated XML codec. Query/Union/link, TypeId/current-config,
-AreaTemplate и cardinality больше двух остаются unsupported до отдельных
-правил.
+evidence-gated XML codec. Один exact current-config reference coordinate также
+типизирован: `CatalogRef.FilterProbe` ↔ platform storage `TypeId`; другие
+reference/type families, Query/Union/link, AreaTemplate и cardinality больше
+двух остаются unsupported до отдельных правил.
 
 Source-owned delegation не является вторым сериализатором: неизменённое
 поддерево остаётся у одного доказанного physical owner. Его мутация, перенос в

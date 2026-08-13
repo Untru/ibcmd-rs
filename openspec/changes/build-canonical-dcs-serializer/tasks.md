@@ -58,8 +58,12 @@
   settings-variant shell. Native `SchemaFile` parse и canonical source emit
   проходят один codec; production MSSQL route больше не откатывается на
   plaintext/legacy Schema writer для этого cohort.
-- [ ] Полный typed schema API ещё не реализован: Query/Union/link,
-  TypeId/current-config и AreaTemplate требуют отдельных evidence-срезов;
+- [x] Первый exact `TypeId`/current-config reference coordinate реализован
+  семантически: storage UUID разрешается в `CatalogRef.FilterProbe`, source
+  QName строится общим XML codec, а собранный offline CF принят, применён,
+  сохранён и повторно выгружен чистой базой 8.3.27.2214.
+- [ ] Полный typed schema API ещё не реализован: Query/Union/link, остальные
+  TypeId/type families и AreaTemplate требуют отдельных evidence-срезов;
   неподтверждённые schema shapes fail-closed.
 - [ ] `defaultSettings`, nested variants, `AreaTemplate` и остальные schema
   branches остаются вне доказанного общего layer.
