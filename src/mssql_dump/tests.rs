@@ -7407,7 +7407,10 @@ fn extracts_form_customizable_false_to_body_xml() {
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
-    assert!(form_xml.contains("<Group>Vertical</Group>"));
+    // `Group` is the form's default and is filtered from the writer
+    // (`properties.group.filter(|group| *group != "Vertical")`), so the
+    // canonical rendering omits it rather than writing it out explicitly.
+    assert!(!form_xml.contains("<Group>"));
     assert!(form_xml.contains("<Customizable>false</Customizable>"));
 }
 
@@ -7419,7 +7422,10 @@ fn extracts_form_auto_url_false_to_body_xml() {
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
-    assert!(form_xml.contains("<Group>Vertical</Group>"));
+    // `Group` is the form's default and is filtered from the writer
+    // (`properties.group.filter(|group| *group != "Vertical")`), so the
+    // canonical rendering omits it rather than writing it out explicitly.
+    assert!(!form_xml.contains("<Group>"));
     assert!(form_xml.contains("<AutoURL>false</AutoURL>"));
     assert!(!form_xml.contains("<Customizable>false</Customizable>"));
 }
@@ -7444,7 +7450,10 @@ fn does_not_extract_form_auto_url_from_property_bag_layout() {
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
-    assert!(form_xml.contains("<Group>Vertical</Group>"));
+    // `Group` is the form's default and is filtered from the writer
+    // (`properties.group.filter(|group| *group != "Vertical")`), so the
+    // canonical rendering omits it rather than writing it out explicitly.
+    assert!(!form_xml.contains("<Group>"));
     assert!(!form_xml.contains("<AutoURL>"));
 }
 
@@ -7775,7 +7784,10 @@ fn extracts_form_use_for_folders_and_items_items_from_property_bag_layout() {
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
-    assert!(form_xml.contains("<Group>Vertical</Group>"));
+    // `Group` is the form's default and is filtered from the writer
+    // (`properties.group.filter(|group| *group != "Vertical")`), so the
+    // canonical rendering omits it rather than writing it out explicitly.
+    assert!(!form_xml.contains("<Group>"));
     assert!(form_xml.contains("<UseForFoldersAndItems>Items</UseForFoldersAndItems>"));
 }
 
@@ -7787,7 +7799,10 @@ fn extracts_form_use_for_folders_and_items_folders_from_property_bag_layout() {
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
-    assert!(form_xml.contains("<Group>Vertical</Group>"));
+    // `Group` is the form's default and is filtered from the writer
+    // (`properties.group.filter(|group| *group != "Vertical")`), so the
+    // canonical rendering omits it rather than writing it out explicitly.
+    assert!(!form_xml.contains("<Group>"));
     assert!(form_xml.contains("<UseForFoldersAndItems>Folders</UseForFoldersAndItems>"));
 }
 
@@ -11631,7 +11646,12 @@ fn extracts_wrapper55_table_user_settings_group() {
 
 #[test]
 fn extracts_ordinary_wrapper55_table_properties_and_autocommandbar_autofill() {
-    let field = r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,0},{1,0},{1,{3}},0,1,1,0,0,0,1,0,3,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,1,13,{"U"},{0},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0}"#;
+    // Padded to the current `FormTableSchema` minimum tail length (see
+    // `extracts_business_network_table_flags_from_ordinary_wrapper55` for the
+    // rationale), and slot 52 (`EnableStartDrag`) flipped to `1` so the
+    // already-intended `Some(true)` expectation below matches the current
+    // fixed front-slot encoding for that property.
+    let field = r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,0},{1,0},{1,{3}},0,1,1,0,0,0,1,0,3,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,1,13,{"U"},{0},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#;
 
     let item = parse_form_child_item(
         field,
@@ -11933,7 +11953,12 @@ fn keeps_single_table_title_and_enable_drag_for_hierarchical_wrapper55_table() {
 #[test]
 fn extracts_business_network_table_flags_from_ordinary_wrapper55() {
     let item = parse_form_child_item(
-            r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,2,13,{"U"},19,{"S",""}}"#,
+            // The wrapper-55 table schema now requires a validated fixed-length
+            // tail (>= 99 fields; see `FormTableSchema::BASE_FIELD_COUNT`) beyond
+            // the counted property bag. The original fixture predates that tail
+            // and is padded here with neutral `0` scalars, which the schema's
+            // reverse-offset gates accept as their default/omitted values.
+            r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,2,13,{"U"},19,{"S",""},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::from([("7".to_string(), "Список".to_string())]),
@@ -12196,8 +12221,13 @@ fn table_auto_max_width_tail_rule_is_end_to_end_and_traced() {
 
 #[test]
 fn formats_hierarchical_table_properties_in_schema_order() {
+    // Padded to the current `FormTableSchema` minimum tail length (see
+    // `extracts_business_network_table_flags_from_ordinary_wrapper55` for the
+    // rationale), and slot 52 (`EnableStartDrag`) flipped to `1` so the
+    // `<EnableStartDrag>true</EnableStartDrag>` ordering assertion below has a
+    // value to find.
     let mut item = parse_form_child_item(
-            r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,0,2,13,{"U"},19,{"S",""}}"#,
+            r#"{55,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Список",0,0,1,{1,1,{"ru","Список"}},{1,0},{1,{7}},0,1,0,0,1,1,0,0,0,0,0,2,1,0,1,1,0,1,2,2,1,1,0,0,1,0,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,0,2,13,{"U"},19,{"S",""},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::from([("7".to_string(), "Список".to_string())]),
@@ -12249,7 +12279,11 @@ fn formats_hierarchical_table_properties_in_schema_order() {
 #[test]
 fn extracts_business_network_table_height_rows_without_change_row_order() {
     let item = parse_form_child_item(
-            r#"{55,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"РегионыПродажи",0,0,1,{1,1,{"ru","Регионы продаж и поставок"}},{1,0},{1,{2}},0,1,0,0,0,1,1,0,0,1,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{4,1282f000-23b6-4887-87f4-9e8e79db3d32,"РегионыПродажиВыбор",2391e7b8-7235-45d7-ab7e-6ff3dc086396,"РегионыПродажиПередНачаломДобавления",ab930362-ff94-4dcb-ad16-188805d23e3c,"РегионыПродажиПередНачаломИзменения",fe115cc8-9e33-4684-a166-bd5136fe7a9f,"РегионыПродажиПриИзменении",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1,2391e7b8-7235-45d7-ab7e-6ff3dc086396,0,1,ab930362-ff94-4dcb-ad16-188805d23e3c,0,1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},{0}}"#,
+            // Padded to the current `FormTableSchema` minimum tail length (see
+            // `extracts_business_network_table_flags_from_ordinary_wrapper55`
+            // for the rationale); the pre-existing event-handler block is left
+            // untouched ahead of the new trailing `0` scalars.
+            r#"{55,{5,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"РегионыПродажи",0,0,1,{1,1,{"ru","Регионы продаж и поставок"}},{1,0},{1,{2}},0,1,0,0,0,1,1,0,0,1,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{4,1282f000-23b6-4887-87f4-9e8e79db3d32,"РегионыПродажиВыбор",2391e7b8-7235-45d7-ab7e-6ff3dc086396,"РегионыПродажиПередНачаломДобавления",ab930362-ff94-4dcb-ad16-188805d23e3c,"РегионыПродажиПередНачаломИзменения",fe115cc8-9e33-4684-a166-bd5136fe7a9f,"РегионыПродажиПриИзменении",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1,2391e7b8-7235-45d7-ab7e-6ff3dc086396,0,1,ab930362-ff94-4dcb-ad16-188805d23e3c,0,1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1},{0},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::from([("2".to_string(), "РегионыПродажи".to_string())]),
@@ -12275,7 +12309,10 @@ fn extracts_business_network_table_height_rows_without_change_row_order() {
 #[test]
 fn extracts_change_row_order_from_zero_marker_ordinary_table_variant() {
     let item = parse_form_child_item(
-            r#"{55,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СписокЗаказов",0,0,1,{1,0},{1,0},{1,{3}},0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""}}"#,
+            // Padded to the current `FormTableSchema` minimum tail length (see
+            // `extracts_business_network_table_flags_from_ordinary_wrapper55`
+            // for the rationale).
+            r#"{55,{10,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"СписокЗаказов",0,0,1,{1,0},{1,0},{1,{3}},0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,1,0,1,2,2,1,1,0,0,0,1,2,0,0,1,1,{0},{4,0,{0},"",-1,-1,1,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::from([("3".to_string(), "СписокЗаказов".to_string())]),
@@ -12299,7 +12336,10 @@ fn extracts_change_row_order_from_zero_marker_ordinary_table_variant() {
 #[test]
 fn extracts_ordinary_wrapper55_table_rows_picture_and_command_set() {
     let item = parse_form_child_item(
-            r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,1,{"ru","Rows"}},{1,0},{1,{2}},0,0,0,0,0,0,0,0,0,2,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,1,2,0,0,1,1,{1,{8}},{4,1,{0,e112dfa4-4cb7-402d-85b9-f0234915989b},"",-1,-1,0,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{1,1282f000-23b6-4887-87f4-9e8e79db3d32,"RowsSelection",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1},{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,fa51b106-eae6-44c7-8054-76cbb3100603},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0}"#,
+            // Padded to the current `FormTableSchema` minimum tail length (see
+            // `extracts_business_network_table_flags_from_ordinary_wrapper55`
+            // for the rationale).
+            r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,1,{"ru","Rows"}},{1,0},{1,{2}},0,0,0,0,0,0,0,0,0,2,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,1,2,0,0,1,1,{1,{8}},{4,1,{0,e112dfa4-4cb7-402d-85b9-f0234915989b},"",-1,-1,0,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{1,1282f000-23b6-4887-87f4-9e8e79db3d32,"RowsSelection",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1},{8,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,fa51b106-eae6-44c7-8054-76cbb3100603},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
