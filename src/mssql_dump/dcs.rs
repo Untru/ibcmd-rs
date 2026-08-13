@@ -9,7 +9,9 @@ use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
     DcsChildParseOutcome, DcsSettingsChildrenError, DcsSettingsChildrenParts,
-    analyze_dcs_settings_document, emit_dcs_settings_children_parts, rewrite_dcs_settings_children,
+    analyze_dcs_schema_template_documents, analyze_dcs_settings_document,
+    bind_dcs_settings_to_source_variants, emit_dcs_settings_children_parts,
+    rewrite_dcs_settings_children,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -220,6 +222,37 @@ pub(crate) fn normalize_data_composition_schema_template_xml_with_profiles(
     let mut xml = canonicalize_data_composition_schema_documents(&schema_documents, object_refs)?;
     rewrite_data_composition_type_ids(&mut xml, type_index);
     insert_data_composition_settings(&mut xml, &settings)?;
+    Some(xml.into_bytes())
+}
+
+pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles(
+    documents: &[&[u8]],
+    type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
+    source_profile: &ProfileId,
+    target_profile: &ProfileId,
+) -> Option<Vec<u8>> {
+    let envelope = analyze_dcs_schema_template_documents(documents).ok()?;
+    let schema_documents = [
+        envelope.primary_schema_file(),
+        envelope.terminal_schema_file(),
+    ]
+    .into_iter()
+    .map(|document| std::str::from_utf8(document).ok())
+    .collect::<Option<Vec<_>>>()?;
+    let mut settings = Vec::with_capacity(envelope.settings().len());
+    for document in envelope.settings() {
+        let document = std::str::from_utf8(document).ok()?;
+        settings.push(canonicalize_data_composition_settings_document(
+            document,
+            object_refs,
+            source_profile,
+            target_profile,
+        )?);
+    }
+    let mut xml = canonicalize_data_composition_schema_documents(&schema_documents, object_refs)?;
+    rewrite_data_composition_type_ids(&mut xml, type_index);
+    xml = bind_dcs_settings_to_source_variants(&xml, &settings).ok()?;
     Some(xml.into_bytes())
 }
 
@@ -2831,20 +2864,30 @@ mod tests {
 
     #[test]
     fn platform_multi_variant_envelope_materializes_settings_positionally_byte_exact() {
-        let raw = decode_base64_fixture(include_str!(concat!(
+        let packed = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-multi-variant-envelope/raw/",
-            "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin.b64"
+            "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.deflate.b64"
         )));
         let expected = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-multi-variant-envelope/native-template.xml.b64"
         )));
 
-        let actual = normalize_data_composition_schema_template_xml(
-            &raw,
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .expect("platform-attested multi-variant body must decode");
+        let documents = body.documents();
+        let source_profile = ProfileId::parse("provider:mssql-legacy").unwrap();
+        let target_profile = ProfileId::parse("xml-2.20").unwrap();
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &documents,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &source_profile,
+            &target_profile,
         )
         .expect("platform-attested multi-variant DCS body must be exportable");
 

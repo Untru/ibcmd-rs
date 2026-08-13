@@ -41,8 +41,15 @@
   root `settingsVariant`: `u32@4` — число внешних `Settings`, далее идут
   `settings_count + 1` длин `u64`, а внешние documents связываются с variants
   позиционно и возвращаются inline в source XML.
-- [ ] Общий canonical schema/template API и multi-variant reverse compiler не
-  реализованы.
+- [x] Общий evidence-gated schema/template envelope API валидирует document
+  roles/QName/BOM/empty-terminal, связывает внешние `Settings` с direct
+  variants namespace-aware и обслуживает reverse compiler для доказанных
+  одного-двух variants; доказанный production MSSQL route использует decoder
+  ranges и не пересканирует plaintext по `<?xml`.
+- [ ] Полный typed schema API и общий inner-schema renderer ещё не реализованы:
+  schema shell остаётся source-owned, а legacy renderer временно владеет
+  TypeId/current-config/AreaTemplate lexical conversion и явно отделённым
+  compatibility fallback для ещё не сведённых дополнительных SchemaFile.
 - [ ] `defaultSettings`, nested variants, `AreaTemplate` и остальные schema
   branches остаются вне доказанного общего layer.
 

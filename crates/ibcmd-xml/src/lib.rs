@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod dcs;
+pub mod dcs_template;
 mod dialect;
 mod form_choice_parameters;
 pub mod metadata;
@@ -35,6 +36,11 @@ pub use dcs::{
     parse_form_list_settings_orders, platform_default_form_list_settings_conditional_appearance,
     platform_default_form_list_settings_filter, platform_default_form_list_settings_order,
     preflight_dcs_settings_serialization, rewrite_dcs_settings_children,
+};
+pub use dcs_template::{
+    DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DetachedDcsSchemaTemplateSource,
+    analyze_dcs_schema_template_documents, bind_dcs_settings_to_source_variants,
+    detach_dcs_settings_from_source_variants,
 };
 pub use dialect::{
     BomRule, DetectionCandidate, DialectDescriptor, DialectDetection, DialectError,

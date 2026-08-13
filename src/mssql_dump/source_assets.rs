@@ -1483,20 +1483,29 @@ pub(super) fn write_source_asset(
                     asset.primary_path.display()
                 )
             })?;
-            let inflated = body.plaintext().to_vec();
             let adapter = MssqlLegacyAdapter::from_legacy_selector(context.source_version);
             let target_profile =
                 ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
                     .expect("legacy source-version profiles are valid");
             let content = match body.layout() {
                 crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument => {
-                    normalize_data_composition_schema_template_xml_with_profiles(
-                        &inflated,
+                    let documents = body.documents();
+                    crate::mssql_dump::dcs::normalize_data_composition_schema_template_documents_with_profiles(
+                        &documents,
                         context.dcs_type_index,
                         context.object_refs,
                         adapter.provider_id(),
                         &target_profile,
                     )
+                    .or_else(|| {
+                        normalize_data_composition_schema_template_xml_with_profiles(
+                            body.plaintext(),
+                            context.dcs_type_index,
+                            context.object_refs,
+                            adapter.provider_id(),
+                            &target_profile,
+                        )
+                    })
                     .with_context(|| {
                         format!(
                             "failed to normalize native data-composition source asset {}",
@@ -1504,7 +1513,7 @@ pub(super) fn write_source_asset(
                         )
                     })?
                 }
-                crate::compiler::bodies::dcs::DcsBodyLayout::DirectXml => inflated,
+                crate::compiler::bodies::dcs::DcsBodyLayout::DirectXml => body.plaintext().to_vec(),
             };
             let path = output_dir.join(&asset.primary_path);
             if let Some(parent) = path.parent() {
