@@ -50,7 +50,8 @@ pub enum DcsSchemaBuildError {
     UnsupportedLanguage { language: String },
     /// The object data set did not contain exactly the attested two fields.
     UnexpectedDataSetFieldCount { expected: usize, actual: usize },
-    /// The attested field order is string followed by decimal.
+    /// The attested field order is string followed by decimal or one
+    /// generated reference.
     UnexpectedDataSetFieldTypeOrder,
     /// Two data-set fields used the same output data path.
     DuplicateDataSetFieldPath { path: String },
@@ -120,7 +121,7 @@ impl Display for DcsSchemaBuildError {
                 "DCS schema object data set requires exactly {expected} fields (actual {actual})"
             ),
             Self::UnexpectedDataSetFieldTypeOrder => formatter.write_str(
-                "DCS schema object data-set fields must be string followed by decimal",
+                "DCS schema object data-set fields must be string followed by decimal or one generated reference",
             ),
             Self::DuplicateDataSetFieldPath { path } => {
                 write!(formatter, "DCS schema data-set field path `{path}` is duplicated")
@@ -260,11 +261,47 @@ impl<'de> Deserialize<'de> for DcsSchemaDecimalType {
 }
 
 /// Closed field value-type variants admitted by the first schema cohort.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum DcsSchemaFieldType {
     String(DcsSchemaStringType),
     Decimal(DcsSchemaDecimalType),
+    Reference(DcsSchemaReferenceType),
+}
+
+/// One generated current-configuration reference, represented semantically
+/// rather than by the configuration-local storage UUID.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaReferenceType {
+    qualified_name: CanonicalText,
+}
+
+impl DcsSchemaReferenceType {
+    pub fn new(qualified_name: CanonicalText) -> Result<Self, DcsSchemaBuildError> {
+        require_text("reference type qualified name", &qualified_name)?;
+        Ok(Self { qualified_name })
+    }
+
+    pub const fn qualified_name(&self) -> &CanonicalText {
+        &self.qualified_name
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaReferenceTypeWire {
+    qualified_name: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaReferenceType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaReferenceTypeWire::deserialize(deserializer)?;
+        Self::new(wire.qualified_name).map_err(de::Error::custom)
+    }
 }
 
 /// One local DCS data source. Its type is fixed by this semantic type and is
@@ -334,8 +371,8 @@ impl DcsSchemaDataSetField {
         &self.field
     }
 
-    pub const fn value_type(&self) -> DcsSchemaFieldType {
-        self.value_type
+    pub const fn value_type(&self) -> &DcsSchemaFieldType {
+        &self.value_type
     }
 }
 
@@ -385,7 +422,10 @@ impl DcsSchemaDataSetObject {
         }
         if !matches!(fields[0].value_type(), DcsSchemaFieldType::String(_))
             || (fields.len() == 2
-                && !matches!(fields[1].value_type(), DcsSchemaFieldType::Decimal(_)))
+                && !matches!(
+                    fields[1].value_type(),
+                    DcsSchemaFieldType::Decimal(_) | DcsSchemaFieldType::Reference(_)
+                ))
         {
             return Err(DcsSchemaBuildError::UnexpectedDataSetFieldTypeOrder);
         }
@@ -811,7 +851,10 @@ impl DcsSchema {
                     .to_owned(),
             });
         }
-        let rich = data_set.fields().len() == DCS_SCHEMA_DATA_SET_FIELD_COUNT;
+        let rich = data_set
+            .fields()
+            .get(1)
+            .is_some_and(|field| matches!(field.value_type(), DcsSchemaFieldType::Decimal(_)));
         if rich != calculated_field.is_some() || rich != parameter.is_some() {
             return Err(DcsSchemaBuildError::UnexpectedDataSetFieldTypeOrder);
         }
@@ -994,6 +1037,9 @@ fn validate_retained_bytes(schema: &DcsSchema) -> Result<(), DcsSchemaBuildError
     for field in schema.data_set.fields() {
         retained = add_retained(retained, field.data_path().as_str().len())?;
         retained = add_retained(retained, field.field().as_str().len())?;
+        if let DcsSchemaFieldType::Reference(reference) = field.value_type() {
+            retained = add_retained(retained, reference.qualified_name().as_str().len())?;
+        }
     }
     if let Some(calculated) = &schema.calculated_field {
         retained = add_retained(retained, calculated.data_path().as_str().len())?;
@@ -1070,6 +1116,17 @@ mod tests {
         .unwrap()
     }
 
+    fn reference_field() -> DcsSchemaDataSetField {
+        DcsSchemaDataSetField::new(
+            text("Owner"),
+            text("Owner"),
+            DcsSchemaFieldType::Reference(
+                DcsSchemaReferenceType::new(text("CatalogRef.FilterProbe")).unwrap(),
+            ),
+        )
+        .unwrap()
+    }
+
     fn variant(name: &str) -> DcsSchemaSettingsVariantShell {
         DcsSchemaSettingsVariantShell::new(
             text(name),
@@ -1136,6 +1193,30 @@ mod tests {
         let json = serde_json::to_string(&schema).unwrap();
         assert_eq!(serde_json::from_str::<DcsSchema>(&json).unwrap(), schema);
         assert_eq!(serde_json::to_string(&schema).unwrap(), json);
+    }
+
+    #[test]
+    fn reference_field_is_semantic_bounded_and_serde_stable() {
+        let schema = DcsSchema::new_simple(
+            DcsSchemaLocalDataSource::new(text("ИсточникДанных1")).unwrap(),
+            DcsSchemaDataSetObject::new(
+                text("ProbeData"),
+                vec![string_field(), reference_field()],
+                text("ИсточникДанных1"),
+                text("ProbeData"),
+            )
+            .unwrap(),
+            vec![variant("Main")],
+            provenance(),
+        )
+        .unwrap();
+        assert!(matches!(
+            schema.data_set().fields()[1].value_type(),
+            DcsSchemaFieldType::Reference(reference)
+                if reference.qualified_name().as_str() == "CatalogRef.FilterProbe"
+        ));
+        let json = serde_json::to_string(&schema).unwrap();
+        assert_eq!(serde_json::from_str::<DcsSchema>(&json).unwrap(), schema);
     }
 
     #[test]

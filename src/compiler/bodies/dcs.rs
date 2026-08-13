@@ -824,6 +824,57 @@ mod tests {
     }
 
     #[test]
+    fn platform_type_id_reference_source_compiles_and_exports_through_common_codec() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-typeid-reference/native-template.xml.b64"
+        )));
+        let compiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &source,
+        )
+        .expect("platform-attested current-config reference source must compile");
+        let decoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &compiled,
+        )
+        .unwrap();
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            crate::mssql_dump::DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.FilterProbe".to_owned(),
+            },
+        );
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &type_index,
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("d5p1:CatalogRef.FilterProbe"));
+        let recompiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &exported,
+        )
+        .unwrap();
+        let redecoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &recompiled,
+        )
+        .unwrap();
+        assert_eq!(redecoded.document_count(), decoded.document_count());
+    }
+
+    #[test]
     fn schema_decoder_rejects_zero_settings_count() {
         let mut plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS)]);
         plain[4..8].copy_from_slice(&0u32.to_le_bytes());

@@ -11,7 +11,7 @@ use ibcmd_xml::{
     DcsChildParseOutcome, DcsInlineSettingsFragment, DcsSettingsChildrenError,
     DcsSettingsChildrenParts, analyze_dcs_schema_template_documents, analyze_dcs_settings_document,
     emit_dcs_inner_schema_source_document, emit_dcs_settings_children_parts,
-    parse_dcs_inner_schema_storage_document, rewrite_dcs_settings_children,
+    parse_dcs_inner_schema_storage_document_with_references, rewrite_dcs_settings_children,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -227,16 +227,26 @@ pub(crate) fn normalize_data_composition_schema_template_xml_with_profiles(
 
 pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles(
     documents: &[&[u8]],
-    _type_index: &DcsTypeIndex,
+    type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Option<Vec<u8>> {
     let envelope = analyze_dcs_schema_template_documents(documents).ok()?;
-    let schema = parse_dcs_inner_schema_storage_document(
+    let reference_types = type_index
+        .iter()
+        .filter_map(|(type_id, resolution)| match resolution {
+            DcsTypeResolution::Type { qname } => qname
+                .strip_prefix(CFG_PREFIX)
+                .map(|name| (type_id.clone(), name.to_owned())),
+            DcsTypeResolution::KeepId | DcsTypeResolution::TypeSet { .. } => None,
+        })
+        .collect();
+    let schema = parse_dcs_inner_schema_storage_document_with_references(
         envelope.primary_schema_file(),
         source_profile.clone(),
         "mssql:dcs-schema-template/primary-schema-file",
+        &reference_types,
     )
     .ok()?;
     let mut settings = Vec::with_capacity(envelope.settings().len());
@@ -2890,6 +2900,40 @@ mod tests {
         )
         .expect("platform-attested multi-variant DCS body must be exportable");
 
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_type_id_reference_body_exports_byte_exact_through_common_codec() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-typeid-reference/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-typeid-reference/native-template.xml.b64"
+        )));
+        let mut type_index = BTreeMap::new();
+        type_index.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            DcsTypeResolution::Type {
+                qname: "cfg:CatalogRef.FilterProbe".to_owned(),
+            },
+        );
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        let documents = body.documents();
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &documents,
+            &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
         assert_eq!(actual, expected);
     }
 

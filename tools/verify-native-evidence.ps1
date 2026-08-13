@@ -965,6 +965,41 @@ Assert-Equal (@($dcsFilterPolicy.policy.supportedComparisonTypes) -join ',') 'Eq
 Assert-Equal (@($dcsFilterPolicy.policy.supportedRightTypes) -join ',') 'string' 'DCS filter right type'
 Assert-Equal $dcsFilterPolicy.policy.maxEmittedItems 1 'DCS filter emission cardinality'
 
+$dcsTypeIdRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-typeid-reference'
+$dcsTypeIdManifest = Get-Content -LiteralPath (Join-Path $dcsTypeIdRoot 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsTypeIdManifest.schema_version 1 'DCS TypeId manifest schema version'
+Assert-Equal $dcsTypeIdManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-typeid-reference' 'DCS TypeId fixture ID'
+Assert-Equal $dcsTypeIdManifest.platform.version '8.3.27.2214' 'DCS TypeId platform version'
+Assert-Equal $dcsTypeIdManifest.platform.database_locale 'ru_RU' 'DCS TypeId database locale'
+Assert-Equal $dcsTypeIdManifest.rounds.native_template_equal $true 'DCS TypeId native equality'
+Assert-Equal $dcsTypeIdManifest.rounds.packed_body_equal $true 'DCS TypeId packed equality'
+Assert-Equal $dcsTypeIdManifest.rounds.unpacked_body_equal $true 'DCS TypeId unpacked equality'
+foreach ($artifact in @(
+    $dcsTypeIdManifest.retained.configuration,
+    $dcsTypeIdManifest.retained.native_template,
+    $dcsTypeIdManifest.retained.packed_body,
+    $dcsTypeIdManifest.retained.unpacked_body
+)) {
+    $null = Get-Base64EvidenceBytes $artifact $dcsTypeIdRoot
+}
+Assert-FileEvidence ([pscustomobject]@{ path=$dcsTypeIdManifest.seed.template_path; size=$dcsTypeIdManifest.seed.template_size; sha256=$dcsTypeIdManifest.seed.template_sha256 }) $dcsTypeIdRoot
+Assert-FileEvidence ([pscustomobject]@{ path=$dcsTypeIdManifest.seed.objects_path; size=$dcsTypeIdManifest.seed.objects_size; sha256=$dcsTypeIdManifest.seed.objects_sha256 }) $dcsTypeIdRoot
+Assert-Equal $dcsTypeIdManifest.mapping.storage_value '488c0ffa-ef24-480c-a420-3bd2736317f9' 'DCS TypeId storage mapping'
+Assert-Equal $dcsTypeIdManifest.mapping.source_value 'CatalogRef.FilterProbe' 'DCS TypeId source mapping'
+Assert-Equal $dcsTypeIdManifest.compiler_acceptance.candidate_cf_sha256 '485b71e5e42622a563c0551241b464b219e8c939b2dd285b4babfc231e28d377' 'DCS TypeId compiler candidate'
+Assert-Equal $dcsTypeIdManifest.compiler_acceptance.compiled_body_sha256 '099c803efaa22422914bb32f7a8214cf1bd4c2c7b2c73ec155b8b6f73f173f45' 'DCS TypeId compiled body'
+Assert-Equal $dcsTypeIdManifest.compiler_acceptance.reexported_native_template_sha256 $dcsTypeIdManifest.rounds.native_template_sha256 'DCS TypeId compiler re-export equality'
+Assert-Equal $dcsTypeIdManifest.compiler_acceptance.semantic_token_retained $dcsTypeIdManifest.mapping.source_value 'DCS TypeId compiler semantic retention'
+
+$dcsInnerPolicyPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-inner-schema-evidence.json'
+$dcsInnerPolicy = Get-Content -LiteralPath $dcsInnerPolicyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsInnerPolicy.sources.typeIdReference.fixtureId $dcsTypeIdManifest.fixture_id 'DCS inner policy TypeId fixture binding'
+Assert-Equal $dcsInnerPolicy.sources.typeIdReference.nativeXmlSha256 $dcsTypeIdManifest.rounds.native_template_sha256 'DCS inner policy TypeId native binding'
+Assert-Equal $dcsInnerPolicy.sources.typeIdReference.packedBodySha256 $dcsTypeIdManifest.rounds.packed_body_sha256 'DCS inner policy TypeId packed binding'
+Assert-Equal $dcsInnerPolicy.sources.typeIdReference.unpackedBodySha256 $dcsTypeIdManifest.rounds.unpacked_body_sha256 'DCS inner policy TypeId unpacked binding'
+Assert-Equal $dcsInnerPolicy.policy.referenceStorageTypeId $dcsTypeIdManifest.mapping.storage_value 'DCS inner policy TypeId value binding'
+Assert-Equal $dcsInnerPolicy.policy.referenceSourceQualifiedName $dcsTypeIdManifest.mapping.source_value 'DCS inner policy reference QName binding'
+
 $dcsConditionalRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance'
 $dcsConditionalManifestPath = Join-Path $dcsConditionalRoot 'manifest.json'
 if (-not (Test-Path -LiteralPath $dcsConditionalManifestPath -PathType Leaf)) {

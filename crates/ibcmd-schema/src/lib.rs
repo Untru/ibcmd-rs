@@ -3384,6 +3384,9 @@ pub struct DcsInnerSchemaPolicy {
     data_core_namespace_uri: String,
     xml_schema_namespace_uri: String,
     xsi_namespace_uri: String,
+    current_config_namespace_uri: String,
+    reference_storage_type_id: String,
+    reference_source_qualified_name: String,
     root_qname: String,
     xsi_type_attribute_qname: String,
     root_child_order: Vec<DcsInnerSchemaRootChildKind>,
@@ -3447,6 +3450,18 @@ impl DcsInnerSchemaPolicy {
 
     pub fn xsi_namespace_uri(&self) -> &str {
         &self.xsi_namespace_uri
+    }
+
+    pub fn current_config_namespace_uri(&self) -> &str {
+        &self.current_config_namespace_uri
+    }
+
+    pub fn reference_storage_type_id(&self) -> &str {
+        &self.reference_storage_type_id
+    }
+
+    pub fn reference_source_qualified_name(&self) -> &str {
+        &self.reference_source_qualified_name
     }
 
     pub fn root_qname(&self) -> &str {
@@ -4598,6 +4613,22 @@ struct DcsInnerSchemaEvidenceSources {
     core: DcsInnerSchemaCoreEvidence,
     simple_filter: DcsInnerSchemaSimpleFilterEvidence,
     multi_variant: DcsInnerSchemaMultiVariantEvidence,
+    type_id_reference: DcsInnerSchemaTypeIdReferenceEvidence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaTypeIdReferenceEvidence {
+    fixture_id: String,
+    seed_template_sha256: String,
+    round1_cf_sha256: String,
+    round2_cf_sha256: String,
+    native_xml_sha256: String,
+    packed_body_sha256: String,
+    unpacked_body_sha256: String,
+    round_trips: u32,
+    storage_type_id: String,
+    source_qualified_name: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -4669,6 +4700,9 @@ struct DcsInnerSchemaEvidencePolicy {
     data_core_namespace: String,
     xml_schema_namespace: String,
     xsi_namespace: String,
+    current_config_namespace: String,
+    reference_storage_type_id: String,
+    reference_source_qualified_name: String,
     root_qname: String,
     xsi_type_attribute_qname: String,
     root_child_order: Vec<String>,
@@ -5726,7 +5760,7 @@ impl DcsInnerSchemaEvidenceCorpus {
         let expected_source = DcsInnerSchemaEvidenceSource {
             product: "1C:Enterprise Platform".to_owned(),
             release: "8.3.27 / XML 2.20".to_owned(),
-            derivation: "bounded inner DataCompositionSchema policy synthesized from the immutable dcs-core, dcs-filter and two-variant envelope corpora on 8.3.27.2214; no other patch build or schema cohort is inferred".to_owned(),
+            derivation: "bounded inner DataCompositionSchema policy synthesized from the immutable dcs-core, dcs-filter, dcs-typeid-reference and two-variant envelope corpora on 8.3.27.2214; no other patch build or schema cohort is inferred".to_owned(),
         };
         let expected_sources = DcsInnerSchemaEvidenceSources {
             platform_line: "8.3.27".to_owned(),
@@ -5819,6 +5853,24 @@ impl DcsInnerSchemaEvidenceCorpus {
                 variant_names: vec!["Main".to_owned(), "Secondary Secondary".to_owned()],
                 source_variant_order_matches_external_settings_order: true,
             },
+            type_id_reference: DcsInnerSchemaTypeIdReferenceEvidence {
+                fixture_id: "8.3.27.2214-xml-2.20-dcs-typeid-reference".to_owned(),
+                seed_template_sha256:
+                    "88a5e42672923c9908654dad21bc5ce9833a486bed379cd8fee5a56669dc7080".to_owned(),
+                round1_cf_sha256:
+                    "10e812cd1bbedba323e13c74a44b2c2f808a8dbaf2b16b3f459a7946f348ca4e".to_owned(),
+                round2_cf_sha256:
+                    "2698d5e411c914f8c460516f59dbff477a294133ca502c2972fcbfe5bfb85ecd".to_owned(),
+                native_xml_sha256:
+                    "3a42405b2c790b00953984acd4340d2c66a23deee88592ca27ccc6f7ecddc1b0".to_owned(),
+                packed_body_sha256:
+                    "3edb0f46155b238c68f2b3879e25695ca148b197e6e706f7719a41953ac51ff5".to_owned(),
+                unpacked_body_sha256:
+                    "14bc430e2f284e08759a94f6e4cd78d344cfcc524281f979b16c8db03c7a0b90".to_owned(),
+                round_trips: 2,
+                storage_type_id: "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+                source_qualified_name: "CatalogRef.FilterProbe".to_owned(),
+            },
         };
 
         const SCHEMA_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -5835,6 +5887,10 @@ impl DcsInnerSchemaEvidenceCorpus {
             data_core_namespace: DATA_CORE_NS.to_owned(),
             xml_schema_namespace: XS_NS.to_owned(),
             xsi_namespace: XSI_NS.to_owned(),
+            current_config_namespace: "http://v8.1c.ru/8.1/data/enterprise/current-config"
+                .to_owned(),
+            reference_storage_type_id: "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            reference_source_qualified_name: "CatalogRef.FilterProbe".to_owned(),
             root_qname: schema_qname("DataCompositionSchema"),
             xsi_type_attribute_qname: format!("{{{XSI_NS}}}type"),
             root_child_order: vec![
@@ -5932,7 +5988,7 @@ impl DcsInnerSchemaEvidenceCorpus {
         ];
         let expected_non_claims = [
             "AreaTemplate, appearance side tables and appIndex are outside this bounded inner-schema cohort.",
-            "TypeId and current-configuration references are outside this bounded inner-schema cohort.",
+            "Only the exact CatalogRef.FilterProbe direct DataSetObject field TypeId/current-config mapping is admitted; TypeSet, DefinedType, characteristic and other contexts remain outside this cohort.",
             "DataSetQuery, DataSetUnion, nested data sets and dataSetLink are outside this bounded inner-schema cohort.",
             "defaultSettings, nested settingsVariant, absent inline Settings, duplicate or empty variant metadata and more than two direct settingsVariant nodes are outside this bounded inner-schema cohort.",
             "No unknown QName, attribute, type token, enum token, child order, cross-profile replay or full DataCompositionSchema model is inferred.",
@@ -5974,6 +6030,9 @@ impl DcsInnerSchemaEvidenceCorpus {
             data_core_namespace_uri: self.policy.data_core_namespace,
             xml_schema_namespace_uri: self.policy.xml_schema_namespace,
             xsi_namespace_uri: self.policy.xsi_namespace,
+            current_config_namespace_uri: self.policy.current_config_namespace,
+            reference_storage_type_id: self.policy.reference_storage_type_id,
+            reference_source_qualified_name: self.policy.reference_source_qualified_name,
             root_qname: self.policy.root_qname,
             xsi_type_attribute_qname: self.policy.xsi_type_attribute_qname,
             root_child_order: vec![

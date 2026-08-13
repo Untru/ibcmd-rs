@@ -41,6 +41,7 @@ pub use dcs::{
 pub use dcs_schema::{
     DcsInlineSettingsFragment, DcsInnerSchemaError, emit_dcs_inner_schema_source_document,
     parse_dcs_inner_schema_storage_document,
+    parse_dcs_inner_schema_storage_document_with_references,
 };
 pub use dcs_template::{
     DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DcsSchemaTemplateOwnedDocuments,

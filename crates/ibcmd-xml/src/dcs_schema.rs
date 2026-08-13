@@ -7,8 +7,9 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::dcs_schema::{
     DcsSchema, DcsSchemaBuildError, DcsSchemaCalculatedField, DcsSchemaDataSetField,
     DcsSchemaDataSetObject, DcsSchemaDecimalType, DcsSchemaFieldType, DcsSchemaLocalDataSource,
-    DcsSchemaLocalString, DcsSchemaSettingsVariantShell, DcsSchemaStringParameter,
-    DcsSchemaStringType, DcsSchemaTotalFunction, DcsSchemaUngroupedTotalField,
+    DcsSchemaLocalString, DcsSchemaReferenceType, DcsSchemaSettingsVariantShell,
+    DcsSchemaStringParameter, DcsSchemaStringType, DcsSchemaTotalFunction,
+    DcsSchemaUngroupedTotalField,
 };
 use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
@@ -132,6 +133,22 @@ pub fn parse_dcs_inner_schema_storage_document(
     source_profile: ProfileId,
     locator: &str,
 ) -> Result<DcsSchema, DcsInnerSchemaError> {
+    parse_dcs_inner_schema_storage_document_with_references(
+        bytes,
+        source_profile,
+        locator,
+        &BTreeMap::new(),
+    )
+}
+
+/// Parses the bounded schema cohort while resolving configuration-local
+/// storage TypeId values to semantic current-configuration qualified names.
+pub fn parse_dcs_inner_schema_storage_document_with_references(
+    bytes: &[u8],
+    source_profile: ProfileId,
+    locator: &str,
+    reference_types: &BTreeMap<String, String>,
+) -> Result<DcsSchema, DcsInnerSchemaError> {
     let policy = policy()?;
     let document = parse_document(bytes)?;
     require_name(&document, None, "SchemaFile")?;
@@ -151,7 +168,11 @@ pub fn parse_dcs_inner_schema_storage_document(
     let children = elements(root)?;
     let mut cursor = 0usize;
     let data_source = parse_data_source(take(&children, &mut cursor, "dataSource")?, &policy)?;
-    let data_set = parse_data_set(take(&children, &mut cursor, "dataSet")?, &policy)?;
+    let data_set = parse_data_set(
+        take(&children, &mut cursor, "dataSet")?,
+        &policy,
+        reference_types,
+    )?;
     let rich = children
         .get(cursor)
         .is_some_and(|child| child.local == "calculatedField");
@@ -245,7 +266,7 @@ pub fn emit_dcs_inner_schema_source_document(
         line(&mut out, 2, "<field xsi:type=\"DataSetFieldField\">");
         scalar(&mut out, 3, "dataPath", field.data_path().as_str());
         scalar(&mut out, 3, "field", field.field().as_str());
-        emit_value_type(&mut out, 3, field.value_type());
+        emit_value_type(&mut out, 3, field.value_type(), &policy);
         line(&mut out, 2, "</field>");
     }
     scalar(
@@ -268,7 +289,8 @@ pub fn emit_dcs_inner_schema_source_document(
         emit_value_type(
             &mut out,
             2,
-            DcsSchemaFieldType::Decimal(calculated.value_type()),
+            &DcsSchemaFieldType::Decimal(calculated.value_type()),
+            &policy,
         );
         line(&mut out, 1, "</calculatedField>");
     }
@@ -288,7 +310,8 @@ pub fn emit_dcs_inner_schema_source_document(
         emit_value_type(
             &mut out,
             2,
-            DcsSchemaFieldType::String(parameter.value_type()),
+            &DcsSchemaFieldType::String(parameter.value_type()),
+            &policy,
         );
         let mut value = String::from("<value xsi:type=\"xs:string\">");
         value.push_str(&escape(parameter.value().as_str()));
@@ -330,6 +353,7 @@ fn parse_data_source(
 fn parse_data_set(
     e: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
+    reference_types: &BTreeMap<String, String>,
 ) -> Result<DcsSchemaDataSetObject, DcsInnerSchemaError> {
     require_schema(e, p, "dataSet")?;
     require_type(e, p, p.data_set_object_type_qname())?;
@@ -348,7 +372,7 @@ fn parse_data_set(
     }
     let fields = c[1..c.len() - 2]
         .iter()
-        .map(|field| parse_field(field, p))
+        .map(|field| parse_field(field, p, reference_types))
         .collect::<Result<Vec<_>, _>>()?;
     DcsSchemaDataSetObject::new(
         canonical(text(c[0])?)?,
@@ -362,13 +386,14 @@ fn parse_data_set(
 fn parse_field(
     e: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
+    reference_types: &BTreeMap<String, String>,
 ) -> Result<DcsSchemaDataSetField, DcsInnerSchemaError> {
     require_type(e, p, p.data_set_field_type_qname())?;
     let c = exact_children(e, p.data_set_field_child_order(), p.schema_namespace_uri())?;
     DcsSchemaDataSetField::new(
         canonical(text(c[0])?)?,
         canonical(text(c[1])?)?,
-        parse_value_type(c[2], p)?,
+        parse_value_type_with_references(c[2], p, reference_types)?,
     )
     .map_err(DcsInnerSchemaError::Build)
 }
@@ -514,6 +539,57 @@ fn parse_value_type(
     } else {
         unsupported("value Type QName is outside the cohort")
     }
+}
+
+fn parse_value_type_with_references(
+    e: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    reference_types: &BTreeMap<String, String>,
+) -> Result<DcsSchemaFieldType, DcsInnerSchemaError> {
+    let children = element_children(e)?;
+    if children.len() == 1
+        && children[0].namespace.as_deref() == Some(p.data_core_namespace_uri())
+        && children[0].local == "TypeId"
+    {
+        require_no_attributes(e)?;
+        require_no_attributes(children[0])?;
+        let type_id = text(children[0])?.to_ascii_lowercase();
+        let qualified_name = reference_types.get(&type_id).ok_or_else(|| {
+            DcsInnerSchemaError::UnsupportedSource(format!(
+                "TypeId {type_id} has no evidence-backed semantic resolution"
+            ))
+        })?;
+        if type_id != p.reference_storage_type_id()
+            || qualified_name != p.reference_source_qualified_name()
+        {
+            return unsupported("resolved TypeId is outside the evidenced reference cohort");
+        }
+        return Ok(DcsSchemaFieldType::Reference(
+            DcsSchemaReferenceType::new(canonical(qualified_name.clone())?)
+                .map_err(DcsInnerSchemaError::Build)?,
+        ));
+    }
+    if children.len() == 1
+        && children[0].namespace.as_deref() == Some(p.data_core_namespace_uri())
+        && children[0].local == "Type"
+    {
+        require_no_attributes(e)?;
+        require_no_attributes(children[0])?;
+        let qname = resolve_qname_text(children[0])?;
+        let expected = format!(
+            "{{{}}}{}",
+            p.current_config_namespace_uri(),
+            p.reference_source_qualified_name()
+        );
+        if qname != expected {
+            return unsupported("current-config Type is outside the evidenced reference cohort");
+        }
+        return Ok(DcsSchemaFieldType::Reference(
+            DcsSchemaReferenceType::new(canonical(p.reference_source_qualified_name().to_owned())?)
+                .map_err(DcsInnerSchemaError::Build)?,
+        ));
+    }
+    parse_value_type(e, p)
 }
 
 fn parse_document(bytes: &[u8]) -> Result<ParsedElement, DcsInnerSchemaError> {
@@ -846,7 +922,12 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
-fn emit_value_type(out: &mut String, depth: usize, value: DcsSchemaFieldType) {
+fn emit_value_type(
+    out: &mut String,
+    depth: usize,
+    value: &DcsSchemaFieldType,
+    policy: &DcsInnerSchemaPolicy,
+) {
     line(out, depth, "<valueType>");
     match value {
         DcsSchemaFieldType::String(v) => {
@@ -869,6 +950,15 @@ fn emit_value_type(out: &mut String, depth: usize, value: DcsSchemaFieldType) {
             scalar(out, depth + 2, "v8:AllowedSign", "Any");
             line(out, depth + 1, "</v8:NumberQualifiers>");
         }
+        DcsSchemaFieldType::Reference(v) => line(
+            out,
+            depth + 1,
+            &format!(
+                "<v8:Type xmlns:d5p1=\"{}\">d5p1:{}</v8:Type>",
+                policy.current_config_namespace_uri(),
+                escape(v.qualified_name().as_str())
+            ),
+        ),
     }
     line(out, depth, "</valueType>")
 }
@@ -971,6 +1061,22 @@ mod tests {
         compiled.primary_schema_file().to_vec()
     }
 
+    fn type_id_documents() -> Vec<Vec<u8>> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-typeid-reference/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        vec![
+            body[24..24 + first].to_vec(),
+            body[24 + first..24 + first + second].to_vec(),
+            body[24 + first + second..].to_vec(),
+        ]
+    }
+
     fn inline_settings(source: &str) -> DcsInlineSettingsFragment {
         let start = source.find("<dcsset:settings").unwrap();
         let close = "</dcsset:settings>";
@@ -1023,6 +1129,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(emitted, source);
+    }
+
+    #[test]
+    fn platform_type_id_reference_resolves_to_semantic_qname_and_emits_exact_source() {
+        let documents = type_id_documents();
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-typeid-reference/native-template.xml.b64"
+        )));
+        let mut references = BTreeMap::new();
+        references.insert(
+            "488c0ffa-ef24-480c-a420-3bd2736317f9".to_owned(),
+            "CatalogRef.FilterProbe".to_owned(),
+        );
+        let schema = parse_dcs_inner_schema_storage_document_with_references(
+            &documents[0],
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-typeid-reference",
+            &references,
+        )
+        .unwrap();
+        assert!(matches!(
+            schema.data_set().fields()[1].value_type(),
+            DcsSchemaFieldType::Reference(reference)
+                if reference.qualified_name().as_str() == "CatalogRef.FilterProbe"
+        ));
+        let expected_text = std::str::from_utf8(&expected).unwrap();
+        let emitted = emit_dcs_inner_schema_source_document(
+            &schema,
+            &[inline_settings(
+                expected_text.trim_start_matches('\u{feff}'),
+            )],
+        )
+        .unwrap();
+        assert_eq!(emitted, expected);
     }
 
     #[test]

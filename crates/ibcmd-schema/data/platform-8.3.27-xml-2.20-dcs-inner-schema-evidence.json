@@ -4,7 +4,7 @@
   "source": {
     "product": "1C:Enterprise Platform",
     "release": "8.3.27 / XML 2.20",
-    "derivation": "bounded inner DataCompositionSchema policy synthesized from the immutable dcs-core, dcs-filter and two-variant envelope corpora on 8.3.27.2214; no other patch build or schema cohort is inferred"
+    "derivation": "bounded inner DataCompositionSchema policy synthesized from the immutable dcs-core, dcs-filter, dcs-typeid-reference and two-variant envelope corpora on 8.3.27.2214; no other patch build or schema cohort is inferred"
   },
   "sources": {
     "platformLine": "8.3.27",
@@ -65,6 +65,18 @@
         "Secondary Secondary"
       ],
       "sourceVariantOrderMatchesExternalSettingsOrder": true
+    },
+    "typeIdReference": {
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-typeid-reference",
+      "seedTemplateSha256": "88a5e42672923c9908654dad21bc5ce9833a486bed379cd8fee5a56669dc7080",
+      "round1CfSha256": "10e812cd1bbedba323e13c74a44b2c2f808a8dbaf2b16b3f459a7946f348ca4e",
+      "round2CfSha256": "2698d5e411c914f8c460516f59dbff477a294133ca502c2972fcbfe5bfb85ecd",
+      "nativeXmlSha256": "3a42405b2c790b00953984acd4340d2c66a23deee88592ca27ccc6f7ecddc1b0",
+      "packedBodySha256": "3edb0f46155b238c68f2b3879e25695ca148b197e6e706f7719a41953ac51ff5",
+      "unpackedBodySha256": "14bc430e2f284e08759a94f6e4cd78d344cfcc524281f979b16c8db03c7a0b90",
+      "roundTrips": 2,
+      "storageTypeId": "488c0ffa-ef24-480c-a420-3bd2736317f9",
+      "sourceQualifiedName": "CatalogRef.FilterProbe"
     }
   },
   "policy": {
@@ -73,6 +85,9 @@
     "dataCoreNamespace": "http://v8.1c.ru/8.1/data/core",
     "xmlSchemaNamespace": "http://www.w3.org/2001/XMLSchema",
     "xsiNamespace": "http://www.w3.org/2001/XMLSchema-instance",
+    "currentConfigNamespace": "http://v8.1c.ru/8.1/data/enterprise/current-config",
+    "referenceStorageTypeId": "488c0ffa-ef24-480c-a420-3bd2736317f9",
+    "referenceSourceQualifiedName": "CatalogRef.FilterProbe",
     "rootQname": "{http://v8.1c.ru/8.1/data-composition-system/schema}DataCompositionSchema",
     "xsiTypeAttributeQname": "{http://www.w3.org/2001/XMLSchema-instance}type",
     "rootChildOrder": [
@@ -204,7 +219,7 @@
   ],
   "nonClaims": [
     "AreaTemplate, appearance side tables and appIndex are outside this bounded inner-schema cohort.",
-    "TypeId and current-configuration references are outside this bounded inner-schema cohort.",
+    "Only the exact CatalogRef.FilterProbe direct DataSetObject field TypeId/current-config mapping is admitted; TypeSet, DefinedType, characteristic and other contexts remain outside this cohort.",
     "DataSetQuery, DataSetUnion, nested data sets and dataSetLink are outside this bounded inner-schema cohort.",
     "defaultSettings, nested settingsVariant, absent inline Settings, duplicate or empty variant metadata and more than two direct settingsVariant nodes are outside this bounded inner-schema cohort.",
     "No unknown QName, attribute, type token, enum token, child order, cross-profile replay or full DataCompositionSchema model is inferred.",
