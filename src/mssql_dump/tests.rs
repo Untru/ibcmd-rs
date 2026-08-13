@@ -10979,8 +10979,17 @@ fn rejects_document_field_records_without_common_identity_or_name() {
 
 #[test]
 fn extracts_form_usual_group_group_from_layout_code() {
+    // The legacy 11-field layout code predates `FormUsualGroupSchema`'s
+    // current minimum item length (>= 30 total fields) and `group`'s
+    // `fields.get(8)` scalar fallback slot is, at that length, part of the
+    // now-required `{29,...}` options block instead — rebuilt as a minimal
+    // valid options block (`options[4] = 0` for `ShowTitle=false`,
+    // `options[27] = 4` for `Group=HorizontalIfPossible`; see
+    // `FormUsualGroupSchema`/`parse_form_usual_group_property_bag_group` /
+    // `FormChildItemShowTitleSchema` in `src/form_schema.rs`) padded to the
+    // 30-field minimum.
     let item = parse_form_child_item(
-        r#"{22,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0},3,0,0}"#,
+        r#"{22,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{8,3,0,1,100},{0,0,0},1,{29,0,0,3,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,4,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#,
         None,
         None,
         &BTreeMap::new(),
@@ -11074,7 +11083,12 @@ fn omits_default_vertical_group_for_page() {
     )
     .unwrap();
 
-    assert_eq!(item.group, Some("Vertical"));
+    // `FormPageSchema::properties` never produces `Some("Vertical")` for a
+    // Page item (its `group` match only yields `None` or one of the
+    // horizontal variants) — "Vertical" is the implicit default and is
+    // represented as `None`, not as an explicit value that then gets
+    // filtered at render time.
+    assert_eq!(item.group, None);
     let xml = format_form_child_items_xml(&[item], 1);
     assert!(!xml.contains("<Group>Vertical</Group>"));
 }
@@ -18327,7 +18341,12 @@ fn extracts_usual_group_title_style_refs_from_metadata_index() {
 
 #[test]
 fn omits_unresolved_and_ordinary_usual_group_title_style_slots() {
-    let ordinary_usual = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
+    // Padded to the current `FormUsualGroupSchema`/`FormChildItemShowTitleSchema`
+    // minimum item length (>= 30 total fields, even delta from 30; see
+    // `FormUsualGroupSchema::from_raw_layout`). The 29-field `{29,...}` options
+    // block itself is untouched — only trailing neutral `0` scalars are
+    // appended after the pre-existing tail.
+    let ordinary_usual = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#;
     let ordinary_popup = ordinary_usual.replacen(
         "{3,4,{0}},0,2,0,0,0},0,11111111",
         "{3,4,{0}},0,2,0,0,2},0,11111111",
@@ -18412,7 +18431,10 @@ fn preserves_unstyled_usual_group_title_before_width_order() {
 
 #[test]
 fn omits_property_bag_usual_group_show_title_false_for_title_variant() {
-    let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{8,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111}"#;
+    // Padded to the current `FormUsualGroupSchema` minimum item length (see
+    // `omits_unresolved_and_ordinary_usual_group_title_style_slots` for the
+    // rationale).
+    let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,1,{"ru","Shown title"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{8,3,0,1,100},{0,0,0},1,{29,0,0,3,1,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#;
 
     let item = parse_form_child_item(
         field,
@@ -18440,7 +18462,10 @@ fn omits_property_bag_usual_group_show_title_false_for_title_variant() {
 
 #[test]
 fn parses_property_bag_usual_group_horizontal_stretch() {
-    let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,1,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},1,0,0,1,{1,0},2,0,3,3,2,0,1,1,{3,4,{0}},0,2,0,3,0},0,1,0,1}"#;
+    // Padded to the current `FormUsualGroupSchema` minimum item length (see
+    // `omits_unresolved_and_ordinary_usual_group_title_style_slots` for the
+    // rationale).
+    let field = r#"{22,{22,22222222-2222-4222-8222-222222222222},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,1,2,{4,4,{0},4},{8,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},1,0,0,1,{1,0},2,0,3,3,2,0,1,1,{3,4,{0}},0,2,0,3,0},0,1,0,1,0,0,0,0,0}"#;
 
     let item = parse_form_child_item(
         field,
@@ -18467,7 +18492,10 @@ fn parses_property_bag_usual_group_horizontal_stretch() {
 #[test]
 fn parses_live_usual_group_width_false_stretch_and_usual_behavior() {
     let item = parse_form_child_item(
-            r#"{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ГруппаОсновная",{1,1,{"ru","Группа основная"}},{1,0},0,1,0,66,0,0,1,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,1,0,1}"#,
+            // Padded to the current `FormUsualGroupSchema` minimum item length
+            // (see `omits_unresolved_and_ordinary_usual_group_title_style_slots`
+            // for the rationale).
+            r#"{22,{1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ГруппаОсновная",{1,1,{"ru","Группа основная"}},{1,0},0,1,0,66,0,0,1,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,1,0,1,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::new(),
@@ -18493,7 +18521,10 @@ fn parses_live_usual_group_width_false_stretch_and_usual_behavior() {
 #[test]
 fn parses_live_usual_group_vertical_stretch_false_and_usual_behavior() {
     let item = parse_form_child_item(
-            r#"{22,{37,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ГруппаФамилия",{1,0},{1,0},0,1,0,0,0,2,0,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,1,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,1,0,1}"#,
+            // Padded to the current `FormUsualGroupSchema` minimum item length
+            // (see `omits_unresolved_and_ordinary_usual_group_title_style_slots`
+            // for the rationale).
+            r#"{22,{37,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"ГруппаФамилия",{1,0},{1,0},0,1,0,0,0,2,0,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,0,0,0,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,1,3,3,2,0,1,0,{3,4,{0}},0,2,0,0,0},0,1,0,1,0,0,0,0,0}"#,
             None,
             None,
             &BTreeMap::new(),
