@@ -499,12 +499,14 @@ fn inspect_schema_file(
                     ));
                 }
             }
-            Event::Text(text) if require_empty_schema && stack.len() >= 2 => {
-                if !text.as_ref().iter().all(u8::is_ascii_whitespace) {
-                    return Err(DcsSchemaTemplateError::UnsupportedSource(
-                        "terminal native dataCompositionSchema must be empty",
-                    ));
-                }
+            Event::Text(text)
+                if require_empty_schema
+                    && stack.len() >= 2
+                    && !text.as_ref().iter().all(u8::is_ascii_whitespace) =>
+            {
+                return Err(DcsSchemaTemplateError::UnsupportedSource(
+                    "terminal native dataCompositionSchema must be empty",
+                ));
             }
             Event::CData(_) if require_empty_schema && stack.len() >= 2 => {
                 return Err(DcsSchemaTemplateError::UnsupportedSource(
