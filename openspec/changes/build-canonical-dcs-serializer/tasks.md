@@ -50,10 +50,16 @@
   принадлежит общему XML layer: compiler больше не владеет BOM/declaration,
   `SchemaFile`, root-case mapping или empty terminal document; получаемое тело
   совпадает с уже принятым pinned-платформой compiler artifact.
-- [ ] Полный typed schema API и общий inner-schema renderer ещё не реализованы:
-  schema shell остаётся source-owned, а legacy renderer временно владеет
-  TypeId/current-config/AreaTemplate lexical conversion и явно отделённым
-  compatibility fallback для ещё не сведённых дополнительных SchemaFile.
+- [x] Первый platform-attested typed inner-schema cohort реализован общими
+  `ibcmd-core` / `ibcmd-schema` / `ibcmd-xml`: Local data source,
+  `DataSetObject`, string/decimal fields, decimal calculated field, два
+  ungrouped `Sum` total, scalar string parameter и один-два positional
+  settings-variant shell. Native `SchemaFile` parse и canonical source emit
+  проходят один codec; production MSSQL route больше не откатывается на
+  plaintext/legacy Schema writer для этого cohort.
+- [ ] Полный typed schema API ещё не реализован: Query/Union/link,
+  TypeId/current-config и AreaTemplate требуют отдельных evidence-срезов;
+  неподтверждённые schema shapes fail-closed.
 - [ ] `defaultSettings`, nested variants, `AreaTemplate` и остальные schema
   branches остаются вне доказанного общего layer.
 

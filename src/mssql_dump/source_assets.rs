@@ -1497,15 +1497,6 @@ pub(super) fn write_source_asset(
                         adapter.provider_id(),
                         &target_profile,
                     )
-                    .or_else(|| {
-                        normalize_data_composition_schema_template_xml_with_profiles(
-                            body.plaintext(),
-                            context.dcs_type_index,
-                            context.object_refs,
-                            adapter.provider_id(),
-                            &target_profile,
-                        )
-                    })
                     .with_context(|| {
                         format!(
                             "failed to normalize native data-composition source asset {}",

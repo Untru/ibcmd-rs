@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod dcs;
+pub mod dcs_schema;
 pub mod dcs_template;
 mod dialect;
 mod form_choice_parameters;
@@ -19,10 +20,10 @@ pub use dcs::{
     DcsSettingsChildrenParts, DcsSettingsDocumentAnalysis, DcsSettingsDocumentAnalysisError,
     DcsSettingsParseError, DcsSettingsTypedChildren, DcsSourceOwnedChild, DcsSourceOwnedChildKind,
     DcsWriterDecision, DcsWriterEvidence, DcsWriterEvidenceStatus, FormDcsChildren,
-    analyze_dcs_settings_document, emit_dcs_conditional_appearance_fragment,
-    emit_dcs_conditional_appearance_storage_document, emit_dcs_filter_fragment,
-    emit_dcs_filter_storage_document, emit_dcs_order_fragment, emit_dcs_order_storage_document,
-    emit_dcs_settings_children, emit_dcs_settings_children_parts,
+    analyze_dcs_inline_settings_fragment, analyze_dcs_settings_document,
+    emit_dcs_conditional_appearance_fragment, emit_dcs_conditional_appearance_storage_document,
+    emit_dcs_filter_fragment, emit_dcs_filter_storage_document, emit_dcs_order_fragment,
+    emit_dcs_order_storage_document, emit_dcs_settings_children, emit_dcs_settings_children_parts,
     emit_form_attributes_conditional_appearance_fragment,
     emit_form_attributes_conditional_appearance_storage_document,
     emit_form_attributes_empty_storage_document, emit_form_list_settings_tail,
@@ -36,6 +37,10 @@ pub use dcs::{
     parse_form_list_settings_orders, platform_default_form_list_settings_conditional_appearance,
     platform_default_form_list_settings_filter, platform_default_form_list_settings_order,
     preflight_dcs_settings_serialization, rewrite_dcs_settings_children,
+};
+pub use dcs_schema::{
+    DcsInlineSettingsFragment, DcsInnerSchemaError, emit_dcs_inner_schema_source_document,
+    parse_dcs_inner_schema_storage_document,
 };
 pub use dcs_template::{
     DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DcsSchemaTemplateOwnedDocuments,

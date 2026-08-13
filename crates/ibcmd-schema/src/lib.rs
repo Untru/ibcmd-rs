@@ -2649,6 +2649,10 @@ pub const BUNDLED_DCS_SETTINGS_SOURCE_OWNED_EVIDENCE_JSON: &str =
 /// `SchemaFile + Settings[*] + SchemaFile` DCS template envelope.
 pub const BUNDLED_DCS_SCHEMA_TEMPLATE_ENVELOPE_EVIDENCE_JSON: &str =
     include_str!("../data/platform-8.3.27-xml-2.20-dcs-schema-template-envelope-evidence.json");
+/// Embedded platform-authenticated policy for the exact bounded inner
+/// `DataCompositionSchema` cohort shared by the one- and two-variant fixtures.
+pub const BUNDLED_DCS_INNER_SCHEMA_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-inner-schema-evidence.json");
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3354,6 +3358,302 @@ pub struct DcsSchemaTemplateEnvelopePolicy {
     stored_length_width_bytes: usize,
     minimum_attested_settings_variants: usize,
     maximum_attested_settings_variants: usize,
+}
+
+/// Semantic root-child cohorts in the exact evidenced inner DCS schema order.
+/// Repeated children remain within their cohort and are bounded by
+/// [`DcsInnerSchemaPolicy::maximum_root_children`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DcsInnerSchemaRootChildKind {
+    DataSource,
+    DataSetObject,
+    CalculatedField,
+    TotalField,
+    Parameter,
+    SettingsVariant,
+}
+
+/// Exact namespace, order, type, token and cardinality policy for the bounded
+/// inner `DataCompositionSchema` cohort authenticated on 8.3.27 XML 2.20.
+/// Inline settings bodies are intentionally delegated to the existing common
+/// settings layer; everything outside this policy must fail closed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsInnerSchemaPolicy {
+    schema_namespace_uri: String,
+    settings_namespace_uri: String,
+    data_core_namespace_uri: String,
+    xml_schema_namespace_uri: String,
+    xsi_namespace_uri: String,
+    root_qname: String,
+    xsi_type_attribute_qname: String,
+    root_child_order: Vec<DcsInnerSchemaRootChildKind>,
+    root_child_qnames: Vec<String>,
+    data_source_child_order: Vec<String>,
+    data_set_child_order: Vec<String>,
+    data_set_field_child_order: Vec<String>,
+    calculated_field_child_order: Vec<String>,
+    total_field_child_order: Vec<String>,
+    sum_total_function_token: String,
+    sum_total_expression_grammar: String,
+    parameter_child_order: Vec<String>,
+    localized_value_child_order: Vec<String>,
+    localized_item_child_order: Vec<String>,
+    string_value_type_child_order: Vec<String>,
+    decimal_value_type_child_order: Vec<String>,
+    string_qualifiers_child_order: Vec<String>,
+    number_qualifiers_child_order: Vec<String>,
+    settings_variant_child_order: Vec<String>,
+    data_set_object_type_qname: String,
+    data_set_field_type_qname: String,
+    local_string_type_qname: String,
+    string_value_type_qname: String,
+    decimal_value_type_qname: String,
+    supported_data_source_type_tokens: Vec<String>,
+    supported_value_type_qnames: Vec<String>,
+    supported_allowed_length_tokens: Vec<String>,
+    supported_allowed_sign_tokens: Vec<String>,
+    supported_boolean_tokens: Vec<String>,
+    supported_language_tokens: Vec<String>,
+    supported_string_lengths: Vec<u32>,
+    supported_number_digits: Vec<u32>,
+    supported_fraction_digits: Vec<u32>,
+    maximum_data_sources: usize,
+    maximum_data_sets: usize,
+    maximum_data_set_fields: usize,
+    maximum_calculated_fields: usize,
+    maximum_total_fields: usize,
+    maximum_parameters: usize,
+    minimum_settings_variants: usize,
+    maximum_settings_variants: usize,
+    maximum_localized_items: usize,
+}
+
+impl DcsInnerSchemaPolicy {
+    pub fn schema_namespace_uri(&self) -> &str {
+        &self.schema_namespace_uri
+    }
+
+    pub fn settings_namespace_uri(&self) -> &str {
+        &self.settings_namespace_uri
+    }
+
+    pub fn data_core_namespace_uri(&self) -> &str {
+        &self.data_core_namespace_uri
+    }
+
+    pub fn xml_schema_namespace_uri(&self) -> &str {
+        &self.xml_schema_namespace_uri
+    }
+
+    pub fn xsi_namespace_uri(&self) -> &str {
+        &self.xsi_namespace_uri
+    }
+
+    pub fn root_qname(&self) -> &str {
+        &self.root_qname
+    }
+
+    pub fn xsi_type_attribute_qname(&self) -> &str {
+        &self.xsi_type_attribute_qname
+    }
+
+    pub fn root_child_order(&self) -> &[DcsInnerSchemaRootChildKind] {
+        &self.root_child_order
+    }
+
+    pub fn root_child_qnames(&self) -> &[String] {
+        &self.root_child_qnames
+    }
+
+    pub fn root_child_qname(&self, kind: DcsInnerSchemaRootChildKind) -> &str {
+        &self.root_child_qnames[self.root_child_rank(kind)]
+    }
+
+    pub fn data_source_child_order(&self) -> &[String] {
+        &self.data_source_child_order
+    }
+
+    pub fn data_set_child_order(&self) -> &[String] {
+        &self.data_set_child_order
+    }
+
+    pub fn data_set_field_child_order(&self) -> &[String] {
+        &self.data_set_field_child_order
+    }
+
+    pub fn calculated_field_child_order(&self) -> &[String] {
+        &self.calculated_field_child_order
+    }
+
+    pub fn total_field_child_order(&self) -> &[String] {
+        &self.total_field_child_order
+    }
+
+    /// Exact XML function token authenticated by the two dcs-core totals.
+    pub fn sum_total_function_token(&self) -> &str {
+        &self.sum_total_function_token
+    }
+
+    /// Exact XML expression grammar for `DcsSchemaTotalFunction::Sum`.
+    /// `{dataPath}` is the single substitution slot; callers must not infer
+    /// alternate spacing, casing or aggregate syntax.
+    pub fn sum_total_expression_grammar(&self) -> &str {
+        &self.sum_total_expression_grammar
+    }
+
+    pub fn parameter_child_order(&self) -> &[String] {
+        &self.parameter_child_order
+    }
+
+    pub fn localized_value_child_order(&self) -> &[String] {
+        &self.localized_value_child_order
+    }
+
+    pub fn localized_item_child_order(&self) -> &[String] {
+        &self.localized_item_child_order
+    }
+
+    pub fn string_value_type_child_order(&self) -> &[String] {
+        &self.string_value_type_child_order
+    }
+
+    pub fn decimal_value_type_child_order(&self) -> &[String] {
+        &self.decimal_value_type_child_order
+    }
+
+    pub fn string_qualifiers_child_order(&self) -> &[String] {
+        &self.string_qualifiers_child_order
+    }
+
+    pub fn number_qualifiers_child_order(&self) -> &[String] {
+        &self.number_qualifiers_child_order
+    }
+
+    pub fn settings_variant_child_order(&self) -> &[String] {
+        &self.settings_variant_child_order
+    }
+
+    pub fn data_set_object_type_qname(&self) -> &str {
+        &self.data_set_object_type_qname
+    }
+
+    pub fn data_set_field_type_qname(&self) -> &str {
+        &self.data_set_field_type_qname
+    }
+
+    pub fn local_string_type_qname(&self) -> &str {
+        &self.local_string_type_qname
+    }
+
+    pub fn string_value_type_qname(&self) -> &str {
+        &self.string_value_type_qname
+    }
+
+    pub fn decimal_value_type_qname(&self) -> &str {
+        &self.decimal_value_type_qname
+    }
+
+    pub fn supported_data_source_type_tokens(&self) -> &[String] {
+        &self.supported_data_source_type_tokens
+    }
+
+    pub fn supported_value_type_qnames(&self) -> &[String] {
+        &self.supported_value_type_qnames
+    }
+
+    pub fn supported_allowed_length_tokens(&self) -> &[String] {
+        &self.supported_allowed_length_tokens
+    }
+
+    pub fn supported_allowed_sign_tokens(&self) -> &[String] {
+        &self.supported_allowed_sign_tokens
+    }
+
+    pub fn supported_boolean_tokens(&self) -> &[String] {
+        &self.supported_boolean_tokens
+    }
+
+    pub fn supported_language_tokens(&self) -> &[String] {
+        &self.supported_language_tokens
+    }
+
+    pub fn supported_string_lengths(&self) -> &[u32] {
+        &self.supported_string_lengths
+    }
+
+    pub fn supported_number_digits(&self) -> &[u32] {
+        &self.supported_number_digits
+    }
+
+    pub fn supported_fraction_digits(&self) -> &[u32] {
+        &self.supported_fraction_digits
+    }
+
+    pub const fn maximum_data_set_fields(&self) -> usize {
+        self.maximum_data_set_fields
+    }
+
+    pub const fn maximum_localized_items(&self) -> usize {
+        self.maximum_localized_items
+    }
+
+    pub const fn min_settings_variants(&self) -> usize {
+        self.minimum_settings_variants
+    }
+
+    pub const fn max_settings_variants(&self) -> usize {
+        self.maximum_settings_variants
+    }
+
+    pub const fn supports_settings_variant_count(&self, count: usize) -> bool {
+        count >= self.minimum_settings_variants && count <= self.maximum_settings_variants
+    }
+
+    pub const fn root_child_rank(&self, kind: DcsInnerSchemaRootChildKind) -> usize {
+        match kind {
+            DcsInnerSchemaRootChildKind::DataSource => 0,
+            DcsInnerSchemaRootChildKind::DataSetObject => 1,
+            DcsInnerSchemaRootChildKind::CalculatedField => 2,
+            DcsInnerSchemaRootChildKind::TotalField => 3,
+            DcsInnerSchemaRootChildKind::Parameter => 4,
+            DcsInnerSchemaRootChildKind::SettingsVariant => 5,
+        }
+    }
+
+    pub const fn maximum_root_children(&self, kind: DcsInnerSchemaRootChildKind) -> usize {
+        match kind {
+            DcsInnerSchemaRootChildKind::DataSource => self.maximum_data_sources,
+            DcsInnerSchemaRootChildKind::DataSetObject => self.maximum_data_sets,
+            DcsInnerSchemaRootChildKind::CalculatedField => self.maximum_calculated_fields,
+            DcsInnerSchemaRootChildKind::TotalField => self.maximum_total_fields,
+            DcsInnerSchemaRootChildKind::Parameter => self.maximum_parameters,
+            DcsInnerSchemaRootChildKind::SettingsVariant => self.maximum_settings_variants,
+        }
+    }
+
+    pub const fn settings_body_is_delegated(&self) -> bool {
+        true
+    }
+
+    pub const fn unknown_qnames_are_unsupported(&self) -> bool {
+        true
+    }
+
+    pub const fn unknown_attributes_are_unsupported(&self) -> bool {
+        true
+    }
+
+    pub const fn unknown_types_are_unsupported(&self) -> bool {
+        true
+    }
+
+    pub const fn unknown_tokens_are_unsupported(&self) -> bool {
+        true
+    }
+
+    pub const fn wrong_order_is_unsupported(&self) -> bool {
+        true
+    }
 }
 
 impl DcsSchemaTemplateEnvelopePolicy {
@@ -4266,6 +4566,142 @@ struct DcsSchemaTemplateEnvelopeTwoVariantShape {
     variant_names: Vec<String>,
     source_variant_order_matches_external_settings_order: bool,
     terminal_schema_file_is_empty: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    source: DcsInnerSchemaEvidenceSource,
+    sources: DcsInnerSchemaEvidenceSources,
+    policy: DcsInnerSchemaEvidencePolicy,
+    proven_claims: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaEvidenceSources {
+    platform_line: String,
+    platform_version: String,
+    source_version: String,
+    ibcmd_sha256: String,
+    core: DcsInnerSchemaCoreEvidence,
+    multi_variant: DcsInnerSchemaMultiVariantEvidence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaCoreEvidence {
+    fixture_id: String,
+    seed_report_sha256: String,
+    seed_dcs_sha256: String,
+    seed_template_sha256: String,
+    round1_cf_sha256: String,
+    round2_cf_sha256: String,
+    configuration_encoded_sha256: String,
+    configuration_decoded_sha256: String,
+    native_xml_sha256: String,
+    packed_body_sha256: String,
+    unpacked_body_sha256: String,
+    compiler_commit: String,
+    compiled_packed_body_sha256: String,
+    compiled_unpacked_body_sha256: String,
+    candidate_cf_sha256: String,
+    round_trips: u32,
+    platform_load_and_apply_succeeded: bool,
+    selected_tree_equal_to_round2: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaMultiVariantEvidence {
+    fixture_id: String,
+    extractor_identity: String,
+    extractor_sha256: String,
+    seed_sha256: String,
+    round1_cf_sha256: String,
+    round2_cf_sha256: String,
+    round1_template_sha256: String,
+    round2_template_sha256: String,
+    round1_packed_sha256: String,
+    round2_packed_sha256: String,
+    round1_unpacked_sha256: String,
+    round2_unpacked_sha256: String,
+    configuration_encoded_sha256: String,
+    configuration_decoded_sha256: String,
+    native_xml_encoded_sha256: String,
+    native_xml_decoded_sha256: String,
+    round_trips: u32,
+    settings_variant_count: usize,
+    variant_names: Vec<String>,
+    source_variant_order_matches_external_settings_order: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaEvidencePolicy {
+    schema_namespace: String,
+    settings_namespace: String,
+    data_core_namespace: String,
+    xml_schema_namespace: String,
+    xsi_namespace: String,
+    root_qname: String,
+    xsi_type_attribute_qname: String,
+    root_child_order: Vec<String>,
+    data_source_child_order: Vec<String>,
+    data_set_child_order: Vec<String>,
+    data_set_field_child_order: Vec<String>,
+    calculated_field_child_order: Vec<String>,
+    total_field_child_order: Vec<String>,
+    sum_total_function_token: String,
+    sum_total_expression_grammar: String,
+    parameter_child_order: Vec<String>,
+    localized_value_child_order: Vec<String>,
+    localized_item_child_order: Vec<String>,
+    string_value_type_child_order: Vec<String>,
+    decimal_value_type_child_order: Vec<String>,
+    string_qualifiers_child_order: Vec<String>,
+    number_qualifiers_child_order: Vec<String>,
+    settings_variant_child_order: Vec<String>,
+    data_set_object_type_qname: String,
+    data_set_field_type_qname: String,
+    local_string_type_qname: String,
+    string_value_type_qname: String,
+    decimal_value_type_qname: String,
+    supported_data_source_type_tokens: Vec<String>,
+    supported_value_type_qnames: Vec<String>,
+    supported_allowed_length_tokens: Vec<String>,
+    supported_allowed_sign_tokens: Vec<String>,
+    supported_boolean_tokens: Vec<String>,
+    supported_language_tokens: Vec<String>,
+    supported_string_lengths: Vec<u32>,
+    supported_number_digits: Vec<u32>,
+    supported_fraction_digits: Vec<u32>,
+    maximum_data_sources: usize,
+    maximum_data_sets: usize,
+    maximum_data_set_fields: usize,
+    maximum_calculated_fields: usize,
+    maximum_total_fields: usize,
+    maximum_parameters: usize,
+    minimum_settings_variants: usize,
+    maximum_settings_variants: usize,
+    maximum_localized_items: usize,
+    settings_body_ownership: String,
+    unknown_qnames: String,
+    unknown_attributes: String,
+    unknown_types: String,
+    unknown_tokens: String,
+    wrong_order: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -5255,6 +5691,307 @@ impl DcsSchemaTemplateEnvelopeEvidenceCorpus {
             stored_length_width_bytes: self.policy.stored_length_width_bytes,
             minimum_attested_settings_variants: self.policy.minimum_attested_settings_variants,
             maximum_attested_settings_variants: self.policy.maximum_attested_settings_variants,
+        }
+    }
+}
+
+impl DcsInnerSchemaEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 16 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "DCS inner-schema evidence exceeds 16384 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        let expected_source = DcsInnerSchemaEvidenceSource {
+            product: "1C:Enterprise Platform".to_owned(),
+            release: "8.3.27 / XML 2.20".to_owned(),
+            derivation: "bounded inner DataCompositionSchema policy synthesized from the immutable one-variant dcs-core corpus and exact two-variant envelope corpus on 8.3.27.2214; no other patch build or schema cohort is inferred".to_owned(),
+        };
+        let expected_sources = DcsInnerSchemaEvidenceSources {
+            platform_line: "8.3.27".to_owned(),
+            platform_version: "8.3.27.2214".to_owned(),
+            source_version: "2.20".to_owned(),
+            ibcmd_sha256: "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+                .to_owned(),
+            core: DcsInnerSchemaCoreEvidence {
+                fixture_id: "8.3.27.2214-xml-2.20-dcs-core".to_owned(),
+                seed_report_sha256:
+                    "1917a90a7a1c9f047f20ac28d0503229dd403fa2a5ef68a5d982b22197e2ff1a".to_owned(),
+                seed_dcs_sha256: "55eebfe0cdc0af3597205ba468aa3be7b80c61020e4f5e6d6c7fba8fafdad733"
+                    .to_owned(),
+                seed_template_sha256:
+                    "bf1ebf1bcb4cf0992060989915a005c6cc18ef5da94ea3d978b6506b22331319".to_owned(),
+                round1_cf_sha256:
+                    "91ffa78b699e1c9ca8f847269f0aa7775fe02e556893184b9dee3e5e15637b6b".to_owned(),
+                round2_cf_sha256:
+                    "d5cc56c9e63720d07a3b0d92cc75507bda7c7e27e0e9eebb20fdfdecc550c6a8".to_owned(),
+                configuration_encoded_sha256:
+                    "018be3b0505e1cda246a47603eaf7ea73529cb1273e3f2059cee97666228b9c7".to_owned(),
+                configuration_decoded_sha256:
+                    "d5cc56c9e63720d07a3b0d92cc75507bda7c7e27e0e9eebb20fdfdecc550c6a8".to_owned(),
+                native_xml_sha256:
+                    "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f".to_owned(),
+                packed_body_sha256:
+                    "6c9d6e02140f1410bf92650d5fe717b07cd66ec45db1567ab4b2ae7dc0782a8b".to_owned(),
+                unpacked_body_sha256:
+                    "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510".to_owned(),
+                compiler_commit: "52641f9310af8b1f829f938ac410344fe49cbaa1".to_owned(),
+                compiled_packed_body_sha256:
+                    "5b8f758dc3d64e56b744b7554148245b0bf1f3023ce5aa81df63bcd730058ca8".to_owned(),
+                compiled_unpacked_body_sha256:
+                    "928de9e6a9fbcfe89530e5d02fe8f08c0efe491c392b671fa61c4c36d48ec81a".to_owned(),
+                candidate_cf_sha256:
+                    "86521776c1530306c1b9fe1d406b92ecb6d6ece8551125fc7d987e421bb0b45a".to_owned(),
+                round_trips: 2,
+                platform_load_and_apply_succeeded: true,
+                selected_tree_equal_to_round2: true,
+            },
+            multi_variant: DcsInnerSchemaMultiVariantEvidence {
+                fixture_id: "8.3.27.2214-xml-2.20-dcs-multi-variant-envelope".to_owned(),
+                extractor_identity: "ibcmd-rs cf extract retained lab build".to_owned(),
+                extractor_sha256:
+                    "5ec1be63f1a850c2673ee8ce7b896fb98934f363d86fff4e9d581b57cfcab722".to_owned(),
+                seed_sha256: "d32bf50308d0af77243ac4a5b2b9d090ef9c32ddf5575e9583b679dbb785e881"
+                    .to_owned(),
+                round1_cf_sha256:
+                    "de78c33dc31f49112f26bc9e880a079f3a8a122275ddea7e00f64a348c0807e6".to_owned(),
+                round2_cf_sha256:
+                    "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4".to_owned(),
+                round1_template_sha256:
+                    "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680".to_owned(),
+                round2_template_sha256:
+                    "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680".to_owned(),
+                round1_packed_sha256:
+                    "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c".to_owned(),
+                round2_packed_sha256:
+                    "145a48abb9bb6896d5a0ad0f76fc354fe42f6c6edb37639721d56c6aed4b408c".to_owned(),
+                round1_unpacked_sha256:
+                    "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87".to_owned(),
+                round2_unpacked_sha256:
+                    "17b58ff54fb5982b7a5db842758ed108072c58238eb231183822dddb265c7a87".to_owned(),
+                configuration_encoded_sha256:
+                    "bc5a9f7823b061fdf285de591dec24696016c751afa0f88751967fb4604040e0".to_owned(),
+                configuration_decoded_sha256:
+                    "212401d593ee02dba8a634c93debb23b75dfed2b6ce1073b7b2d9d2d285d78d4".to_owned(),
+                native_xml_encoded_sha256:
+                    "94a3fe8358475179213c176c49f3615a16d195166174927961b21334cdb62020".to_owned(),
+                native_xml_decoded_sha256:
+                    "f7d9fcf20107c3ea228686138962b073c69945083e32dd29bf943be508cea680".to_owned(),
+                round_trips: 2,
+                settings_variant_count: 2,
+                variant_names: vec!["Main".to_owned(), "Secondary Secondary".to_owned()],
+                source_variant_order_matches_external_settings_order: true,
+            },
+        };
+
+        const SCHEMA_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/schema";
+        const SETTINGS_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+        const DATA_CORE_NS: &str = "http://v8.1c.ru/8.1/data/core";
+        const XS_NS: &str = "http://www.w3.org/2001/XMLSchema";
+        const XSI_NS: &str = "http://www.w3.org/2001/XMLSchema-instance";
+        let schema_qname = |local: &str| format!("{{{SCHEMA_NS}}}{local}");
+        let settings_qname = |local: &str| format!("{{{SETTINGS_NS}}}{local}");
+        let core_qname = |local: &str| format!("{{{DATA_CORE_NS}}}{local}");
+        let expected_policy = DcsInnerSchemaEvidencePolicy {
+            schema_namespace: SCHEMA_NS.to_owned(),
+            settings_namespace: SETTINGS_NS.to_owned(),
+            data_core_namespace: DATA_CORE_NS.to_owned(),
+            xml_schema_namespace: XS_NS.to_owned(),
+            xsi_namespace: XSI_NS.to_owned(),
+            root_qname: schema_qname("DataCompositionSchema"),
+            xsi_type_attribute_qname: format!("{{{XSI_NS}}}type"),
+            root_child_order: vec![
+                schema_qname("dataSource"),
+                schema_qname("dataSet"),
+                schema_qname("calculatedField"),
+                schema_qname("totalField"),
+                schema_qname("parameter"),
+                schema_qname("settingsVariant"),
+            ],
+            data_source_child_order: vec![schema_qname("name"), schema_qname("dataSourceType")],
+            data_set_child_order: vec![
+                schema_qname("name"),
+                schema_qname("field"),
+                schema_qname("dataSource"),
+                schema_qname("objectName"),
+            ],
+            data_set_field_child_order: vec![
+                schema_qname("dataPath"),
+                schema_qname("field"),
+                schema_qname("valueType"),
+            ],
+            calculated_field_child_order: vec![
+                schema_qname("dataPath"),
+                schema_qname("expression"),
+                schema_qname("valueType"),
+            ],
+            total_field_child_order: vec![schema_qname("dataPath"), schema_qname("expression")],
+            sum_total_function_token: "Sum".to_owned(),
+            sum_total_expression_grammar: "Sum({dataPath})".to_owned(),
+            parameter_child_order: vec![
+                schema_qname("name"),
+                schema_qname("title"),
+                schema_qname("valueType"),
+                schema_qname("value"),
+                schema_qname("useRestriction"),
+            ],
+            localized_value_child_order: vec![core_qname("item")],
+            localized_item_child_order: vec![core_qname("lang"), core_qname("content")],
+            string_value_type_child_order: vec![core_qname("Type"), core_qname("StringQualifiers")],
+            decimal_value_type_child_order: vec![
+                core_qname("Type"),
+                core_qname("NumberQualifiers"),
+            ],
+            string_qualifiers_child_order: vec![core_qname("Length"), core_qname("AllowedLength")],
+            number_qualifiers_child_order: vec![
+                core_qname("Digits"),
+                core_qname("FractionDigits"),
+                core_qname("AllowedSign"),
+            ],
+            settings_variant_child_order: vec![
+                settings_qname("name"),
+                settings_qname("presentation"),
+                settings_qname("settings"),
+            ],
+            data_set_object_type_qname: schema_qname("DataSetObject"),
+            data_set_field_type_qname: schema_qname("DataSetFieldField"),
+            local_string_type_qname: core_qname("LocalStringType"),
+            string_value_type_qname: format!("{{{XS_NS}}}string"),
+            decimal_value_type_qname: format!("{{{XS_NS}}}decimal"),
+            supported_data_source_type_tokens: vec!["Local".to_owned()],
+            supported_value_type_qnames: vec![
+                format!("{{{XS_NS}}}string"),
+                format!("{{{XS_NS}}}decimal"),
+            ],
+            supported_allowed_length_tokens: vec!["Variable".to_owned()],
+            supported_allowed_sign_tokens: vec!["Any".to_owned()],
+            supported_boolean_tokens: vec!["false".to_owned()],
+            supported_language_tokens: vec!["ru".to_owned()],
+            supported_string_lengths: vec![20, 40],
+            supported_number_digits: vec![15],
+            supported_fraction_digits: vec![2],
+            maximum_data_sources: 1,
+            maximum_data_sets: 1,
+            maximum_data_set_fields: 2,
+            maximum_calculated_fields: 1,
+            maximum_total_fields: 2,
+            maximum_parameters: 1,
+            minimum_settings_variants: 1,
+            maximum_settings_variants: 2,
+            maximum_localized_items: 1,
+            settings_body_ownership: "delegated-existing-common-settings-layer".to_owned(),
+            unknown_qnames: "unsupported".to_owned(),
+            unknown_attributes: "unsupported".to_owned(),
+            unknown_types: "unsupported".to_owned(),
+            unknown_tokens: "unsupported".to_owned(),
+            wrong_order: "unsupported".to_owned(),
+        };
+        let expected_proven_claims = [
+            "The dcs-core source authenticates one dataSource, one DataSetObject with two DataSetFieldField fields, one calculatedField, two totalField nodes, one parameter and one direct settingsVariant in exact QName and child order.",
+            "The dcs-core source authenticates only xs:string and xs:decimal value types, their exact qualifier child order and the Local, Variable, Any, false and ru tokens retained by two platform rounds.",
+            "The multi-variant source authenticates two direct settingsVariant metadata shells in source order, each with name, LocalStringType presentation and delegated inline settings.",
+            "The dcs-core compiler candidate loaded and applied on pinned 8.3.27.2214 and exported the same selected tree as round two.",
+        ];
+        let expected_non_claims = [
+            "AreaTemplate, appearance side tables and appIndex are outside this bounded inner-schema cohort.",
+            "TypeId and current-configuration references are outside this bounded inner-schema cohort.",
+            "DataSetQuery, DataSetUnion, nested data sets and dataSetLink are outside this bounded inner-schema cohort.",
+            "defaultSettings, nested settingsVariant, absent inline Settings, duplicate or empty variant metadata and more than two direct settingsVariant nodes are outside this bounded inner-schema cohort.",
+            "No unknown QName, attribute, type token, enum token, child order, cross-profile replay or full DataCompositionSchema model is inferred.",
+            "Unica generated only the hypothesis seeds; pinned 8.3.27.2214 native output is the authority.",
+        ];
+        let checks = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-inner-schema-bounded-v1",
+            ),
+            ("contract source", self.source == expected_source),
+            (
+                "fixture provenance and hashes",
+                self.sources == expected_sources,
+            ),
+            (
+                "QName, order, type, token and maximum policy",
+                self.policy == expected_policy,
+            ),
+            (
+                "proven claims",
+                self.proven_claims == expected_proven_claims,
+            ),
+            ("non-claims", self.non_claims == expected_non_claims),
+        ];
+        if let Some((field, _)) = checks.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS inner-schema {field} drifted"
+            )));
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsInnerSchemaPolicy {
+        DcsInnerSchemaPolicy {
+            schema_namespace_uri: self.policy.schema_namespace,
+            settings_namespace_uri: self.policy.settings_namespace,
+            data_core_namespace_uri: self.policy.data_core_namespace,
+            xml_schema_namespace_uri: self.policy.xml_schema_namespace,
+            xsi_namespace_uri: self.policy.xsi_namespace,
+            root_qname: self.policy.root_qname,
+            xsi_type_attribute_qname: self.policy.xsi_type_attribute_qname,
+            root_child_order: vec![
+                DcsInnerSchemaRootChildKind::DataSource,
+                DcsInnerSchemaRootChildKind::DataSetObject,
+                DcsInnerSchemaRootChildKind::CalculatedField,
+                DcsInnerSchemaRootChildKind::TotalField,
+                DcsInnerSchemaRootChildKind::Parameter,
+                DcsInnerSchemaRootChildKind::SettingsVariant,
+            ],
+            root_child_qnames: self.policy.root_child_order,
+            data_source_child_order: self.policy.data_source_child_order,
+            data_set_child_order: self.policy.data_set_child_order,
+            data_set_field_child_order: self.policy.data_set_field_child_order,
+            calculated_field_child_order: self.policy.calculated_field_child_order,
+            total_field_child_order: self.policy.total_field_child_order,
+            sum_total_function_token: self.policy.sum_total_function_token,
+            sum_total_expression_grammar: self.policy.sum_total_expression_grammar,
+            parameter_child_order: self.policy.parameter_child_order,
+            localized_value_child_order: self.policy.localized_value_child_order,
+            localized_item_child_order: self.policy.localized_item_child_order,
+            string_value_type_child_order: self.policy.string_value_type_child_order,
+            decimal_value_type_child_order: self.policy.decimal_value_type_child_order,
+            string_qualifiers_child_order: self.policy.string_qualifiers_child_order,
+            number_qualifiers_child_order: self.policy.number_qualifiers_child_order,
+            settings_variant_child_order: self.policy.settings_variant_child_order,
+            data_set_object_type_qname: self.policy.data_set_object_type_qname,
+            data_set_field_type_qname: self.policy.data_set_field_type_qname,
+            local_string_type_qname: self.policy.local_string_type_qname,
+            string_value_type_qname: self.policy.string_value_type_qname,
+            decimal_value_type_qname: self.policy.decimal_value_type_qname,
+            supported_data_source_type_tokens: self.policy.supported_data_source_type_tokens,
+            supported_value_type_qnames: self.policy.supported_value_type_qnames,
+            supported_allowed_length_tokens: self.policy.supported_allowed_length_tokens,
+            supported_allowed_sign_tokens: self.policy.supported_allowed_sign_tokens,
+            supported_boolean_tokens: self.policy.supported_boolean_tokens,
+            supported_language_tokens: self.policy.supported_language_tokens,
+            supported_string_lengths: self.policy.supported_string_lengths,
+            supported_number_digits: self.policy.supported_number_digits,
+            supported_fraction_digits: self.policy.supported_fraction_digits,
+            maximum_data_sources: self.policy.maximum_data_sources,
+            maximum_data_sets: self.policy.maximum_data_sets,
+            maximum_data_set_fields: self.policy.maximum_data_set_fields,
+            maximum_calculated_fields: self.policy.maximum_calculated_fields,
+            maximum_total_fields: self.policy.maximum_total_fields,
+            maximum_parameters: self.policy.maximum_parameters,
+            minimum_settings_variants: self.policy.minimum_settings_variants,
+            maximum_settings_variants: self.policy.maximum_settings_variants,
+            maximum_localized_items: self.policy.maximum_localized_items,
         }
     }
 }
@@ -9328,6 +10065,19 @@ pub fn bundled_dcs_schema_template_envelope_policy()
         .clone()
 }
 
+/// Returns the immutable platform-authenticated policy for the exact bounded
+/// inner DCS schema cohort. Unknown QNames, types, tokens and orderings remain
+/// unsupported, and inline settings bodies are delegated to the common layer.
+pub fn bundled_dcs_inner_schema_policy() -> Result<DcsInnerSchemaPolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsInnerSchemaPolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsInnerSchemaEvidenceCorpus::parse(BUNDLED_DCS_INNER_SCHEMA_EVIDENCE_JSON)
+                .map(DcsInnerSchemaEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 /// Returns the immutable platform-authenticated standalone/Form order policy.
 pub fn bundled_dcs_order_policy() -> Result<DcsOrderPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsOrderPolicy, SchemaError>> = OnceLock::new();
@@ -11423,6 +12173,155 @@ mod tests {
         extra_field["policy"]["guessMissingSettings"] = serde_json::json!(true);
         assert!(matches!(
             DcsSchemaTemplateEnvelopeEvidenceCorpus::parse(
+                &serde_json::to_string(&extra_field).unwrap()
+            ),
+            Err(SchemaError::InvalidJson(message)) if message.contains("unknown field")
+        ));
+    }
+
+    #[test]
+    fn bundled_platform_dcs_inner_schema_policy_binds_exact_bounded_cohort() {
+        let policy = bundled_dcs_inner_schema_policy().unwrap();
+        assert_eq!(
+            policy.root_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/schema}DataCompositionSchema"
+        );
+        assert_eq!(
+            policy.xsi_type_attribute_qname(),
+            "{http://www.w3.org/2001/XMLSchema-instance}type"
+        );
+        assert_eq!(
+            policy.root_child_order(),
+            &[
+                DcsInnerSchemaRootChildKind::DataSource,
+                DcsInnerSchemaRootChildKind::DataSetObject,
+                DcsInnerSchemaRootChildKind::CalculatedField,
+                DcsInnerSchemaRootChildKind::TotalField,
+                DcsInnerSchemaRootChildKind::Parameter,
+                DcsInnerSchemaRootChildKind::SettingsVariant,
+            ]
+        );
+        assert_eq!(
+            policy.root_child_qname(DcsInnerSchemaRootChildKind::DataSetObject),
+            "{http://v8.1c.ru/8.1/data-composition-system/schema}dataSet"
+        );
+        assert_eq!(
+            policy.data_set_object_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/schema}DataSetObject"
+        );
+        assert_eq!(
+            policy.data_set_field_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/schema}DataSetFieldField"
+        );
+        assert_eq!(
+            policy.local_string_type_qname(),
+            "{http://v8.1c.ru/8.1/data/core}LocalStringType"
+        );
+        assert_eq!(
+            policy.decimal_value_type_qname(),
+            "{http://www.w3.org/2001/XMLSchema}decimal"
+        );
+        assert_eq!(
+            policy.supported_value_type_qnames(),
+            &[
+                "{http://www.w3.org/2001/XMLSchema}string".to_owned(),
+                "{http://www.w3.org/2001/XMLSchema}decimal".to_owned(),
+            ]
+        );
+        assert_eq!(policy.supported_data_source_type_tokens(), &["Local"]);
+        assert_eq!(policy.supported_allowed_length_tokens(), &["Variable"]);
+        assert_eq!(policy.supported_allowed_sign_tokens(), &["Any"]);
+        assert_eq!(policy.supported_boolean_tokens(), &["false"]);
+        assert_eq!(policy.supported_language_tokens(), &["ru"]);
+        assert_eq!(policy.supported_string_lengths(), &[20, 40]);
+        assert_eq!(policy.sum_total_function_token(), "Sum");
+        assert_eq!(policy.sum_total_expression_grammar(), "Sum({dataPath})");
+        assert_eq!(policy.maximum_data_set_fields(), 2);
+        assert_eq!(
+            policy.maximum_root_children(DcsInnerSchemaRootChildKind::TotalField),
+            2
+        );
+        assert_eq!(
+            policy.maximum_root_children(DcsInnerSchemaRootChildKind::SettingsVariant),
+            2
+        );
+        assert_eq!(policy.min_settings_variants(), 1);
+        assert_eq!(policy.max_settings_variants(), 2);
+        assert!(!policy.supports_settings_variant_count(0));
+        assert!(policy.supports_settings_variant_count(1));
+        assert!(policy.supports_settings_variant_count(2));
+        assert!(!policy.supports_settings_variant_count(3));
+        assert!(policy.settings_body_is_delegated());
+        assert!(policy.unknown_qnames_are_unsupported());
+        assert!(policy.unknown_attributes_are_unsupported());
+        assert!(policy.unknown_types_are_unsupported());
+        assert!(policy.unknown_tokens_are_unsupported());
+        assert!(policy.wrong_order_is_unsupported());
+    }
+
+    #[test]
+    fn dcs_inner_schema_evidence_fails_closed_on_hash_order_nonclaim_and_extra_field_drift() {
+        let raw = serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_INNER_SCHEMA_EVIDENCE_JSON)
+            .unwrap();
+
+        let mut hash_drift = raw.clone();
+        hash_drift["sources"]["core"]["nativeXmlSha256"] = serde_json::json!("0".repeat(64));
+        assert!(matches!(
+            DcsInnerSchemaEvidenceCorpus::parse(
+                &serde_json::to_string(&hash_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("fixture provenance and hashes drifted")
+        ));
+
+        let mut order_drift = raw.clone();
+        order_drift["policy"]["rootChildOrder"]
+            .as_array_mut()
+            .unwrap()
+            .swap(1, 2);
+        assert!(matches!(
+            DcsInnerSchemaEvidenceCorpus::parse(
+                &serde_json::to_string(&order_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("QName, order, type, token and maximum policy drifted")
+        ));
+
+        let mut maximum_drift = raw.clone();
+        maximum_drift["policy"]["maximumSettingsVariants"] = serde_json::json!(3);
+        assert!(matches!(
+            DcsInnerSchemaEvidenceCorpus::parse(
+                &serde_json::to_string(&maximum_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("QName, order, type, token and maximum policy drifted")
+        ));
+
+        let mut total_grammar_drift = raw.clone();
+        total_grammar_drift["policy"]["sumTotalExpressionGrammar"] =
+            serde_json::json!("SUM({dataPath})");
+        assert!(matches!(
+            DcsInnerSchemaEvidenceCorpus::parse(
+                &serde_json::to_string(&total_grammar_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("QName, order, type, token and maximum policy drifted")
+        ));
+
+        let mut nonclaim_drift = raw.clone();
+        nonclaim_drift["nonClaims"][2] = serde_json::json!("DataSetQuery is now supported.");
+        assert!(matches!(
+            DcsInnerSchemaEvidenceCorpus::parse(
+                &serde_json::to_string(&nonclaim_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("non-claims drifted")
+        ));
+
+        let mut extra_field = raw;
+        extra_field["policy"]["allowDataSetQuery"] = serde_json::json!(true);
+        assert!(matches!(
+            DcsInnerSchemaEvidenceCorpus::parse(
                 &serde_json::to_string(&extra_field).unwrap()
             ),
             Err(SchemaError::InvalidJson(message)) if message.contains("unknown field")

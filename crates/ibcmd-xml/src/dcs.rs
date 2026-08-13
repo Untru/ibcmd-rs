@@ -1624,6 +1624,23 @@ pub fn parse_dcs_settings_children_strict(
 pub fn analyze_dcs_settings_document(
     document: &str,
 ) -> Result<DcsSettingsDocumentAnalysis, DcsSettingsDocumentAnalysisError> {
+    analyze_dcs_settings_document_with_root(document, "Settings")
+}
+
+/// Parses an inline settings payload embedded in a schema settings variant.
+///
+/// This uses the same child taxonomy as the standalone `Settings` document;
+/// only the evidence-backed lowercase root spelling differs.
+pub fn analyze_dcs_inline_settings_fragment(
+    document: &str,
+) -> Result<DcsSettingsDocumentAnalysis, DcsSettingsDocumentAnalysisError> {
+    analyze_dcs_settings_document_with_root(document, "settings")
+}
+
+fn analyze_dcs_settings_document_with_root(
+    document: &str,
+    expected_root_local: &str,
+) -> Result<DcsSettingsDocumentAnalysis, DcsSettingsDocumentAnalysisError> {
     if document.len() > MAX_DCS_RETAINED_BYTES {
         return Err(DcsSettingsParseError {
             reason: "settings document exceeds the retained-byte budget",
@@ -1635,11 +1652,11 @@ pub fn analyze_dcs_settings_document(
             reason: "document is not well-formed XML",
         })?;
     let root = document.root();
-    if root.name().local() != "Settings"
+    if root.name().local() != expected_root_local
         || !xml_element_uses_namespace(root, root, DCS_SETTINGS_NAMESPACE)
     {
         return Err(DcsSettingsParseError {
-            reason: "root is not the settings-namespace Settings element",
+            reason: "root is not the expected settings-namespace element",
         }
         .into());
     }

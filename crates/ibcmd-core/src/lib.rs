@@ -12,6 +12,7 @@ pub mod asset;
 pub mod capability;
 pub mod characteristics;
 pub mod dcs;
+pub mod dcs_schema;
 pub mod detection;
 pub mod diagnostic;
 pub mod family;

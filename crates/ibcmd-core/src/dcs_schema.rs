@@ -1,0 +1,1303 @@
+//! Bounded canonical IR for the platform-attested inner DCS schema cohort.
+//!
+//! This module owns semantic structure only. XML QNames, namespace prefixes,
+//! `xsi:type` spellings, document framing, and writer order remain schema/XML
+//! policy. The admitted shape is deliberately narrow: one local data source,
+//! one object data set with a string field followed by a decimal field, one
+//! decimal calculated field, two ungrouped `Sum` totals, one scalar string
+//! parameter, and one or two positional settings-variant shells.
+
+use std::collections::BTreeSet;
+use std::error::Error;
+use std::fmt::{self, Display, Formatter};
+use std::marker::PhantomData;
+
+use serde::de::{IgnoredAny, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, de};
+
+use crate::provenance::SourceProvenance;
+use crate::value::CanonicalText;
+
+/// Exact field count in the first attested object-data-set cohort.
+pub const DCS_SCHEMA_DATA_SET_FIELD_COUNT: usize = 2;
+/// Exact total count in the first attested inner-schema cohort.
+pub const DCS_SCHEMA_TOTAL_FIELD_COUNT: usize = 2;
+/// Maximum settings variants admitted by the attested positional envelope.
+pub const MAX_DCS_SCHEMA_SETTINGS_VARIANTS: usize = 2;
+/// Aggregate variable-sized byte budget for one bounded inner schema.
+pub const MAX_DCS_SCHEMA_RETAINED_BYTES: usize = 16_777_216;
+
+/// Failure to construct or revalidate the bounded inner DCS schema IR.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DcsSchemaBuildError {
+    /// A required semantic text was empty.
+    EmptyText { field: &'static str },
+    /// String length must be positive for the attested qualified string type.
+    ZeroStringLength,
+    /// Only the two string lengths present in the attested cohort are admitted.
+    UnsupportedStringLength { length: u32 },
+    /// The data-set string field has the attested length 20.
+    UnexpectedDataSetStringLength { length: u32 },
+    /// The scalar string parameter has the attested length 40.
+    UnexpectedParameterStringLength { length: u32 },
+    /// Decimal precision must be positive.
+    ZeroDecimalDigits,
+    /// Decimal scale exceeded its precision.
+    DecimalFractionExceedsDigits { digits: u32, fraction_digits: u32 },
+    /// Only decimal(15,2) is present in the attested cohort.
+    UnsupportedDecimalQualifiers { digits: u32, fraction_digits: u32 },
+    /// The bounded localized string admits only the attested language token.
+    UnsupportedLanguage { language: String },
+    /// The object data set did not contain exactly the attested two fields.
+    UnexpectedDataSetFieldCount { expected: usize, actual: usize },
+    /// The attested field order is string followed by decimal.
+    UnexpectedDataSetFieldTypeOrder,
+    /// Two data-set fields used the same output data path.
+    DuplicateDataSetFieldPath { path: String },
+    /// The data set referenced a different data source.
+    DataSourceReferenceMismatch,
+    /// The calculated field reused a data-set output path.
+    DuplicateCalculatedFieldPath { path: String },
+    /// The schema did not contain exactly the attested two total fields.
+    UnexpectedTotalFieldCount { expected: usize, actual: usize },
+    /// Total fields did not target the data-set decimal field followed by the
+    /// decimal calculated field.
+    UnexpectedTotalFieldOrder,
+    /// No settings variant was supplied.
+    EmptySettingsVariants,
+    /// More settings variants were supplied than the envelope evidence admits.
+    TooManySettingsVariants { maximum: usize, actual: usize },
+    /// Two settings-variant shells used the same exact name.
+    DuplicateSettingsVariantName { name: String },
+    /// Aggregate variable-sized content exceeded the core IR budget.
+    RetainedBytesExceeded { maximum: usize, actual: usize },
+    /// Aggregate retained-byte arithmetic overflowed.
+    RetainedByteCountOverflow,
+}
+
+impl Display for DcsSchemaBuildError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyText { field } => write!(formatter, "DCS schema {field} is empty"),
+            Self::ZeroStringLength => {
+                formatter.write_str("DCS schema string length must be positive")
+            }
+            Self::UnsupportedStringLength { length } => write!(
+                formatter,
+                "DCS schema string length {length} is outside the attested 20/40 cohort"
+            ),
+            Self::UnexpectedDataSetStringLength { length } => write!(
+                formatter,
+                "DCS schema data-set string length must be 20 (actual {length})"
+            ),
+            Self::UnexpectedParameterStringLength { length } => write!(
+                formatter,
+                "DCS schema parameter string length must be 40 (actual {length})"
+            ),
+            Self::ZeroDecimalDigits => {
+                formatter.write_str("DCS schema decimal digits must be positive")
+            }
+            Self::DecimalFractionExceedsDigits {
+                digits,
+                fraction_digits,
+            } => write!(
+                formatter,
+                "DCS schema decimal fraction digits {fraction_digits} exceed digits {digits}"
+            ),
+            Self::UnsupportedDecimalQualifiers {
+                digits,
+                fraction_digits,
+            } => write!(
+                formatter,
+                "DCS schema decimal qualifiers ({digits},{fraction_digits}) are outside the attested (15,2) cohort"
+            ),
+            Self::UnsupportedLanguage { language } => write!(
+                formatter,
+                "DCS schema localized language `{language}` is outside the attested `ru` cohort"
+            ),
+            Self::UnexpectedDataSetFieldCount { expected, actual } => write!(
+                formatter,
+                "DCS schema object data set requires exactly {expected} fields (actual {actual})"
+            ),
+            Self::UnexpectedDataSetFieldTypeOrder => formatter.write_str(
+                "DCS schema object data-set fields must be string followed by decimal",
+            ),
+            Self::DuplicateDataSetFieldPath { path } => {
+                write!(formatter, "DCS schema data-set field path `{path}` is duplicated")
+            }
+            Self::DataSourceReferenceMismatch => formatter.write_str(
+                "DCS schema object data set references a different local data source",
+            ),
+            Self::DuplicateCalculatedFieldPath { path } => write!(
+                formatter,
+                "DCS schema calculated field path `{path}` duplicates a data-set field path"
+            ),
+            Self::UnexpectedTotalFieldCount { expected, actual } => write!(
+                formatter,
+                "DCS schema requires exactly {expected} ungrouped totals (actual {actual})"
+            ),
+            Self::UnexpectedTotalFieldOrder => formatter.write_str(
+                "DCS schema totals must target the data-set decimal field and then the calculated decimal field",
+            ),
+            Self::EmptySettingsVariants => {
+                formatter.write_str("DCS schema requires at least one settings-variant shell")
+            }
+            Self::TooManySettingsVariants { maximum, actual } => write!(
+                formatter,
+                "DCS schema exceeds {maximum} settings-variant shells (actual {actual})"
+            ),
+            Self::DuplicateSettingsVariantName { name } => write!(
+                formatter,
+                "DCS schema settings-variant name `{name}` is duplicated"
+            ),
+            Self::RetainedBytesExceeded { maximum, actual } => write!(
+                formatter,
+                "DCS schema exceeds retained-byte budget {maximum} (actual {actual})"
+            ),
+            Self::RetainedByteCountOverflow => {
+                formatter.write_str("DCS schema retained-byte count overflowed")
+            }
+        }
+    }
+}
+
+impl Error for DcsSchemaBuildError {}
+
+/// Variable-length string qualifiers admitted by the attested cohort.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaStringType {
+    length: u32,
+}
+
+impl DcsSchemaStringType {
+    pub fn new(length: u32) -> Result<Self, DcsSchemaBuildError> {
+        if length == 0 {
+            return Err(DcsSchemaBuildError::ZeroStringLength);
+        }
+        if !matches!(length, 20 | 40) {
+            return Err(DcsSchemaBuildError::UnsupportedStringLength { length });
+        }
+        Ok(Self { length })
+    }
+
+    pub const fn length(&self) -> u32 {
+        self.length
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaStringTypeWire {
+    length: u32,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaStringType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaStringTypeWire::deserialize(deserializer)?;
+        Self::new(wire.length).map_err(de::Error::custom)
+    }
+}
+
+/// Decimal qualifiers with unrestricted sign, as observed in the cohort.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaDecimalType {
+    digits: u32,
+    fraction_digits: u32,
+}
+
+impl DcsSchemaDecimalType {
+    pub fn new(digits: u32, fraction_digits: u32) -> Result<Self, DcsSchemaBuildError> {
+        if digits == 0 {
+            return Err(DcsSchemaBuildError::ZeroDecimalDigits);
+        }
+        if fraction_digits > digits {
+            return Err(DcsSchemaBuildError::DecimalFractionExceedsDigits {
+                digits,
+                fraction_digits,
+            });
+        }
+        if digits != 15 || fraction_digits != 2 {
+            return Err(DcsSchemaBuildError::UnsupportedDecimalQualifiers {
+                digits,
+                fraction_digits,
+            });
+        }
+        Ok(Self {
+            digits,
+            fraction_digits,
+        })
+    }
+
+    pub const fn digits(&self) -> u32 {
+        self.digits
+    }
+
+    pub const fn fraction_digits(&self) -> u32 {
+        self.fraction_digits
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaDecimalTypeWire {
+    digits: u32,
+    fraction_digits: u32,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaDecimalType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaDecimalTypeWire::deserialize(deserializer)?;
+        Self::new(wire.digits, wire.fraction_digits).map_err(de::Error::custom)
+    }
+}
+
+/// Closed field value-type variants admitted by the first schema cohort.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum DcsSchemaFieldType {
+    String(DcsSchemaStringType),
+    Decimal(DcsSchemaDecimalType),
+}
+
+/// One local DCS data source. Its type is fixed by this semantic type and is
+/// not retained as an open token.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaLocalDataSource {
+    name: CanonicalText,
+}
+
+impl DcsSchemaLocalDataSource {
+    pub fn new(name: CanonicalText) -> Result<Self, DcsSchemaBuildError> {
+        require_text("local data-source name", &name)?;
+        Ok(Self { name })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaLocalDataSourceWire {
+    name: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaLocalDataSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaLocalDataSourceWire::deserialize(deserializer)?;
+        Self::new(wire.name).map_err(de::Error::custom)
+    }
+}
+
+/// One direct `DataSetFieldField` semantic entry.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaDataSetField {
+    data_path: CanonicalText,
+    field: CanonicalText,
+    value_type: DcsSchemaFieldType,
+}
+
+impl DcsSchemaDataSetField {
+    pub fn new(
+        data_path: CanonicalText,
+        field: CanonicalText,
+        value_type: DcsSchemaFieldType,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("data-set field data path", &data_path)?;
+        require_text("data-set source field", &field)?;
+        Ok(Self {
+            data_path,
+            field,
+            value_type,
+        })
+    }
+
+    pub const fn data_path(&self) -> &CanonicalText {
+        &self.data_path
+    }
+
+    pub const fn field(&self) -> &CanonicalText {
+        &self.field
+    }
+
+    pub const fn value_type(&self) -> DcsSchemaFieldType {
+        self.value_type
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaDataSetFieldWire {
+    data_path: CanonicalText,
+    field: CanonicalText,
+    value_type: DcsSchemaFieldType,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaDataSetField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaDataSetFieldWire::deserialize(deserializer)?;
+        Self::new(wire.data_path, wire.field, wire.value_type).map_err(de::Error::custom)
+    }
+}
+
+/// One bounded object data set. Field order is semantic and retained exactly.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaDataSetObject {
+    name: CanonicalText,
+    fields: Vec<DcsSchemaDataSetField>,
+    data_source: CanonicalText,
+    object_name: CanonicalText,
+}
+
+impl DcsSchemaDataSetObject {
+    pub fn new(
+        name: CanonicalText,
+        fields: Vec<DcsSchemaDataSetField>,
+        data_source: CanonicalText,
+        object_name: CanonicalText,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("object data-set name", &name)?;
+        require_text("object data-set source reference", &data_source)?;
+        require_text("object data-set object name", &object_name)?;
+        if fields.len() != DCS_SCHEMA_DATA_SET_FIELD_COUNT {
+            return Err(DcsSchemaBuildError::UnexpectedDataSetFieldCount {
+                expected: DCS_SCHEMA_DATA_SET_FIELD_COUNT,
+                actual: fields.len(),
+            });
+        }
+        if !matches!(fields[0].value_type(), DcsSchemaFieldType::String(_))
+            || !matches!(fields[1].value_type(), DcsSchemaFieldType::Decimal(_))
+        {
+            return Err(DcsSchemaBuildError::UnexpectedDataSetFieldTypeOrder);
+        }
+        let DcsSchemaFieldType::String(string_type) = fields[0].value_type() else {
+            unreachable!("field type order checked above")
+        };
+        if string_type.length() != 20 {
+            return Err(DcsSchemaBuildError::UnexpectedDataSetStringLength {
+                length: string_type.length(),
+            });
+        }
+        let mut paths = BTreeSet::new();
+        for field in &fields {
+            if !paths.insert(field.data_path().as_str()) {
+                return Err(DcsSchemaBuildError::DuplicateDataSetFieldPath {
+                    path: field.data_path().as_str().to_owned(),
+                });
+            }
+        }
+        Ok(Self {
+            name,
+            fields,
+            data_source,
+            object_name,
+        })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+
+    pub fn fields(&self) -> &[DcsSchemaDataSetField] {
+        &self.fields
+    }
+
+    pub const fn data_source(&self) -> &CanonicalText {
+        &self.data_source
+    }
+
+    pub const fn object_name(&self) -> &CanonicalText {
+        &self.object_name
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaDataSetObjectWire {
+    name: CanonicalText,
+    fields: BoundedDcsSchemaVec<DcsSchemaDataSetField, DCS_SCHEMA_DATA_SET_FIELD_COUNT>,
+    data_source: CanonicalText,
+    object_name: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaDataSetObject {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaDataSetObjectWire::deserialize(deserializer)?;
+        Self::new(
+            wire.name,
+            wire.fields.values,
+            wire.data_source,
+            wire.object_name,
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
+/// The single direct calculated field admitted by the cohort.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaCalculatedField {
+    data_path: CanonicalText,
+    expression: CanonicalText,
+    value_type: DcsSchemaDecimalType,
+}
+
+impl DcsSchemaCalculatedField {
+    pub fn new(
+        data_path: CanonicalText,
+        expression: CanonicalText,
+        value_type: DcsSchemaDecimalType,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("calculated-field data path", &data_path)?;
+        require_text("calculated-field expression", &expression)?;
+        Ok(Self {
+            data_path,
+            expression,
+            value_type,
+        })
+    }
+
+    pub const fn data_path(&self) -> &CanonicalText {
+        &self.data_path
+    }
+
+    pub const fn expression(&self) -> &CanonicalText {
+        &self.expression
+    }
+
+    pub const fn value_type(&self) -> DcsSchemaDecimalType {
+        self.value_type
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaCalculatedFieldWire {
+    data_path: CanonicalText,
+    expression: CanonicalText,
+    value_type: DcsSchemaDecimalType,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaCalculatedField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaCalculatedFieldWire::deserialize(deserializer)?;
+        Self::new(wire.data_path, wire.expression, wire.value_type).map_err(de::Error::custom)
+    }
+}
+
+/// Closed aggregate-function set for the first ungrouped-total cohort.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DcsSchemaTotalFunction {
+    Sum,
+}
+
+/// One direct, ungrouped total. Grouping collections are intentionally absent
+/// from this type and therefore cannot be inferred by a writer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaUngroupedTotalField {
+    data_path: CanonicalText,
+    function: DcsSchemaTotalFunction,
+}
+
+impl DcsSchemaUngroupedTotalField {
+    pub fn new(
+        data_path: CanonicalText,
+        function: DcsSchemaTotalFunction,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("total-field data path", &data_path)?;
+        Ok(Self {
+            data_path,
+            function,
+        })
+    }
+
+    pub const fn data_path(&self) -> &CanonicalText {
+        &self.data_path
+    }
+
+    pub const fn function(&self) -> DcsSchemaTotalFunction {
+        self.function
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaUngroupedTotalFieldWire {
+    data_path: CanonicalText,
+    function: DcsSchemaTotalFunction,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaUngroupedTotalField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaUngroupedTotalFieldWire::deserialize(deserializer)?;
+        Self::new(wire.data_path, wire.function).map_err(de::Error::custom)
+    }
+}
+
+/// One-entry localized string used by the attested parameter and variant
+/// shells. Multi-language collections are outside this bounded cohort.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaLocalString {
+    language: CanonicalText,
+    content: CanonicalText,
+}
+
+impl DcsSchemaLocalString {
+    pub fn new(
+        language: CanonicalText,
+        content: CanonicalText,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("localized-string language", &language)?;
+        require_text("localized-string content", &content)?;
+        if language.as_str() != "ru" {
+            return Err(DcsSchemaBuildError::UnsupportedLanguage {
+                language: language.as_str().to_owned(),
+            });
+        }
+        Ok(Self { language, content })
+    }
+
+    pub const fn language(&self) -> &CanonicalText {
+        &self.language
+    }
+
+    pub const fn content(&self) -> &CanonicalText {
+        &self.content
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaLocalStringWire {
+    language: CanonicalText,
+    content: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaLocalString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaLocalStringWire::deserialize(deserializer)?;
+        Self::new(wire.language, wire.content).map_err(de::Error::custom)
+    }
+}
+
+/// One scalar string parameter. Its `useRestriction` semantic is fixed to the
+/// attested `false`; collections of values and restriction modes are absent.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaStringParameter {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    value_type: DcsSchemaStringType,
+    value: CanonicalText,
+}
+
+impl DcsSchemaStringParameter {
+    pub fn new(
+        name: CanonicalText,
+        title: DcsSchemaLocalString,
+        value_type: DcsSchemaStringType,
+        value: CanonicalText,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("parameter name", &name)?;
+        require_text("parameter scalar string value", &value)?;
+        if value_type.length() != 40 {
+            return Err(DcsSchemaBuildError::UnexpectedParameterStringLength {
+                length: value_type.length(),
+            });
+        }
+        Ok(Self {
+            name,
+            title,
+            value_type,
+            value,
+        })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+
+    pub const fn title(&self) -> &DcsSchemaLocalString {
+        &self.title
+    }
+
+    pub const fn value_type(&self) -> DcsSchemaStringType {
+        self.value_type
+    }
+
+    pub const fn value(&self) -> &CanonicalText {
+        &self.value
+    }
+
+    pub const fn use_restriction(&self) -> bool {
+        false
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaStringParameterWire {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    value_type: DcsSchemaStringType,
+    value: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaStringParameter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaStringParameterWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.title, wire.value_type, wire.value).map_err(de::Error::custom)
+    }
+}
+
+/// Positional metadata shell for one externally delegated Settings document.
+/// The Settings payload itself remains in the common settings/envelope layer.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaSettingsVariantShell {
+    name: CanonicalText,
+    presentation: DcsSchemaLocalString,
+}
+
+impl DcsSchemaSettingsVariantShell {
+    pub fn new(
+        name: CanonicalText,
+        presentation: DcsSchemaLocalString,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("settings-variant name", &name)?;
+        Ok(Self { name, presentation })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+
+    pub const fn presentation(&self) -> &DcsSchemaLocalString {
+        &self.presentation
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaSettingsVariantShellWire {
+    name: CanonicalText,
+    presentation: DcsSchemaLocalString,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaSettingsVariantShell {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaSettingsVariantShellWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.presentation).map_err(de::Error::custom)
+    }
+}
+
+/// Complete bounded semantic value for the first inner DCS schema cohort.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchema {
+    data_source: DcsSchemaLocalDataSource,
+    data_set: DcsSchemaDataSetObject,
+    calculated_field: DcsSchemaCalculatedField,
+    total_fields: Vec<DcsSchemaUngroupedTotalField>,
+    parameter: DcsSchemaStringParameter,
+    settings_variants: Vec<DcsSchemaSettingsVariantShell>,
+    provenance: SourceProvenance,
+}
+
+impl DcsSchema {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        data_source: DcsSchemaLocalDataSource,
+        data_set: DcsSchemaDataSetObject,
+        calculated_field: DcsSchemaCalculatedField,
+        total_fields: Vec<DcsSchemaUngroupedTotalField>,
+        parameter: DcsSchemaStringParameter,
+        settings_variants: Vec<DcsSchemaSettingsVariantShell>,
+        provenance: SourceProvenance,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        if data_set.data_source() != data_source.name() {
+            return Err(DcsSchemaBuildError::DataSourceReferenceMismatch);
+        }
+        if data_set
+            .fields()
+            .iter()
+            .any(|field| field.data_path() == calculated_field.data_path())
+        {
+            return Err(DcsSchemaBuildError::DuplicateCalculatedFieldPath {
+                path: calculated_field.data_path().as_str().to_owned(),
+            });
+        }
+        if total_fields.len() != DCS_SCHEMA_TOTAL_FIELD_COUNT {
+            return Err(DcsSchemaBuildError::UnexpectedTotalFieldCount {
+                expected: DCS_SCHEMA_TOTAL_FIELD_COUNT,
+                actual: total_fields.len(),
+            });
+        }
+        let decimal_path = data_set.fields()[1].data_path();
+        if total_fields[0].data_path() != decimal_path
+            || total_fields[1].data_path() != calculated_field.data_path()
+        {
+            return Err(DcsSchemaBuildError::UnexpectedTotalFieldOrder);
+        }
+        if settings_variants.is_empty() {
+            return Err(DcsSchemaBuildError::EmptySettingsVariants);
+        }
+        if settings_variants.len() > MAX_DCS_SCHEMA_SETTINGS_VARIANTS {
+            return Err(DcsSchemaBuildError::TooManySettingsVariants {
+                maximum: MAX_DCS_SCHEMA_SETTINGS_VARIANTS,
+                actual: settings_variants.len(),
+            });
+        }
+        let mut variant_names = BTreeSet::new();
+        for variant in &settings_variants {
+            if !variant_names.insert(variant.name().as_str()) {
+                return Err(DcsSchemaBuildError::DuplicateSettingsVariantName {
+                    name: variant.name().as_str().to_owned(),
+                });
+            }
+        }
+
+        let schema = Self {
+            data_source,
+            data_set,
+            calculated_field,
+            total_fields,
+            parameter,
+            settings_variants,
+            provenance,
+        };
+        validate_retained_bytes(&schema)?;
+        Ok(schema)
+    }
+
+    pub const fn data_source(&self) -> &DcsSchemaLocalDataSource {
+        &self.data_source
+    }
+
+    pub const fn data_set(&self) -> &DcsSchemaDataSetObject {
+        &self.data_set
+    }
+
+    pub const fn calculated_field(&self) -> &DcsSchemaCalculatedField {
+        &self.calculated_field
+    }
+
+    pub fn total_fields(&self) -> &[DcsSchemaUngroupedTotalField] {
+        &self.total_fields
+    }
+
+    pub const fn parameter(&self) -> &DcsSchemaStringParameter {
+        &self.parameter
+    }
+
+    pub fn settings_variants(&self) -> &[DcsSchemaSettingsVariantShell] {
+        &self.settings_variants
+    }
+
+    pub const fn provenance(&self) -> &SourceProvenance {
+        &self.provenance
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaWire {
+    data_source: DcsSchemaLocalDataSource,
+    data_set: DcsSchemaDataSetObject,
+    calculated_field: DcsSchemaCalculatedField,
+    total_fields: BoundedDcsSchemaVec<DcsSchemaUngroupedTotalField, DCS_SCHEMA_TOTAL_FIELD_COUNT>,
+    parameter: DcsSchemaStringParameter,
+    settings_variants:
+        BoundedDcsSchemaVec<DcsSchemaSettingsVariantShell, MAX_DCS_SCHEMA_SETTINGS_VARIANTS>,
+    provenance: SourceProvenance,
+}
+
+impl<'de> Deserialize<'de> for DcsSchema {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaWire::deserialize(deserializer)?;
+        Self::new(
+            wire.data_source,
+            wire.data_set,
+            wire.calculated_field,
+            wire.total_fields.values,
+            wire.parameter,
+            wire.settings_variants.values,
+            wire.provenance,
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
+struct BoundedDcsSchemaVec<T, const MAXIMUM: usize> {
+    values: Vec<T>,
+}
+
+struct BoundedDcsSchemaVecVisitor<T, const MAXIMUM: usize>(PhantomData<fn() -> T>);
+
+impl<'de, T, const MAXIMUM: usize> Visitor<'de> for BoundedDcsSchemaVecVisitor<T, MAXIMUM>
+where
+    T: Deserialize<'de>,
+{
+    type Value = BoundedDcsSchemaVec<T, MAXIMUM>;
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "a bounded DCS schema collection of at most {MAXIMUM} items"
+        )
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or_default().min(MAXIMUM));
+        while values.len() < MAXIMUM {
+            let Some(value) = sequence.next_element::<T>()? else {
+                return Ok(BoundedDcsSchemaVec { values });
+            };
+            values.push(value);
+        }
+        if sequence.next_element::<IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom(format_args!(
+                "DCS schema collection exceeds {MAXIMUM} items"
+            )));
+        }
+        Ok(BoundedDcsSchemaVec { values })
+    }
+}
+
+impl<'de, T, const MAXIMUM: usize> Deserialize<'de> for BoundedDcsSchemaVec<T, MAXIMUM>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(BoundedDcsSchemaVecVisitor(PhantomData))
+    }
+}
+
+fn require_text(field: &'static str, value: &CanonicalText) -> Result<(), DcsSchemaBuildError> {
+    if value.as_str().is_empty() {
+        return Err(DcsSchemaBuildError::EmptyText { field });
+    }
+    Ok(())
+}
+
+fn validate_retained_bytes(schema: &DcsSchema) -> Result<(), DcsSchemaBuildError> {
+    let mut retained = schema.provenance.retained_byte_len();
+    retained = add_retained(retained, schema.data_source.name().as_str().len())?;
+    retained = add_retained(retained, schema.data_set.name().as_str().len())?;
+    retained = add_retained(retained, schema.data_set.data_source().as_str().len())?;
+    retained = add_retained(retained, schema.data_set.object_name().as_str().len())?;
+    for field in schema.data_set.fields() {
+        retained = add_retained(retained, field.data_path().as_str().len())?;
+        retained = add_retained(retained, field.field().as_str().len())?;
+    }
+    retained = add_retained(retained, schema.calculated_field.data_path().as_str().len())?;
+    retained = add_retained(
+        retained,
+        schema.calculated_field.expression().as_str().len(),
+    )?;
+    for total in &schema.total_fields {
+        retained = add_retained(retained, total.data_path().as_str().len())?;
+    }
+    retained = add_retained(retained, schema.parameter.name().as_str().len())?;
+    retained = add_retained(retained, schema.parameter.title().language().as_str().len())?;
+    retained = add_retained(retained, schema.parameter.title().content().as_str().len())?;
+    retained = add_retained(retained, schema.parameter.value().as_str().len())?;
+    for variant in &schema.settings_variants {
+        retained = add_retained(retained, variant.name().as_str().len())?;
+        retained = add_retained(retained, variant.presentation().language().as_str().len())?;
+        retained = add_retained(retained, variant.presentation().content().as_str().len())?;
+    }
+    Ok(())
+}
+
+fn add_retained(current: usize, additional: usize) -> Result<usize, DcsSchemaBuildError> {
+    let actual = current
+        .checked_add(additional)
+        .ok_or(DcsSchemaBuildError::RetainedByteCountOverflow)?;
+    if actual > MAX_DCS_SCHEMA_RETAINED_BYTES {
+        return Err(DcsSchemaBuildError::RetainedBytesExceeded {
+            maximum: MAX_DCS_SCHEMA_RETAINED_BYTES,
+            actual,
+        });
+    }
+    Ok(actual)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::artifact::ProfileId;
+    use crate::diagnostic::{ObjectPath, PathSegment, PropertyPath};
+    use crate::provenance::CanonicalAnchor;
+
+    fn text(value: &str) -> CanonicalText {
+        CanonicalText::new(value).unwrap()
+    }
+
+    fn provenance() -> SourceProvenance {
+        SourceProvenance::with_locator(
+            ProfileId::parse("platform:8.3.27").unwrap(),
+            CanonicalAnchor::new(
+                ObjectPath::new(vec![PathSegment::name("dcs_schema").unwrap()]).unwrap(),
+                PropertyPath::root(),
+            ),
+            "fixture:dcs-core/Template.xml",
+        )
+        .unwrap()
+    }
+
+    fn string_field() -> DcsSchemaDataSetField {
+        DcsSchemaDataSetField::new(
+            text("Name"),
+            text("Name"),
+            DcsSchemaFieldType::String(DcsSchemaStringType::new(20).unwrap()),
+        )
+        .unwrap()
+    }
+
+    fn decimal_field() -> DcsSchemaDataSetField {
+        DcsSchemaDataSetField::new(
+            text("Amount"),
+            text("Amount"),
+            DcsSchemaFieldType::Decimal(DcsSchemaDecimalType::new(15, 2).unwrap()),
+        )
+        .unwrap()
+    }
+
+    fn variant(name: &str) -> DcsSchemaSettingsVariantShell {
+        DcsSchemaSettingsVariantShell::new(
+            text(name),
+            DcsSchemaLocalString::new(text("ru"), text(name)).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn schema(variants: Vec<DcsSchemaSettingsVariantShell>) -> DcsSchema {
+        DcsSchema::new(
+            DcsSchemaLocalDataSource::new(text("ИсточникДанных1")).unwrap(),
+            DcsSchemaDataSetObject::new(
+                text("Rows"),
+                vec![string_field(), decimal_field()],
+                text("ИсточникДанных1"),
+                text("Rows"),
+            )
+            .unwrap(),
+            DcsSchemaCalculatedField::new(
+                text("DoubleAmount"),
+                text("Amount * 2"),
+                DcsSchemaDecimalType::new(15, 2).unwrap(),
+            )
+            .unwrap(),
+            vec![
+                DcsSchemaUngroupedTotalField::new(text("Amount"), DcsSchemaTotalFunction::Sum)
+                    .unwrap(),
+                DcsSchemaUngroupedTotalField::new(
+                    text("DoubleAmount"),
+                    DcsSchemaTotalFunction::Sum,
+                )
+                .unwrap(),
+            ],
+            DcsSchemaStringParameter::new(
+                text("Caption"),
+                DcsSchemaLocalString::new(text("ru"), text("Caption")).unwrap(),
+                DcsSchemaStringType::new(40).unwrap(),
+                text("DCS corpus"),
+            )
+            .unwrap(),
+            variants,
+            provenance(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn attested_one_variant_cohort_is_typed_and_serde_stable() {
+        let schema = schema(vec![variant("Main")]);
+        assert_eq!(schema.data_source().name().as_str(), "ИсточникДанных1");
+        assert!(matches!(
+            schema.data_set().fields()[0].value_type(),
+            DcsSchemaFieldType::String(value) if value.length() == 20
+        ));
+        assert!(matches!(
+            schema.data_set().fields()[1].value_type(),
+            DcsSchemaFieldType::Decimal(value)
+                if value.digits() == 15 && value.fraction_digits() == 2
+        ));
+        assert_eq!(schema.total_fields().len(), 2);
+        assert!(!schema.parameter().use_restriction());
+        assert_eq!(schema.settings_variants()[0].name().as_str(), "Main");
+
+        let json = serde_json::to_string(&schema).unwrap();
+        assert_eq!(serde_json::from_str::<DcsSchema>(&json).unwrap(), schema);
+        assert_eq!(serde_json::to_string(&schema).unwrap(), json);
+    }
+
+    #[test]
+    fn two_variant_shells_preserve_positional_order() {
+        let schema = schema(vec![variant("Main"), variant("Secondary Secondary")]);
+        assert_eq!(
+            schema
+                .settings_variants()
+                .iter()
+                .map(|variant| variant.name().as_str())
+                .collect::<Vec<_>>(),
+            ["Main", "Secondary Secondary"]
+        );
+        assert_eq!(
+            serde_json::from_str::<DcsSchema>(&serde_json::to_string(&schema).unwrap()).unwrap(),
+            schema
+        );
+    }
+
+    #[test]
+    fn type_qualifiers_and_required_text_fail_closed() {
+        assert_eq!(
+            DcsSchemaStringType::new(0),
+            Err(DcsSchemaBuildError::ZeroStringLength)
+        );
+        assert_eq!(
+            DcsSchemaDecimalType::new(0, 0),
+            Err(DcsSchemaBuildError::ZeroDecimalDigits)
+        );
+        assert_eq!(
+            DcsSchemaDecimalType::new(2, 3),
+            Err(DcsSchemaBuildError::DecimalFractionExceedsDigits {
+                digits: 2,
+                fraction_digits: 3,
+            })
+        );
+        assert_eq!(
+            DcsSchemaStringType::new(21),
+            Err(DcsSchemaBuildError::UnsupportedStringLength { length: 21 })
+        );
+        assert_eq!(
+            DcsSchemaDecimalType::new(10, 2),
+            Err(DcsSchemaBuildError::UnsupportedDecimalQualifiers {
+                digits: 10,
+                fraction_digits: 2,
+            })
+        );
+        assert!(matches!(
+            DcsSchemaLocalString::new(text("en"), text("Caption")),
+            Err(DcsSchemaBuildError::UnsupportedLanguage { .. })
+        ));
+        assert!(matches!(
+            DcsSchemaLocalDataSource::new(text("")),
+            Err(DcsSchemaBuildError::EmptyText { .. })
+        ));
+    }
+
+    #[test]
+    fn object_data_set_requires_exact_field_shape_and_unique_paths() {
+        let one = DcsSchemaDataSetObject::new(
+            text("Rows"),
+            vec![string_field()],
+            text("Source"),
+            text("Rows"),
+        );
+        assert!(matches!(
+            one,
+            Err(DcsSchemaBuildError::UnexpectedDataSetFieldCount { actual: 1, .. })
+        ));
+
+        let reversed = DcsSchemaDataSetObject::new(
+            text("Rows"),
+            vec![decimal_field(), string_field()],
+            text("Source"),
+            text("Rows"),
+        );
+        assert_eq!(
+            reversed,
+            Err(DcsSchemaBuildError::UnexpectedDataSetFieldTypeOrder)
+        );
+
+        let string_40 = DcsSchemaDataSetField::new(
+            text("Name"),
+            text("Name"),
+            DcsSchemaFieldType::String(DcsSchemaStringType::new(40).unwrap()),
+        )
+        .unwrap();
+        assert!(matches!(
+            DcsSchemaDataSetObject::new(
+                text("Rows"),
+                vec![string_40, decimal_field()],
+                text("Source"),
+                text("Rows"),
+            ),
+            Err(DcsSchemaBuildError::UnexpectedDataSetStringLength { length: 40 })
+        ));
+
+        let duplicate_decimal = DcsSchemaDataSetField::new(
+            text("Name"),
+            text("Amount"),
+            DcsSchemaFieldType::Decimal(DcsSchemaDecimalType::new(15, 2).unwrap()),
+        )
+        .unwrap();
+        assert!(matches!(
+            DcsSchemaDataSetObject::new(
+                text("Rows"),
+                vec![string_field(), duplicate_decimal],
+                text("Source"),
+                text("Rows"),
+            ),
+            Err(DcsSchemaBuildError::DuplicateDataSetFieldPath { .. })
+        ));
+    }
+
+    #[test]
+    fn schema_cross_references_totals_and_variants_are_strict() {
+        let valid = schema(vec![variant("Main")]);
+        let mut json = serde_json::to_value(&valid).unwrap();
+        json["data_set"]["data_source"] = serde_json::json!("Other");
+        assert!(
+            serde_json::from_value::<DcsSchema>(json)
+                .unwrap_err()
+                .to_string()
+                .contains("different local data source")
+        );
+
+        let mut json = serde_json::to_value(&valid).unwrap();
+        json["calculated_field"]["data_path"] = serde_json::json!("Amount");
+        assert!(
+            serde_json::from_value::<DcsSchema>(json)
+                .unwrap_err()
+                .to_string()
+                .contains("duplicates a data-set field")
+        );
+
+        let mut json = serde_json::to_value(&valid).unwrap();
+        json["total_fields"].as_array_mut().unwrap().reverse();
+        assert!(
+            serde_json::from_value::<DcsSchema>(json)
+                .unwrap_err()
+                .to_string()
+                .contains("totals must target")
+        );
+
+        assert!(matches!(
+            DcsSchema::new(
+                valid.data_source.clone(),
+                valid.data_set.clone(),
+                valid.calculated_field.clone(),
+                valid.total_fields.clone(),
+                valid.parameter.clone(),
+                Vec::new(),
+                valid.provenance.clone(),
+            ),
+            Err(DcsSchemaBuildError::EmptySettingsVariants)
+        ));
+        assert!(matches!(
+            DcsSchema::new(
+                valid.data_source.clone(),
+                valid.data_set.clone(),
+                valid.calculated_field.clone(),
+                valid.total_fields.clone(),
+                valid.parameter.clone(),
+                vec![variant("Main"), variant("Main")],
+                valid.provenance.clone(),
+            ),
+            Err(DcsSchemaBuildError::DuplicateSettingsVariantName { .. })
+        ));
+    }
+
+    #[test]
+    fn public_serde_is_bounded_revalidating_and_denies_unknown_fields() {
+        let valid = schema(vec![variant("Main")]);
+        let mut unknown = serde_json::to_value(&valid).unwrap();
+        unknown["guessed_qname"] = serde_json::json!("DataCompositionSchema");
+        assert!(serde_json::from_value::<DcsSchema>(unknown).is_err());
+
+        let mut too_many_variants = serde_json::to_value(&valid).unwrap();
+        too_many_variants["settings_variants"] =
+            serde_json::json!([variant("A"), variant("B"), variant("C")]);
+        assert!(
+            serde_json::from_value::<DcsSchema>(too_many_variants)
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds 2 items")
+        );
+
+        let mut too_many_fields = serde_json::to_value(&valid).unwrap();
+        too_many_fields["data_set"]["fields"] =
+            serde_json::json!([string_field(), decimal_field(), decimal_field()]);
+        assert!(
+            serde_json::from_value::<DcsSchema>(too_many_fields)
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds 2 items")
+        );
+
+        let mut invalid_qualifier = serde_json::to_value(&valid).unwrap();
+        invalid_qualifier["data_set"]["fields"][0]["value_type"]["string"]["length"] =
+            serde_json::json!(0);
+        assert!(
+            serde_json::from_value::<DcsSchema>(invalid_qualifier)
+                .unwrap_err()
+                .to_string()
+                .contains("string length must be positive")
+        );
+    }
+
+    #[test]
+    fn retained_byte_arithmetic_is_fail_closed() {
+        assert_eq!(
+            add_retained(MAX_DCS_SCHEMA_RETAINED_BYTES, 1),
+            Err(DcsSchemaBuildError::RetainedBytesExceeded {
+                maximum: MAX_DCS_SCHEMA_RETAINED_BYTES,
+                actual: MAX_DCS_SCHEMA_RETAINED_BYTES + 1,
+            })
+        );
+        assert_eq!(
+            add_retained(usize::MAX, 1),
+            Err(DcsSchemaBuildError::RetainedByteCountOverflow)
+        );
+    }
+}
