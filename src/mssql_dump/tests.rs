@@ -50201,7 +50201,7 @@ fn catalog_default_presentation_fixture(
         *field = "{0}".to_string();
     }
     fields[51] = "1".to_string();
-    fields[52] = "0".to_string();
+    fields[52] = "{0,{0}}".to_string();
     fields[53] = "1".to_string();
     fields[57] = "0".to_string();
 
@@ -50246,7 +50246,9 @@ fn extracts_as_code_for_six_renamed_exact_code56_zero_length_catalogs() {
         "BinaryPayloadsRenamed",
         "PrintLanguagesRenamed",
     ] {
-        let source = catalog_default_presentation_fixture("56", 61, "0", name)
+        let mut fixture = catalog_default_presentation_fixture("56", 61, "0", name);
+        fixture.fields[20] = "0".to_string();
+        let source = fixture
             .extract()
             .expect("exact code-56 zero-length Catalog");
         let xml = String::from_utf8(source.xml).unwrap();
@@ -50797,13 +50799,26 @@ fn extracts_catalog_choice_flags_from_root_fields() {
     let list_value_id = "44444444-4444-4444-8444-444444444442";
     let manager_type_id = "55555555-5555-4555-8555-555555555551";
     let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"NoQuickChoice\",{{1,\"en\",\"No quick choice\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,0,0}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "NoQuickChoice", "");
+    for (field_index, value) in [
+        (1, object_type_id),
+        (2, object_value_id),
+        (3, ref_type_id),
+        (4, ref_value_id),
+        (5, selection_type_id),
+        (6, selection_value_id),
+        (7, list_type_id),
+        (8, list_value_id),
+        (34, manager_type_id),
+        (35, manager_value_id),
+    ] {
+        fields[field_index] = value.to_owned();
+    }
+    fields[40] = "0".to_owned();
+    fields[41] = "0".to_owned();
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
 
     let extracted = extract_metadata_source_xml(
         &catalog_blob,
@@ -50816,7 +50831,7 @@ fn extracts_catalog_choice_flags_from_root_fields() {
     let xml = String::from_utf8(extracted.xml).unwrap();
 
     assert!(xml.contains("<QuickChoice>false</QuickChoice>"), "{xml}");
-    assert!(xml.contains("<ChoiceMode>FromList</ChoiceMode>"), "{xml}");
+    assert!(xml.contains("<ChoiceMode>FromForm</ChoiceMode>"), "{xml}");
     assert!(
         xml.find("<EditType>InDialog</EditType>").unwrap()
             < xml.find("<QuickChoice>false</QuickChoice>").unwrap(),
@@ -50824,7 +50839,7 @@ fn extracts_catalog_choice_flags_from_root_fields() {
     );
     assert!(
         xml.find("<QuickChoice>false</QuickChoice>").unwrap()
-            < xml.find("<ChoiceMode>FromList</ChoiceMode>").unwrap(),
+            < xml.find("<ChoiceMode>FromForm</ChoiceMode>").unwrap(),
         "{xml}"
     );
 }
@@ -51319,7 +51334,7 @@ fn extracts_catalog_attribute_and_tabular_section_child_headers() {
     let object_refs = BTreeMap::from([
         (
             attribute_uuid.to_string(),
-            "Catalog.Products.Attribute.ExternalCode".to_string(),
+            "Catalog.Products.Attribute.Field".to_string(),
         ),
         (
             tabular_section_uuid.to_string(),
@@ -51327,7 +51342,7 @@ fn extracts_catalog_attribute_and_tabular_section_child_headers() {
         ),
         (
             tabular_attribute_uuid.to_string(),
-            "Catalog.Products.TabularSection.Prices.Attribute.Price".to_string(),
+            "Catalog.Products.TabularSection.Prices.Attribute.Field".to_string(),
         ),
     ]);
     let extracted = extract_metadata_source_xml_with_refs(
