@@ -27,6 +27,9 @@ pub const MAX_DCS_SCHEMA_SETTINGS_VARIANTS: usize = 2;
 /// Aggregate variable-sized byte budget for one bounded inner schema.
 pub const MAX_DCS_SCHEMA_RETAINED_BYTES: usize = 16_777_216;
 
+/// Exact Query/Union/link cardinality authenticated by the dedicated cohort.
+pub const DCS_SCHEMA_QUERY_UNION_LINK_COUNT: usize = 1;
+
 /// Failure to construct or revalidate the bounded inner DCS schema IR.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DcsSchemaBuildError {
@@ -74,6 +77,8 @@ pub enum DcsSchemaBuildError {
     RetainedBytesExceeded { maximum: usize, actual: usize },
     /// Aggregate retained-byte arithmetic overflowed.
     RetainedByteCountOverflow,
+    /// The bounded Query/Union/link graph has inconsistent names or fields.
+    QueryUnionLinkMismatch,
 }
 
 impl Display for DcsSchemaBuildError {
@@ -158,11 +163,308 @@ impl Display for DcsSchemaBuildError {
             Self::RetainedByteCountOverflow => {
                 formatter.write_str("DCS schema retained-byte count overflowed")
             }
+            Self::QueryUnionLinkMismatch => formatter.write_str(
+                "DCS schema Query/Union/link references do not match the attested graph",
+            ),
         }
     }
 }
 
 impl Error for DcsSchemaBuildError {}
+
+/// One untyped field in the exact Query cohort.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaQueryField {
+    data_path: CanonicalText,
+    field: CanonicalText,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaQueryFieldWire {
+    data_path: CanonicalText,
+    field: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaQueryField {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = DcsSchemaQueryFieldWire::deserialize(deserializer)?;
+        Self::new(wire.data_path, wire.field).map_err(de::Error::custom)
+    }
+}
+
+impl DcsSchemaQueryField {
+    pub fn new(
+        data_path: CanonicalText,
+        field: CanonicalText,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("query field data path", &data_path)?;
+        require_text("query source field", &field)?;
+        Ok(Self { data_path, field })
+    }
+    pub const fn data_path(&self) -> &CanonicalText {
+        &self.data_path
+    }
+    pub const fn field(&self) -> &CanonicalText {
+        &self.field
+    }
+}
+
+/// One exact `DataSetQuery` node.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaQueryDataSet {
+    name: CanonicalText,
+    field: DcsSchemaQueryField,
+    data_source: CanonicalText,
+    query: CanonicalText,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaQueryDataSetWire {
+    name: CanonicalText,
+    field: DcsSchemaQueryField,
+    data_source: CanonicalText,
+    query: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaQueryDataSet {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = DcsSchemaQueryDataSetWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.field, wire.data_source, wire.query).map_err(de::Error::custom)
+    }
+}
+
+impl DcsSchemaQueryDataSet {
+    pub fn new(
+        name: CanonicalText,
+        field: DcsSchemaQueryField,
+        data_source: CanonicalText,
+        query: CanonicalText,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("query data-set name", &name)?;
+        require_text("query data-source reference", &data_source)?;
+        require_text("query text", &query)?;
+        Ok(Self {
+            name,
+            field,
+            data_source,
+            query,
+        })
+    }
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+    pub const fn field(&self) -> &DcsSchemaQueryField {
+        &self.field
+    }
+    pub const fn data_source(&self) -> &CanonicalText {
+        &self.data_source
+    }
+    pub const fn query(&self) -> &CanonicalText {
+        &self.query
+    }
+}
+
+/// One exact `DataSetUnion` containing one Query item.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaUnionDataSet {
+    name: CanonicalText,
+    item: DcsSchemaQueryDataSet,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaUnionDataSetWire {
+    name: CanonicalText,
+    item: DcsSchemaQueryDataSet,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaUnionDataSet {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = DcsSchemaUnionDataSetWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.item).map_err(de::Error::custom)
+    }
+}
+
+impl DcsSchemaUnionDataSet {
+    pub fn new(
+        name: CanonicalText,
+        item: DcsSchemaQueryDataSet,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("union data-set name", &name)?;
+        Ok(Self { name, item })
+    }
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+    pub const fn item(&self) -> &DcsSchemaQueryDataSet {
+        &self.item
+    }
+}
+
+/// One exact direct link from the Query to the Union.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaDataSetLink {
+    source_data_set: CanonicalText,
+    destination_data_set: CanonicalText,
+    source_expression: CanonicalText,
+    destination_expression: CanonicalText,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaDataSetLinkWire {
+    source_data_set: CanonicalText,
+    destination_data_set: CanonicalText,
+    source_expression: CanonicalText,
+    destination_expression: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaDataSetLink {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = DcsSchemaDataSetLinkWire::deserialize(deserializer)?;
+        Self::new(
+            wire.source_data_set,
+            wire.destination_data_set,
+            wire.source_expression,
+            wire.destination_expression,
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
+/// Complete bounded semantic value for the exact Query/Union/link cohort.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaQueryUnionLink {
+    data_source: DcsSchemaLocalDataSource,
+    query: DcsSchemaQueryDataSet,
+    union: DcsSchemaUnionDataSet,
+    link: DcsSchemaDataSetLink,
+    settings_variants: Vec<DcsSchemaSettingsVariantShell>,
+    provenance: SourceProvenance,
+}
+
+impl DcsSchemaQueryUnionLink {
+    pub fn new(
+        data_source: DcsSchemaLocalDataSource,
+        query: DcsSchemaQueryDataSet,
+        union: DcsSchemaUnionDataSet,
+        link: DcsSchemaDataSetLink,
+        settings_variants: Vec<DcsSchemaSettingsVariantShell>,
+        provenance: SourceProvenance,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        let field = query.field().data_path();
+        if query.data_source() != data_source.name()
+            || union.item().data_source() != data_source.name()
+            || query.field() != union.item().field()
+            || query.query() != union.item().query()
+            || link.source_data_set() != query.name()
+            || link.destination_data_set() != union.name()
+            || link.source_expression() != field
+            || link.destination_expression() != field
+            || settings_variants.len() != DCS_SCHEMA_QUERY_UNION_LINK_COUNT
+        {
+            return Err(DcsSchemaBuildError::QueryUnionLinkMismatch);
+        }
+        let model = Self {
+            data_source,
+            query,
+            union,
+            link,
+            settings_variants,
+            provenance,
+        };
+        validate_query_union_link_retained_bytes(&model)?;
+        Ok(model)
+    }
+    pub const fn data_source(&self) -> &DcsSchemaLocalDataSource {
+        &self.data_source
+    }
+    pub const fn query(&self) -> &DcsSchemaQueryDataSet {
+        &self.query
+    }
+    pub const fn union(&self) -> &DcsSchemaUnionDataSet {
+        &self.union
+    }
+    pub const fn link(&self) -> &DcsSchemaDataSetLink {
+        &self.link
+    }
+    pub fn settings_variants(&self) -> &[DcsSchemaSettingsVariantShell] {
+        &self.settings_variants
+    }
+    pub const fn provenance(&self) -> &SourceProvenance {
+        &self.provenance
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaQueryUnionLinkWire {
+    data_source: DcsSchemaLocalDataSource,
+    query: DcsSchemaQueryDataSet,
+    union: DcsSchemaUnionDataSet,
+    link: DcsSchemaDataSetLink,
+    settings_variants:
+        BoundedDcsSchemaVec<DcsSchemaSettingsVariantShell, DCS_SCHEMA_QUERY_UNION_LINK_COUNT>,
+    provenance: SourceProvenance,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaQueryUnionLink {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = DcsSchemaQueryUnionLinkWire::deserialize(deserializer)?;
+        Self::new(
+            wire.data_source,
+            wire.query,
+            wire.union,
+            wire.link,
+            wire.settings_variants.values,
+            wire.provenance,
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
+impl DcsSchemaDataSetLink {
+    pub fn new(
+        source_data_set: CanonicalText,
+        destination_data_set: CanonicalText,
+        source_expression: CanonicalText,
+        destination_expression: CanonicalText,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        for (field, value) in [
+            ("link source data set", &source_data_set),
+            ("link destination data set", &destination_data_set),
+            ("link source expression", &source_expression),
+            ("link destination expression", &destination_expression),
+        ] {
+            require_text(field, value)?;
+        }
+        Ok(Self {
+            source_data_set,
+            destination_data_set,
+            source_expression,
+            destination_expression,
+        })
+    }
+    pub const fn source_data_set(&self) -> &CanonicalText {
+        &self.source_data_set
+    }
+    pub const fn destination_data_set(&self) -> &CanonicalText {
+        &self.destination_data_set
+    }
+    pub const fn source_expression(&self) -> &CanonicalText {
+        &self.source_expression
+    }
+    pub const fn destination_expression(&self) -> &CanonicalText {
+        &self.destination_expression
+    }
+}
 
 /// Variable-length string qualifiers admitted by the attested cohort.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -1062,6 +1364,40 @@ fn validate_retained_bytes(schema: &DcsSchema) -> Result<(), DcsSchemaBuildError
     Ok(())
 }
 
+fn validate_query_union_link_retained_bytes(
+    model: &DcsSchemaQueryUnionLink,
+) -> Result<(), DcsSchemaBuildError> {
+    let mut retained = model.provenance.retained_byte_len();
+    for value in [
+        model.data_source.name(),
+        model.query.name(),
+        model.query.field.data_path(),
+        model.query.field.field(),
+        model.query.data_source(),
+        model.query.query(),
+        model.union.name(),
+        model.union.item.name(),
+        model.link.source_data_set(),
+        model.link.destination_data_set(),
+        model.link.source_expression(),
+        model.link.destination_expression(),
+    ] {
+        retained = add_retained(retained, value.as_str().len())?;
+    }
+    for variant in &model.settings_variants {
+        retained = add_retained(retained, variant.name().as_str().len())?;
+        retained = add_retained(retained, variant.presentation().language().as_str().len())?;
+        retained = add_retained(retained, variant.presentation().content().as_str().len())?;
+    }
+    if retained > MAX_DCS_SCHEMA_RETAINED_BYTES {
+        return Err(DcsSchemaBuildError::RetainedBytesExceeded {
+            maximum: MAX_DCS_SCHEMA_RETAINED_BYTES,
+            actual: retained,
+        });
+    }
+    Ok(())
+}
+
 fn add_retained(current: usize, additional: usize) -> Result<usize, DcsSchemaBuildError> {
     let actual = current
         .checked_add(additional)
@@ -1125,6 +1461,50 @@ mod tests {
             ),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn query_union_link_graph_is_bounded_cross_checked_and_serde_stable() {
+        let field = DcsSchemaQueryField::new(text("SortKey"), text("SortKey")).unwrap();
+        let query = DcsSchemaQueryDataSet::new(
+            text("QueryRows"),
+            field.clone(),
+            text("ИсточникДанных1"),
+            text("ВЫБРАТЬ \"A\" КАК SortKey"),
+        )
+        .unwrap();
+        let item = DcsSchemaQueryDataSet::new(
+            text("UnionPart"),
+            field,
+            text("ИсточникДанных1"),
+            text("ВЫБРАТЬ \"A\" КАК SortKey"),
+        )
+        .unwrap();
+        let union = DcsSchemaUnionDataSet::new(text("UnionRows"), item).unwrap();
+        let link = DcsSchemaDataSetLink::new(
+            text("QueryRows"),
+            text("UnionRows"),
+            text("SortKey"),
+            text("SortKey"),
+        )
+        .unwrap();
+        let model = DcsSchemaQueryUnionLink::new(
+            DcsSchemaLocalDataSource::new(text("ИсточникДанных1")).unwrap(),
+            query,
+            union,
+            link,
+            vec![variant("Main")],
+            provenance(),
+        )
+        .unwrap();
+        let json = serde_json::to_string(&model).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaQueryUnionLink>(&json).unwrap(),
+            model
+        );
+        let mut drift = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        drift["link"]["destination_expression"] = serde_json::json!("Other");
+        assert!(serde_json::from_value::<DcsSchemaQueryUnionLink>(drift).is_err());
     }
 
     fn variant(name: &str) -> DcsSchemaSettingsVariantShell {

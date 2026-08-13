@@ -2654,6 +2654,12 @@ pub const BUNDLED_DCS_SCHEMA_TEMPLATE_ENVELOPE_EVIDENCE_JSON: &str =
 pub const BUNDLED_DCS_INNER_SCHEMA_EVIDENCE_JSON: &str =
     include_str!("../data/platform-8.3.27-xml-2.20-dcs-inner-schema-evidence.json");
 
+/// Immutable exact Query/Union/link evidence retained independently from the
+/// first bounded inner-schema policy while that policy is being widened.
+pub const BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-query-union-link/manifest.json"
+);
+
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
 pub const BUNDLED_FORM_CHOICE_PARAMETERS_WRITER_EVIDENCE_JSON: &str =
@@ -3371,6 +3377,47 @@ pub enum DcsInnerSchemaRootChildKind {
     TotalField,
     Parameter,
     SettingsVariant,
+}
+
+/// Exact QName/order/type policy for the one Query + one Union + one link
+/// coordinate authenticated by the clean-room 8.3.27.2214 fixture.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsQueryUnionLinkPolicy {
+    query_children: Vec<String>,
+    union_children: Vec<String>,
+    link_children: Vec<String>,
+    query_type_qname: String,
+    union_type_qname: String,
+    field_type_qname: String,
+    query_text: String,
+    field: String,
+}
+
+impl DcsQueryUnionLinkPolicy {
+    pub fn query_children(&self) -> &[String] {
+        &self.query_children
+    }
+    pub fn union_children(&self) -> &[String] {
+        &self.union_children
+    }
+    pub fn link_children(&self) -> &[String] {
+        &self.link_children
+    }
+    pub fn query_type_qname(&self) -> &str {
+        &self.query_type_qname
+    }
+    pub fn union_type_qname(&self) -> &str {
+        &self.union_type_qname
+    }
+    pub fn field_type_qname(&self) -> &str {
+        &self.field_type_qname
+    }
+    pub fn query_text(&self) -> &str {
+        &self.query_text
+    }
+    pub fn field(&self) -> &str {
+        &self.field
+    }
 }
 
 /// Exact namespace, order, type, token and cardinality policy for the bounded
@@ -4593,6 +4640,98 @@ struct DcsInnerSchemaEvidenceCorpus {
     policy: DcsInnerSchemaEvidencePolicy,
     proven_claims: Vec<String>,
     non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkManifest {
+    schema_version: u32,
+    fixture_id: String,
+    platform: DcsQueryUnionLinkPlatform,
+    seed: DcsQueryUnionLinkSeed,
+    rounds: DcsQueryUnionLinkRounds,
+    compiler_acceptance: DcsQueryUnionLinkCompilerAcceptance,
+    retained: DcsQueryUnionLinkRetained,
+    cohort: DcsQueryUnionLinkCohort,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkPlatform {
+    version: String,
+    source_version: String,
+    database_locale: String,
+    ibcmd_sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkSeed {
+    generator: String,
+    commit: String,
+    authority: String,
+    path: String,
+    size: usize,
+    sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkRounds {
+    round_1_cf_sha256: String,
+    round_2_cf_sha256: String,
+    native_template_sha256: String,
+    packed_body_sha256: String,
+    unpacked_body_sha256: String,
+    native_template_equal: bool,
+    packed_body_equal: bool,
+    unpacked_body_equal: bool,
+    round_trips: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkCompilerAcceptance {
+    candidate_unpacked_size: usize,
+    candidate_unpacked_sha256: String,
+    candidate_cf_size: usize,
+    candidate_cf_sha256: String,
+    accepted_cf_size: usize,
+    accepted_cf_sha256: String,
+    fresh_database_locale: String,
+    load_apply_save: bool,
+    reexported_template_size: usize,
+    reexported_template_sha256: String,
+    reexported_template_equal: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkRetained {
+    configuration: DcsQueryUnionLinkArtifact,
+    native_template: DcsQueryUnionLinkArtifact,
+    packed_body: DcsQueryUnionLinkArtifact,
+    unpacked_body: DcsQueryUnionLinkArtifact,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkArtifact {
+    path: String,
+    decoded_size: usize,
+    sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsQueryUnionLinkCohort {
+    root_order: Vec<String>,
+    query_children: Vec<String>,
+    union_children: Vec<String>,
+    link_children: Vec<String>,
+    query: String,
+    field: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -10168,6 +10307,116 @@ pub fn bundled_dcs_inner_schema_policy() -> Result<DcsInnerSchemaPolicy, SchemaE
         .clone()
 }
 
+pub fn bundled_dcs_query_union_link_policy() -> Result<DcsQueryUnionLinkPolicy, SchemaError> {
+    parse_dcs_query_union_link_policy(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON)
+}
+
+fn parse_dcs_query_union_link_policy(
+    evidence_json: &str,
+) -> Result<DcsQueryUnionLinkPolicy, SchemaError> {
+    let manifest: DcsQueryUnionLinkManifest = serde_json::from_str(evidence_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if manifest.schema_version != 1
+        || manifest.fixture_id != "8.3.27.2214-xml-2.20-dcs-query-union-link"
+        || manifest.platform.version != "8.3.27.2214"
+        || manifest.platform.source_version != "2.20"
+        || manifest.platform.database_locale != "ru_RU"
+        || manifest.platform.ibcmd_sha256
+            != "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+        || manifest.seed.generator != "Unica native dcs.compile"
+        || manifest.seed.commit != "a527d40962d047c6922c903b37510b30f697da42"
+        || manifest.seed.authority != "hypothesis_only"
+        || manifest.seed.path != "seed/Template.xml"
+        || manifest.seed.size != 2457
+        || manifest.seed.sha256
+            != "7eacfc04d24904e3ca7e780623e7f3dde6496aa871769cd2628122c53d1d8b0b"
+        || manifest.rounds.round_1_cf_sha256
+            != "700338ab23cf7939a0b330feb435ecf1035bcf999cfc81b4789d81d637e1ba26"
+        || manifest.rounds.round_2_cf_sha256
+            != "749147b480b77172c20e46928a44f82160eedb4594228df7e54a3f9c28f91f02"
+        || manifest.rounds.native_template_sha256
+            != "902307f2ff2c9ca69f73d0622c8ec9a49532fc8feca52fd17083203196f3816f"
+        || manifest.rounds.packed_body_sha256
+            != "a554c6d0c3fbd9fea503dfa2510ed1a39a8eebd1a8d19774901d6a840553a781"
+        || manifest.rounds.unpacked_body_sha256
+            != "e107c2373e38b3b453e0f6fac83bcdc46adba1422bab685163b8ffe9f81498ca"
+        || !manifest.rounds.native_template_equal
+        || !manifest.rounds.packed_body_equal
+        || !manifest.rounds.unpacked_body_equal
+        || manifest.rounds.round_trips != 2
+        || manifest.compiler_acceptance.candidate_unpacked_size != 3_318
+        || manifest.compiler_acceptance.candidate_unpacked_sha256
+            != "30eb6b551a93e5b8ad8589d11af5af5045fb6680a18ed0089c9b295f7819fcfa"
+        || manifest.compiler_acceptance.candidate_cf_size != 26_362
+        || manifest.compiler_acceptance.candidate_cf_sha256
+            != "dbcb913a1eadd1c64a1b4891c6fa915024ffb34553703e514c063ee067480b1a"
+        || manifest.compiler_acceptance.accepted_cf_size != 87_706
+        || manifest.compiler_acceptance.accepted_cf_sha256
+            != "91bd718a5a6e3041c994882ffb3c5dbeccc5c8c5559035ce641007749817b70d"
+        || manifest.compiler_acceptance.fresh_database_locale != "ru_RU"
+        || !manifest.compiler_acceptance.load_apply_save
+        || manifest.compiler_acceptance.reexported_template_size != 2_493
+        || manifest.compiler_acceptance.reexported_template_sha256
+            != manifest.rounds.native_template_sha256
+        || !manifest.compiler_acceptance.reexported_template_equal
+        || manifest.retained.configuration.path != "configuration.cf.b64"
+        || manifest.retained.configuration.decoded_size != 87_677
+        || manifest.retained.configuration.sha256 != manifest.rounds.round_2_cf_sha256
+        || manifest.retained.native_template.path != "native-template.xml.b64"
+        || manifest.retained.native_template.decoded_size != 2_493
+        || manifest.retained.native_template.sha256 != manifest.rounds.native_template_sha256
+        || manifest.retained.packed_body.path != "raw-packed.bin.b64"
+        || manifest.retained.packed_body.decoded_size != 758
+        || manifest.retained.packed_body.sha256 != manifest.rounds.packed_body_sha256
+        || manifest.retained.unpacked_body.path != "raw-unpacked.bin.b64"
+        || manifest.retained.unpacked_body.decoded_size != 2_907
+        || manifest.retained.unpacked_body.sha256 != manifest.rounds.unpacked_body_sha256
+        || manifest.non_claims.len() != 4
+        || manifest.cohort.root_order
+            != [
+                "dataSource",
+                "dataSet:DataSetQuery",
+                "dataSet:DataSetUnion",
+                "dataSetLink",
+                "settingsVariant",
+            ]
+        || manifest.cohort.query_children != ["name", "field", "dataSource", "query"]
+        || manifest.cohort.union_children != ["name", "item:DataSetQuery"]
+        || manifest.cohort.link_children
+            != [
+                "sourceDataSet",
+                "destinationDataSet",
+                "sourceExpression",
+                "destinationExpression",
+            ]
+        || manifest.cohort.query != "ВЫБРАТЬ \"A\" КАК SortKey"
+        || manifest.cohort.field != "SortKey"
+    {
+        return Err(SchemaError::InvalidDcsWriterEvidence(
+            "DCS Query/Union/link evidence drifted from the exact cohort".into(),
+        ));
+    }
+    const SCHEMA_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/schema";
+    let q = |name: &str| format!("{{{SCHEMA_NS}}}{name}");
+    Ok(DcsQueryUnionLinkPolicy {
+        query_children: ["name", "field", "dataSource", "query"].map(q).into(),
+        union_children: ["name", "item"].map(q).into(),
+        link_children: [
+            "sourceDataSet",
+            "destinationDataSet",
+            "sourceExpression",
+            "destinationExpression",
+        ]
+        .map(q)
+        .into(),
+        query_type_qname: q("DataSetQuery"),
+        union_type_qname: q("DataSetUnion"),
+        field_type_qname: q("DataSetFieldField"),
+        query_text: manifest.cohort.query,
+        field: manifest.cohort.field,
+    })
+}
+
 /// Returns the immutable platform-authenticated standalone/Form order policy.
 pub fn bundled_dcs_order_policy() -> Result<DcsOrderPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsOrderPolicy, SchemaError>> = OnceLock::new();
@@ -12347,6 +12596,37 @@ mod tests {
         assert!(policy.unknown_types_are_unsupported());
         assert!(policy.unknown_tokens_are_unsupported());
         assert!(policy.wrong_order_is_unsupported());
+    }
+
+    #[test]
+    fn bundled_query_union_link_policy_is_exact_and_fail_closed() {
+        let policy = bundled_dcs_query_union_link_policy().unwrap();
+        assert_eq!(policy.query_text(), "ВЫБРАТЬ \"A\" КАК SortKey");
+        assert_eq!(policy.field(), "SortKey");
+        assert_eq!(policy.query_children().len(), 4);
+        assert_eq!(policy.union_children().len(), 2);
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON).unwrap();
+        value["cohort"]["field"] = serde_json::json!("Other");
+        assert!(matches!(
+            parse_dcs_query_union_link_policy(&serde_json::to_string(&value).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("Query/Union/link evidence drifted")
+        ));
+        let mut hash_drift: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON).unwrap();
+        hash_drift["retained"]["packed_body"]["sha256"] = serde_json::json!("0".repeat(64));
+        assert!(
+            parse_dcs_query_union_link_policy(&serde_json::to_string(&hash_drift).unwrap())
+                .is_err()
+        );
+        let mut extra: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON).unwrap();
+        extra["platform"]["unexpected"] = serde_json::json!(true);
+        assert!(matches!(
+            parse_dcs_query_union_link_policy(&serde_json::to_string(&extra).unwrap()),
+            Err(SchemaError::InvalidJson(_))
+        ));
     }
 
     #[test]

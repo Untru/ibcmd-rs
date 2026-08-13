@@ -10,8 +10,9 @@ use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
     DcsChildParseOutcome, DcsInlineSettingsFragment, DcsSettingsChildrenError,
     DcsSettingsChildrenParts, analyze_dcs_schema_template_documents, analyze_dcs_settings_document,
-    emit_dcs_inner_schema_source_document, emit_dcs_settings_children_parts,
-    parse_dcs_inner_schema_storage_document_with_references, rewrite_dcs_settings_children,
+    emit_dcs_inner_schema_source_document, emit_dcs_query_union_link_source_document,
+    emit_dcs_settings_children_parts, parse_dcs_inner_schema_storage_document_with_references,
+    parse_dcs_query_union_link_storage_document, rewrite_dcs_settings_children,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -247,8 +248,7 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         source_profile.clone(),
         "mssql:dcs-schema-template/primary-schema-file",
         &reference_types,
-    )
-    .ok()?;
+    );
     let mut settings = Vec::with_capacity(envelope.settings().len());
     for document in envelope.settings() {
         let document = std::str::from_utf8(document).ok()?;
@@ -262,7 +262,19 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
             .ok()?,
         );
     }
-    emit_dcs_inner_schema_source_document(&schema, &settings).ok()
+    match schema {
+        Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings).ok(),
+        Err(_) if reference_types.is_empty() => {
+            let schema = parse_dcs_query_union_link_storage_document(
+                envelope.primary_schema_file(),
+                source_profile.clone(),
+                "mssql:dcs-schema-template/query-union-link",
+            )
+            .ok()?;
+            emit_dcs_query_union_link_source_document(&schema, &settings).ok()
+        }
+        Err(_) => None,
+    }
 }
 
 fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &DcsTypeIndex) {
@@ -2929,6 +2941,32 @@ mod tests {
         let actual = normalize_data_composition_schema_template_documents_with_profiles(
             &documents,
             &type_index,
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_query_union_link_body_exports_byte_exact_through_common_codec() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/native-template.xml.b64"
+        )));
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &ProfileId::parse("provider:mssql-legacy").unwrap(),
             &ProfileId::parse("xml-2.20").unwrap(),

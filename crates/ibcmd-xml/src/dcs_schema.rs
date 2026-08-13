@@ -6,15 +6,18 @@ use std::fmt::{self, Display, Formatter};
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::dcs_schema::{
     DcsSchema, DcsSchemaBuildError, DcsSchemaCalculatedField, DcsSchemaDataSetField,
-    DcsSchemaDataSetObject, DcsSchemaDecimalType, DcsSchemaFieldType, DcsSchemaLocalDataSource,
-    DcsSchemaLocalString, DcsSchemaReferenceType, DcsSchemaSettingsVariantShell,
+    DcsSchemaDataSetLink, DcsSchemaDataSetObject, DcsSchemaDecimalType, DcsSchemaFieldType,
+    DcsSchemaLocalDataSource, DcsSchemaLocalString, DcsSchemaQueryDataSet, DcsSchemaQueryField,
+    DcsSchemaQueryUnionLink, DcsSchemaReferenceType, DcsSchemaSettingsVariantShell,
     DcsSchemaStringParameter, DcsSchemaStringType, DcsSchemaTotalFunction,
-    DcsSchemaUngroupedTotalField,
+    DcsSchemaUngroupedTotalField, DcsSchemaUnionDataSet,
 };
 use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::CanonicalText;
-use ibcmd_schema::{DcsInnerSchemaPolicy, bundled_dcs_inner_schema_policy};
+use ibcmd_schema::{
+    DcsInnerSchemaPolicy, bundled_dcs_inner_schema_policy, bundled_dcs_query_union_link_policy,
+};
 use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::ResolveResult;
@@ -228,6 +231,128 @@ pub fn parse_dcs_inner_schema_storage_document_with_references(
     .map_err(DcsInnerSchemaError::Build)
 }
 
+/// Parses the exact one-Query/one-Union/one-link storage cohort.
+pub fn parse_dcs_query_union_link_storage_document(
+    bytes: &[u8],
+    source_profile: ProfileId,
+    locator: &str,
+) -> Result<DcsSchemaQueryUnionLink, DcsInnerSchemaError> {
+    let p = policy()?;
+    let qp = bundled_dcs_query_union_link_policy()
+        .map_err(|e| DcsInnerSchemaError::InvalidEvidence(e.to_string()))?;
+    let document = parse_document(bytes)?;
+    require_name(&document, None, "SchemaFile")?;
+    require_no_attributes(&document)?;
+    let wrapper = elements(&document)?;
+    if wrapper.len() != 1 {
+        return unsupported("SchemaFile must contain exactly one schema root");
+    }
+    let root = wrapper[0];
+    require_name(
+        root,
+        Some(p.schema_namespace_uri()),
+        "dataCompositionSchema",
+    )?;
+    require_no_attributes(root)?;
+    let children = elements(root)?;
+    if children.len() != 5 {
+        return unsupported("Query/Union/link root must contain exactly five children");
+    }
+    let data_source = parse_data_source(children[0], &p)?;
+    let query = parse_query(children[1], &p, &qp, false)?;
+    let union = parse_union(children[2], &p, &qp)?;
+    let link = parse_link(children[3], &p, &qp)?;
+    let variant = parse_variant(children[4], &p)?;
+    let anchor = CanonicalAnchor::new(
+        ObjectPath::new(vec![PathSegment::name("dcs_schema").expect("static")]).expect("static"),
+        PropertyPath::root(),
+    );
+    let provenance = SourceProvenance::with_locator(source_profile, anchor, locator)
+        .map_err(|e| DcsInnerSchemaError::Malformed(e.to_string()))?;
+    DcsSchemaQueryUnionLink::new(data_source, query, union, link, vec![variant], provenance)
+        .map_err(DcsInnerSchemaError::Build)
+}
+
+fn parse_query(
+    e: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    qp: &ibcmd_schema::DcsQueryUnionLinkPolicy,
+    nested: bool,
+) -> Result<DcsSchemaQueryDataSet, DcsInnerSchemaError> {
+    require_name(
+        e,
+        Some(p.schema_namespace_uri()),
+        if nested { "item" } else { "dataSet" },
+    )?;
+    require_type(e, p, qp.query_type_qname())?;
+    let c = exact_children(e, qp.query_children(), p.schema_namespace_uri())?;
+    let field_children = exact_children(
+        c[1],
+        &[
+            format!("{{{}}}dataPath", p.schema_namespace_uri()),
+            format!("{{{}}}field", p.schema_namespace_uri()),
+        ],
+        p.schema_namespace_uri(),
+    )?;
+    require_type(c[1], p, qp.field_type_qname())?;
+    let field = DcsSchemaQueryField::new(
+        canonical(text(field_children[0])?)?,
+        canonical(text(field_children[1])?)?,
+    )
+    .map_err(DcsInnerSchemaError::Build)?;
+    let query = DcsSchemaQueryDataSet::new(
+        canonical(text(c[0])?)?,
+        field,
+        canonical(text(c[2])?)?,
+        canonical(text(c[3])?)?,
+    )
+    .map_err(DcsInnerSchemaError::Build)?;
+    require_query_union_link_values(&query, qp)?;
+    Ok(query)
+}
+
+fn require_query_union_link_values(
+    query: &DcsSchemaQueryDataSet,
+    policy: &ibcmd_schema::DcsQueryUnionLinkPolicy,
+) -> Result<(), DcsInnerSchemaError> {
+    if query.field().data_path().as_str() != policy.field()
+        || query.field().field().as_str() != policy.field()
+        || query.query().as_str() != policy.query_text()
+    {
+        return unsupported("Query/Union/link field or query text is outside the exact cohort");
+    }
+    Ok(())
+}
+
+fn parse_union(
+    e: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    qp: &ibcmd_schema::DcsQueryUnionLinkPolicy,
+) -> Result<DcsSchemaUnionDataSet, DcsInnerSchemaError> {
+    require_name(e, Some(p.schema_namespace_uri()), "dataSet")?;
+    require_type(e, p, qp.union_type_qname())?;
+    let c = exact_children(e, qp.union_children(), p.schema_namespace_uri())?;
+    DcsSchemaUnionDataSet::new(canonical(text(c[0])?)?, parse_query(c[1], p, qp, true)?)
+        .map_err(DcsInnerSchemaError::Build)
+}
+
+fn parse_link(
+    e: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    qp: &ibcmd_schema::DcsQueryUnionLinkPolicy,
+) -> Result<DcsSchemaDataSetLink, DcsInnerSchemaError> {
+    require_name(e, Some(p.schema_namespace_uri()), "dataSetLink")?;
+    require_no_attributes(e)?;
+    let c = exact_children(e, qp.link_children(), p.schema_namespace_uri())?;
+    DcsSchemaDataSetLink::new(
+        canonical(text(c[0])?)?,
+        canonical(text(c[1])?)?,
+        canonical(text(c[2])?)?,
+        canonical(text(c[3])?)?,
+    )
+    .map_err(DcsInnerSchemaError::Build)
+}
+
 /// Emits the exact canonical XML 2.20 source spelling for the bounded cohort.
 /// Each supplied block must be an already evidence-gated inline
 /// `<dcsset:settings...>` fragment owned by the common Settings codec.
@@ -335,6 +460,108 @@ pub fn emit_dcs_inner_schema_source_document(
     }
     out.push_str("\r\n</DataCompositionSchema>");
     Ok(out.into_bytes())
+}
+
+pub fn emit_dcs_query_union_link_source_document(
+    schema: &DcsSchemaQueryUnionLink,
+    settings_blocks: &[DcsInlineSettingsFragment],
+) -> Result<Vec<u8>, DcsInnerSchemaError> {
+    if settings_blocks.len() != 1 || schema.settings_variants().len() != 1 {
+        return unsupported("Query/Union/link requires exactly one Settings block");
+    }
+    let p = policy()?;
+    let qp = bundled_dcs_query_union_link_policy()
+        .map_err(|e| DcsInnerSchemaError::InvalidEvidence(e.to_string()))?;
+    require_query_union_link_values(schema.query(), &qp)?;
+    require_query_union_link_values(schema.union().item(), &qp)?;
+    let mut out = source_header(&p);
+    line(&mut out, 1, "<dataSource>");
+    scalar(&mut out, 2, "name", schema.data_source().name().as_str());
+    scalar(&mut out, 2, "dataSourceType", "Local");
+    line(&mut out, 1, "</dataSource>");
+    emit_query(&mut out, 1, "dataSet", schema.query());
+    line(&mut out, 1, "<dataSet xsi:type=\"DataSetUnion\">");
+    scalar(&mut out, 2, "name", schema.union().name().as_str());
+    emit_query(&mut out, 2, "item", schema.union().item());
+    line(&mut out, 1, "</dataSet>");
+    line(&mut out, 1, "<dataSetLink>");
+    for (name, value) in [
+        ("sourceDataSet", schema.link().source_data_set()),
+        ("destinationDataSet", schema.link().destination_data_set()),
+        ("sourceExpression", schema.link().source_expression()),
+        (
+            "destinationExpression",
+            schema.link().destination_expression(),
+        ),
+    ] {
+        scalar(&mut out, 2, name, value.as_str());
+    }
+    line(&mut out, 1, "</dataSetLink>");
+    emit_variant(
+        &mut out,
+        schema.settings_variants().first().expect("one"),
+        &settings_blocks[0],
+    );
+    out.push_str("\r\n</DataCompositionSchema>");
+    Ok(out.into_bytes())
+}
+
+fn source_header(p: &DcsInnerSchemaPolicy) -> String {
+    format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<DataCompositionSchema xmlns=\"{}\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"{}\" xmlns:v8=\"{}\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"{}\" xmlns:xsi=\"{}\">",
+        p.schema_namespace_uri(),
+        p.settings_namespace_uri(),
+        p.data_core_namespace_uri(),
+        p.xml_schema_namespace_uri(),
+        p.xsi_namespace_uri()
+    )
+}
+
+fn emit_variant(
+    out: &mut String,
+    variant: &DcsSchemaSettingsVariantShell,
+    settings: &DcsInlineSettingsFragment,
+) {
+    line(out, 1, "<settingsVariant>");
+    scalar(out, 2, "dcsset:name", variant.name().as_str());
+    emit_local_string(out, 2, "dcsset:presentation", variant.presentation(), true);
+    append_indented_fragment(out, settings.as_str(), 2);
+    line(out, 1, "</settingsVariant>");
+}
+
+fn emit_query(out: &mut String, depth: usize, element: &str, query: &DcsSchemaQueryDataSet) {
+    line(
+        out,
+        depth,
+        &format!("<{element} xsi:type=\"DataSetQuery\">"),
+    );
+    scalar(out, depth + 1, "name", query.name().as_str());
+    line(out, depth + 1, "<field xsi:type=\"DataSetFieldField\">");
+    scalar(
+        out,
+        depth + 2,
+        "dataPath",
+        query.field().data_path().as_str(),
+    );
+    scalar(out, depth + 2, "field", query.field().field().as_str());
+    line(out, depth + 1, "</field>");
+    scalar(out, depth + 1, "dataSource", query.data_source().as_str());
+    line(
+        out,
+        depth + 1,
+        &format!(
+            "<query>{}</query>",
+            escape_query_text(query.query().as_str())
+        ),
+    );
+    line(out, depth, &format!("</{element}>"));
+}
+
+fn escape_query_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn parse_data_source(
@@ -1077,6 +1304,22 @@ mod tests {
         ]
     }
 
+    fn query_union_link_documents() -> Vec<Vec<u8>> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        vec![
+            body[24..24 + first].to_vec(),
+            body[24 + first..24 + first + second].to_vec(),
+            body[24 + first + second..].to_vec(),
+        ]
+    }
+
     fn inline_settings(source: &str) -> DcsInlineSettingsFragment {
         let start = source.find("<dcsset:settings").unwrap();
         let close = "</dcsset:settings>";
@@ -1164,6 +1407,51 @@ mod tests {
         )
         .unwrap();
         assert_eq!(emitted, expected);
+    }
+
+    #[test]
+    fn platform_query_union_link_parses_and_emits_exact_source() {
+        let documents = query_union_link_documents();
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/native-template.xml.b64"
+        )));
+        let schema = parse_dcs_query_union_link_storage_document(
+            &documents[0],
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-query-union-link",
+        )
+        .unwrap();
+        assert_eq!(schema.query().name().as_str(), "QueryRows");
+        assert_eq!(schema.union().name().as_str(), "UnionRows");
+        let expected_text = std::str::from_utf8(&expected).unwrap();
+        let emitted = emit_dcs_query_union_link_source_document(
+            &schema,
+            &[inline_settings(
+                expected_text.trim_start_matches('\u{feff}'),
+            )],
+        )
+        .unwrap();
+        assert_eq!(emitted, expected);
+    }
+
+    #[test]
+    fn query_union_link_rejects_unattested_query_and_field_values() {
+        let documents = query_union_link_documents();
+        let primary = String::from_utf8(documents[0].clone()).unwrap();
+        for drifted in [
+            primary.replacen("ВЫБРАТЬ \"A\" КАК SortKey", "ВЫБРАТЬ 1", 1),
+            primary.replacen(">SortKey<", ">Other<", 1),
+        ] {
+            assert!(matches!(
+                parse_dcs_query_union_link_storage_document(
+                    drifted.as_bytes(),
+                    ProfileId::parse("provider:mssql-legacy").unwrap(),
+                    "fixture:drift"
+                ),
+                Err(DcsInnerSchemaError::UnsupportedSource(_))
+            ));
+        }
     }
 
     #[test]

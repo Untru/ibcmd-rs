@@ -875,6 +875,46 @@ mod tests {
     }
 
     #[test]
+    fn platform_query_union_link_source_compiles_and_exports_through_common_codec() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-query-union-link/native-template.xml.b64"
+        )));
+        let compiled = compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &source,
+        )
+        .expect("platform-attested Query/Union/link source must compile");
+        let decoded = decode_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &compiled,
+        )
+        .unwrap();
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        assert!(
+            std::str::from_utf8(&exported)
+                .unwrap()
+                .contains("DataSetUnion")
+        );
+        compile_dcs(
+            &DcsCodecProfile::fixture(),
+            DcsTemplateKind::Schema,
+            &exported,
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn schema_decoder_rejects_zero_settings_count() {
         let mut plain = synthetic_schema_plain(&[xml_document(EMPTY_SETTINGS)]);
         plain[4..8].copy_from_slice(&0u32.to_le_bytes());

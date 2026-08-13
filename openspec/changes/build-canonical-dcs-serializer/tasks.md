@@ -62,8 +62,13 @@
   семантически: storage UUID разрешается в `CatalogRef.FilterProbe`, source
   QName строится общим XML codec, а собранный offline CF принят, применён,
   сохранён и повторно выгружен чистой базой 8.3.27.2214.
-- [ ] Полный typed schema API ещё не реализован: Query/Union/link, остальные
-  TypeId/type families и AreaTemplate требуют отдельных evidence-срезов;
+- [x] Exact bounded `DataSetQuery` + one-item `DataSetUnion` + direct
+  `dataSetLink` cohort реализован одним semantic IR и namespace-aware XML
+  codec. Два свежих платформенных roundtrip byte-stable; production compiler
+  body загружен и применён свежей базой 8.3.27.2214, обратный `Template.xml`
+  побайтно совпадает с native evidence.
+- [ ] Полный typed schema API ещё не реализован: остальные Query/Union/link
+  варианты, TypeId/type families и AreaTemplate требуют evidence-срезов;
   неподтверждённые schema shapes fail-closed.
 - [ ] `defaultSettings`, nested variants, `AreaTemplate` и остальные schema
   branches остаются вне доказанного общего layer.

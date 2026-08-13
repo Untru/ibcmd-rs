@@ -1000,6 +1000,23 @@ Assert-Equal $dcsInnerPolicy.sources.typeIdReference.unpackedBodySha256 $dcsType
 Assert-Equal $dcsInnerPolicy.policy.referenceStorageTypeId $dcsTypeIdManifest.mapping.storage_value 'DCS inner policy TypeId value binding'
 Assert-Equal $dcsInnerPolicy.policy.referenceSourceQualifiedName $dcsTypeIdManifest.mapping.source_value 'DCS inner policy reference QName binding'
 
+$dcsQueryRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-query-union-link'
+$dcsQueryManifest = Get-Content -LiteralPath (Join-Path $dcsQueryRoot 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsQueryManifest.schema_version 1 'DCS Query/Union/link manifest schema version'
+Assert-Equal $dcsQueryManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-query-union-link' 'DCS Query/Union/link fixture ID'
+Assert-Equal $dcsQueryManifest.rounds.native_template_equal $true 'DCS Query/Union/link native equality'
+Assert-Equal $dcsQueryManifest.rounds.packed_body_equal $true 'DCS Query/Union/link packed equality'
+Assert-Equal $dcsQueryManifest.rounds.unpacked_body_equal $true 'DCS Query/Union/link unpacked equality'
+Assert-Equal $dcsQueryManifest.compiler_acceptance.candidate_unpacked_sha256 '30eb6b551a93e5b8ad8589d11af5af5045fb6680a18ed0089c9b295f7819fcfa' 'DCS Query/Union/link compiler body'
+Assert-Equal $dcsQueryManifest.compiler_acceptance.load_apply_save $true 'DCS Query/Union/link compiler platform acceptance'
+Assert-Equal $dcsQueryManifest.compiler_acceptance.reexported_template_equal $true 'DCS Query/Union/link compiler re-export equality'
+Assert-Equal $dcsQueryManifest.compiler_acceptance.reexported_template_sha256 $dcsQueryManifest.rounds.native_template_sha256 'DCS Query/Union/link compiler re-export hash binding'
+foreach ($artifact in @($dcsQueryManifest.retained.configuration, $dcsQueryManifest.retained.native_template, $dcsQueryManifest.retained.packed_body, $dcsQueryManifest.retained.unpacked_body)) {
+    $null = Get-Base64EvidenceBytes $artifact $dcsQueryRoot
+}
+Assert-FileEvidence ([pscustomobject]@{ path=$dcsQueryManifest.seed.path; size=$dcsQueryManifest.seed.size; sha256=$dcsQueryManifest.seed.sha256 }) $dcsQueryRoot
+Assert-Equal (@($dcsQueryManifest.cohort.root_order) -join ',') 'dataSource,dataSet:DataSetQuery,dataSet:DataSetUnion,dataSetLink,settingsVariant' 'DCS Query/Union/link root order'
+
 $dcsConditionalRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance'
 $dcsConditionalManifestPath = Join-Path $dcsConditionalRoot 'manifest.json'
 if (-not (Test-Path -LiteralPath $dcsConditionalManifestPath -PathType Leaf)) {
