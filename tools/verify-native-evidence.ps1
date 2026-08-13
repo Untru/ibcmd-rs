@@ -1017,6 +1017,23 @@ foreach ($artifact in @($dcsQueryManifest.retained.configuration, $dcsQueryManif
 Assert-FileEvidence ([pscustomobject]@{ path=$dcsQueryManifest.seed.path; size=$dcsQueryManifest.seed.size; sha256=$dcsQueryManifest.seed.sha256 }) $dcsQueryRoot
 Assert-Equal (@($dcsQueryManifest.cohort.root_order) -join ',') 'dataSource,dataSet:DataSetQuery,dataSet:DataSetUnion,dataSetLink,settingsVariant' 'DCS Query/Union/link root order'
 
+$dcsAreaRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-area-template'
+$dcsAreaManifest = Get-Content -LiteralPath (Join-Path $dcsAreaRoot 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsAreaManifest.schema_version 1 'DCS AreaTemplate manifest schema version'
+Assert-Equal $dcsAreaManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-area-template-style-free' 'DCS AreaTemplate fixture ID'
+Assert-Equal $dcsAreaManifest.rounds.native_template_equal $true 'DCS AreaTemplate native equality'
+Assert-Equal $dcsAreaManifest.rounds.packed_body_equal $true 'DCS AreaTemplate packed equality'
+Assert-Equal $dcsAreaManifest.rounds.unpacked_body_equal $true 'DCS AreaTemplate unpacked equality'
+foreach ($artifact in @($dcsAreaManifest.retained.configuration, $dcsAreaManifest.retained.native_template, $dcsAreaManifest.retained.packed_body, $dcsAreaManifest.retained.unpacked_body, $dcsAreaManifest.retained.area_schema_file)) {
+    $null = Get-Base64EvidenceBytes $artifact $dcsAreaRoot
+}
+Assert-FileEvidence ([pscustomobject]@{ path=$dcsAreaManifest.seed.path; size=$dcsAreaManifest.seed.size; sha256=$dcsAreaManifest.seed.sha256 }) $dcsAreaRoot
+Assert-Equal $dcsAreaManifest.document_topology.settings_count 1 'DCS AreaTemplate Settings count'
+Assert-Equal (@($dcsAreaManifest.document_topology.stored_lengths) -join ',') '3029,1142' 'DCS AreaTemplate stored lengths'
+Assert-Equal $dcsAreaManifest.document_topology.trailing_area_schema_file_size 1027 'DCS AreaTemplate trailing document size'
+Assert-Equal $dcsAreaManifest.cohort.has_root_appearance $false 'DCS AreaTemplate appearance absence'
+Assert-Equal $dcsAreaManifest.cohort.has_app_index $false 'DCS AreaTemplate appIndex absence'
+
 $dcsConditionalRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-conditional-appearance'
 $dcsConditionalManifestPath = Join-Path $dcsConditionalRoot 'manifest.json'
 if (-not (Test-Path -LiteralPath $dcsConditionalManifestPath -PathType Leaf)) {

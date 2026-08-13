@@ -72,6 +72,11 @@
   неподтверждённые schema shapes fail-closed.
 - [ ] `defaultSettings`, nested variants, `AreaTemplate` и остальные schema
   branches остаются вне доказанного общего layer.
+- [x] Физический style-free `AreaTemplate` cohort снят двумя свежими циклами
+  8.3.27.2214: primary schema и внешний Settings остаются byte-identical
+  `dcs-core`, а один TableRow/tableCell/Field + expression parameter хранится
+  отдельным trailing `SchemaFile` без root appearance и `appIndex`. Production
+  codec/reverse compiler для этого документа остаются следующим подэтапом.
 
 ## Задача 5: Проверить evidence
 
