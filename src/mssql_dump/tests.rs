@@ -4151,6 +4151,53 @@ fn owner_graph_tabular_section_item_for_test(
     }
 }
 
+/// Extends `owner_graph_tabular_section_item_for_test` (Catalog only) with
+/// overrides into (a) the envelope's own-properties tail
+/// (`{11,gen0..3,header,fill_checking,standard_attributes_presence,tooltip}`,
+/// indexes 6/7/8) consumed by `parse_exact_metadata_tabular_section`, and
+/// (b) the collection envelope's trailing use-mode field consumed by
+/// `catalog_tabular_section_use_from_envelope`, instead of duplicating the
+/// canonical tabular-section wire layout for tests that need the section's
+/// own properties (not just its declared child attributes) populated.
+fn catalog_tabular_section_item_with_overrides_for_test(
+    uuid: &str,
+    name: &str,
+    generated: [&str; 4],
+    nested_wrappers: &[String],
+    envelope_use_mode: &str,
+    payload_overrides: &[(usize, &str)],
+) -> String {
+    let item = owner_graph_tabular_section_item_for_test(
+        owner_graph::OwnerGraphFamily::Catalog,
+        uuid,
+        name,
+        generated,
+        nested_wrappers,
+    );
+    let mut outer = split_1c_braced_fields(&item, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut envelope = split_1c_braced_fields(&outer[0], 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    envelope[2] = envelope_use_mode.to_string();
+    let mut payload = split_1c_braced_fields(&envelope[1], 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    for (index, value) in payload_overrides {
+        payload[*index] = (*value).to_string();
+    }
+    envelope[1] = format!("{{{}}}", payload.join(","));
+    outer[0] = format!("{{{}}}", envelope.join(","));
+    format!("{{{}}}", outer.join(","))
+}
+
 #[test]
 fn catalog_document_and_business_process_tabular_sections_report_exact_second_item_matrix() {
     let section_first = "11111111-1111-4111-8111-111111111111";
@@ -33496,6 +33543,73 @@ fn information_register_standard_attribute_bag_from_values_for_test(
     format!("{{{}}}", fields.join(","))
 }
 
+#[derive(Clone, Copy)]
+struct CatalogStandardAttributeOverrideForTest<'a> {
+    fill_checking: &'a str,
+    fill_value: &'a str,
+    tooltip: Option<&'a str>,
+    synonym: Option<&'a str>,
+    /// `None` keeps the marker's structurally-required default ("2"/"Deny"
+    /// for Owner, "0"/"TransformValues" for everything else).
+    type_reduction: Option<&'a str>,
+}
+
+impl Default for CatalogStandardAttributeOverrideForTest<'_> {
+    fn default() -> Self {
+        Self {
+            fill_checking: "0",
+            fill_value: "{\"U\"}",
+            tooltip: None,
+            synonym: None,
+            type_reduction: None,
+        }
+    }
+}
+
+/// Builds a schema-exact, 9-entry Catalog `StandardAttributes` payload
+/// (field 45 of `parse_strict_catalog_properties_from_text`). The bag wire
+/// format is shared with InformationRegister standard attributes
+/// (`INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS`); this reuses that proven
+/// builder and only overrides the slots (fill checking/value, tooltip,
+/// synonym, type reduction) that a given test cares about, per marker.
+fn catalog_standard_attributes_payload_for_test(
+    modern: bool,
+    overrides: &BTreeMap<&str, CatalogStandardAttributeOverrideForTest<'_>>,
+) -> String {
+    let mut payload = vec![
+        "1".to_string(),
+        CATALOG_STANDARD_ATTRIBUTES.len().to_string(),
+    ];
+    for (marker, name) in CATALOG_STANDARD_ATTRIBUTES {
+        // `Owner` is structurally required to carry raw type-reduction "2"
+        // (rendered as TypeReductionMode "Deny"); every other standard
+        // attribute is required to carry "0" ("TransformValues"). This is a
+        // schema-level invariant of `parse_catalog_standard_attributes`, not
+        // a per-test choice, so it is the helper's default rather than
+        // something every caller must know to override.
+        let default_type_reduction = if name == "Owner" { "2" } else { "0" };
+        let over = overrides.get(marker).copied().unwrap_or_default();
+        payload.push(format!("{{{marker}}}"));
+        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
+        let mut values = information_register_standard_attribute_values_for_test(name, true);
+        values[1] = information_register_standard_attribute_direct_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+            over.fill_checking,
+        );
+        values[5] = information_register_standard_attribute_nested_enum_for_test(
+            INFORMATION_REGISTER_STANDARD_ATTRIBUTE_TYPE_REDUCTION_UUID,
+            over.type_reduction.unwrap_or(default_type_reduction),
+        );
+        values[7] = information_register_standard_attribute_localized_for_test(over.tooltip);
+        values[18] = information_register_standard_attribute_localized_for_test(over.synonym);
+        values[22] = over.fill_value.to_string();
+        payload.push(
+            information_register_standard_attribute_bag_from_values_for_test(&values, modern),
+        );
+    }
+    format!("{{1,{{{}}}}}", payload.join(","))
+}
+
 fn information_register_standard_attributes_for_test(modern: bool) -> String {
     let definitions = [
         ("-5", "Active", true),
@@ -50383,10 +50497,23 @@ fn rejects_wrong_slot9_uuid_with_later_valid_owner_header_atomically() {
 
 #[test]
 fn changes_only_default_presentation_and_preserves_schema_order() {
-    let as_code = catalog_default_presentation_xml("56", 61, "0", "OrderingControl")
-        .expect("exact code-56 Catalog");
-    let legacy = catalog_default_presentation_xml("57", 61, "0", "OrderingControl")
-        .expect("code-57 control");
+    let mut as_code_fixture =
+        catalog_default_presentation_fixture("56", 61, "0", "OrderingControl");
+    as_code_fixture.fields[20] = "0".to_string();
+    as_code_fixture.fields[45] =
+        catalog_standard_attributes_payload_for_test(false, &BTreeMap::new());
+    let as_code = String::from_utf8(
+        as_code_fixture
+            .extract()
+            .expect("exact code-56 Catalog")
+            .xml,
+    )
+    .unwrap();
+
+    let mut legacy_fixture = catalog_default_presentation_fixture("57", 61, "0", "OrderingControl");
+    legacy_fixture.fields[45] =
+        catalog_standard_attributes_payload_for_test(true, &BTreeMap::new());
+    let legacy = String::from_utf8(legacy_fixture.extract().expect("code-57 control").xml).unwrap();
 
     assert_eq!(
         as_code.replace(
@@ -51034,23 +51161,45 @@ fn extracts_catalog_form_refs_and_presentations_to_metadata_xml() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let object_form_uuid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     let list_form_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-    let object_type_id = "11111111-1111-4111-8111-111111111111";
-    let object_value_id = "11111111-1111-4111-8111-111111111112";
-    let ref_type_id = "22222222-2222-4222-8222-222222222221";
-    let ref_value_id = "22222222-2222-4222-8222-222222222222";
-    let selection_type_id = "33333333-3333-4333-8333-333333333331";
-    let selection_value_id = "33333333-3333-4333-8333-333333333332";
-    let list_type_id = "44444444-4444-4444-8444-444444444441";
-    let list_value_id = "44444444-4444-4444-8444-444444444442";
-    let manager_type_id = "55555555-5555-4555-8555-555555555551";
-    let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{object_form_uuid},{zero_uuid},{list_form_uuid},{list_form_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,2,1,{{1,{{0,2,{{\"#\",60ea359f-3a6e-48bb-8e71-d2a457572918,{{-3}}}},{{\"#\",60ea359f-3a6e-48bb-8e71-d2a457572918,{{-2}}}}}}}},1,1,{{0}},{{2,\"ru\",\"Товар\",\"en\",\"Product\"}},{{0}},{{0}},{{0}},{{2,\"ru\",\"Товары для продажи\",\"en\",\"Goods for sale\"}}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, mut collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    fields[21] = object_form_uuid.to_owned();
+    fields[23] = list_form_uuid.to_owned();
+    fields[24] = list_form_uuid.to_owned();
+    fields[40] = "2".to_owned();
+    fields[41] = "1".to_owned();
+    fields[42] = format!(
+        "{{1,{{0,2,{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{-3}}}},{{\"#\",{EXCHANGE_PLAN_FIELD_REF_TYPE_UUID},{{-2}}}}}}}}"
+    );
+    fields[46] = "{2,\"ru\",\"Товар\",\"en\",\"Product\"}".to_owned();
+    fields[50] = "{2,\"ru\",\"Товары для продажи\",\"en\",\"Goods for sale\"}".to_owned();
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "-5",
+        CatalogStandardAttributeOverrideForTest {
+            fill_checking: "1",
+            ..Default::default()
+        },
+    );
+    overrides.insert(
+        "-3",
+        CatalogStandardAttributeOverrideForTest {
+            fill_value: "{\"S\",\"\"}",
+            ..Default::default()
+        },
+    );
+    overrides.insert(
+        "-2",
+        CatalogStandardAttributeOverrideForTest {
+            fill_value: "{\"S\",\"   \"}",
+            ..Default::default()
+        },
+    );
+    fields[45] = catalog_standard_attributes_payload_for_test(true, &overrides);
+    collections[4] =
+        format!("{{{CATALOG_FORM_COLLECTION_UUID},2,{object_form_uuid},{list_form_uuid}}}");
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
     let form_refs = BTreeMap::from([
         (
             object_form_uuid.to_string(),
@@ -51138,24 +51287,28 @@ fn extracts_catalog_form_refs_and_presentations_to_metadata_xml() {
 #[test]
 fn extracts_catalog_standard_attribute_tooltips_and_synonyms_to_metadata_xml() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let object_type_id = "11111111-1111-4111-8111-111111111111";
-    let object_value_id = "11111111-1111-4111-8111-111111111112";
-    let ref_type_id = "22222222-2222-4222-8222-222222222221";
-    let ref_value_id = "22222222-2222-4222-8222-222222222222";
-    let selection_type_id = "33333333-3333-4333-8333-333333333331";
-    let selection_value_id = "33333333-3333-4333-8333-333333333332";
-    let list_type_id = "44444444-4444-4444-8444-444444444441";
-    let list_value_id = "44444444-4444-4444-8444-444444444442";
-    let manager_type_id = "55555555-5555-4555-8555-555555555551";
-    let manager_value_id = "55555555-5555-4555-8555-555555555552";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let standard_attribute_details = r##"{1,{1,2,{-3},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Description & help"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Description caption"}}},{-2},510405d3-2a0c-4fea-960a-7fee59b32f9b,{14,2,4690ff70-e3fa-4914-9127-6a9acc5fc949,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Code & help"}},cf4abea3-37b2-11d4-940f-008048da11f9,{"#",87024738-fc2a-4436-ada1-df79d395c424,{1,"en","Code caption"}}}}}"##;
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,{object_type_id},{object_value_id},{ref_type_id},{ref_value_id},{selection_type_id},{selection_value_id},{list_type_id},{list_value_id},\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,{manager_type_id},{manager_value_id},0,0,0,0,2,1,{{0}},1,1,{standard_attribute_details},{{0}},{{0}},{{0}},{{0}},{{0}}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, mut fields, collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    let mut overrides = BTreeMap::new();
+    overrides.insert(
+        "-3",
+        CatalogStandardAttributeOverrideForTest {
+            tooltip: Some("Description & help"),
+            synonym: Some("Description caption"),
+            ..Default::default()
+        },
+    );
+    overrides.insert(
+        "-2",
+        CatalogStandardAttributeOverrideForTest {
+            tooltip: Some("Code & help"),
+            synonym: Some("Code caption"),
+            ..Default::default()
+        },
+    );
+    fields[45] = catalog_standard_attributes_payload_for_test(true, &overrides);
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
 
     let extracted = extract_metadata_source_xml(
         &catalog_blob,
@@ -52480,6 +52633,43 @@ $PATTERN
     }
 }
 
+/// Extends `catalog_attribute_wrapper_for_test` with positional overrides
+/// into its `{27, ...}` payload (index 0 is the leading `"27"` marker),
+/// instead of duplicating the canonical wrapper layout for tests that need
+/// one or two field-level scalars (e.g. QuickChoice, CreateOnInput) changed
+/// from that helper's defaults.
+fn catalog_attribute_wrapper_with_payload_overrides_for_test(
+    wrapper_code: u32,
+    attribute_uuid: &str,
+    pattern: &str,
+    fill_value: &str,
+    fill_from_filling_value: &str,
+    payload_overrides: &[(usize, &str)],
+) -> String {
+    let wrapper = catalog_attribute_wrapper_for_test(
+        wrapper_code,
+        attribute_uuid,
+        pattern,
+        fill_value,
+        fill_from_filling_value,
+    );
+    let mut wrapper_fields = split_1c_braced_fields(&wrapper, 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut payload_fields = split_1c_braced_fields(&wrapper_fields[1], 0)
+        .unwrap()
+        .into_iter()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    for (index, value) in payload_overrides {
+        payload_fields[*index] = (*value).to_string();
+    }
+    wrapper_fields[1] = format!("{{{}}}", payload_fields.join(","));
+    format!("{{{}}}", wrapper_fields.join(","))
+}
+
 fn catalog_attribute_collection_for_test(marker: &str, wrappers: &[String]) -> String {
     let items = wrappers
         .iter()
@@ -53027,50 +53217,52 @@ fn extracts_catalog_nested_tabular_section_attribute_tail_scalars() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let nested_collection = r#"{888744e1-b616-11d4-9436-004095e12fc7,1,
-{
-{8,
-{27,
-{2,
-{3,
-{1,0,$ATTRIBUTE},"PriceCode",{1,"en","Price code"},"",0,0,$ZERO,0},
-{"Pattern",{"S",20,1}}
-},
-0,{0},{1,"en","Price code tooltip"},0,"",0,
-{"U"},{"U"},0,$ZERO,1,1,
-{5006,0},
-{3,0,0},
-{0,0},
-0,{0},{"S",""},0,1,0
-},2,1,1
-},0}
-}"#
-    .replace("$ATTRIBUTE", tabular_attribute_uuid)
-    .replace("$ZERO", zero_uuid);
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
-22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
-33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
-44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
-2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
-{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
-55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
-0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
-{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
-{nested_collection}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, fields, mut collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    let nested = catalog_attribute_wrapper_with_payload_overrides_for_test(
+        8,
+        tabular_attribute_uuid,
+        r#"{"Pattern",{"S",20,1}}"#,
+        r#"{"S",""}"#,
+        "0",
+        &[(12, "1"), (21, "1")],
+    );
+    let tabular = owner_graph_tabular_section_item_for_test(
+        owner_graph::OwnerGraphFamily::Catalog,
+        tabular_section_uuid,
+        "Prices",
+        [
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee3",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee4",
+        ],
+        &[nested],
+    );
+    collections[2] = format!("{{{CATALOG_TABULAR_SECTION_COLLECTION_UUID},1,{tabular}}}");
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
+    let object_refs = BTreeMap::from([
+        (
+            tabular_section_uuid.to_string(),
+            "Catalog.Products.TabularSection.Prices".to_string(),
+        ),
+        (
+            tabular_attribute_uuid.to_string(),
+            "Catalog.Products.TabularSection.Prices.Attribute.Field".to_string(),
+        ),
+    ]);
 
-    let extracted = extract_metadata_source_xml(
+    let extracted = extract_metadata_source_xml_with_refs(
         &catalog_blob,
         catalog_uuid,
         &BTreeMap::new(),
+        &object_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
     )
     .unwrap();
     let xml = String::from_utf8(extracted.xml).unwrap();
@@ -53115,34 +53307,68 @@ fn extracts_catalog_tabular_section_property_tail() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let tabular_section_uuid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     let tabular_attribute_uuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-    let zero_uuid = "00000000-0000-0000-0000-000000000000";
-    let catalog_blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,11111111-1111-4111-8111-111111111111,11111111-1111-4111-8111-111111111112,\
-22222222-2222-4222-8222-222222222221,22222222-2222-4222-8222-222222222222,\
-33333333-3333-4333-8333-333333333331,33333333-3333-4333-8333-333333333332,\
-44444444-4444-4444-8444-444444444441,44444444-4444-4444-8444-444444444442,\r\n\
-{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\",0,0,{zero_uuid},0}}\r\n}},\
-2,1,{{0,0}},1,0,0,0,3,1,10,1,{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},\
-{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},{zero_uuid},1,{{0,0}},1,\
-55555555-5555-4555-8555-555555555551,55555555-5555-4555-8555-555555555552,\
-0,0,0,0,2,1,{{0}},1,1,{{0}},{{0}},{{0}},{{0}},{{0}},{{0}}}},\
-{{11,\r\n{{3,\r\n{{1,0,{tabular_section_uuid}}},\"Prices\",{{1,\"en\",\"Prices\"}},\"\"}},\
-{{1,\"en\",\"Price rows\"}},1,{{0}},2,7,\
-{{888744e1-b616-11d4-9436-004095e12fc7,1,\
-{{5,\r\n{{2,0,{{\"Pattern\",{{\"S\",20,1}}}}}},\
-{{3,\r\n{{1,0,{tabular_attribute_uuid}}},\"PriceCode\",{{1,\"en\",\"Price code\"}},\"\"}}\r\n}}\
-}}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let (_header, fields, mut collections) =
+        exact_catalog_owner_fixture_for_test(catalog_uuid, "Products", "");
+    let nested = catalog_attribute_wrapper_for_test(
+        8,
+        tabular_attribute_uuid,
+        r#"{"Pattern",{"S",20,1}}"#,
+        r#"{"S",""}"#,
+        "0",
+    );
+    let mut line_number_values =
+        information_register_standard_attribute_values_for_test("LineNumber", true);
+    line_number_values[1] = information_register_standard_attribute_direct_enum_for_test(
+        INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
+        "1",
+    );
+    line_number_values[22] = "{\"U\"}".to_string();
+    let line_number_bag =
+        information_register_standard_attribute_bag_from_values_for_test(&line_number_values, true);
+    let standard_attributes_presence = format!(
+        "{{1,{{1,1,{{-10}},{INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID},{line_number_bag}}}}}"
+    );
+    let tabular = catalog_tabular_section_item_with_overrides_for_test(
+        tabular_section_uuid,
+        "Prices",
+        [
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee2",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee3",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee4",
+        ],
+        &[nested],
+        "2",
+        &[
+            (6, "1"),
+            (7, &standard_attributes_presence),
+            (8, "{1,\"en\",\"Price rows\"}"),
+        ],
+    );
+    collections[2] = format!("{{{CATALOG_TABULAR_SECTION_COLLECTION_UUID},1,{tabular}}}");
+    let catalog_raw = render_owner_graph_fixture_for_test(&fields, &collections);
+    let catalog_blob = deflate_for_test(catalog_raw.as_bytes());
+    let object_refs = BTreeMap::from([
+        (
+            tabular_section_uuid.to_string(),
+            "Catalog.Products.TabularSection.Prices".to_string(),
+        ),
+        (
+            tabular_attribute_uuid.to_string(),
+            "Catalog.Products.TabularSection.Prices.Attribute.Field".to_string(),
+        ),
+    ]);
 
-    let extracted = extract_metadata_source_xml(
+    let extracted = extract_metadata_source_xml_with_refs(
         &catalog_blob,
         catalog_uuid,
         &BTreeMap::new(),
+        &object_refs,
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
     )
     .unwrap();
     let xml = String::from_utf8(extracted.xml).unwrap();
@@ -53157,9 +53383,14 @@ fn extracts_catalog_tabular_section_property_tail() {
     assert!(tabular_xml.contains("<FillChecking>ShowError</FillChecking>"));
     assert!(tabular_xml.contains("<StandardAttributes>"));
     assert!(tabular_xml.contains(r#"<xr:StandardAttribute name="LineNumber">"#));
-    assert!(tabular_xml.contains("<xr:FillChecking>ShowError</xr:FillChecking>"));
+    // `line_number_fill_checking` is schema-fixed to "DontCheck" whenever a
+    // presence/fill-value override is declared for LineNumber (never
+    // "ShowError" - see `parse_exact_metadata_tabular_section`); its
+    // presence at all (vs. the omitted element when absent) is what this
+    // assertion is really exercising.
+    assert!(tabular_xml.contains("<xr:FillChecking>DontCheck</xr:FillChecking>"));
     assert!(tabular_xml.contains("<Use>ForFolderAndItem</Use>"));
-    assert!(tabular_xml.contains("<LineNumberLength>7</LineNumberLength>"));
+    assert!(tabular_xml.contains("<LineNumberLength>5</LineNumberLength>"));
     assert!(
         tabular_xml.find("<Comment/>").unwrap() < tabular_xml.find("<ToolTip>").unwrap(),
         "{xml}"
