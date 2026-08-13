@@ -3,9 +3,9 @@
 //! This module owns semantic structure only. XML QNames, namespace prefixes,
 //! `xsi:type` spellings, document framing, and writer order remain schema/XML
 //! policy. The admitted shape is deliberately narrow: one local data source,
-//! one object data set with a string field followed by a decimal field, one
-//! decimal calculated field, two ungrouped `Sum` totals, one scalar string
-//! parameter, and one or two positional settings-variant shells.
+//! one object data set with either the attested single string field or the
+//! richer string/decimal pair, optional richer calculated/totals/parameter
+//! members, and one or two positional settings-variant shells.
 
 use std::collections::BTreeSet;
 use std::error::Error;
@@ -377,14 +377,15 @@ impl DcsSchemaDataSetObject {
         require_text("object data-set name", &name)?;
         require_text("object data-set source reference", &data_source)?;
         require_text("object data-set object name", &object_name)?;
-        if fields.len() != DCS_SCHEMA_DATA_SET_FIELD_COUNT {
+        if !(1..=DCS_SCHEMA_DATA_SET_FIELD_COUNT).contains(&fields.len()) {
             return Err(DcsSchemaBuildError::UnexpectedDataSetFieldCount {
                 expected: DCS_SCHEMA_DATA_SET_FIELD_COUNT,
                 actual: fields.len(),
             });
         }
         if !matches!(fields[0].value_type(), DcsSchemaFieldType::String(_))
-            || !matches!(fields[1].value_type(), DcsSchemaFieldType::Decimal(_))
+            || (fields.len() == 2
+                && !matches!(fields[1].value_type(), DcsSchemaFieldType::Decimal(_)))
         {
             return Err(DcsSchemaBuildError::UnexpectedDataSetFieldTypeOrder);
         }
@@ -736,9 +737,9 @@ impl<'de> Deserialize<'de> for DcsSchemaSettingsVariantShell {
 pub struct DcsSchema {
     data_source: DcsSchemaLocalDataSource,
     data_set: DcsSchemaDataSetObject,
-    calculated_field: DcsSchemaCalculatedField,
+    calculated_field: Option<DcsSchemaCalculatedField>,
     total_fields: Vec<DcsSchemaUngroupedTotalField>,
-    parameter: DcsSchemaStringParameter,
+    parameter: Option<DcsSchemaStringParameter>,
     settings_variants: Vec<DcsSchemaSettingsVariantShell>,
     provenance: SourceProvenance,
 }
@@ -754,29 +755,85 @@ impl DcsSchema {
         settings_variants: Vec<DcsSchemaSettingsVariantShell>,
         provenance: SourceProvenance,
     ) -> Result<Self, DcsSchemaBuildError> {
+        Self::new_parts(
+            data_source,
+            data_set,
+            Some(calculated_field),
+            total_fields,
+            Some(parameter),
+            settings_variants,
+            provenance,
+        )
+    }
+
+    pub fn new_simple(
+        data_source: DcsSchemaLocalDataSource,
+        data_set: DcsSchemaDataSetObject,
+        settings_variants: Vec<DcsSchemaSettingsVariantShell>,
+        provenance: SourceProvenance,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        Self::new_parts(
+            data_source,
+            data_set,
+            None,
+            Vec::new(),
+            None,
+            settings_variants,
+            provenance,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_parts(
+        data_source: DcsSchemaLocalDataSource,
+        data_set: DcsSchemaDataSetObject,
+        calculated_field: Option<DcsSchemaCalculatedField>,
+        total_fields: Vec<DcsSchemaUngroupedTotalField>,
+        parameter: Option<DcsSchemaStringParameter>,
+        settings_variants: Vec<DcsSchemaSettingsVariantShell>,
+        provenance: SourceProvenance,
+    ) -> Result<Self, DcsSchemaBuildError> {
         if data_set.data_source() != data_source.name() {
             return Err(DcsSchemaBuildError::DataSourceReferenceMismatch);
         }
-        if data_set
-            .fields()
-            .iter()
-            .any(|field| field.data_path() == calculated_field.data_path())
-        {
+        if calculated_field.as_ref().is_some_and(|calculated| {
+            data_set
+                .fields()
+                .iter()
+                .any(|field| field.data_path() == calculated.data_path())
+        }) {
             return Err(DcsSchemaBuildError::DuplicateCalculatedFieldPath {
-                path: calculated_field.data_path().as_str().to_owned(),
+                path: calculated_field
+                    .as_ref()
+                    .expect("checked as present")
+                    .data_path()
+                    .as_str()
+                    .to_owned(),
             });
         }
-        if total_fields.len() != DCS_SCHEMA_TOTAL_FIELD_COUNT {
+        let rich = data_set.fields().len() == DCS_SCHEMA_DATA_SET_FIELD_COUNT;
+        if rich != calculated_field.is_some() || rich != parameter.is_some() {
+            return Err(DcsSchemaBuildError::UnexpectedDataSetFieldTypeOrder);
+        }
+        let expected_totals = if rich {
+            DCS_SCHEMA_TOTAL_FIELD_COUNT
+        } else {
+            0
+        };
+        if total_fields.len() != expected_totals {
             return Err(DcsSchemaBuildError::UnexpectedTotalFieldCount {
-                expected: DCS_SCHEMA_TOTAL_FIELD_COUNT,
+                expected: expected_totals,
                 actual: total_fields.len(),
             });
         }
-        let decimal_path = data_set.fields()[1].data_path();
-        if total_fields[0].data_path() != decimal_path
-            || total_fields[1].data_path() != calculated_field.data_path()
-        {
-            return Err(DcsSchemaBuildError::UnexpectedTotalFieldOrder);
+        if rich {
+            let decimal_path = data_set.fields()[1].data_path();
+            if total_fields[0].data_path() != decimal_path
+                || total_fields[1].data_path()
+                    != calculated_field.as_ref().expect("rich cohort").data_path()
+            {
+                return Err(DcsSchemaBuildError::UnexpectedTotalFieldOrder);
+            }
         }
         if settings_variants.is_empty() {
             return Err(DcsSchemaBuildError::EmptySettingsVariants);
@@ -817,16 +874,16 @@ impl DcsSchema {
         &self.data_set
     }
 
-    pub const fn calculated_field(&self) -> &DcsSchemaCalculatedField {
-        &self.calculated_field
+    pub const fn calculated_field(&self) -> Option<&DcsSchemaCalculatedField> {
+        self.calculated_field.as_ref()
     }
 
     pub fn total_fields(&self) -> &[DcsSchemaUngroupedTotalField] {
         &self.total_fields
     }
 
-    pub const fn parameter(&self) -> &DcsSchemaStringParameter {
-        &self.parameter
+    pub const fn parameter(&self) -> Option<&DcsSchemaStringParameter> {
+        self.parameter.as_ref()
     }
 
     pub fn settings_variants(&self) -> &[DcsSchemaSettingsVariantShell] {
@@ -843,9 +900,9 @@ impl DcsSchema {
 struct DcsSchemaWire {
     data_source: DcsSchemaLocalDataSource,
     data_set: DcsSchemaDataSetObject,
-    calculated_field: DcsSchemaCalculatedField,
+    calculated_field: Option<DcsSchemaCalculatedField>,
     total_fields: BoundedDcsSchemaVec<DcsSchemaUngroupedTotalField, DCS_SCHEMA_TOTAL_FIELD_COUNT>,
-    parameter: DcsSchemaStringParameter,
+    parameter: Option<DcsSchemaStringParameter>,
     settings_variants:
         BoundedDcsSchemaVec<DcsSchemaSettingsVariantShell, MAX_DCS_SCHEMA_SETTINGS_VARIANTS>,
     provenance: SourceProvenance,
@@ -857,7 +914,7 @@ impl<'de> Deserialize<'de> for DcsSchema {
         D: Deserializer<'de>,
     {
         let wire = DcsSchemaWire::deserialize(deserializer)?;
-        Self::new(
+        Self::new_parts(
             wire.data_source,
             wire.data_set,
             wire.calculated_field,
@@ -938,18 +995,19 @@ fn validate_retained_bytes(schema: &DcsSchema) -> Result<(), DcsSchemaBuildError
         retained = add_retained(retained, field.data_path().as_str().len())?;
         retained = add_retained(retained, field.field().as_str().len())?;
     }
-    retained = add_retained(retained, schema.calculated_field.data_path().as_str().len())?;
-    retained = add_retained(
-        retained,
-        schema.calculated_field.expression().as_str().len(),
-    )?;
+    if let Some(calculated) = &schema.calculated_field {
+        retained = add_retained(retained, calculated.data_path().as_str().len())?;
+        retained = add_retained(retained, calculated.expression().as_str().len())?;
+    }
     for total in &schema.total_fields {
         retained = add_retained(retained, total.data_path().as_str().len())?;
     }
-    retained = add_retained(retained, schema.parameter.name().as_str().len())?;
-    retained = add_retained(retained, schema.parameter.title().language().as_str().len())?;
-    retained = add_retained(retained, schema.parameter.title().content().as_str().len())?;
-    retained = add_retained(retained, schema.parameter.value().as_str().len())?;
+    if let Some(parameter) = &schema.parameter {
+        retained = add_retained(retained, parameter.name().as_str().len())?;
+        retained = add_retained(retained, parameter.title().language().as_str().len())?;
+        retained = add_retained(retained, parameter.title().content().as_str().len())?;
+        retained = add_retained(retained, parameter.value().as_str().len())?;
+    }
     for variant in &schema.settings_variants {
         retained = add_retained(retained, variant.name().as_str().len())?;
         retained = add_retained(retained, variant.presentation().language().as_str().len())?;
@@ -1072,7 +1130,7 @@ mod tests {
                 if value.digits() == 15 && value.fraction_digits() == 2
         ));
         assert_eq!(schema.total_fields().len(), 2);
-        assert!(!schema.parameter().use_restriction());
+        assert!(!schema.parameter().unwrap().use_restriction());
         assert_eq!(schema.settings_variants()[0].name().as_str(), "Main");
 
         let json = serde_json::to_string(&schema).unwrap();
@@ -1136,17 +1194,14 @@ mod tests {
     }
 
     #[test]
-    fn object_data_set_requires_exact_field_shape_and_unique_paths() {
+    fn object_data_set_accepts_attested_simple_or_rich_shape_and_unique_paths() {
         let one = DcsSchemaDataSetObject::new(
             text("Rows"),
             vec![string_field()],
             text("Source"),
             text("Rows"),
         );
-        assert!(matches!(
-            one,
-            Err(DcsSchemaBuildError::UnexpectedDataSetFieldCount { actual: 1, .. })
-        ));
+        assert_eq!(one.unwrap().fields().len(), 1);
 
         let reversed = DcsSchemaDataSetObject::new(
             text("Rows"),
@@ -1226,9 +1281,9 @@ mod tests {
             DcsSchema::new(
                 valid.data_source.clone(),
                 valid.data_set.clone(),
-                valid.calculated_field.clone(),
+                valid.calculated_field.clone().unwrap(),
                 valid.total_fields.clone(),
-                valid.parameter.clone(),
+                valid.parameter.clone().unwrap(),
                 Vec::new(),
                 valid.provenance.clone(),
             ),
@@ -1238,9 +1293,9 @@ mod tests {
             DcsSchema::new(
                 valid.data_source.clone(),
                 valid.data_set.clone(),
-                valid.calculated_field.clone(),
+                valid.calculated_field.clone().unwrap(),
                 valid.total_fields.clone(),
-                valid.parameter.clone(),
+                valid.parameter.clone().unwrap(),
                 vec![variant("Main"), variant("Main")],
                 valid.provenance.clone(),
             ),

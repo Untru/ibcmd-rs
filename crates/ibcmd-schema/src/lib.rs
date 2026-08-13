@@ -4596,7 +4596,21 @@ struct DcsInnerSchemaEvidenceSources {
     source_version: String,
     ibcmd_sha256: String,
     core: DcsInnerSchemaCoreEvidence,
+    simple_filter: DcsInnerSchemaSimpleFilterEvidence,
     multi_variant: DcsInnerSchemaMultiVariantEvidence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsInnerSchemaSimpleFilterEvidence {
+    fixture_id: String,
+    round1_cf_sha256: String,
+    round2_cf_sha256: String,
+    configuration_encoded_sha256: String,
+    native_xml_sha256: String,
+    packed_body_sha256: String,
+    unpacked_body_sha256: String,
+    round_trips: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
@@ -5712,7 +5726,7 @@ impl DcsInnerSchemaEvidenceCorpus {
         let expected_source = DcsInnerSchemaEvidenceSource {
             product: "1C:Enterprise Platform".to_owned(),
             release: "8.3.27 / XML 2.20".to_owned(),
-            derivation: "bounded inner DataCompositionSchema policy synthesized from the immutable one-variant dcs-core corpus and exact two-variant envelope corpus on 8.3.27.2214; no other patch build or schema cohort is inferred".to_owned(),
+            derivation: "bounded inner DataCompositionSchema policy synthesized from the immutable dcs-core, dcs-filter and two-variant envelope corpora on 8.3.27.2214; no other patch build or schema cohort is inferred".to_owned(),
         };
         let expected_sources = DcsInnerSchemaEvidenceSources {
             platform_line: "8.3.27".to_owned(),
@@ -5752,6 +5766,22 @@ impl DcsInnerSchemaEvidenceCorpus {
                 round_trips: 2,
                 platform_load_and_apply_succeeded: true,
                 selected_tree_equal_to_round2: true,
+            },
+            simple_filter: DcsInnerSchemaSimpleFilterEvidence {
+                fixture_id: "8.3.27.2214-xml-2.20-dcs-filter".to_owned(),
+                round1_cf_sha256:
+                    "a5ac836be4d0d04f7445cfd9744863e8b90723eca12de353e790ecdff110bd4b".to_owned(),
+                round2_cf_sha256:
+                    "fad8f529230bc474920f925245eba0054f3f85d97039aa38d1fd850fd7c5bd4c".to_owned(),
+                configuration_encoded_sha256:
+                    "83462fcaf018063a1fee3c7e75a1c68a3ad0e099d4d025bb7b3e545e5e24f8e8".to_owned(),
+                native_xml_sha256:
+                    "bcc29901ebd9edbb863d4eaa9ba3c1d40350dd92c001437aaa0358deddf02b45".to_owned(),
+                packed_body_sha256:
+                    "6288d1b0a2b790e22964073af4e1516b6aea09b42510f8246261daff4890e0c2".to_owned(),
+                unpacked_body_sha256:
+                    "b8e1e2cb0b47ce2fdb5cd44caf382a24ad5d8c3afd044bb8b3ed26e50707b718".to_owned(),
+                round_trips: 2,
             },
             multi_variant: DcsInnerSchemaMultiVariantEvidence {
                 fixture_id: "8.3.27.2214-xml-2.20-dcs-multi-variant-envelope".to_owned(),
@@ -5894,6 +5924,7 @@ impl DcsInnerSchemaEvidenceCorpus {
             wrong_order: "unsupported".to_owned(),
         };
         let expected_proven_claims = [
+            "The dcs-filter source authenticates the simple one-string-field DataSetObject cohort with calculatedField, totalField and parameter absent.",
             "The dcs-core source authenticates one dataSource, one DataSetObject with two DataSetFieldField fields, one calculatedField, two totalField nodes, one parameter and one direct settingsVariant in exact QName and child order.",
             "The dcs-core source authenticates only xs:string and xs:decimal value types, their exact qualifier child order and the Local, Variable, Any, false and ru tokens retained by two platform rounds.",
             "The multi-variant source authenticates two direct settingsVariant metadata shells in source order, each with name, LocalStringType presentation and delegated inline settings.",

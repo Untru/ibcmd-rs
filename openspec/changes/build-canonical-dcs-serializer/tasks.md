@@ -52,8 +52,9 @@
   совпадает с уже принятым pinned-платформой compiler artifact.
 - [x] Первый platform-attested typed inner-schema cohort реализован общими
   `ibcmd-core` / `ibcmd-schema` / `ibcmd-xml`: Local data source,
-  `DataSetObject`, string/decimal fields, decimal calculated field, два
-  ungrouped `Sum` total, scalar string parameter и один-два positional
+  `DataSetObject`, доказанные simple (one string field) и rich
+  (string/decimal fields, calculated field, два ungrouped `Sum` total,
+  scalar string parameter) cohorts и один-два positional
   settings-variant shell. Native `SchemaFile` parse и canonical source emit
   проходят один codec; production MSSQL route больше не откатывается на
   plaintext/legacy Schema writer для этого cohort.

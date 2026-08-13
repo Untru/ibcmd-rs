@@ -149,19 +149,28 @@ pub fn parse_dcs_inner_schema_storage_document(
     require_no_attributes(root)?;
 
     let children = elements(root)?;
-    let expected_counts = [1usize, 1, 1, 2, 1];
     let mut cursor = 0usize;
     let data_source = parse_data_source(take(&children, &mut cursor, "dataSource")?, &policy)?;
     let data_set = parse_data_set(take(&children, &mut cursor, "dataSet")?, &policy)?;
-    let calculated = parse_calculated(take(&children, &mut cursor, "calculatedField")?, &policy)?;
-    let mut totals = Vec::with_capacity(expected_counts[3]);
-    for _ in 0..expected_counts[3] {
+    let rich = children
+        .get(cursor)
+        .is_some_and(|child| child.local == "calculatedField");
+    let calculated = rich
+        .then(|| parse_calculated(take(&children, &mut cursor, "calculatedField")?, &policy))
+        .transpose()?;
+    let mut totals = Vec::with_capacity(if rich { 2 } else { 0 });
+    while children
+        .get(cursor)
+        .is_some_and(|child| child.local == "totalField")
+    {
         totals.push(parse_total(
             take(&children, &mut cursor, "totalField")?,
             &policy,
         )?);
     }
-    let parameter = parse_parameter(take(&children, &mut cursor, "parameter")?, &policy)?;
+    let parameter = rich
+        .then(|| parse_parameter(take(&children, &mut cursor, "parameter")?, &policy))
+        .transpose()?;
     let mut variants = Vec::new();
     while cursor < children.len() {
         variants.push(parse_variant(
@@ -180,15 +189,21 @@ pub fn parse_dcs_inner_schema_storage_document(
     );
     let provenance = SourceProvenance::with_locator(source_profile, anchor, locator)
         .map_err(|error| DcsInnerSchemaError::Malformed(error.to_string()))?;
-    DcsSchema::new(
-        data_source,
-        data_set,
-        calculated,
-        totals,
-        parameter,
-        variants,
-        provenance,
-    )
+    match (calculated, parameter) {
+        (Some(calculated), Some(parameter)) => DcsSchema::new(
+            data_source,
+            data_set,
+            calculated,
+            totals,
+            parameter,
+            variants,
+            provenance,
+        ),
+        (None, None) if totals.is_empty() => {
+            DcsSchema::new_simple(data_source, data_set, variants, provenance)
+        }
+        _ => return unsupported("inner schema mixes simple and rich cohort members"),
+    }
     .map_err(DcsInnerSchemaError::Build)
 }
 
@@ -246,25 +261,17 @@ pub fn emit_dcs_inner_schema_source_document(
         schema.data_set().object_name().as_str(),
     );
     line(&mut out, 1, "</dataSet>");
-    line(&mut out, 1, "<calculatedField>");
-    scalar(
-        &mut out,
-        2,
-        "dataPath",
-        schema.calculated_field().data_path().as_str(),
-    );
-    scalar(
-        &mut out,
-        2,
-        "expression",
-        schema.calculated_field().expression().as_str(),
-    );
-    emit_value_type(
-        &mut out,
-        2,
-        DcsSchemaFieldType::Decimal(schema.calculated_field().value_type()),
-    );
-    line(&mut out, 1, "</calculatedField>");
+    if let Some(calculated) = schema.calculated_field() {
+        line(&mut out, 1, "<calculatedField>");
+        scalar(&mut out, 2, "dataPath", calculated.data_path().as_str());
+        scalar(&mut out, 2, "expression", calculated.expression().as_str());
+        emit_value_type(
+            &mut out,
+            2,
+            DcsSchemaFieldType::Decimal(calculated.value_type()),
+        );
+        line(&mut out, 1, "</calculatedField>");
+    }
     for total in schema.total_fields() {
         line(&mut out, 1, "<totalField>");
         scalar(&mut out, 2, "dataPath", total.data_path().as_str());
@@ -274,20 +281,22 @@ pub fn emit_dcs_inner_schema_source_document(
         scalar(&mut out, 2, "expression", &expression);
         line(&mut out, 1, "</totalField>");
     }
-    line(&mut out, 1, "<parameter>");
-    scalar(&mut out, 2, "name", schema.parameter().name().as_str());
-    emit_local_string(&mut out, 2, "title", schema.parameter().title(), false);
-    emit_value_type(
-        &mut out,
-        2,
-        DcsSchemaFieldType::String(schema.parameter().value_type()),
-    );
-    let mut value = String::from("<value xsi:type=\"xs:string\">");
-    value.push_str(&escape(schema.parameter().value().as_str()));
-    value.push_str("</value>");
-    line(&mut out, 2, &value);
-    scalar(&mut out, 2, "useRestriction", "false");
-    line(&mut out, 1, "</parameter>");
+    if let Some(parameter) = schema.parameter() {
+        line(&mut out, 1, "<parameter>");
+        scalar(&mut out, 2, "name", parameter.name().as_str());
+        emit_local_string(&mut out, 2, "title", parameter.title(), false);
+        emit_value_type(
+            &mut out,
+            2,
+            DcsSchemaFieldType::String(parameter.value_type()),
+        );
+        let mut value = String::from("<value xsi:type=\"xs:string\">");
+        value.push_str(&escape(parameter.value().as_str()));
+        value.push_str("</value>");
+        line(&mut out, 2, &value);
+        scalar(&mut out, 2, "useRestriction", "false");
+        line(&mut out, 1, "</parameter>");
+    }
     for (variant, settings) in schema.settings_variants().iter().zip(settings_blocks) {
         line(&mut out, 1, "<settingsVariant>");
         scalar(&mut out, 2, "dcsset:name", variant.name().as_str());
@@ -325,24 +334,27 @@ fn parse_data_set(
     require_schema(e, p, "dataSet")?;
     require_type(e, p, p.data_set_object_type_qname())?;
     let c = element_children(e)?;
-    if c.len() != 5
+    if !(4..=5).contains(&c.len())
         || c[0].local != "name"
         || c[1].local != "field"
-        || c[2].local != "field"
-        || c[3].local != "dataSource"
-        || c[4].local != "objectName"
+        || c[c.len() - 2].local != "dataSource"
+        || c[c.len() - 1].local != "objectName"
+        || (c.len() == 5 && c[2].local != "field")
     {
         return unsupported("DataSetObject child order/cardinality is outside the cohort");
     }
     for child in &c {
         require_namespace(child, p.schema_namespace_uri())?;
     }
-    let fields = vec![parse_field(c[1], p)?, parse_field(c[2], p)?];
+    let fields = c[1..c.len() - 2]
+        .iter()
+        .map(|field| parse_field(field, p))
+        .collect::<Result<Vec<_>, _>>()?;
     DcsSchemaDataSetObject::new(
         canonical(text(c[0])?)?,
         fields,
-        canonical(text(c[3])?)?,
-        canonical(text(c[4])?)?,
+        canonical(text(c[c.len() - 2])?)?,
+        canonical(text(c[c.len() - 1])?)?,
     )
     .map_err(DcsInnerSchemaError::Build)
 }
@@ -902,6 +914,36 @@ fn append_indented_fragment(out: &mut String, fragment: &str, depth: usize) {
 mod tests {
     use super::*;
 
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut length = 0usize;
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            quartet[length] = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => 64,
+                _ => panic!("invalid base64 fixture"),
+            };
+            length += 1;
+            if length == 4 {
+                output.push((quartet[0] << 2) | (quartet[1] >> 4));
+                if quartet[2] != 64 {
+                    output.push((quartet[1] << 4) | (quartet[2] >> 2));
+                }
+                if quartet[3] != 64 {
+                    output.push((quartet[2] << 6) | quartet[3]);
+                }
+                length = 0;
+            }
+        }
+        assert_eq!(length, 0);
+        output
+    }
+
     fn core_source() -> Vec<u8> {
         include_bytes!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
@@ -916,6 +958,17 @@ mod tests {
             "dcs-core/raw/f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin"
         ));
         body[24..24 + 3029].to_vec()
+    }
+
+    fn filter_primary() -> Vec<u8> {
+        let native = include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-filter/native-template.xml.b64"
+        ));
+        let source = decode_base64_fixture(native);
+        let compiled =
+            crate::dcs_template::compile_dcs_schema_template_source_documents(&source).unwrap();
+        compiled.primary_schema_file().to_vec()
     }
 
     fn inline_settings(source: &str) -> DcsInlineSettingsFragment {
@@ -945,6 +998,31 @@ mod tests {
         .unwrap();
         let emitted = String::from_utf8(emitted).unwrap().replace("\r\n", "\n");
         assert_eq!(emitted.trim_end(), source.trim_end());
+    }
+
+    #[test]
+    fn platform_filter_simple_schema_parses_and_emits_exact_source() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-filter/native-template.xml.b64"
+        )));
+        let source_text = String::from_utf8(source.clone()).unwrap();
+        let schema = parse_dcs_inner_schema_storage_document(
+            &filter_primary(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-filter",
+        )
+        .unwrap();
+        assert_eq!(schema.data_set().fields().len(), 1);
+        assert!(schema.calculated_field().is_none());
+        assert!(schema.total_fields().is_empty());
+        assert!(schema.parameter().is_none());
+        let emitted = emit_dcs_inner_schema_source_document(
+            &schema,
+            &[inline_settings(source_text.trim_start_matches('\u{feff}'))],
+        )
+        .unwrap();
+        assert_eq!(emitted, source);
     }
 
     #[test]

@@ -20,8 +20,8 @@ Form ListSettings.
 `Settings`, за ним следуют `settings_count + 1` длин `u64`, а settings documents
 делегируются вариантам позиционно. Bounded reverse compiler для одного-двух
 вариантов использует этот общий binder. Первый typed inner-schema cohort также
-общий: Local/Object, string/decimal types, calculated field, ungrouped totals,
-scalar parameter и variant shells проходят через canonical IR и
+общий: Local/Object simple one-string-field и rich string/decimal cohorts,
+calculated field, ungrouped totals, scalar parameter и variant shells проходят через canonical IR и
 evidence-gated XML codec. Query/Union/link, TypeId/current-config,
 AreaTemplate и cardinality больше двух остаются unsupported до отдельных
 правил.
