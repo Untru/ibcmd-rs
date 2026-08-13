@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
+use ibcmd_core::dcs::DcsAppearanceColor;
 use ibcmd_core::dcs_schema::{
     DcsSchema, DcsSchemaAreaTemplate, DcsSchemaBuildError, DcsSchemaCalculatedField,
     DcsSchemaDataSetField, DcsSchemaDataSetLink, DcsSchemaDataSetObject, DcsSchemaDecimalType,
@@ -301,14 +302,19 @@ pub fn parse_dcs_area_template_storage_document(
         return unsupported("AreaTemplate schema must contain exactly one template");
     }
     let area = parse_area_template_element(top[0], source_profile, locator, &ap)?;
-    if wrapper.len() == 2 {
-        require_storage_area_appearance(wrapper[1], &p, &ap)?;
+    let area = if wrapper.len() == 2 {
         if !area.has_parameter_appearance() {
             return unsupported("AreaTemplate side table has no matching appIndex");
         }
+        match require_storage_area_appearance(wrapper[1], &p, &ap)? {
+            Some(color) => area.with_color_and_parameter_appearance(color),
+            None => area,
+        }
     } else if area.has_parameter_appearance() {
         return unsupported("AreaTemplate appIndex has no appearance side table");
-    }
+    } else {
+        area
+    };
     Ok(area)
 }
 
@@ -362,7 +368,7 @@ fn parse_area_template_element(
     require_type(template[1], &p, &ap.area_template_type_qname())?;
     require_name(template[2], Some(p.schema_namespace_uri()), "parameter")?;
     require_type(template[2], &p, &ap.expression_parameter_type_qname())?;
-    let parameter_appearance = parse_exact_area_body(template[1], &p, ap)?;
+    let (has_appearance, embedded_color) = parse_exact_area_body(template[1], &p, ap)?;
     let parameter = elements(template[2])?;
     if parameter.len() != 2 {
         return unsupported("AreaTemplate parameter must contain name and expression");
@@ -388,18 +394,28 @@ fn parse_area_template_element(
         provenance,
     )
     .map_err(DcsInnerSchemaError::Build)?;
-    Ok(if parameter_appearance {
-        area.with_parameter_appearance()
-    } else {
-        area
+    Ok(match (has_appearance, embedded_color) {
+        (false, _) => area,
+        (true, Some(color)) => area.with_color_and_parameter_appearance(color),
+        (true, None) => area.with_parameter_appearance(),
     })
+}
+
+/// Which document direction an appearance body was found in. The two
+/// directions authenticate different lexical spellings for the same
+/// logical parameters once the color item co-occurs (see
+/// `DcsAreaTemplatePolicy::storage_appearance_parameter_with_color`).
+#[derive(Clone, Copy)]
+enum AreaAppearanceDirection {
+    Source,
+    Storage,
 }
 
 fn parse_exact_area_body(
     area: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-) -> Result<bool, DcsInnerSchemaError> {
+) -> Result<(bool, Option<DcsAppearanceColor>), DcsInnerSchemaError> {
     let area_ns = ap.area_namespace_uri();
     let rows = elements(area)?;
     if rows.len() != 1 {
@@ -429,20 +445,23 @@ fn parse_exact_area_body(
         return unsupported("AreaTemplate field value is outside the exact coordinate");
     }
     match cell.get(1) {
-        None => Ok(false),
+        None => Ok((false, None)),
         Some(appearance)
             if appearance.namespace.as_deref() == Some(area_ns)
                 && appearance.local == "appearance" =>
         {
-            require_source_area_appearance(appearance, p, ap)?;
-            Ok(true)
+            let color = require_source_area_appearance(appearance, p, ap)?;
+            Ok((true, color))
         }
         Some(index) if index.namespace.as_deref() == Some(area_ns) && index.local == "appIndex" => {
             require_no_attributes(index)?;
             if text(index)? != "0" {
                 return unsupported("AreaTemplate appIndex is outside the exact coordinate");
             }
-            Ok(true)
+            // The side-table wrapper (parsed separately by the caller) is
+            // the sole authority for storage-direction appearance content;
+            // appIndex only signals that a side table must be present.
+            Ok((true, None))
         }
         Some(_) => unsupported("AreaTemplate cell second child is outside the exact coordinate"),
     }
@@ -452,32 +471,56 @@ fn require_source_area_appearance(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-) -> Result<(), DcsInnerSchemaError> {
+) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
     require_no_attributes(appearance)?;
-    require_parameter_appearance_body(appearance, p, ap, false)
+    require_parameter_appearance_body(appearance, p, ap, AreaAppearanceDirection::Source)
 }
 
 fn require_storage_area_appearance(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-) -> Result<(), DcsInnerSchemaError> {
+) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
     require_name(appearance, Some(ap.area_namespace_uri()), "appearance")?;
     require_type(appearance, p, &ap.table_cell_appearance_type_qname())?;
-    require_parameter_appearance_body(appearance, p, ap, true)
+    require_parameter_appearance_body(appearance, p, ap, AreaAppearanceDirection::Storage)
 }
 
+/// Validates the shared `dcscor:item`/`item` appearance body shape and
+/// returns the color, if the evidenced two-item `ЦветТекста` + `Расшифровка`
+/// state was found. Exactly one or two items are admitted; the color item,
+/// when present, must be first.
 fn require_parameter_appearance_body(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-    _storage: bool,
-) -> Result<(), DcsInnerSchemaError> {
+    direction: AreaAppearanceDirection,
+) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
     let items = elements(appearance)?;
-    if items.len() != 1 {
-        return unsupported("AreaTemplate appearance must contain exactly one item");
+    match items.len() {
+        1 => {
+            require_parameter_item(items[0], p, ap, ap.appearance_parameter())?;
+            Ok(None)
+        }
+        2 => {
+            let color = require_color_item(items[0], p, ap, direction)?;
+            let expected_parameter = match direction {
+                AreaAppearanceDirection::Source => ap.appearance_parameter(),
+                AreaAppearanceDirection::Storage => ap.storage_appearance_parameter_with_color(),
+            };
+            require_parameter_item(items[1], p, ap, expected_parameter)?;
+            Ok(Some(color))
+        }
+        _ => unsupported("AreaTemplate appearance item cardinality is outside the cohort"),
     }
-    let item = items[0];
+}
+
+fn require_parameter_item(
+    item: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+    expected_parameter: &str,
+) -> Result<(), DcsInnerSchemaError> {
     require_name(item, Some(ap.core_namespace_uri()), "item")?;
     require_no_attributes(item)?;
     let children = elements(item)?;
@@ -490,12 +533,48 @@ fn require_parameter_appearance_body(
     require_type(children[1], p, &ap.parameter_value_type_qname())?;
     let parameter = text(children[0])?;
     let parameter = parameter.trim();
-    if parameter != ap.appearance_parameter()
+    if parameter != expected_parameter
         || text_allowing_attributes(children[1])? != ap.parameter_name()
     {
         return unsupported("AreaTemplate appearance value is outside the exact coordinate");
     }
     Ok(())
+}
+
+fn require_color_item(
+    item: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+    direction: AreaAppearanceDirection,
+) -> Result<DcsAppearanceColor, DcsInnerSchemaError> {
+    require_name(item, Some(ap.core_namespace_uri()), "item")?;
+    require_no_attributes(item)?;
+    let children = elements(item)?;
+    if children.len() != 2 {
+        return unsupported("AreaTemplate appearance color item must contain parameter and value");
+    }
+    require_name(children[0], Some(ap.core_namespace_uri()), "parameter")?;
+    require_no_attributes(children[0])?;
+    require_name(children[1], Some(ap.core_namespace_uri()), "value")?;
+    require_type(children[1], p, &ap.color_type_qname())?;
+    let parameter = text(children[0])?;
+    let expected_parameter = match direction {
+        AreaAppearanceDirection::Source => ap.text_color_parameter(),
+        AreaAppearanceDirection::Storage => ap.storage_text_color_parameter(),
+    };
+    if parameter.trim() != expected_parameter {
+        return unsupported(
+            "AreaTemplate appearance color parameter is outside the exact coordinate",
+        );
+    }
+    // Compare only the expanded QName: the platform does not preserve the
+    // source prefix spelling, and the evidenced cohort admits any prefix
+    // bound to the web-colors namespace (native uses an auto-generated
+    // `d8p1`/`d4p2`, the seed uses a locally-declared `web`).
+    if resolve_qname_text_allowing_attributes(children[1])? != ap.web_red_qname() {
+        return unsupported("AreaTemplate appearance color value is outside the exact coordinate");
+    }
+    Ok(DcsAppearanceColor::WebRed)
 }
 
 fn parse_query(
@@ -757,6 +836,12 @@ pub fn emit_dcs_area_template_source_fragment(
     line(&mut out, 5, "</dcsat:item>");
     if area.has_parameter_appearance() {
         line(&mut out, 5, "<dcsat:appearance>");
+        if let Some(color) = area.text_color_appearance() {
+            line(&mut out, 6, "<dcscor:item>");
+            scalar(&mut out, 7, "dcscor:parameter", "ЦветТекста");
+            line(&mut out, 7, source_color_value_fragment(color));
+            line(&mut out, 6, "</dcscor:item>");
+        }
         line(&mut out, 6, "<dcscor:item>");
         scalar(&mut out, 7, "dcscor:parameter", "Расшифровка");
         line(
@@ -850,18 +935,58 @@ pub fn emit_dcs_area_template_storage_document(
             1,
             "<appearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"TableCellAppearance\">",
         );
+        let color = area.text_color_appearance();
+        if let Some(color) = color {
+            line(
+                &mut out,
+                2,
+                "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">",
+            );
+            scalar(&mut out, 3, "parameter", "TextColor");
+            line(&mut out, 3, storage_color_value_fragment(color));
+            line(&mut out, 2, "</item>");
+        }
         line(
             &mut out,
             2,
             "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">",
         );
-        scalar(&mut out, 3, "parameter", "Расшифровка");
+        let parameter_label = if color.is_some() {
+            "Details"
+        } else {
+            "Расшифровка"
+        };
+        scalar(&mut out, 3, "parameter", parameter_label);
         line(&mut out, 3, "<value xsi:type=\"Parameter\">Probe</value>");
         line(&mut out, 2, "</item>");
         line(&mut out, 1, "</appearance>");
     }
     out.push_str("\r\n</SchemaFile>");
     Ok(out.into_bytes())
+}
+
+/// Exact `dcscor:value` fragment for the source-direction (embedded
+/// `dcsat:appearance`) spelling of the evidenced web color. The `d8p1`
+/// prefix is not semantic -- it is the platform's own auto-generated
+/// spelling, reproduced verbatim to match `native-template.xml` byte for
+/// byte -- but it is only ever compared by expanded QName on parse.
+fn source_color_value_fragment(color: DcsAppearanceColor) -> &'static str {
+    match color {
+        DcsAppearanceColor::WebRed => {
+            "<dcscor:value xmlns:d8p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xsi:type=\"v8ui:Color\">d8p1:Red</dcscor:value>"
+        }
+    }
+}
+
+/// Exact `value` fragment for the storage-direction (side-table) spelling
+/// of the evidenced web color, matching the platform's own `d4p1`/`d4p2`
+/// auto-generated prefixes byte for byte.
+fn storage_color_value_fragment(color: DcsAppearanceColor) -> &'static str {
+    match color {
+        DcsAppearanceColor::WebRed => {
+            "<value xmlns:d4p1=\"http://v8.1c.ru/8.1/data/ui\" xmlns:d4p2=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xsi:type=\"d4p1:Color\">d4p2:Red</value>"
+        }
+    }
 }
 
 fn source_header(p: &DcsInnerSchemaPolicy) -> String {
@@ -1481,6 +1606,11 @@ fn require_type(
 fn resolve_qname_text(e: &ParsedElement) -> Result<String, DcsInnerSchemaError> {
     resolve_qname(e, &text(e)?)
 }
+fn resolve_qname_text_allowing_attributes(
+    e: &ParsedElement,
+) -> Result<String, DcsInnerSchemaError> {
+    resolve_qname(e, &text_allowing_attributes(e)?)
+}
 fn resolve_qname(e: &ParsedElement, value: &str) -> Result<String, DcsInnerSchemaError> {
     let (prefix, local) = value
         .split_once(':')
@@ -1697,6 +1827,52 @@ mod tests {
         )))
     }
 
+    /// The color cohort's manifest retains only the combined `raw-unpacked`
+    /// envelope (no standalone `area-schema-file.xml.b64`), so the terminal
+    /// side-table document is sliced from the length-prefixed header the
+    /// same way `type_id_documents`/`query_union_link_documents` do above.
+    fn area_template_web_color_document() -> Vec<u8> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-appearance-web-color/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        body[24 + first + second..].to_vec()
+    }
+
+    fn area_template_web_color_native_source() -> Vec<u8> {
+        decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-appearance-web-color/native-template.xml.b64"
+        )))
+    }
+
+    /// Wraps a synthetic `dcsat:appearance` body (source direction, inside
+    /// the inline `<template>`) in the minimal document shape
+    /// `parse_dcs_area_template_source_document` accepts.
+    fn area_template_document_with_appearance(appearance: &str) -> Vec<u8> {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\
+<template><name>AreaProbe</name>\
+<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">\
+<dcsat:item xsi:type=\"dcsat:TableRow\"><dcsat:tableCell>\
+<dcsat:item xsi:type=\"dcsat:Field\"><dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value></dcsat:item>\
+<dcsat:appearance>{appearance}</dcsat:appearance>\
+</dcsat:tableCell></dcsat:item></template>\
+<parameter xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:ExpressionAreaTemplateParameter\">\
+<dcsat:name>Probe</dcsat:name><dcsat:expression>\"Probe\"</dcsat:expression></parameter>\
+</template></DataCompositionSchema>"
+        )
+        .into_bytes()
+    }
+
+    const COLOR_ITEM_WEB_RED: &str = "<dcscor:item><dcscor:parameter>ЦветТекста</dcscor:parameter><dcscor:value xmlns:d8p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xsi:type=\"v8ui:Color\">d8p1:Red</dcscor:value></dcscor:item>";
+    const PARAMETER_ITEM_PROBE: &str = "<dcscor:item><dcscor:parameter>Расшифровка</dcscor:parameter><dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value></dcscor:item>";
+
     fn inline_settings(source: &str) -> DcsInlineSettingsFragment {
         let start = source.find("<dcsset:settings").unwrap();
         let close = "</dcsset:settings>";
@@ -1757,6 +1933,153 @@ mod tests {
             parsed_source.has_parameter_appearance(),
             area.has_parameter_appearance()
         );
+    }
+
+    #[test]
+    fn platform_area_appearance_web_color_side_table_parses_and_emits_exact_documents() {
+        let source = area_template_web_color_native_source();
+        let storage = area_template_web_color_document();
+
+        let area = parse_dcs_area_template_storage_document(
+            &storage,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-area-appearance-web-color",
+        )
+        .unwrap();
+        assert!(area.has_parameter_appearance());
+        assert_eq!(
+            area.text_color_appearance(),
+            Some(DcsAppearanceColor::WebRed)
+        );
+        // Storage direction: raw side-table bytes -> IR -> byte-exact re-emit.
+        assert_eq!(
+            emit_dcs_area_template_storage_document(&area).unwrap(),
+            storage
+        );
+
+        let parsed_source = parse_dcs_area_template_source_document(
+            &source,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:dcs-area-appearance-web-color/source",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed_source.name(), area.name());
+        assert_eq!(parsed_source.parameter_name(), area.parameter_name());
+        assert_eq!(parsed_source.expression(), area.expression());
+        assert_eq!(
+            parsed_source.text_color_appearance(),
+            area.text_color_appearance()
+        );
+        // Source direction: native XML -> IR -> byte-exact re-emit of the
+        // inline `<template>` fragment (the same IR the storage side
+        // produced), proving one shared IR drives both directions.
+        let fragment = emit_dcs_area_template_source_fragment(&parsed_source).unwrap();
+        let fragment = std::str::from_utf8(&fragment).unwrap();
+        assert!(fragment.contains("<dcscor:parameter>ЦветТекста</dcscor:parameter>"));
+        assert!(fragment.contains("d8p1:Red"));
+        let color_at = fragment.find("ЦветТекста").unwrap();
+        let details_at = fragment.find("Расшифровка").unwrap();
+        assert!(color_at < details_at, "color item must precede Расшифровка");
+    }
+
+    #[test]
+    fn area_appearance_source_accepts_any_prefix_bound_to_web_namespace() {
+        // The seed used a locally-declared `web` prefix rather than the
+        // platform's auto-generated `d8p1`; both must parse identically
+        // because only the expanded QName is authenticated, never the
+        // lexical prefix spelling.
+        let appearance = format!(
+            "<dcscor:item><dcscor:parameter>ЦветТекста</dcscor:parameter><dcscor:value xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xsi:type=\"v8ui:Color\">web:Red</dcscor:value></dcscor:item>{PARAMETER_ITEM_PROBE}"
+        );
+        let document = area_template_document_with_appearance(&appearance);
+        let area = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-appearance-web-color/any-prefix",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            area.text_color_appearance(),
+            Some(DcsAppearanceColor::WebRed)
+        );
+    }
+
+    #[test]
+    fn area_appearance_source_rejects_color_from_unknown_namespace() {
+        let appearance = format!(
+            "<dcscor:item><dcscor:parameter>ЦветТекста</dcscor:parameter><dcscor:value xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xsi:type=\"v8ui:Color\">win:Red</dcscor:value></dcscor:item>{PARAMETER_ITEM_PROBE}"
+        );
+        let document = area_template_document_with_appearance(&appearance);
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-appearance-web-color/unknown-namespace",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_appearance_source_rejects_more_than_one_color_item() {
+        let appearance = format!("{COLOR_ITEM_WEB_RED}{COLOR_ITEM_WEB_RED}{PARAMETER_ITEM_PROBE}");
+        let document = area_template_document_with_appearance(&appearance);
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-appearance-web-color/too-many-color-items",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_appearance_source_rejects_color_out_of_position() {
+        // The evidenced order is color-then-parameter; the reverse (as the
+        // non-authoritative seed happened to spell it) must be rejected,
+        // not silently reordered or accepted.
+        let appearance = format!("{PARAMETER_ITEM_PROBE}{COLOR_ITEM_WEB_RED}");
+        let document = area_template_document_with_appearance(&appearance);
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-appearance-web-color/wrong-position",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_appearance_source_rejects_unknown_parameter_name() {
+        let appearance = "<dcscor:item><dcscor:parameter>НеизвестныйПараметр</dcscor:parameter><dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value></dcscor:item>";
+        let document = area_template_document_with_appearance(appearance);
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-appearance-web-color/unknown-parameter",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_appearance_storage_rejects_corrupted_side_table_bytes() {
+        let storage = area_template_web_color_document();
+        // Truncate mid-document: still starts as plausible XML but never
+        // closes, so this must fail closed with a typed parse error rather
+        // than panicking or silently returning a partial/absent result.
+        let corrupted = &storage[..storage.len() / 2];
+        let error = parse_dcs_area_template_storage_document(
+            corrupted,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-appearance-web-color/corrupted",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DcsInnerSchemaError::Malformed(_) | DcsInnerSchemaError::UnsupportedSource(_)
+        ));
     }
 
     #[test]

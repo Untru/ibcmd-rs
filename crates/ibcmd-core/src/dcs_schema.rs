@@ -15,6 +15,7 @@ use std::marker::PhantomData;
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, de};
 
+use crate::dcs::DcsAppearanceColor;
 use crate::provenance::SourceProvenance;
 use crate::value::CanonicalText;
 
@@ -38,6 +39,10 @@ pub struct DcsSchemaAreaTemplate {
     parameter_name: CanonicalText,
     expression: CanonicalText,
     parameter_appearance: bool,
+    /// Web-cohort text color authenticated by the dedicated 2214
+    /// appearance-color side-table cohort. Always co-occurs with
+    /// `parameter_appearance`; the platform never emits color alone.
+    text_color_appearance: Option<DcsAppearanceColor>,
     provenance: SourceProvenance,
 }
 
@@ -62,6 +67,7 @@ impl DcsSchemaAreaTemplate {
             parameter_name,
             expression,
             parameter_appearance: false,
+            text_color_appearance: None,
             provenance,
         })
     }
@@ -70,6 +76,17 @@ impl DcsSchemaAreaTemplate {
     /// appearance authenticated by the dedicated 2214 side-table cohort.
     pub fn with_parameter_appearance(mut self) -> Self {
         self.parameter_appearance = true;
+        self
+    }
+
+    /// Enables the exact `ЦветТекста = web:Red` then `Расшифровка =
+    /// Parameter(Probe)` table-cell appearance pair authenticated by the
+    /// dedicated 2214 appearance-color side-table cohort. The color item is
+    /// always ordered before the parameter item; there is no evidenced
+    /// color-only state.
+    pub fn with_color_and_parameter_appearance(mut self, color: DcsAppearanceColor) -> Self {
+        self.parameter_appearance = true;
+        self.text_color_appearance = Some(color);
         self
     }
 
@@ -85,6 +102,9 @@ impl DcsSchemaAreaTemplate {
     pub const fn has_parameter_appearance(&self) -> bool {
         self.parameter_appearance
     }
+    pub const fn text_color_appearance(&self) -> Option<DcsAppearanceColor> {
+        self.text_color_appearance
+    }
     pub const fn provenance(&self) -> &SourceProvenance {
         &self.provenance
     }
@@ -98,6 +118,8 @@ struct DcsSchemaAreaTemplateWire {
     expression: CanonicalText,
     #[serde(default)]
     parameter_appearance: bool,
+    #[serde(default)]
+    text_color_appearance: Option<DcsAppearanceColor>,
     provenance: SourceProvenance,
 }
 
@@ -111,11 +133,13 @@ impl<'de> Deserialize<'de> for DcsSchemaAreaTemplate {
             wire.provenance,
         )
         .map_err(de::Error::custom)?;
-        Ok(if wire.parameter_appearance {
-            value.with_parameter_appearance()
-        } else {
-            value
-        })
+        Ok(
+            match (wire.parameter_appearance, wire.text_color_appearance) {
+                (_, Some(color)) => value.with_color_and_parameter_appearance(color),
+                (true, None) => value.with_parameter_appearance(),
+                (false, None) => value,
+            },
+        )
     }
 }
 
@@ -1626,6 +1650,34 @@ mod tests {
             serde_json::from_str::<DcsSchemaAreaTemplate>(&json).unwrap(),
             styled
         );
+    }
+
+    #[test]
+    fn style_free_area_template_color_appearance_is_bounded_and_serde_stable() {
+        let value = DcsSchemaAreaTemplate::new(
+            text("AreaProbe"),
+            text("Probe"),
+            text("\"Probe\""),
+            provenance(),
+        )
+        .unwrap();
+        let colored = value
+            .clone()
+            .with_color_and_parameter_appearance(DcsAppearanceColor::WebRed);
+        assert!(colored.has_parameter_appearance());
+        assert_eq!(
+            colored.text_color_appearance(),
+            Some(DcsAppearanceColor::WebRed)
+        );
+        let json = serde_json::to_string(&colored).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaAreaTemplate>(&json).unwrap(),
+            colored
+        );
+
+        let parameter_only = value.with_parameter_appearance();
+        assert_eq!(parameter_only.text_color_appearance(), None);
+        assert_ne!(parameter_only, colored);
     }
 
     fn variant(name: &str) -> DcsSchemaSettingsVariantShell {

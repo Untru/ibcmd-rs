@@ -2667,6 +2667,13 @@ pub const BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON: &str = include_str!(
 pub const BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-template-appearance/manifest.json"
 );
+/// Immutable platform-authenticated AreaTemplate appearance web-color
+/// coordinate: the `ЦветТекста = web:Red` item that precedes `Расшифровка`
+/// in the same table-cell appearance. Native-only round trips (no live
+/// compiler-acceptance verification); see cohort/non_claims in the manifest.
+pub const BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-appearance-web-color/manifest.json"
+);
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3740,6 +3747,7 @@ pub struct DcsAreaTemplatePolicy {
     field_order: Vec<String>,
     parameter_order: Vec<String>,
     supports_parameter_appearance: bool,
+    supports_text_color_appearance: bool,
 }
 
 impl DcsAreaTemplatePolicy {
@@ -3782,8 +3790,47 @@ impl DcsAreaTemplatePolicy {
     pub const fn supports_parameter_appearance(&self) -> bool {
         self.supports_parameter_appearance
     }
+    pub const fn supports_text_color_appearance(&self) -> bool {
+        self.supports_text_color_appearance
+    }
     pub fn appearance_parameter(&self) -> &str {
         "Расшифровка"
+    }
+    /// Storage-side spelling of the `Расшифровка` appearance parameter when
+    /// it co-occurs with the `ЦветТекста` color item. The evidenced side
+    /// table spells this item `Details` (English) only in that two-item
+    /// state; the color-less single-item state keeps the Cyrillic spelling
+    /// (see `appearance_parameter`).
+    pub fn storage_appearance_parameter_with_color(&self) -> &str {
+        "Details"
+    }
+    /// Source-direction (`DataCompositionSchema` / native-template) spelling
+    /// of the text-color appearance parameter.
+    pub fn text_color_parameter(&self) -> &str {
+        "ЦветТекста"
+    }
+    /// Storage-side spelling of the text-color appearance parameter.
+    pub fn storage_text_color_parameter(&self) -> &str {
+        "TextColor"
+    }
+    /// `http://v8.1c.ru/8.1/data/ui`, the namespace hosting the `Color`
+    /// value type referenced by the `ЦветТекста` appearance item.
+    pub fn ui_namespace_uri(&self) -> &str {
+        "http://v8.1c.ru/8.1/data/ui"
+    }
+    /// `http://v8.1c.ru/8.1/data/ui/colors/web`, the namespace hosting the
+    /// evidenced `Red` web-color literal.
+    pub fn web_color_namespace_uri(&self) -> &str {
+        "http://v8.1c.ru/8.1/data/ui/colors/web"
+    }
+    pub fn color_type_qname(&self) -> String {
+        format!("{{{}}}Color", self.ui_namespace_uri())
+    }
+    /// Expanded QName of the only evidenced web-color lexical token, `Red`.
+    /// Comparison against parsed color values must use this expanded form
+    /// only; the platform does not preserve the source prefix spelling.
+    pub fn web_red_qname(&self) -> String {
+        format!("{{{}}}Red", self.web_color_namespace_uri())
     }
     pub fn table_cell_appearance_type_qname(&self) -> String {
         format!("{{{}}}TableCellAppearance", self.area_namespace_uri())
@@ -3868,6 +3915,41 @@ struct DcsAreaTemplateAppearanceCohort {
     app_index: u32,
     side_table_count: u32,
     referenced_indexes_cover_table: bool,
+}
+
+/// Draft-stage evidence: native-only round trips authenticate the exact
+/// `ЦветТекста = web:Red` appearance item added ahead of `Расшифровка`.
+/// Unlike [`DcsAreaTemplateAppearanceEvidence`], this manifest carries no
+/// `compiler_acceptance` block -- the policy built from it must not claim
+/// live-platform verification of the compile direction.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateColorEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsAreaTemplateColorCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateColorCohort {
+    template_name: String,
+    target_position: String,
+    appearance_item_count_after_delta: u32,
+    new_item_parameter: String,
+    new_item_value_type: String,
+    new_item_value_text: String,
+    new_item_namespace_prefix_source: String,
+    new_item_namespace_uri: String,
+    appearance_item_order_after_delta: Vec<String>,
+    appearance_item_order_in_seed: Vec<String>,
 }
 
 impl DcsSchemaTemplateEnvelopePolicy {
@@ -10465,9 +10547,20 @@ pub fn bundled_dcs_query_union_link_policy() -> Result<DcsQueryUnionLinkPolicy, 
 
 /// Returns the exact first style-free AreaTemplate policy.
 pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, SchemaError> {
-    let evidence: DcsAreaTemplateEvidence =
-        serde_json::from_str(BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON)
-            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    parse_dcs_area_template_policy(
+        BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+        BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+        BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+    )
+}
+
+fn parse_dcs_area_template_policy(
+    evidence_json: &str,
+    appearance_json: &str,
+    color_json: &str,
+) -> Result<DcsAreaTemplatePolicy, SchemaError> {
+    let evidence: DcsAreaTemplateEvidence = serde_json::from_str(evidence_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
     if evidence.schema_version != 1
         || evidence.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-template-style-free"
         || evidence.cohort.template_name != "AreaProbe"
@@ -10498,9 +10591,8 @@ pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, Schem
             "DCS AreaTemplate evidence drifted from the exact coordinate".to_string(),
         ));
     }
-    let appearance: DcsAreaTemplateAppearanceEvidence =
-        serde_json::from_str(BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON)
-            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    let appearance: DcsAreaTemplateAppearanceEvidence = serde_json::from_str(appearance_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
     if appearance.schema_version != 1
         || appearance.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-template-appearance-parameter"
         || appearance.cohort.template_name != evidence.cohort.template_name
@@ -10526,6 +10618,35 @@ pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, Schem
             "DCS AreaTemplate appearance evidence drifted from the exact coordinate".to_string(),
         ));
     }
+    let color: DcsAreaTemplateColorEvidence = serde_json::from_str(color_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if color.schema_version != 1
+        || color.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-appearance-web-color"
+        || color.cohort.template_name != evidence.cohort.template_name
+        || color.cohort.target_position
+            != "existing single tableCell's dcsat:appearance (Field item first, appearance second -- unchanged base storage order)"
+        || color.cohort.appearance_item_count_after_delta != 2
+        || color.cohort.new_item_parameter != "ЦветТекста"
+        || color.cohort.new_item_value_type != "v8ui:Color"
+        || color.cohort.new_item_value_text != "d8p1:Red"
+        || color.cohort.new_item_namespace_prefix_source
+            != "auto-generated by platform (d8p1), not the seed's locally-declared \"web\" prefix"
+        || color.cohort.new_item_namespace_uri != "http://v8.1c.ru/8.1/data/ui/colors/web"
+        || color.cohort.appearance_item_order_after_delta != ["ЦветТекста", "Расшифровка"]
+        || color.cohort.appearance_item_order_in_seed != ["Расшифровка", "ЦветТекста"]
+        || color.negative_observations.len() != 2
+        || color.non_claims.len() != 4
+        || color.platform.is_null()
+        || color.seed.is_null()
+        || color.rounds.is_null()
+        || color.retained.is_null()
+        || color.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS AreaTemplate appearance web-color evidence drifted from the exact coordinate"
+                .to_string(),
+        ));
+    }
     Ok(DcsAreaTemplatePolicy {
         template_name: evidence.cohort.template_name,
         parameter_name: evidence.cohort.parameter_name,
@@ -10537,6 +10658,7 @@ pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, Schem
         field_order: evidence.cohort.field_order,
         parameter_order: evidence.cohort.parameter_order,
         supports_parameter_appearance: true,
+        supports_text_color_appearance: true,
     })
 }
 
@@ -10557,6 +10679,18 @@ mod dcs_area_template_policy_tests {
             policy.parameter_value_type_qname(),
             "{http://v8.1c.ru/8.1/data-composition-system/core}Parameter"
         );
+        assert!(policy.supports_text_color_appearance());
+        assert_eq!(policy.text_color_parameter(), "ЦветТекста");
+        assert_eq!(policy.storage_text_color_parameter(), "TextColor");
+        assert_eq!(policy.storage_appearance_parameter_with_color(), "Details");
+        assert_eq!(
+            policy.color_type_qname(),
+            "{http://v8.1c.ru/8.1/data/ui}Color"
+        );
+        assert_eq!(
+            policy.web_red_qname(),
+            "{http://v8.1c.ru/8.1/data/ui/colors/web}Red"
+        );
     }
 
     #[test]
@@ -10565,6 +10699,67 @@ mod dcs_area_template_policy_tests {
             serde_json::from_str(BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON).unwrap();
         value["unexpected"] = serde_json::json!(true);
         assert!(serde_json::from_value::<DcsAreaTemplateEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn area_appearance_web_color_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsAreaTemplateColorEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn area_appearance_web_color_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON).unwrap();
+
+        let mut namespace_drift = raw.clone();
+        namespace_drift["cohort"]["new_item_namespace_uri"] =
+            serde_json::json!("http://v8.1c.ru/8.1/data/ui/colors/windows");
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                &serde_json::to_string(&namespace_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut order_drift = raw.clone();
+        order_drift["cohort"]["appearance_item_order_after_delta"] =
+            serde_json::json!(["Расшифровка", "ЦветТекста"]);
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                &serde_json::to_string(&order_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut truncated_observations = raw;
+        truncated_observations["negative_observations"] = serde_json::json!([
+            "A locally-declared xmlns:web prefix on the new dcscor:value element is not preserved verbatim by the platform's native re-export; the platform assigns its own auto-generated prefix (d8p1) for this namespace at this insertion point instead."
+        ]);
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                &serde_json::to_string(&truncated_observations).unwrap(),
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+            )
+            .is_ok()
+        );
     }
 }
 

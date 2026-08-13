@@ -1107,6 +1107,137 @@ mod tests {
     }
 
     #[test]
+    fn platform_area_appearance_web_color_compiles_to_exact_side_table() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-appearance-web-color/native-template.xml.b64"
+        )));
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-appearance-web-color/raw-unpacked.bin.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&source)),
+            "7ca981cac18c0df2715d355eb6cf97665f80bd5a027dc67764b322b818a51a25"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&unpacked)),
+            "2a78f4fd6218295397d6841d09e6652775f5b063397270e4729381c8ece79831"
+        );
+        // document_topology (manifest.json): header 24 bytes, one stored
+        // length for the primary schema (3029) and one for the sole
+        // settings document (1142); the terminal side-table SchemaFile is
+        // the remaining bytes.
+        let expected_area = unpacked[24 + 3029 + 1142..].to_vec();
+        assert_eq!(expected_area.len(), 1614);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected_area)),
+            "d8f30afc51eb97f8de38e339bf6d2aee0b1065d5a1333464e7a1d938ca93bfac"
+        );
+
+        // seed(source) XML -> body: compiling the evidenced native
+        // document must reproduce the exact platform-observed terminal
+        // side-table document, including the new color side-table bytes
+        // (matching the scope b4bba2d's own equivalent test proves; the
+        // primary schema and settings documents are covered by the
+        // pre-existing, unrelated inner-schema/settings cohorts).
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+        assert_eq!(
+            decoded.documents().last().copied(),
+            Some(expected_area.as_slice())
+        );
+
+        // body -> XML: re-exporting the compiled body must reproduce the
+        // evidenced color appearance verbatim. (Byte-exact whole-document
+        // equality against native-template.xml is not asserted here: the
+        // pre-existing settings-document reindentation gap in
+        // `normalize_data_composition_schema_template_documents_with_profiles`
+        // -- present identically for the unrelated base
+        // `dcs-area-template-appearance` corpus -- is out of this work
+        // package's scope. The genuine-bytes test below, which never goes
+        // through our own compiler's settings emission, proves byte-exact
+        // whole-document equality instead.)
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<dcscor:parameter>ЦветТекста</dcscor:parameter>"));
+        assert!(exported_text.contains("d8p1:Red"));
+        assert!(!exported_text.contains("appIndex"));
+        let color_at = exported_text.find("ЦветТекста").unwrap();
+        let details_at = exported_text.find("Расшифровка").unwrap();
+        assert!(color_at < details_at, "color item must precede Расшифровка");
+
+        // XML -> body: recompiling the exported source must reproduce the
+        // exact terminal side-table bytes the platform emitted (the same
+        // property `body -> XML -> body == raw-unpacked` pins for the
+        // terminal document).
+        let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
+        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+    }
+
+    #[test]
+    fn platform_area_appearance_web_color_native_packed_body_exports_exact_native_template() {
+        let profile = DcsCodecProfile::fixture();
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-appearance-web-color/raw-packed.bin.b64"
+        )));
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-appearance-web-color/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "5ba80e683598577102f59d71e55e781d7bc411574d3d6779db0888397292cab3"
+        );
+
+        // This decodes the platform's own deflate-compressed bytes
+        // directly -- not anything ibcmd-rs compiled -- so the exact
+        // re-export match below is independent of our own compiler
+        // direction being correct.
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &packed)
+            .expect("genuine platform-packed body must decode");
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("genuine platform side table must remain exportable");
+        assert_eq!(exported, native_template);
+    }
+
+    #[test]
+    fn area_appearance_web_color_seed_order_is_rejected_fail_closed() {
+        let profile = DcsCodecProfile::fixture();
+        let seed = include_bytes!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-appearance-web-color/seed/Template.xml"
+        ));
+        // The seed is explicitly non-authoritative (manifest:
+        // "hypothesis_only") and orders the appearance items
+        // Расшифровка-then-ЦветТекста -- the reverse of what
+        // native-template.xml (the platform-proven order) actually uses.
+        // The compiler must reject this order, not silently accept or
+        // reorder it.
+        assert!(matches!(
+            compile_dcs(&profile, DcsTemplateKind::Schema, seed),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
     fn schema_compiler_rejects_every_unowned_settings_child() {
         for unknown in [
             "<dcsset:outputParameters/>",
