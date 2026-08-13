@@ -1,5 +1,7 @@
 use super::*;
-use ibcmd_core::dcs::{DcsBuildError, DcsSelection, DcsSettings, DcsSettingsEnvelope};
+use ibcmd_core::dcs::{
+    DcsBuildError, DcsOrder, DcsSelection, DcsSettingsBuilder, DcsSettingsEnvelope,
+};
 use ibcmd_core::diagnostic::{PathSegment, PropertyPath};
 use ibcmd_core::opaque::OpaqueFacets;
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
@@ -72,6 +74,7 @@ impl std::error::Error for CanonicalDcsSettingsAdapterError {}
 pub(super) fn emit_canonical_dcs_settings_children(
     context: CanonicalDcsSettingsContext,
     selection: Option<&DcsSelection>,
+    order: Option<&DcsOrder>,
     items_view_mode: Option<&str>,
     items_user_setting_id: Option<&str>,
     source_profile: &ProfileId,
@@ -83,6 +86,7 @@ pub(super) fn emit_canonical_dcs_settings_children(
     let parts = emit_canonical_dcs_settings_parts(
         context,
         selection,
+        order,
         items_view_mode,
         items_user_setting_id,
         source_profile,
@@ -92,18 +96,21 @@ pub(super) fn emit_canonical_dcs_settings_children(
         locator,
     )?;
     let mut output = parts.selection.unwrap_or_default();
+    output.push_str(parts.order.as_deref().unwrap_or_default());
     output.push_str(&parts.tail);
     Ok(output)
 }
 
 struct CanonicalDcsSettingsParts {
     selection: Option<String>,
+    order: Option<String>,
     tail: String,
 }
 
 fn emit_canonical_dcs_settings_parts(
     context: CanonicalDcsSettingsContext,
     selection: Option<&DcsSelection>,
+    order: Option<&DcsOrder>,
     items_view_mode: Option<&str>,
     items_user_setting_id: Option<&str>,
     source_profile: &ProfileId,
@@ -135,14 +142,14 @@ fn emit_canonical_dcs_settings_parts(
     );
     let provenance = SourceProvenance::with_locator(source_profile.clone(), anchor, locator)
         .map_err(|error| CanonicalDcsSettingsAdapterError::Provenance(error.to_string()))?;
-    let settings = DcsSettings::new(
-        selection.cloned(),
-        items_user_setting_id,
-        items_view_mode,
-        OpaqueFacets::new(Vec::new()).expect("empty opaque facets are valid"),
-        provenance,
-    )
-    .map_err(CanonicalDcsSettingsAdapterError::Build)?;
+    let settings = DcsSettingsBuilder::new(provenance)
+        .selection(selection.cloned())
+        .order(order.cloned())
+        .items_user_setting_id(items_user_setting_id)
+        .items_view_mode(items_view_mode)
+        .opaque_extensions(OpaqueFacets::new(Vec::new()).expect("empty opaque facets are valid"))
+        .build()
+        .map_err(CanonicalDcsSettingsAdapterError::Build)?;
     let envelope = match context {
         CanonicalDcsSettingsContext::Standalone => DcsSettingsEnvelope::settings(settings),
         CanonicalDcsSettingsContext::FormListSettings => {
@@ -153,6 +160,7 @@ fn emit_canonical_dcs_settings_parts(
         .map_err(CanonicalDcsSettingsAdapterError::Serialize)?;
     Ok(CanonicalDcsSettingsParts {
         selection: parts.selection().map(str::to_owned),
+        order: parts.order().map(str::to_owned),
         tail: parts.tail().to_owned(),
     })
 }
@@ -1116,6 +1124,11 @@ fn canonicalize_data_composition_settings_document(
     let parts = emit_canonical_dcs_settings_parts(
         CanonicalDcsSettingsContext::Standalone,
         children.selection(),
+        match children.order() {
+            ibcmd_xml::DcsChildParseOutcome::Typed(order) => Some(order),
+            ibcmd_xml::DcsChildParseOutcome::Absent
+            | ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => None,
+        },
         children.items_view_mode(),
         children.items_user_setting_id(),
         source_profile,
@@ -1129,6 +1142,7 @@ fn canonicalize_data_composition_settings_document(
         &mut writer.output,
         &children,
         parts.selection.as_deref(),
+        parts.order.as_deref(),
         &parts.tail,
     )?;
     let settings = writer

@@ -21,6 +21,8 @@ use crate::value::{CanonicalText, EnumToken};
 pub const MAX_DCS_OPAQUE_EXTENSIONS: usize = 4_096;
 /// Maximum selected items retained by one DCS settings selection.
 pub const MAX_DCS_SELECTION_ITEMS: usize = 16_384;
+/// Maximum order items retained by one DCS settings order.
+pub const MAX_DCS_ORDER_ITEMS: usize = 16_384;
 /// Maximum aggregate variable-sized data retained by one DCS settings value.
 pub const MAX_DCS_RETAINED_BYTES: usize = 67_108_864;
 
@@ -38,6 +40,20 @@ pub enum DcsBuildError {
         /// Actual items.
         actual: usize,
     },
+    /// A DCS order was present without items or supported container metadata.
+    EmptyOrder,
+    /// An order field did not contain a field path.
+    EmptyOrderField,
+    /// A DCS order exceeded its direct item bound.
+    TooManyOrderItems {
+        /// Maximum accepted items.
+        maximum: usize,
+        /// Actual items.
+        actual: usize,
+    },
+    /// The only observed explicit `use` value is `false`; `true` must not be
+    /// normalized into an omission without default evidence.
+    UnsupportedOrderUseTrue,
     /// The opaque extension collection exceeded its DCS-specific item bound.
     TooManyOpaqueExtensions {
         /// Maximum accepted extensions.
@@ -90,6 +106,17 @@ impl Display for DcsBuildError {
             Self::TooManySelectionItems { maximum, actual } => write!(
                 formatter,
                 "DCS selection exceeds {maximum} items (actual {actual})"
+            ),
+            Self::EmptyOrder => formatter.write_str(
+                "DCS order has neither items nor supported metadata; propertyless empty-order emission is not evidence-backed",
+            ),
+            Self::EmptyOrderField => formatter.write_str("DCS order field path is empty"),
+            Self::TooManyOrderItems { maximum, actual } => write!(
+                formatter,
+                "DCS order exceeds {maximum} items (actual {actual})"
+            ),
+            Self::UnsupportedOrderUseTrue => formatter.write_str(
+                "DCS order use=true is not evidence-backed; preserve it at the owning boundary",
             ),
             Self::TooManyOpaqueExtensions { maximum, actual } => write!(
                 formatter,
@@ -265,6 +292,200 @@ impl<'de> Deserialize<'de> for DcsSelection {
     }
 }
 
+/// Platform-evidenced direction token for a DCS field order.
+///
+/// The enum is intentionally closed. A new direction enters the canonical
+/// writer only together with profile evidence instead of through an open
+/// string fallback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DcsOrderType {
+    Asc,
+    Desc,
+}
+
+/// A supported field order with presence-aware `use` semantics.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsOrderField {
+    use_value: Option<bool>,
+    field: CanonicalText,
+    order_type: DcsOrderType,
+}
+
+impl DcsOrderField {
+    /// Builds a field order without inferring omitted values.
+    pub fn new(
+        use_value: Option<bool>,
+        field: CanonicalText,
+        order_type: DcsOrderType,
+    ) -> Result<Self, DcsBuildError> {
+        if field.as_str().is_empty() {
+            return Err(DcsBuildError::EmptyOrderField);
+        }
+        if use_value == Some(true) {
+            return Err(DcsBuildError::UnsupportedOrderUseTrue);
+        }
+        Ok(Self {
+            use_value,
+            field,
+            order_type,
+        })
+    }
+
+    /// Returns the exact source presence/value of the `use` child.
+    pub const fn use_value(&self) -> Option<bool> {
+        self.use_value
+    }
+
+    /// Returns the exact ordered field path.
+    pub const fn field(&self) -> &CanonicalText {
+        &self.field
+    }
+
+    /// Returns the explicit order direction.
+    pub const fn order_type(&self) -> DcsOrderType {
+        self.order_type
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsOrderFieldWire {
+    use_value: Option<bool>,
+    field: CanonicalText,
+    order_type: DcsOrderType,
+}
+
+impl<'de> Deserialize<'de> for DcsOrderField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsOrderFieldWire::deserialize(deserializer)?;
+        Self::new(wire.use_value, wire.field, wire.order_type).map_err(de::Error::custom)
+    }
+}
+
+/// Verified order item variants. `Auto` is retained as a canonical semantic
+/// variant because the 8.3.27 corpus proves its property-free shape in nested
+/// orders; individual output contexts still gate whether it may be emitted.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum DcsOrderItem {
+    Field(DcsOrderField),
+    Auto,
+}
+
+/// Bounded DCS order in exact source order. A metadata-only order is valid;
+/// a propertyless empty container is not.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsOrder {
+    items: Vec<DcsOrderItem>,
+    view_mode: Option<EnumToken>,
+    user_setting_id: Option<CanonicalText>,
+}
+
+impl DcsOrder {
+    /// Builds an order while preserving duplicates and source order.
+    pub fn new(
+        items: Vec<DcsOrderItem>,
+        view_mode: Option<EnumToken>,
+        user_setting_id: Option<CanonicalText>,
+    ) -> Result<Self, DcsBuildError> {
+        if items.is_empty() && (view_mode.is_none() || user_setting_id.is_none()) {
+            return Err(DcsBuildError::EmptyOrder);
+        }
+        if items.len() > MAX_DCS_ORDER_ITEMS {
+            return Err(DcsBuildError::TooManyOrderItems {
+                maximum: MAX_DCS_ORDER_ITEMS,
+                actual: items.len(),
+            });
+        }
+        Ok(Self {
+            items,
+            view_mode,
+            user_setting_id,
+        })
+    }
+
+    pub fn items(&self) -> &[DcsOrderItem] {
+        &self.items
+    }
+
+    pub const fn view_mode(&self) -> Option<&EnumToken> {
+        self.view_mode.as_ref()
+    }
+
+    pub const fn user_setting_id(&self) -> Option<&CanonicalText> {
+        self.user_setting_id.as_ref()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsOrderWire {
+    items: DcsOrderItemsWire,
+    view_mode: Option<EnumToken>,
+    user_setting_id: Option<CanonicalText>,
+}
+
+struct DcsOrderItemsWire(Vec<DcsOrderItem>);
+
+struct DcsOrderItemsVisitor;
+
+impl<'de> Visitor<'de> for DcsOrderItemsVisitor {
+    type Value = DcsOrderItemsWire;
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(formatter, "at most {MAX_DCS_ORDER_ITEMS} DCS order items")
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut items = Vec::with_capacity(
+            sequence
+                .size_hint()
+                .unwrap_or_default()
+                .min(MAX_DCS_ORDER_ITEMS),
+        );
+        while items.len() < MAX_DCS_ORDER_ITEMS {
+            let Some(item) = sequence.next_element::<DcsOrderItem>()? else {
+                return Ok(DcsOrderItemsWire(items));
+            };
+            items.push(item);
+        }
+        if sequence.next_element::<IgnoredAny>()?.is_some() {
+            return Err(de::Error::custom(format_args!(
+                "DCS order exceeds {MAX_DCS_ORDER_ITEMS} items"
+            )));
+        }
+        Ok(DcsOrderItemsWire(items))
+    }
+}
+
+impl<'de> Deserialize<'de> for DcsOrderItemsWire {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(DcsOrderItemsVisitor)
+    }
+}
+
+impl<'de> Deserialize<'de> for DcsOrder {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsOrderWire::deserialize(deserializer)?;
+        Self::new(wire.items.0, wire.view_mode, wire.user_setting_id).map_err(de::Error::custom)
+    }
+}
+
 /// Verified typed minimum of `DataCompositionSettings`.
 ///
 /// The optional root selection and scalar fields are structural model
@@ -275,6 +496,7 @@ impl<'de> Deserialize<'de> for DcsSelection {
 #[serde(deny_unknown_fields)]
 pub struct DcsSettings {
     selection: Option<DcsSelection>,
+    order: Option<DcsOrder>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: OpaqueFacets,
@@ -282,10 +504,9 @@ pub struct DcsSettings {
 }
 
 impl DcsSettings {
-    /// Builds settings and validates all DCS-specific resource and provenance
-    /// invariants.
-    pub fn new(
+    fn from_parts(
         selection: Option<DcsSelection>,
+        order: Option<DcsOrder>,
         items_user_setting_id: Option<CanonicalText>,
         items_view_mode: Option<EnumToken>,
         opaque_extensions: OpaqueFacets,
@@ -293,6 +514,7 @@ impl DcsSettings {
     ) -> Result<Self, DcsBuildError> {
         validate_settings(
             selection.as_ref(),
+            order.as_ref(),
             items_user_setting_id.as_ref(),
             items_view_mode.as_ref(),
             &opaque_extensions,
@@ -300,6 +522,7 @@ impl DcsSettings {
         )?;
         Ok(Self {
             selection,
+            order,
             items_user_setting_id,
             items_view_mode,
             opaque_extensions,
@@ -310,6 +533,11 @@ impl DcsSettings {
     /// Returns the optional root selection.
     pub const fn selection(&self) -> Option<&DcsSelection> {
         self.selection.as_ref()
+    }
+
+    /// Returns the optional root order.
+    pub const fn order(&self) -> Option<&DcsOrder> {
+        self.order.as_ref()
     }
 
     /// Returns the optional exact user-setting identifier.
@@ -333,10 +561,74 @@ impl DcsSettings {
     }
 }
 
+/// Builder for canonical DCS settings. Provenance is mandatory at the entry
+/// point so adding new cohorts does not grow a positional constructor whose
+/// arguments can be accidentally swapped.
+#[derive(Clone, Debug)]
+pub struct DcsSettingsBuilder {
+    selection: Option<DcsSelection>,
+    order: Option<DcsOrder>,
+    items_user_setting_id: Option<CanonicalText>,
+    items_view_mode: Option<EnumToken>,
+    opaque_extensions: OpaqueFacets,
+    provenance: SourceProvenance,
+}
+
+impl DcsSettingsBuilder {
+    pub fn new(provenance: SourceProvenance) -> Self {
+        Self {
+            selection: None,
+            order: None,
+            items_user_setting_id: None,
+            items_view_mode: None,
+            opaque_extensions: OpaqueFacets::new(Vec::new())
+                .expect("empty DCS opaque facets are valid"),
+            provenance,
+        }
+    }
+
+    pub fn selection(mut self, selection: Option<DcsSelection>) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    pub fn order(mut self, order: Option<DcsOrder>) -> Self {
+        self.order = order;
+        self
+    }
+
+    pub fn items_user_setting_id(mut self, value: Option<CanonicalText>) -> Self {
+        self.items_user_setting_id = value;
+        self
+    }
+
+    pub fn items_view_mode(mut self, value: Option<EnumToken>) -> Self {
+        self.items_view_mode = value;
+        self
+    }
+
+    pub fn opaque_extensions(mut self, value: OpaqueFacets) -> Self {
+        self.opaque_extensions = value;
+        self
+    }
+
+    pub fn build(self) -> Result<DcsSettings, DcsBuildError> {
+        DcsSettings::from_parts(
+            self.selection,
+            self.order,
+            self.items_user_setting_id,
+            self.items_view_mode,
+            self.opaque_extensions,
+            self.provenance,
+        )
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DcsSettingsWire {
     selection: Option<DcsSelection>,
+    order: Option<DcsOrder>,
     items_user_setting_id: Option<CanonicalText>,
     items_view_mode: Option<EnumToken>,
     opaque_extensions: DcsOpaqueFacetsWire,
@@ -411,14 +703,16 @@ impl<'de> Deserialize<'de> for DcsSettings {
         D: Deserializer<'de>,
     {
         let wire = DcsSettingsWire::deserialize(deserializer)?;
-        Self::new(
-            wire.selection,
-            wire.items_user_setting_id,
-            wire.items_view_mode,
-            OpaqueFacets::new(wire.opaque_extensions.0).map_err(de::Error::custom)?,
-            wire.provenance,
-        )
-        .map_err(de::Error::custom)
+        DcsSettingsBuilder::new(wire.provenance)
+            .selection(wire.selection)
+            .order(wire.order)
+            .items_user_setting_id(wire.items_user_setting_id)
+            .items_view_mode(wire.items_view_mode)
+            .opaque_extensions(
+                OpaqueFacets::new(wire.opaque_extensions.0).map_err(de::Error::custom)?,
+            )
+            .build()
+            .map_err(de::Error::custom)
     }
 }
 
@@ -461,6 +755,7 @@ impl DcsSettingsEnvelope {
 
 fn validate_settings(
     selection: Option<&DcsSelection>,
+    order: Option<&DcsOrder>,
     items_user_setting_id: Option<&CanonicalText>,
     items_view_mode: Option<&EnumToken>,
     opaque_extensions: &OpaqueFacets,
@@ -493,6 +788,37 @@ fn validate_settings(
                 retained_bytes =
                     checked_retained_bytes(retained_bytes, field.field().as_str().len())?;
             }
+        }
+    }
+    if let Some(order) = order {
+        if order.items().is_empty()
+            && (order.view_mode().is_none() || order.user_setting_id().is_none())
+        {
+            return Err(DcsBuildError::EmptyOrder);
+        }
+        if order.items().len() > MAX_DCS_ORDER_ITEMS {
+            return Err(DcsBuildError::TooManyOrderItems {
+                maximum: MAX_DCS_ORDER_ITEMS,
+                actual: order.items().len(),
+            });
+        }
+        for item in order.items() {
+            if let DcsOrderItem::Field(field) = item {
+                if field.field().as_str().is_empty() {
+                    return Err(DcsBuildError::EmptyOrderField);
+                }
+                if field.use_value() == Some(true) {
+                    return Err(DcsBuildError::UnsupportedOrderUseTrue);
+                }
+                retained_bytes =
+                    checked_retained_bytes(retained_bytes, field.field().as_str().len())?;
+            }
+        }
+        if let Some(value) = order.view_mode() {
+            retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
+        }
+        if let Some(value) = order.user_setting_id() {
+            retained_bytes = checked_retained_bytes(retained_bytes, value.as_str().len())?;
         }
     }
     if let Some(value) = items_user_setting_id {
@@ -602,18 +928,27 @@ mod tests {
     }
 
     fn settings(extensions: Vec<OpaqueFacet>) -> DcsSettings {
-        DcsSettings::new(
-            None,
-            Some(CanonicalText::new("main-settings").unwrap()),
-            Some(EnumToken::new("QuickAccess").unwrap()),
-            OpaqueFacets::new(extensions).unwrap(),
-            provenance("platform:8.3.24", "settings"),
-        )
-        .unwrap()
+        DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+            .items_user_setting_id(Some(CanonicalText::new("main-settings").unwrap()))
+            .items_view_mode(Some(EnumToken::new("QuickAccess").unwrap()))
+            .opaque_extensions(OpaqueFacets::new(extensions).unwrap())
+            .build()
+            .unwrap()
     }
 
     fn selected_field(field: &str) -> DcsSelectedItem {
         DcsSelectedItem::Field(DcsSelectedField::new(CanonicalText::new(field).unwrap()).unwrap())
+    }
+
+    fn order_field(use_value: Option<bool>, field: &str) -> DcsOrderItem {
+        DcsOrderItem::Field(
+            DcsOrderField::new(
+                use_value,
+                CanonicalText::new(field).unwrap(),
+                DcsOrderType::Asc,
+            )
+            .unwrap(),
+        )
     }
 
     #[test]
@@ -624,14 +959,10 @@ mod tests {
             selected_field("Name"),
         ])
         .unwrap();
-        let settings = DcsSettings::new(
-            Some(selection),
-            None,
-            None,
-            OpaqueFacets::new(Vec::new()).unwrap(),
-            provenance("platform:8.3.27", "settings"),
-        )
-        .unwrap();
+        let settings = DcsSettingsBuilder::new(provenance("platform:8.3.27", "settings"))
+            .selection(Some(selection))
+            .build()
+            .unwrap();
 
         assert!(matches!(
             settings.selection().unwrap().items(),
@@ -668,6 +999,121 @@ mod tests {
             "items": vec![serde_json::json!("auto"); MAX_DCS_SELECTION_ITEMS + 1]
         });
         let error = serde_json::from_value::<DcsSelection>(over_limit)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("exceeds 16384 items"));
+    }
+
+    #[test]
+    fn order_preserves_presence_order_duplicates_and_wire_shape() {
+        let order = DcsOrder::new(
+            vec![order_field(None, "Name"), order_field(Some(false), "Name")],
+            Some(EnumToken::new("Normal").unwrap()),
+            Some(CanonicalText::new("88619765-ccb3-46c6-ac52-38e9c992ebd4").unwrap()),
+        )
+        .unwrap();
+        let settings = DcsSettingsBuilder::new(provenance("platform:8.3.27", "settings"))
+            .order(Some(order))
+            .build()
+            .unwrap();
+
+        let items = settings.order().unwrap().items();
+        assert_eq!(items.len(), 2);
+        let DcsOrderItem::Field(first) = &items[0] else {
+            panic!("expected field order")
+        };
+        let DcsOrderItem::Field(second) = &items[1] else {
+            panic!("expected field order")
+        };
+        assert_eq!(first.use_value(), None);
+        assert_eq!(second.use_value(), Some(false));
+        assert_eq!(first.field().as_str(), second.field().as_str());
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""use_value":null"#));
+        assert!(json.contains(r#""use_value":false"#));
+        assert_eq!(
+            serde_json::from_str::<DcsSettings>(&json).unwrap(),
+            settings
+        );
+    }
+
+    #[test]
+    fn desc_multiple_items_and_metadata_only_orders_are_canonical() {
+        let desc = DcsOrderItem::Field(
+            DcsOrderField::new(
+                None,
+                CanonicalText::new("VersionNumber").unwrap(),
+                DcsOrderType::Desc,
+            )
+            .unwrap(),
+        );
+        let multiple = DcsOrder::new(
+            vec![desc.clone(), desc],
+            Some(EnumToken::new("Normal").unwrap()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(multiple.items().len(), 2);
+        assert!(matches!(
+            multiple.items(),
+            [DcsOrderItem::Field(first), DcsOrderItem::Field(second)]
+                if first.order_type() == DcsOrderType::Desc
+                    && second.order_type() == DcsOrderType::Desc
+        ));
+
+        let metadata_only = DcsOrder::new(
+            Vec::new(),
+            Some(EnumToken::new("Normal").unwrap()),
+            Some(CanonicalText::new("88619765-ccb3-46c6-ac52-38e9c992ebd4").unwrap()),
+        )
+        .unwrap();
+        assert!(metadata_only.items().is_empty());
+        assert_eq!(metadata_only.view_mode().unwrap().as_str(), "Normal");
+        assert_eq!(
+            serde_json::from_str::<DcsOrder>(&serde_json::to_string(&metadata_only).unwrap())
+                .unwrap(),
+            metadata_only
+        );
+    }
+
+    #[test]
+    fn unsupported_order_shapes_fail_closed() {
+        assert_eq!(
+            DcsOrder::new(Vec::new(), None, None),
+            Err(DcsBuildError::EmptyOrder)
+        );
+        assert_eq!(
+            DcsOrder::new(Vec::new(), Some(EnumToken::new("Normal").unwrap()), None,),
+            Err(DcsBuildError::EmptyOrder)
+        );
+        assert_eq!(
+            DcsOrderField::new(None, CanonicalText::new("").unwrap(), DcsOrderType::Asc,),
+            Err(DcsBuildError::EmptyOrderField)
+        );
+        assert_eq!(
+            DcsOrderField::new(
+                Some(true),
+                CanonicalText::new("Name").unwrap(),
+                DcsOrderType::Asc,
+            ),
+            Err(DcsBuildError::UnsupportedOrderUseTrue)
+        );
+        assert!(matches!(
+            DcsOrder::new(
+                vec![DcsOrderItem::Auto; MAX_DCS_ORDER_ITEMS + 1],
+                None,
+                None,
+            ),
+            Err(DcsBuildError::TooManyOrderItems { .. })
+        ));
+
+        let over_limit = serde_json::json!({
+            "items": vec![serde_json::json!("auto"); MAX_DCS_ORDER_ITEMS + 1],
+            "view_mode": null,
+            "user_setting_id": null
+        });
+        let error = serde_json::from_value::<DcsOrder>(over_limit)
             .unwrap_err()
             .to_string();
         assert!(error.contains("exceeds 16384 items"));
@@ -726,13 +1172,9 @@ mod tests {
     fn mismatched_profile_and_non_xml_facets_fail_closed() {
         let mismatched = extension("platform:8.3.25", 0, b"<future/>");
         assert!(matches!(
-            DcsSettings::new(
-                None,
-                None,
-                None,
-                OpaqueFacets::new(vec![mismatched]).unwrap(),
-                provenance("platform:8.3.24", "settings"),
-            ),
+            DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .opaque_extensions(OpaqueFacets::new(vec![mismatched]).unwrap())
+                .build(),
             Err(DcsBuildError::OpaqueSourceProfileMismatch { index: 0 })
         ));
 
@@ -744,13 +1186,9 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            DcsSettings::new(
-                None,
-                None,
-                None,
-                OpaqueFacets::new(vec![non_xml_placement]).unwrap(),
-                provenance("platform:8.3.24", "settings"),
-            ),
+            DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .opaque_extensions(OpaqueFacets::new(vec![non_xml_placement]).unwrap())
+                .build(),
             Err(DcsBuildError::NonXmlPlacement { index: 0, .. })
         ));
 
@@ -762,13 +1200,9 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            DcsSettings::new(
-                None,
-                None,
-                None,
-                OpaqueFacets::new(vec![non_xml_media]).unwrap(),
-                provenance("platform:8.3.24", "settings"),
-            ),
+            DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .opaque_extensions(OpaqueFacets::new(vec![non_xml_media]).unwrap())
+                .build(),
             Err(DcsBuildError::NonXmlMediaKind { index: 0, .. })
         ));
     }
@@ -778,13 +1212,9 @@ mod tests {
         let first = extension("platform:8.3.24", 1, b"<first/>");
         let duplicate = extension("platform:8.3.24", 1, b"<second/>");
         assert!(matches!(
-            DcsSettings::new(
-                None,
-                None,
-                None,
-                OpaqueFacets::new(vec![first, duplicate]).unwrap(),
-                provenance("platform:8.3.24", "settings"),
-            ),
+            DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .opaque_extensions(OpaqueFacets::new(vec![first, duplicate]).unwrap())
+                .build(),
             Err(DcsBuildError::DuplicateOpaquePlacement { index: 1 })
         ));
 
@@ -792,13 +1222,9 @@ mod tests {
             .map(|ordinal| extension("platform:8.3.24", u32::try_from(ordinal).unwrap(), b""))
             .collect();
         assert!(matches!(
-            DcsSettings::new(
-                None,
-                None,
-                None,
-                OpaqueFacets::new(extensions).unwrap(),
-                provenance("platform:8.3.24", "settings"),
-            ),
+            DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .opaque_extensions(OpaqueFacets::new(extensions).unwrap())
+                .build(),
             Err(DcsBuildError::TooManyOpaqueExtensions { .. })
         ));
     }

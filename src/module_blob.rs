@@ -9,9 +9,14 @@ use anyhow::{Context, Result, anyhow};
 use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
+use ibcmd_core::dcs::DcsOrder;
 use ibcmd_schema::{
     FormTextDocumentContextMenuMultiplicity, form_layout_single_child_item_slot_indices,
     parse_form_text_document_context_menu_multiplicity,
+};
+use ibcmd_xml::{
+    DcsChildParseOutcome, emit_dcs_order_storage_document, parse_dcs_order_storage_document,
+    parse_form_list_settings_orders,
 };
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
@@ -234,17 +239,9 @@ struct FormXmlListSettingsFieldItem {
     field: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlListSettingsOrder {
-    items: Vec<FormXmlListSettingsOrderItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-struct FormXmlListSettingsOrderItem {
-    field: Option<String>,
-    order_type: Option<String>,
+    canonical: DcsOrder,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -6562,6 +6559,9 @@ fn sanitize_source_path_segment(value: &str) -> String {
 }
 
 fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
+    let canonical_orders = parse_form_list_settings_orders(xml)
+        .map_err(|error| anyhow!("cannot parse Form ListSettings order: {error}"))?;
+    let mut canonical_orders = canonical_orders.into_iter();
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
@@ -6576,7 +6576,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_parameter = None::<FormXmlParameter>;
     let mut current_dynamic_list_field = None::<FormXmlDynamicListField>;
     let mut current_list_settings_field_item = None::<FormXmlListSettingsFieldItem>;
-    let mut current_list_settings_order_item = None::<FormXmlListSettingsOrderItem>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
     let mut current_child_items = Vec::<FormXmlChildItem>::new();
     let mut current_child_localized_section = None::<String>;
@@ -6811,21 +6810,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     current_list_settings_field_item =
                         Some(FormXmlListSettingsFieldItem::default());
-                } else if local == "item"
-                    && path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "Attributes",
-                            "Attribute",
-                            "Settings",
-                            "ListSettings",
-                            "order",
-                        ],
-                    )
-                {
-                    current_list_settings_order_item =
-                        Some(FormXmlListSettingsOrderItem::default());
                 } else if local == "Item"
                     && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
                 {
@@ -8855,7 +8839,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 .push(item);
                         }
                     }
-                    "field"
+                    "order"
                         if path_ends_with(
                             &path,
                             &[
@@ -8865,110 +8849,28 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 "Settings",
                                 "ListSettings",
                                 "order",
-                                "item",
-                                "field",
                             ],
                         ) =>
                     {
-                        if let Some(item) = current_list_settings_order_item.as_mut() {
-                            item.field = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "orderType"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "item",
-                                "orderType",
-                            ],
-                        ) =>
-                    {
-                        if let Some(item) = current_list_settings_order_item.as_mut() {
-                            item.order_type = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "item"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "item",
-                            ],
-                        ) =>
-                    {
-                        if let Some(item) = current_list_settings_order_item.take()
-                            && item.field.as_deref().is_some_and(|field| !field.is_empty())
-                            && let Some(settings) = current_attribute
-                                .as_mut()
-                                .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .order
-                                .get_or_insert_with(FormXmlListSettingsOrder::default)
-                                .items
-                                .push(item);
-                        }
-                    }
-                    "viewMode"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "viewMode",
-                            ],
-                        ) =>
-                    {
+                        let canonical = match canonical_orders.next() {
+                            Some(DcsChildParseOutcome::Typed(order)) => order,
+                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
+                                return Err(anyhow!(
+                                    "unsupported Form ListSettings order: {reason}"
+                                ));
+                            }
+                            Some(DcsChildParseOutcome::Absent) | None => {
+                                return Err(anyhow!(
+                                    "Form ListSettings order has no canonical parse result"
+                                ));
+                            }
+                        };
                         if let Some(settings) = current_attribute
                             .as_mut()
                             .and_then(|attribute| attribute.settings.as_mut())
                         {
-                            settings
-                                .list_settings
-                                .order
-                                .get_or_insert_with(FormXmlListSettingsOrder::default)
-                                .view_mode = Some(text_value.trim().to_string());
-                        }
-                    }
-                    "userSettingID"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "Attributes",
-                                "Attribute",
-                                "Settings",
-                                "ListSettings",
-                                "order",
-                                "userSettingID",
-                            ],
-                        ) =>
-                    {
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
-                        {
-                            settings
-                                .list_settings
-                                .order
-                                .get_or_insert_with(FormXmlListSettingsOrder::default)
-                                .user_setting_id = Some(text_value.trim().to_string());
+                            settings.list_settings.order =
+                                Some(FormXmlListSettingsOrder { canonical });
                         }
                     }
                     "viewMode"
@@ -10283,6 +10185,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
         buffer.clear();
     }
 
+    if canonical_orders.next().is_some() {
+        return Err(anyhow!(
+            "Form ListSettings order parse results were not consumed by the Form structure"
+        ));
+    }
     Ok(properties)
 }
 
@@ -18715,33 +18622,10 @@ fn form_existing_dcs_order_matches(
     let Some(xml) = form_setting_base64_xml(existing)? else {
         return Ok(false);
     };
-    let parsed = parse_form_dcs_order_xml(&xml)?;
-    if parsed.items.len() != order.items.len() {
-        return Ok(false);
-    }
-    let items_match = order
-        .items
-        .iter()
-        .zip(parsed.items.iter())
-        .all(|(expected, actual)| {
-            expected
-                .field
-                .as_deref()
-                .is_none_or(|field| actual.field.as_deref() == Some(field))
-                && expected
-                    .order_type
-                    .as_deref()
-                    .is_none_or(|order_type| actual.order_type.as_deref() == Some(order_type))
-        });
-    let view_mode_matches = order
-        .view_mode
-        .as_deref()
-        .is_none_or(|expected| parsed.view_mode.as_deref() == Some(expected));
-    let user_setting_matches = order
-        .user_setting_id
-        .as_deref()
-        .is_none_or(|expected| parsed.user_setting_id.as_deref() == Some(expected));
-    Ok(items_match && view_mode_matches && user_setting_matches)
+    let expected = canonical_form_xml_list_settings_order(order)?;
+    let parsed = parse_dcs_order_storage_document(xml.as_bytes())
+        .map_err(|error| anyhow!("invalid existing Form Order document: {error}"))?;
+    Ok(matches!(parsed, DcsChildParseOutcome::Typed(actual) if actual == expected))
 }
 
 fn form_existing_dcs_standard_section_matches(
@@ -18805,101 +18689,8 @@ struct ParsedFormDcsStandardSection {
 }
 
 #[derive(Default)]
-struct ParsedFormDcsOrder {
-    items: Vec<ParsedFormDcsOrderItem>,
-    view_mode: Option<String>,
-    user_setting_id: Option<String>,
-}
-
-#[derive(Default)]
-struct ParsedFormDcsOrderItem {
-    field: Option<String>,
-    order_type: Option<String>,
-}
-
-#[derive(Default)]
 struct ParsedFormDcsFieldItem {
     field: Option<String>,
-}
-
-fn parse_form_dcs_order_xml(xml: &str) -> Result<ParsedFormDcsOrder> {
-    let mut reader = Reader::from_reader(xml.as_bytes());
-    let mut buffer = Vec::new();
-    let mut current = None::<String>;
-    let mut text = String::new();
-    let mut parsed = ParsedFormDcsOrder::default();
-    let mut current_item = None::<ParsedFormDcsOrderItem>;
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if local == "item" {
-                    current_item = Some(ParsedFormDcsOrderItem::default());
-                } else if matches!(
-                    local.as_str(),
-                    "field" | "orderType" | "viewMode" | "userSettingID"
-                ) {
-                    current = Some(local);
-                    text.clear();
-                }
-            }
-            Ok(Event::Text(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::CData(event)) => {
-                if current.is_some() {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::GeneralRef(reference)) => {
-                if current.is_some() {
-                    let value = if let Some(ch) = reference.resolve_char_ref()? {
-                        ch.to_string()
-                    } else {
-                        let entity = reference.decode()?;
-                        resolve_xml_entity(entity.as_ref())
-                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
-                            .to_string()
-                    };
-                    text.push_str(&value);
-                }
-            }
-            Ok(Event::End(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if current.as_deref() == Some(local.as_str()) {
-                    match local.as_str() {
-                        "field" => {
-                            if let Some(item) = current_item.as_mut() {
-                                item.field = Some(text.trim().to_string());
-                            }
-                        }
-                        "orderType" => {
-                            if let Some(item) = current_item.as_mut() {
-                                item.order_type = Some(text.trim().to_string());
-                            }
-                        }
-                        "viewMode" => parsed.view_mode = Some(text.trim().to_string()),
-                        "userSettingID" => parsed.user_setting_id = Some(text.trim().to_string()),
-                        _ => {}
-                    }
-                    current = None;
-                    text.clear();
-                }
-                if local == "item"
-                    && let Some(item) = current_item.take()
-                {
-                    parsed.items.push(item);
-                }
-            }
-            Ok(Event::Eof) => break,
-            Err(error) => return Err(error.into()),
-            _ => {}
-        }
-        buffer.clear();
-    }
-    Ok(parsed)
 }
 
 fn parse_form_dcs_standard_section_xml(xml: &str) -> Result<ParsedFormDcsStandardSection> {
@@ -19112,9 +18903,9 @@ fn format_form_setting_dcs_order(
 ) -> Result<String> {
     let existing_uuid = find_form_setting_ref_uuid(settings_text, key)
         .unwrap_or_else(|| default_form_setting_ref_uuid(key).to_string());
-    let xml = format_form_dcs_order_xml(order);
-    let mut bytes = b"\xEF\xBB\xBF".to_vec();
-    bytes.extend_from_slice(xml.as_bytes());
+    let canonical = canonical_form_xml_list_settings_order(order)?;
+    let bytes = emit_dcs_order_storage_document(&canonical)
+        .map_err(|error| anyhow!("cannot emit canonical Form Order document: {error}"))?;
     Ok(format!(
         "{{\"#\",{existing_uuid},{{#base64:{}}}}}",
         encode_base64(&bytes)
@@ -19177,45 +18968,8 @@ fn parse_non_zero_uuid(value: &str) -> Option<String> {
     (uuid != Uuid::nil()).then(|| uuid.hyphenated().to_string())
 }
 
-fn format_form_dcs_order_xml(order: &FormXmlListSettingsOrder) -> String {
-    let mut xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
-        .to_string();
-    for item in &order.items {
-        let Some(field) = item.field.as_deref().filter(|field| !field.is_empty()) else {
-            continue;
-        };
-        xml.push_str("\t<item xsi:type=\"OrderItemField\">\r\n");
-        xml.push_str(&format!(
-            "\t\t<field>{}</field>\r\n",
-            escape_xml_text(field)
-        ));
-        if let Some(order_type) = item.order_type.as_deref().filter(|value| !value.is_empty()) {
-            xml.push_str(&format!(
-                "\t\t<orderType>{}</orderType>\r\n",
-                escape_xml_text(order_type)
-            ));
-        }
-        xml.push_str("\t</item>\r\n");
-    }
-    if let Some(view_mode) = order.view_mode.as_deref().filter(|value| !value.is_empty()) {
-        xml.push_str(&format!(
-            "\t<viewMode>{}</viewMode>\r\n",
-            escape_xml_text(view_mode)
-        ));
-    }
-    if let Some(user_setting_id) = order
-        .user_setting_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        xml.push_str(&format!(
-            "\t<userSettingID>{}</userSettingID>\r\n",
-            escape_xml_text(user_setting_id)
-        ));
-    }
-    xml.push_str("</Order>");
-    xml
+fn canonical_form_xml_list_settings_order(order: &FormXmlListSettingsOrder) -> Result<DcsOrder> {
+    Ok(order.canonical.clone())
 }
 
 fn format_form_dcs_standard_section_xml(
@@ -31203,7 +30957,10 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             .as_ref()
             .and_then(|settings| settings.list_settings.order.as_ref())
             .ok_or_else(|| anyhow::anyhow!("order was not parsed from form XML"))?;
-        assert_eq!(parsed_order.items[0].field.as_deref(), Some("Код"));
+        assert!(matches!(
+            parsed_order.canonical.items(),
+            [ibcmd_core::dcs::DcsOrderItem::Field(field)] if field.field().as_str() == "Код"
+        ));
 
         let packed =
             super::pack_form_body_blob_from_form_xml_with_source(&base, xml, None, Some(&source))?;

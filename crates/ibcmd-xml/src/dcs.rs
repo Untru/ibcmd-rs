@@ -8,21 +8,29 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
-use ibcmd_core::dcs::{DcsSelectedField, DcsSelectedItem, DcsSelection, DcsSettingsEnvelope};
+use ibcmd_core::dcs::{
+    DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType, DcsSelectedField, DcsSelectedItem,
+    DcsSelection, DcsSettingsEnvelope, MAX_DCS_ORDER_ITEMS, MAX_DCS_RETAINED_BYTES,
+};
 use ibcmd_core::diagnostic::{Diagnostic, DiagnosticCode, Severity};
-use ibcmd_core::value::CanonicalText;
+use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_schema::{
     DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
     WriterRuleCorpus, WriterRuleKey, bundled_dcs_list_settings_tail_policy,
-    bundled_dcs_selection_policy, bundled_dcs_settings_serialization_policy, bundled_writer_rules,
+    bundled_dcs_order_policy, bundled_dcs_selection_policy,
+    bundled_dcs_settings_serialization_policy, bundled_writer_rules,
 };
+use quick_xml::Reader as QuickXmlReader;
 use quick_xml::escape::escape;
+use quick_xml::events::Event as QuickXmlEvent;
 
 use crate::node::{AttributeKind, XmlElement, XmlNode};
 use crate::reader::XmlReader;
 
 const DCS_SETTINGS_NAMESPACE: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+const FORM_LOG_NAMESPACE: &str = "http://v8.1c.ru/8.3/xcf/logform";
 const XSI_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema-instance";
+const XS_NAMESPACE: &str = "http://www.w3.org/2001/XMLSchema";
 
 /// EDT release against which the DCS writer boundary was inspected.
 pub const DCS_WRITER_EVIDENCE_RELEASE: &str = "2025.2.3+30";
@@ -62,6 +70,10 @@ pub enum DcsWriterDecision {
     RootSelectionPolicy,
     /// Whether Form `ListSettings` has a physical root-selection ingress.
     FormListSettingsSelectionIngress,
+    /// Root order QName, item variants, child order, and context placement.
+    RootOrderPolicy,
+    /// Form `ListSettings` embedded/storage order ingress.
+    FormListSettingsOrderIngress,
     /// Placement of retained opaque XML relative to typed settings children.
     OpaqueExtensionPlacement,
     /// EDT delegation from Form `ListSettings` into the DCS serializer.
@@ -88,6 +100,10 @@ impl DcsWriterDecision {
             Self::RootSelectionPolicy => "dcs.DataCompositionSettings.selection.policy",
             Self::FormListSettingsSelectionIngress => {
                 "form.DynamicListExtInfo.listSettings.selection.ingress"
+            }
+            Self::RootOrderPolicy => "dcs.DataCompositionSettings.order.policy",
+            Self::FormListSettingsOrderIngress => {
+                "form.DynamicListExtInfo.listSettings.order.ingress"
             }
             Self::OpaqueExtensionPlacement => {
                 "dcs.DataCompositionSettings.opaque-extension.placement"
@@ -174,6 +190,16 @@ pub const DCS_WRITER_EVIDENCE: &[DcsWriterEvidence] = &[
         decision: DcsWriterDecision::FormListSettingsSelectionIngress,
         status: DcsWriterEvidenceStatus::Pending,
         source: "no-platform-authenticated-form-list-settings-selection-cohort",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::RootOrderPolicy,
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "native-evidence:8.3.27.2214-xml-2.20-dcs-order/standalone",
+    },
+    DcsWriterEvidence {
+        decision: DcsWriterDecision::FormListSettingsOrderIngress,
+        status: DcsWriterEvidenceStatus::Verified,
+        source: "native-evidence:8.3.27.2214-xml-2.20-dcs-order/form",
     },
     DcsWriterEvidence {
         decision: DcsWriterDecision::OpaqueExtensionPlacement,
@@ -284,6 +310,7 @@ pub enum DcsSettingsChildrenError {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DcsSettingsTypedChildren {
     selection: Option<DcsSelection>,
+    order: DcsChildParseOutcome<DcsOrder>,
     items_view_mode: Option<String>,
     items_user_setting_id: Option<String>,
 }
@@ -292,6 +319,11 @@ impl DcsSettingsTypedChildren {
     /// Returns the bounded direct root selection, if present.
     pub const fn selection(&self) -> Option<&DcsSelection> {
         self.selection.as_ref()
+    }
+
+    /// Returns the presence-aware root order parse result.
+    pub const fn order(&self) -> &DcsChildParseOutcome<DcsOrder> {
+        &self.order
     }
 
     /// Returns the direct `itemsViewMode` value, if present.
@@ -304,6 +336,43 @@ impl DcsSettingsTypedChildren {
         self.items_user_setting_id.as_deref()
     }
 }
+
+/// Presence-aware result for one caller-owned DCS child. Unsupported is not
+/// absence: its exact bytes stay with the owning codec and must not be
+/// regenerated from a partial typed value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DcsChildParseOutcome<T> {
+    Absent,
+    Typed(T),
+    Unsupported(&'static str),
+}
+
+impl<T> Default for DcsChildParseOutcome<T> {
+    fn default() -> Self {
+        Self::Absent
+    }
+}
+
+/// A malformed recognized settings structure. This is distinct from an
+/// unsupported but well-formed extension that remains source-owned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsSettingsParseError {
+    reason: &'static str,
+}
+
+impl DcsSettingsParseError {
+    pub const fn reason(&self) -> &'static str {
+        self.reason
+    }
+}
+
+impl Display for DcsSettingsParseError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(formatter, "invalid DCS settings structure: {}", self.reason)
+    }
+}
+
+impl Error for DcsSettingsParseError {}
 
 impl Display for DcsSettingsChildrenError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
@@ -410,6 +479,7 @@ pub fn emit_dcs_settings_children(
 ) -> Result<String, DcsSettingsChildrenError> {
     let parts = emit_dcs_settings_children_parts(envelope, target_profile, prefix, indent)?;
     let mut output = parts.selection.unwrap_or_default();
+    output.push_str(parts.order.as_deref().unwrap_or_default());
     output.push_str(&parts.tail);
     Ok(output)
 }
@@ -420,12 +490,16 @@ pub fn emit_dcs_settings_children(
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DcsSettingsChildrenParts {
     selection: Option<String>,
+    order: Option<String>,
     tail: String,
 }
 
 impl DcsSettingsChildrenParts {
     pub fn selection(&self) -> Option<&str> {
         self.selection.as_deref()
+    }
+    pub fn order(&self) -> Option<&str> {
+        self.order.as_deref()
     }
     pub fn tail(&self) -> &str {
         &self.tail
@@ -446,6 +520,10 @@ pub fn emit_dcs_settings_children_parts(
         .selection()
         .map(|selection| emit_dcs_selection(selection, prefix, indent))
         .transpose()?;
+    let order = settings
+        .order()
+        .map(|order| emit_dcs_order_fragment(order, prefix, indent))
+        .transpose()?;
     let tail = emit_form_list_settings_tail(
         settings.items_view_mode().map(|value| value.as_str()),
         settings.items_user_setting_id().map(|value| value.as_str()),
@@ -453,7 +531,11 @@ pub fn emit_dcs_settings_children_parts(
         indent,
     )
     .map_err(DcsSettingsChildrenError::from)?;
-    Ok(DcsSettingsChildrenParts { selection, tail })
+    Ok(DcsSettingsChildrenParts {
+        selection,
+        order,
+        tail,
+    })
 }
 
 fn emit_dcs_selection(
@@ -509,6 +591,204 @@ fn emit_dcs_selection(
     Ok(output)
 }
 
+/// Emits an embedded standalone/Form order child from the shared canonical
+/// semantics. The caller owns only its surrounding physical wrapper.
+pub fn emit_dcs_order_fragment(
+    order: &DcsOrder,
+    prefix: &str,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    if !is_xml_prefix(prefix)
+        || indent.len() > 64
+        || !indent.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        return Err(
+            DcsListSettingsTailError::InvalidFormat("order prefix or indent is invalid").into(),
+        );
+    }
+    emit_dcs_order(order, Some(prefix), indent)
+}
+
+/// Emits the exact BOM-prefixed physical `<Order>` document stored in a Form
+/// dynamic-list base64 record. Base64 and the record type UUID remain the
+/// responsibility of the physical Form adapter.
+pub fn emit_dcs_order_storage_document(
+    order: &DcsOrder,
+) -> Result<Vec<u8>, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_order_policy().map_err(DcsListSettingsTailError::from)?;
+    let root = expanded_local_name(policy.storage_order_qname())?;
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<{root} xmlns=\"{}\" xmlns:xs=\"{XS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">\r\n",
+        policy.namespace_uri()
+    );
+    xml.push_str(&emit_dcs_order_contents(order, None, "\t")?);
+    xml.push_str("</");
+    xml.push_str(root);
+    xml.push('>');
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(bytes)
+}
+
+/// Builds the exact metadata-only Form order authenticated by the bundled
+/// platform evidence. Physical adapters consume this helper instead of owning
+/// default XML values or user-setting identifiers.
+pub fn platform_default_form_list_settings_order() -> Result<DcsOrder, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_order_policy().map_err(DcsListSettingsTailError::from)?;
+    let Some(view_mode) = policy.supported_view_modes().first() else {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "metadata-only Form order view mode is not evidenced",
+        )
+        .into());
+    };
+    let view_mode = EnumToken::new(view_mode)
+        .map_err(|_| DcsListSettingsTailError::InvalidValue("viewMode"))?;
+    let user_setting_id = CanonicalText::new(policy.metadata_only_user_setting_id())
+        .map_err(|_| DcsListSettingsTailError::InvalidValue("userSettingID"))?;
+    DcsOrder::new(Vec::new(), Some(view_mode), Some(user_setting_id)).map_err(|_| {
+        DcsListSettingsTailError::InvalidFormat(
+            "metadata-only Form order violates canonical bounds",
+        )
+        .into()
+    })
+}
+
+fn emit_dcs_order(
+    order: &DcsOrder,
+    prefix: Option<&str>,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_order_policy().map_err(DcsListSettingsTailError::from)?;
+    if !policy.follows_selection_and_precedes_structure_items()
+        || !policy.propertyless_empty_order_is_unsupported()
+        || !policy.metadata_only_order_requires_view_mode_and_user_setting_id()
+        || (order.items().is_empty()
+            && (order.view_mode().is_none() || order.user_setting_id().is_none()))
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "order placement or propertyless-empty emission policy is unsupported",
+        )
+        .into());
+    }
+    let local = expanded_local_name(policy.order_qname())?;
+    let qualified = |local: &str| match prefix {
+        Some(prefix) => format!("{prefix}:{local}"),
+        None => local.to_owned(),
+    };
+    let mut output = format!("{indent}<{}>\r\n", qualified(local));
+    let nested = format!("{indent}\t");
+    output.push_str(&emit_dcs_order_contents(order, prefix, &nested)?);
+    output.push_str(&format!("{indent}</{}>\r\n", qualified(local)));
+    Ok(output)
+}
+
+fn emit_dcs_order_contents(
+    order: &DcsOrder,
+    prefix: Option<&str>,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_order_policy().map_err(DcsListSettingsTailError::from)?;
+    let qualify = |name: &str| match prefix {
+        Some(prefix) => format!("{prefix}:{name}"),
+        None => name.to_owned(),
+    };
+    let item_name = qualify(expanded_local_name(policy.item_qname())?);
+    let use_name = qualify(expanded_local_name(policy.use_qname())?);
+    let field_name = qualify(expanded_local_name(policy.field_qname())?);
+    let order_type_name = qualify(expanded_local_name(policy.order_type_qname())?);
+    let field_type = qualify(expanded_local_name(policy.field_type_qname())?);
+    let view_mode_name = qualify(expanded_local_name(policy.view_mode_qname())?);
+    let user_setting_id_name = qualify(expanded_local_name(policy.user_setting_id_qname())?);
+    let child_indent = format!("{indent}\t");
+    let mut output = String::new();
+    if order.items().len() > policy.max_emitted_items() {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "order cardinality is not platform-evidenced",
+        )
+        .into());
+    }
+    for item in order.items() {
+        let DcsOrderItem::Field(field) = item else {
+            return Err(DcsListSettingsTailError::InvalidFormat(
+                "root OrderItemAuto emission is unsupported",
+            )
+            .into());
+        };
+        if !policy.supported_use_values().contains(&field.use_value())
+            || !policy
+                .supported_order_types()
+                .iter()
+                .any(|supported| supported == order_type_token(field.order_type()))
+        {
+            return Err(DcsListSettingsTailError::InvalidFormat(
+                "order item value is not platform-evidenced",
+            )
+            .into());
+        }
+        for (name, value) in [
+            ("field", field.field().as_str()),
+            ("orderType", order_type_token(field.order_type())),
+        ] {
+            if value.is_empty() || value.chars().any(|character| !is_xml_1_0_char(character)) {
+                return Err(DcsListSettingsTailError::InvalidValue(name).into());
+            }
+        }
+        output.push_str(&format!(
+            "{indent}<{item_name} xsi:type=\"{field_type}\">\r\n"
+        ));
+        if field.use_value() == Some(false) {
+            output.push_str(&format!("{child_indent}<{use_name}>false</{use_name}>\r\n"));
+        }
+        output.push_str(&format!(
+            "{child_indent}<{field_name}>{}</{field_name}>\r\n",
+            escape(field.field().as_str())
+        ));
+        output.push_str(&format!(
+            "{child_indent}<{order_type_name}>{}</{order_type_name}>\r\n",
+            order_type_token(field.order_type())
+        ));
+        output.push_str(&format!("{indent}</{item_name}>\r\n"));
+    }
+    if let Some(value) = order.view_mode() {
+        if !policy
+            .supported_view_modes()
+            .iter()
+            .any(|supported| supported == value.as_str())
+            || value
+                .as_str()
+                .chars()
+                .any(|character| !is_xml_1_0_char(character))
+        {
+            return Err(DcsListSettingsTailError::InvalidValue("viewMode").into());
+        }
+        output.push_str(&format!(
+            "{indent}<{view_mode_name}>{}</{view_mode_name}>\r\n",
+            escape(value.as_str())
+        ));
+    }
+    if let Some(value) = order.user_setting_id() {
+        if value
+            .as_str()
+            .chars()
+            .any(|character| !is_xml_1_0_char(character))
+        {
+            return Err(DcsListSettingsTailError::InvalidValue("userSettingID").into());
+        }
+        output.push_str(&format!(
+            "{indent}<{user_setting_id_name}>{}</{user_setting_id_name}>\r\n",
+            escape(value.as_str())
+        ));
+    }
+    Ok(output)
+}
+
+fn order_type_token(order_type: DcsOrderType) -> &'static str {
+    match order_type {
+        DcsOrderType::Asc => "Asc",
+        DcsOrderType::Desc => "Desc",
+    }
+}
+
 fn expanded_local_name(expanded: &str) -> Result<&str, DcsListSettingsTailError> {
     expanded.rsplit_once('}').map(|(_, local)| local).ok_or(
         DcsListSettingsTailError::InvalidFormat("verified selection QName is not expanded"),
@@ -522,25 +802,76 @@ fn expanded_local_name(expanded: &str) -> Result<&str, DcsListSettingsTailError>
 /// Duplicate scalars, scalar attributes, complex scalar content, or an inexact
 /// scalar namespace fail closed.
 pub fn parse_dcs_settings_children(document: &str) -> Option<DcsSettingsTypedChildren> {
-    let document = XmlReader::from_slice(document.as_bytes()).ok()?;
+    parse_dcs_settings_children_strict(document).ok()
+}
+
+/// Strict variant that distinguishes malformed recognized structure from an
+/// unsupported but source-owned order shape.
+pub fn parse_dcs_settings_children_strict(
+    document: &str,
+) -> Result<DcsSettingsTypedChildren, DcsSettingsParseError> {
+    if document.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "settings document exceeds the retained-byte budget",
+        });
+    }
+    let document =
+        XmlReader::from_slice(document.as_bytes()).map_err(|_| DcsSettingsParseError {
+            reason: "document is not well-formed XML",
+        })?;
     let root = document.root();
     if root.name().local() != "Settings"
         || !xml_element_uses_namespace(root, root, DCS_SETTINGS_NAMESPACE)
     {
-        return None;
+        return Err(DcsSettingsParseError {
+            reason: "root is not the settings-namespace Settings element",
+        });
     }
     let mut children = DcsSettingsTypedChildren::default();
     let mut selection_candidate = None;
     let mut selection_is_ambiguous = false;
+    let mut order_candidate = None;
+    let mut order_placement_is_unsupported = false;
+    let mut order_window_closed = false;
+    let mut saw_order = false;
     for node in root.children() {
         let XmlNode::Element(element) = node else {
             continue;
         };
         if element.name().local() == "selection" {
+            if saw_order && xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE) {
+                order_placement_is_unsupported = true;
+            }
             if selection_candidate.replace(element).is_some() {
                 selection_is_ambiguous = true;
             }
             continue;
+        }
+        if element.name().local() == "order" {
+            if order_candidate.replace(element).is_some() {
+                return Err(DcsSettingsParseError {
+                    reason: "duplicate direct order child",
+                });
+            }
+            if order_window_closed {
+                order_placement_is_unsupported = true;
+            }
+            saw_order = true;
+            continue;
+        }
+        if xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
+            && matches!(
+                element.name().local(),
+                "conditionalAppearance"
+                    | "outputParameters"
+                    | "item"
+                    | "additionalProperties"
+                    | "itemsViewMode"
+                    | "itemsUserSettingID"
+                    | "itemsUserSettingPresentation"
+            )
+        {
+            order_window_closed = true;
         }
         let target = match element.name().local() {
             "itemsViewMode" => &mut children.items_view_mode,
@@ -554,14 +885,20 @@ pub fn parse_dcs_settings_children(document: &str) -> Option<DcsSettingsTypedChi
                 .iter()
                 .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
         {
-            return None;
+            return Err(DcsSettingsParseError {
+                reason: "duplicate, attributed, complex, or wrong-namespace scalar child",
+            });
         }
         let mut value = String::new();
         for child in element.children() {
             match child {
                 XmlNode::Text(text) => value.push_str(text.value()),
                 XmlNode::CData(text) => value.push_str(text.value()),
-                _ => return None,
+                _ => {
+                    return Err(DcsSettingsParseError {
+                        reason: "scalar child has complex content",
+                    });
+                }
             }
         }
         *target = Some(value);
@@ -569,7 +906,329 @@ pub fn parse_dcs_settings_children(document: &str) -> Option<DcsSettingsTypedChi
     if !selection_is_ambiguous && let Some(element) = selection_candidate {
         children.selection = parse_dcs_selection(element, root);
     }
-    Some(children)
+    if let Some(element) = order_candidate {
+        children.order = parse_dcs_order(element, root)?;
+        if order_placement_is_unsupported
+            && matches!(&children.order, DcsChildParseOutcome::Typed(_))
+        {
+            children.order = DcsChildParseOutcome::Unsupported(
+                "root order placement is outside the evidenced settings sequence",
+            );
+        }
+    }
+    Ok(children)
+}
+
+fn parse_dcs_order(
+    element: &XmlElement,
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsOrder>, DcsSettingsParseError> {
+    let policy = bundled_dcs_order_policy().map_err(|_| DcsSettingsParseError {
+        reason: "bundled order evidence is invalid",
+    })?;
+    if !xml_element_uses_namespace(element, root, policy.namespace_uri()) {
+        return Err(DcsSettingsParseError {
+            reason: "order child uses the wrong namespace",
+        });
+    }
+    if element
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "order attributes are unsupported",
+        ));
+    }
+
+    let mut items = Vec::new();
+    let mut view_mode = None;
+    let mut user_setting_id = None;
+    let mut tail_started = false;
+    for node in element.children() {
+        let child = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(child) => child,
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "order contains non-element content",
+                });
+            }
+        };
+        if !xml_element_uses_namespace(child, root, policy.namespace_uri()) {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "order child namespace is unsupported",
+            ));
+        }
+        match child.name().local() {
+            "item" if !tail_started => match parse_dcs_order_item(child, root, &policy)? {
+                DcsChildParseOutcome::Typed(item) => items.push(item),
+                DcsChildParseOutcome::Unsupported(reason) => {
+                    return Ok(DcsChildParseOutcome::Unsupported(reason));
+                }
+                DcsChildParseOutcome::Absent => {
+                    return Err(DcsSettingsParseError {
+                        reason: "order item parser returned absence for a present item",
+                    });
+                }
+            },
+            "viewMode" if view_mode.is_none() && user_setting_id.is_none() => {
+                tail_started = true;
+                view_mode = Some(parse_simple_order_child(child)?);
+            }
+            "userSettingID" if user_setting_id.is_none() => {
+                tail_started = true;
+                user_setting_id = Some(parse_simple_order_child(child)?);
+            }
+            "item" | "viewMode" | "userSettingID" => {
+                return Err(DcsSettingsParseError {
+                    reason: "order child is duplicated or out of sequence",
+                });
+            }
+            _ => {
+                return Ok(DcsChildParseOutcome::Unsupported(
+                    "order child kind is unsupported",
+                ));
+            }
+        }
+        if items.len() > MAX_DCS_ORDER_ITEMS {
+            return Err(DcsSettingsParseError {
+                reason: "order exceeds the item bound",
+            });
+        }
+    }
+    if items.is_empty() && (view_mode.is_none() || user_setting_id.is_none()) {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "metadata-only order requires both viewMode and userSettingID",
+        ));
+    }
+    if items.len() > policy.max_emitted_items() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "order cardinality is outside the platform-evidenced emission cohort",
+        ));
+    }
+    if let Some(value) = view_mode.as_deref()
+        && !policy
+            .supported_view_modes()
+            .iter()
+            .any(|supported| supported == value)
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "order viewMode is outside the platform-evidenced set",
+        ));
+    }
+    let view_mode = view_mode
+        .as_deref()
+        .map(ibcmd_core::value::EnumToken::new)
+        .transpose()
+        .map_err(|_| DcsSettingsParseError {
+            reason: "order viewMode is invalid",
+        })?;
+    let user_setting_id = user_setting_id
+        .as_deref()
+        .map(CanonicalText::new)
+        .transpose()
+        .map_err(|_| DcsSettingsParseError {
+            reason: "order userSettingID is invalid",
+        })?;
+    DcsOrder::new(items, view_mode, user_setting_id)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "order violates canonical bounds",
+        })
+}
+
+/// Parses the physical BOM/base64 `<Order>` document stored by Form dynamic
+/// lists through the same strict canonical order boundary.
+pub fn parse_dcs_order_storage_document(
+    bytes: &[u8],
+) -> Result<DcsChildParseOutcome<DcsOrder>, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "storage Order document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "storage Order document is not well-formed XML",
+    })?;
+    let root = document.root();
+    let policy = bundled_dcs_order_policy().map_err(|_| DcsSettingsParseError {
+        reason: "bundled order evidence is invalid",
+    })?;
+    if root.name().local() != "Order"
+        || !xml_element_uses_namespace(root, root, policy.namespace_uri())
+    {
+        return Err(DcsSettingsParseError {
+            reason: "storage root is not the settings-namespace Order element",
+        });
+    }
+    parse_dcs_order(root, root)
+}
+
+/// Extracts every direct Form `ListSettings/order` in document order through
+/// the same namespace-aware parser used by standalone settings and storage
+/// documents. The Form compiler consumes the resulting canonical values and
+/// never owns DCS QNames or item ordering itself.
+pub fn parse_form_list_settings_orders(
+    bytes: &[u8],
+) -> Result<Vec<DcsChildParseOutcome<DcsOrder>>, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "Form document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "Form document is not well-formed XML",
+    })?;
+    let root = document.root();
+    let mut orders = Vec::new();
+    collect_form_list_settings_orders(root, root, &mut orders)?;
+    Ok(orders)
+}
+
+fn collect_form_list_settings_orders(
+    element: &XmlElement,
+    root: &XmlElement,
+    orders: &mut Vec<DcsChildParseOutcome<DcsOrder>>,
+) -> Result<(), DcsSettingsParseError> {
+    if element.name().local() == "ListSettings" {
+        if !xml_element_uses_namespace(element, root, FORM_LOG_NAMESPACE) {
+            return Err(DcsSettingsParseError {
+                reason: "Form ListSettings uses the wrong namespace",
+            });
+        }
+        let mut order = None;
+        for child in element.children() {
+            let XmlNode::Element(child) = child else {
+                continue;
+            };
+            if child.name().local() == "order" {
+                if order.is_some() {
+                    return Err(DcsSettingsParseError {
+                        reason: "duplicate direct Form ListSettings order child",
+                    });
+                }
+                order = Some(parse_dcs_order(child, root)?);
+            }
+        }
+        if let Some(order) = order {
+            orders.push(order);
+        }
+        return Ok(());
+    }
+    for child in element.children() {
+        if let XmlNode::Element(child) = child {
+            collect_form_list_settings_orders(child, root, orders)?;
+        }
+    }
+    Ok(())
+}
+
+fn parse_dcs_order_item(
+    item: &XmlElement,
+    root: &XmlElement,
+    policy: &ibcmd_schema::DcsOrderPolicy,
+) -> Result<DcsChildParseOutcome<DcsOrderItem>, DcsSettingsParseError> {
+    let Some(item_type) = resolved_xsi_type(item, root) else {
+        return Err(DcsSettingsParseError {
+            reason: "order item lacks one exact xsi:type",
+        });
+    };
+    if item_type != policy.field_type_qname() {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "order item type is unsupported in this root context",
+        ));
+    }
+    let mut use_value = None;
+    let mut field = None;
+    let mut order_type = None;
+    let mut phase = 0u8;
+    for node in item.children() {
+        let child = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(child) => child,
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "order item contains non-element content",
+                });
+            }
+        };
+        if !xml_element_uses_namespace(child, root, policy.namespace_uri()) {
+            return Ok(DcsChildParseOutcome::Unsupported(
+                "order item child namespace is unsupported",
+            ));
+        }
+        match child.name().local() {
+            "use" if phase == 0 => {
+                let value = parse_simple_order_child(child)?;
+                if value != "false" {
+                    return Ok(DcsChildParseOutcome::Unsupported(
+                        "only explicit use=false is platform-evidenced",
+                    ));
+                }
+                use_value = Some(false);
+                phase = 1;
+            }
+            "field" if phase <= 1 && field.is_none() => {
+                field = Some(parse_simple_order_child(child)?);
+                phase = 2;
+            }
+            "orderType" if phase == 2 && order_type.is_none() => {
+                let value = parse_simple_order_child(child)?;
+                order_type = match value.as_str() {
+                    "Asc" => Some(DcsOrderType::Asc),
+                    "Desc" => Some(DcsOrderType::Desc),
+                    _ => {
+                        return Ok(DcsChildParseOutcome::Unsupported(
+                            "orderType is outside the platform-evidenced Asc/Desc set",
+                        ));
+                    }
+                };
+                phase = 3;
+            }
+            "use" | "field" | "orderType" => {
+                return Err(DcsSettingsParseError {
+                    reason: "order item child is duplicated or out of sequence",
+                });
+            }
+            _ => {
+                return Ok(DcsChildParseOutcome::Unsupported(
+                    "order item child kind is unsupported",
+                ));
+            }
+        }
+    }
+    let (Some(field), Some(order_type)) = (field, order_type) else {
+        return Err(DcsSettingsParseError {
+            reason: "order field and explicit orderType are required",
+        });
+    };
+    let field = CanonicalText::new(&field).map_err(|_| DcsSettingsParseError {
+        reason: "order field is invalid",
+    })?;
+    DcsOrderField::new(use_value, field, order_type)
+        .map(DcsOrderItem::Field)
+        .map(DcsChildParseOutcome::Typed)
+        .map_err(|_| DcsSettingsParseError {
+            reason: "order item violates canonical bounds",
+        })
+}
+
+fn parse_simple_order_child(element: &XmlElement) -> Result<String, DcsSettingsParseError> {
+    if element
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Err(DcsSettingsParseError {
+            reason: "order scalar child has attributes",
+        });
+    }
+    simple_element_text(element).ok_or(DcsSettingsParseError {
+        reason: "order scalar child is empty or complex",
+    })
 }
 
 fn parse_dcs_selection(element: &XmlElement, root: &XmlElement) -> Option<DcsSelection> {
@@ -684,21 +1343,25 @@ pub fn rewrite_dcs_settings_children(
     xml: &mut String,
     children: &DcsSettingsTypedChildren,
     serialized_selection: Option<&str>,
+    serialized_order: Option<&str>,
     serialized_tail: &str,
 ) -> Option<()> {
+    let mut rewritten = xml.clone();
     if children.selection.is_some() {
-        remove_first_canonical_dcs_child(xml, "selection")?;
         let selection = serialized_selection?;
-        let root_start = xml.find("<dcsset:settings")?;
-        let root_open_end = xml[root_start..].find('>')?.checked_add(root_start + 1)?;
-        let insertion = if xml[root_open_end..].starts_with("\r\n") {
-            root_open_end + 2
-        } else {
-            root_open_end
-        };
-        xml.insert_str(insertion, selection);
+        replace_direct_canonical_dcs_child(&mut rewritten, "selection", selection)?;
     } else if serialized_selection.is_some() {
         return None;
+    }
+    match children.order() {
+        DcsChildParseOutcome::Typed(_) => {
+            replace_direct_canonical_dcs_child(&mut rewritten, "order", serialized_order?)?;
+        }
+        DcsChildParseOutcome::Absent | DcsChildParseOutcome::Unsupported(_) => {
+            if serialized_order.is_some() {
+                return None;
+            }
+        }
     }
     for (remove, local) in [
         (children.items_view_mode.is_some(), "itemsViewMode"),
@@ -708,60 +1371,107 @@ pub fn rewrite_dcs_settings_children(
         ),
     ] {
         if remove {
-            remove_unique_canonical_dcs_child(xml, local)?;
+            remove_unique_canonical_dcs_child(&mut rewritten, local)?;
         }
     }
     if children.items_view_mode.is_none() && children.items_user_setting_id.is_none() {
-        return serialized_tail.is_empty().then_some(());
+        if serialized_tail.is_empty() {
+            *xml = rewritten;
+            return Some(());
+        }
+        return None;
     }
     let closing = "</dcsset:settings>";
-    let closing_offset = xml.rfind(closing)?;
-    let insertion = xml[..closing_offset]
+    let closing_offset = rewritten.rfind(closing)?;
+    let insertion = rewritten[..closing_offset]
         .trim_end_matches(['\r', '\n', '\t', ' '])
         .len();
-    xml.replace_range(insertion..closing_offset, "");
+    rewritten.replace_range(insertion..closing_offset, "");
     let insertion_text = if serialized_tail.is_empty() {
         "\r\n".to_string()
     } else {
         format!("\r\n{serialized_tail}")
     };
-    xml.insert_str(insertion, &insertion_text);
+    rewritten.insert_str(insertion, &insertion_text);
+    *xml = rewritten;
     Some(())
 }
 
-fn remove_first_canonical_dcs_child(xml: &mut String, local: &str) -> Option<()> {
-    let open = format!("<dcsset:{local}>");
-    let empty = format!("<dcsset:{local}/>");
-    let close = format!("</dcsset:{local}>");
-    let (start, end) = if let Some(start) = xml.find(&open) {
-        let content_start = start.checked_add(open.len())?;
-        let relative_end = xml[content_start..].find(&close)?;
-        let end = content_start
-            .checked_add(relative_end)?
-            .checked_add(close.len())?;
-        (start, end)
-    } else {
-        let start = xml.find(&empty)?;
-        (start, start.checked_add(empty.len())?)
-    };
-    let line_start = xml[..start].rfind('\n').map_or(0, |offset| offset + 1);
-    let start = if xml[line_start..start]
+fn replace_direct_canonical_dcs_child(
+    xml: &mut String,
+    local: &str,
+    replacement: &str,
+) -> Option<()> {
+    let range = direct_canonical_dcs_child_span(xml, local)?;
+    xml.replace_range(range, replacement);
+    Some(())
+}
+
+fn direct_canonical_dcs_child_span(xml: &str, local: &str) -> Option<std::ops::Range<usize>> {
+    let mut reader = QuickXmlReader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buffer = Vec::new();
+    let mut depth = 0usize;
+    let mut active_start = None;
+    loop {
+        let event_start = usize::try_from(reader.buffer_position()).ok()?;
+        match reader.read_event_into(&mut buffer).ok()? {
+            QuickXmlEvent::Start(event) => {
+                depth = depth.checked_add(1)?;
+                let event_local = event.local_name();
+                if depth == 1 && event_local.as_ref() != b"settings" {
+                    return None;
+                }
+                if depth == 2 && event_local.as_ref() == local.as_bytes() {
+                    if active_start.is_some() {
+                        return None;
+                    }
+                    active_start = Some(event_start);
+                }
+            }
+            QuickXmlEvent::Empty(event) => {
+                let event_local = event.local_name();
+                if depth == 1 && event_local.as_ref() == local.as_bytes() {
+                    let end = usize::try_from(reader.buffer_position()).ok()?;
+                    return Some(expand_xml_child_line(xml, event_start..end));
+                }
+            }
+            QuickXmlEvent::End(event) => {
+                let event_local = event.local_name();
+                if depth == 2 && event_local.as_ref() == local.as_bytes() {
+                    let start = active_start.take()?;
+                    let end = usize::try_from(reader.buffer_position()).ok()?;
+                    return Some(expand_xml_child_line(xml, start..end));
+                }
+                depth = depth.checked_sub(1)?;
+            }
+            QuickXmlEvent::Eof => return None,
+            _ => {}
+        }
+        buffer.clear();
+    }
+}
+
+fn expand_xml_child_line(xml: &str, range: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    let line_start = xml[..range.start]
+        .rfind('\n')
+        .map_or(0, |offset| offset + 1);
+    let start = if xml[line_start..range.start]
         .bytes()
         .all(|byte| matches!(byte, b' ' | b'\t'))
     {
         line_start
     } else {
-        start
+        range.start
     };
-    let end = if xml[end..].starts_with("\r\n") {
-        end + 2
-    } else if xml[end..].starts_with('\n') {
-        end + 1
+    let end = if xml[range.end..].starts_with("\r\n") {
+        range.end + 2
+    } else if xml[range.end..].starts_with('\n') {
+        range.end + 1
     } else {
-        end
+        range.end
     };
-    xml.replace_range(start..end, "");
-    Some(())
+    start..end
 }
 
 fn xml_element_uses_namespace(element: &XmlElement, root: &XmlElement, uri: &str) -> bool {
@@ -781,13 +1491,26 @@ fn namespace_for_prefix<'a>(
             (declared_prefix.as_deref() == prefix).then_some(attribute.value())
         })
     }
-    declaration(element, prefix).or_else(|| {
-        if std::ptr::eq(element, root) {
-            None
-        } else {
-            declaration(root, prefix)
+    fn find_on_path<'a>(
+        current: &'a XmlElement,
+        target: &'a XmlElement,
+        prefix: Option<&str>,
+        inherited: Option<&'a str>,
+    ) -> Option<Option<&'a str>> {
+        let active = declaration(current, prefix).or(inherited);
+        if std::ptr::eq(current, target) {
+            return Some(active);
         }
-    })
+        for child in current.children() {
+            if let XmlNode::Element(child) = child
+                && let Some(found) = find_on_path(child, target, prefix, active)
+            {
+                return Some(found);
+            }
+        }
+        None
+    }
+    find_on_path(root, element, prefix, None).flatten()
 }
 
 fn remove_unique_canonical_dcs_child(xml: &mut String, local: &str) -> Option<()> {
@@ -884,6 +1607,10 @@ pub fn preflight_dcs_settings_serialization(
         bundled_dcs_selection_policy()
             .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
     }
+    if settings.order().is_some() {
+        bundled_dcs_order_policy()
+            .map_err(|error| invalid_evidence(envelope, target_profile, &error))?;
+    }
 
     if matches!(envelope, DcsSettingsEnvelope::ListSettings(_)) {
         if settings.selection().is_some() {
@@ -919,11 +1646,11 @@ pub fn emit_dcs_settings_envelope(
         invalid_evidence(envelope, target_profile, &"invalid verified wrapper QName")
     })?;
     let settings = envelope.as_settings();
-    if settings.selection().is_some() {
+    if settings.selection().is_some() || settings.order().is_some() {
         return Err(invalid_evidence(
             envelope,
             target_profile,
-            &"complete envelope selection requires caller-owned namespace prefix and placement",
+            &"complete envelope selection/order requires caller-owned namespace prefix and placement",
         ));
     }
     for (field, value) in [
@@ -1158,6 +1885,37 @@ mod tests {
 
     use super::*;
 
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut length = 0usize;
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            let value = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => 64,
+                _ => panic!("invalid fixture base64 byte {byte}"),
+            };
+            quartet[length] = value;
+            length += 1;
+            if length == 4 {
+                output.push((quartet[0] << 2) | (quartet[1] >> 4));
+                if quartet[2] != 64 {
+                    output.push((quartet[1] << 4) | (quartet[2] >> 2));
+                }
+                if quartet[3] != 64 {
+                    output.push((quartet[2] << 6) | quartet[3]);
+                }
+                length = 0;
+            }
+        }
+        assert_eq!(length, 0, "fixture base64 must contain complete quartets");
+        output
+    }
+
     fn anchor(property: &str) -> CanonicalAnchor {
         CanonicalAnchor::new(
             ObjectPath::new(vec![PathSegment::name("dcs_settings").unwrap()]).unwrap(),
@@ -1187,14 +1945,13 @@ mod tests {
             })
             .into_iter()
             .collect();
-        let settings = ibcmd_core::dcs::DcsSettings::new(
-            None,
-            Some(CanonicalText::new("main-settings").unwrap()),
-            Some(EnumToken::new("QuickAccess").unwrap()),
-            OpaqueFacets::new(opaque).unwrap(),
-            provenance("platform:8.3.24", "settings"),
-        )
-        .unwrap();
+        let settings =
+            ibcmd_core::dcs::DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .items_user_setting_id(Some(CanonicalText::new("main-settings").unwrap()))
+                .items_view_mode(Some(EnumToken::new("QuickAccess").unwrap()))
+                .opaque_extensions(OpaqueFacets::new(opaque).unwrap())
+                .build()
+                .unwrap();
         if list_settings {
             DcsSettingsEnvelope::list_settings(settings)
         } else {
@@ -1203,14 +1960,11 @@ mod tests {
     }
 
     fn empty_envelope(list_settings: bool) -> DcsSettingsEnvelope {
-        let settings = ibcmd_core::dcs::DcsSettings::new(
-            None,
-            None,
-            Some(EnumToken::new("QuickAccess").unwrap()),
-            OpaqueFacets::new(Vec::new()).unwrap(),
-            provenance("platform:8.3.24", "settings"),
-        )
-        .unwrap();
+        let settings =
+            ibcmd_core::dcs::DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .items_view_mode(Some(EnumToken::new("QuickAccess").unwrap()))
+                .build()
+                .unwrap();
         if list_settings {
             DcsSettingsEnvelope::list_settings(settings)
         } else {
@@ -1219,14 +1973,13 @@ mod tests {
     }
 
     fn invalid_text_envelope(list_settings: bool, invalid: char) -> DcsSettingsEnvelope {
-        let settings = ibcmd_core::dcs::DcsSettings::new(
-            None,
-            Some(CanonicalText::new(&format!("bad{invalid}value")).unwrap()),
-            None,
-            OpaqueFacets::new(Vec::new()).unwrap(),
-            provenance("platform:8.3.24", "settings"),
-        )
-        .unwrap();
+        let settings =
+            ibcmd_core::dcs::DcsSettingsBuilder::new(provenance("platform:8.3.24", "settings"))
+                .items_user_setting_id(Some(
+                    CanonicalText::new(&format!("bad{invalid}value")).unwrap(),
+                ))
+                .build()
+                .unwrap();
         if list_settings {
             DcsSettingsEnvelope::list_settings(settings)
         } else {
@@ -1236,7 +1989,7 @@ mod tests {
 
     #[test]
     fn every_dcs_writer_decision_is_explicitly_verified_or_pending() {
-        assert_eq!(DCS_WRITER_EVIDENCE.len(), 13);
+        assert_eq!(DCS_WRITER_EVIDENCE.len(), 15);
         assert!(
             DCS_WRITER_EVIDENCE
                 .iter()
@@ -1259,6 +2012,8 @@ mod tests {
                 DcsWriterDecision::ItemsViewModeOrder,
                 DcsWriterDecision::ItemsViewModeDefaultEmission,
                 DcsWriterDecision::RootSelectionPolicy,
+                DcsWriterDecision::RootOrderPolicy,
+                DcsWriterDecision::FormListSettingsOrderIngress,
                 DcsWriterDecision::OpaqueExtensionPlacement,
                 DcsWriterDecision::FormListSettingsDelegate,
             ]
@@ -1379,6 +2134,7 @@ mod tests {
             &mut canonical,
             &children,
             None,
+            None,
             concat!(
                 "\t<dcsset:itemsViewMode>Compact</dcsset:itemsViewMode>\r\n",
                 "\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n"
@@ -1416,14 +2172,11 @@ mod tests {
         assert_eq!(escaped.field().as_str(), "A<&");
 
         let target = ProfileId::parse("platform:8.3.27").unwrap();
-        let settings = ibcmd_core::dcs::DcsSettings::new(
-            parsed.selection().cloned(),
-            None,
-            None,
-            OpaqueFacets::new(Vec::new()).unwrap(),
-            provenance("platform:8.3.27", "selection"),
-        )
-        .unwrap();
+        let settings =
+            ibcmd_core::dcs::DcsSettingsBuilder::new(provenance("platform:8.3.27", "selection"))
+                .selection(parsed.selection().cloned())
+                .build()
+                .unwrap();
         let envelope = DcsSettingsEnvelope::settings(settings);
         let parts = emit_dcs_settings_children_parts(&envelope, &target, "dcsset", "\t").unwrap();
         assert_eq!(
@@ -1456,6 +2209,341 @@ mod tests {
             error.missing_decisions(),
             [DcsWriterDecision::FormListSettingsSelectionIngress]
         );
+    }
+
+    #[test]
+    fn platform_order_parses_and_emits_one_shared_standalone_form_shape() {
+        let standalone = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<selection><item xsi:type=\"SelectedItemAuto\"/></selection>",
+            "<order><item xsi:type=\"OrderItemField\"><field>Name</field>",
+            "<orderType>Asc</orderType></item></order><item/>",
+            "</Settings>"
+        );
+        let parsed = parse_dcs_settings_children_strict(standalone).unwrap();
+        let DcsChildParseOutcome::Typed(order) = parsed.order() else {
+            panic!("expected typed order: {:?}", parsed.order());
+        };
+        let DcsOrderItem::Field(field) = &order.items()[0] else {
+            panic!("expected field item");
+        };
+        assert_eq!(field.use_value(), None);
+        assert_eq!(field.field().as_str(), "Name");
+        assert_eq!(field.order_type(), DcsOrderType::Asc);
+        assert_eq!(
+            emit_dcs_order_fragment(order, "dcsset", "\t").unwrap(),
+            concat!(
+                "\t<dcsset:order>\r\n",
+                "\t\t<dcsset:item xsi:type=\"dcsset:OrderItemField\">\r\n",
+                "\t\t\t<dcsset:field>Name</dcsset:field>\r\n",
+                "\t\t\t<dcsset:orderType>Asc</dcsset:orderType>\r\n",
+                "\t\t</dcsset:item>\r\n",
+                "\t</dcsset:order>\r\n"
+            )
+        );
+
+        let form_storage = concat!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+            "\t<item xsi:type=\"OrderItemField\">\r\n",
+            "\t\t<use>false</use>\r\n",
+            "\t\t<field>Дата</field>\r\n",
+            "\t\t<orderType>Asc</orderType>\r\n",
+            "\t</item>\r\n",
+            "\t<viewMode>Normal</viewMode>\r\n",
+            "\t<userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</userSettingID>\r\n",
+            "</Order>"
+        );
+        let DcsChildParseOutcome::Typed(order) =
+            parse_dcs_order_storage_document(form_storage.as_bytes()).unwrap()
+        else {
+            panic!("expected typed Form storage order");
+        };
+        let DcsOrderItem::Field(field) = &order.items()[0] else {
+            panic!("expected Form field item");
+        };
+        assert_eq!(field.use_value(), Some(false));
+        assert_eq!(order.view_mode().unwrap().as_str(), "Normal");
+        assert_eq!(
+            emit_dcs_order_storage_document(&order).unwrap(),
+            form_storage.as_bytes()
+        );
+
+        let metadata_only = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<order><viewMode>Normal</viewMode>",
+            "<userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</userSettingID>",
+            "</order></Settings>"
+        );
+        let parsed = parse_dcs_settings_children_strict(metadata_only).unwrap();
+        let DcsChildParseOutcome::Typed(order) = parsed.order() else {
+            panic!("expected typed metadata-only order");
+        };
+        assert!(order.items().is_empty());
+        assert_eq!(order.view_mode().unwrap().as_str(), "Normal");
+
+        let desc = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<order>",
+            "<item xsi:type=\"OrderItemField\"><field>State</field><orderType>Desc</orderType></item>",
+            "<viewMode>Normal</viewMode></order></Settings>"
+        );
+        let parsed = parse_dcs_settings_children_strict(desc).unwrap();
+        let DcsChildParseOutcome::Typed(order) = parsed.order() else {
+            panic!("expected typed Desc order");
+        };
+        assert_eq!(order.items().len(), 1);
+        assert!(order.items().iter().all(|item| matches!(
+            item,
+            DcsOrderItem::Field(field) if field.order_type() == DcsOrderType::Desc
+        )));
+
+        let multiple = desc.replace(
+            "<viewMode>",
+            "<item xsi:type=\"OrderItemField\"><field>Version</field><orderType>Desc</orderType></item><viewMode>",
+        );
+        let parsed = parse_dcs_settings_children_strict(&multiple).unwrap();
+        assert!(matches!(
+            parsed.order(),
+            DcsChildParseOutcome::Unsupported(reason)
+                if reason.contains("cardinality")
+        ));
+    }
+
+    #[test]
+    fn committed_form_order_fragments_drive_the_shared_parser_and_writer() {
+        let storage = decode_base64_fixture(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/native-evidence/8.3.27.2214/dcs-order/form-storage-order.xml.b64"
+        )));
+        let DcsChildParseOutcome::Typed(storage_order) =
+            parse_dcs_order_storage_document(&storage).unwrap()
+        else {
+            panic!("committed storage Order must be typed");
+        };
+        assert_eq!(
+            emit_dcs_order_storage_document(&storage_order).unwrap(),
+            storage,
+            "storage bytes are the platform-authenticated oracle"
+        );
+
+        for encoded in [
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/native-evidence/8.3.27.2214/dcs-order/form-embedded-order.xml.b64"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/native-evidence/8.3.27.2214/dcs-order/form-metadata-only-order.xml.b64"
+            )),
+        ] {
+            let bytes = decode_base64_fixture(encoded);
+            let fragment = String::from_utf8(bytes).unwrap();
+            let wrapped = format!(
+                "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\">{fragment}</Settings>"
+            );
+            let parsed = parse_dcs_settings_children_strict(&wrapped).unwrap();
+            let DcsChildParseOutcome::Typed(order) = parsed.order() else {
+                panic!(
+                    "committed embedded Order must be typed: {:?}",
+                    parsed.order()
+                );
+            };
+            let canonical_fixture = format!("{}\r\n", fragment.replace("\r\n\t\t\t\t\t", "\r\n"));
+            assert_eq!(
+                emit_dcs_order_fragment(order, "dcsset", "").unwrap(),
+                canonical_fixture
+            );
+        }
+    }
+
+    #[test]
+    fn form_list_settings_ingress_delegates_direct_order_to_canonical_parser() {
+        let form = concat!(
+            "<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" ",
+            "xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<Attributes><Attribute><Settings><ListSettings>",
+            "<dcsset:order>",
+            "<dcsset:item xsi:type=\"dcsset:OrderItemField\">",
+            "<dcsset:use>false</dcsset:use><dcsset:field>Date</dcsset:field>",
+            "<dcsset:orderType>Desc</dcsset:orderType></dcsset:item>",
+            "<dcsset:viewMode>Normal</dcsset:viewMode>",
+            "</dcsset:order></ListSettings></Settings></Attribute></Attributes></Form>"
+        );
+        let parsed = parse_form_list_settings_orders(form.as_bytes()).unwrap();
+        let [DcsChildParseOutcome::Typed(order)] = parsed.as_slice() else {
+            panic!("expected one typed Form order: {parsed:?}");
+        };
+        assert!(matches!(
+            order.items(),
+            [DcsOrderItem::Field(field)]
+                if field.use_value() == Some(false)
+                    && field.order_type() == DcsOrderType::Desc
+        ));
+
+        let duplicate = form.replace(
+            "</dcsset:order>",
+            "</dcsset:order><dcsset:order><dcsset:viewMode>Normal</dcsset:viewMode></dcsset:order>",
+        );
+        assert_eq!(
+            parse_form_list_settings_orders(duplicate.as_bytes())
+                .unwrap_err()
+                .reason(),
+            "duplicate direct Form ListSettings order child"
+        );
+    }
+
+    #[test]
+    fn form_order_resolves_intermediate_namespace_declarations_and_rejects_shadowing() {
+        let local_namespace = concat!(
+            "<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\">",
+            "<Settings xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><ListSettings>",
+            "<dcsset:order><dcsset:item xsi:type=\"dcsset:OrderItemField\">",
+            "<dcsset:field>Date</dcsset:field><dcsset:orderType>Asc</dcsset:orderType>",
+            "</dcsset:item></dcsset:order></ListSettings></Settings></Form>"
+        );
+        assert!(matches!(
+            parse_form_list_settings_orders(local_namespace.as_bytes())
+                .unwrap()
+                .as_slice(),
+            [DcsChildParseOutcome::Typed(_)]
+        ));
+
+        let shadowed = local_namespace.replace(
+            "<ListSettings>",
+            "<ListSettings xmlns:dcsset=\"urn:shadowed\">",
+        );
+        assert_eq!(
+            parse_form_list_settings_orders(shadowed.as_bytes())
+                .unwrap_err()
+                .reason(),
+            "order child uses the wrong namespace"
+        );
+    }
+
+    #[test]
+    fn standalone_order_outside_the_evidenced_root_slot_remains_source_owned() {
+        let after_structure = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<item/><order><item xsi:type=\"OrderItemField\"><field>Name</field>",
+            "<orderType>Asc</orderType></item></order></Settings>"
+        );
+        let parsed = parse_dcs_settings_children_strict(after_structure).unwrap();
+        assert!(matches!(
+            parsed.order(),
+            DcsChildParseOutcome::Unsupported(reason) if reason.contains("placement")
+        ));
+
+        let before_selection = after_structure.replace("<item/>", "").replace(
+            "</Settings>",
+            "<selection><item xsi:type=\"SelectedItemAuto\"/></selection></Settings>",
+        );
+        let parsed = parse_dcs_settings_children_strict(&before_selection).unwrap();
+        assert!(matches!(
+            parsed.order(),
+            DcsChildParseOutcome::Unsupported(reason) if reason.contains("placement")
+        ));
+    }
+
+    #[test]
+    fn unsupported_order_is_not_collapsed_to_absence_or_partially_rewritten() {
+        let missing_direction = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<order><item xsi:type=\"OrderItemField\"><field>Name</field>",
+            "</item></order></Settings>"
+        );
+        assert_eq!(
+            parse_dcs_settings_children_strict(missing_direction)
+                .unwrap_err()
+                .reason(),
+            "order field and explicit orderType are required"
+        );
+
+        let duplicate = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">",
+            "<order/><order/></Settings>"
+        );
+        assert_eq!(
+            parse_dcs_settings_children_strict(duplicate)
+                .unwrap_err()
+                .reason(),
+            "duplicate direct order child"
+        );
+    }
+
+    #[test]
+    fn structural_rewrite_replaces_only_direct_root_order() {
+        let source = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<order><item xsi:type=\"OrderItemField\"><field>Name</field>",
+            "<orderType>Asc</orderType></item></order><item><order/>",
+            "</item></Settings>"
+        );
+        let children = parse_dcs_settings_children_strict(source).unwrap();
+        let DcsChildParseOutcome::Typed(order) = children.order() else {
+            panic!("expected typed order");
+        };
+        let replacement = emit_dcs_order_fragment(order, "dcsset", "\t").unwrap();
+        let mut canonical = concat!(
+            "<dcsset:settings>\r\n",
+            "\t<dcsset:order>\r\n\t\t<dcsset:item/>\r\n\t</dcsset:order>\r\n",
+            "\t<dcsset:item>\r\n\t\t<dcsset:order/>\r\n\t</dcsset:item>\r\n",
+            "</dcsset:settings>"
+        )
+        .to_owned();
+        rewrite_dcs_settings_children(&mut canonical, &children, None, Some(&replacement), "")
+            .unwrap();
+        assert!(canonical.contains("<dcsset:field>Name</dcsset:field>"));
+        assert_eq!(canonical.matches("<dcsset:order>").count(), 1);
+        assert_eq!(canonical.matches("<dcsset:order/>").count(), 1);
+        assert!(canonical.contains("\t\t<dcsset:order/>"));
+    }
+
+    #[test]
+    fn structural_rewrite_is_atomic_when_a_late_tail_step_fails() {
+        let source = concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "<selection><item xsi:type=\"SelectedItemAuto\"/></selection>",
+            "<order><item xsi:type=\"OrderItemField\"><field>Name</field>",
+            "<orderType>Asc</orderType></item></order>",
+            "<itemsViewMode>Normal</itemsViewMode></Settings>"
+        );
+        let children = parse_dcs_settings_children_strict(source).unwrap();
+        let selection = emit_dcs_selection(children.selection().unwrap(), "dcsset", "\t").unwrap();
+        let DcsChildParseOutcome::Typed(order) = children.order() else {
+            panic!("expected typed order");
+        };
+        let order = emit_dcs_order_fragment(order, "dcsset", "\t").unwrap();
+        let mut canonical = concat!(
+            "<dcsset:settings>\r\n",
+            "\t<dcsset:selection/>\r\n",
+            "\t<dcsset:order/>\r\n",
+            "</dcsset:settings>"
+        )
+        .to_owned();
+        let original = canonical.clone();
+        assert!(
+            rewrite_dcs_settings_children(
+                &mut canonical,
+                &children,
+                Some(&selection),
+                Some(&order),
+                "\t<dcsset:itemsViewMode>Normal</dcsset:itemsViewMode>\r\n",
+            )
+            .is_none()
+        );
+        assert_eq!(canonical, original);
     }
 
     #[test]

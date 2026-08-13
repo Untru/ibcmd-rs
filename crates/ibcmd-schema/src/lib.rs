@@ -2626,6 +2626,9 @@ pub const BUNDLED_DCS_WRITER_EVIDENCE_JSON: &str =
 /// Embedded platform-authenticated policy for the bounded DCS root selection.
 pub const BUNDLED_DCS_SELECTION_EVIDENCE_JSON: &str =
     include_str!("../data/platform-8.3.27-xml-2.20-dcs-selection-evidence.json");
+/// Embedded platform-authenticated policy for the shared DCS order cohort.
+pub const BUNDLED_DCS_ORDER_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-order-evidence.json");
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3287,6 +3290,86 @@ pub struct DcsSelectionPolicy {
     auto_type_qname: String,
 }
 
+/// Exact order QName, item sequence, and context policy authenticated by
+/// standalone DCS and Form round-trips on the common 8.3.27/XML 2.20 contract.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsOrderPolicy {
+    namespace_uri: String,
+    order_qname: String,
+    storage_order_qname: String,
+    item_qname: String,
+    use_qname: String,
+    field_qname: String,
+    order_type_qname: String,
+    view_mode_qname: String,
+    user_setting_id_qname: String,
+    field_type_qname: String,
+    supported_order_types: Vec<String>,
+    max_emitted_items: usize,
+    supported_view_modes: Vec<String>,
+    metadata_only_user_setting_id: String,
+}
+
+impl DcsOrderPolicy {
+    pub fn namespace_uri(&self) -> &str {
+        &self.namespace_uri
+    }
+    pub fn order_qname(&self) -> &str {
+        &self.order_qname
+    }
+    pub fn storage_order_qname(&self) -> &str {
+        &self.storage_order_qname
+    }
+    pub fn item_qname(&self) -> &str {
+        &self.item_qname
+    }
+    pub fn use_qname(&self) -> &str {
+        &self.use_qname
+    }
+    pub fn field_qname(&self) -> &str {
+        &self.field_qname
+    }
+    pub fn order_type_qname(&self) -> &str {
+        &self.order_type_qname
+    }
+    pub fn view_mode_qname(&self) -> &str {
+        &self.view_mode_qname
+    }
+    pub fn user_setting_id_qname(&self) -> &str {
+        &self.user_setting_id_qname
+    }
+    pub fn field_type_qname(&self) -> &str {
+        &self.field_type_qname
+    }
+    pub const fn follows_selection_and_precedes_structure_items(&self) -> bool {
+        true
+    }
+    pub const fn propertyless_empty_order_is_unsupported(&self) -> bool {
+        true
+    }
+    pub const fn metadata_only_order_requires_view_mode_and_user_setting_id(&self) -> bool {
+        true
+    }
+    pub const fn root_auto_is_unsupported(&self) -> bool {
+        true
+    }
+    pub fn supported_order_types(&self) -> &[String] {
+        &self.supported_order_types
+    }
+    pub const fn supported_use_values(&self) -> &'static [Option<bool>] {
+        &[None, Some(false)]
+    }
+    pub const fn max_emitted_items(&self) -> usize {
+        self.max_emitted_items
+    }
+    pub fn supported_view_modes(&self) -> &[String] {
+        &self.supported_view_modes
+    }
+    pub fn metadata_only_user_setting_id(&self) -> &str {
+        &self.metadata_only_user_setting_id
+    }
+}
+
 impl DcsSelectionPolicy {
     pub fn namespace_uri(&self) -> &str {
         &self.namespace_uri
@@ -3350,6 +3433,108 @@ struct DcsSelectionEvidencePolicy {
     auto_type_qname: String,
     settings_placement: String,
     empty_selection_emission: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsOrderEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    source: DcsOrderContractSource,
+    sources: DcsOrderEvidenceSources,
+    policy: DcsOrderEvidencePolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsOrderContractSource {
+    product: String,
+    release: String,
+    derivation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsOrderEvidenceSources {
+    standalone: DcsOrderEvidenceSource,
+    form: DcsFormOrderEvidenceSource,
+    form_metadata_only: DcsMetadataOnlyOrderEvidenceSource,
+    unica_desc: DcsUnicaOrderEvidenceSource,
+    source_version: String,
+    platform_line: String,
+    ibcmd_sha256: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsOrderEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    raw_body_sha256: String,
+    native_xml_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsFormOrderEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    raw_body_sha256: String,
+    native_xml_sha256: String,
+    storage_order_sha256: String,
+    embedded_order_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsMetadataOnlyOrderEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fragment_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsUnicaOrderEvidenceSource {
+    product: String,
+    release: String,
+    derivation: String,
+    repository_revision: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsOrderEvidencePolicy {
+    namespace: String,
+    order_qname: String,
+    storage_order_qname: String,
+    item_qname: String,
+    use_qname: String,
+    field_qname: String,
+    order_type_qname: String,
+    view_mode_qname: String,
+    user_setting_id_qname: String,
+    field_type_qname: String,
+    settings_placement: String,
+    item_child_order: Vec<String>,
+    order_child_order: Vec<String>,
+    supported_order_types: Vec<String>,
+    supported_use_values: Vec<String>,
+    max_emitted_items: usize,
+    supported_view_modes: Vec<String>,
+    metadata_only_user_setting_id: String,
+    propertyless_empty_order_emission: String,
+    metadata_only_order_emission: String,
+    root_auto_emission: String,
 }
 
 impl DcsSelectionEvidenceCorpus {
@@ -3456,6 +3641,244 @@ impl DcsSelectionEvidenceCorpus {
             field_qname: self.policy.field_qname,
             field_type_qname: self.policy.field_type_qname,
             auto_type_qname: self.policy.auto_type_qname,
+        }
+    }
+}
+
+impl DcsOrderEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 32 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "order evidence exceeds 32768 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        const NS: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+        let standalone = &self.sources.standalone;
+        let form = &self.sources.form;
+        let metadata_only = &self.sources.form_metadata_only;
+        let unica_desc = &self.sources.unica_desc;
+        let expected = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-settings-order-v1",
+            ),
+            (
+                "contract source product",
+                self.source.product == "1C:Enterprise Platform",
+            ),
+            (
+                "contract source release",
+                self.source.release == "8.3.27 / XML 2.20",
+            ),
+            (
+                "contract source derivation",
+                self.source.derivation
+                    == "component contract synthesized from exact standalone and Form experiments; patch builds are retained as provenance and do not select separate XML dialects without a structural counterexample",
+            ),
+            ("platform line", self.sources.platform_line == "8.3.27"),
+            ("source version", self.sources.source_version == "2.20"),
+            (
+                "standalone product",
+                standalone.product == "1C:Enterprise Platform",
+            ),
+            ("form product", form.product == "1C:Enterprise Platform"),
+            (
+                "metadata-only product",
+                metadata_only.product == "1C:Enterprise Platform",
+            ),
+            (
+                "Unica Desc product",
+                unica_desc.product == "1C:Enterprise Platform via the public Unica corpus",
+            ),
+            (
+                "standalone release",
+                standalone.release.starts_with("8.3.27."),
+            ),
+            ("form release", form.release == standalone.release),
+            (
+                "metadata-only release",
+                metadata_only.release == standalone.release,
+            ),
+            ("Unica Desc release", unica_desc.release == "8.3.27.2074"),
+            (
+                "standalone derivation",
+                standalone.derivation
+                    == "two fresh isolated file-infobase round-trips with pinned ibcmd; immutable raw body and selected native XML retained; Unica supplied the initial seed only",
+            ),
+            (
+                "form derivation",
+                form.derivation
+                    == "retained platform-saved CF followed by one fresh isolated file-infobase load/apply/save/export round-trip; exact raw Form row and native XML were byte-stable",
+            ),
+            (
+                "metadata-only derivation",
+                metadata_only.derivation
+                    == "byte-identical lexical fragment observed in retained and fresh native Form exports; private owner locator is intentionally not published and this source authenticates only the exact metadata-only fragment",
+            ),
+            (
+                "Unica Desc derivation",
+                unica_desc.derivation
+                    == "public Unica rich dcs.compile checkpoint with explicit Desc root and group order accepted through two semantic platform round-trips; prefix and whitespace bytes were not used as evidence",
+            ),
+            (
+                "Unica Desc revision",
+                unica_desc.repository_revision == "a527d40962d047c6922c903b37510b30f697da42",
+            ),
+            (
+                "standalone fixture",
+                standalone.fixture_id == "8.3.27.2214-xml-2.20-dcs-core",
+            ),
+            (
+                "form fixture",
+                form.fixture_id == "8.3.27.2214-xml-2.20-dcs-order",
+            ),
+            ("standalone rounds", standalone.round_trips >= 2),
+            ("form rounds", form.round_trips >= 2),
+            ("metadata-only rounds", metadata_only.round_trips >= 2),
+            ("Unica Desc rounds", unica_desc.round_trips >= 2),
+            ("namespace", self.policy.namespace == NS),
+            (
+                "order QName",
+                self.policy.order_qname == format!("{{{NS}}}order"),
+            ),
+            (
+                "storage Order QName",
+                self.policy.storage_order_qname == format!("{{{NS}}}Order"),
+            ),
+            (
+                "item QName",
+                self.policy.item_qname == format!("{{{NS}}}item"),
+            ),
+            ("use QName", self.policy.use_qname == format!("{{{NS}}}use")),
+            (
+                "field QName",
+                self.policy.field_qname == format!("{{{NS}}}field"),
+            ),
+            (
+                "order type QName",
+                self.policy.order_type_qname == format!("{{{NS}}}orderType"),
+            ),
+            (
+                "view mode QName",
+                self.policy.view_mode_qname == format!("{{{NS}}}viewMode"),
+            ),
+            (
+                "user setting ID QName",
+                self.policy.user_setting_id_qname == format!("{{{NS}}}userSettingID"),
+            ),
+            (
+                "field type QName",
+                self.policy.field_type_qname == format!("{{{NS}}}OrderItemField"),
+            ),
+            (
+                "settings placement",
+                self.policy.settings_placement == "after-selection-before-structure-items",
+            ),
+            (
+                "item child order",
+                self.policy.item_child_order == ["use?", "field", "orderType"],
+            ),
+            (
+                "order child order",
+                self.policy.order_child_order == ["items", "viewMode?", "userSettingID?"],
+            ),
+            (
+                "supported order types",
+                self.policy.supported_order_types == ["Asc", "Desc"],
+            ),
+            (
+                "supported use values",
+                self.policy.supported_use_values == ["omitted", "false"],
+            ),
+            ("maximum emitted items", self.policy.max_emitted_items == 1),
+            (
+                "supported view modes",
+                self.policy.supported_view_modes == ["Normal"],
+            ),
+            (
+                "metadata-only user setting ID",
+                self.policy.metadata_only_user_setting_id == "88619765-ccb3-46c6-ac52-38e9c992ebd4",
+            ),
+            (
+                "propertyless empty order emission",
+                self.policy.propertyless_empty_order_emission == "unsupported",
+            ),
+            (
+                "metadata-only order emission",
+                self.policy.metadata_only_order_emission == "requires-viewMode-and-userSettingID",
+            ),
+            (
+                "root Auto emission",
+                self.policy.root_auto_emission == "unsupported",
+            ),
+        ];
+        if let Some((field, _)) = expected.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS order {field} drifted"
+            )));
+        }
+        for (field, digest) in [
+            ("ibcmd SHA-256", self.sources.ibcmd_sha256.as_str()),
+            (
+                "standalone raw body SHA-256",
+                standalone.raw_body_sha256.as_str(),
+            ),
+            (
+                "standalone native XML SHA-256",
+                standalone.native_xml_sha256.as_str(),
+            ),
+            ("Form raw body SHA-256", form.raw_body_sha256.as_str()),
+            ("Form native XML SHA-256", form.native_xml_sha256.as_str()),
+            (
+                "Form storage Order SHA-256",
+                form.storage_order_sha256.as_str(),
+            ),
+            (
+                "Form embedded order SHA-256",
+                form.embedded_order_sha256.as_str(),
+            ),
+            (
+                "Form metadata-only Order SHA-256",
+                metadata_only.fragment_sha256.as_str(),
+            ),
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                    "DCS order {field} is invalid"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsOrderPolicy {
+        DcsOrderPolicy {
+            namespace_uri: self.policy.namespace,
+            order_qname: self.policy.order_qname,
+            storage_order_qname: self.policy.storage_order_qname,
+            item_qname: self.policy.item_qname,
+            use_qname: self.policy.use_qname,
+            field_qname: self.policy.field_qname,
+            order_type_qname: self.policy.order_type_qname,
+            view_mode_qname: self.policy.view_mode_qname,
+            user_setting_id_qname: self.policy.user_setting_id_qname,
+            field_type_qname: self.policy.field_type_qname,
+            supported_order_types: self.policy.supported_order_types,
+            max_emitted_items: self.policy.max_emitted_items,
+            supported_view_modes: self.policy.supported_view_modes,
+            metadata_only_user_setting_id: self.policy.metadata_only_user_setting_id,
         }
     }
 }
@@ -6471,6 +6894,17 @@ pub fn bundled_dcs_selection_policy() -> Result<DcsSelectionPolicy, SchemaError>
         .clone()
 }
 
+/// Returns the immutable platform-authenticated standalone/Form order policy.
+pub fn bundled_dcs_order_policy() -> Result<DcsOrderPolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsOrderPolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsOrderEvidenceCorpus::parse(BUNDLED_DCS_ORDER_EVIDENCE_JSON)
+                .map(DcsOrderEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 pub fn bundled_dcs_list_settings_tail_policy() -> Result<DcsListSettingsTailPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsListSettingsTailPolicy, SchemaError>> = OnceLock::new();
     POLICY
@@ -8272,6 +8706,44 @@ mod tests {
             DcsSelectionEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("field type QName drifted")
+        ));
+    }
+
+    #[test]
+    fn bundled_platform_dcs_order_policy_binds_both_contexts_and_fails_on_drift() {
+        let policy = bundled_dcs_order_policy().unwrap();
+        assert_eq!(
+            policy.order_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}order"
+        );
+        assert_eq!(
+            policy.storage_order_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}Order"
+        );
+        assert_eq!(
+            policy.field_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}OrderItemField"
+        );
+        assert_eq!(policy.supported_order_types(), &["Asc", "Desc"]);
+        assert_eq!(policy.supported_use_values(), &[None, Some(false)]);
+        assert_eq!(policy.max_emitted_items(), 1);
+        assert_eq!(policy.supported_view_modes(), &["Normal"]);
+        assert_eq!(
+            policy.metadata_only_user_setting_id(),
+            "88619765-ccb3-46c6-ac52-38e9c992ebd4"
+        );
+        assert!(policy.follows_selection_and_precedes_structure_items());
+        assert!(policy.propertyless_empty_order_is_unsupported());
+        assert!(policy.metadata_only_order_requires_view_mode_and_user_setting_id());
+        assert!(policy.root_auto_is_unsupported());
+
+        let mut drift =
+            serde_json::from_str::<serde_json::Value>(BUNDLED_DCS_ORDER_EVIDENCE_JSON).unwrap();
+        drift["policy"]["itemChildOrder"] = serde_json::json!(["field", "use?", "orderType"]);
+        assert!(matches!(
+            DcsOrderEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("item child order drifted")
         ));
     }
 

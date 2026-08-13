@@ -44,6 +44,7 @@ use crate::form_schema::{
     form_text_document_context_menu_child_is_valid, form_tooltip_representation_schema,
     form_tooltip_representation_xml_order,
 };
+use ibcmd_core::dcs::DcsOrder;
 #[cfg(test)]
 use ibcmd_schema::parse_form_choice_list_item as parse_schema_form_choice_list_item;
 #[cfg(test)]
@@ -66,7 +67,9 @@ use ibcmd_schema::{
     parse_generated_metadata_owner, parse_metadata_data_path,
 };
 use ibcmd_xml::{
-    FormChoiceParametersEmitError, emit_form_choice_parameter_links, emit_form_choice_parameters,
+    DcsChildParseOutcome, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
+    emit_form_choice_parameters, parse_dcs_order_storage_document,
+    platform_default_form_list_settings_order,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -803,18 +806,23 @@ pub(super) struct FormListSettingsStandardSection {
     pub(super) raw_xml: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub(super) struct FormListSettingsOrder {
-    pub(super) items: Vec<FormListSettingsOrderItem>,
-    pub(super) view_mode: Option<String>,
-    pub(super) user_setting_id: Option<String>,
-    pub(super) raw_xml: Option<String>,
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormListSettingsOrder {
+    Typed(DcsOrder),
+    OpaqueStorage {
+        bytes: Vec<u8>,
+        reason: &'static str,
+    },
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub(super) struct FormListSettingsOrderItem {
-    pub(super) field: String,
-    pub(super) order_type: Option<String>,
+impl FormListSettingsOrder {
+    #[cfg(test)]
+    pub(super) const fn typed(&self) -> Option<&DcsOrder> {
+        match self {
+            Self::Typed(order) => Some(order),
+            Self::OpaqueStorage { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1239,6 +1247,9 @@ pub(super) enum FormSchemaWriteError {
     },
     UnsupportedTypedChoiceParameterAvailableTypes,
     ChoiceParametersEmit(FormChoiceParametersEmitError),
+    OpaqueDcsOrder {
+        reason: &'static str,
+    },
 }
 
 impl From<WriterRuleLookupError> for FormSchemaWriteError {
@@ -1416,11 +1427,19 @@ fn preflight_form_writer_paths_with_dcs_profiles(
         .iter()
         .filter_map(|attribute| attribute.settings.as_ref())
     {
+        let canonical_order = match settings.list_settings.order.as_ref() {
+            Some(FormListSettingsOrder::Typed(order)) => Some(order),
+            Some(FormListSettingsOrder::OpaqueStorage { reason, .. }) => {
+                return Err(FormSchemaWriteError::OpaqueDcsOrder { reason });
+            }
+            None => None,
+        };
         // This is the only fallible DynamicList/ListSettings formatter path. It returns its
         // complete fragment atomically and has no output or filesystem side effects.
         drop(emit_canonical_dcs_settings_children(
             CanonicalDcsSettingsContext::FormListSettings,
             None,
+            canonical_order,
             settings.list_settings.items_view_mode.as_deref(),
             settings.list_settings.items_user_setting_id.as_deref(),
             source_profile,
@@ -2955,12 +2974,9 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
             user_setting_id: Some("dfcece9d-5077-440b-b6b3-45a5cb4538eb".to_string()),
             raw_xml: None,
         });
-        list_settings.order = Some(FormListSettingsOrder {
-            items: Vec::new(),
-            view_mode: Some("Normal".to_string()),
-            user_setting_id: Some("88619765-ccb3-46c6-ac52-38e9c992ebd4".to_string()),
-            raw_xml: None,
-        });
+        list_settings.order = Some(FormListSettingsOrder::Typed(
+            default_form_list_settings_order(),
+        ));
         list_settings.conditional_appearance = Some(FormListSettingsStandardSection {
             view_mode: Some("Normal".to_string()),
             user_setting_id: Some("b75fecce-942b-4aed-abc9-e6a02e460fb3".to_string()),
@@ -2980,12 +2996,9 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
             });
         }
         if list_settings.order.is_none() {
-            list_settings.order = Some(FormListSettingsOrder {
-                items: Vec::new(),
-                view_mode: Some("Normal".to_string()),
-                user_setting_id: Some("88619765-ccb3-46c6-ac52-38e9c992ebd4".to_string()),
-                raw_xml: None,
-            });
+            list_settings.order = Some(FormListSettingsOrder::Typed(
+                default_form_list_settings_order(),
+            ));
         }
         if list_settings.conditional_appearance.is_none() {
             list_settings.conditional_appearance = Some(FormListSettingsStandardSection {
@@ -3002,6 +3015,11 @@ pub(super) fn apply_implicit_form_dynamic_list_settings(settings: &mut FormDynam
             list_settings.items_view_mode = Some("Normal".to_string());
         }
     }
+}
+
+fn default_form_list_settings_order() -> DcsOrder {
+    platform_default_form_list_settings_order()
+        .expect("bundled platform-authenticated metadata-only Form order is valid")
 }
 
 pub(super) fn parse_form_attribute_save_fields(
@@ -3949,15 +3967,24 @@ pub(super) fn path_ends_with(path: &[String], suffix: &[&str]) -> bool {
 
 pub(super) fn parse_form_list_settings_order(
     field: &str,
-    object_refs: &BTreeMap<String, String>,
+    _object_refs: &BTreeMap<String, String>,
 ) -> Option<FormListSettingsOrder> {
     let payload = extract_base64_payload(field)?;
-    let xml = decode_base64_mime(payload)?;
-    let xml = String::from_utf8(xml).ok()?;
-    let mut order = parse_form_list_settings_order_xml(&xml).unwrap_or_default();
-    order.raw_xml =
-        normalize_form_list_settings_section_xml(&xml, "Order", "order", object_refs, false);
-    Some(order)
+    let bytes = decode_base64_mime(payload)?;
+    match parse_dcs_order_storage_document(&bytes) {
+        Ok(DcsChildParseOutcome::Typed(canonical)) => Some(FormListSettingsOrder::Typed(canonical)),
+        Ok(DcsChildParseOutcome::Unsupported(reason)) => {
+            Some(FormListSettingsOrder::OpaqueStorage { bytes, reason })
+        }
+        Ok(DcsChildParseOutcome::Absent) => Some(FormListSettingsOrder::OpaqueStorage {
+            bytes,
+            reason: "present storage Order parsed as absent",
+        }),
+        Err(error) => Some(FormListSettingsOrder::OpaqueStorage {
+            bytes,
+            reason: error.reason(),
+        }),
+    }
 }
 
 pub(super) fn parse_form_list_settings_standard_section(
@@ -4490,101 +4517,6 @@ pub(super) fn parse_form_list_settings_standard_section_xml(
 
     (section.view_mode.is_some() || section.user_setting_id.is_some() || section.raw_xml.is_some())
         .then_some(section)
-}
-
-pub(super) fn parse_form_list_settings_order_xml(xml: &str) -> Option<FormListSettingsOrder> {
-    let mut reader = Reader::from_str(xml.trim_start_matches('\u{feff}'));
-    reader.config_mut().trim_text(true);
-    let mut buffer = Vec::new();
-    let mut path = Vec::<String>::new();
-    let mut text = String::new();
-    let mut order = FormListSettingsOrder::default();
-    let mut current_item = None::<FormListSettingsOrderItem>;
-
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if matches!(
-                    local.as_str(),
-                    "field" | "orderType" | "viewMode" | "userSettingID"
-                ) {
-                    text.clear();
-                }
-                if local == "item" && path.last().map(String::as_str) == Some("Order") {
-                    current_item = Some(FormListSettingsOrderItem {
-                        field: String::new(),
-                        order_type: None,
-                    });
-                }
-                path.push(local);
-            }
-            Ok(Event::Text(value)) => {
-                if path_ends_with(&path, &["Order", "item", "field"])
-                    || path_ends_with(&path, &["Order", "item", "orderType"])
-                    || path_ends_with(&path, &["Order", "viewMode"])
-                    || path_ends_with(&path, &["Order", "userSettingID"])
-                {
-                    text.push_str(value.xml_content().ok()?.as_ref());
-                }
-            }
-            Ok(Event::CData(value)) => {
-                if path_ends_with(&path, &["Order", "item", "field"])
-                    || path_ends_with(&path, &["Order", "item", "orderType"])
-                    || path_ends_with(&path, &["Order", "viewMode"])
-                    || path_ends_with(&path, &["Order", "userSettingID"])
-                {
-                    text.push_str(value.xml_content().ok()?.as_ref());
-                }
-            }
-            Ok(Event::End(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                match local.as_str() {
-                    "field" if path_ends_with(&path, &["Order", "item", "field"]) => {
-                        if let Some(item) = current_item.as_mut() {
-                            item.field = text.trim().to_string();
-                        }
-                    }
-                    "orderType" if path_ends_with(&path, &["Order", "item", "orderType"]) => {
-                        if let Some(item) = current_item.as_mut() {
-                            item.order_type = Some(text.trim().to_string());
-                        }
-                    }
-                    "item" if path_ends_with(&path, &["Order", "item"]) => {
-                        if let Some(item) = current_item.take()
-                            && !item.field.is_empty()
-                        {
-                            order.items.push(item);
-                        }
-                    }
-                    "viewMode" if path_ends_with(&path, &["Order", "viewMode"]) => {
-                        order.view_mode = Some(text.trim().to_string());
-                    }
-                    "userSettingID" if path_ends_with(&path, &["Order", "userSettingID"]) => {
-                        order.user_setting_id = Some(text.trim().to_string());
-                    }
-                    _ => {}
-                }
-                let _ = path.pop();
-                if matches!(
-                    local.as_str(),
-                    "field" | "orderType" | "viewMode" | "userSettingID"
-                ) {
-                    text.clear();
-                }
-            }
-            Ok(Event::Eof) => break,
-            Ok(_) => {}
-            Err(_) => return None,
-        }
-        buffer.clear();
-    }
-
-    (!order.items.is_empty()
-        || order.view_mode.is_some()
-        || order.user_setting_id.is_some()
-        || order.raw_xml.is_some())
-    .then_some(order)
 }
 
 pub(super) fn parse_form_main_table_ref(
@@ -17795,8 +17727,28 @@ fn format_form_list_settings_xml_with_dcs_profiles(
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Result<String, FormSchemaWriteError> {
+    let canonical_order = match settings.order.as_ref() {
+        Some(FormListSettingsOrder::Typed(order)) => Some(order),
+        Some(FormListSettingsOrder::OpaqueStorage { reason, .. }) => {
+            return Err(FormSchemaWriteError::OpaqueDcsOrder { reason });
+        }
+        None => None,
+    };
+    let canonical_order_fragment = emit_canonical_dcs_settings_children(
+        CanonicalDcsSettingsContext::FormListSettings,
+        None,
+        canonical_order,
+        None,
+        None,
+        source_profile,
+        target_profile,
+        "dcsset",
+        "\t\t\t\t\t",
+        "mssql:form/ListSettings/order",
+    )?;
     let tail_xml = emit_canonical_dcs_settings_children(
         CanonicalDcsSettingsContext::FormListSettings,
+        None,
         None,
         settings.items_view_mode.as_deref(),
         settings.items_user_setting_id.as_deref(),
@@ -17825,41 +17777,8 @@ fn format_form_list_settings_xml_with_dcs_profiles(
             ));
         }
     }
-    if form_list_settings_order_has_output(settings.order.as_ref())
-        && let Some(order) = &settings.order
-    {
-        if let Some(raw_xml) = &order.raw_xml {
-            xml.push_str(&indent_xml_fragment(raw_xml, "\t\t\t\t\t"));
-        } else {
-            xml.push_str("\t\t\t\t\t<dcsset:order>\r\n");
-            for item in &order.items {
-                xml.push_str("\t\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:OrderItemField\">\r\n");
-                xml.push_str(&format!(
-                    "\t\t\t\t\t\t\t<dcsset:field>{}</dcsset:field>\r\n",
-                    escape_xml_text(&item.field)
-                ));
-                if let Some(order_type) = &item.order_type {
-                    xml.push_str(&format!(
-                        "\t\t\t\t\t\t\t<dcsset:orderType>{}</dcsset:orderType>\r\n",
-                        escape_xml_text(order_type)
-                    ));
-                }
-                xml.push_str("\t\t\t\t\t\t</dcsset:item>\r\n");
-            }
-            if let Some(view_mode) = &order.view_mode {
-                xml.push_str(&format!(
-                    "\t\t\t\t\t\t<dcsset:viewMode>{}</dcsset:viewMode>\r\n",
-                    escape_xml_text(view_mode)
-                ));
-            }
-            if let Some(user_setting_id) = &order.user_setting_id {
-                xml.push_str(&format!(
-                    "\t\t\t\t\t\t<dcsset:userSettingID>{}</dcsset:userSettingID>\r\n",
-                    escape_xml_text(user_setting_id)
-                ));
-            }
-            xml.push_str("\t\t\t\t\t</dcsset:order>\r\n");
-        }
+    if form_list_settings_order_has_output(settings.order.as_ref()) && settings.order.is_some() {
+        xml.push_str(&canonical_order_fragment);
     }
     if form_list_settings_standard_section_has_output(settings.conditional_appearance.as_ref())
         && let Some(conditional_appearance) = &settings.conditional_appearance
@@ -17889,12 +17808,7 @@ pub(super) fn form_list_settings_standard_section_has_output(
 }
 
 pub(super) fn form_list_settings_order_has_output(order: Option<&FormListSettingsOrder>) -> bool {
-    order.is_some_and(|order| {
-        order.raw_xml.is_some()
-            || !order.items.is_empty()
-            || order.view_mode.is_some()
-            || order.user_setting_id.is_some()
-    })
+    order.is_some()
 }
 
 pub(super) fn format_form_list_settings_standard_section_xml(

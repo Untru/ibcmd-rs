@@ -390,6 +390,72 @@ $dcsCfBytes = [Convert]::FromBase64String(($dcsEncodedCf -replace '\s', ''))
 Assert-Equal $dcsCfBytes.Length ([long]$dcsManifest.configuration_cf.decoded_size) 'decoded DCS CF size'
 Assert-Equal (Get-Sha256Hex $dcsCfBytes) $dcsManifest.configuration_cf.decoded_sha256 'decoded DCS CF SHA-256'
 
+$dcsOrderRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-order'
+$dcsOrderManifestPath = Join-Path $dcsOrderRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsOrderManifestPath -PathType Leaf)) {
+    throw "DCS order evidence manifest is missing: $dcsOrderManifestPath"
+}
+$dcsOrderManifest = Get-Content -LiteralPath $dcsOrderManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsOrderManifest.schema_version 1 'DCS order manifest schema version'
+Assert-Equal $dcsOrderManifest.issue 283 'DCS order issue'
+Assert-Equal $dcsOrderManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-order' 'DCS order fixture ID'
+Assert-Equal $dcsOrderManifest.evidence.platform_line '8.3.27' 'DCS order platform line'
+Assert-Equal $dcsOrderManifest.evidence.platform_version '8.3.27.2214' 'DCS order exact platform provenance'
+Assert-Equal $dcsOrderManifest.evidence.source_version '2.20' 'DCS order source version'
+Assert-Equal $dcsOrderManifest.standalone.round_trips 2 'DCS order standalone round-trip count'
+foreach ($rowName in @('owner', 'metadata', 'body')) {
+    Assert-Equal (@($dcsOrderManifest.form.raw_rows.$rowName.observed_in_rounds) -join ',') 'retained_round_1,fresh_round_2' "DCS order $rowName observed rounds"
+}
+foreach ($nativeFile in @($dcsOrderManifest.form.native_files)) {
+    Assert-Equal (@($nativeFile.observed_in_rounds) -join ',') 'retained_round_1,fresh_round_2' "DCS order $($nativeFile.path) observed rounds"
+}
+foreach ($fragment in @(
+    $dcsOrderManifest.form.minimal_public_fragments.storage_order,
+    $dcsOrderManifest.form.minimal_public_fragments.embedded_order,
+    $dcsOrderManifest.form.minimal_public_fragments.metadata_only_order
+)) {
+    $fragmentPath = Resolve-FixturePath $fragment.path $dcsOrderRoot
+    if (-not (Test-Path -LiteralPath $fragmentPath -PathType Leaf)) {
+        throw "DCS order fragment is missing: $($fragment.path)"
+    }
+    $encoded = Get-Content -LiteralPath $fragmentPath -Raw -Encoding ASCII
+    $decoded = [Convert]::FromBase64String(($encoded -replace '\s', ''))
+    Assert-Equal $decoded.Length ([long]$fragment.decoded_size) "$($fragment.path) decoded size"
+    Assert-Equal (Get-Sha256Hex $decoded) $fragment.sha256 "$($fragment.path) SHA-256"
+}
+
+$dcsOrderPolicyPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-order-evidence.json'
+if (-not (Test-Path -LiteralPath $dcsOrderPolicyPath -PathType Leaf)) {
+    throw "DCS order policy evidence is missing: $dcsOrderPolicyPath"
+}
+$dcsOrderPolicy = Get-Content -LiteralPath $dcsOrderPolicyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsOrderPolicy.schemaVersion 1 'DCS order policy schema version'
+Assert-Equal $dcsOrderPolicy.contract $dcsOrderManifest.contract 'DCS order policy contract binding'
+Assert-Equal $dcsOrderPolicy.source.product '1C:Enterprise Platform' 'DCS order contract product'
+Assert-Equal $dcsOrderPolicy.source.release '8.3.27 / XML 2.20' 'DCS order component contract'
+Assert-Equal $dcsOrderPolicy.sources.platformLine $dcsOrderManifest.evidence.platform_line 'DCS order policy platform-line binding'
+Assert-Equal $dcsOrderPolicy.sources.sourceVersion $dcsOrderManifest.evidence.source_version 'DCS order policy source-version binding'
+Assert-Equal $dcsOrderPolicy.sources.ibcmdSha256 $dcsOrderManifest.evidence.ibcmd_sha256 'DCS order policy ibcmd binding'
+Assert-Equal $dcsOrderPolicy.sources.standalone.fixtureId $dcsManifest.fixture_id 'DCS order standalone fixture binding'
+Assert-Equal $dcsOrderPolicy.sources.standalone.release $dcsOrderManifest.evidence.platform_version 'DCS order standalone release binding'
+Assert-Equal $dcsOrderPolicy.sources.standalone.roundTrips $dcsOrderManifest.standalone.round_trips 'DCS order standalone round-trip binding'
+Assert-Equal $dcsOrderPolicy.sources.form.fixtureId $dcsOrderManifest.fixture_id 'DCS order Form fixture binding'
+Assert-Equal $dcsOrderPolicy.sources.form.release $dcsOrderManifest.evidence.platform_version 'DCS order Form release binding'
+Assert-Equal $dcsOrderPolicy.sources.form.roundTrips 2 'DCS order Form round-trip binding'
+Assert-Equal $dcsOrderPolicy.sources.standalone.rawBodySha256 $dcsOrderManifest.standalone.unpacked_body_sha256 'DCS order standalone body binding'
+Assert-Equal $dcsOrderPolicy.sources.standalone.nativeXmlSha256 $dcsOrderManifest.standalone.native_template_sha256 'DCS order standalone XML binding'
+Assert-Equal $dcsOrderPolicy.sources.form.rawBodySha256 $dcsOrderManifest.form.raw_rows.body.unpacked_sha256 'DCS order Form body binding'
+$dcsOrderNativeForm = @($dcsOrderManifest.form.native_files | Where-Object { $_.path -like '*/Ext/Form.xml' })
+Assert-Equal $dcsOrderNativeForm.Count 1 'DCS order native Form XML count'
+Assert-Equal $dcsOrderPolicy.sources.form.nativeXmlSha256 $dcsOrderNativeForm[0].sha256 'DCS order Form XML binding'
+Assert-Equal $dcsOrderPolicy.sources.form.storageOrderSha256 $dcsOrderManifest.form.minimal_public_fragments.storage_order.sha256 'DCS order storage fragment binding'
+Assert-Equal $dcsOrderPolicy.sources.form.embeddedOrderSha256 $dcsOrderManifest.form.minimal_public_fragments.embedded_order.sha256 'DCS order embedded fragment binding'
+Assert-Equal $dcsOrderPolicy.sources.formMetadataOnly.fragmentSha256 $dcsOrderManifest.form.supplemental_metadata_only_observation.metadata_only.sha256 'DCS order metadata-only binding'
+Assert-Equal (@($dcsOrderPolicy.policy.supportedOrderTypes) -join ',') 'Asc,Desc' 'DCS order emission directions'
+Assert-Equal $dcsOrderPolicy.sources.unicaDesc.repositoryRevision $dcsOrderManifest.form.cross_evidence.unica_desc.revision 'DCS order Unica revision binding'
+Assert-Equal (@($dcsOrderPolicy.policy.supportedViewModes) -join ',') 'Normal' 'DCS order emission view modes'
+Assert-Equal $dcsOrderPolicy.policy.maxEmittedItems 1 'DCS order emission cardinality'
+
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
     $BinaryPath = Join-Path $RepositoryRoot $BinaryPath
 }
@@ -460,4 +526,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order + ChartOfCharacteristicTypes + register and plan generated types.'

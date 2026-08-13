@@ -7,9 +7,11 @@ use crate::metadata_owner_graph::{
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
 use ibcmd_core::characteristics::{CharacteristicFilterValue, CharacteristicReference};
+use ibcmd_core::dcs::{DcsOrder, DcsOrderField, DcsOrderItem, DcsOrderType};
 use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::semantic::semantic_digest;
 use ibcmd_core::validate::validate_configuration;
+use ibcmd_core::value::CanonicalText;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 
@@ -8417,7 +8419,9 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
             .list_settings
             .order
             .as_ref()
-            .and_then(|v| v.view_mode.as_deref()),
+            .and_then(FormListSettingsOrder::typed)
+            .and_then(DcsOrder::view_mode)
+            .map(|value| value.as_str()),
         Some("Normal")
     );
     assert_eq!(
@@ -8425,7 +8429,9 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
             .list_settings
             .order
             .as_ref()
-            .and_then(|v| v.user_setting_id.as_deref()),
+            .and_then(FormListSettingsOrder::typed)
+            .and_then(DcsOrder::user_setting_id)
+            .map(CanonicalText::as_str),
         Some("88619765-ccb3-46c6-ac52-38e9c992ebd4")
     );
     assert_eq!(
@@ -8611,16 +8617,48 @@ fn preserves_custom_order_without_auto_save_for_renamed_attribute() {
         .order
         .as_ref()
         .expect("explicit custom order");
-    assert_eq!(
-        order.items,
-        vec![FormListSettingsOrderItem {
-            field: "Дата".to_string(),
-            order_type: Some("Asc".to_string()),
-        }]
-    );
+    let canonical = order.typed().expect("canonical custom order");
+    assert!(matches!(
+        canonical.items(),
+        [DcsOrderItem::Field(field)]
+            if field.field().as_str() == "Дата"
+                && field.order_type() == DcsOrderType::Asc
+    ));
     assert!(settings.list_settings.conditional_appearance.is_none());
     assert!(settings.list_settings.items_view_mode.is_none());
     assert!(settings.list_settings.items_user_setting_id.is_none());
+}
+
+#[test]
+fn malformed_present_storage_order_is_retained_and_fails_closed() {
+    let malformed = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<Order xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+        "<item xsi:type=\"OrderItemField\"><field>Дата</field></item></Order>"
+    );
+    let field = format!(
+        "{{#base64:{}}}",
+        encode_base64_for_test(malformed.as_bytes())
+    );
+    let order = parse_form_list_settings_order(&field, &BTreeMap::new())
+        .expect("present Order must not collapse to absence");
+    assert!(matches!(
+        &order,
+        FormListSettingsOrder::OpaqueStorage { bytes, reason }
+            if bytes == malformed.as_bytes()
+                && *reason == "order field and explicit orderType are required"
+    ));
+    let settings = FormListSettings {
+        order: Some(order),
+        ..FormListSettings::default()
+    };
+    assert!(matches!(
+        format_form_list_settings_xml(&settings),
+        Err(FormSchemaWriteError::OpaqueDcsOrder {
+            reason: "order field and explicit orderType are required"
+        })
+    ));
 }
 
 #[test]
@@ -8638,15 +8676,21 @@ fn keeps_custom_dynamic_list_settings_ids_without_default_view_modes() {
         server_state_xml: None,
         list_settings: FormListSettings {
             filter: Some(FormListSettingsStandardSection::default()),
-            order: Some(FormListSettingsOrder {
-                items: vec![FormListSettingsOrderItem {
-                    field: "Дата".to_string(),
-                    order_type: Some("Asc".to_string()),
-                }],
-                view_mode: None,
-                user_setting_id: Some("f5abd21c-a9fb-4b17-8ed5-0505541ef807".to_string()),
-                raw_xml: None,
-            }),
+            order: Some(FormListSettingsOrder::Typed(
+                DcsOrder::new(
+                    vec![DcsOrderItem::Field(
+                        DcsOrderField::new(
+                            None,
+                            CanonicalText::new("Дата").unwrap(),
+                            DcsOrderType::Asc,
+                        )
+                        .unwrap(),
+                    )],
+                    None,
+                    Some(CanonicalText::new("f5abd21c-a9fb-4b17-8ed5-0505541ef807").unwrap()),
+                )
+                .unwrap(),
+            )),
             conditional_appearance: Some(FormListSettingsStandardSection {
                 view_mode: None,
                 user_setting_id: Some("e5c7c4de-2fd3-4479-9d17-62e044522edd".to_string()),
@@ -8711,7 +8755,7 @@ fn omits_list_settings_wrapper_when_tail_has_only_evidence_defaults() {
 }
 
 #[test]
-fn appends_escaped_list_settings_tail_after_unchanged_complex_sections() {
+fn rejects_opaque_order_before_formatting_list_settings() {
     let complex_settings = FormListSettings {
         filter: Some(FormListSettingsStandardSection {
             raw_xml: Some(
@@ -8720,11 +8764,9 @@ fn appends_escaped_list_settings_tail_after_unchanged_complex_sections() {
             ),
             ..FormListSettingsStandardSection::default()
         }),
-        order: Some(FormListSettingsOrder {
-            raw_xml: Some(
-                "<dcsset:order><dcsset:item>opaque-order</dcsset:item></dcsset:order>".to_string(),
-            ),
-            ..FormListSettingsOrder::default()
+        order: Some(FormListSettingsOrder::OpaqueStorage {
+            bytes: b"<Order><item>opaque-order</item></Order>".to_vec(),
+            reason: "unsupported test order",
         }),
         conditional_appearance: Some(FormListSettingsStandardSection {
             raw_xml: Some(
@@ -8735,21 +8777,12 @@ fn appends_escaped_list_settings_tail_after_unchanged_complex_sections() {
         }),
         ..FormListSettings::default()
     };
-    let complex_xml = format_form_list_settings_xml(&complex_settings).unwrap();
-
-    let mut settings_with_tail = complex_settings;
-    settings_with_tail.items_view_mode = Some("Compact<&".to_string());
-    settings_with_tail.items_user_setting_id = Some("id<&".to_string());
-    let xml = format_form_list_settings_xml(&settings_with_tail).unwrap();
-
-    let closing = "\t\t\t\t</ListSettings>\r\n";
-    let expected = format!(
-        "{}\t\t\t\t\t<dcsset:itemsViewMode>Compact&lt;&amp;</dcsset:itemsViewMode>\r\n\
-\t\t\t\t\t<dcsset:itemsUserSettingID>id&lt;&amp;</dcsset:itemsUserSettingID>\r\n\
-{closing}",
-        complex_xml.strip_suffix(closing).unwrap()
-    );
-    assert_eq!(xml, expected);
+    assert!(matches!(
+        format_form_list_settings_xml(&complex_settings),
+        Err(FormSchemaWriteError::OpaqueDcsOrder {
+            reason: "unsupported test order"
+        })
+    ));
 }
 
 #[test]
@@ -8844,7 +8877,9 @@ fn parses_dynamic_list_appearance_and_group_selected_setting_id() {
             .list_settings
             .order
             .as_ref()
-            .and_then(|order| order.user_setting_id.as_deref()),
+            .and_then(FormListSettingsOrder::typed)
+            .and_then(DcsOrder::user_setting_id)
+            .map(CanonicalText::as_str),
         Some("f5abd21c-a9fb-4b17-8ed5-0505541ef807")
     );
     assert_eq!(
