@@ -1,8 +1,11 @@
 # Дизайн: DCS canonical layer
 
 Decoder строит ограниченное typed IR для известных settings/schema/template
-узлов и сохраняет неизвестные узлы как bounded opaque XML facets с точным
-placement. IR не хранит готовые XML-фрагменты для известных полей.
+узлов. Ветви, которые подтверждены профилем, но ещё не типизированы canonical
+IR, могут оставаться bounded source-owned только по отдельному positive rule с
+точным placement и provenance. Действительно неизвестный профилю QName не
+считается opaque автоматически: он отклоняется fail-closed. IR не хранит
+готовые XML-фрагменты для известных полей.
 
 Serializer использует DCS feature semantics и отдельные verified writer rules.
 QName, TypeId, picture/color qualification и collection order не выводятся из
@@ -11,3 +14,7 @@ Form ListSettings.
 
 Внедрение начинается с ListSettings и минимального settings document, затем
 расширяется на schema/template только при наличии verified evidence.
+
+Source-owned delegation не является вторым сериализатором: неизменённое
+поддерево остаётся у одного доказанного physical owner. Его мутация, перенос в
+другой wrapper или cross-profile emission запрещены до отдельного writer rule.

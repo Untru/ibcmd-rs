@@ -9,10 +9,15 @@
 
 ## Задача 2: Добавить bounded canonical DCS IR
 
-**Статус:** `[x]`
+**Статус:** `[ ]`
 
 - [x] Settings/ListSettings typed minimum реализован.
-- [x] Unknown extensions сохраняются opaque-lossless с placement.
+- [x] Exact EDT evidence разделяет распознаваемые settings features и
+  truly-unknown QName, для которых reader вызывает `throwWrongElement`.
+- [ ] Profile-recognized, но ещё не типизированные ветви сохраняются
+  source-owned с точным placement/provenance в production decoder.
+- [ ] Ветви с positive opaque-lossless rule проходят same-profile replay;
+  arbitrary unknown без такого rule остаётся fail-closed.
 
 ## Задача 3: Реализовать единый serializer
 

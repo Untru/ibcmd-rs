@@ -5,7 +5,9 @@ use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::EffectiveProfile;
-use ibcmd_xml::{DcsChildParseOutcome, parse_dcs_settings_children_strict};
+use ibcmd_xml::{
+    DcsChildParseOutcome, DcsSettingsDocumentAnalysisError, analyze_dcs_settings_document,
+};
 use quick_xml::NsReader;
 use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
@@ -184,14 +186,35 @@ fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
     }
 
     let (inner, settings) = source_schema_to_native_parts(xml)?;
-    let typed_settings = parse_dcs_settings_children_strict(&settings)
-        .map_err(|error| DcsCodecError::InvalidXml(error.to_string()))?;
+    let settings_analysis =
+        analyze_dcs_settings_document(&settings).map_err(|error| match error {
+            DcsSettingsDocumentAnalysisError::Malformed(error) => {
+                DcsCodecError::InvalidXml(error.to_string())
+            }
+            DcsSettingsDocumentAnalysisError::UnsupportedSource { reason, .. } => {
+                DcsCodecError::UnsupportedSource(reason)
+            }
+        })?;
+    let typed_settings = settings_analysis.typed();
+    if matches!(
+        typed_settings.selection_outcome(),
+        DcsChildParseOutcome::Unsupported(_)
+    ) {
+        return Err(DcsCodecError::UnsupportedSource(
+            "DCS selection is outside the platform-authenticated compiler cohort",
+        ));
+    }
     if matches!(
         typed_settings.filter(),
         DcsChildParseOutcome::Unsupported(_)
     ) {
         return Err(DcsCodecError::UnsupportedSource(
             "DCS filter is outside the platform-authenticated compiler cohort",
+        ));
+    }
+    if matches!(typed_settings.order(), DcsChildParseOutcome::Unsupported(_)) {
+        return Err(DcsCodecError::UnsupportedSource(
+            "DCS order is outside the platform-authenticated compiler cohort",
         ));
     }
     if matches!(
@@ -640,6 +663,36 @@ mod tests {
     use super::*;
     use crate::compiler::families::native::deflate_bytes;
 
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut length = 0usize;
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            quartet[length] = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => 64,
+                _ => panic!("invalid fixture base64 byte {byte}"),
+            };
+            length += 1;
+            if length == 4 {
+                output.push((quartet[0] << 2) | (quartet[1] >> 4));
+                if quartet[2] != 64 {
+                    output.push((quartet[1] << 4) | (quartet[2] >> 2));
+                }
+                if quartet[3] != 64 {
+                    output.push((quartet[2] << 6) | quartet[3]);
+                }
+                length = 0;
+            }
+        }
+        assert_eq!(length, 0, "fixture base64 must contain complete quartets");
+        output
+    }
+
     const SIMPLE_SCHEMA: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 <DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
 	<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>
@@ -807,6 +860,54 @@ mod tests {
         assert!(exported.contains("<dcsset:comparisonType>Equal</dcsset:comparisonType>"));
         assert!(exported.contains("<dcsset:right xsi:type=\"xs:string\">A</dcsset:right>"));
         assert_eq!(exported.matches("<settingsVariant>").count(), 1);
+    }
+
+    #[test]
+    fn platform_data_parameters_source_owned_template_compiles_without_a_second_serializer() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-data-parameters-source-owned/native-template.xml.b64"
+        )));
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source)
+            .expect("platform-attested source-owned template must compile");
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+        let exported = crate::mssql_dump::normalize_data_composition_schema_template_xml(
+            decoded.plaintext(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("compiled source-owned body must remain exportable");
+
+        let (_, settings) = source_schema_to_native_parts(&exported).unwrap();
+        let analysis = analyze_dcs_settings_document(&settings).unwrap();
+        assert_eq!(analysis.source_owned().len(), 2);
+        assert!(settings.contains("<dcscor:parameter>Caption</dcscor:parameter>"));
+        assert!(
+            settings.contains("<dcscor:value xsi:type=\"xs:string\">Opaque probe</dcscor:value>")
+        );
+    }
+
+    #[test]
+    fn schema_compiler_rejects_every_unowned_settings_child() {
+        for unknown in [
+            "<dcsset:outputParameters/>",
+            "<dcsset:futureProbe/>",
+            "<probe:futureProbe xmlns:probe=\"urn:ibcmd-rs:dcs-probe\"/>",
+        ] {
+            let source = String::from_utf8(SIMPLE_SCHEMA.to_vec()).unwrap().replace(
+                "<dcsset:settings/>",
+                &format!("<dcsset:settings>{unknown}</dcsset:settings>"),
+            );
+            assert!(matches!(
+                compile_dcs(
+                    &DcsCodecProfile::fixture(),
+                    DcsTemplateKind::Schema,
+                    source.as_bytes()
+                ),
+                Err(DcsCodecError::UnsupportedSource(_))
+            ));
+        }
     }
 
     #[test]

@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "contract": "8.3.27-xml-2.20-dcs-settings-source-owned-v1",
+  "source": {
+    "product": "1C:Enterprise Platform",
+    "release": "8.3.27 / XML 2.20",
+    "derivation": "bounded source-owned policy synthesized from two exact standalone DCS cohorts; patch build is retained as provenance and does not select a separate XML dialect without a structural counterexample"
+  },
+  "sources": {
+    "baseline": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two isolated file-infobase round-trips retained as the immutable dcs-core fixture",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-core",
+      "nativeXmlSha256": "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f",
+      "packedBodySha256": "6c9d6e02140f1410bf92650d5fe717b07cd66ec45db1567ab4b2ae7dc0782a8b",
+      "unpackedBodySha256": "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510",
+      "roundTrips": 2
+    },
+    "dataParameters": {
+      "product": "1C:Enterprise Platform",
+      "release": "8.3.27.2214",
+      "derivation": "two fresh isolated file-infobase round-trips retained as the immutable dcs-data-parameters-source-owned fixture",
+      "fixtureId": "8.3.27.2214-xml-2.20-dcs-data-parameters-source-owned",
+      "nativeXmlSha256": "db505e5863f238570714fd2f281303fdf6b0a940040535a66e29f080828d6f7c",
+      "packedBodySha256": "c1f1ba3b778c6a6054730ee389ed244f9c985d9e32c098caf61de18b8a4b4155",
+      "unpackedBodySha256": "ff4bdb55f20904504c781bdd6ec7d1e2a3203fe53c497819c7c58ae6815e3713",
+      "fragmentSha256": "a8318c0031c780148c9b3496f4b6981d3857e2b83b3f4d965c71b895b36831c9",
+      "roundTrips": 2
+    },
+    "unknownChildNegative": {
+      "product": "1C:EDT",
+      "release": "2025.2.3+30",
+      "derivation": "exact readSettings bytecode review already retained by the bundled DCS writer evidence",
+      "evidenceKey": "dcs.DataCompositionSettings.opaque-extension.placement",
+      "readerOutcome": "throwWrongElement",
+      "productionOutcome": "unsupported-no-lossless-placement"
+    },
+    "platformLine": "8.3.27",
+    "sourceVersion": "2.20",
+    "ibcmdSha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "policy": {
+    "namespace": "http://v8.1c.ru/8.1/data-composition-system/settings",
+    "coreNamespace": "http://v8.1c.ru/8.1/data-composition-system/core",
+    "xmlSchemaNamespace": "http://www.w3.org/2001/XMLSchema",
+    "xsiNamespace": "http://www.w3.org/2001/XMLSchema-instance",
+    "dataParametersQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}dataParameters",
+    "dataParameterItemQname": "{http://v8.1c.ru/8.1/data-composition-system/core}item",
+    "settingsParameterValueTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}SettingsParameterValue",
+    "parameterQname": "{http://v8.1c.ru/8.1/data-composition-system/core}parameter",
+    "parameterName": "Caption",
+    "valueQname": "{http://v8.1c.ru/8.1/data-composition-system/core}value",
+    "valueTypeQname": "{http://www.w3.org/2001/XMLSchema}string",
+    "value": "Opaque probe",
+    "orderQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}order",
+    "structureItemQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}item",
+    "structureItemGroupTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}StructureItemGroup",
+    "structureOrderQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}order",
+    "structureOrderItemQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}item",
+    "orderItemAutoTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}OrderItemAuto",
+    "structureSelectionQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}selection",
+    "structureSelectionItemQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}item",
+    "selectedItemAutoTypeQname": "{http://v8.1c.ru/8.1/data-composition-system/settings}SelectedItemAuto",
+    "rootChildOrder": ["selection", "dataParameters", "order", "item(StructureItemGroup)"],
+    "dataParameterItemChildOrder": ["parameter", "value"],
+    "structureItemChildOrder": ["order", "selection"],
+    "structureOrderChildOrder": ["item(OrderItemAuto)"],
+    "structureSelectionChildOrder": ["item(SelectedItemAuto)"],
+    "dataParametersPlacement": "after-selection-before-order",
+    "structureItemPlacement": "terminal",
+    "scope": "standalone-only",
+    "maxDataParameterItems": 1,
+    "maxStructureItems": 1,
+    "unknownChildren": "unsupported-no-lossless-placement",
+    "genericOpaqueEmission": "forbidden"
+  }
+}

@@ -23,7 +23,8 @@ use ibcmd_schema::{
     WriterRuleCorpus, WriterRuleKey, bundled_dcs_conditional_appearance_policy,
     bundled_dcs_filter_policy, bundled_dcs_form_attributes_conditional_appearance_policy,
     bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy, bundled_dcs_selection_policy,
-    bundled_dcs_settings_serialization_policy, bundled_writer_rules,
+    bundled_dcs_settings_serialization_policy, bundled_dcs_settings_source_owned_policy,
+    bundled_writer_rules,
 };
 use quick_xml::Reader as QuickXmlReader;
 use quick_xml::escape::escape;
@@ -352,7 +353,7 @@ pub enum DcsSettingsChildrenError {
 /// Platform-evidenced typed children read from a DCS settings root.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct DcsSettingsTypedChildren {
-    selection: Option<DcsSelection>,
+    selection: DcsChildParseOutcome<DcsSelection>,
     filter: DcsChildParseOutcome<DcsFilter>,
     order: DcsChildParseOutcome<DcsOrder>,
     conditional_appearance: DcsChildParseOutcome<DcsConditionalAppearance>,
@@ -363,7 +364,15 @@ pub struct DcsSettingsTypedChildren {
 impl DcsSettingsTypedChildren {
     /// Returns the bounded direct root selection, if present.
     pub const fn selection(&self) -> Option<&DcsSelection> {
-        self.selection.as_ref()
+        match &self.selection {
+            DcsChildParseOutcome::Typed(selection) => Some(selection),
+            DcsChildParseOutcome::Absent | DcsChildParseOutcome::Unsupported(_) => None,
+        }
+    }
+
+    /// Returns the presence-aware root selection parse result.
+    pub const fn selection_outcome(&self) -> &DcsChildParseOutcome<DcsSelection> {
+        &self.selection
     }
 
     /// Returns the presence-aware root filter parse result.
@@ -401,6 +410,115 @@ pub enum DcsChildParseOutcome<T> {
     Absent,
     Typed(T),
     Unsupported(&'static str),
+}
+
+/// One platform-authenticated direct `Settings` child whose exact bytes stay
+/// with the physical source owner rather than entering the canonical DCS IR.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DcsSourceOwnedChildKind {
+    DataParametersCaptionStringV1,
+    StructureItemGroupAutoV1,
+}
+
+/// Location and authenticated shape of one source-owned direct child.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DcsSourceOwnedChild {
+    kind: DcsSourceOwnedChildKind,
+    direct_ordinal: usize,
+}
+
+impl DcsSourceOwnedChild {
+    /// Returns the exact platform-authenticated source-owned shape.
+    pub const fn kind(&self) -> DcsSourceOwnedChildKind {
+        self.kind
+    }
+
+    /// Returns the zero-based ordinal among direct element children.
+    pub const fn direct_ordinal(&self) -> usize {
+        self.direct_ordinal
+    }
+}
+
+/// One-pass analysis of a standalone DCS `Settings` document.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsSettingsDocumentAnalysis {
+    typed: DcsSettingsTypedChildren,
+    source_owned: Vec<DcsSourceOwnedChild>,
+}
+
+impl DcsSettingsDocumentAnalysis {
+    /// Returns the canonical, presence-aware children owned by the DCS codec.
+    pub const fn typed(&self) -> &DcsSettingsTypedChildren {
+        &self.typed
+    }
+
+    /// Consumes the analysis and returns its canonical typed children.
+    pub fn into_typed(self) -> DcsSettingsTypedChildren {
+        self.typed
+    }
+
+    /// Returns authenticated direct children that must remain byte-owned by
+    /// the source adapter.
+    pub fn source_owned(&self) -> &[DcsSourceOwnedChild] {
+        &self.source_owned
+    }
+}
+
+/// Fail-closed result of standalone DCS document analysis.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DcsSettingsDocumentAnalysisError {
+    /// The XML or a recognized canonical structure is malformed.
+    Malformed(DcsSettingsParseError),
+    /// A well-formed direct source shape has no authenticated ownership rule.
+    UnsupportedSource {
+        reason: &'static str,
+        direct_ordinal: Option<usize>,
+    },
+}
+
+impl DcsSettingsDocumentAnalysisError {
+    /// Returns the stable fail-closed reason.
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::Malformed(error) => error.reason(),
+            Self::UnsupportedSource { reason, .. } => reason,
+        }
+    }
+
+    /// Returns the direct element ordinal for unsupported source input.
+    pub const fn direct_ordinal(&self) -> Option<usize> {
+        match self {
+            Self::Malformed(_) => None,
+            Self::UnsupportedSource { direct_ordinal, .. } => *direct_ordinal,
+        }
+    }
+}
+
+impl Display for DcsSettingsDocumentAnalysisError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Malformed(error) => write!(formatter, "{error}"),
+            Self::UnsupportedSource {
+                reason,
+                direct_ordinal: Some(ordinal),
+            } => write!(
+                formatter,
+                "unsupported direct DCS source child at ordinal {ordinal}: {reason}"
+            ),
+            Self::UnsupportedSource {
+                reason,
+                direct_ordinal: None,
+            } => write!(formatter, "unsupported DCS source: {reason}"),
+        }
+    }
+}
+
+impl Error for DcsSettingsDocumentAnalysisError {}
+
+impl From<DcsSettingsParseError> for DcsSettingsDocumentAnalysisError {
+    fn from(error: DcsSettingsParseError) -> Self {
+        Self::Malformed(error)
+    }
 }
 
 /// All DCS-owned Form children parsed from one XML document. This keeps the
@@ -1479,22 +1597,38 @@ fn expanded_local_name(expanded: &str) -> Result<&str, DcsListSettingsTailError>
 /// Reads the verified typed children from a standalone DCS `Settings`
 /// document.
 ///
-/// Unknown siblings and unsupported selections remain with their owning codec.
-/// Duplicate scalars, scalar attributes, complex scalar content, or an inexact
-/// scalar namespace fail closed.
+/// Unsupported source shapes fail closed. Platform-authenticated source-owned
+/// shapes are accepted by the unified analyzer and remain physically owned by
+/// the caller.
 pub fn parse_dcs_settings_children(document: &str) -> Option<DcsSettingsTypedChildren> {
     parse_dcs_settings_children_strict(document).ok()
 }
 
-/// Strict variant that distinguishes malformed recognized structure from an
-/// unsupported but source-owned order shape.
+/// Strict compatibility projection of [`analyze_dcs_settings_document`].
 pub fn parse_dcs_settings_children_strict(
     document: &str,
 ) -> Result<DcsSettingsTypedChildren, DcsSettingsParseError> {
+    analyze_dcs_settings_document(document)
+        .map(DcsSettingsDocumentAnalysis::into_typed)
+        .map_err(|error| DcsSettingsParseError {
+            reason: error.reason(),
+        })
+}
+
+/// Parses and classifies a standalone DCS `Settings` document exactly once.
+///
+/// Canonical children enter the typed IR. The two platform-authenticated
+/// recognized-but-untyped shapes are reported with exact direct ordinals so a
+/// physical adapter can preserve their original bytes. Every other direct
+/// element fails closed instead of being silently dropped or normalized.
+pub fn analyze_dcs_settings_document(
+    document: &str,
+) -> Result<DcsSettingsDocumentAnalysis, DcsSettingsDocumentAnalysisError> {
     if document.len() > MAX_DCS_RETAINED_BYTES {
         return Err(DcsSettingsParseError {
             reason: "settings document exceeds the retained-byte budget",
-        });
+        }
+        .into());
     }
     let document =
         XmlReader::from_slice(document.as_bytes()).map_err(|_| DcsSettingsParseError {
@@ -1506,8 +1640,20 @@ pub fn parse_dcs_settings_children_strict(
     {
         return Err(DcsSettingsParseError {
             reason: "root is not the settings-namespace Settings element",
-        });
+        }
+        .into());
     }
+    let source_owned = audit_dcs_settings_direct_children(root)?;
+    let typed = parse_dcs_settings_children_root(root)?;
+    Ok(DcsSettingsDocumentAnalysis {
+        typed,
+        source_owned,
+    })
+}
+
+fn parse_dcs_settings_children_root(
+    root: &XmlElement,
+) -> Result<DcsSettingsTypedChildren, DcsSettingsParseError> {
     let mut children = DcsSettingsTypedChildren::default();
     let mut selection_candidate = None;
     let mut selection_is_ambiguous = false;
@@ -1589,21 +1735,23 @@ pub fn parse_dcs_settings_children_strict(
             order_window_closed = true;
             continue;
         }
-        if xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE)
-            && matches!(
-                element.name().local(),
-                "dataParameters"
-                    | "outputParameters"
-                    | "item"
-                    | "additionalProperties"
-                    | "itemsViewMode"
-                    | "itemsUserSettingID"
-                    | "itemsUserSettingPresentation"
-            )
-        {
-            filter_window_closed = true;
-            order_window_closed = true;
-            conditional_appearance_window_closed = true;
+        if xml_element_uses_namespace(element, root, DCS_SETTINGS_NAMESPACE) {
+            match element.name().local() {
+                "dataParameters" => {
+                    filter_window_closed = true;
+                }
+                "outputParameters"
+                | "item"
+                | "additionalProperties"
+                | "itemsViewMode"
+                | "itemsUserSettingID"
+                | "itemsUserSettingPresentation" => {
+                    filter_window_closed = true;
+                    order_window_closed = true;
+                    conditional_appearance_window_closed = true;
+                }
+                _ => {}
+            }
         }
         let target = match element.name().local() {
             "itemsViewMode" => &mut children.items_view_mode,
@@ -1635,8 +1783,16 @@ pub fn parse_dcs_settings_children_strict(
         }
         *target = Some(value);
     }
-    if !selection_is_ambiguous && let Some(element) = selection_candidate {
-        children.selection = parse_dcs_selection(element, root);
+    if selection_is_ambiguous {
+        children.selection = DcsChildParseOutcome::Unsupported(
+            "duplicate direct selection child has no authenticated ownership",
+        );
+    } else if let Some(element) = selection_candidate {
+        children.selection = parse_dcs_selection(element, root)
+            .map(DcsChildParseOutcome::Typed)
+            .unwrap_or(DcsChildParseOutcome::Unsupported(
+                "root selection shape is outside the authenticated typed cohort",
+            ));
     }
     if let Some(element) = filter_candidate {
         children.filter = parse_dcs_filter(element, root)?;
@@ -1686,6 +1842,262 @@ pub fn parse_dcs_settings_children_strict(
         }
     }
     Ok(children)
+}
+
+fn audit_dcs_settings_direct_children(
+    root: &XmlElement,
+) -> Result<Vec<DcsSourceOwnedChild>, DcsSettingsDocumentAnalysisError> {
+    let policy = bundled_dcs_settings_source_owned_policy().map_err(|_| DcsSettingsParseError {
+        reason: "bundled DCS source-owned evidence is invalid",
+    })?;
+    if !policy.is_standalone_only()
+        || !policy.unknown_children_are_unsupported()
+        || !policy.generic_opaque_emission_is_forbidden()
+    {
+        return Err(DcsSettingsParseError {
+            reason: "bundled DCS source-ownership boundary is not fail-closed",
+        }
+        .into());
+    }
+
+    let direct_elements = root
+        .children()
+        .iter()
+        .filter_map(|node| match node {
+            XmlNode::Element(element) => Some(element),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let order_ordinal = direct_elements
+        .iter()
+        .position(|element| element_has_expanded_qname(element, root, policy.order_qname()));
+    let selection_ordinal = direct_elements.iter().position(|element| {
+        element.name().local() == "selection"
+            && xml_element_uses_namespace(element, root, policy.namespace_uri())
+    });
+    let mut source_owned = Vec::new();
+    let mut data_parameter_count = 0usize;
+    let mut structure_item_count = 0usize;
+
+    for (direct_ordinal, element) in direct_elements.iter().copied().enumerate() {
+        let Some(namespace) = namespace_for_prefix(element, root, element.name().prefix()) else {
+            return Err(unsupported_source_child(
+                "direct Settings child has no resolved namespace",
+                direct_ordinal,
+            ));
+        };
+        if namespace != policy.namespace_uri() {
+            return Err(unsupported_source_child(
+                "foreign-namespace direct Settings child is unsupported",
+                direct_ordinal,
+            ));
+        }
+
+        if element_has_expanded_qname(element, root, policy.data_parameters_qname()) {
+            data_parameter_count = data_parameter_count.saturating_add(1);
+            if data_parameter_count > policy.max_data_parameter_items()
+                || !is_exact_caption_string_data_parameters(element, root, &policy)
+            {
+                return Err(unsupported_source_child(
+                    "dataParameters is outside the authenticated Caption string shape",
+                    direct_ordinal,
+                ));
+            }
+            if policy.data_parameters_follows_selection_and_precedes_order()
+                && !(selection_ordinal.is_some_and(|ordinal| ordinal < direct_ordinal)
+                    && order_ordinal.is_some_and(|ordinal| direct_ordinal < ordinal))
+            {
+                return Err(unsupported_source_child(
+                    "dataParameters is outside the authenticated selection-to-order placement",
+                    direct_ordinal,
+                ));
+            }
+            source_owned.push(DcsSourceOwnedChild {
+                kind: DcsSourceOwnedChildKind::DataParametersCaptionStringV1,
+                direct_ordinal,
+            });
+            continue;
+        }
+
+        if element_has_expanded_qname(element, root, policy.structure_item_qname()) {
+            structure_item_count = structure_item_count.saturating_add(1);
+            if structure_item_count > policy.max_structure_items()
+                || !is_exact_structure_item_group_auto(element, root, &policy)
+            {
+                return Err(unsupported_source_child(
+                    "direct item is outside the authenticated StructureItemGroup auto shape",
+                    direct_ordinal,
+                ));
+            }
+            if policy.structure_item_is_terminal() && direct_ordinal + 1 != direct_elements.len() {
+                return Err(unsupported_source_child(
+                    "StructureItemGroup is outside the authenticated terminal placement",
+                    direct_ordinal,
+                ));
+            }
+            source_owned.push(DcsSourceOwnedChild {
+                kind: DcsSourceOwnedChildKind::StructureItemGroupAutoV1,
+                direct_ordinal,
+            });
+            continue;
+        }
+
+        if matches!(
+            element.name().local(),
+            "selection"
+                | "filter"
+                | "order"
+                | "conditionalAppearance"
+                | "itemsViewMode"
+                | "itemsUserSettingID"
+        ) {
+            continue;
+        }
+
+        return Err(unsupported_source_child(
+            "unknown direct Settings child is unsupported",
+            direct_ordinal,
+        ));
+    }
+    Ok(source_owned)
+}
+
+fn unsupported_source_child(
+    reason: &'static str,
+    direct_ordinal: usize,
+) -> DcsSettingsDocumentAnalysisError {
+    DcsSettingsDocumentAnalysisError::UnsupportedSource {
+        reason,
+        direct_ordinal: Some(direct_ordinal),
+    }
+}
+
+fn is_exact_caption_string_data_parameters(
+    element: &XmlElement,
+    root: &XmlElement,
+    policy: &ibcmd_schema::DcsSettingsSourceOwnedPolicy,
+) -> bool {
+    if has_ordinary_attributes(element) {
+        return false;
+    }
+    let Some(items) = exact_element_children(element) else {
+        return false;
+    };
+    if items.len() != 1 || items.len() > policy.max_data_parameter_items() {
+        return false;
+    }
+    let item = items[0];
+    if !element_has_expanded_qname(item, root, policy.data_parameter_item_qname())
+        || resolved_xsi_type_in_namespace(item, root, policy.xsi_namespace_uri()).as_deref()
+            != Some(policy.settings_parameter_value_type_qname())
+    {
+        return false;
+    }
+    let Some(children) = exact_element_children(item) else {
+        return false;
+    };
+    if children.len() != 2 {
+        return false;
+    }
+    let parameter = children[0];
+    let value = children[1];
+    element_has_expanded_qname(parameter, root, policy.parameter_qname())
+        && !has_ordinary_attributes(parameter)
+        && simple_element_text(parameter).as_deref() == Some(policy.parameter_name())
+        && element_has_expanded_qname(value, root, policy.value_qname())
+        && resolved_xsi_type_in_namespace(value, root, policy.xsi_namespace_uri()).as_deref()
+            == Some(policy.value_type_qname())
+        && simple_element_text(value).as_deref() == Some(policy.value())
+}
+
+fn is_exact_structure_item_group_auto(
+    element: &XmlElement,
+    root: &XmlElement,
+    policy: &ibcmd_schema::DcsSettingsSourceOwnedPolicy,
+) -> bool {
+    if resolved_xsi_type_in_namespace(element, root, policy.xsi_namespace_uri()).as_deref()
+        != Some(policy.structure_item_group_type_qname())
+    {
+        return false;
+    }
+    let Some(children) = exact_element_children(element) else {
+        return false;
+    };
+    if children.len() != 2 {
+        return false;
+    }
+    let order = children[0];
+    let selection = children[1];
+    element_has_expanded_qname(order, root, policy.structure_order_qname())
+        && !has_ordinary_attributes(order)
+        && has_one_exact_empty_typed_child(
+            order,
+            root,
+            policy.structure_order_item_qname(),
+            policy.order_item_auto_type_qname(),
+            policy.xsi_namespace_uri(),
+        )
+        && element_has_expanded_qname(selection, root, policy.structure_selection_qname())
+        && !has_ordinary_attributes(selection)
+        && has_one_exact_empty_typed_child(
+            selection,
+            root,
+            policy.structure_selection_item_qname(),
+            policy.selected_item_auto_type_qname(),
+            policy.xsi_namespace_uri(),
+        )
+}
+
+fn has_one_exact_empty_typed_child(
+    parent: &XmlElement,
+    root: &XmlElement,
+    child_qname: &str,
+    type_qname: &str,
+    xsi_namespace_uri: &str,
+) -> bool {
+    let Some(children) = exact_element_children(parent) else {
+        return false;
+    };
+    let [child] = children.as_slice() else {
+        return false;
+    };
+    element_has_expanded_qname(child, root, child_qname)
+        && resolved_xsi_type_in_namespace(child, root, xsi_namespace_uri).as_deref()
+            == Some(type_qname)
+        && exact_element_children(child).is_some_and(|children| children.is_empty())
+}
+
+fn exact_element_children(element: &XmlElement) -> Option<Vec<&XmlElement>> {
+    let mut elements = Vec::new();
+    for node in element.children() {
+        match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => {}
+            XmlNode::CData(text) if text.value().trim().is_empty() => {}
+            XmlNode::Element(element) => elements.push(element),
+            _ => return None,
+        }
+    }
+    Some(elements)
+}
+
+fn has_ordinary_attributes(element: &XmlElement) -> bool {
+    element
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+}
+
+fn element_has_expanded_qname(element: &XmlElement, root: &XmlElement, expanded: &str) -> bool {
+    let Some((namespace, local)) = split_expanded_qname(expanded) else {
+        return false;
+    };
+    element.name().local() == local && xml_element_uses_namespace(element, root, namespace)
+}
+
+fn split_expanded_qname(expanded: &str) -> Option<(&str, &str)> {
+    let expanded = expanded.strip_prefix('{')?;
+    let (namespace, local) = expanded.split_once('}')?;
+    (!namespace.is_empty() && !local.is_empty()).then_some((namespace, local))
 }
 
 fn parse_dcs_filter(
@@ -2013,6 +2425,7 @@ pub fn parse_form_list_settings_filters(
         reason: "Form document is not well-formed XML",
     })?;
     let root = document.root();
+    audit_form_list_settings_direct_children(root, root)?;
     let mut filters = Vec::new();
     collect_form_list_settings_filters(root, root, &mut filters)?;
     Ok(filters)
@@ -2481,6 +2894,7 @@ pub fn parse_form_list_settings_conditional_appearances(
         reason: "Form document is not well-formed XML",
     })?;
     let root = document.root();
+    audit_form_list_settings_direct_children(root, root)?;
     let mut values = Vec::new();
     collect_form_list_settings_conditional_appearances(root, root, &mut values)?;
     Ok(values)
@@ -2548,6 +2962,7 @@ pub fn parse_form_dcs_children(bytes: &[u8]) -> Result<FormDcsChildren, DcsSetti
             reason: "Form document root uses the wrong QName",
         });
     }
+    audit_form_list_settings_direct_children(root, root)?;
 
     let mut result = FormDcsChildren::default();
     collect_form_list_settings_filters(root, root, &mut result.list_settings_filters)?;
@@ -2560,6 +2975,56 @@ pub fn parse_form_dcs_children(bytes: &[u8]) -> Result<FormDcsChildren, DcsSetti
     result.form_attributes_conditional_appearance =
         collect_form_attributes_conditional_appearance(root)?;
     Ok(result)
+}
+
+fn audit_form_list_settings_direct_children(
+    element: &XmlElement,
+    root: &XmlElement,
+) -> Result<(), DcsSettingsParseError> {
+    if element.name().local() == "ListSettings" {
+        if !xml_element_uses_namespace(element, root, FORM_LOG_NAMESPACE) {
+            return Err(DcsSettingsParseError {
+                reason: "Form ListSettings uses the wrong namespace",
+            });
+        }
+        for node in element.children() {
+            let child = match node {
+                XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+                XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+                XmlNode::Comment(_) | XmlNode::ProcessingInstruction(_) => continue,
+                XmlNode::Element(child) => child,
+                _ => {
+                    return Err(DcsSettingsParseError {
+                        reason: "Form ListSettings contains unsupported direct content",
+                    });
+                }
+            };
+            if !xml_element_uses_namespace(child, root, DCS_SETTINGS_NAMESPACE) {
+                return Err(DcsSettingsParseError {
+                    reason: "Form ListSettings contains a foreign direct child",
+                });
+            }
+            if !matches!(
+                child.name().local(),
+                "filter"
+                    | "order"
+                    | "conditionalAppearance"
+                    | "itemsViewMode"
+                    | "itemsUserSettingID"
+            ) {
+                return Err(DcsSettingsParseError {
+                    reason: "Form ListSettings contains an unsupported direct child",
+                });
+            }
+        }
+        return Ok(());
+    }
+    for node in element.children() {
+        if let XmlNode::Element(child) = node {
+            audit_form_list_settings_direct_children(child, root)?;
+        }
+    }
+    Ok(())
 }
 
 fn collect_form_attributes_conditional_appearance(
@@ -2949,6 +3414,7 @@ pub fn parse_form_list_settings_orders(
         reason: "Form document is not well-formed XML",
     })?;
     let root = document.root();
+    audit_form_list_settings_direct_children(root, root)?;
     let mut orders = Vec::new();
     collect_form_list_settings_orders(root, root, &mut orders)?;
     Ok(orders)
@@ -3174,13 +3640,21 @@ fn simple_element_text(element: &XmlElement) -> Option<String> {
 }
 
 fn resolved_xsi_type(element: &XmlElement, root: &XmlElement) -> Option<String> {
+    resolved_xsi_type_in_namespace(element, root, XSI_NAMESPACE)
+}
+
+fn resolved_xsi_type_in_namespace(
+    element: &XmlElement,
+    root: &XmlElement,
+    xsi_namespace_uri: &str,
+) -> Option<String> {
     let mut value = None;
     for attribute in element.attributes() {
         let AttributeKind::Ordinary(name) = attribute.kind() else {
             continue;
         };
         if name.local() == "type"
-            && namespace_for_prefix(element, root, name.prefix()) == Some(XSI_NAMESPACE)
+            && namespace_for_prefix(element, root, name.prefix()) == Some(xsi_namespace_uri)
         {
             if value.is_some() {
                 return None;
@@ -3212,7 +3686,7 @@ pub fn rewrite_dcs_settings_children(
     serialized: &DcsSettingsChildrenParts,
 ) -> Option<()> {
     let mut rewritten = xml.clone();
-    if children.selection.is_some() {
+    if children.selection().is_some() {
         let selection = serialized.selection()?;
         replace_direct_canonical_dcs_child(&mut rewritten, "selection", selection)?;
     } else if serialized.selection().is_some() {
@@ -4251,7 +4725,7 @@ mod tests {
             "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
             "<selection><item xsi:type=\"SelectedItemAuto\"/></selection>",
             "<order><item xsi:type=\"OrderItemField\"><field>Name</field>",
-            "<orderType>Asc</orderType></item></order><item/>",
+            "<orderType>Asc</orderType></item></order>",
             "</Settings>"
         );
         let parsed = parse_dcs_settings_children_strict(standalone).unwrap();
@@ -4457,7 +4931,7 @@ mod tests {
             parse_form_list_settings_orders(shadowed.as_bytes())
                 .unwrap_err()
                 .reason(),
-            "order child uses the wrong namespace"
+            "Form ListSettings contains a foreign direct child"
         );
     }
 
@@ -4469,10 +4943,13 @@ mod tests {
             "<item/><order><item xsi:type=\"OrderItemField\"><field>Name</field>",
             "<orderType>Asc</orderType></item></order></Settings>"
         );
-        let parsed = parse_dcs_settings_children_strict(after_structure).unwrap();
+        let error = analyze_dcs_settings_document(after_structure).unwrap_err();
         assert!(matches!(
-            parsed.order(),
-            DcsChildParseOutcome::Unsupported(reason) if reason.contains("placement")
+            error,
+            DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                direct_ordinal: Some(0),
+                ..
+            }
         ));
 
         let before_selection = after_structure.replace("<item/>", "").replace(
@@ -4519,8 +4996,7 @@ mod tests {
             "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
             "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
             "<order><item xsi:type=\"OrderItemField\"><field>Name</field>",
-            "<orderType>Asc</orderType></item></order><item><order/>",
-            "</item></Settings>"
+            "<orderType>Asc</orderType></item></order></Settings>"
         );
         let children = parse_dcs_settings_children_strict(source).unwrap();
         let DcsChildParseOutcome::Typed(order) = children.order() else {
@@ -4604,6 +5080,10 @@ mod tests {
                 parsed.selection().is_none(),
                 "typed unsupported selection: {selection}"
             );
+            assert!(matches!(
+                parsed.selection_outcome(),
+                DcsChildParseOutcome::Unsupported(_)
+            ));
         }
 
         let duplicate = format!(
@@ -4615,16 +5095,24 @@ mod tests {
                 .selection()
                 .is_none()
         );
+        assert!(matches!(
+            parse_dcs_settings_children(&duplicate)
+                .unwrap()
+                .selection_outcome(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
 
         let wrong_namespace = format!(
             "<Settings xmlns=\"{DCS_SETTINGS_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\"><bad:selection xmlns:bad=\"urn:bad\"><bad:item xsi:type=\"bad:SelectedItemAuto\"/></bad:selection></Settings>"
         );
-        assert!(
-            parse_dcs_settings_children(&wrong_namespace)
-                .unwrap()
-                .selection()
-                .is_none()
-        );
+        assert!(parse_dcs_settings_children(&wrong_namespace).is_none());
+        assert!(matches!(
+            analyze_dcs_settings_document(&wrong_namespace),
+            Err(DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                direct_ordinal: Some(0),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -4895,5 +5383,158 @@ mod tests {
             .reason(),
             "inactive Form Attributes storage Settings is not empty"
         );
+    }
+
+    fn exact_source_owned_settings() -> String {
+        concat!(
+            "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+            "xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ",
+            "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">",
+            "<selection><item xsi:type=\"dcsset:SelectedItemAuto\"/></selection>",
+            "<dataParameters><dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">",
+            "<dcscor:parameter>Caption</dcscor:parameter>",
+            "<dcscor:value xsi:type=\"xs:string\">Opaque probe</dcscor:value>",
+            "</dcscor:item></dataParameters>",
+            "<order/>",
+            "<item xsi:type=\"dcsset:StructureItemGroup\">",
+            "<order><item xsi:type=\"dcsset:OrderItemAuto\"/></order>",
+            "<selection><item xsi:type=\"dcsset:SelectedItemAuto\"/></selection>",
+            "</item></Settings>"
+        )
+        .to_owned()
+    }
+
+    #[test]
+    fn unified_settings_analysis_classifies_only_exact_source_owned_shapes() {
+        let source = exact_source_owned_settings();
+        let analysis = analyze_dcs_settings_document(&source).unwrap();
+        assert!(matches!(
+            analysis.typed().selection_outcome(),
+            DcsChildParseOutcome::Typed(_)
+        ));
+        assert_eq!(
+            analysis.source_owned(),
+            [
+                DcsSourceOwnedChild {
+                    kind: DcsSourceOwnedChildKind::DataParametersCaptionStringV1,
+                    direct_ordinal: 1,
+                },
+                DcsSourceOwnedChild {
+                    kind: DcsSourceOwnedChildKind::StructureItemGroupAutoV1,
+                    direct_ordinal: 3,
+                },
+            ]
+        );
+        assert_eq!(
+            parse_dcs_settings_children_strict(&source).unwrap(),
+            analysis.typed().clone()
+        );
+
+        for (mutated, ordinal) in [
+            (source.replace("Opaque probe", "Near miss"), 1),
+            (
+                source.replace(
+                    "</selection></item></Settings>",
+                    "</selection><future/></item></Settings>",
+                ),
+                3,
+            ),
+            (
+                source.replace("<dataParameters>", "<future/><dataParameters>"),
+                1,
+            ),
+        ] {
+            assert!(matches!(
+                analyze_dcs_settings_document(&mutated),
+                Err(DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                    direct_ordinal: Some(actual),
+                    ..
+                }) if actual == ordinal
+            ));
+        }
+    }
+
+    #[test]
+    fn unified_settings_analysis_rejects_unknown_direct_children_and_bad_placement() {
+        let source = exact_source_owned_settings();
+        let same_namespace = source.replace("<order/>", "<futureProbe/><order/>");
+        assert!(matches!(
+            analyze_dcs_settings_document(&same_namespace),
+            Err(DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                direct_ordinal: Some(2),
+                ..
+            })
+        ));
+
+        let foreign = source.replace("<order/>", "<f:future xmlns:f=\"urn:future\"/><order/>");
+        assert!(matches!(
+            analyze_dcs_settings_document(&foreign),
+            Err(DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                direct_ordinal: Some(2),
+                ..
+            })
+        ));
+
+        let data_after_order = source.replace(
+            concat!(
+                "<dataParameters><dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">",
+                "<dcscor:parameter>Caption</dcscor:parameter>",
+                "<dcscor:value xsi:type=\"xs:string\">Opaque probe</dcscor:value>",
+                "</dcscor:item></dataParameters><order/>"
+            ),
+            concat!(
+                "<order/><dataParameters><dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">",
+                "<dcscor:parameter>Caption</dcscor:parameter>",
+                "<dcscor:value xsi:type=\"xs:string\">Opaque probe</dcscor:value>",
+                "</dcscor:item></dataParameters>"
+            ),
+        );
+        assert!(matches!(
+            analyze_dcs_settings_document(&data_after_order),
+            Err(DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                direct_ordinal: Some(2),
+                ..
+            })
+        ));
+
+        let nonterminal_group = source.replace(
+            "</item></Settings>",
+            "</item><itemsViewMode>Normal</itemsViewMode></Settings>",
+        );
+        assert!(matches!(
+            analyze_dcs_settings_document(&nonterminal_group),
+            Err(DcsSettingsDocumentAnalysisError::UnsupportedSource {
+                direct_ordinal: Some(3),
+                ..
+            })
+        ));
+
+        assert!(matches!(
+            analyze_dcs_settings_document("<Settings>"),
+            Err(DcsSettingsDocumentAnalysisError::Malformed(_))
+        ));
+    }
+
+    #[test]
+    fn form_list_settings_audit_rejects_every_unowned_direct_child() {
+        let form = |child: &str| {
+            format!(
+                "<Form xmlns=\"{FORM_LOG_NAMESPACE}\" xmlns:dcsset=\"{DCS_SETTINGS_NAMESPACE}\"><Settings><ListSettings>{child}</ListSettings></Settings></Form>"
+            )
+        };
+        for child in [
+            "<dcsset:item/>",
+            "<dcsset:futureProbe/>",
+            "<f:future xmlns:f=\"urn:future\"/>",
+        ] {
+            assert!(parse_form_dcs_children(form(child).as_bytes()).is_err());
+            assert!(parse_form_list_settings_filters(form(child).as_bytes()).is_err());
+            assert!(parse_form_list_settings_orders(form(child).as_bytes()).is_err());
+            assert!(
+                parse_form_list_settings_conditional_appearances(form(child).as_bytes()).is_err()
+            );
+        }
     }
 }

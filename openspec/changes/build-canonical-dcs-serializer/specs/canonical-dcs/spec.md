@@ -13,14 +13,23 @@ canonical representation and serializer.
 
 ### Requirement: Unknown DCS extensions are lossless
 
-The canonical DCS layer SHALL retain bounded unknown extensions with explicit
-placement and source provenance.
+The canonical DCS layer SHALL retain bounded extensions with explicit placement
+and source provenance when the selected profile has a positive retention rule.
+An XML child that is truly unknown to the profile SHALL fail closed rather than
+being relabeled as opaque automatically.
 
 #### Scenario: A supported profile contains an unknown extension
 
-- **WHEN** the extension fits configured resource limits
+- **WHEN** the profile classifies the extension as source-owned or
+  opaque-lossless and the extension fits configured resource limits
 - **THEN** it is retained with exact placement and provenance
 - **AND** same-profile serialization preserves it
+
+#### Scenario: The selected profile rejects an unknown QName
+
+- **WHEN** the profile has no positive retention rule for the QName
+- **THEN** decoding returns a stable unsupported-source diagnostic
+- **AND** no partial canonical mutation or inferred placement is emitted
 
 ### Requirement: DCS writer decisions require evidence
 

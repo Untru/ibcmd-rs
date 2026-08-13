@@ -436,6 +436,164 @@ $dcsCfBytes = [Convert]::FromBase64String(($dcsEncodedCf -replace '\s', ''))
 Assert-Equal $dcsCfBytes.Length ([long]$dcsManifest.configuration_cf.decoded_size) 'decoded DCS CF size'
 Assert-Equal (Get-Sha256Hex $dcsCfBytes) $dcsManifest.configuration_cf.decoded_sha256 'decoded DCS CF SHA-256'
 
+$dcsDataParametersRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-data-parameters-source-owned'
+$dcsDataParametersManifestPath = Join-Path $dcsDataParametersRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsDataParametersManifestPath -PathType Leaf)) {
+    throw "DCS dataParameters evidence manifest is missing: $dcsDataParametersManifestPath"
+}
+$dcsDataParametersManifest = Get-Content -LiteralPath $dcsDataParametersManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsDataParametersManifest.schema_version 1 'DCS dataParameters manifest schema version'
+Assert-Equal $dcsDataParametersManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-data-parameters-source-owned' 'DCS dataParameters fixture ID'
+Assert-Equal $dcsDataParametersManifest.issue 283 'DCS dataParameters issue'
+Assert-Equal $dcsDataParametersManifest.contract 'dcs-recognized-untyped-source-owned-passthrough' 'DCS dataParameters contract'
+Assert-Equal $dcsDataParametersManifest.evidence.platform_line '8.3.27' 'DCS dataParameters platform line'
+Assert-Equal $dcsDataParametersManifest.evidence.platform_version '8.3.27.2214' 'DCS dataParameters exact platform provenance'
+Assert-Equal $dcsDataParametersManifest.evidence.source_version '2.20' 'DCS dataParameters source version'
+Assert-Equal $dcsDataParametersManifest.evidence.database_locale 'ru_RU' 'DCS dataParameters database locale'
+Assert-Equal $dcsDataParametersManifest.rounds.template_equal_between_rounds $true 'DCS dataParameters Template round equality'
+Assert-Equal $dcsDataParametersManifest.rounds.packed_equal_between_rounds $true 'DCS dataParameters packed round equality'
+Assert-Equal $dcsDataParametersManifest.rounds.unpacked_equal_between_rounds $true 'DCS dataParameters unpacked round equality'
+Assert-Equal $dcsDataParametersManifest.rounds.round_1_template_sha256 $dcsDataParametersManifest.rounds.round_2_template_sha256 'DCS dataParameters Template round hashes'
+Assert-Equal $dcsDataParametersManifest.rounds.round_1_packed_sha256 $dcsDataParametersManifest.rounds.round_2_packed_sha256 'DCS dataParameters packed round hashes'
+Assert-Equal $dcsDataParametersManifest.rounds.round_1_unpacked_sha256 $dcsDataParametersManifest.rounds.round_2_unpacked_sha256 'DCS dataParameters unpacked round hashes'
+Assert-FileEvidence $dcsDataParametersManifest.seed.delta $dcsDataParametersRoot
+
+$dcsDataParametersCfBytes = Get-Base64EvidenceBytes $dcsDataParametersManifest.configuration_cf $dcsDataParametersRoot
+$dcsDataParametersTemplateBytes = Get-Base64EvidenceBytes $dcsDataParametersManifest.template.native_xml $dcsDataParametersRoot
+$dcsDataParametersPackedBytes = Get-Base64EvidenceBytes $dcsDataParametersManifest.template.raw_entry.packed $dcsDataParametersRoot
+$dcsDataParametersUnpackedBytes = Get-Base64EvidenceBytes $dcsDataParametersManifest.template.raw_entry.unpacked $dcsDataParametersRoot
+Assert-Equal (Get-Sha256Hex $dcsDataParametersCfBytes) $dcsDataParametersManifest.rounds.round_2_cf.sha256 'DCS dataParameters retained round-2 CF SHA-256'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersTemplateBytes) $dcsDataParametersManifest.rounds.round_1_template_sha256 'DCS dataParameters retained Template/round-1 binding'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersTemplateBytes) $dcsDataParametersManifest.rounds.round_2_template_sha256 'DCS dataParameters retained Template/round-2 binding'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersPackedBytes) $dcsDataParametersManifest.rounds.round_1_packed_sha256 'DCS dataParameters retained packed/round-1 binding'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersPackedBytes) $dcsDataParametersManifest.rounds.round_2_packed_sha256 'DCS dataParameters retained packed/round-2 binding'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersUnpackedBytes) $dcsDataParametersManifest.rounds.round_1_unpacked_sha256 'DCS dataParameters retained unpacked/round-1 binding'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersUnpackedBytes) $dcsDataParametersManifest.rounds.round_2_unpacked_sha256 'DCS dataParameters retained unpacked/round-2 binding'
+
+$dcsDataParametersCompressedStream = New-Object IO.MemoryStream(,($dcsDataParametersPackedBytes))
+$dcsDataParametersDecompressedStream = New-Object IO.MemoryStream
+$dcsDataParametersDeflateStream = New-Object IO.Compression.DeflateStream(
+    $dcsDataParametersCompressedStream,
+    [IO.Compression.CompressionMode]::Decompress
+)
+try {
+    $dcsDataParametersDeflateStream.CopyTo($dcsDataParametersDecompressedStream)
+} finally {
+    $dcsDataParametersDeflateStream.Dispose()
+    $dcsDataParametersCompressedStream.Dispose()
+}
+try {
+    $dcsDataParametersDecompressed = $dcsDataParametersDecompressedStream.ToArray()
+} finally {
+    $dcsDataParametersDecompressedStream.Dispose()
+}
+Assert-Equal (Get-Sha256Hex $dcsDataParametersDecompressed) (Get-Sha256Hex $dcsDataParametersUnpackedBytes) 'DCS dataParameters packed/unpacked pair'
+Assert-Equal ([BitConverter]::ToUInt32($dcsDataParametersUnpackedBytes, 0)) ([uint32]$dcsDataParametersManifest.proven_shape.header_marker) 'DCS dataParameters header marker'
+Assert-Equal ([BitConverter]::ToUInt32($dcsDataParametersUnpackedBytes, 4)) ([uint32]$dcsDataParametersManifest.proven_shape.settings_document_count) 'DCS dataParameters settings document count'
+$dcsDataParametersFirstLength = [int]$dcsDataParametersManifest.proven_shape.stored_document_lengths[0]
+$dcsDataParametersSecondLength = [int]$dcsDataParametersManifest.proven_shape.stored_document_lengths[1]
+Assert-Equal ([BitConverter]::ToUInt64($dcsDataParametersUnpackedBytes, 8)) ([uint64]$dcsDataParametersFirstLength) 'DCS dataParameters first document length'
+Assert-Equal ([BitConverter]::ToUInt64($dcsDataParametersUnpackedBytes, 16)) ([uint64]$dcsDataParametersSecondLength) 'DCS dataParameters second document length'
+$dcsDataParametersThirdLength = $dcsDataParametersUnpackedBytes.Length - 24 - $dcsDataParametersFirstLength - $dcsDataParametersSecondLength
+Assert-Equal $dcsDataParametersThirdLength ([int]$dcsDataParametersManifest.proven_shape.trailing_document_length) 'DCS dataParameters trailing document length'
+$dcsDataParametersDocuments = @(
+    Get-ByteSlice $dcsDataParametersUnpackedBytes 24 $dcsDataParametersFirstLength
+    Get-ByteSlice $dcsDataParametersUnpackedBytes (24 + $dcsDataParametersFirstLength) $dcsDataParametersSecondLength
+    Get-ByteSlice $dcsDataParametersUnpackedBytes (24 + $dcsDataParametersFirstLength + $dcsDataParametersSecondLength) $dcsDataParametersThirdLength
+)
+for ($index = 0; $index -lt $dcsDataParametersDocuments.Count; $index++) {
+    Assert-Equal (Get-Sha256Hex $dcsDataParametersDocuments[$index]) $dcsDataParametersManifest.proven_shape.document_sha256[$index] "DCS dataParameters document $($index + 1) SHA-256"
+}
+$dcsBaseFirstLength = [int]$dcsManifest.proven_shape.stored_document_lengths[0]
+$dcsBaseSecondLength = [int]$dcsManifest.proven_shape.stored_document_lengths[1]
+$dcsBaseThirdOffset = 24 + $dcsBaseFirstLength + $dcsBaseSecondLength
+$dcsBaseThirdLength = $dcsDecompressed.Length - $dcsBaseThirdOffset
+Assert-Equal (Get-Sha256Hex $dcsDataParametersDocuments[0]) (Get-Sha256Hex (Get-ByteSlice $dcsDecompressed 24 $dcsBaseFirstLength)) 'DCS dataParameters/base schema document equality'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersDocuments[2]) (Get-Sha256Hex (Get-ByteSlice $dcsDecompressed $dcsBaseThirdOffset $dcsBaseThirdLength)) 'DCS dataParameters/base trailing document equality'
+
+$dcsDataParametersTemplateText = [Text.Encoding]::UTF8.GetString($dcsDataParametersTemplateBytes)
+$dcsDataParametersTemplateDocument = New-Object Xml.XmlDocument
+$dcsDataParametersTemplateDocument.PreserveWhitespace = $true
+$dcsDataParametersTemplateStream = New-Object IO.MemoryStream(,($dcsDataParametersTemplateBytes))
+try {
+    $dcsDataParametersTemplateDocument.Load($dcsDataParametersTemplateStream)
+} finally {
+    $dcsDataParametersTemplateStream.Dispose()
+}
+$dcsDataParametersNamespaces = New-Object Xml.XmlNamespaceManager($dcsDataParametersTemplateDocument.NameTable)
+$dcsDataParametersNamespaces.AddNamespace('dcs', 'http://v8.1c.ru/8.1/data-composition-system/schema')
+$dcsDataParametersNamespaces.AddNamespace('dcsset', 'http://v8.1c.ru/8.1/data-composition-system/settings')
+$dcsDataParametersNamespaces.AddNamespace('dcscor', 'http://v8.1c.ru/8.1/data-composition-system/core')
+$dcsDataParametersNamespaces.AddNamespace('xsi', 'http://www.w3.org/2001/XMLSchema-instance')
+$dcsDataParametersNode = $dcsDataParametersTemplateDocument.SelectSingleNode(
+    '/dcs:DataCompositionSchema/dcs:settingsVariant/dcsset:settings/dcsset:dataParameters',
+    $dcsDataParametersNamespaces
+)
+if ($null -eq $dcsDataParametersNode) {
+    throw 'DCS dataParameters direct Settings child is missing from retained native Template.xml.'
+}
+$dcsDataParametersSettingsNode = $dcsDataParametersNode.ParentNode
+$dcsDataParametersChildOrder = @(
+    $dcsDataParametersSettingsNode.ChildNodes |
+        Where-Object { $_.NodeType -eq [Xml.XmlNodeType]::Element } |
+        ForEach-Object { $_.LocalName }
+)
+Assert-Equal ($dcsDataParametersChildOrder -join ',') ($dcsDataParametersManifest.proven_shape.root_settings_child_order -join ',') 'DCS dataParameters direct Settings child order'
+$dcsDataParametersItems = @($dcsDataParametersNode.SelectNodes('dcscor:item', $dcsDataParametersNamespaces))
+Assert-Equal $dcsDataParametersItems.Count 1 'DCS dataParameters item count'
+$dcsDataParametersItem = $dcsDataParametersItems[0]
+Assert-Equal $dcsDataParametersItem.NamespaceURI 'http://v8.1c.ru/8.1/data-composition-system/core' 'DCS dataParameters item namespace'
+Assert-Equal $dcsDataParametersItem.GetAttribute('type', 'http://www.w3.org/2001/XMLSchema-instance') 'dcsset:SettingsParameterValue' 'DCS dataParameters item xsi:type'
+$dcsDataParametersParameter = $dcsDataParametersItem.SelectSingleNode('dcscor:parameter', $dcsDataParametersNamespaces)
+$dcsDataParametersValue = $dcsDataParametersItem.SelectSingleNode('dcscor:value', $dcsDataParametersNamespaces)
+Assert-Equal $dcsDataParametersParameter.InnerText $dcsDataParametersManifest.proven_shape.parameter 'DCS dataParameters parameter'
+Assert-Equal $dcsDataParametersValue.InnerText $dcsDataParametersManifest.proven_shape.value 'DCS dataParameters value'
+Assert-Equal $dcsDataParametersValue.GetAttribute('type', 'http://www.w3.org/2001/XMLSchema-instance') 'xs:string' 'DCS dataParameters value xsi:type'
+Assert-Equal $dcsDataParametersManifest.proven_shape.data_parameters_qname '{http://v8.1c.ru/8.1/data-composition-system/settings}dataParameters' 'DCS dataParameters expanded QName'
+Assert-Equal $dcsDataParametersManifest.proven_shape.item_qname '{http://v8.1c.ru/8.1/data-composition-system/core}item' 'DCS dataParameters item expanded QName'
+Assert-Equal $dcsDataParametersManifest.proven_shape.item_type_qname '{http://v8.1c.ru/8.1/data-composition-system/settings}SettingsParameterValue' 'DCS dataParameters item type expanded QName'
+Assert-Equal $dcsDataParametersManifest.proven_shape.value_type_qname '{http://www.w3.org/2001/XMLSchema}string' 'DCS dataParameters value type expanded QName'
+$dcsDataParametersFragmentStart = $dcsDataParametersTemplateText.IndexOf('<dcsset:dataParameters>', [StringComparison]::Ordinal)
+$dcsDataParametersFragmentEndTag = '</dcsset:dataParameters>'
+$dcsDataParametersFragmentEnd = $dcsDataParametersTemplateText.IndexOf($dcsDataParametersFragmentEndTag, $dcsDataParametersFragmentStart, [StringComparison]::Ordinal)
+if ($dcsDataParametersFragmentStart -lt 0 -or $dcsDataParametersFragmentEnd -lt 0) {
+    throw 'DCS dataParameters exact fragment is missing from retained native Template.xml.'
+}
+$dcsDataParametersFragmentText = $dcsDataParametersTemplateText.Substring(
+    $dcsDataParametersFragmentStart,
+    $dcsDataParametersFragmentEnd - $dcsDataParametersFragmentStart + $dcsDataParametersFragmentEndTag.Length
+)
+$dcsDataParametersFragmentBytes = [Text.Encoding]::UTF8.GetBytes($dcsDataParametersFragmentText)
+Assert-Equal $dcsDataParametersFragmentBytes.Length ([long]$dcsDataParametersManifest.template.data_parameters_fragment.decoded_size) 'DCS dataParameters fragment size'
+Assert-Equal (Get-Sha256Hex $dcsDataParametersFragmentBytes) $dcsDataParametersManifest.template.data_parameters_fragment.sha256 'DCS dataParameters fragment SHA-256'
+
+$dcsFeatureSemanticsPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/edt-2025.2.3-feature-semantics.json'
+$dcsCanonicalCoveragePath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/edt-2025.2.3-canonical-coverage.json'
+$dcsFeatureSemantics = Get-Content -LiteralPath $dcsFeatureSemanticsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$dcsCanonicalCoverage = Get-Content -LiteralPath $dcsCanonicalCoveragePath -Raw -Encoding UTF8 | ConvertFrom-Json
+$dcsDataParametersFeatures = @(
+    $dcsFeatureSemantics.packages |
+        ForEach-Object { $_.classifiers } |
+        Where-Object { $_.name -eq $dcsDataParametersManifest.classification.xcore_classifier } |
+        ForEach-Object { $_.features } |
+        Where-Object { $_.name -eq $dcsDataParametersManifest.classification.xcore_feature }
+)
+Assert-Equal $dcsDataParametersFeatures.Count 1 'DCS dataParameters Xcore feature cardinality'
+Assert-Equal $dcsDataParametersFeatures[0].kind $dcsDataParametersManifest.classification.xcore_kind 'DCS dataParameters Xcore feature kind'
+Assert-Equal $dcsDataParametersFeatures[0].modelType $dcsDataParametersManifest.classification.xcore_model_type 'DCS dataParameters Xcore model type'
+$dcsDataParametersCoverageEntries = @(
+    $dcsCanonicalCoverage.entries |
+        Where-Object {
+            $_.key.classifier -eq $dcsDataParametersManifest.classification.xcore_classifier -and
+            $_.key.feature -eq $dcsDataParametersManifest.classification.xcore_feature
+        }
+)
+Assert-Equal $dcsDataParametersCoverageEntries.Count 1 'DCS dataParameters canonical coverage cardinality'
+Assert-Equal $dcsDataParametersCoverageEntries[0].status $dcsDataParametersManifest.classification.canonical_coverage_status 'DCS dataParameters canonical coverage status'
+Assert-Equal $dcsDataParametersCoverageEntries[0].diagnosticCode $dcsDataParametersManifest.classification.canonical_diagnostic_code 'DCS dataParameters canonical diagnostic code'
+Assert-Equal $dcsDataParametersCoverageEntries[0].opaquePlacement $null 'DCS dataParameters canonical opaque-placement absence'
+Assert-Equal $dcsCanonicalCoverage.summary.opaqueLossless 0 'canonical coverage opaque-lossless count'
+
 $dcsOrderRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-order'
 $dcsOrderManifestPath = Join-Path $dcsOrderRoot 'manifest.json'
 if (-not (Test-Path -LiteralPath $dcsOrderManifestPath -PathType Leaf)) {
@@ -699,6 +857,8 @@ $cfPath = Join-Path $temporaryRoot 'configuration.cf'
 $outputRoot = Join-Path $temporaryRoot 'export'
 $dcsCfPath = Join-Path $temporaryRoot 'dcs-configuration.cf'
 $dcsOutputRoot = Join-Path $temporaryRoot 'dcs-export'
+$dcsDataParametersCfPath = Join-Path $temporaryRoot 'dcs-data-parameters-configuration.cf'
+$dcsDataParametersOutputRoot = Join-Path $temporaryRoot 'dcs-data-parameters-export'
 $dcsFilterComparisonCfPath = Join-Path $temporaryRoot 'dcs-filter-comparison.cf'
 $dcsFilterComparisonOutputRoot = Join-Path $temporaryRoot 'dcs-filter-comparison-export'
 $dcsFilterMetadataCfPath = Join-Path $temporaryRoot 'dcs-filter-metadata-only.cf'
@@ -762,6 +922,32 @@ try {
     }
     Assert-Equal (Get-Item -LiteralPath $dcsCandidatePath).Length ([long]$dcsManifest.template.native_xml.size) "$dcsCandidateRelativePath exported size"
     Assert-Equal (Get-FileSha256Hex $dcsCandidatePath) $dcsManifest.template.native_xml.sha256 "$dcsCandidateRelativePath exported SHA-256"
+
+    [IO.File]::WriteAllBytes($dcsDataParametersCfPath, $dcsDataParametersCfBytes)
+    $dcsDataParametersStdout = & $BinaryPath cf export --source-version 2.20 $dcsDataParametersCfPath $dcsDataParametersOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+        throw "DCS dataParameters CF export failed with exit code $LASTEXITCODE. $stderr"
+    }
+    $dcsDataParametersReport = ($dcsDataParametersStdout -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $dcsDataParametersReport.ok $true 'DCS dataParameters CF export status'
+    Assert-Equal $dcsDataParametersReport.export.storage.failed 0 'DCS dataParameters failed storage entries'
+    $dcsDataParametersCandidatePath = Join-Path $dcsDataParametersOutputRoot ($dcsDataParametersManifest.template.native_xml.export_path.Replace('/', [IO.Path]::DirectorySeparatorChar))
+    if (-not (Test-Path -LiteralPath $dcsDataParametersCandidatePath -PathType Leaf)) {
+        throw "Exported DCS dataParameters Template is missing: $($dcsDataParametersManifest.template.native_xml.export_path)"
+    }
+    Assert-Equal (Get-Item -LiteralPath $dcsDataParametersCandidatePath).Length ([long]$dcsDataParametersManifest.template.native_xml.decoded_size) 'DCS dataParameters exported Template size'
+    Assert-Equal (Get-FileSha256Hex $dcsDataParametersCandidatePath) $dcsDataParametersManifest.template.native_xml.decoded_sha256 'DCS dataParameters exported Template SHA-256'
+    $dcsDataParametersExportedFragment = Get-Utf8XmlFragmentBytes $dcsDataParametersCandidatePath '<dcsset:dataParameters>' '</dcsset:dataParameters>'
+    Assert-Equal $dcsDataParametersExportedFragment.Length ([long]$dcsDataParametersManifest.template.data_parameters_fragment.decoded_size) 'DCS dataParameters exported fragment size'
+    Assert-Equal (Get-Sha256Hex $dcsDataParametersExportedFragment) $dcsDataParametersManifest.template.data_parameters_fragment.sha256 'DCS dataParameters exported fragment SHA-256'
+    $verifyDcsDataParameters = & $BinaryPath cf verify $dcsDataParametersCfPath --compression raw-deflate `
+        --element $dcsDataParametersManifest.template.body_key `
+        --expect-sha256 "$($dcsDataParametersManifest.template.body_key)=$($dcsDataParametersManifest.template.raw_entry.unpacked.decoded_sha256)" 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS dataParameters raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($verifyDcsDataParameters -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS dataParameters raw row'
 
     [IO.File]::WriteAllBytes($dcsFilterComparisonCfPath, $dcsFilterComparisonCfBytes)
     $dcsFilterComparisonStdout = & $BinaryPath cf export --source-version 2.20 $dcsFilterComparisonCfPath $dcsFilterComparisonOutputRoot 2> $stderrPath
@@ -913,4 +1099,4 @@ try {
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter/conditionalAppearance/Form Attributes wrapper + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter/conditionalAppearance/dataParameters source-owned/Form Attributes wrapper + ChartOfCharacteristicTypes + register and plan generated types.'

@@ -8,8 +8,8 @@ use ibcmd_core::opaque::OpaqueFacets;
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
-    DcsSettingsChildrenError, DcsSettingsChildrenParts, emit_dcs_settings_children_parts,
-    parse_dcs_settings_children, rewrite_dcs_settings_children,
+    DcsChildParseOutcome, DcsSettingsChildrenError, DcsSettingsChildrenParts,
+    analyze_dcs_settings_document, emit_dcs_settings_children_parts, rewrite_dcs_settings_children,
 };
 
 const DCS_SCHEMA_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/schema";
@@ -1115,7 +1115,20 @@ fn canonicalize_data_composition_settings_document(
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Option<String> {
-    let children = parse_dcs_settings_children(document)?;
+    let analysis = analyze_dcs_settings_document(document).ok()?;
+    let children = analysis.typed();
+    if matches!(
+        children.selection_outcome(),
+        DcsChildParseOutcome::Unsupported(_)
+    ) || matches!(children.filter(), DcsChildParseOutcome::Unsupported(_))
+        || matches!(children.order(), DcsChildParseOutcome::Unsupported(_))
+        || matches!(
+            children.conditional_appearance(),
+            DcsChildParseOutcome::Unsupported(_)
+        )
+    {
+        return None;
+    }
     let mut writer = DataCompositionXmlWriter::new(object_refs);
     writer.write_document(document, DataCompositionDocumentMode::Settings)?;
     let parts = emit_canonical_dcs_settings_parts(
@@ -1123,19 +1136,19 @@ fn canonicalize_data_composition_settings_document(
         CanonicalDcsSettingsInput {
             selection: children.selection(),
             filter: match children.filter() {
-                ibcmd_xml::DcsChildParseOutcome::Typed(filter) => Some(filter),
-                ibcmd_xml::DcsChildParseOutcome::Absent
-                | ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => None,
+                DcsChildParseOutcome::Typed(filter) => Some(filter),
+                DcsChildParseOutcome::Absent => None,
+                DcsChildParseOutcome::Unsupported(_) => unreachable!("checked above"),
             },
             order: match children.order() {
-                ibcmd_xml::DcsChildParseOutcome::Typed(order) => Some(order),
-                ibcmd_xml::DcsChildParseOutcome::Absent
-                | ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => None,
+                DcsChildParseOutcome::Typed(order) => Some(order),
+                DcsChildParseOutcome::Absent => None,
+                DcsChildParseOutcome::Unsupported(_) => unreachable!("checked above"),
             },
             conditional_appearance: match children.conditional_appearance() {
-                ibcmd_xml::DcsChildParseOutcome::Typed(value) => Some(value),
-                ibcmd_xml::DcsChildParseOutcome::Absent => None,
-                ibcmd_xml::DcsChildParseOutcome::Unsupported(_) => return None,
+                DcsChildParseOutcome::Typed(value) => Some(value),
+                DcsChildParseOutcome::Absent => None,
+                DcsChildParseOutcome::Unsupported(_) => unreachable!("checked above"),
             },
             items_view_mode: children.items_view_mode(),
             items_user_setting_id: children.items_user_setting_id(),
@@ -2449,8 +2462,39 @@ fn is_dcs_settings_xsi_type(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ibcmd_xml::parse_dcs_settings_children;
 
     const TYPE_ID: &str = "11111111-1111-1111-1111-111111111111";
+
+    fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        let mut quartet = [0u8; 4];
+        let mut length = 0usize;
+        for byte in encoded.bytes().filter(|byte| !byte.is_ascii_whitespace()) {
+            quartet[length] = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => 64,
+                _ => panic!("invalid fixture base64 byte {byte}"),
+            };
+            length += 1;
+            if length == 4 {
+                output.push((quartet[0] << 2) | (quartet[1] >> 4));
+                if quartet[2] != 64 {
+                    output.push((quartet[1] << 4) | (quartet[2] >> 2));
+                }
+                if quartet[3] != 64 {
+                    output.push((quartet[2] << 6) | quartet[3]);
+                }
+                length = 0;
+            }
+        }
+        assert_eq!(length, 0, "fixture base64 must contain complete quartets");
+        output
+    }
 
     fn rewritten_type(xml: &str) -> String {
         let mut xml = xml.to_string();
@@ -2693,7 +2737,6 @@ mod tests {
         let settings = concat!(
             "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">",
-            "<order/>",
             "<itemsUserSettingID>id&lt;&amp;</itemsUserSettingID>",
             "<itemsViewMode>Compact</itemsViewMode>",
             "</Settings>"
@@ -2762,6 +2805,54 @@ mod tests {
                 .expect("platform-attested DCS body must be exportable");
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_data_parameters_source_owned_body_exports_byte_exact() {
+        let raw = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-data-parameters-source-owned/raw/",
+            "f4db0f6c-34f4-4449-995d-6265516e5fa8.0.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-data-parameters-source-owned/native-template.xml.b64"
+        )));
+
+        let actual = normalize_data_composition_schema_template_xml(
+            &raw,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("platform-attested source-owned DCS body must be exportable");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn unknown_settings_children_never_reach_the_generic_normalizer() {
+        for unknown in [
+            "<outputParameters/>",
+            "<futureProbe/>",
+            "<probe:futureProbe xmlns:probe=\"urn:ibcmd-rs:dcs-probe\"/>",
+        ] {
+            let settings = format!(
+                "<Settings xmlns=\"{DCS_SETTINGS_URI}\" xmlns:xsi=\"{}\">{unknown}</Settings>",
+                std::str::from_utf8(XSI_NS).unwrap()
+            );
+            let source_profile = ProfileId::parse("provider:mssql-legacy").unwrap();
+            let target_profile = ProfileId::parse("xml-2.20").unwrap();
+            assert!(
+                canonicalize_data_composition_settings_document(
+                    &settings,
+                    &BTreeMap::new(),
+                    &source_profile,
+                    &target_profile,
+                )
+                .is_none(),
+                "unknown child reached generic normalization: {unknown}"
+            );
+        }
     }
 
     #[test]

@@ -2641,6 +2641,10 @@ pub const BUNDLED_DCS_CONDITIONAL_APPEARANCE_EVIDENCE_JSON: &str =
 pub const BUNDLED_DCS_FORM_ATTRIBUTES_CONDITIONAL_APPEARANCE_EVIDENCE_JSON: &str = include_str!(
     "../data/platform-8.3.27-xml-2.20-dcs-form-attributes-conditional-appearance-evidence.json"
 );
+/// Embedded platform-authenticated policy for the exact standalone settings
+/// subtrees that remain source-owned by the XML codec.
+pub const BUNDLED_DCS_SETTINGS_SOURCE_OWNED_EVIDENCE_JSON: &str =
+    include_str!("../data/platform-8.3.27-xml-2.20-dcs-settings-source-owned-evidence.json");
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3290,6 +3294,122 @@ pub struct DcsSettingsSerializationPolicy {
     form_list_settings_qname: String,
 }
 
+/// Exact, bounded standalone settings subtrees which may be retained from an
+/// authenticated source document but may not be synthesized or mutated.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsSettingsSourceOwnedPolicy {
+    namespace_uri: String,
+    core_namespace_uri: String,
+    xml_schema_namespace_uri: String,
+    xsi_namespace_uri: String,
+    data_parameters_qname: String,
+    data_parameter_item_qname: String,
+    settings_parameter_value_type_qname: String,
+    parameter_qname: String,
+    parameter_name: String,
+    value_qname: String,
+    value_type_qname: String,
+    value: String,
+    order_qname: String,
+    structure_item_qname: String,
+    structure_item_group_type_qname: String,
+    structure_order_qname: String,
+    structure_order_item_qname: String,
+    order_item_auto_type_qname: String,
+    structure_selection_qname: String,
+    structure_selection_item_qname: String,
+    selected_item_auto_type_qname: String,
+    max_data_parameter_items: usize,
+    max_structure_items: usize,
+}
+
+impl DcsSettingsSourceOwnedPolicy {
+    pub fn namespace_uri(&self) -> &str {
+        &self.namespace_uri
+    }
+    pub fn core_namespace_uri(&self) -> &str {
+        &self.core_namespace_uri
+    }
+    pub fn xml_schema_namespace_uri(&self) -> &str {
+        &self.xml_schema_namespace_uri
+    }
+    pub fn xsi_namespace_uri(&self) -> &str {
+        &self.xsi_namespace_uri
+    }
+    pub fn data_parameters_qname(&self) -> &str {
+        &self.data_parameters_qname
+    }
+    pub fn data_parameter_item_qname(&self) -> &str {
+        &self.data_parameter_item_qname
+    }
+    pub fn settings_parameter_value_type_qname(&self) -> &str {
+        &self.settings_parameter_value_type_qname
+    }
+    pub fn parameter_qname(&self) -> &str {
+        &self.parameter_qname
+    }
+    pub fn parameter_name(&self) -> &str {
+        &self.parameter_name
+    }
+    pub fn value_qname(&self) -> &str {
+        &self.value_qname
+    }
+    pub fn value_type_qname(&self) -> &str {
+        &self.value_type_qname
+    }
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+    pub fn order_qname(&self) -> &str {
+        &self.order_qname
+    }
+    pub fn structure_item_qname(&self) -> &str {
+        &self.structure_item_qname
+    }
+    pub fn structure_item_group_type_qname(&self) -> &str {
+        &self.structure_item_group_type_qname
+    }
+    pub fn structure_order_qname(&self) -> &str {
+        &self.structure_order_qname
+    }
+    pub fn structure_order_item_qname(&self) -> &str {
+        &self.structure_order_item_qname
+    }
+    pub fn order_item_auto_type_qname(&self) -> &str {
+        &self.order_item_auto_type_qname
+    }
+    pub fn structure_selection_qname(&self) -> &str {
+        &self.structure_selection_qname
+    }
+    pub fn structure_selection_item_qname(&self) -> &str {
+        &self.structure_selection_item_qname
+    }
+    pub fn selected_item_auto_type_qname(&self) -> &str {
+        &self.selected_item_auto_type_qname
+    }
+    pub const fn max_data_parameter_items(&self) -> usize {
+        self.max_data_parameter_items
+    }
+    pub const fn max_structure_items(&self) -> usize {
+        self.max_structure_items
+    }
+    pub const fn is_standalone_only(&self) -> bool {
+        true
+    }
+    pub const fn data_parameters_follows_selection_and_precedes_order(&self) -> bool {
+        true
+    }
+    pub const fn structure_item_is_terminal(&self) -> bool {
+        true
+    }
+    pub const fn unknown_children_are_unsupported(&self) -> bool {
+        true
+    }
+    pub const fn generic_opaque_emission_is_forbidden(&self) -> bool {
+        true
+    }
+}
+
 /// Exact QName and placement policy authenticated by the immutable 8.3.27
 /// XML 2.20 DCS micro-CF. Patch build is provenance, not a dialect selector.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3781,6 +3901,111 @@ struct DcsSelectionEvidencePolicy {
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSettingsSourceOwnedEvidenceCorpus {
+    schema_version: u32,
+    contract: String,
+    source: DcsSettingsSourceOwnedContractSource,
+    sources: DcsSettingsSourceOwnedEvidenceSources,
+    policy: DcsSettingsSourceOwnedEvidencePolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSettingsSourceOwnedContractSource {
+    product: String,
+    release: String,
+    derivation: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSettingsSourceOwnedEvidenceSources {
+    baseline: DcsSettingsSourceOwnedPositiveSource,
+    data_parameters: DcsSettingsDataParametersPositiveSource,
+    unknown_child_negative: DcsSettingsUnknownChildNegativeSource,
+    platform_line: String,
+    source_version: String,
+    ibcmd_sha256: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSettingsSourceOwnedPositiveSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    native_xml_sha256: String,
+    packed_body_sha256: String,
+    unpacked_body_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSettingsDataParametersPositiveSource {
+    product: String,
+    release: String,
+    derivation: String,
+    fixture_id: String,
+    native_xml_sha256: String,
+    packed_body_sha256: String,
+    unpacked_body_sha256: String,
+    fragment_sha256: String,
+    round_trips: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSettingsUnknownChildNegativeSource {
+    product: String,
+    release: String,
+    derivation: String,
+    evidence_key: String,
+    reader_outcome: String,
+    production_outcome: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DcsSettingsSourceOwnedEvidencePolicy {
+    namespace: String,
+    core_namespace: String,
+    xml_schema_namespace: String,
+    xsi_namespace: String,
+    data_parameters_qname: String,
+    data_parameter_item_qname: String,
+    settings_parameter_value_type_qname: String,
+    parameter_qname: String,
+    parameter_name: String,
+    value_qname: String,
+    value_type_qname: String,
+    value: String,
+    order_qname: String,
+    structure_item_qname: String,
+    structure_item_group_type_qname: String,
+    structure_order_qname: String,
+    structure_order_item_qname: String,
+    order_item_auto_type_qname: String,
+    structure_selection_qname: String,
+    structure_selection_item_qname: String,
+    selected_item_auto_type_qname: String,
+    root_child_order: Vec<String>,
+    data_parameter_item_child_order: Vec<String>,
+    structure_item_child_order: Vec<String>,
+    structure_order_child_order: Vec<String>,
+    structure_selection_child_order: Vec<String>,
+    data_parameters_placement: String,
+    structure_item_placement: String,
+    scope: String,
+    max_data_parameter_items: usize,
+    max_structure_items: usize,
+    unknown_children: String,
+    generic_opaque_emission: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DcsOrderEvidenceCorpus {
     schema_version: u32,
     contract: String,
@@ -4266,6 +4491,301 @@ impl DcsSelectionEvidenceCorpus {
             field_qname: self.policy.field_qname,
             field_type_qname: self.policy.field_type_qname,
             auto_type_qname: self.policy.auto_type_qname,
+        }
+    }
+}
+
+impl DcsSettingsSourceOwnedEvidenceCorpus {
+    fn parse(json: &str) -> Result<Self, SchemaError> {
+        if json.len() > 24 * 1024 {
+            return Err(SchemaError::InvalidDcsWriterEvidence(
+                "settings source-owned evidence exceeds 24576 UTF-8 bytes".to_owned(),
+            ));
+        }
+        let evidence: Self = serde_json::from_str(json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    fn validate(&self) -> Result<(), SchemaError> {
+        const NS: &str = "http://v8.1c.ru/8.1/data-composition-system/settings";
+        const CORE_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/core";
+        const XS_NS: &str = "http://www.w3.org/2001/XMLSchema";
+        const XSI_NS: &str = "http://www.w3.org/2001/XMLSchema-instance";
+        const IBCMD_SHA: &str = "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b";
+        let baseline = &self.sources.baseline;
+        let data_parameters = &self.sources.data_parameters;
+        let unknown = &self.sources.unknown_child_negative;
+        let expected = [
+            ("schema version", self.schema_version == 1),
+            (
+                "contract",
+                self.contract == "8.3.27-xml-2.20-dcs-settings-source-owned-v1",
+            ),
+            (
+                "contract source product",
+                self.source.product == "1C:Enterprise Platform",
+            ),
+            (
+                "contract source release",
+                self.source.release == "8.3.27 / XML 2.20",
+            ),
+            (
+                "contract source derivation",
+                self.source.derivation
+                    == "bounded source-owned policy synthesized from two exact standalone DCS cohorts; patch build is retained as provenance and does not select a separate XML dialect without a structural counterexample",
+            ),
+            ("platform line", self.sources.platform_line == "8.3.27"),
+            ("source version", self.sources.source_version == "2.20"),
+            ("ibcmd SHA-256", self.sources.ibcmd_sha256 == IBCMD_SHA),
+            (
+                "baseline product",
+                baseline.product == "1C:Enterprise Platform",
+            ),
+            ("baseline release", baseline.release == "8.3.27.2214"),
+            (
+                "baseline derivation",
+                baseline.derivation
+                    == "two isolated file-infobase round-trips retained as the immutable dcs-core fixture",
+            ),
+            (
+                "baseline fixture",
+                baseline.fixture_id == "8.3.27.2214-xml-2.20-dcs-core",
+            ),
+            (
+                "baseline native XML SHA-256",
+                baseline.native_xml_sha256
+                    == "4e29eb37d821ff47a65c0240751427369c19cf9ec57c7eaa366e4b9efc35818f",
+            ),
+            (
+                "baseline packed body SHA-256",
+                baseline.packed_body_sha256
+                    == "6c9d6e02140f1410bf92650d5fe717b07cd66ec45db1567ab4b2ae7dc0782a8b",
+            ),
+            (
+                "baseline unpacked body SHA-256",
+                baseline.unpacked_body_sha256
+                    == "39790f6f4ff59a5487396eb435a12e4c1a74418c2b3750286dadac8cd40f4510",
+            ),
+            ("baseline round trips", baseline.round_trips == 2),
+            (
+                "dataParameters product",
+                data_parameters.product == "1C:Enterprise Platform",
+            ),
+            (
+                "dataParameters release",
+                data_parameters.release == "8.3.27.2214",
+            ),
+            (
+                "dataParameters derivation",
+                data_parameters.derivation
+                    == "two fresh isolated file-infobase round-trips retained as the immutable dcs-data-parameters-source-owned fixture",
+            ),
+            (
+                "dataParameters fixture",
+                data_parameters.fixture_id
+                    == "8.3.27.2214-xml-2.20-dcs-data-parameters-source-owned",
+            ),
+            (
+                "dataParameters native XML SHA-256",
+                data_parameters.native_xml_sha256
+                    == "db505e5863f238570714fd2f281303fdf6b0a940040535a66e29f080828d6f7c",
+            ),
+            (
+                "dataParameters packed body SHA-256",
+                data_parameters.packed_body_sha256
+                    == "c1f1ba3b778c6a6054730ee389ed244f9c985d9e32c098caf61de18b8a4b4155",
+            ),
+            (
+                "dataParameters unpacked body SHA-256",
+                data_parameters.unpacked_body_sha256
+                    == "ff4bdb55f20904504c781bdd6ec7d1e2a3203fe53c497819c7c58ae6815e3713",
+            ),
+            (
+                "dataParameters fragment SHA-256",
+                data_parameters.fragment_sha256
+                    == "a8318c0031c780148c9b3496f4b6981d3857e2b83b3f4d965c71b895b36831c9",
+            ),
+            (
+                "dataParameters round trips",
+                data_parameters.round_trips == 2,
+            ),
+            ("negative product", unknown.product == "1C:EDT"),
+            ("negative release", unknown.release == "2025.2.3+30"),
+            (
+                "negative derivation",
+                unknown.derivation
+                    == "exact readSettings bytecode review already retained by the bundled DCS writer evidence",
+            ),
+            (
+                "negative evidence key",
+                unknown.evidence_key == "dcs.DataCompositionSettings.opaque-extension.placement",
+            ),
+            (
+                "negative reader outcome",
+                unknown.reader_outcome == "throwWrongElement",
+            ),
+            (
+                "negative production outcome",
+                unknown.production_outcome == "unsupported-no-lossless-placement",
+            ),
+            ("namespace", self.policy.namespace == NS),
+            ("core namespace", self.policy.core_namespace == CORE_NS),
+            (
+                "XML Schema namespace",
+                self.policy.xml_schema_namespace == XS_NS,
+            ),
+            ("xsi namespace", self.policy.xsi_namespace == XSI_NS),
+            (
+                "dataParameters QName",
+                self.policy.data_parameters_qname == format!("{{{NS}}}dataParameters"),
+            ),
+            (
+                "data parameter item QName",
+                self.policy.data_parameter_item_qname == format!("{{{CORE_NS}}}item"),
+            ),
+            (
+                "SettingsParameterValue type QName",
+                self.policy.settings_parameter_value_type_qname
+                    == format!("{{{NS}}}SettingsParameterValue"),
+            ),
+            (
+                "parameter QName",
+                self.policy.parameter_qname == format!("{{{CORE_NS}}}parameter"),
+            ),
+            ("parameter name", self.policy.parameter_name == "Caption"),
+            (
+                "value QName",
+                self.policy.value_qname == format!("{{{CORE_NS}}}value"),
+            ),
+            (
+                "value type QName",
+                self.policy.value_type_qname == format!("{{{XS_NS}}}string"),
+            ),
+            ("value", self.policy.value == "Opaque probe"),
+            (
+                "order QName",
+                self.policy.order_qname == format!("{{{NS}}}order"),
+            ),
+            (
+                "structure item QName",
+                self.policy.structure_item_qname == format!("{{{NS}}}item"),
+            ),
+            (
+                "StructureItemGroup type QName",
+                self.policy.structure_item_group_type_qname
+                    == format!("{{{NS}}}StructureItemGroup"),
+            ),
+            (
+                "structure order QName",
+                self.policy.structure_order_qname == format!("{{{NS}}}order"),
+            ),
+            (
+                "structure order item QName",
+                self.policy.structure_order_item_qname == format!("{{{NS}}}item"),
+            ),
+            (
+                "OrderItemAuto type QName",
+                self.policy.order_item_auto_type_qname == format!("{{{NS}}}OrderItemAuto"),
+            ),
+            (
+                "structure selection QName",
+                self.policy.structure_selection_qname == format!("{{{NS}}}selection"),
+            ),
+            (
+                "structure selection item QName",
+                self.policy.structure_selection_item_qname == format!("{{{NS}}}item"),
+            ),
+            (
+                "SelectedItemAuto type QName",
+                self.policy.selected_item_auto_type_qname == format!("{{{NS}}}SelectedItemAuto"),
+            ),
+            (
+                "root child order",
+                self.policy.root_child_order
+                    == [
+                        "selection",
+                        "dataParameters",
+                        "order",
+                        "item(StructureItemGroup)",
+                    ],
+            ),
+            (
+                "data parameter item child order",
+                self.policy.data_parameter_item_child_order == ["parameter", "value"],
+            ),
+            (
+                "structure item child order",
+                self.policy.structure_item_child_order == ["order", "selection"],
+            ),
+            (
+                "structure order child order",
+                self.policy.structure_order_child_order == ["item(OrderItemAuto)"],
+            ),
+            (
+                "structure selection child order",
+                self.policy.structure_selection_child_order == ["item(SelectedItemAuto)"],
+            ),
+            (
+                "dataParameters placement",
+                self.policy.data_parameters_placement == "after-selection-before-order",
+            ),
+            (
+                "structure item placement",
+                self.policy.structure_item_placement == "terminal",
+            ),
+            ("scope", self.policy.scope == "standalone-only"),
+            (
+                "maximum data parameter items",
+                self.policy.max_data_parameter_items == 1,
+            ),
+            (
+                "maximum structure items",
+                self.policy.max_structure_items == 1,
+            ),
+            (
+                "unknown children",
+                self.policy.unknown_children == "unsupported-no-lossless-placement",
+            ),
+            (
+                "generic opaque emission",
+                self.policy.generic_opaque_emission == "forbidden",
+            ),
+        ];
+        if let Some((field, _)) = expected.into_iter().find(|(_, valid)| !valid) {
+            return Err(SchemaError::InvalidDcsWriterEvidence(format!(
+                "DCS settings source-owned {field} drifted"
+            )));
+        }
+        Ok(())
+    }
+
+    fn into_policy(self) -> DcsSettingsSourceOwnedPolicy {
+        DcsSettingsSourceOwnedPolicy {
+            namespace_uri: self.policy.namespace,
+            core_namespace_uri: self.policy.core_namespace,
+            xml_schema_namespace_uri: self.policy.xml_schema_namespace,
+            xsi_namespace_uri: self.policy.xsi_namespace,
+            data_parameters_qname: self.policy.data_parameters_qname,
+            data_parameter_item_qname: self.policy.data_parameter_item_qname,
+            settings_parameter_value_type_qname: self.policy.settings_parameter_value_type_qname,
+            parameter_qname: self.policy.parameter_qname,
+            parameter_name: self.policy.parameter_name,
+            value_qname: self.policy.value_qname,
+            value_type_qname: self.policy.value_type_qname,
+            value: self.policy.value,
+            order_qname: self.policy.order_qname,
+            structure_item_qname: self.policy.structure_item_qname,
+            structure_item_group_type_qname: self.policy.structure_item_group_type_qname,
+            structure_order_qname: self.policy.structure_order_qname,
+            structure_order_item_qname: self.policy.structure_order_item_qname,
+            order_item_auto_type_qname: self.policy.order_item_auto_type_qname,
+            structure_selection_qname: self.policy.structure_selection_qname,
+            structure_selection_item_qname: self.policy.structure_selection_item_qname,
+            selected_item_auto_type_qname: self.policy.selected_item_auto_type_qname,
+            max_data_parameter_items: self.policy.max_data_parameter_items,
+            max_structure_items: self.policy.max_structure_items,
         }
     }
 }
@@ -8309,6 +8829,21 @@ pub fn bundled_dcs_selection_policy() -> Result<DcsSelectionPolicy, SchemaError>
         .clone()
 }
 
+/// Returns the immutable platform-authenticated policy for the exact bounded
+/// standalone settings subtrees that remain source-owned.
+pub fn bundled_dcs_settings_source_owned_policy()
+-> Result<DcsSettingsSourceOwnedPolicy, SchemaError> {
+    static POLICY: OnceLock<Result<DcsSettingsSourceOwnedPolicy, SchemaError>> = OnceLock::new();
+    POLICY
+        .get_or_init(|| {
+            DcsSettingsSourceOwnedEvidenceCorpus::parse(
+                BUNDLED_DCS_SETTINGS_SOURCE_OWNED_EVIDENCE_JSON,
+            )
+            .map(DcsSettingsSourceOwnedEvidenceCorpus::into_policy)
+        })
+        .clone()
+}
+
 /// Returns the immutable platform-authenticated standalone/Form order policy.
 pub fn bundled_dcs_order_policy() -> Result<DcsOrderPolicy, SchemaError> {
     static POLICY: OnceLock<Result<DcsOrderPolicy, SchemaError>> = OnceLock::new();
@@ -10216,6 +10751,87 @@ mod tests {
             DcsSelectionEvidenceCorpus::parse(&serde_json::to_string(&drift).unwrap()),
             Err(SchemaError::InvalidDcsWriterEvidence(message))
                 if message.contains("field type QName drifted")
+        ));
+    }
+
+    #[test]
+    fn bundled_platform_dcs_settings_source_owned_policy_binds_exact_standalone_cohort() {
+        let policy = bundled_dcs_settings_source_owned_policy().unwrap();
+        assert_eq!(
+            policy.data_parameters_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}dataParameters"
+        );
+        assert_eq!(
+            policy.data_parameter_item_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/core}item"
+        );
+        assert_eq!(
+            policy.settings_parameter_value_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}SettingsParameterValue"
+        );
+        assert_eq!(policy.parameter_name(), "Caption");
+        assert_eq!(
+            policy.value_type_qname(),
+            "{http://www.w3.org/2001/XMLSchema}string"
+        );
+        assert_eq!(policy.value(), "Opaque probe");
+        assert_eq!(
+            policy.structure_item_group_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}StructureItemGroup"
+        );
+        assert_eq!(
+            policy.order_item_auto_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}OrderItemAuto"
+        );
+        assert_eq!(
+            policy.selected_item_auto_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/settings}SelectedItemAuto"
+        );
+        assert_eq!(policy.max_data_parameter_items(), 1);
+        assert_eq!(policy.max_structure_items(), 1);
+        assert!(policy.is_standalone_only());
+        assert!(policy.data_parameters_follows_selection_and_precedes_order());
+        assert!(policy.structure_item_is_terminal());
+        assert!(policy.unknown_children_are_unsupported());
+        assert!(policy.generic_opaque_emission_is_forbidden());
+    }
+
+    #[test]
+    fn dcs_settings_source_owned_evidence_fails_closed_on_shape_hash_and_extra_field_drift() {
+        let raw = serde_json::from_str::<serde_json::Value>(
+            BUNDLED_DCS_SETTINGS_SOURCE_OWNED_EVIDENCE_JSON,
+        )
+        .unwrap();
+
+        let mut shape_drift = raw.clone();
+        shape_drift["policy"]["structureItemChildOrder"] =
+            serde_json::json!(["selection", "order"]);
+        assert!(matches!(
+            DcsSettingsSourceOwnedEvidenceCorpus::parse(
+                &serde_json::to_string(&shape_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("structure item child order drifted")
+        ));
+
+        let mut hash_drift = raw.clone();
+        hash_drift["sources"]["dataParameters"]["unpackedBodySha256"] =
+            serde_json::json!("0".repeat(64));
+        assert!(matches!(
+            DcsSettingsSourceOwnedEvidenceCorpus::parse(
+                &serde_json::to_string(&hash_drift).unwrap()
+            ),
+            Err(SchemaError::InvalidDcsWriterEvidence(message))
+                if message.contains("dataParameters unpacked body SHA-256 drifted")
+        ));
+
+        let mut extra_field = raw;
+        extra_field["policy"]["opaqueFallback"] = serde_json::json!(true);
+        assert!(matches!(
+            DcsSettingsSourceOwnedEvidenceCorpus::parse(
+                &serde_json::to_string(&extra_field).unwrap()
+            ),
+            Err(SchemaError::InvalidJson(message)) if message.contains("unknown field")
         ));
     }
 
