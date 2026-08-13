@@ -340,17 +340,12 @@ impl DcsSettingsTypedChildren {
 /// Presence-aware result for one caller-owned DCS child. Unsupported is not
 /// absence: its exact bytes stay with the owning codec and must not be
 /// regenerated from a partial typed value.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum DcsChildParseOutcome<T> {
+    #[default]
     Absent,
     Typed(T),
     Unsupported(&'static str),
-}
-
-impl<T> Default for DcsChildParseOutcome<T> {
-    fn default() -> Self {
-        Self::Absent
-    }
 }
 
 /// A malformed recognized settings structure. This is distinct from an
