@@ -52853,6 +52853,23 @@ fn catalog_attribute_counts_markers_and_value_lexemes_fail_closed() {
 }
 
 #[test]
+fn catalog_attribute_wrapper_fields_accepts_pattern_with_one_type() {
+    let attribute_uuid = "11111111-1111-4111-8111-111111111111";
+    let single_type_pattern = catalog_attribute_wrapper_for_test(
+        5,
+        attribute_uuid,
+        r#"{"Pattern",{"S"}}"#,
+        r#"{"S",""}"#,
+        "0",
+    );
+    let single_type_pattern_fields = split_1c_braced_fields(&single_type_pattern, 0).unwrap();
+    assert!(
+        parse_catalog_attribute_wrapper_fields(&single_type_pattern_fields, Some(attribute_uuid))
+            .is_some()
+    );
+}
+
+#[test]
 fn catalog_nonempty_paths_and_typed_values_resolve_fail_closed() {
     let direct_uuid = "11111111-1111-4111-8111-111111111111";
     let tabular_uuid = "22222222-2222-4222-8222-222222222222";

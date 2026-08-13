@@ -17138,6 +17138,15 @@ fn parse_catalog_attribute_wrapper_fields<'a>(
     if expected_child_uuid.is_some_and(|expected| expected != child_uuid) {
         return None;
     }
+    // `parse_metadata_code27_payload` only checks the `"Pattern"` marker
+    // itself; a real Catalog attribute always declares at least one value
+    // type, so an empty pattern (`{"Pattern"}`) is a malformed wrapper, not
+    // an attribute with no type.
+    let detail = split_1c_braced_fields(payload.get(1)?.trim(), 0)?;
+    let pattern = split_1c_braced_fields(detail.get(2)?.trim(), 0)?;
+    if pattern.len() < 2 {
+        return None;
+    }
     metadata_attribute_indexing_xml(fields.get(2)?.trim())?;
     match wrapper_code {
         5 => {
