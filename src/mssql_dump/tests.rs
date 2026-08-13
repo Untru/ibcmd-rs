@@ -1,8 +1,10 @@
 use super::characteristics::*;
 use super::*;
 use crate::metadata_owner_graph::{
-    CATALOG_FORM_COLLECTION_UUID, CATALOG_TABULAR_SECTION_COLLECTION_UUID,
-    METADATA_TEMPLATE_COLLECTION_UUID, OwnerGraphFamily,
+    CATALOG_ATTRIBUTE_GROUP_UUID, CATALOG_COMMAND_COLLECTION_UUID, CATALOG_FORM_COLLECTION_UUID,
+    CATALOG_TABULAR_SECTION_COLLECTION_UUID, DOCUMENT_ATTRIBUTE_GROUP_UUID,
+    DOCUMENT_COMMAND_COLLECTION_UUID, DOCUMENT_FORM_COLLECTION_UUID,
+    DOCUMENT_TABULAR_SECTION_COLLECTION_UUID, METADATA_TEMPLATE_COLLECTION_UUID, OwnerGraphFamily,
 };
 use flate2::Compression;
 use flate2::write::DeflateEncoder;
@@ -4661,6 +4663,124 @@ fn metadata_inventory_is_empty_when_xml_extraction_is_disabled() {
     fs::remove_dir_all(root).unwrap();
 }
 
+fn owner_metadata_collection_for_test(marker: &str, items: &[&str]) -> String {
+    if items.is_empty() {
+        format!("{{{marker},0}}")
+    } else {
+        format!("{{{marker},{},{}}}", items.len(), items.join(","))
+    }
+}
+
+/// Minimal owner-schema-exact Document blob: a header-only "Order" document
+/// with every root collection (tabular sections, templates, attributes,
+/// commands, forms) empty and every scalar field set to its documented
+/// default. Field indexes follow `parse_document_properties_from_text` /
+/// `OwnerGraphFamily::Document.layout()`.
+fn document_metadata_text_for_test(uuid: &str, name: &str) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let mut fields: Vec<String> = vec!["0".to_string(); 53];
+    fields[0] = "40".to_string();
+    fields[1] = "11111111-1111-4111-8111-111111111111".to_string();
+    fields[2] = "11111111-1111-4111-8111-111111111112".to_string();
+    fields[3] = "22222222-2222-4222-8222-222222222221".to_string();
+    fields[4] = "22222222-2222-4222-8222-222222222222".to_string();
+    fields[5] = "33333333-3333-4333-8333-333333333331".to_string();
+    fields[6] = "33333333-3333-4333-8333-333333333332".to_string();
+    fields[7] = "44444444-4444-4444-8444-444444444441".to_string();
+    fields[8] = "44444444-4444-4444-8444-444444444442".to_string();
+    fields[9] =
+        format!("{{0,{{3,{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,{zero},0}}}}");
+    fields[10] = zero.to_string();
+    fields[16] = zero.to_string();
+    fields[17] = zero.to_string();
+    fields[18] = zero.to_string();
+    fields[22] = "{0,0}".to_string();
+    fields[24] = "{0,0}".to_string();
+    fields[26] = "55555555-5555-4555-8555-555555555551".to_string();
+    fields[27] = "55555555-5555-4555-8555-555555555552".to_string();
+    fields[29] = "{1,{0,0}}".to_string();
+    fields[32] = "{0}".to_string();
+    fields[35] = zero.to_string();
+    fields[36] = zero.to_string();
+    fields[37] = zero.to_string();
+    fields[38] = "{0}".to_string();
+    fields[39] = "{0}".to_string();
+    fields[40] = "{0}".to_string();
+    fields[41] = "{0}".to_string();
+    fields[42] = "{0}".to_string();
+    fields[45] = "{0,{0}}".to_string();
+    fields[47] = "{1,{0,0}}".to_string();
+    fields[48] = "{1,2,0}".to_string();
+    format!(
+        "{{1,{{{}}},5,{},{},{},{},{}}}",
+        fields.join(","),
+        owner_metadata_collection_for_test(DOCUMENT_TABULAR_SECTION_COLLECTION_UUID, &[]),
+        owner_metadata_collection_for_test(METADATA_TEMPLATE_COLLECTION_UUID, &[]),
+        owner_metadata_collection_for_test(DOCUMENT_ATTRIBUTE_GROUP_UUID, &[]),
+        owner_metadata_collection_for_test(DOCUMENT_COMMAND_COLLECTION_UUID, &[]),
+        owner_metadata_collection_for_test(DOCUMENT_FORM_COLLECTION_UUID, &[]),
+    )
+}
+
+/// Minimal owner-schema-exact Catalog blob (owner_code "56" or "57") with
+/// every root collection empty except the caller-supplied owned form/template
+/// uuids. Field indexes follow `parse_strict_catalog_properties_from_text` /
+/// `OwnerGraphFamily::Catalog.layout()`.
+fn catalog_metadata_text_for_test(
+    owner_code: &str,
+    uuid: &str,
+    name: &str,
+    form_uuids: &[&str],
+    template_uuids: &[&str],
+) -> String {
+    let zero = "00000000-0000-0000-0000-000000000000";
+    let mut fields: Vec<String> = vec!["0".to_string(); 61];
+    fields[0] = owner_code.to_string();
+    fields[1] = "11111111-1111-4111-8111-111111111111".to_string();
+    fields[2] = "11111111-1111-4111-8111-111111111112".to_string();
+    fields[3] = "22222222-2222-4222-8222-222222222221".to_string();
+    fields[4] = "22222222-2222-4222-8222-222222222222".to_string();
+    fields[5] = "33333333-3333-4333-8333-333333333331".to_string();
+    fields[6] = "33333333-3333-4333-8333-333333333332".to_string();
+    fields[7] = "44444444-4444-4444-8444-444444444441".to_string();
+    fields[8] = "44444444-4444-4444-8444-444444444442".to_string();
+    fields[9] =
+        format!("{{0,{{3,{{1,0,{uuid}}},\"{name}\",{{1,\"en\",\"{name}\"}},\"\",0,0,{zero},0}}}}");
+    fields[12] = "{0,0}".to_string();
+    fields[21] = zero.to_string();
+    fields[22] = zero.to_string();
+    fields[23] = zero.to_string();
+    fields[24] = zero.to_string();
+    fields[25] = zero.to_string();
+    fields[26] = zero.to_string();
+    fields[27] = zero.to_string();
+    fields[28] = zero.to_string();
+    fields[29] = zero.to_string();
+    fields[30] = zero.to_string();
+    fields[32] = "{0,0}".to_string();
+    fields[34] = "55555555-5555-4555-8555-555555555551".to_string();
+    fields[35] = "55555555-5555-4555-8555-555555555552".to_string();
+    fields[42] = "{1,{0,0}}".to_string();
+    fields[45] = "{0}".to_string();
+    fields[46] = "{0}".to_string();
+    fields[47] = "{0}".to_string();
+    fields[48] = "{0}".to_string();
+    fields[49] = "{0}".to_string();
+    fields[50] = "{0}".to_string();
+    fields[52] = "{0,{0}}".to_string();
+    fields[54] = "{1,{0,0}}".to_string();
+    fields[56] = "{1,2,0}".to_string();
+    format!(
+        "{{1,{{{}}},5,{},{},{},{},{}}}",
+        fields.join(","),
+        owner_metadata_collection_for_test(METADATA_TEMPLATE_COLLECTION_UUID, template_uuids),
+        owner_metadata_collection_for_test(CATALOG_COMMAND_COLLECTION_UUID, &[]),
+        owner_metadata_collection_for_test(CATALOG_TABULAR_SECTION_COLLECTION_UUID, &[]),
+        owner_metadata_collection_for_test(CATALOG_ATTRIBUTE_GROUP_UUID, &[]),
+        owner_metadata_collection_for_test(CATALOG_FORM_COLLECTION_UUID, form_uuids),
+    )
+}
+
 #[test]
 fn writes_document_additional_indexes_to_source_layout() {
     let root = std::env::temp_dir().join(format!(
@@ -4669,12 +4789,8 @@ fn writes_document_additional_indexes_to_source_layout() {
     ));
     fs::create_dir_all(&root).unwrap();
     let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let document_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,\r\n{{3,\r\n{{1,0,{uuid}}},\"Order\",{{1,\"en\",\"Order\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0}},0}}"
-            )
-            .as_bytes(),
-        );
+    let document_metadata =
+        deflate_for_test(document_metadata_text_for_test(uuid, "Order").as_bytes());
     let additional_indexes =
         b"\xef\xbb\xbf<AdditionalIndexes><AdditionalIndex id=\"idx\"/></AdditionalIndexes>"
             .to_vec();
@@ -6066,17 +6182,12 @@ fn writes_form_metadata_xml_to_owner_or_common_form_layout() {
     let owned_form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let common_form_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
     let catalog_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{56,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_form_uuid},{owned_form_uuid},{common_form_uuid},{{99999999-9999-4999-8999-999999999999,1,{owned_form_uuid}}}}}\r\n}}"
-            )
+        catalog_metadata_text_for_test("56", catalog_uuid, "Products", &[owned_form_uuid], &[])
             .as_bytes(),
-        );
+    );
     let second_catalog_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{second_catalog_uuid}}},\"Services\",{{1,\"en\",\"Services\"}},\"\"}}\r\n}},0,{common_form_uuid}}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        catalog_metadata_text_for_test("57", second_catalog_uuid, "Services", &[], &[]).as_bytes(),
+    );
     let owned_form_metadata = deflate_for_test(
             format!(
                 "{{1,\r\n{{0,\r\n{{14,\r\n{{3,\r\n{{1,0,{owned_form_uuid}}},\"ListForm\",{{1,\"en\",\"List form\"}},\"\"}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}\r\n}}\r\n}},0}}"
@@ -22561,11 +22672,8 @@ fn writes_help_xml_and_html_to_source_layout() {
     fs::create_dir_all(&root).unwrap();
     let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        catalog_metadata_text_for_test("57", uuid, "Products", &[], &[]).as_bytes(),
+    );
     let help = deflate_for_test(
         b"{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,{#base64:iVBORw0KGgo=}}",
     );
@@ -22704,11 +22812,8 @@ fn writes_predefined_data_to_source_layout() {
     let folder_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let item_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
     let catalog_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+        catalog_metadata_text_for_test("57", catalog_uuid, "Products", &[], &[]).as_bytes(),
+    );
     let predefined = deflate_for_test(
             format!(
                 "{{0,{{1,{{7}},{{2,{{1,1,{{2,0,5,{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Элементы\"}},{{\"S\",\"\"}},1,{{1,1,{{2,1,7,{{\"#\",{type_uuid},{{1,{folder_uuid}}}}},{{\"B\",1}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Folder\"}},{{\"S\",\"F\"}},{{\"S\",\"Folder description\"}},{{\"N\",0}},1,{{1,1,{{2,2,7,{{\"#\",{type_uuid},{{1,{item_uuid}}}}},{{\"B\",0}},{{\"#\",{type_uuid},{{1,00000000-0000-0000-0000-000000000000}}}},{{\"S\",\"Item\"}},{{\"S\",\"I\"}},{{\"S\",\"Item description\"}},{{\"N\",0}},0}}}}}}}}}}}}}},-1,3}}}}"
@@ -22959,11 +23064,9 @@ fn writes_form_help_xml_and_html_to_source_layout() {
     let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let form_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let catalog_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{form_uuid},{{99999999-9999-4999-8999-999999999999,1,{form_uuid}}}}}\r\n}}"
-            )
+        catalog_metadata_text_for_test("57", catalog_uuid, "Products", &[form_uuid], &[])
             .as_bytes(),
-        );
+    );
     let form_metadata = deflate_for_test(
             format!(
                 "{{1,\r\n{{0,\r\n{{13,\r\n{{3,\r\n{{1,0,{form_uuid}}},\"ItemForm\",{{1,\"en\",\"Item form\"}},\"\"}},0,1,{{0}}\r\n}}\r\n}},0}}"
@@ -23029,11 +23132,9 @@ fn writes_template_metadata_xml_to_owner_or_common_template_layout() {
     let owned_template_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
     let common_template_uuid = "cccccccc-cccc-4ccc-cccc-cccccccccccc";
     let catalog_metadata = deflate_for_test(
-            format!(
-                "{{1,\r\n{{57,\r\n{{0,\r\n{{3,\r\n{{1,0,{catalog_uuid}}},\"Products\",{{1,\"en\",\"Products\"}},\"\"}}\r\n}},0,{owned_template_uuid}}}\r\n}}"
-            )
+        catalog_metadata_text_for_test("57", catalog_uuid, "Products", &[], &[owned_template_uuid])
             .as_bytes(),
-        );
+    );
     let owned_template_metadata = deflate_for_test(
             format!(
                 "{{1,\r\n{{2,0,\r\n{{3,\r\n{{1,0,{owned_template_uuid}}},\"Print\",{{1,\"en\",\"Print\"}},\"\"}}\r\n,0}}\r\n}}"
@@ -53142,12 +53243,7 @@ fn writes_extracted_metadata_xml_to_source_layout() {
     ));
     fs::create_dir_all(&root).unwrap();
     let uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
-    let blob = deflate_for_test(
-            format!(
-                "{{1,\r\n{{40,\r\n{{0,\r\n{{3,\r\n{{1,0,{uuid}}},\"Invoice\",{{1,\"en\",\"Invoice\"}},\"\"}}\r\n}}\r\n}}\r\n}}\r\n}}"
-            )
-            .as_bytes(),
-        );
+    let blob = deflate_for_test(document_metadata_text_for_test(uuid, "Invoice").as_bytes());
     let row = ConfigRow {
         file_name: uuid.to_string(),
         part_no: 0,
