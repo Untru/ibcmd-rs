@@ -780,7 +780,6 @@ Assert-Equal $dcsMultiVariantPolicy.fixture.platformVersion $dcsMultiVariantMani
 Assert-Equal $dcsMultiVariantPolicy.fixture.sourceVersion $dcsMultiVariantManifest.evidence.source_version 'DCS schema-template envelope source-version binding'
 Assert-Equal $dcsMultiVariantPolicy.fixture.ibcmdSha256 $dcsMultiVariantManifest.evidence.ibcmd_sha256 'DCS schema-template envelope ibcmd binding'
 Assert-Equal $dcsMultiVariantPolicy.fixture.extractorIdentity $dcsMultiVariantManifest.evidence.extractor.identity 'DCS schema-template envelope extractor identity binding'
-Assert-Equal $dcsMultiVariantPolicy.fixture.extractorPath $dcsMultiVariantManifest.evidence.extractor.path 'DCS schema-template envelope extractor path binding'
 Assert-Equal $dcsMultiVariantPolicy.fixture.extractorSha256 $dcsMultiVariantManifest.evidence.extractor.sha256 'DCS schema-template envelope extractor binding'
 Assert-Equal $dcsMultiVariantPolicy.fixture.seedSha256 $dcsMultiVariantManifest.seed.sha256 'DCS schema-template envelope seed binding'
 Assert-Equal $dcsMultiVariantPolicy.fixture.round1CfSha256 $dcsMultiVariantManifest.rounds.round_1_cf.sha256 'DCS schema-template envelope round-1 CF binding'

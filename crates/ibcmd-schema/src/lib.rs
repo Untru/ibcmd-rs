@@ -4204,7 +4204,6 @@ struct DcsSchemaTemplateEnvelopeEvidenceFixture {
     source_version: String,
     ibcmd_sha256: String,
     extractor_identity: String,
-    extractor_path: String,
     extractor_sha256: String,
     seed_sha256: String,
     round1_cf_sha256: String,
@@ -5082,8 +5081,6 @@ impl DcsSchemaTemplateEnvelopeEvidenceCorpus {
             ibcmd_sha256: "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
                 .to_owned(),
             extractor_identity: "ibcmd-rs cf extract retained lab build".to_owned(),
-            extractor_path: "C:/work/ibcmd-rs-selected-extract-2/target/debug/ibcmd-rs.exe"
-                .to_owned(),
             extractor_sha256: "5ec1be63f1a850c2673ee8ce7b896fb98934f363d86fff4e9d581b57cfcab722"
                 .to_owned(),
             seed_sha256: "d32bf50308d0af77243ac4a5b2b9d090ef9c32ddf5575e9583b679dbb785e881"
