@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "fixture_id": "8.3.27.2214-xml-2.20-dcs-area-multi-cell-appearance",
+  "platform": {
+    "version": "8.3.27.2214",
+    "source_version": "2.20",
+    "database_locale": "ru_RU",
+    "ibcmd_sha256": "11c77778927faef858fa4ab544ed627b9b6824a623ee7e5d6e6d5a0cf732d02b"
+  },
+  "seed": {
+    "authority": "hypothesis_only",
+    "basis": "orchestrated batch spec over retained dcs-area-template-appearance corpus export; platform bytes are authority",
+    "path": "seed/Template.xml",
+    "size": 5448,
+    "sha256": "be6a9ba747b79b4de05cb5c9f0a3ac7e52aa45624b08cbf376f2b32ccd80b1fa"
+  },
+  "rounds": {
+    "round_1_cf_sha256": "c6929c6942a2a5e53f0f3e2abb6b4d5eeec16941a43b030f1f49b571ba599a56",
+    "round_2_cf_sha256": "6f6a9c93d1544c888881502d08e3eaabf7fb3c2186cd2584cf64cb45b0f47b6d",
+    "native_template_sha256": "a72d97cfe65a43326433ce1bcfe80f7adf6b6ecfa50074d5d092461db52080d0",
+    "packed_body_sha256": "9e34a9b85eba342e1cc3eb0d6e62c6ae1d230a32696f11408cb94c375a1d5723",
+    "unpacked_body_sha256": "4092d3955a72ee99a7ef5f7ec5eaafcdc80fdead9fb9d8608af55e89c5f75106",
+    "native_template_equal": true,
+    "packed_body_equal": true,
+    "unpacked_body_equal": true,
+    "round_trips": 2
+  },
+  "retained": {
+    "configuration": {
+      "path": "configuration.cf.b64",
+      "decoded_size": 80946,
+      "sha256": "6f6a9c93d1544c888881502d08e3eaabf7fb3c2186cd2584cf64cb45b0f47b6d"
+    },
+    "native_template": {
+      "path": "native-template.xml.b64",
+      "decoded_size": 5448,
+      "sha256": "a72d97cfe65a43326433ce1bcfe80f7adf6b6ecfa50074d5d092461db52080d0"
+    },
+    "packed_body": {
+      "path": "raw-packed.bin.b64",
+      "decoded_size": 1231,
+      "sha256": "9e34a9b85eba342e1cc3eb0d6e62c6ae1d230a32696f11408cb94c375a1d5723"
+    },
+    "unpacked_body": {
+      "path": "raw-unpacked.bin.b64",
+      "decoded_size": 6148,
+      "sha256": "4092d3955a72ee99a7ef5f7ec5eaafcdc80fdead9fb9d8608af55e89c5f75106"
+    }
+  },
+  "document_topology": {
+    "settings_count": 1,
+    "header_bytes": 24,
+    "stored_lengths": [
+      3029,
+      1142
+    ],
+    "primary_schema_sha256": "5124cc181b46586289d2a1ff667f2e8e659c27beefcf806f1f54cc256d82be0c",
+    "settings_sha256": "191d0d0ea288a68188789d4df1ea79f0655768f63025f961b9ab1be746038fa4",
+    "trailing_area_schema_file_size": 1953,
+    "trailing_area_schema_file_sha256": "2aed0a189339c894d16ab61c7a5fd89c08c30aec1a43e353085c8e6c20a10d90"
+  },
+  "cohort": {
+    "template_name": "AreaProbe",
+    "row_count": 2,
+    "row1_cell_count": 2,
+    "row1_cell_appearance": {
+      "parameter": "Расшифровка",
+      "value_type": "Parameter",
+      "value": "Probe"
+    },
+    "row1_cell_field_value": "Probe",
+    "row2_cell_count": 1,
+    "row2_cell_has_appearance": false,
+    "seed_cell_child_order": [
+      "appearance",
+      "item:Field"
+    ],
+    "native_cell_child_order": [
+      "item:Field",
+      "appearance"
+    ],
+    "native_child_order_note": "platform always canonicalizes to Field-then-appearance on export regardless of submitted source order; matches the base fixture's own storage_cell_order"
+  },
+  "negative_observations": [
+    "The platform reorders dcsat:tableCell children to Field-item-first, appearance-second on every observed export, independent of the source XML's element order.",
+    "Both row-1 appearance blocks are fully and independently inlined in the native XML with identical content; no collapsing/sharing is visible at the XML source level.",
+    "Row 2's cell has no appearance element in the native output, exactly matching the no-appearance seed input for that cell."
+  ],
+  "non_claims": [
+    "No claim about the raw storage body's internal appIndex side-table layout (shared vs. duplicated index) for the two structurally-identical row-1 appearance blocks; packed.bin/unpacked.bin are retained for that follow-up, not analyzed in this session.",
+    "No claim about behavior with more than two rows, more than two cells per row, or appearance content that differs between cells.",
+    "compiler_acceptance is intentionally omitted from this draft manifest; it is the next review stage, not part of this lab session."
+  ]
+}
