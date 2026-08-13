@@ -3979,6 +3979,20 @@ pub fn rewrite_dcs_settings_children(
             }
         }
     }
+    match children.output_parameters() {
+        DcsChildParseOutcome::Typed(_) => {
+            replace_direct_canonical_dcs_child(
+                &mut rewritten,
+                "outputParameters",
+                serialized.output_parameters()?,
+            )?;
+        }
+        DcsChildParseOutcome::Absent | DcsChildParseOutcome::Unsupported(_) => {
+            if serialized.output_parameters().is_some() {
+                return None;
+            }
+        }
+    }
     for (remove, local) in [
         (children.items_view_mode.is_some(), "itemsViewMode"),
         (

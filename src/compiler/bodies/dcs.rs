@@ -1364,8 +1364,7 @@ mod tests {
     }
 
     #[test]
-    fn platform_output_parameters_native_packed_body_exports_exact_native_template_except_the_undocumented_name()
-     {
+    fn platform_output_parameters_native_packed_body_exports_exact_native_template() {
         let profile = DcsCodecProfile::fixture();
         let packed = decode_base64_fixture(include_str!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
@@ -1375,6 +1374,7 @@ mod tests {
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-output-parameters/native-template.xml.b64"
         )));
+        // manifest.json: rounds.packed_body_sha256 / rounds.native_template_sha256
         assert_eq!(
             format!("{:x}", Sha256::digest(&packed)),
             "1bab2e8e93c491f33d094473d8456e7877c1673d45656cca9d4729ea40c82fd7"
@@ -1400,21 +1400,12 @@ mod tests {
             )
             .expect("genuine platform primary schema must remain exportable");
 
-        // KNOWN GAP (out of this work package's scope -- see
-        // `platform_output_parameters_exports_through_common_codec_except_the_undocumented_name`
-        // in src/mssql_dump/dcs.rs for the full explanation): the shared
-        // normalizer's `output_parameters` lexical canonicalization
-        // (storage "Title" -> source "Заголовок") is not wired into this
-        // adapter path, so the exported document matches native-template.xml
-        // byte-for-byte everywhere except that one parameter-name text
-        // node, which stays storage-spelled.
-        let expected_text = std::str::from_utf8(&native_template).unwrap();
-        let exported_text = std::str::from_utf8(&exported).unwrap();
-        let patched_exported = exported_text.replace(
-            "<dcscor:parameter>Title</dcscor:parameter>",
-            "<dcscor:parameter>Заголовок</dcscor:parameter>",
-        );
-        assert_eq!(patched_exported, expected_text);
+        // `canonicalize_data_composition_settings_document` now routes
+        // outputParameters through the shared `ibcmd-xml` codec (same
+        // mechanism the terminal AreaTemplate side table already used for
+        // TextColor/Details), so the storage "Title" -> source "Заголовок"
+        // canonicalization is exercised here and the export is byte-exact.
+        assert_eq!(exported, native_template);
     }
 
     #[test]

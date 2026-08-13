@@ -1,7 +1,7 @@
 use super::*;
 use ibcmd_core::dcs::{
-    DcsBuildError, DcsConditionalAppearance, DcsFilter, DcsOrder, DcsSelection, DcsSettingsBuilder,
-    DcsSettingsEnvelope,
+    DcsBuildError, DcsConditionalAppearance, DcsFilter, DcsOrder, DcsOutputParameters,
+    DcsSelection, DcsSettingsBuilder, DcsSettingsEnvelope,
 };
 use ibcmd_core::diagnostic::{PathSegment, PropertyPath};
 use ibcmd_core::opaque::OpaqueFacets;
@@ -83,6 +83,7 @@ pub(super) struct CanonicalDcsSettingsInput<'a> {
     pub(super) filter: Option<&'a DcsFilter>,
     pub(super) order: Option<&'a DcsOrder>,
     pub(super) conditional_appearance: Option<&'a DcsConditionalAppearance>,
+    pub(super) output_parameters: Option<&'a DcsOutputParameters>,
     pub(super) items_view_mode: Option<&'a str>,
     pub(super) items_user_setting_id: Option<&'a str>,
 }
@@ -152,6 +153,7 @@ pub(super) fn emit_canonical_dcs_settings_parts(
         .filter(input.filter.cloned())
         .order(input.order.cloned())
         .conditional_appearance(input.conditional_appearance.cloned())
+        .output_parameters(input.output_parameters.cloned())
         .items_user_setting_id(items_user_setting_id)
         .items_view_mode(items_view_mode)
         .opaque_extensions(OpaqueFacets::new(Vec::new()).expect("empty opaque facets are valid"))
@@ -1202,6 +1204,10 @@ fn canonicalize_data_composition_settings_document(
             children.conditional_appearance(),
             DcsChildParseOutcome::Unsupported(_)
         )
+        || matches!(
+            children.output_parameters(),
+            DcsChildParseOutcome::Unsupported(_)
+        )
     {
         return None;
     }
@@ -1222,6 +1228,11 @@ fn canonicalize_data_composition_settings_document(
                 DcsChildParseOutcome::Unsupported(_) => unreachable!("checked above"),
             },
             conditional_appearance: match children.conditional_appearance() {
+                DcsChildParseOutcome::Typed(value) => Some(value),
+                DcsChildParseOutcome::Absent => None,
+                DcsChildParseOutcome::Unsupported(_) => unreachable!("checked above"),
+            },
+            output_parameters: match children.output_parameters() {
                 DcsChildParseOutcome::Typed(value) => Some(value),
                 DcsChildParseOutcome::Absent => None,
                 DcsChildParseOutcome::Unsupported(_) => unreachable!("checked above"),
@@ -2539,6 +2550,7 @@ fn is_dcs_settings_xsi_type(value: &str) -> bool {
 mod tests {
     use super::*;
     use ibcmd_xml::parse_dcs_settings_children;
+    use sha2::{Digest, Sha256};
 
     const TYPE_ID: &str = "11111111-1111-1111-1111-111111111111";
 
@@ -3102,15 +3114,25 @@ mod tests {
     }
 
     #[test]
-    fn platform_output_parameters_exports_through_common_codec_except_the_undocumented_name() {
+    fn platform_output_parameters_exports_byte_exact_through_common_codec() {
         let packed = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-output-parameters/raw-packed.bin.b64"
         )));
-        let native_template = decode_base64_fixture(include_str!(concat!(
+        let expected = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-output-parameters/native-template.xml.b64"
         )));
+        // manifest.json: rounds.packed_body_sha256 / rounds.native_template_sha256
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "1bab2e8e93c491f33d094473d8456e7877c1673d45656cca9d4729ea40c82fd7"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected)),
+            "bc27a20de1bb75a83b3727ac457db04791cdd092c64e2e31e5b58ebecf296ddb"
+        );
+
         let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
             crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
             &packed,
@@ -3125,28 +3147,16 @@ mod tests {
         )
         .unwrap();
 
-        // KNOWN GAP (out of this work package's scope -- physical adapters
-        // get test-only additions, never production logic changes):
-        // `canonicalize_data_composition_settings_document` and
-        // `CanonicalDcsSettingsInput` in this file have no dedicated
-        // `output_parameters` field/branch, so the generic namespace-prefix
-        // rewrite still correctly re-prefixes `<dcsset:outputParameters>`
-        // and the item's `xsi:type="dcsset:SettingsParameterValue"` (that
-        // part is namespace-URI-driven, not field-specific), but the
-        // dedicated lexical canonicalization this work package added to the
-        // shared `ibcmd-xml` codec (storage "Title" -> source "Заголовок")
-        // is never invoked from this adapter path. The exported document is
-        // therefore byte-identical to native-template.xml everywhere except
-        // that one parameter-name text node, which stays storage-spelled.
-        let expected_text = std::str::from_utf8(&native_template).unwrap();
-        let actual_text = std::str::from_utf8(&actual).unwrap();
-        assert!(actual_text.contains("<dcscor:parameter>Title</dcscor:parameter>"));
-        assert!(!actual_text.contains("Заголовок"));
-        let patched_actual = actual_text.replace(
-            "<dcscor:parameter>Title</dcscor:parameter>",
-            "<dcscor:parameter>Заголовок</dcscor:parameter>",
-        );
-        assert_eq!(patched_actual, expected_text);
+        // `canonicalize_data_composition_settings_document` now routes
+        // outputParameters through the same shared `ibcmd-xml` codec
+        // (`DcsSettingsBuilder::output_parameters`, `emit_dcs_settings_children_parts`,
+        // `rewrite_dcs_settings_children`) that selection/filter/order/
+        // conditionalAppearance already used, the same way the terminal
+        // AreaTemplate side table achieves byte-accuracy for TextColor/
+        // Details. The storage "Title" -> source "Заголовок" lexical
+        // canonicalization this codec already performed is now actually
+        // exercised on this path, so the export is byte-exact.
+        assert_eq!(actual, expected);
     }
 
     #[test]
