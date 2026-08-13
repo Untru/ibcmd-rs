@@ -2674,6 +2674,14 @@ pub const BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON: &str = include_str
 pub const BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-appearance-web-color/manifest.json"
 );
+/// Immutable platform-authenticated AreaTemplate multi-cell shared-appearance
+/// coordinate: row 1 has two `tableCell`s sharing one identical `Расшифровка
+/// = Parameter(Probe)` appearance record; row 2 has one `tableCell` with no
+/// appearance. Native-only round trips (no live compiler-acceptance
+/// verification); see cohort/non_claims in the manifest.
+pub const BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-multi-cell-appearance/manifest.json"
+);
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3748,6 +3756,7 @@ pub struct DcsAreaTemplatePolicy {
     parameter_order: Vec<String>,
     supports_parameter_appearance: bool,
     supports_text_color_appearance: bool,
+    supports_shared_row_appearance: bool,
 }
 
 impl DcsAreaTemplatePolicy {
@@ -3793,8 +3802,23 @@ impl DcsAreaTemplatePolicy {
     pub const fn supports_text_color_appearance(&self) -> bool {
         self.supports_text_color_appearance
     }
+    pub const fn supports_shared_row_appearance(&self) -> bool {
+        self.supports_shared_row_appearance
+    }
     pub fn appearance_parameter(&self) -> &str {
         "Расшифровка"
+    }
+    /// Storage-side spelling of the `Расшифровка` appearance parameter for
+    /// the two-row shared-appearance cohort's single side-table entry
+    /// (referenced by both row-1 cells via the same `appIndex`). The
+    /// evidenced side table spells this item `Details` (English) here too,
+    /// exactly as it does in the color cohort's two-item state, even though
+    /// this record has only one item and no color -- the discriminator is
+    /// not item count but sharing/multiplicity of the record itself. Bound
+    /// independently to this cohort's own evidence, not inferred from the
+    /// color cohort's coincidentally identical literal.
+    pub fn storage_shared_row_appearance_parameter(&self) -> &str {
+        "Details"
     }
     /// Storage-side spelling of the `Расшифровка` appearance parameter when
     /// it co-occurs with the `ЦветТекста` color item. The evidenced side
@@ -3950,6 +3974,49 @@ struct DcsAreaTemplateColorCohort {
     new_item_namespace_uri: String,
     appearance_item_order_after_delta: Vec<String>,
     appearance_item_order_in_seed: Vec<String>,
+}
+
+/// Draft-stage evidence: native-only round trips authenticate the exact
+/// two-row shared-appearance area body (row 1's two cells reuse one side-
+/// table entry via the same `appIndex`; row 2 has no appearance). Like
+/// [`DcsAreaTemplateColorEvidence`], this manifest carries no
+/// `compiler_acceptance` block.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateMultiCellAppearanceEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsAreaTemplateMultiCellAppearanceCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateMultiCellAppearanceCohort {
+    template_name: String,
+    row_count: u32,
+    row1_cell_count: u32,
+    row1_cell_appearance: DcsAreaTemplateMultiCellAppearanceItem,
+    row1_cell_field_value: String,
+    row2_cell_count: u32,
+    row2_cell_has_appearance: bool,
+    seed_cell_child_order: Vec<String>,
+    native_cell_child_order: Vec<String>,
+    native_child_order_note: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateMultiCellAppearanceItem {
+    parameter: String,
+    value_type: String,
+    value: String,
 }
 
 impl DcsSchemaTemplateEnvelopePolicy {
@@ -10551,6 +10618,7 @@ pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, Schem
         BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
         BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
         BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+        BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
     )
 }
 
@@ -10558,6 +10626,7 @@ fn parse_dcs_area_template_policy(
     evidence_json: &str,
     appearance_json: &str,
     color_json: &str,
+    multi_cell_json: &str,
 ) -> Result<DcsAreaTemplatePolicy, SchemaError> {
     let evidence: DcsAreaTemplateEvidence = serde_json::from_str(evidence_json)
         .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
@@ -10647,6 +10716,37 @@ fn parse_dcs_area_template_policy(
                 .to_string(),
         ));
     }
+    let multi_cell: DcsAreaTemplateMultiCellAppearanceEvidence =
+        serde_json::from_str(multi_cell_json)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if multi_cell.schema_version != 1
+        || multi_cell.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-multi-cell-appearance"
+        || multi_cell.cohort.template_name != evidence.cohort.template_name
+        || multi_cell.cohort.row_count != 2
+        || multi_cell.cohort.row1_cell_count != 2
+        || multi_cell.cohort.row1_cell_appearance.parameter != "Расшифровка"
+        || multi_cell.cohort.row1_cell_appearance.value_type != "Parameter"
+        || multi_cell.cohort.row1_cell_appearance.value != evidence.cohort.parameter_name
+        || multi_cell.cohort.row1_cell_field_value != evidence.cohort.parameter_name
+        || multi_cell.cohort.row2_cell_count != 1
+        || multi_cell.cohort.row2_cell_has_appearance
+        || multi_cell.cohort.seed_cell_child_order != ["appearance", "item:Field"]
+        || multi_cell.cohort.native_cell_child_order != ["item:Field", "appearance"]
+        || multi_cell.cohort.native_child_order_note
+            != "platform always canonicalizes to Field-then-appearance on export regardless of submitted source order; matches the base fixture's own storage_cell_order"
+        || multi_cell.negative_observations.len() != 3
+        || multi_cell.non_claims.len() != 3
+        || multi_cell.platform.is_null()
+        || multi_cell.seed.is_null()
+        || multi_cell.rounds.is_null()
+        || multi_cell.retained.is_null()
+        || multi_cell.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS AreaTemplate multi-cell appearance evidence drifted from the exact coordinate"
+                .to_string(),
+        ));
+    }
     Ok(DcsAreaTemplatePolicy {
         template_name: evidence.cohort.template_name,
         parameter_name: evidence.cohort.parameter_name,
@@ -10659,6 +10759,7 @@ fn parse_dcs_area_template_policy(
         parameter_order: evidence.cohort.parameter_order,
         supports_parameter_appearance: true,
         supports_text_color_appearance: true,
+        supports_shared_row_appearance: true,
     })
 }
 
@@ -10691,6 +10792,8 @@ mod dcs_area_template_policy_tests {
             policy.web_red_qname(),
             "{http://v8.1c.ru/8.1/data/ui/colors/web}Red"
         );
+        assert!(policy.supports_shared_row_appearance());
+        assert_eq!(policy.storage_shared_row_appearance_parameter(), "Details");
     }
 
     #[test]
@@ -10722,6 +10825,7 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 &serde_json::to_string(&namespace_drift).unwrap(),
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -10734,6 +10838,7 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 &serde_json::to_string(&order_drift).unwrap(),
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -10747,6 +10852,7 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 &serde_json::to_string(&truncated_observations).unwrap(),
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
             )
             .is_err()
         );
@@ -10757,8 +10863,70 @@ mod dcs_area_template_policy_tests {
                 BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
                 BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON,
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(
+            serde_json::from_value::<DcsAreaTemplateMultiCellAppearanceEvidence>(value).is_err()
+        );
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON).unwrap();
+
+        let mut row_count_drift = raw.clone();
+        row_count_drift["cohort"]["row_count"] = serde_json::json!(3);
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                &serde_json::to_string(&row_count_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut order_drift = raw.clone();
+        order_drift["cohort"]["native_cell_child_order"] =
+            serde_json::json!(["appearance", "item:Field"]);
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                &serde_json::to_string(&order_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        let mut appearance_flag_drift = raw;
+        appearance_flag_drift["cohort"]["row2_cell_has_appearance"] = serde_json::json!(true);
+        assert!(
+            parse_dcs_area_template_policy(
+                BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_TEMPLATE_APPEARANCE_EVIDENCE_JSON,
+                BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON,
+                &serde_json::to_string(&appearance_flag_drift).unwrap(),
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_area_template_policy().is_ok());
+        assert!(
+            bundled_dcs_area_template_policy()
+                .unwrap()
+                .supports_shared_row_appearance()
         );
     }
 }

@@ -43,6 +43,15 @@ pub struct DcsSchemaAreaTemplate {
     /// appearance-color side-table cohort. Always co-occurs with
     /// `parameter_appearance`; the platform never emits color alone.
     text_color_appearance: Option<DcsAppearanceColor>,
+    /// Replaces the whole area body with the exact two-row shape
+    /// authenticated by the dedicated 2214 multi-cell-appearance cohort:
+    /// row 1 has two `tableCell`s sharing one identical `Расшифровка =
+    /// Parameter(Probe)` appearance record (the storage side table has
+    /// exactly one entry, referenced by both cells via the same
+    /// `appIndex`); row 2 has one `tableCell` with no appearance. Mutually
+    /// exclusive with `parameter_appearance`/`text_color_appearance`, which
+    /// describe the single-cell area body instead.
+    shared_row_appearance: bool,
     provenance: SourceProvenance,
 }
 
@@ -68,6 +77,7 @@ impl DcsSchemaAreaTemplate {
             expression,
             parameter_appearance: false,
             text_color_appearance: None,
+            shared_row_appearance: false,
             provenance,
         })
     }
@@ -90,6 +100,16 @@ impl DcsSchemaAreaTemplate {
         self
     }
 
+    /// Enables the exact two-row shared-appearance area body authenticated
+    /// by the dedicated 2214 multi-cell-appearance cohort. See the field
+    /// doc comment for the exact shape. Replaces the single-cell area body
+    /// entirely; callers must not also call `with_parameter_appearance` or
+    /// `with_color_and_parameter_appearance` on the same value.
+    pub fn with_shared_row_appearance(mut self) -> Self {
+        self.shared_row_appearance = true;
+        self
+    }
+
     pub const fn name(&self) -> &CanonicalText {
         &self.name
     }
@@ -104,6 +124,9 @@ impl DcsSchemaAreaTemplate {
     }
     pub const fn text_color_appearance(&self) -> Option<DcsAppearanceColor> {
         self.text_color_appearance
+    }
+    pub const fn has_shared_row_appearance(&self) -> bool {
+        self.shared_row_appearance
     }
     pub const fn provenance(&self) -> &SourceProvenance {
         &self.provenance
@@ -120,6 +143,8 @@ struct DcsSchemaAreaTemplateWire {
     parameter_appearance: bool,
     #[serde(default)]
     text_color_appearance: Option<DcsAppearanceColor>,
+    #[serde(default)]
+    shared_row_appearance: bool,
     provenance: SourceProvenance,
 }
 
@@ -133,13 +158,16 @@ impl<'de> Deserialize<'de> for DcsSchemaAreaTemplate {
             wire.provenance,
         )
         .map_err(de::Error::custom)?;
-        Ok(
-            match (wire.parameter_appearance, wire.text_color_appearance) {
-                (_, Some(color)) => value.with_color_and_parameter_appearance(color),
-                (true, None) => value.with_parameter_appearance(),
-                (false, None) => value,
-            },
-        )
+        let value = match (wire.parameter_appearance, wire.text_color_appearance) {
+            (_, Some(color)) => value.with_color_and_parameter_appearance(color),
+            (true, None) => value.with_parameter_appearance(),
+            (false, None) => value,
+        };
+        Ok(if wire.shared_row_appearance {
+            value.with_shared_row_appearance()
+        } else {
+            value
+        })
     }
 }
 
@@ -1678,6 +1706,29 @@ mod tests {
         let parameter_only = value.with_parameter_appearance();
         assert_eq!(parameter_only.text_color_appearance(), None);
         assert_ne!(parameter_only, colored);
+    }
+
+    #[test]
+    fn style_free_area_template_shared_row_appearance_is_bounded_and_serde_stable() {
+        let value = DcsSchemaAreaTemplate::new(
+            text("AreaProbe"),
+            text("Probe"),
+            text("\"Probe\""),
+            provenance(),
+        )
+        .unwrap();
+        let shared = value.clone().with_shared_row_appearance();
+        assert!(shared.has_shared_row_appearance());
+        // The shared-row body replaces the single-cell appearance state
+        // entirely; it does not also flip the single-cell flags.
+        assert!(!shared.has_parameter_appearance());
+        assert_eq!(shared.text_color_appearance(), None);
+        let json = serde_json::to_string(&shared).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaAreaTemplate>(&json).unwrap(),
+            shared
+        );
+        assert_ne!(shared, value);
     }
 
     fn variant(name: &str) -> DcsSchemaSettingsVariantShell {

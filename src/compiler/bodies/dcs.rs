@@ -1238,6 +1238,132 @@ mod tests {
     }
 
     #[test]
+    fn platform_multi_cell_appearance_compiles_to_exact_side_table() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/native-template.xml.b64"
+        )));
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/raw-unpacked.bin.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&source)),
+            "a72d97cfe65a43326433ce1bcfe80f7adf6b6ecfa50074d5d092461db52080d0"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&unpacked)),
+            "4092d3955a72ee99a7ef5f7ec5eaafcdc80fdead9fb9d8608af55e89c5f75106"
+        );
+        // document_topology (manifest.json): header 24 bytes, one stored
+        // length for the primary schema (3029) and one for the sole
+        // settings document (1142); the terminal side-table SchemaFile is
+        // the remaining bytes.
+        let expected_area = unpacked[24 + 3029 + 1142..].to_vec();
+        assert_eq!(expected_area.len(), 1953);
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&expected_area)),
+            "2aed0a189339c894d16ab61c7a5fd89c08c30aec1a43e353085c8e6c20a10d90"
+        );
+
+        // seed(source) XML -> body: compiling the evidenced native document
+        // must reproduce the exact platform-observed terminal side-table
+        // document, including the shared appIndex=0 referenced by both
+        // row-1 cells and the single `Details`-spelled side-table record.
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+        assert_eq!(
+            decoded.documents().last().copied(),
+            Some(expected_area.as_slice())
+        );
+
+        // body -> XML: re-exporting the compiled body must reproduce the
+        // evidenced shared-row appearance verbatim. (Whole-document byte
+        // equality against native-template.xml is not asserted here for
+        // the same pre-existing, unrelated settings-reindentation reason
+        // documented on the color cohort's equivalent test above; the
+        // genuine-bytes test below proves that instead.)
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert_eq!(
+            exported_text.matches("<dcsat:tableCell>").count(),
+            3,
+            "two row-1 cells plus one row-2 cell"
+        );
+        assert_eq!(exported_text.matches("<dcsat:appearance>").count(), 2);
+        assert!(!exported_text.contains("appIndex"));
+
+        // XML -> body: recompiling the exported source must reproduce the
+        // exact terminal side-table bytes the platform emitted (the same
+        // property `body -> XML -> body == raw-unpacked` pins for the
+        // terminal document).
+        let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
+        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+    }
+
+    #[test]
+    fn platform_multi_cell_appearance_native_packed_body_exports_exact_native_template() {
+        let profile = DcsCodecProfile::fixture();
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/raw-packed.bin.b64"
+        )));
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "9e34a9b85eba342e1cc3eb0d6e62c6ae1d230a32696f11408cb94c375a1d5723"
+        );
+
+        // Decodes the platform's own deflate-compressed bytes directly --
+        // not anything ibcmd-rs compiled -- so the exact re-export match
+        // below is independent of our own compiler direction being
+        // correct, and definitively answers the manifest's own open
+        // question (shared vs. duplicated appIndex) from genuine bytes.
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &packed)
+            .expect("genuine platform-packed body must decode");
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("genuine platform side table must remain exportable");
+        assert_eq!(exported, native_template);
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_seed_order_is_rejected_fail_closed() {
+        let profile = DcsCodecProfile::fixture();
+        let seed = include_bytes!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/seed/Template.xml"
+        ));
+        // The seed is explicitly non-authoritative (manifest:
+        // "hypothesis_only") and spells each row-1 cell
+        // appearance-before-Field, the reverse of what native output and
+        // storage always canonicalize to. The compiler must reject this
+        // order, not silently accept or reorder it.
+        assert!(matches!(
+            compile_dcs(&profile, DcsTemplateKind::Schema, seed),
+            Err(DcsCodecError::UnsupportedSource(_))
+        ));
+    }
+
+    #[test]
     fn schema_compiler_rejects_every_unowned_settings_child() {
         for unknown in [
             "<dcsset:outputParameters/>",

@@ -303,14 +303,18 @@ pub fn parse_dcs_area_template_storage_document(
     }
     let area = parse_area_template_element(top[0], source_profile, locator, &ap)?;
     let area = if wrapper.len() == 2 {
-        if !area.has_parameter_appearance() {
+        if area.has_shared_row_appearance() {
+            require_storage_shared_row_appearance(wrapper[1], &p, &ap)?;
+            area
+        } else if area.has_parameter_appearance() {
+            match require_storage_area_appearance(wrapper[1], &p, &ap)? {
+                Some(color) => area.with_color_and_parameter_appearance(color),
+                None => area,
+            }
+        } else {
             return unsupported("AreaTemplate side table has no matching appIndex");
         }
-        match require_storage_area_appearance(wrapper[1], &p, &ap)? {
-            Some(color) => area.with_color_and_parameter_appearance(color),
-            None => area,
-        }
-    } else if area.has_parameter_appearance() {
+    } else if area.has_parameter_appearance() || area.has_shared_row_appearance() {
         return unsupported("AreaTemplate appIndex has no appearance side table");
     } else {
         area
@@ -368,7 +372,7 @@ fn parse_area_template_element(
     require_type(template[1], &p, &ap.area_template_type_qname())?;
     require_name(template[2], Some(p.schema_namespace_uri()), "parameter")?;
     require_type(template[2], &p, &ap.expression_parameter_type_qname())?;
-    let (has_appearance, embedded_color) = parse_exact_area_body(template[1], &p, ap)?;
+    let area_body = parse_exact_area_body(template[1], &p, ap)?;
     let parameter = elements(template[2])?;
     if parameter.len() != 2 {
         return unsupported("AreaTemplate parameter must contain name and expression");
@@ -394,42 +398,169 @@ fn parse_area_template_element(
         provenance,
     )
     .map_err(DcsInnerSchemaError::Build)?;
-    Ok(match (has_appearance, embedded_color) {
-        (false, _) => area,
-        (true, Some(color)) => area.with_color_and_parameter_appearance(color),
-        (true, None) => area.with_parameter_appearance(),
+    Ok(match area_body {
+        ParsedAreaBody::SingleCell {
+            has_appearance: false,
+            ..
+        } => area,
+        ParsedAreaBody::SingleCell {
+            has_appearance: true,
+            color: Some(color),
+        } => area.with_color_and_parameter_appearance(color),
+        ParsedAreaBody::SingleCell {
+            has_appearance: true,
+            color: None,
+        } => area.with_parameter_appearance(),
+        ParsedAreaBody::SharedRowAppearance => area.with_shared_row_appearance(),
     })
 }
 
 /// Which document direction an appearance body was found in. The two
 /// directions authenticate different lexical spellings for the same
 /// logical parameters once the color item co-occurs (see
-/// `DcsAreaTemplatePolicy::storage_appearance_parameter_with_color`).
+/// `DcsAreaTemplatePolicy::storage_appearance_parameter_with_color`) or the
+/// side-table entry is shared by more than one cell (see
+/// `DcsAreaTemplatePolicy::storage_shared_row_appearance_parameter`).
 #[derive(Clone, Copy)]
 enum AreaAppearanceDirection {
     Source,
     Storage,
 }
 
+/// The outcome of parsing an AreaTemplate's row/cell body: either the
+/// original single-row, single-cell shape (with its own optional
+/// appearance/color), or the evidenced two-row shared-appearance shape.
+enum ParsedAreaBody {
+    SingleCell {
+        has_appearance: bool,
+        color: Option<DcsAppearanceColor>,
+    },
+    SharedRowAppearance,
+}
+
+/// One `tableCell`'s parsed appearance signal: no second child, an embedded
+/// source `dcsat:appearance` (with any color found inside it), or a storage
+/// `appIndex` (whose raw text the caller must validate -- the side-table
+/// wrapper elsewhere is the sole authority for what that index's content
+/// actually is).
+enum TableCellAppearanceSignal {
+    Absent,
+    Source(Option<DcsAppearanceColor>),
+    Storage(String),
+}
+
 fn parse_exact_area_body(
     area: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
-) -> Result<(bool, Option<DcsAppearanceColor>), DcsInnerSchemaError> {
+) -> Result<ParsedAreaBody, DcsInnerSchemaError> {
     let area_ns = ap.area_namespace_uri();
     let rows = elements(area)?;
-    if rows.len() != 1 {
-        return unsupported("AreaTemplate must contain exactly one row");
+    match rows.len() {
+        1 => {
+            require_name(rows[0], Some(area_ns), "item")?;
+            require_type(rows[0], p, &ap.table_row_type_qname())?;
+            let cells = elements(rows[0])?;
+            if cells.len() != 1 {
+                return unsupported("AreaTemplate row must contain exactly one tableCell");
+            }
+            let (has_appearance, color) = match parse_table_cell(cells[0], p, ap)? {
+                TableCellAppearanceSignal::Absent => (false, None),
+                TableCellAppearanceSignal::Source(color) => (true, color),
+                TableCellAppearanceSignal::Storage(index) => {
+                    if index != "0" {
+                        return unsupported(
+                            "AreaTemplate appIndex is outside the exact coordinate",
+                        );
+                    }
+                    (true, None)
+                }
+            };
+            Ok(ParsedAreaBody::SingleCell {
+                has_appearance,
+                color,
+            })
+        }
+        2 => {
+            parse_shared_row_appearance_body(&rows, p, ap)?;
+            Ok(ParsedAreaBody::SharedRowAppearance)
+        }
+        _ => unsupported("AreaTemplate must contain one or two rows"),
     }
-    require_name(rows[0], Some(area_ns), "item")?;
-    require_type(rows[0], p, &ap.table_row_type_qname())?;
-    let row = elements(rows[0])?;
-    if row.len() != 1 {
-        return unsupported("AreaTemplate row must contain exactly one tableCell");
+}
+
+/// Validates the evidenced two-row shape: row 1 has exactly two `tableCell`s
+/// that must both carry the *same* appearance signal (both an embedded
+/// source appearance with no color, or both a storage `appIndex` equal to
+/// `0`); row 2 has exactly one `tableCell` with no appearance at all. Any
+/// divergence between the two row-1 cells, or any appearance on row 2, is
+/// outside the evidenced cohort.
+fn parse_shared_row_appearance_body(
+    rows: &[&ParsedElement],
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<(), DcsInnerSchemaError> {
+    let area_ns = ap.area_namespace_uri();
+    let (row1, row2) = (rows[0], rows[1]);
+    require_name(row1, Some(area_ns), "item")?;
+    require_type(row1, p, &ap.table_row_type_qname())?;
+    let row1_cells = elements(row1)?;
+    if row1_cells.len() != 2 {
+        return unsupported(
+            "AreaTemplate shared-appearance row 1 must contain exactly two tableCells",
+        );
     }
-    require_name(row[0], Some(area_ns), "tableCell")?;
-    require_no_attributes(row[0])?;
-    let cell = elements(row[0])?;
+    let first = parse_table_cell(row1_cells[0], p, ap)?;
+    let second = parse_table_cell(row1_cells[1], p, ap)?;
+    match (first, second) {
+        (TableCellAppearanceSignal::Source(None), TableCellAppearanceSignal::Source(None)) => {}
+        (
+            TableCellAppearanceSignal::Storage(first_index),
+            TableCellAppearanceSignal::Storage(second_index),
+        ) => {
+            if first_index != "0" || second_index != "0" {
+                return unsupported(
+                    "AreaTemplate shared-appearance appIndex is outside the exact coordinate",
+                );
+            }
+        }
+        _ => {
+            return unsupported(
+                "AreaTemplate shared-appearance row 1 cells diverge from the exact coordinate",
+            );
+        }
+    }
+
+    require_name(row2, Some(area_ns), "item")?;
+    require_type(row2, p, &ap.table_row_type_qname())?;
+    let row2_cells = elements(row2)?;
+    if row2_cells.len() != 1 {
+        return unsupported(
+            "AreaTemplate shared-appearance row 2 must contain exactly one tableCell",
+        );
+    }
+    match parse_table_cell(row2_cells[0], p, ap)? {
+        TableCellAppearanceSignal::Absent => Ok(()),
+        _ => unsupported("AreaTemplate shared-appearance row 2 cell must have no appearance"),
+    }
+}
+
+/// Parses one `tableCell`'s `Field` item plus its optional appearance tail,
+/// shared by the single-cell and two-row shared-appearance cohorts. The
+/// platform always canonicalizes storage/native output to Field-first,
+/// appearance-second regardless of source order (a locally reversed order,
+/// as the non-authoritative multi-cell-appearance seed happened to spell
+/// it, is rejected here because `cell[0]` will not resolve to the Field
+/// type).
+fn parse_table_cell(
+    cell_element: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<TableCellAppearanceSignal, DcsInnerSchemaError> {
+    let area_ns = ap.area_namespace_uri();
+    require_name(cell_element, Some(area_ns), "tableCell")?;
+    require_no_attributes(cell_element)?;
+    let cell = elements(cell_element)?;
     if cell.is_empty() || cell.len() > 2 {
         return unsupported("AreaTemplate cell child cardinality is outside the cohort");
     }
@@ -445,23 +576,17 @@ fn parse_exact_area_body(
         return unsupported("AreaTemplate field value is outside the exact coordinate");
     }
     match cell.get(1) {
-        None => Ok((false, None)),
+        None => Ok(TableCellAppearanceSignal::Absent),
         Some(appearance)
             if appearance.namespace.as_deref() == Some(area_ns)
                 && appearance.local == "appearance" =>
         {
             let color = require_source_area_appearance(appearance, p, ap)?;
-            Ok((true, color))
+            Ok(TableCellAppearanceSignal::Source(color))
         }
         Some(index) if index.namespace.as_deref() == Some(area_ns) && index.local == "appIndex" => {
             require_no_attributes(index)?;
-            if text(index)? != "0" {
-                return unsupported("AreaTemplate appIndex is outside the exact coordinate");
-            }
-            // The side-table wrapper (parsed separately by the caller) is
-            // the sole authority for storage-direction appearance content;
-            // appIndex only signals that a side table must be present.
-            Ok((true, None))
+            Ok(TableCellAppearanceSignal::Storage(text(index)?))
         }
         Some(_) => unsupported("AreaTemplate cell second child is outside the exact coordinate"),
     }
@@ -473,7 +598,13 @@ fn require_source_area_appearance(
     ap: &DcsAreaTemplatePolicy,
 ) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
     require_no_attributes(appearance)?;
-    require_parameter_appearance_body(appearance, p, ap, AreaAppearanceDirection::Source)
+    require_parameter_appearance_body(
+        appearance,
+        p,
+        ap,
+        AreaAppearanceDirection::Source,
+        ap.appearance_parameter(),
+    )
 }
 
 fn require_storage_area_appearance(
@@ -483,23 +614,63 @@ fn require_storage_area_appearance(
 ) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
     require_name(appearance, Some(ap.area_namespace_uri()), "appearance")?;
     require_type(appearance, p, &ap.table_cell_appearance_type_qname())?;
-    require_parameter_appearance_body(appearance, p, ap, AreaAppearanceDirection::Storage)
+    require_parameter_appearance_body(
+        appearance,
+        p,
+        ap,
+        AreaAppearanceDirection::Storage,
+        ap.appearance_parameter(),
+    )
+}
+
+/// Validates the storage side-table entry shared by both row-1 cells of
+/// the two-row shared-appearance cohort. Unlike the single-cell storage
+/// entry, this one is spelled `Details` (see
+/// `DcsAreaTemplatePolicy::storage_shared_row_appearance_parameter`) even
+/// though it holds only one item and no color -- the evidenced
+/// discriminator is the record being referenced by more than one cell, not
+/// its own item count. A color item here would be unevidenced, so it is
+/// rejected rather than silently accepted.
+fn require_storage_shared_row_appearance(
+    appearance: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<(), DcsInnerSchemaError> {
+    require_name(appearance, Some(ap.area_namespace_uri()), "appearance")?;
+    require_type(appearance, p, &ap.table_cell_appearance_type_qname())?;
+    match require_parameter_appearance_body(
+        appearance,
+        p,
+        ap,
+        AreaAppearanceDirection::Storage,
+        ap.storage_shared_row_appearance_parameter(),
+    )? {
+        None => Ok(()),
+        Some(_) => unsupported(
+            "AreaTemplate shared-row appearance side table must not contain a color item",
+        ),
+    }
 }
 
 /// Validates the shared `dcscor:item`/`item` appearance body shape and
 /// returns the color, if the evidenced two-item `ЦветТекста` + `Расшифровка`
 /// state was found. Exactly one or two items are admitted; the color item,
-/// when present, must be first.
+/// when present, must be first. `expected_single_item_parameter` is the
+/// literal expected for the lone item in the one-item state, which differs
+/// between the plain single-cell storage entry (`Расшифровка`) and the
+/// shared-row storage entry (`Details`); both directions' single-cell and
+/// two-item-with-color cases always expect `Расшифровка`/`storage_appearance_parameter_with_color`.
 fn require_parameter_appearance_body(
     appearance: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
     ap: &DcsAreaTemplatePolicy,
     direction: AreaAppearanceDirection,
+    expected_single_item_parameter: &str,
 ) -> Result<Option<DcsAppearanceColor>, DcsInnerSchemaError> {
     let items = elements(appearance)?;
     match items.len() {
         1 => {
-            require_parameter_item(items[0], p, ap, ap.appearance_parameter())?;
+            require_parameter_item(items[0], p, ap, expected_single_item_parameter)?;
             Ok(None)
         }
         2 => {
@@ -825,35 +996,72 @@ pub fn emit_dcs_area_template_source_fragment(
         2,
         "<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">",
     );
-    line(&mut out, 3, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
-    line(&mut out, 4, "<dcsat:tableCell>");
-    line(&mut out, 5, "<dcsat:item xsi:type=\"dcsat:Field\">");
-    line(
-        &mut out,
-        6,
-        "<dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
-    );
-    line(&mut out, 5, "</dcsat:item>");
-    if area.has_parameter_appearance() {
-        line(&mut out, 5, "<dcsat:appearance>");
-        if let Some(color) = area.text_color_appearance() {
+    if area.has_shared_row_appearance() {
+        line(&mut out, 3, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+        for _ in 0..2 {
+            line(&mut out, 4, "<dcsat:tableCell>");
+            line(&mut out, 5, "<dcsat:item xsi:type=\"dcsat:Field\">");
+            line(
+                &mut out,
+                6,
+                "<dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
+            );
+            line(&mut out, 5, "</dcsat:item>");
+            line(&mut out, 5, "<dcsat:appearance>");
             line(&mut out, 6, "<dcscor:item>");
-            scalar(&mut out, 7, "dcscor:parameter", "ЦветТекста");
-            line(&mut out, 7, source_color_value_fragment(color));
+            scalar(&mut out, 7, "dcscor:parameter", "Расшифровка");
+            line(
+                &mut out,
+                7,
+                "<dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value>",
+            );
             line(&mut out, 6, "</dcscor:item>");
+            line(&mut out, 5, "</dcsat:appearance>");
+            line(&mut out, 4, "</dcsat:tableCell>");
         }
-        line(&mut out, 6, "<dcscor:item>");
-        scalar(&mut out, 7, "dcscor:parameter", "Расшифровка");
+        line(&mut out, 3, "</dcsat:item>");
+        line(&mut out, 3, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+        line(&mut out, 4, "<dcsat:tableCell>");
+        line(&mut out, 5, "<dcsat:item xsi:type=\"dcsat:Field\">");
         line(
             &mut out,
-            7,
-            "<dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value>",
+            6,
+            "<dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
         );
-        line(&mut out, 6, "</dcscor:item>");
-        line(&mut out, 5, "</dcsat:appearance>");
+        line(&mut out, 5, "</dcsat:item>");
+        line(&mut out, 4, "</dcsat:tableCell>");
+        line(&mut out, 3, "</dcsat:item>");
+    } else {
+        line(&mut out, 3, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+        line(&mut out, 4, "<dcsat:tableCell>");
+        line(&mut out, 5, "<dcsat:item xsi:type=\"dcsat:Field\">");
+        line(
+            &mut out,
+            6,
+            "<dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
+        );
+        line(&mut out, 5, "</dcsat:item>");
+        if area.has_parameter_appearance() {
+            line(&mut out, 5, "<dcsat:appearance>");
+            if let Some(color) = area.text_color_appearance() {
+                line(&mut out, 6, "<dcscor:item>");
+                scalar(&mut out, 7, "dcscor:parameter", "ЦветТекста");
+                line(&mut out, 7, source_color_value_fragment(color));
+                line(&mut out, 6, "</dcscor:item>");
+            }
+            line(&mut out, 6, "<dcscor:item>");
+            scalar(&mut out, 7, "dcscor:parameter", "Расшифровка");
+            line(
+                &mut out,
+                7,
+                "<dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value>",
+            );
+            line(&mut out, 6, "</dcscor:item>");
+            line(&mut out, 5, "</dcsat:appearance>");
+        }
+        line(&mut out, 4, "</dcsat:tableCell>");
+        line(&mut out, 3, "</dcsat:item>");
     }
-    line(&mut out, 4, "</dcsat:tableCell>");
-    line(&mut out, 3, "</dcsat:item>");
     line(&mut out, 2, "</template>");
     line(
         &mut out,
@@ -900,20 +1108,48 @@ pub fn emit_dcs_area_template_storage_document(
         3,
         "<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">",
     );
-    line(&mut out, 4, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
-    line(&mut out, 5, "<dcsat:tableCell>");
-    line(&mut out, 6, "<dcsat:item xsi:type=\"dcsat:Field\">");
-    line(
-        &mut out,
-        7,
-        "<dcsat:value xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
-    );
-    line(&mut out, 6, "</dcsat:item>");
-    if area.has_parameter_appearance() {
-        scalar(&mut out, 6, "dcsat:appIndex", "0");
+    if area.has_shared_row_appearance() {
+        line(&mut out, 4, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+        for _ in 0..2 {
+            line(&mut out, 5, "<dcsat:tableCell>");
+            line(&mut out, 6, "<dcsat:item xsi:type=\"dcsat:Field\">");
+            line(
+                &mut out,
+                7,
+                "<dcsat:value xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
+            );
+            line(&mut out, 6, "</dcsat:item>");
+            scalar(&mut out, 6, "dcsat:appIndex", "0");
+            line(&mut out, 5, "</dcsat:tableCell>");
+        }
+        line(&mut out, 4, "</dcsat:item>");
+        line(&mut out, 4, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+        line(&mut out, 5, "<dcsat:tableCell>");
+        line(&mut out, 6, "<dcsat:item xsi:type=\"dcsat:Field\">");
+        line(
+            &mut out,
+            7,
+            "<dcsat:value xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
+        );
+        line(&mut out, 6, "</dcsat:item>");
+        line(&mut out, 5, "</dcsat:tableCell>");
+        line(&mut out, 4, "</dcsat:item>");
+    } else {
+        line(&mut out, 4, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+        line(&mut out, 5, "<dcsat:tableCell>");
+        line(&mut out, 6, "<dcsat:item xsi:type=\"dcsat:Field\">");
+        line(
+            &mut out,
+            7,
+            "<dcsat:value xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
+        );
+        line(&mut out, 6, "</dcsat:item>");
+        if area.has_parameter_appearance() {
+            scalar(&mut out, 6, "dcsat:appIndex", "0");
+        }
+        line(&mut out, 5, "</dcsat:tableCell>");
+        line(&mut out, 4, "</dcsat:item>");
     }
-    line(&mut out, 5, "</dcsat:tableCell>");
-    line(&mut out, 4, "</dcsat:item>");
     line(&mut out, 3, "</template>");
     line(
         &mut out,
@@ -929,7 +1165,22 @@ pub fn emit_dcs_area_template_storage_document(
     line(&mut out, 3, "</parameter>");
     line(&mut out, 2, "</template>");
     line(&mut out, 1, "</dataCompositionSchema>");
-    if area.has_parameter_appearance() {
+    if area.has_shared_row_appearance() {
+        line(
+            &mut out,
+            1,
+            "<appearance xmlns=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"TableCellAppearance\">",
+        );
+        line(
+            &mut out,
+            2,
+            "<item xmlns=\"http://v8.1c.ru/8.1/data-composition-system/core\">",
+        );
+        scalar(&mut out, 3, "parameter", "Details");
+        line(&mut out, 3, "<value xsi:type=\"Parameter\">Probe</value>");
+        line(&mut out, 2, "</item>");
+        line(&mut out, 1, "</appearance>");
+    } else if area.has_parameter_appearance() {
         line(
             &mut out,
             1,
@@ -1873,6 +2124,54 @@ mod tests {
     const COLOR_ITEM_WEB_RED: &str = "<dcscor:item><dcscor:parameter>ЦветТекста</dcscor:parameter><dcscor:value xmlns:d8p1=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xsi:type=\"v8ui:Color\">d8p1:Red</dcscor:value></dcscor:item>";
     const PARAMETER_ITEM_PROBE: &str = "<dcscor:item><dcscor:parameter>Расшифровка</dcscor:parameter><dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value></dcscor:item>";
 
+    /// The multi-cell-appearance cohort's manifest, like the color cohort's,
+    /// retains only the combined `raw-unpacked` envelope; slice the terminal
+    /// side-table document the same way.
+    fn area_template_multi_cell_appearance_document() -> Vec<u8> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(body[16..24].try_into().unwrap()) as usize;
+        body[24 + first + second..].to_vec()
+    }
+
+    fn area_template_multi_cell_appearance_native_source() -> Vec<u8> {
+        decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/native-template.xml.b64"
+        )))
+    }
+
+    /// Wraps a synthetic two-row `<template xsi:type="dcsat:AreaTemplate">`
+    /// body (source direction) in the minimal document shape
+    /// `parse_dcs_area_template_source_document` accepts. `row1_cells` is
+    /// the raw XML for row 1's `tableCell` elements (caller supplies as
+    /// many/few/whatever-shaped cells as the test needs); row 2 is always
+    /// the fixed one-cell-no-appearance shape.
+    fn area_template_document_with_two_rows(row1_cells: &str) -> Vec<u8> {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\
+<template><name>AreaProbe</name>\
+<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">\
+<dcsat:item xsi:type=\"dcsat:TableRow\">{row1_cells}</dcsat:item>\
+<dcsat:item xsi:type=\"dcsat:TableRow\"><dcsat:tableCell>\
+<dcsat:item xsi:type=\"dcsat:Field\"><dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value></dcsat:item>\
+</dcsat:tableCell></dcsat:item></template>\
+<parameter xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:ExpressionAreaTemplateParameter\">\
+<dcsat:name>Probe</dcsat:name><dcsat:expression>\"Probe\"</dcsat:expression></parameter>\
+</template></DataCompositionSchema>"
+        )
+        .into_bytes()
+    }
+
+    const APPEARANCE_CELL_PROBE: &str = "<dcsat:tableCell><dcsat:item xsi:type=\"dcsat:Field\"><dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value></dcsat:item><dcsat:appearance><dcscor:item><dcscor:parameter>Расшифровка</dcscor:parameter><dcscor:value xsi:type=\"dcscor:Parameter\">Probe</dcscor:value></dcscor:item></dcsat:appearance></dcsat:tableCell>";
+    const PLAIN_CELL_PROBE: &str = "<dcsat:tableCell><dcsat:item xsi:type=\"dcsat:Field\"><dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value></dcsat:item></dcsat:tableCell>";
+
     fn inline_settings(source: &str) -> DcsInlineSettingsFragment {
         let start = source.find("<dcsset:settings").unwrap();
         let close = "</dcsset:settings>";
@@ -2074,6 +2373,195 @@ mod tests {
             corrupted,
             ProfileId::parse("provider:mssql-legacy").unwrap(),
             "fixture:area-appearance-web-color/corrupted",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DcsInnerSchemaError::Malformed(_) | DcsInnerSchemaError::UnsupportedSource(_)
+        ));
+    }
+
+    #[test]
+    fn platform_multi_cell_appearance_side_table_parses_and_emits_exact_documents() {
+        let source = area_template_multi_cell_appearance_native_source();
+        let storage = area_template_multi_cell_appearance_document();
+
+        let area = parse_dcs_area_template_storage_document(
+            &storage,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-area-multi-cell-appearance",
+        )
+        .unwrap();
+        // Resolves the manifest's own open question directly from the
+        // bytes: both row-1 cells carry `appIndex=0` and there is exactly
+        // one side-table `<appearance>` record -- a SHARED index, not two
+        // duplicated records.
+        assert!(area.has_shared_row_appearance());
+        assert!(!area.has_parameter_appearance());
+        assert_eq!(area.text_color_appearance(), None);
+        assert_eq!(
+            emit_dcs_area_template_storage_document(&area).unwrap(),
+            storage
+        );
+
+        let parsed_source = parse_dcs_area_template_source_document(
+            &source,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:dcs-area-multi-cell-appearance/source",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed_source.name(), area.name());
+        assert_eq!(parsed_source.parameter_name(), area.parameter_name());
+        assert_eq!(parsed_source.expression(), area.expression());
+        assert!(parsed_source.has_shared_row_appearance());
+        let fragment = emit_dcs_area_template_source_fragment(&parsed_source).unwrap();
+        let fragment = std::str::from_utf8(&fragment).unwrap();
+        assert_eq!(
+            fragment
+                .matches("<dcsat:item xsi:type=\"dcsat:TableRow\">")
+                .count(),
+            2
+        );
+        assert_eq!(fragment.matches("<dcsat:tableCell>").count(), 3);
+        assert_eq!(fragment.matches("<dcsat:appearance>").count(), 2);
+        assert_eq!(fragment.matches("Расшифровка").count(), 2);
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_seed_order_is_rejected_fail_closed() {
+        // The non-authoritative seed spells each row-1 cell
+        // appearance-before-Field (the reverse of what native output and
+        // storage always canonicalize to); it must be rejected, not
+        // silently reordered or accepted.
+        let seed = include_bytes!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/seed/Template.xml"
+        ));
+        let error = parse_dcs_area_template_source_document(
+            seed,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-multi-cell-appearance/seed-order",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_source_rejects_divergent_row1_cells() {
+        // One cell has the appearance, the other doesn't -- the manifest's
+        // admitted cohort is exactly two IDENTICAL appearance blocks; any
+        // divergence is outside it.
+        let document = area_template_document_with_two_rows(&format!(
+            "{APPEARANCE_CELL_PROBE}{PLAIN_CELL_PROBE}"
+        ));
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-multi-cell-appearance/divergent-cells",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_source_rejects_unsupported_row1_cell_counts() {
+        for row1 in [
+            APPEARANCE_CELL_PROBE.to_string(),
+            format!("{APPEARANCE_CELL_PROBE}{APPEARANCE_CELL_PROBE}{APPEARANCE_CELL_PROBE}"),
+        ] {
+            let document = area_template_document_with_two_rows(&row1);
+            let error = parse_dcs_area_template_source_document(
+                &document,
+                ProfileId::parse("source:designer-xml-2.20").unwrap(),
+                "fixture:area-multi-cell-appearance/row1-cardinality",
+            )
+            .unwrap_err();
+            assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+        }
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_source_rejects_more_than_two_rows() {
+        let document = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\
+<template><name>AreaProbe</name>\
+<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">\
+<dcsat:item xsi:type=\"dcsat:TableRow\">{APPEARANCE_CELL_PROBE}{APPEARANCE_CELL_PROBE}</dcsat:item>\
+<dcsat:item xsi:type=\"dcsat:TableRow\">{PLAIN_CELL_PROBE}</dcsat:item>\
+<dcsat:item xsi:type=\"dcsat:TableRow\">{PLAIN_CELL_PROBE}</dcsat:item>\
+</template>\
+<parameter xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:ExpressionAreaTemplateParameter\">\
+<dcsat:name>Probe</dcsat:name><dcsat:expression>\"Probe\"</dcsat:expression></parameter>\
+</template></DataCompositionSchema>"
+        )
+        .into_bytes();
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-multi-cell-appearance/too-many-rows",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_source_rejects_appearance_on_row2() {
+        let document = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\
+<template><name>AreaProbe</name>\
+<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">\
+<dcsat:item xsi:type=\"dcsat:TableRow\">{APPEARANCE_CELL_PROBE}{APPEARANCE_CELL_PROBE}</dcsat:item>\
+<dcsat:item xsi:type=\"dcsat:TableRow\">{APPEARANCE_CELL_PROBE}</dcsat:item>\
+</template>\
+<parameter xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:ExpressionAreaTemplateParameter\">\
+<dcsat:name>Probe</dcsat:name><dcsat:expression>\"Probe\"</dcsat:expression></parameter>\
+</template></DataCompositionSchema>"
+        )
+        .into_bytes();
+        let error = parse_dcs_area_template_source_document(
+            &document,
+            ProfileId::parse("source:designer-xml-2.20").unwrap(),
+            "fixture:area-multi-cell-appearance/row2-has-appearance",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_storage_rejects_mismatched_app_index() {
+        // Both row-1 cells are evidenced to share appIndex 0; a divergent
+        // index (or a missing side-table match) is outside the cohort.
+        let storage = area_template_multi_cell_appearance_document();
+        let storage_text = std::str::from_utf8(&storage).unwrap();
+        let mutated = storage_text.replacen(
+            "<dcsat:appIndex>0</dcsat:appIndex>\r\n\t\t\t\t\t</dcsat:tableCell>\r\n\t\t\t\t\t<dcsat:tableCell>",
+            "<dcsat:appIndex>1</dcsat:appIndex>\r\n\t\t\t\t\t</dcsat:tableCell>\r\n\t\t\t\t\t<dcsat:tableCell>",
+            1,
+        );
+        assert_ne!(
+            mutated, storage_text,
+            "mutation must actually change the fixture"
+        );
+        let error = parse_dcs_area_template_storage_document(
+            mutated.as_bytes(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-multi-cell-appearance/mismatched-index",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn area_multi_cell_appearance_storage_rejects_corrupted_side_table_bytes() {
+        let storage = area_template_multi_cell_appearance_document();
+        let corrupted = &storage[..storage.len() / 2];
+        let error = parse_dcs_area_template_storage_document(
+            corrupted,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:area-multi-cell-appearance/corrupted",
         )
         .unwrap_err();
         assert!(matches!(

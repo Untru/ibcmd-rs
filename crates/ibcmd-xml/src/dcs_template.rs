@@ -1078,6 +1078,30 @@ mod tests {
     }
 
     #[test]
+    fn platform_multi_cell_appearance_source_compiles_to_exact_side_table() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/native-template.xml.b64"
+        )));
+        // Same manual slice pattern as the color cohort's equivalent test
+        // above: this manifest also retains only the combined
+        // `raw-unpacked` envelope.
+        let unpacked = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-multi-cell-appearance/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(unpacked[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(unpacked[8..16].try_into().unwrap()) as usize;
+        let second = u64::from_le_bytes(unpacked[16..24].try_into().unwrap()) as usize;
+        let expected_area = unpacked[24 + first + second..].to_vec();
+
+        let documents = compile_dcs_schema_template_source_documents(&source).unwrap();
+        assert_eq!(documents.settings().len(), 1);
+        assert_eq!(documents.terminal_schema_file(), expected_area);
+    }
+
+    #[test]
     fn binds_only_direct_variants_positionally() {
         let source = r#"<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings"><settingsVariant><dcsset:name>A</dcsset:name></settingsVariant><settingsVariant><dcsset:name>B</dcsset:name></settingsVariant></DataCompositionSchema>"#;
         let blocks = vec![
