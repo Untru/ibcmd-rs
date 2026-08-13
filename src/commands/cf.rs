@@ -45,7 +45,8 @@ use crate::{
     },
     module_blob::{
         pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
-        pack_simple_metadata_blob_from_xml, patch_versions_blob_bytes_allowing_additions,
+        pack_form_body_blob_from_form_xml, pack_simple_metadata_blob_from_xml,
+        patch_versions_blob_bytes_allowing_additions,
     },
     mssql_dump::{self, StorageImageSourceExportReport},
     profile_registry::{BUNDLED_PROFILES, ProfileRegistryLimits, load_profile_registry},
@@ -737,6 +738,7 @@ enum OverlaySourceFamily {
     MetadataXml,
     CommonModuleXml,
     CommandInterface,
+    FormXml,
 }
 
 impl OverlaySourceFamily {
@@ -747,6 +749,7 @@ impl OverlaySourceFamily {
             Self::MetadataXml => "metadata-xml",
             Self::CommonModuleXml => "common-module-xml",
             Self::CommandInterface => "command-interface",
+            Self::FormXml => "form-xml",
         }
     }
 }
@@ -787,6 +790,10 @@ impl OverlayCodec for CliOverlayCodec<'_> {
             }
             OverlaySourceFamily::CommandInterface => {
                 pack_command_interface_blob_from_xml(base.packed_payload(), &source.bytes)
+                    .map(|packed| packed.blob)
+            }
+            OverlaySourceFamily::FormXml => {
+                pack_form_body_blob_from_form_xml(base.packed_payload(), &source.bytes, None)
                     .map(|packed| packed.blob)
             }
             OverlaySourceFamily::Module | OverlaySourceFamily::RawAsset => Err(anyhow::anyhow!(
@@ -865,6 +872,10 @@ fn overlay(args: CfOverlayArgs) -> Result<CfCommandReport, CfCommandError> {
             OverlaySourceFamily::CommandInterface => {
                 SourcePayload::CommandInterfaceXml { xml: &source.bytes }
             }
+            OverlaySourceFamily::FormXml => SourcePayload::NeedsBase {
+                required: source.key.clone(),
+                reason: "managed Form.xml requires its existing native body row",
+            },
         };
         Ok(CompileRequest::new(target, payload))
     });
@@ -966,6 +977,7 @@ fn load_overlay_sources(args: &CfOverlayArgs) -> Result<Vec<OverlaySource>, Stri
             OverlaySourceFamily::CommandInterface,
             args.command_interfaces.as_slice(),
         ),
+        (OverlaySourceFamily::FormXml, args.form_xml.as_slice()),
     ];
     let mut sources = Vec::new();
     let mut keys = BTreeSet::new();

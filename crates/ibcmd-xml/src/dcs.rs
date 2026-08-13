@@ -21,8 +21,9 @@ use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_schema::{
     DcsListSettingsTailField, FormListSettingsNullValue, SchemaError, WriterPolicy,
     WriterRuleCorpus, WriterRuleKey, bundled_dcs_conditional_appearance_policy,
-    bundled_dcs_filter_policy, bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy,
-    bundled_dcs_selection_policy, bundled_dcs_settings_serialization_policy, bundled_writer_rules,
+    bundled_dcs_filter_policy, bundled_dcs_form_attributes_conditional_appearance_policy,
+    bundled_dcs_list_settings_tail_policy, bundled_dcs_order_policy, bundled_dcs_selection_policy,
+    bundled_dcs_settings_serialization_policy, bundled_writer_rules,
 };
 use quick_xml::Reader as QuickXmlReader;
 use quick_xml::escape::escape;
@@ -402,6 +403,17 @@ pub enum DcsChildParseOutcome<T> {
     Unsupported(&'static str),
 }
 
+/// All DCS-owned Form children parsed from one XML document. This keeps the
+/// production Form compiler on one XML parse while preserving the existing
+/// presence-aware outcomes for each physical context.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FormDcsChildren {
+    pub list_settings_filters: Vec<DcsChildParseOutcome<DcsFilter>>,
+    pub list_settings_orders: Vec<DcsChildParseOutcome<DcsOrder>>,
+    pub list_settings_conditional_appearances: Vec<DcsChildParseOutcome<DcsConditionalAppearance>>,
+    pub form_attributes_conditional_appearance: DcsChildParseOutcome<DcsConditionalAppearance>,
+}
+
 /// A malformed recognized settings structure. This is distinct from an
 /// unsupported but well-formed extension that remains source-owned.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -696,7 +708,9 @@ pub fn emit_dcs_filter_storage_document(
         policy.namespace_uri(),
         policy.xml_schema_namespace_uri()
     );
-    xml.push_str(&emit_dcs_filter_contents(filter, None, "\t", &policy)?);
+    xml.push_str(&emit_dcs_filter_contents(
+        filter, None, "\t", &policy, true,
+    )?);
     xml.push_str("</");
     xml.push_str(root);
     xml.push('>');
@@ -746,6 +760,7 @@ fn emit_dcs_filter(
         prefix,
         &format!("{indent}\t"),
         &policy,
+        prefix.is_none(),
     )?);
     output.push_str(&format!("{indent}</{}>\r\n", qualified(local)));
     Ok(output)
@@ -810,6 +825,7 @@ fn emit_dcs_filter_contents(
     prefix: Option<&str>,
     indent: &str,
     policy: &ibcmd_schema::DcsFilterPolicy,
+    declare_core_namespace_on_left: bool,
 ) -> Result<String, DcsSettingsChildrenError> {
     let qualified = |expanded: &str| -> Result<String, DcsListSettingsTailError> {
         let local = expanded_local_name(expanded)?;
@@ -843,7 +859,7 @@ fn emit_dcs_filter_contents(
                 if use_value { "true" } else { "false" }
             ));
         }
-        let left_namespace = if prefix.is_none() {
+        let left_namespace = if declare_core_namespace_on_left {
             format!(" xmlns:dcscor=\"{}\"", policy.core_namespace_uri())
         } else {
             String::new()
@@ -898,26 +914,53 @@ pub fn emit_dcs_conditional_appearance_fragment(
     let policy =
         bundled_dcs_conditional_appearance_policy().map_err(DcsListSettingsTailError::from)?;
     let root = expanded_local_name(policy.conditional_appearance_qname())?;
+    let mut output = format!("{indent}<{prefix}:{root}>\r\n");
+    output.push_str(&emit_dcs_conditional_appearance_contents(
+        value,
+        Some(prefix),
+        &format!("{indent}\t"),
+        false,
+    )?);
+    output.push_str(&format!("{indent}</{prefix}:{root}>\r\n"));
+    Ok(output)
+}
+
+fn emit_dcs_conditional_appearance_contents(
+    value: &DcsConditionalAppearance,
+    prefix: Option<&str>,
+    item_indent: &str,
+    declared_storage_namespaces: bool,
+) -> Result<String, DcsSettingsChildrenError> {
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(DcsListSettingsTailError::from)?;
+    let qualify = |local: &str| match prefix {
+        Some(prefix) => format!("{prefix}:{local}"),
+        None => local.to_owned(),
+    };
     let item_name = expanded_local_name(policy.item_qname())?;
     let selection_name = expanded_local_name(policy.selection_qname())?;
     let field_name = expanded_local_name(policy.field_qname())?;
     let appearance_name = expanded_local_name(policy.appearance_qname())?;
     let parameter_type = expanded_local_name(policy.parameter_value_type_qname())?;
-    let item_indent = format!("{indent}\t");
     let body_indent = format!("{item_indent}\t");
     let value_indent = format!("{body_indent}\t");
     let scalar_indent = format!("{value_indent}\t");
-    let mut output = format!("{indent}<{prefix}:{root}>\r\n");
+    let item_name = qualify(item_name);
+    let selection_name = qualify(selection_name);
+    let field_name = qualify(field_name);
+    let appearance_name = qualify(appearance_name);
+    let parameter_type = qualify(parameter_type);
+    let mut output = String::new();
     for item in value.items() {
-        output.push_str(&format!("{item_indent}<{prefix}:{item_name}>\r\n"));
-        output.push_str(&format!("{body_indent}<{prefix}:{selection_name}>\r\n"));
-        output.push_str(&format!("{value_indent}<{prefix}:{item_name}>\r\n"));
+        output.push_str(&format!("{item_indent}<{item_name}>\r\n"));
+        output.push_str(&format!("{body_indent}<{selection_name}>\r\n"));
+        output.push_str(&format!("{value_indent}<{item_name}>\r\n"));
         output.push_str(&format!(
-            "{scalar_indent}<{prefix}:{field_name}>{}</{prefix}:{field_name}>\r\n",
+            "{scalar_indent}<{field_name}>{}</{field_name}>\r\n",
             escape(item.selected_field().as_str())
         ));
-        output.push_str(&format!("{value_indent}</{prefix}:{item_name}>\r\n"));
-        output.push_str(&format!("{body_indent}</{prefix}:{selection_name}>\r\n"));
+        output.push_str(&format!("{value_indent}</{item_name}>\r\n"));
+        output.push_str(&format!("{body_indent}</{selection_name}>\r\n"));
         let nested_filter = DcsFilter::new(
             vec![DcsFilterItem::Comparison(item.filter().clone())],
             None,
@@ -928,14 +971,21 @@ pub fn emit_dcs_conditional_appearance_fragment(
                 "conditional-appearance nested filter violates canonical bounds",
             )
         })?;
-        output.push_str(&emit_dcs_filter(
+        let filter_policy = bundled_dcs_filter_policy().map_err(DcsListSettingsTailError::from)?;
+        let filter_name = expanded_local_name(filter_policy.filter_qname())?;
+        let qualified_filter_name = qualify(filter_name);
+        output.push_str(&format!("{body_indent}<{qualified_filter_name}>\r\n"));
+        output.push_str(&emit_dcs_filter_contents(
             &nested_filter,
-            Some(prefix),
-            &body_indent,
+            prefix,
+            &value_indent,
+            &filter_policy,
+            !declared_storage_namespaces && prefix.is_none(),
         )?);
-        output.push_str(&format!("{body_indent}<{prefix}:{appearance_name}>\r\n"));
+        output.push_str(&format!("{body_indent}</{qualified_filter_name}>\r\n"));
+        output.push_str(&format!("{body_indent}<{appearance_name}>\r\n"));
         output.push_str(&format!(
-            "{value_indent}<dcscor:item xsi:type=\"{prefix}:{parameter_type}\">\r\n"
+            "{value_indent}<dcscor:item xsi:type=\"{parameter_type}\">\r\n"
         ));
         let (parameter, color) = match item.appearance() {
             DcsAppearanceParameter::TextColor(DcsAppearanceColor::WebRed) => {
@@ -949,8 +999,8 @@ pub fn emit_dcs_conditional_appearance_fragment(
             "{scalar_indent}<dcscor:value xsi:type=\"v8ui:Color\">{color}</dcscor:value>\r\n"
         ));
         output.push_str(&format!("{value_indent}</dcscor:item>\r\n"));
-        output.push_str(&format!("{body_indent}</{prefix}:{appearance_name}>\r\n"));
-        output.push_str(&format!("{item_indent}</{prefix}:{item_name}>\r\n"));
+        output.push_str(&format!("{body_indent}</{appearance_name}>\r\n"));
+        output.push_str(&format!("{item_indent}</{item_name}>\r\n"));
     }
     for (qname, scalar) in [
         (
@@ -964,14 +1014,94 @@ pub fn emit_dcs_conditional_appearance_fragment(
     ] {
         if let Some(scalar) = scalar {
             let local = expanded_local_name(qname)?;
+            let name = qualify(local);
             output.push_str(&format!(
-                "{item_indent}<{prefix}:{local}>{}</{prefix}:{local}>\r\n",
+                "{item_indent}<{name}>{}</{name}>\r\n",
                 escape(scalar)
             ));
         }
     }
-    output.push_str(&format!("{indent}</{prefix}:{root}>\r\n"));
     Ok(output)
+}
+
+/// Emits the exact direct Form `Attributes/ConditionalAppearance` wrapper.
+pub fn emit_form_attributes_conditional_appearance_fragment(
+    value: &DcsConditionalAppearance,
+    indent: &str,
+) -> Result<String, DcsSettingsChildrenError> {
+    if indent.len() > 64 || !indent.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "Form Attributes conditional-appearance indent is invalid",
+        )
+        .into());
+    }
+    validate_form_attributes_conditional_appearance_for_emission(value)?;
+    let wrapper_policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(DcsListSettingsTailError::from)?;
+    let wrapper = expanded_local_name(wrapper_policy.wrapper_qname())?;
+    let mut output = format!("{indent}<{wrapper}>\r\n");
+    output.push_str(&emit_dcs_conditional_appearance_contents(
+        value,
+        Some("dcsset"),
+        &format!("{indent}\t"),
+        false,
+    )?);
+    output.push_str(&format!("{indent}</{wrapper}>\r\n"));
+    Ok(output)
+}
+
+/// Emits the exact BOM XML stored as the unkeyed Form Attributes tail value.
+pub fn emit_form_attributes_conditional_appearance_storage_document(
+    value: &DcsConditionalAppearance,
+) -> Result<Vec<u8>, DcsSettingsChildrenError> {
+    validate_form_attributes_conditional_appearance_for_emission(value)?;
+    let wrapper_policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(DcsListSettingsTailError::from)?;
+    let root = expanded_local_name(wrapper_policy.storage_root_qname())?;
+    let child = expanded_local_name(wrapper_policy.storage_child_qname())?;
+    let mut xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<{root} xmlns=\"{}\" xmlns:dcscor=\"{}\" xmlns:style=\"{}\" xmlns:sys=\"{}\" xmlns:v8=\"{}\" xmlns:v8ui=\"{}\" xmlns:web=\"{}\" xmlns:win=\"{}\" xmlns:xs=\"{}\" xmlns:xsi=\"{}\">\r\n\t<{child}>\r\n",
+        wrapper_policy.settings_namespace_uri(),
+        wrapper_policy.core_namespace_uri(),
+        wrapper_policy.style_namespace_uri(),
+        wrapper_policy.system_font_namespace_uri(),
+        wrapper_policy.core_data_namespace_uri(),
+        wrapper_policy.ui_namespace_uri(),
+        wrapper_policy.web_color_namespace_uri(),
+        wrapper_policy.windows_color_namespace_uri(),
+        wrapper_policy.xml_schema_namespace_uri(),
+        wrapper_policy.xsi_namespace_uri(),
+    );
+    xml.push_str(&emit_dcs_conditional_appearance_contents(
+        value, None, "\t\t", true,
+    )?);
+    xml.push_str(&format!("\t</{child}>\r\n</{root}>"));
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(bytes)
+}
+
+/// Emits the platform-authenticated inactive Form Attributes Settings tail.
+pub fn emit_form_attributes_empty_storage_document() -> Result<Vec<u8>, DcsSettingsChildrenError> {
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(DcsListSettingsTailError::from)?;
+    let root = expanded_local_name(policy.storage_root_qname())?;
+    let xml = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<{root} xmlns=\"{}\" xmlns:dcscor=\"{}\" xmlns:style=\"{}\" xmlns:sys=\"{}\" xmlns:v8=\"{}\" xmlns:v8ui=\"{}\" xmlns:web=\"{}\" xmlns:win=\"{}\" xmlns:xs=\"{}\" xmlns:xsi=\"{}\"/>",
+        policy.settings_namespace_uri(),
+        policy.core_namespace_uri(),
+        policy.style_namespace_uri(),
+        policy.system_font_namespace_uri(),
+        policy.core_data_namespace_uri(),
+        policy.ui_namespace_uri(),
+        policy.web_color_namespace_uri(),
+        policy.windows_color_namespace_uri(),
+        policy.xml_schema_namespace_uri(),
+        policy.xsi_namespace_uri(),
+    );
+    let mut bytes = b"\xEF\xBB\xBF".to_vec();
+    bytes.extend_from_slice(xml.as_bytes());
+    Ok(bytes)
 }
 
 /// Emits the physical BOM XML stored under the Form Appearance property.
@@ -1115,6 +1245,29 @@ fn validate_dcs_conditional_appearance_for_emission(
             )
             .into());
         }
+    }
+    Ok(())
+}
+
+fn validate_form_attributes_conditional_appearance_for_emission(
+    value: &DcsConditionalAppearance,
+) -> Result<(), DcsSettingsChildrenError> {
+    validate_dcs_conditional_appearance_for_emission(value)?;
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(DcsListSettingsTailError::from)?;
+    if !policy.follows_all_attributes()
+        || !policy.uses_unkeyed_direct_base64_tail()
+        || policy.has_storage_record_type_uuid()
+        || !policy.container_metadata_is_forbidden()
+        || value.items().is_empty()
+        || value.items().len() > policy.max_emitted_items()
+        || value.view_mode().is_some()
+        || value.user_setting_id().is_some()
+    {
+        return Err(DcsListSettingsTailError::InvalidFormat(
+            "Form Attributes conditional appearance is outside the authenticated wrapper cohort",
+        )
+        .into());
     }
     Ok(())
 }
@@ -1923,6 +2076,17 @@ fn parse_dcs_conditional_appearance(
             reason: "conditionalAppearance child uses the wrong namespace",
         });
     }
+    parse_dcs_conditional_appearance_body(element, root)
+}
+
+fn parse_dcs_conditional_appearance_body(
+    element: &XmlElement,
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearance>, DcsSettingsParseError> {
+    let policy =
+        bundled_dcs_conditional_appearance_policy().map_err(|_| DcsSettingsParseError {
+            reason: "bundled conditional-appearance evidence is invalid",
+        })?;
     if element
         .attributes()
         .iter()
@@ -2365,6 +2529,261 @@ fn collect_form_list_settings_conditional_appearances(
         }
     }
     Ok(())
+}
+
+/// Parses all DCS-owned Form children from one namespace-resolved XML tree.
+pub fn parse_form_dcs_children(bytes: &[u8]) -> Result<FormDcsChildren, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "Form document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "Form document is not well-formed XML",
+    })?;
+    let root = document.root();
+    if root.name().local() != "Form" || !xml_element_uses_namespace(root, root, FORM_LOG_NAMESPACE)
+    {
+        return Err(DcsSettingsParseError {
+            reason: "Form document root uses the wrong QName",
+        });
+    }
+
+    let mut result = FormDcsChildren::default();
+    collect_form_list_settings_filters(root, root, &mut result.list_settings_filters)?;
+    collect_form_list_settings_orders(root, root, &mut result.list_settings_orders)?;
+    collect_form_list_settings_conditional_appearances(
+        root,
+        root,
+        &mut result.list_settings_conditional_appearances,
+    )?;
+    result.form_attributes_conditional_appearance =
+        collect_form_attributes_conditional_appearance(root)?;
+    Ok(result)
+}
+
+fn collect_form_attributes_conditional_appearance(
+    root: &XmlElement,
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearance>, DcsSettingsParseError> {
+    let mut attributes = None;
+    for node in root.children() {
+        let XmlNode::Element(child) = node else {
+            continue;
+        };
+        if child.name().local() == "Attributes" {
+            if !xml_element_uses_namespace(child, root, FORM_LOG_NAMESPACE) {
+                return Err(DcsSettingsParseError {
+                    reason: "Form Attributes uses the wrong namespace",
+                });
+            }
+            if attributes.replace(child).is_some() {
+                return Err(DcsSettingsParseError {
+                    reason: "duplicate direct Form Attributes child",
+                });
+            }
+        }
+    }
+    let Some(attributes) = attributes else {
+        return Ok(DcsChildParseOutcome::Absent);
+    };
+    let wrapper_policy =
+        bundled_dcs_form_attributes_conditional_appearance_policy().map_err(|_| {
+            DcsSettingsParseError {
+                reason: "bundled Form Attributes conditional-appearance evidence is invalid",
+            }
+        })?;
+    let mut value = None;
+    let mut wrapper_seen = false;
+    for node in attributes.children() {
+        let child = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(child) => child,
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "Form Attributes contains non-element content",
+                });
+            }
+        };
+        match child.name().local() {
+            "Attribute" => {
+                if wrapper_seen {
+                    return Err(DcsSettingsParseError {
+                        reason: "Form ConditionalAppearance does not follow every Attribute",
+                    });
+                }
+            }
+            "ConditionalAppearance" => {
+                if !xml_element_uses_namespace(child, root, wrapper_policy.form_namespace_uri()) {
+                    return Err(DcsSettingsParseError {
+                        reason: "Form ConditionalAppearance uses the wrong namespace",
+                    });
+                }
+                if wrapper_seen {
+                    return Err(DcsSettingsParseError {
+                        reason: "duplicate direct Form Attributes ConditionalAppearance",
+                    });
+                }
+                wrapper_seen = true;
+                value = Some(constrain_form_attributes_conditional_appearance(
+                    parse_dcs_conditional_appearance_body(child, root)?,
+                ));
+            }
+            _ => {
+                return Err(DcsSettingsParseError {
+                    reason: "Form Attributes contains an unsupported direct child",
+                });
+            }
+        }
+    }
+    Ok(value.unwrap_or(DcsChildParseOutcome::Absent))
+}
+
+fn constrain_form_attributes_conditional_appearance(
+    outcome: DcsChildParseOutcome<DcsConditionalAppearance>,
+) -> DcsChildParseOutcome<DcsConditionalAppearance> {
+    let DcsChildParseOutcome::Typed(value) = outcome else {
+        return outcome;
+    };
+    let Ok(policy) = bundled_dcs_form_attributes_conditional_appearance_policy() else {
+        return DcsChildParseOutcome::Unsupported(
+            "Form Attributes conditional-appearance evidence is unavailable",
+        );
+    };
+    if value.items().is_empty()
+        || value.items().len() > policy.max_emitted_items()
+        || value.view_mode().is_some()
+        || value.user_setting_id().is_some()
+    {
+        return DcsChildParseOutcome::Unsupported(
+            "Form Attributes conditional appearance is outside the authenticated wrapper cohort",
+        );
+    }
+    DcsChildParseOutcome::Typed(value)
+}
+
+/// Parses the exact BOM `<Settings>/<conditionalAppearance>` document kept in
+/// the unkeyed Form Attributes tail field.
+pub fn parse_form_attributes_conditional_appearance_storage_document(
+    bytes: &[u8],
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearance>, DcsSettingsParseError> {
+    parse_form_attributes_conditional_appearance_storage_candidate_document(bytes)?.ok_or(
+        DcsSettingsParseError {
+            reason: "Form Attributes storage root uses the wrong QName",
+        },
+    )
+}
+
+/// Validates the exact semantic shape of the inactive Form Attributes tail.
+pub fn parse_form_attributes_empty_storage_document(
+    bytes: &[u8],
+) -> Result<(), DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "Form Attributes empty storage document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "Form Attributes empty storage document is not well-formed XML",
+    })?;
+    let root = document.root();
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy().map_err(|_| {
+        DcsSettingsParseError {
+            reason: "bundled Form Attributes conditional-appearance evidence is invalid",
+        }
+    })?;
+    if root.name().local() != "Settings"
+        || !xml_element_uses_namespace(root, root, policy.settings_namespace_uri())
+    {
+        return Err(DcsSettingsParseError {
+            reason: "inactive Form Attributes storage root uses the wrong QName",
+        });
+    }
+    if root
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+        || root.children().iter().any(|node| match node {
+            XmlNode::Text(text) => !text.value().trim().is_empty(),
+            XmlNode::CData(text) => !text.value().trim().is_empty(),
+            _ => true,
+        })
+    {
+        return Err(DcsSettingsParseError {
+            reason: "inactive Form Attributes storage Settings is not empty",
+        });
+    }
+    Ok(())
+}
+
+/// Parses an unkeyed Form tail field when it is this wrapper's exact Settings
+/// document and returns `None` for other well-formed base64/XML tail values.
+pub fn parse_form_attributes_conditional_appearance_storage_candidate_document(
+    bytes: &[u8],
+) -> Result<Option<DcsChildParseOutcome<DcsConditionalAppearance>>, DcsSettingsParseError> {
+    if bytes.len() > MAX_DCS_RETAINED_BYTES {
+        return Err(DcsSettingsParseError {
+            reason: "Form Attributes storage document exceeds the retained-byte budget",
+        });
+    }
+    let document = XmlReader::from_slice(bytes).map_err(|_| DcsSettingsParseError {
+        reason: "Form Attributes storage document is not well-formed XML",
+    })?;
+    let root = document.root();
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy().map_err(|_| {
+        DcsSettingsParseError {
+            reason: "bundled Form Attributes conditional-appearance evidence is invalid",
+        }
+    })?;
+    if root.name().local() != "Settings"
+        || !xml_element_uses_namespace(root, root, policy.settings_namespace_uri())
+    {
+        return Ok(None);
+    }
+    let mut child = None;
+    let mut unexpected_content = false;
+    for node in root.children() {
+        let element = match node {
+            XmlNode::Text(text) if text.value().trim().is_empty() => continue,
+            XmlNode::CData(text) if text.value().trim().is_empty() => continue,
+            XmlNode::Element(element) => element,
+            _ => {
+                unexpected_content = true;
+                continue;
+            }
+        };
+        if element.name().local() != "conditionalAppearance"
+            || !xml_element_uses_namespace(element, root, policy.settings_namespace_uri())
+        {
+            unexpected_content = true;
+            continue;
+        }
+        if child.replace(element).is_some() {
+            return Err(DcsSettingsParseError {
+                reason: "duplicate Form Attributes storage conditionalAppearance child",
+            });
+        }
+    }
+    let Some(child) = child else {
+        return Ok(None);
+    };
+    if root
+        .attributes()
+        .iter()
+        .any(|attribute| matches!(attribute.kind(), AttributeKind::Ordinary(_)))
+    {
+        return Err(DcsSettingsParseError {
+            reason: "Form Attributes storage root has ordinary attributes",
+        });
+    }
+    if unexpected_content {
+        return Err(DcsSettingsParseError {
+            reason: "Form Attributes storage document has an unexpected direct child",
+        });
+    }
+    Ok(Some(constrain_form_attributes_conditional_appearance(
+        parse_dcs_conditional_appearance_body(child, root)?,
+    )))
 }
 
 fn parse_dcs_order(
@@ -4389,6 +4808,92 @@ mod tests {
         assert_eq!(
             emit_dcs_conditional_appearance_storage_document(&metadata).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn form_attributes_conditional_appearance_fixture_round_trips_both_wrappers() {
+        let form = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/native-form.xml.b64"
+        ));
+        let parsed = parse_form_dcs_children(&form).unwrap();
+        let DcsChildParseOutcome::Typed(native_value) =
+            &parsed.form_attributes_conditional_appearance
+        else {
+            panic!("expected typed Form Attributes conditional appearance");
+        };
+        assert_eq!(parsed.list_settings_conditional_appearances.len(), 1);
+
+        let storage = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        ));
+        let DcsChildParseOutcome::Typed(storage_value) =
+            parse_form_attributes_conditional_appearance_storage_document(&storage).unwrap()
+        else {
+            panic!("expected typed Form Attributes storage value");
+        };
+        assert_eq!(native_value, &storage_value);
+        assert_eq!(
+            emit_form_attributes_conditional_appearance_storage_document(native_value).unwrap(),
+            storage
+        );
+
+        let empty_storage = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
+        ));
+        parse_form_attributes_empty_storage_document(&empty_storage).unwrap();
+        assert_eq!(
+            emit_form_attributes_empty_storage_document().unwrap(),
+            empty_storage
+        );
+
+        let wrapper = decode_base64_fixture(include_str!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-conditional-appearance.xml.b64"
+        ));
+        let emitted =
+            emit_form_attributes_conditional_appearance_fragment(native_value, "\t\t").unwrap();
+        assert_eq!(
+            emitted
+                .strip_prefix("\t\t")
+                .unwrap()
+                .strip_suffix("\r\n")
+                .unwrap()
+                .as_bytes(),
+            wrapper
+        );
+
+        let duplicate = String::from_utf8(form).unwrap().replace(
+            "</Attributes>",
+            &format!("{}\r\n\t</Attributes>", String::from_utf8(wrapper).unwrap()),
+        );
+        assert_eq!(
+            parse_form_dcs_children(duplicate.as_bytes())
+                .unwrap_err()
+                .reason(),
+            "duplicate direct Form Attributes ConditionalAppearance"
+        );
+
+        let extra_storage_child = String::from_utf8(storage)
+            .unwrap()
+            .replace("</Settings>", "<unexpected/></Settings>");
+        assert_eq!(
+            parse_form_attributes_conditional_appearance_storage_document(
+                extra_storage_child.as_bytes()
+            )
+            .unwrap_err()
+            .reason(),
+            "Form Attributes storage document has an unexpected direct child"
+        );
+        assert_eq!(
+            parse_form_attributes_empty_storage_document(
+                String::from_utf8(empty_storage)
+                    .unwrap()
+                    .replace("/>", "><unexpected/></Settings>")
+                    .as_bytes()
+            )
+            .unwrap_err()
+            .reason(),
+            "inactive Form Attributes storage Settings is not empty"
         );
     }
 }

@@ -417,6 +417,9 @@ pub struct CfOverlayArgs {
     /// Patch CommandInterface using its base row when necessary (`STORAGE_KEY=FILE`); repeatable.
     #[arg(long = "command-interface", value_name = "KEY=FILE")]
     pub command_interfaces: Vec<String>,
+    /// Compile managed Form.xml against its existing native body row (`STORAGE_KEY=FILE`); repeatable.
+    #[arg(long = "form-xml", value_name = "KEY=FILE")]
+    pub form_xml: Vec<String>,
 }
 
 #[derive(Debug, Args)]

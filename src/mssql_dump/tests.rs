@@ -7798,7 +7798,10 @@ fn extracts_form_attributes_and_commands_from_body_tail() {
     assert!(form_xml.contains(
         "<dcsset:userSettingID>88619765-ccb3-46c6-ac52-38e9c992ebd4</dcsset:userSettingID>"
     ));
-    assert!(form_xml.contains("<dcsset:conditionalAppearance>"));
+    assert!(
+        form_xml.contains("<dcsset:conditionalAppearance>"),
+        "{form_xml}"
+    );
     assert!(form_xml.contains(
         "<dcsset:userSettingID>b75fecce-942b-4aed-abc9-e6a02e460fb3</dcsset:userSettingID>"
     ));
@@ -8262,61 +8265,68 @@ fn normalizes_form_server_state_core_type_qnames_idempotently() {
 
 #[test]
 fn extracts_form_attributes_conditional_appearance_from_body_tail() {
-    let section = extract_form_body_attributes_section(
-        &[format!(
-            "{{4,0,{{0}},{{#base64:{}}}}}",
-            "PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPFNldHRpbmdzIHhtbG5zPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEtY29tcG9zaXRpb24tc3lzdGVtL3NldHRpbmdzIiB4bWxuczpkY3Njb3I9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS1jb21wb3NpdGlvbi1zeXN0ZW0vY29yZSIgeG1sbnM6djh1aT0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpIiB4bWxuczpzeXM9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS91aS9mb250cy9zeXN0ZW0iIHhtbG5zOnhzPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYSIgeG1sbnM6eHNpPSJodHRwOi8vd3d3LnczLm9yZy8yMDAxL1hNTFNjaGVtYS1pbnN0YW5jZSI+PGNvbmRpdGlvbmFsQXBwZWFyYW5jZT48aXRlbT48c2VsZWN0aW9uPjxpdGVtPjxmaWVsZD7QoNC10LrQstC40LfQuNGC0YvQntGB0L3QvtCy0L3Ri9C10J/RgNC10LTRgdGC0LDQstC70LXQvdC40LU8L2ZpZWxkPjwvaXRlbT48L3NlbGVjdGlvbj48ZmlsdGVyPjxpdGVtIHhzaTp0eXBlPSJGaWx0ZXJJdGVtQ29tcGFyaXNvbiI+PGxlZnQgeHNpOnR5cGU9ImRjc2NvcjpGaWVsZCI+0KDQtdC60LLQuNC30LjRgtGL0J/QvtC40YHQutCwLtCf0YDQtdC00YPRgdGC0LDQvdC+0LLQu9C10L3QvdC+0LU8L2xlZnQ+PGNvbXBhcmlzb25UeXBlPkVxdWFsPC9jb21wYXJpc29uVHlwZT48cmlnaHQgeHNpOnR5cGU9InhzOmJvb2xlYW4iPnRydWU8L3JpZ2h0PjwvaXRlbT48L2ZpbHRlcj48YXBwZWFyYW5jZT48ZGNzY29yOml0ZW0geHNpOnR5cGU9IlNldHRpbmdzUGFyYW1ldGVyVmFsdWUiPjxkY3Njb3I6cGFyYW1ldGVyPtCo0YDQuNGE0YI8L2Rjc2NvcjpwYXJhbWV0ZXI+PGRjc2Nvcjp2YWx1ZSB4c2k6dHlwZT0idjh1aTpGb250IiByZWY9InN5czpEZWZhdWx0R1VJRm9udCIgYm9sZD0idHJ1ZSIgaXRhbGljPSJmYWxzZSIgdW5kZXJsaW5lPSJmYWxzZSIgc3RyaWtlb3V0PSJmYWxzZSIga2luZD0iV2luZG93c0ZvbnQiLz48L2Rjc2NvcjppdGVtPjwvYXBwZWFyYW5jZT48L2l0ZW0+PC9jb25kaXRpb25hbEFwcGVhcmFuY2U+PC9TZXR0aW5ncz4="
-        )],
-        &BTreeMap::new(),
+    let encoded = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
-
-    let xml = section
-        .conditional_appearance_xml
-        .as_deref()
-        .expect("conditional appearance xml");
-
-    assert!(xml.contains("<ConditionalAppearance>"), "{xml}");
-    assert!(xml.contains("<dcsset:selection>"), "{xml}");
-    assert!(
-        xml.contains(r#"<dcsset:item xsi:type="dcsset:FilterItemComparison">"#),
-        "{xml}"
+    let tail = format!(
+        "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{}}}}}",
+        encoded.trim()
     );
-    assert!(
-        xml.contains(r#"<dcsset:left xsi:type="dcscor:Field">"#),
-        "{xml}"
-    );
-    assert!(
-        xml.contains(r#"<dcscor:item xsi:type="dcsset:SettingsParameterValue">"#),
-        "{xml}"
+    let section = extract_form_body_attributes_section(&[tail]);
+    let Some(FormAttributesConditionalAppearance::Typed(value)) =
+        section.conditional_appearance.as_ref()
+    else {
+        panic!("platform-authenticated Form Attributes value must be typed");
+    };
+    let storage = decode_base64_mime(encoded).unwrap();
+    assert_eq!(
+        ibcmd_xml::emit_form_attributes_conditional_appearance_storage_document(value).unwrap(),
+        storage
     );
 }
 
 #[test]
-fn repairs_utf8_mojibake_in_conditional_appearance_xml() {
-    let repaired =
-        repair_utf8_mojibake("Ð ÐµÐºÐ²Ð¸Ð·Ð¸ÑÑÐÑÐ½Ð¾Ð²Ð½ÑÐµÐÑÐµÐ´ÑÑÐ°Ð²Ð»ÐµÐ½Ð¸Ðµ")
-            .expect("repaired mojibake");
-
-    assert_eq!(repaired, "РеквизитыОсновныеПредставление");
-    assert_eq!(repair_utf8_mojibake("Ð¨ÑÐ¸ÑÑ").as_deref(), Some("Шрифт"));
+fn form_attributes_unsupported_conditional_appearance_stays_opaque() {
+    let encoded = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+    );
+    let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
+        .unwrap()
+        .replace("xs:string\">A", "xs:boolean\">true");
+    let payload = crate::module_blob::encode_base64(storage.as_bytes());
+    let section = extract_form_body_attributes_section(&[format!(
+        "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
+    )]);
+    assert!(matches!(
+        section.conditional_appearance,
+        Some(FormAttributesConditionalAppearance::OpaqueStorage { .. })
+    ));
+    assert!(matches!(
+        format_form_attributes_section_xml(&[], &section),
+        Err(FormSchemaWriteError::OpaqueDcsFormAttributesConditionalAppearance { .. })
+    ));
 }
 
 #[test]
-fn normalizes_conditional_appearance_style_item_value_refs() {
-    let xml = normalize_form_attributes_conditional_appearance_xml(
-            r#"<Settings><conditionalAppearance><item><appearance><dcscor:item xsi:type="SettingsParameterValue"><dcscor:parameter>ЦветТекста</dcscor:parameter><dcscor:value xsi:type="v8ui:Color">0:6a2cf0b3-46ab-4e14-beff-ab6b97c1e5b2</dcscor:value></dcscor:item></appearance></item></conditionalAppearance></Settings>"#,
-            &BTreeMap::from([(
-                "6a2cf0b3-46ab-4e14-beff-ab6b97c1e5b2".to_string(),
-                "StyleItem.ЦветНеАктивнойСтроки".to_string(),
-            )]),
-        )
-        .expect("normalized xml");
-
-    assert!(xml.contains("style:ЦветНеАктивнойСтроки"), "{xml}");
-    assert!(
-        !xml.contains("0:6a2cf0b3-46ab-4e14-beff-ab6b97c1e5b2"),
-        "{xml}"
+fn form_attributes_malformed_conditional_appearance_fails_closed() {
+    let encoded = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
     );
+    let storage = String::from_utf8(decode_base64_mime(encoded).unwrap())
+        .unwrap()
+        .replace("</conditionalAppearance>", "");
+    let payload = crate::module_blob::encode_base64(storage.as_bytes());
+    let section = extract_form_body_attributes_section(&[format!(
+        "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{payload}}}}}"
+    )]);
+    assert!(matches!(
+        section.conditional_appearance,
+        Some(FormAttributesConditionalAppearance::OpaqueStorage { .. })
+    ));
+    assert!(matches!(
+        format_form_attributes_section_xml(&[], &section),
+        Err(FormSchemaWriteError::OpaqueDcsFormAttributesConditionalAppearance { .. })
+    ));
 }
 
 #[test]
@@ -8334,16 +8344,15 @@ fn prefix_default_xml_tags_preserves_utf8_text() {
 
 #[test]
 fn formats_form_attributes_section_conditional_appearance_inside_attributes() {
-    let xml = format_form_attributes_section_xml(
-        &[],
-        &FormAttributesSection {
-            conditional_appearance_xml: Some(
-                "<ConditionalAppearance><dcsset:item><dcsset:selection/></dcsset:item></ConditionalAppearance>"
-                    .to_string(),
-            ),
-        },
-    )
-    .unwrap();
+    let encoded = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+    );
+    let tail = format!(
+        "{{4,0,0,1,\"Список.SortKey\",\"Список.SortKey\",{{2,{{26}},{{9}}}},{{1,{{26}}}},{{#base64:{}}}}}",
+        encoded.trim()
+    );
+    let section = extract_form_body_attributes_section(&[tail]);
+    let xml = format_form_attributes_section_xml(&[], &section).unwrap();
 
     assert!(xml.contains("\t<Attributes>\r\n"), "{xml}");
     assert!(xml.contains("\t\t<ConditionalAppearance>\r\n"), "{xml}");

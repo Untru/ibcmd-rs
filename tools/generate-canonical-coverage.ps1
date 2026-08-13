@@ -347,13 +347,15 @@ $typedCoverageDefinitions = @(
     @{ classifier = 'DataCompositionConditionalAppearance'; feature = 'userSettingID'; canonicalType = 'DcsConditionalAppearance'; canonicalField = 'user_setting_id'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
     @{ classifier = 'DataCompositionConditionalAppearanceItem'; feature = 'selection'; canonicalType = 'DcsConditionalAppearanceItem'; canonicalField = 'selected_field'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
     @{ classifier = 'DataCompositionConditionalAppearanceItem'; feature = 'filter'; canonicalType = 'DcsConditionalAppearanceItem'; canonicalField = 'filter'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
-    @{ classifier = 'DataCompositionConditionalAppearanceItem'; feature = 'appearance'; canonicalType = 'DcsConditionalAppearanceItem'; canonicalField = 'appearance'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' }
+    @{ classifier = 'DataCompositionConditionalAppearanceItem'; feature = 'appearance'; canonicalType = 'DcsConditionalAppearanceItem'; canonicalField = 'appearance'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-conditional-appearance-evidence.json' },
+    @{ namespaceUri = 'http://g5.1c.ru/v8/dt/form'; classifier = 'Form'; feature = 'conditionalAppearance'; canonicalType = 'DcsConditionalAppearance'; canonicalField = 'conditional_appearance'; policy = 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-form-attributes-conditional-appearance-evidence.json' }
 )
 $typedCoverageMappings = [System.Collections.Generic.Dictionary[string, object]]::new(
     [System.StringComparer]::Ordinal
 )
 foreach ($mapping in $typedCoverageDefinitions) {
-    $id = Get-KeyId -NamespaceUri $settingsNamespaceUri -Classifier $mapping.classifier -Feature $mapping.feature
+    $namespaceUri = if ($mapping.ContainsKey('namespaceUri')) { $mapping.namespaceUri } else { $settingsNamespaceUri }
+    $id = Get-KeyId -NamespaceUri $namespaceUri -Classifier $mapping.classifier -Feature $mapping.feature
     $typedCoverageMappings.Add($id, $mapping)
 }
 

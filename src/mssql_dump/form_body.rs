@@ -68,7 +68,8 @@ use ibcmd_schema::{
     parse_generated_metadata_owner, parse_metadata_data_path,
 };
 use ibcmd_xml::{
-    DcsChildParseOutcome, FormChoiceParametersEmitError, emit_form_choice_parameter_links,
+    DcsChildParseOutcome, DcsSettingsChildrenError, FormChoiceParametersEmitError,
+    emit_form_attributes_conditional_appearance_fragment, emit_form_choice_parameter_links,
     emit_form_choice_parameters, parse_dcs_conditional_appearance_storage_document,
     parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
     platform_default_form_list_settings_conditional_appearance,
@@ -287,8 +288,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_attributes_cpu_ms += elapsed_ms(started);
     }
-    let attributes_section =
-        extract_form_body_attributes_section(&body.trailing, context.object_refs);
+    let attributes_section = extract_form_body_attributes_section(&body.trailing);
 
     let started = Instant::now();
     properties.report_result = extract_form_report_attribute_ref(&form_fields, "5", &attributes);
@@ -430,6 +430,7 @@ pub(super) fn extract_form_body_xml_from_body_detailed_timed(
                 .as_ref()
                 .map(|command_bar| command_bar.child_items.as_slice()),
             &attributes,
+            &attributes_section,
             &context.dcs_source_profile,
             &context.dcs_target_profile,
         ) {
@@ -790,7 +791,16 @@ pub(super) struct FormDynamicListField {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct FormAttributesSection {
-    pub(super) conditional_appearance_xml: Option<String>,
+    pub(super) conditional_appearance: Option<FormAttributesConditionalAppearance>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub(super) enum FormAttributesConditionalAppearance {
+    Typed(DcsConditionalAppearance),
+    OpaqueStorage {
+        bytes: Vec<u8>,
+        reason: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -1261,6 +1271,7 @@ pub(super) enum FormSchemaWriteError {
     Corpus(SchemaError),
     WriterRule(WriterRuleLookupError),
     CanonicalDcs(CanonicalDcsSettingsAdapterError),
+    DcsSettingsChildren(DcsSettingsChildrenError),
     UnexpectedPolicy {
         rule_id: String,
         expected: &'static str,
@@ -1290,6 +1301,9 @@ pub(super) enum FormSchemaWriteError {
     OpaqueDcsConditionalAppearance {
         reason: &'static str,
     },
+    OpaqueDcsFormAttributesConditionalAppearance {
+        reason: &'static str,
+    },
 }
 
 impl From<WriterRuleLookupError> for FormSchemaWriteError {
@@ -1307,6 +1321,12 @@ impl From<SchemaError> for FormSchemaWriteError {
 impl From<CanonicalDcsSettingsAdapterError> for FormSchemaWriteError {
     fn from(error: CanonicalDcsSettingsAdapterError) -> Self {
         Self::CanonicalDcs(error)
+    }
+}
+
+impl From<DcsSettingsChildrenError> for FormSchemaWriteError {
+    fn from(error: DcsSettingsChildrenError) -> Self {
+        Self::DcsSettingsChildren(error)
     }
 }
 
@@ -1446,6 +1466,7 @@ pub(super) fn preflight_form_writer_paths(
         child_items,
         auto_command_bar_child_items,
         attributes,
+        &FormAttributesSection::default(),
         &source_profile,
         &target_profile,
     )
@@ -1455,6 +1476,7 @@ fn preflight_form_writer_paths_with_dcs_profiles(
     child_items: &[FormChildItem],
     auto_command_bar_child_items: Option<&[FormChildItem]>,
     attributes: &[FormAttribute],
+    attributes_section: &FormAttributesSection,
     source_profile: &ProfileId,
     target_profile: &ProfileId,
 ) -> Result<(), FormSchemaWriteError> {
@@ -1462,6 +1484,19 @@ fn preflight_form_writer_paths_with_dcs_profiles(
     preflight_form_choice_parameter_writer_paths(child_items)?;
     if let Some(auto_command_bar_child_items) = auto_command_bar_child_items {
         preflight_form_choice_parameter_writer_paths(auto_command_bar_child_items)?;
+    }
+    match attributes_section.conditional_appearance.as_ref() {
+        Some(FormAttributesConditionalAppearance::Typed(value)) => {
+            drop(emit_form_attributes_conditional_appearance_fragment(
+                value, "\t\t",
+            )?);
+        }
+        Some(FormAttributesConditionalAppearance::OpaqueStorage { reason, .. }) => {
+            return Err(
+                FormSchemaWriteError::OpaqueDcsFormAttributesConditionalAppearance { reason },
+            );
+        }
+        None => {}
     }
     for settings in attributes
         .iter()
@@ -2786,29 +2821,29 @@ fn extract_form_body_attributes_with_dcs_type_index(
         .collect()
 }
 
-pub(super) fn extract_form_body_attributes_section(
-    trailing: &[String],
-    object_refs: &BTreeMap<String, String>,
-) -> FormAttributesSection {
-    let Some(fields) = trailing
-        .first()
-        .and_then(|field| split_1c_braced_fields(field, 0))
-    else {
+pub(super) fn extract_form_body_attributes_section(trailing: &[String]) -> FormAttributesSection {
+    let Some(text) = trailing.first() else {
         return FormAttributesSection::default();
     };
-    if fields.first().map(|field| field.trim()) != Some("4") {
-        return FormAttributesSection::default();
-    }
-    let Some(attribute_count) = fields
-        .get(1)
-        .and_then(|field| field.trim().parse::<usize>().ok())
-    else {
-        return FormAttributesSection::default();
-    };
+    let conditional_appearance =
+        match crate::module_blob::parse_form_attributes_conditional_appearance_tail(text) {
+            Ok(DcsChildParseOutcome::Typed(value)) => {
+                Some(FormAttributesConditionalAppearance::Typed(value))
+            }
+            Ok(DcsChildParseOutcome::Unsupported(reason)) => {
+                Some(FormAttributesConditionalAppearance::OpaqueStorage {
+                    bytes: text.as_bytes().to_vec(),
+                    reason,
+                })
+            }
+            Ok(DcsChildParseOutcome::Absent) => None,
+            Err(_) => Some(FormAttributesConditionalAppearance::OpaqueStorage {
+                bytes: text.as_bytes().to_vec(),
+                reason: "malformed Form Attributes conditional-appearance physical tail",
+            }),
+        };
     FormAttributesSection {
-        conditional_appearance_xml: fields.iter().skip(2 + attribute_count).find_map(|field| {
-            extract_form_attributes_conditional_appearance_xml(field, object_refs)
-        }),
+        conditional_appearance,
     }
 }
 
@@ -4059,143 +4094,6 @@ pub(super) fn parse_form_list_settings_conditional_appearance(
             reason: error.reason(),
         }),
     }
-}
-
-pub(super) fn extract_form_attributes_conditional_appearance_xml(
-    field: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let payload = extract_base64_payload(field)?;
-    let xml = decode_base64_mime(payload)?;
-    let xml = String::from_utf8(xml).ok()?;
-    normalize_form_attributes_conditional_appearance_xml(&xml, object_refs)
-}
-
-pub(super) fn normalize_form_attributes_conditional_appearance_xml(
-    xml: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> Option<String> {
-    let repaired_xml = repair_utf8_mojibake(xml).unwrap_or_else(|| xml.to_string());
-    let xml = repaired_xml.trim_start_matches('\u{feff}');
-    let xml = if let Some(stripped) = xml.strip_prefix("<?xml") {
-        let declaration_end = stripped.find("?>")?;
-        stripped[declaration_end + 2..].trim_start_matches(['\r', '\n'])
-    } else {
-        xml
-    };
-    let (root_start, closing_tag) = if let Some(root_start) = xml.find("<conditionalAppearance") {
-        (root_start, "</conditionalAppearance>")
-    } else if let Some(root_start) = xml.find("<ConditionalAppearance") {
-        (root_start, "</ConditionalAppearance>")
-    } else {
-        return None;
-    };
-    let root_open_end = xml[root_start..].find('>')? + root_start + 1;
-    let root_close_start = xml.rfind(closing_tag)?;
-    let inner = xml[root_open_end..root_close_start].trim();
-    let inner = normalize_form_conditional_appearance_text_values(inner, object_refs);
-    let inner = prefix_default_xml_tags(&inner, "dcsset");
-    let inner = prefix_unqualified_xsi_type_values(&inner, "dcsset");
-    if inner.is_empty() {
-        Some("<ConditionalAppearance/>".to_string())
-    } else {
-        Some(format!(
-            "<ConditionalAppearance>{}</ConditionalAppearance>",
-            inner
-        ))
-    }
-}
-
-pub(super) fn prefix_unqualified_xsi_type_values(fragment: &str, prefix: &str) -> String {
-    let marker = r#"xsi:type=""#;
-    let mut output = String::with_capacity(fragment.len() + prefix.len() * 8);
-    let mut offset = 0usize;
-    while let Some(relative_start) = fragment[offset..].find(marker) {
-        let start = offset + relative_start;
-        output.push_str(&fragment[offset..start + marker.len()]);
-        let value_start = start + marker.len();
-        let Some(relative_end) = fragment[value_start..].find('"') else {
-            output.push_str(&fragment[value_start..]);
-            return output;
-        };
-        let value_end = value_start + relative_end;
-        let value = &fragment[value_start..value_end];
-        if value.contains(':') {
-            output.push_str(value);
-        } else {
-            output.push_str(prefix);
-            output.push(':');
-            output.push_str(value);
-        }
-        offset = value_end;
-    }
-    output.push_str(&fragment[offset..]);
-    output
-}
-
-pub(super) fn repair_utf8_mojibake(text: &str) -> Option<String> {
-    if !text.contains('Ð') && !text.contains('Ñ') {
-        return None;
-    }
-    let mut bytes = Vec::with_capacity(text.len());
-    for ch in text.chars() {
-        let value = u32::from(ch);
-        if value > u8::MAX as u32 {
-            return None;
-        }
-        bytes.push(value as u8);
-    }
-    String::from_utf8(bytes).ok()
-}
-
-pub(super) fn normalize_form_conditional_appearance_text_values(
-    fragment: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> String {
-    let mut output = String::with_capacity(fragment.len());
-    let bytes = fragment.as_bytes();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        if bytes[index] == b'<' {
-            let next = fragment[index..]
-                .find('>')
-                .map(|relative| index + relative + 1)
-                .unwrap_or(bytes.len());
-            output.push_str(&fragment[index..next]);
-            index = next;
-            continue;
-        }
-        let next_tag = fragment[index..]
-            .find('<')
-            .map(|relative| index + relative)
-            .unwrap_or(bytes.len());
-        output.push_str(&normalize_form_conditional_appearance_text_segment(
-            &fragment[index..next_tag],
-            object_refs,
-        ));
-        index = next_tag;
-    }
-    output
-}
-
-pub(super) fn normalize_form_conditional_appearance_text_segment(
-    segment: &str,
-    object_refs: &BTreeMap<String, String>,
-) -> String {
-    let trimmed = segment.trim();
-    let Some(uuid) = trimmed.strip_prefix("0:") else {
-        return segment.to_string();
-    };
-    let Some(style_ref) = moxel_style_ref_for_uuid(uuid, object_refs) else {
-        return segment.to_string();
-    };
-    let leading_len = segment.len() - segment.trim_start().len();
-    let trailing_len = segment.len() - segment.trim_end().len();
-    let mut normalized = String::with_capacity(segment.len() + style_ref.len());
-    normalized.push_str(&segment[..leading_len]);
-    normalized.push_str(&style_ref);
-    normalized.push_str(&segment[segment.len() - trailing_len..]);
-    normalized
 }
 
 #[cfg(test)]
@@ -17405,7 +17303,7 @@ fn format_form_attributes_section_xml_with_dcs_profiles(
     dcs_source_profile: &ProfileId,
     dcs_target_profile: &ProfileId,
 ) -> Result<String, FormSchemaWriteError> {
-    if attributes.is_empty() && attributes_section.conditional_appearance_xml.is_none() {
+    if attributes.is_empty() && attributes_section.conditional_appearance.is_none() {
         return Ok("\t<Attributes/>\r\n".to_string());
     }
     let mut xml = "\t<Attributes>\r\n".to_string();
@@ -17414,11 +17312,19 @@ fn format_form_attributes_section_xml_with_dcs_profiles(
         dcs_source_profile,
         dcs_target_profile,
     )?);
-    if let Some(conditional_appearance_xml) = &attributes_section.conditional_appearance_xml {
-        xml.push_str(&indent_xml_fragment(
-            &split_adjacent_xml_tags(conditional_appearance_xml),
-            "\t\t",
-        ));
+    if let Some(conditional_appearance) = &attributes_section.conditional_appearance {
+        match conditional_appearance {
+            FormAttributesConditionalAppearance::Typed(value) => {
+                xml.push_str(&emit_form_attributes_conditional_appearance_fragment(
+                    value, "\t\t",
+                )?);
+            }
+            FormAttributesConditionalAppearance::OpaqueStorage { reason, .. } => {
+                return Err(
+                    FormSchemaWriteError::OpaqueDcsFormAttributesConditionalAppearance { reason },
+                );
+            }
+        }
     }
     xml.push_str("\t</Attributes>\r\n");
     Ok(xml)
@@ -17754,10 +17660,6 @@ pub(super) fn indent_xml_fragment(fragment: &str, indent: &str) -> String {
         }
     }
     xml
-}
-
-pub(super) fn split_adjacent_xml_tags(fragment: &str) -> String {
-    fragment.replace("><", ">\n<")
 }
 
 pub(super) fn form_bool_when_not_native_default(

@@ -315,7 +315,10 @@ impl FormRootAutoCommandBarSchema {
             return None;
         }
         let marker = match fields.get(FormNestedAutoCommandBarSchema::MARKER_SLOT) {
-            Some(raw) => Some(parse_root_auto_command_bar_marker(raw)?),
+            Some(raw) => Some(
+                parse_root_auto_command_bar_marker(raw)
+                    .or_else(|| parse_nested_auto_command_bar_marker(raw))?,
+            ),
             None => None,
         };
         Some(Self { marker })
@@ -479,6 +482,13 @@ mod nested_auto_command_bar_tests {
         let schema = FormRootAutoCommandBarSchema::from_raw_layout("22", "-1", &fields).unwrap();
         assert_eq!(schema.horizontal_align(), Some("Right"));
         assert_eq!(schema.autofill(), Some(false));
+
+        let platform_8_3_27_fields = fixture("{0,0,1}", 29);
+        let platform_8_3_27_schema =
+            FormRootAutoCommandBarSchema::from_raw_layout("22", "-1", &platform_8_3_27_fields)
+                .unwrap();
+        assert_eq!(platform_8_3_27_schema.horizontal_align(), None);
+        assert_eq!(platform_8_3_27_schema.autofill(), Some(true));
 
         for marker in ["{1,4,0,0}", "{1,2,2,0}", "{0,2,0,0}", "{1,2,0}"] {
             let fields = fixture(marker, 29);
@@ -4339,6 +4349,22 @@ pub(crate) enum FormTableXmlProperty {
     UpdateOnDataChange,
     UserSettingsGroup,
     AllowGettingCurrentRowURL,
+}
+
+pub(crate) fn normalize_form_table_command_bar_location_xml(value: &str) -> Option<&'static str> {
+    match value {
+        "None" => Some("None"),
+        "Top" => Some("Top"),
+        _ => None,
+    }
+}
+
+pub(crate) fn encode_form_table_command_bar_location(value: &str) -> Option<&'static str> {
+    match value {
+        "None" => Some("0"),
+        "Top" => Some("1"),
+        _ => None,
+    }
 }
 
 pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[

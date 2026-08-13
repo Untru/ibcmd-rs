@@ -7,9 +7,9 @@
   },
   "summary": {
     "entries": 4966,
-    "typed": 27,
+    "typed": 28,
     "opaqueLossless": 0,
-    "unsupported": 4939,
+    "unsupported": 4938,
     "platformOnly": 0
   },
   "familyAggregates": [
@@ -24,9 +24,9 @@
     {
       "family": "forms",
       "entries": 2314,
-      "typed": 1,
+      "typed": 2,
       "opaqueLossless": 0,
-      "unsupported": 2313,
+      "unsupported": 2312,
       "platformOnly": 0
     },
     {
@@ -301,7 +301,7 @@
       "package": "com._1c.g5.v8.dt.form.model",
       "classifierKind": "class",
       "featureKind": "reference",
-      "features": 32
+      "features": 31
     },
     {
       "rule": "unsupported/schema.unmapped",
@@ -34490,19 +34490,20 @@
         "feature": "conditionalAppearance"
       },
       "family": "forms",
-      "status": "unsupported",
-      "canonicalType": null,
-      "canonicalField": null,
+      "status": "typed",
+      "canonicalType": "DcsConditionalAppearance",
+      "canonicalField": "conditional_appearance",
       "opaquePlacement": null,
-      "diagnosticCode": "schema.unmapped",
+      "diagnosticCode": null,
       "evidence": {
         "status": "verified",
-        "kind": "coverage-bootstrap",
+        "kind": "canonical-code-inspection-and-platform-evidence",
         "sources": [
-          "model/Form.xcore",
-          "tools/generate-canonical-coverage.ps1"
+          "crates/ibcmd-core/src/dcs.rs",
+          "crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-form-attributes-conditional-appearance-evidence.json",
+          "model/Form.xcore"
         ],
-        "note": "Implementation coverage placeholder; not EDT semantics."
+        "note": "Typed canonical field with bounded constructor/deserialization validation and profile-gated XML emission."
       }
     },
     {

@@ -1,0 +1,17 @@
+{
+  "owner": "Catalog.FilterProbe",
+  "form": "ListForm",
+  "wrapper": "Form.Attributes.ConditionalAppearance",
+  "selectedField": "Список.SortKey",
+  "filter": {
+    "field": "Список.SortKey",
+    "comparisonType": "Equal",
+    "rightType": "xs:string",
+    "right": "A"
+  },
+  "appearance": {
+    "parameter": "ЦветТекста",
+    "valueType": "v8ui:Color",
+    "value": "web:Red"
+  }
+}

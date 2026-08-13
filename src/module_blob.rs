@@ -12,15 +12,18 @@ use flate2::write::DeflateEncoder;
 use ibcmd_core::dcs::{DcsConditionalAppearance, DcsFilter, DcsOrder};
 use ibcmd_schema::{
     FormTextDocumentContextMenuMultiplicity, bundled_dcs_conditional_appearance_policy,
-    bundled_dcs_filter_policy, bundled_dcs_order_policy,
-    form_layout_single_child_item_slot_indices, parse_form_text_document_context_menu_multiplicity,
+    bundled_dcs_filter_policy, bundled_dcs_form_attributes_conditional_appearance_policy,
+    bundled_dcs_order_policy, form_layout_single_child_item_slot_indices,
+    parse_form_text_document_context_menu_multiplicity,
 };
 use ibcmd_xml::{
     DcsChildParseOutcome, emit_dcs_conditional_appearance_storage_document,
     emit_dcs_filter_storage_document, emit_dcs_order_storage_document,
-    parse_dcs_conditional_appearance_storage_document, parse_dcs_filter_storage_document,
-    parse_dcs_order_storage_document, parse_form_list_settings_conditional_appearances,
-    parse_form_list_settings_filters, parse_form_list_settings_orders,
+    emit_form_attributes_conditional_appearance_storage_document,
+    emit_form_attributes_empty_storage_document, parse_dcs_conditional_appearance_storage_document,
+    parse_dcs_filter_storage_document, parse_dcs_order_storage_document,
+    parse_form_attributes_conditional_appearance_storage_document,
+    parse_form_attributes_empty_storage_document, parse_form_dcs_children,
 };
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
@@ -38,8 +41,9 @@ use crate::form_schema::{
     FormRootVerticalAlign, FormRootVerticalAlignSchema, FormTableCurrentRowUse,
     FormTableHorizontalScrollBar, FormTableInitialListView, FormTablePropertyBagKey as TableBagKey,
     FormTableSchema, FormTableSearchOnInput, FormTooltipRepresentation,
-    FormWarningOnEditRepresentation, form_tooltip_representation_schema,
-    form_tooltip_representation_supports_xml_tag,
+    FormWarningOnEditRepresentation, encode_form_table_command_bar_location,
+    form_tooltip_representation_schema, form_tooltip_representation_supports_xml_tag,
+    normalize_form_table_command_bar_location_xml,
 };
 use crate::v8_container::{
     V8Element, build_v8_container, make_v8_element_header, parse_v8_container, read_v8_element_data,
@@ -142,6 +146,7 @@ struct FormXmlBodyProperties {
     auto_command_bar: Option<FormXmlAutoCommandBar>,
     attributes_present: bool,
     attributes: Vec<FormXmlAttribute>,
+    attributes_conditional_appearance: Option<DcsConditionalAppearance>,
     parameters_present: bool,
     parameters: Vec<FormXmlParameter>,
     commands_present: bool,
@@ -5869,6 +5874,11 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
                 let mut attributes = plain[attributes_range.clone()].trim().to_string();
                 patch_form_body_attributes(&mut attributes, &properties.attributes, source)
                     .context("failed to patch Form body attributes")?;
+                patch_form_body_attributes_conditional_appearance(
+                    &mut attributes,
+                    properties.attributes_conditional_appearance.as_ref(),
+                )
+                .context("failed to patch Form body Attributes conditional appearance")?;
                 plain.replace_range(attributes_range, &attributes);
             }
         }
@@ -6556,22 +6566,29 @@ fn sanitize_source_path_segment(value: &str) -> String {
 }
 
 fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
-    let canonical_filters = parse_form_list_settings_filters(xml)
-        .map_err(|error| anyhow!("cannot parse Form ListSettings filter: {error}"))?;
-    let mut canonical_filters = canonical_filters.into_iter();
-    let canonical_orders = parse_form_list_settings_orders(xml)
-        .map_err(|error| anyhow!("cannot parse Form ListSettings order: {error}"))?;
-    let mut canonical_orders = canonical_orders.into_iter();
-    let canonical_conditional_appearances = parse_form_list_settings_conditional_appearances(xml)
-        .map_err(|error| {
-        anyhow!("cannot parse Form ListSettings conditional appearance: {error}")
-    })?;
-    let mut canonical_conditional_appearances = canonical_conditional_appearances.into_iter();
+    let canonical_dcs = parse_form_dcs_children(xml)
+        .map_err(|error| anyhow!("cannot parse Form DCS children: {error}"))?;
+    let mut canonical_filters = canonical_dcs.list_settings_filters.into_iter();
+    let mut canonical_orders = canonical_dcs.list_settings_orders.into_iter();
+    let mut canonical_conditional_appearances = canonical_dcs
+        .list_settings_conditional_appearances
+        .into_iter();
+    let attributes_conditional_appearance =
+        match canonical_dcs.form_attributes_conditional_appearance {
+            DcsChildParseOutcome::Typed(value) => Some(value),
+            DcsChildParseOutcome::Unsupported(reason) => {
+                return Err(anyhow!(
+                    "unsupported Form Attributes conditional appearance: {reason}"
+                ));
+            }
+            DcsChildParseOutcome::Absent => None,
+        };
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut text_value = String::new();
     let mut properties = FormXmlBodyProperties::default();
+    properties.attributes_conditional_appearance = attributes_conditional_appearance;
     let mut current_event_name = None::<String>;
     let mut current_command = None::<FormXmlCommand>;
     let mut current_localized_section = None::<String>;
@@ -11475,12 +11492,9 @@ fn parse_form_group_representation_xml(value: &str) -> Result<FormXmlGroupRepres
 }
 
 fn parse_form_table_command_bar_location_xml(value: &str) -> Result<String> {
-    match value {
-        "Top" => Ok(value.to_string()),
-        other => Err(anyhow!(
-            "unsupported Form Table CommandBarLocation: {other}"
-        )),
-    }
+    normalize_form_table_command_bar_location_xml(value)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| anyhow!("unsupported Form Table CommandBarLocation: {value}"))
 }
 
 fn parse_form_table_initial_tree_view_xml(value: &str) -> Result<String> {
@@ -16762,10 +16776,7 @@ fn form_table_representation_code(value: &str) -> Option<&'static str> {
 }
 
 fn form_table_command_bar_location_code(value: &str) -> Option<&'static str> {
-    match value {
-        "Top" => Some("1"),
-        _ => None,
-    }
+    encode_form_table_command_bar_location(value)
 }
 
 fn form_table_initial_tree_view_code(value: &str) -> Option<&'static str> {
@@ -17920,12 +17931,12 @@ fn retain_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute
     let Ok(count) = text[count_range.clone()].trim().parse::<usize>() else {
         return Ok(());
     };
-    if fields.len() != 2 + count {
+    if fields.len() < 2 + count {
         return Ok(());
     }
 
     let mut entries = Vec::new();
-    for range in fields.iter().skip(2) {
+    for range in fields.iter().skip(2).take(count) {
         let entry = text[range.clone()].to_string();
         match form_body_attribute_entry_identity(&entry)? {
             Some((id, name))
@@ -17943,18 +17954,245 @@ fn retain_form_body_attributes(text: &mut String, attributes: &[FormXmlAttribute
     if entries.len() == count {
         return Ok(());
     }
-    if entries.is_empty() {
+    let extras = fields
+        .iter()
+        .skip(2 + count)
+        .map(|range| text[range.clone()].to_string())
+        .collect::<Vec<_>>();
+    if entries.is_empty() && extras.is_empty() {
         *text = "{0}".to_string();
         return Ok(());
     }
 
     let mut replacement = format!("{{4,{}", entries.len());
-    for entry in entries {
+    for entry in entries.into_iter().chain(extras) {
         replacement.push(',');
         replacement.push_str(&entry);
     }
     replacement.push('}');
     *text = replacement;
+    Ok(())
+}
+
+pub(crate) fn parse_form_attributes_conditional_appearance_tail(
+    text: &str,
+) -> Result<DcsChildParseOutcome<DcsConditionalAppearance>> {
+    let fields = scan_braced_fields(text, 0)?;
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(|error| anyhow!(error.to_string()))?;
+    let container_marker = fields.first().map(|range| text[range.clone()].trim());
+    if container_marker == Some(policy.storage_absent_container_marker()) {
+        return Ok(DcsChildParseOutcome::Absent);
+    }
+    if container_marker != Some(policy.storage_container_marker()) {
+        return Ok(DcsChildParseOutcome::Absent);
+    }
+    let count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Form Attributes container has no valid declared count"))?;
+    let extras_start = 2usize
+        .checked_add(count)
+        .ok_or_else(|| anyhow!("Form Attributes declared count overflows"))?;
+    if fields.len() < extras_start {
+        return Err(anyhow!(
+            "Form Attributes container has fewer entries than its declared count"
+        ));
+    }
+    let extras = &fields[extras_start..];
+    if extras.is_empty() {
+        return Ok(DcsChildParseOutcome::Absent);
+    }
+    if extras.len() < 2 {
+        return if extras.first().is_some_and(|range| {
+            text[range.clone()].trim() == policy.storage_inactive_marker()[0].as_str()
+        }) {
+            Err(anyhow!(
+                "Form Attributes conditional-appearance tail marker is incomplete"
+            ))
+        } else {
+            Ok(DcsChildParseOutcome::Absent)
+        };
+    }
+    let marker = [
+        text[extras[0].clone()].trim(),
+        text[extras[1].clone()].trim(),
+    ];
+    let inactive = policy.storage_inactive_marker();
+    let active = policy.storage_active_marker();
+    if marker == [inactive[0].as_str(), inactive[1].as_str()] {
+        if extras.len() != 3 {
+            return Err(anyhow!(
+                "inactive Form Attributes conditional-appearance tail has an unexpected field count"
+            ));
+        }
+        let bytes = decode_base64_payload_field(text[extras[2].clone()].trim())?;
+        parse_form_attributes_empty_storage_document(&bytes)
+            .map_err(|error| anyhow!(error.to_string()))?;
+        return Ok(DcsChildParseOutcome::Absent);
+    }
+    if marker != [active[0].as_str(), active[1].as_str()] {
+        return Ok(DcsChildParseOutcome::Absent);
+    }
+    if extras.len() != 7 {
+        return Err(anyhow!(
+            "active Form Attributes conditional-appearance tail has an unexpected field count"
+        ));
+    }
+
+    let selected_field = parse_1c_quoted_string(&text[extras[2].clone()])?;
+    let filter_field = parse_1c_quoted_string(&text[extras[3].clone()])?;
+    if selected_field != filter_field {
+        return Err(anyhow!(
+            "Form Attributes conditional-appearance descriptor fields disagree"
+        ));
+    }
+    parse_form_attributes_type_index_descriptor(
+        &text[extras[4].clone()],
+        policy.storage_selection_type_indexes(),
+    )?;
+    parse_form_attributes_type_index_descriptor(
+        &text[extras[5].clone()],
+        policy.storage_filter_type_indexes(),
+    )?;
+    let bytes = decode_base64_payload_field(text[extras[6].clone()].trim())?;
+    let outcome = parse_form_attributes_conditional_appearance_storage_document(&bytes)
+        .map_err(|error| anyhow!(error.to_string()))?;
+    if let DcsChildParseOutcome::Typed(value) = &outcome {
+        let actual_field = value
+            .items()
+            .first()
+            .ok_or_else(|| anyhow!("typed Form Attributes appearance has no rule"))?
+            .selected_field()
+            .as_str();
+        if actual_field != selected_field {
+            return Err(anyhow!(
+                "Form Attributes conditional-appearance descriptor does not match its Settings payload"
+            ));
+        }
+    }
+    Ok(outcome)
+}
+
+fn parse_form_attributes_type_index_descriptor(text: &str, expected: &[u32]) -> Result<()> {
+    let fields = scan_braced_fields(text.trim(), 0)?;
+    let count = fields
+        .first()
+        .and_then(|range| text.trim()[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Form Attributes type-index descriptor count is invalid"))?;
+    if count != expected.len() || fields.len() != expected.len() + 1 {
+        return Err(anyhow!(
+            "Form Attributes type-index descriptor cardinality is outside the evidenced shape"
+        ));
+    }
+    let text = text.trim();
+    for (range, expected) in fields.iter().skip(1).zip(expected) {
+        let nested = scan_braced_fields(text, range.start)?;
+        if nested.len() != 1
+            || text[nested[0].clone()].trim().parse::<u32>().ok() != Some(*expected)
+        {
+            return Err(anyhow!(
+                "Form Attributes type-index descriptor differs from the evidenced shape"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn format_form_attributes_type_index_descriptor(indexes: &[u32]) -> String {
+    let mut output = format!("{{{}", indexes.len());
+    for index in indexes {
+        output.push_str(&format!(",{{{index}}}"));
+    }
+    output.push('}');
+    output
+}
+
+fn patch_form_body_attributes_conditional_appearance(
+    text: &mut String,
+    value: Option<&DcsConditionalAppearance>,
+) -> Result<()> {
+    let existing = parse_form_attributes_conditional_appearance_tail(text)?;
+    if let DcsChildParseOutcome::Unsupported(reason) = existing {
+        return Err(anyhow!(
+            "unsupported Form Attributes conditional-appearance tail payload: {reason}"
+        ));
+    }
+    if matches!((&existing, value), (DcsChildParseOutcome::Typed(existing), Some(value)) if existing == value)
+    {
+        return Ok(());
+    }
+    if matches!((&existing, value), (DcsChildParseOutcome::Absent, None)) {
+        return Ok(());
+    }
+
+    let fields = scan_braced_fields(text, 0)?;
+    let policy = bundled_dcs_form_attributes_conditional_appearance_policy()
+        .map_err(|error| anyhow!(error.to_string()))?;
+    if fields.first().map(|range| text[range.clone()].trim())
+        != Some(policy.storage_container_marker())
+    {
+        if value.is_some() {
+            return Err(anyhow!(
+                "Form Attributes conditional appearance cannot be added without the evidenced marker-4 envelope"
+            ));
+        }
+        return Ok(());
+    }
+    let count = fields
+        .get(1)
+        .and_then(|range| text[range.clone()].trim().parse::<usize>().ok())
+        .ok_or_else(|| anyhow!("Form Attributes container has no valid declared count"))?;
+    let extras_start = 2 + count;
+    if fields.len() < extras_start {
+        return Err(anyhow!(
+            "Form Attributes container has fewer entries than its declared count"
+        ));
+    }
+    if matches!(existing, DcsChildParseOutcome::Absent) && value.is_some() {
+        let extras = &fields[extras_start..];
+        let inactive = policy.storage_inactive_marker();
+        let has_authenticated_inactive_tail = extras.len() == 3
+            && text[extras[0].clone()].trim() == inactive[0].as_str()
+            && text[extras[1].clone()].trim() == inactive[1].as_str();
+        if !has_authenticated_inactive_tail {
+            return Err(anyhow!(
+                "Form Attributes conditional appearance cannot be added without the authenticated inactive tail"
+            ));
+        }
+    }
+    let tail = if let Some(value) = value {
+        let item = value
+            .items()
+            .first()
+            .ok_or_else(|| anyhow!("Form Attributes conditional appearance has no rule"))?;
+        let field = item.selected_field().as_str();
+        let bytes = emit_form_attributes_conditional_appearance_storage_document(value)
+            .map_err(|error| anyhow!(error.to_string()))?;
+        vec![
+            policy.storage_active_marker()[0].clone(),
+            policy.storage_active_marker()[1].clone(),
+            format_1c_string(field),
+            format_1c_string(field),
+            format_form_attributes_type_index_descriptor(policy.storage_selection_type_indexes()),
+            format_form_attributes_type_index_descriptor(policy.storage_filter_type_indexes()),
+            format!("{{#base64:{}}}", encode_base64(&bytes)),
+        ]
+    } else {
+        let bytes = emit_form_attributes_empty_storage_document()
+            .map_err(|error| anyhow!(error.to_string()))?;
+        vec![
+            policy.storage_inactive_marker()[0].clone(),
+            policy.storage_inactive_marker()[1].clone(),
+            format!("{{#base64:{}}}", encode_base64(&bytes)),
+        ]
+    };
+    let closing = scan_balanced_braces(text, 0)? - 1;
+    let previous_end = fields
+        .get(extras_start.saturating_sub(1))
+        .map(|range| range.end)
+        .ok_or_else(|| anyhow!("Form Attributes tail has no predecessor"))?;
+    text.replace_range(previous_end..closing, &format!(",{}", tail.join(",")));
     Ok(())
 }
 
@@ -30604,6 +30842,83 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let default = ibcmd_xml::platform_default_form_list_settings_conditional_appearance()?;
         assert!(super::format_form_setting_dcs_conditional_appearance(&default)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn form_attributes_conditional_appearance_tail_is_added_preserved_and_removed()
+    -> anyhow::Result<()> {
+        let form = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/native-form.xml.b64"
+        ))?;
+        let properties = super::parse_form_xml_body_properties(&form)?;
+        assert!(properties.attributes_conditional_appearance.is_some());
+        let parsed = ibcmd_xml::parse_form_dcs_children(&form)?;
+        let ibcmd_xml::DcsChildParseOutcome::Typed(value) =
+            &parsed.form_attributes_conditional_appearance
+        else {
+            anyhow::bail!("Form Attributes fixture value was not parsed");
+        };
+        let storage = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-storage-settings.xml.b64"
+        ))?;
+        let empty_storage = decode_base64_for_test(include_str!(
+            "../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/form-attributes-empty-storage-settings.xml.b64"
+        ))?;
+        let inactive = format!(
+            "{{4,0,0,0,{{#base64:{}}}}}",
+            super::encode_base64(&empty_storage)
+        );
+        assert!(matches!(
+            super::parse_form_attributes_conditional_appearance_tail(&inactive)?,
+            ibcmd_xml::DcsChildParseOutcome::Absent
+        ));
+
+        let mut inserted = inactive.clone();
+        super::patch_form_body_attributes_conditional_appearance(&mut inserted, Some(value))?;
+        let fields = super::scan_braced_fields(&inserted, 0)?;
+        assert_eq!(fields.len(), 9);
+        assert_eq!(inserted[fields[2].clone()].trim(), "0");
+        assert_eq!(inserted[fields[3].clone()].trim(), "1");
+        assert_eq!(
+            super::parse_1c_quoted_string(&inserted[fields[4].clone()])?,
+            "Список.SortKey"
+        );
+        assert_eq!(
+            super::parse_1c_quoted_string(&inserted[fields[5].clone()])?,
+            "Список.SortKey"
+        );
+        assert_eq!(inserted[fields[6].clone()].trim(), "{2,{26},{9}}");
+        assert_eq!(inserted[fields[7].clone()].trim(), "{1,{26}}");
+        assert_eq!(
+            super::decode_base64_payload_field(inserted[fields[8].clone()].trim())?,
+            storage
+        );
+        let ibcmd_xml::DcsChildParseOutcome::Typed(inserted_value) =
+            super::parse_form_attributes_conditional_appearance_tail(&inserted)?
+        else {
+            anyhow::bail!("inserted Form Attributes tail was not typed");
+        };
+        assert_eq!(&inserted_value, value);
+
+        let mut preserved = inserted;
+        let original = preserved.clone();
+        super::patch_form_body_attributes_conditional_appearance(&mut preserved, Some(value))?;
+        assert_eq!(preserved, original);
+        super::patch_form_body_attributes_conditional_appearance(&mut preserved, None)?;
+        assert_eq!(preserved, inactive);
+
+        for original in ["{4,0}", "{4,0,9,9,{0}}"] {
+            let mut unsupported = original.to_string();
+            assert!(
+                super::patch_form_body_attributes_conditional_appearance(
+                    &mut unsupported,
+                    Some(value)
+                )
+                .is_err()
+            );
+            assert_eq!(unsupported, original);
+        }
         Ok(())
     }
 

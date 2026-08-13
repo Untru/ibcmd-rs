@@ -624,6 +624,69 @@ Assert-Equal (@($dcsConditionalPolicy.policy.supportedParameters) -join ',') 'Te
 Assert-Equal (@($dcsConditionalPolicy.policy.supportedValues) -join ',') 'WebRed' 'DCS conditional-appearance value cohort'
 Assert-Equal $dcsConditionalPolicy.policy.maxEmittedItems 1 'DCS conditional-appearance emission cardinality'
 
+$dcsFormAttributesRoot = Join-Path $RepositoryRoot 'tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance'
+$dcsFormAttributesManifestPath = Join-Path $dcsFormAttributesRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $dcsFormAttributesManifestPath -PathType Leaf)) {
+    throw "DCS Form Attributes conditional-appearance manifest is missing: $dcsFormAttributesManifestPath"
+}
+$dcsFormAttributesManifest = Get-Content -LiteralPath $dcsFormAttributesManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsFormAttributesManifest.schema_version 1 'DCS Form Attributes manifest schema version'
+Assert-Equal $dcsFormAttributesManifest.issue 283 'DCS Form Attributes issue'
+Assert-Equal $dcsFormAttributesManifest.fixture_id '8.3.27.2214-xml-2.20-dcs-form-attributes-conditional-appearance' 'DCS Form Attributes fixture ID'
+Assert-Equal $dcsFormAttributesManifest.evidence.platform_version '8.3.27.2214' 'DCS Form Attributes platform version'
+Assert-Equal $dcsFormAttributesManifest.evidence.source_version '2.20' 'DCS Form Attributes source version'
+Assert-Equal $dcsFormAttributesManifest.evidence.database_locale 'ru_RU' 'DCS Form Attributes database locale'
+Assert-Equal $dcsFormAttributesManifest.rounds.selected_native_equal_between_rounds $true 'DCS Form Attributes selected-native equality'
+Assert-Equal $dcsFormAttributesManifest.rounds.packed_rows_equal_between_rounds $true 'DCS Form Attributes packed-row equality'
+Assert-Equal $dcsFormAttributesManifest.rounds.unpacked_rows_equal_between_rounds $true 'DCS Form Attributes unpacked-row equality'
+$dcsFormAttributesCfBytes = Get-Base64EvidenceBytes $dcsFormAttributesManifest.configuration_cf $dcsFormAttributesRoot
+foreach ($fragment in @(
+    $dcsFormAttributesManifest.seed.probe_form,
+    $dcsFormAttributesManifest.form.native_xml,
+    $dcsFormAttributesManifest.form.wrapper,
+    $dcsFormAttributesManifest.form.storage_settings,
+    $dcsFormAttributesManifest.form.absent_baseline.empty_storage_settings
+)) {
+    $null = Get-Base64EvidenceBytes $fragment $dcsFormAttributesRoot
+}
+$dcsFormAttributesRulePath = Resolve-FixturePath $dcsFormAttributesManifest.seed.rule.path $dcsFormAttributesRoot
+Assert-Equal (Get-Item -LiteralPath $dcsFormAttributesRulePath).Length ([long]$dcsFormAttributesManifest.seed.rule.size) 'DCS Form Attributes seed rule size'
+Assert-Equal (Get-FileSha256Hex $dcsFormAttributesRulePath) $dcsFormAttributesManifest.seed.rule.sha256 'DCS Form Attributes seed rule SHA-256'
+
+$dcsFormAttributesPolicyPath = Join-Path $RepositoryRoot 'crates/ibcmd-schema/data/platform-8.3.27-xml-2.20-dcs-form-attributes-conditional-appearance-evidence.json'
+if (-not (Test-Path -LiteralPath $dcsFormAttributesPolicyPath -PathType Leaf)) {
+    throw "DCS Form Attributes conditional-appearance policy is missing: $dcsFormAttributesPolicyPath"
+}
+$dcsFormAttributesPolicy = Get-Content -LiteralPath $dcsFormAttributesPolicyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Equal $dcsFormAttributesPolicy.schemaVersion 1 'DCS Form Attributes policy schema version'
+Assert-Equal $dcsFormAttributesPolicy.contract $dcsFormAttributesManifest.contract 'DCS Form Attributes policy contract binding'
+Assert-Equal $dcsFormAttributesPolicy.bodyContract $dcsFormAttributesManifest.body_contract 'DCS Form Attributes body contract binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.comparison.fixtureId $dcsFormAttributesManifest.fixture_id 'DCS Form Attributes fixture binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.comparison.release $dcsFormAttributesManifest.evidence.platform_version 'DCS Form Attributes release binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.comparison.databaseLocale $dcsFormAttributesManifest.evidence.database_locale 'DCS Form Attributes locale binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.comparison.formRawBodySha256 $dcsFormAttributesManifest.form.body_row.unpacked_sha256 'DCS Form Attributes raw-body binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.comparison.formNativeXmlSha256 $dcsFormAttributesManifest.form.native_xml.sha256 'DCS Form Attributes native-XML binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.comparison.wrapperSha256 $dcsFormAttributesManifest.form.wrapper.sha256 'DCS Form Attributes wrapper binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.comparison.storageSettingsSha256 $dcsFormAttributesManifest.form.storage_settings.sha256 'DCS Form Attributes storage binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.absent.fixtureId $dcsFormAttributesManifest.form.absent_baseline.fixture_id 'DCS Form Attributes absent fixture binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.absent.formRawBodySha256 $dcsFormAttributesManifest.form.absent_baseline.body_unpacked_sha256 'DCS Form Attributes absent body binding'
+Assert-Equal $dcsFormAttributesPolicy.sources.absent.formNativeXmlSha256 $dcsFormAttributesManifest.form.absent_baseline.native_form_sha256 'DCS Form Attributes absent XML binding'
+Assert-Equal $dcsFormAttributesPolicy.policy.storageRecordTypeUuid $null 'DCS Form Attributes storage UUID absence'
+Assert-Equal $dcsFormAttributesPolicy.policy.storageEnvelope $dcsFormAttributesManifest.proven_shape.storage_envelope 'DCS Form Attributes storage-envelope binding'
+Assert-Equal $dcsFormAttributesPolicy.policy.storageContainerMarker $dcsFormAttributesManifest.form.storage_outer_tail.container_marker 'DCS Form Attributes container marker'
+Assert-Equal $dcsFormAttributesPolicy.policy.storageAbsentContainerMarker $dcsFormAttributesManifest.form.storage_outer_tail.absent_container_marker 'DCS Form Attributes absent container marker'
+Assert-Equal (@($dcsFormAttributesPolicy.policy.storageInactiveMarker) -join ',') '0,0' 'DCS Form Attributes inactive marker'
+Assert-Equal (@($dcsFormAttributesPolicy.policy.storageActiveMarker) -join ',') '0,1' 'DCS Form Attributes active marker'
+Assert-Equal (@($dcsFormAttributesPolicy.policy.storageFieldOrder) -join ',') 'selection,filter' 'DCS Form Attributes descriptor field order'
+Assert-Equal (@($dcsFormAttributesPolicy.policy.storageSelectionTypeIndexes) -join ',') '26,9' 'DCS Form Attributes selection type indexes'
+Assert-Equal (@($dcsFormAttributesPolicy.policy.storageFilterTypeIndexes) -join ',') '26' 'DCS Form Attributes filter type indexes'
+Assert-Equal $dcsFormAttributesPolicy.policy.absenceRepresentation 'wrapper-absent-empty-settings-tail-present' 'DCS Form Attributes absence representation'
+Assert-Equal (@($dcsFormAttributesManifest.form.storage_outer_tail.active_marker) -join ',') '0,1' 'DCS Form Attributes manifest active marker'
+Assert-Equal (@($dcsFormAttributesManifest.form.storage_outer_tail.field_order) -join ',') 'selection,filter' 'DCS Form Attributes manifest field order'
+Assert-Equal (@($dcsFormAttributesManifest.form.storage_outer_tail.selection_type_indexes) -join ',') '26,9' 'DCS Form Attributes manifest selection type indexes'
+Assert-Equal (@($dcsFormAttributesManifest.form.storage_outer_tail.filter_type_indexes) -join ',') '26' 'DCS Form Attributes manifest filter type indexes'
+Assert-Equal $dcsFormAttributesPolicy.policy.maxEmittedItems 1 'DCS Form Attributes emission cardinality'
+
 if (-not [IO.Path]::IsPathRooted($BinaryPath)) {
     $BinaryPath = Join-Path $RepositoryRoot $BinaryPath
 }
@@ -642,6 +705,11 @@ $dcsFilterMetadataCfPath = Join-Path $temporaryRoot 'dcs-filter-metadata-only.cf
 $dcsFilterMetadataOutputRoot = Join-Path $temporaryRoot 'dcs-filter-metadata-only-export'
 $dcsConditionalCfPath = Join-Path $temporaryRoot 'dcs-conditional-appearance.cf'
 $dcsConditionalOutputRoot = Join-Path $temporaryRoot 'dcs-conditional-appearance-export'
+$dcsFormAttributesCfPath = Join-Path $temporaryRoot 'dcs-form-attributes-conditional-appearance.cf'
+$dcsFormAttributesOutputRoot = Join-Path $temporaryRoot 'dcs-form-attributes-conditional-appearance-export'
+$dcsFormAttributesCandidateCfPath = Join-Path $temporaryRoot 'dcs-form-attributes-compiler-candidate.cf'
+$dcsFormAttributesCandidateFormPath = Join-Path $temporaryRoot 'dcs-form-attributes-compiler-input.xml'
+$dcsFormAttributesCandidateOutputRoot = Join-Path $temporaryRoot 'dcs-form-attributes-compiler-export'
 $stderrPath = Join-Path $temporaryRoot 'stderr.txt'
 [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
 
@@ -780,10 +848,69 @@ try {
         throw "DCS conditional-appearance raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
     }
     Assert-Equal ((($verifyConditional -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS conditional-appearance raw rows'
+
+    [IO.File]::WriteAllBytes($dcsFormAttributesCfPath, $dcsFormAttributesCfBytes)
+    $dcsFormAttributesStdout = & $BinaryPath cf export --source-version 2.20 $dcsFormAttributesCfPath $dcsFormAttributesOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { '' }
+        throw "DCS Form Attributes CF export failed with exit code $LASTEXITCODE. $stderr"
+    }
+    $dcsFormAttributesReport = ($dcsFormAttributesStdout -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $dcsFormAttributesReport.ok $true 'DCS Form Attributes export status'
+    Assert-Equal $dcsFormAttributesReport.export.storage.failed 0 'DCS Form Attributes failed storage entries'
+    foreach ($expected in @($dcsFormAttributesManifest.selected_native_files)) {
+        $candidatePath = Join-Path $dcsFormAttributesOutputRoot ($expected.path.Replace('/', [IO.Path]::DirectorySeparatorChar))
+        if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+            throw "Exported DCS Form Attributes output is missing: $($expected.path)"
+        }
+        Assert-Equal (Get-Item -LiteralPath $candidatePath).Length ([long]$expected.size) "$($expected.path) exported size"
+        Assert-Equal (Get-FileSha256Hex $candidatePath) $expected.sha256 "$($expected.path) exported SHA-256"
+    }
+    $dcsFormAttributesFormPath = Join-Path $dcsFormAttributesOutputRoot 'Catalogs\FilterProbe\Forms\ListForm\Ext\Form.xml'
+    $dcsFormAttributesWrapper = Get-Utf8XmlFragmentBytes $dcsFormAttributesFormPath '<ConditionalAppearance>' '</ConditionalAppearance>'
+    Assert-Equal $dcsFormAttributesWrapper.Length ([long]$dcsFormAttributesManifest.form.wrapper.decoded_size) 'DCS Form Attributes wrapper exported size'
+    Assert-Equal (Get-Sha256Hex $dcsFormAttributesWrapper) $dcsFormAttributesManifest.form.wrapper.sha256 'DCS Form Attributes wrapper exported SHA-256'
+    $verifyDcsFormAttributes = & $BinaryPath cf verify $dcsFormAttributesCfPath --compression raw-deflate `
+        --element $dcsFormAttributesManifest.form.metadata_key `
+        --element $dcsFormAttributesManifest.form.body_key `
+        --expect-sha256 "$($dcsFormAttributesManifest.form.metadata_key)=$($dcsFormAttributesManifest.form.metadata_row.unpacked_sha256)" `
+        --expect-sha256 "$($dcsFormAttributesManifest.form.body_key)=$($dcsFormAttributesManifest.form.body_row.unpacked_sha256)" 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS Form Attributes raw-row verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($verifyDcsFormAttributes -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS Form Attributes raw rows'
+
+    $dcsFormAttributesCompilerInput = Get-Base64EvidenceBytes $dcsFormAttributesManifest.form.native_xml $dcsFormAttributesRoot
+    [IO.File]::WriteAllBytes($dcsFormAttributesCandidateFormPath, $dcsFormAttributesCompilerInput)
+    $overlayBinding = "$($dcsFormAttributesManifest.form.body_key)=$dcsFormAttributesCandidateFormPath"
+    $overlayResult = & $BinaryPath cf overlay $dcsConditionalCfPath $dcsFormAttributesCandidateCfPath `
+        --source-version 2.20 `
+        --form-xml $overlayBinding 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS Form Attributes offline compiler overlay failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    $overlayReport = ($overlayResult -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Equal $overlayReport.ok $true 'DCS Form Attributes compiler overlay status'
+    Assert-Equal (Get-Item -LiteralPath $dcsFormAttributesCandidateCfPath).Length ([long]$dcsFormAttributesManifest.compiler_acceptance.candidate_cf_size) 'DCS Form Attributes compiler candidate size'
+    $verifyDcsFormAttributesCandidate = & $BinaryPath cf verify $dcsFormAttributesCandidateCfPath --compression raw-deflate `
+        --element $dcsFormAttributesManifest.form.body_key `
+        --expect-sha256 "$($dcsFormAttributesManifest.form.body_key)=$($dcsFormAttributesManifest.compiler_acceptance.body_unpacked_sha256)" 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS Form Attributes compiler candidate verification failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($verifyDcsFormAttributesCandidate -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS Form Attributes compiler candidate raw body'
+    $candidateExport = & $BinaryPath cf export --source-version 2.20 $dcsFormAttributesCandidateCfPath $dcsFormAttributesCandidateOutputRoot 2> $stderrPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "DCS Form Attributes compiler candidate export failed: $((Get-Content -LiteralPath $stderrPath -Raw))"
+    }
+    Assert-Equal ((($candidateExport -join [Environment]::NewLine) | ConvertFrom-Json).ok) $true 'DCS Form Attributes compiler candidate export status'
+    $candidateFormPath = Join-Path $dcsFormAttributesCandidateOutputRoot 'Catalogs\FilterProbe\Forms\ListForm\Ext\Form.xml'
+    $candidateWrapper = Get-Utf8XmlFragmentBytes $candidateFormPath '<ConditionalAppearance>' '</ConditionalAppearance>'
+    Assert-Equal (Get-Sha256Hex $candidateWrapper) $dcsFormAttributesManifest.compiler_acceptance.platform_native_wrapper_sha256 'DCS Form Attributes compiler candidate wrapper SHA-256'
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }
 }
 
-Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter/conditionalAppearance + ChartOfCharacteristicTypes + register and plan generated types.'
+Write-Output 'Native evidence verification passed: 8.3.27.2214 / XML 2.20 / Task + BusinessProcess + DCS selection/order/filter/conditionalAppearance/Form Attributes wrapper + ChartOfCharacteristicTypes + register and plan generated types.'
