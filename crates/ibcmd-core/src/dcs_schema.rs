@@ -222,6 +222,13 @@ pub enum DcsSchemaBuildError {
     QueryUnionLinkMismatch,
     /// The style-free AreaTemplate differs from the exact admitted coordinate.
     AreaTemplateMismatch,
+    /// Only decimal(10,2) is present in the attested scalar-parameter cohort.
+    UnsupportedParameterDecimalQualifiers { digits: u32, fraction_digits: u32 },
+    /// Only the attested `100.5` decimal literal is present in the cohort.
+    UnsupportedParameterDecimalValue { value: String },
+    /// The three additional scalar-typed parameters require the existing
+    /// string `Caption` parameter to already be present.
+    ScalarParametersRequireStringParameter,
 }
 
 impl Display for DcsSchemaBuildError {
@@ -311,6 +318,20 @@ impl Display for DcsSchemaBuildError {
             ),
             Self::AreaTemplateMismatch => formatter.write_str(
                 "DCS schema AreaTemplate differs from the attested style-free coordinate",
+            ),
+            Self::UnsupportedParameterDecimalQualifiers {
+                digits,
+                fraction_digits,
+            } => write!(
+                formatter,
+                "DCS schema parameter decimal qualifiers ({digits},{fraction_digits}) are outside the attested (10,2) cohort"
+            ),
+            Self::UnsupportedParameterDecimalValue { value } => write!(
+                formatter,
+                "DCS schema parameter decimal value `{value}` is outside the attested `100.5` cohort"
+            ),
+            Self::ScalarParametersRequireStringParameter => formatter.write_str(
+                "DCS schema scalar-typed parameters require the existing string Caption parameter",
             ),
         }
     }
@@ -1175,6 +1196,308 @@ impl<'de> Deserialize<'de> for DcsSchemaStringParameter {
     }
 }
 
+/// `v8:StandardPeriodVariant` value authenticated for the initial 2214
+/// parameter-scalar-types cohort. XML lexical spelling and namespace
+/// prefixes remain schema/XML policy. Only `LastMonth` is evidenced; other
+/// variants must fail closed at the schema/XML layer, not be represented
+/// here.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DcsSchemaStandardPeriodVariant {
+    LastMonth,
+}
+
+/// Decimal qualifiers for the `Лимит` scalar-parameter cohort. Kept
+/// separate from [`DcsSchemaDecimalType`] (the Amount/DoubleAmount
+/// data-set/calculated-field cohort's own, independently evidenced 15/2
+/// pair): each digit/fraction pair is its own bounded, evidence-enumerated
+/// coordinate, not a general decimal-qualifiers facility.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaParameterDecimalType {
+    digits: u32,
+    fraction_digits: u32,
+}
+
+impl DcsSchemaParameterDecimalType {
+    pub fn new(digits: u32, fraction_digits: u32) -> Result<Self, DcsSchemaBuildError> {
+        if digits == 0 {
+            return Err(DcsSchemaBuildError::ZeroDecimalDigits);
+        }
+        if fraction_digits > digits {
+            return Err(DcsSchemaBuildError::DecimalFractionExceedsDigits {
+                digits,
+                fraction_digits,
+            });
+        }
+        if digits != 10 || fraction_digits != 2 {
+            return Err(DcsSchemaBuildError::UnsupportedParameterDecimalQualifiers {
+                digits,
+                fraction_digits,
+            });
+        }
+        Ok(Self {
+            digits,
+            fraction_digits,
+        })
+    }
+
+    pub const fn digits(&self) -> u32 {
+        self.digits
+    }
+
+    pub const fn fraction_digits(&self) -> u32 {
+        self.fraction_digits
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaParameterDecimalTypeWire {
+    digits: u32,
+    fraction_digits: u32,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaParameterDecimalType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaParameterDecimalTypeWire::deserialize(deserializer)?;
+        Self::new(wire.digits, wire.fraction_digits).map_err(de::Error::custom)
+    }
+}
+
+/// The `Флаг` scalar boolean parameter authenticated by the dedicated 2214
+/// parameter-scalar-types cohort. Its `useRestriction` semantic is fixed to
+/// the attested `false`, matching [`DcsSchemaStringParameter`].
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaBooleanParameter {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    value: bool,
+}
+
+impl DcsSchemaBooleanParameter {
+    pub fn new(
+        name: CanonicalText,
+        title: DcsSchemaLocalString,
+        value: bool,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("boolean parameter name", &name)?;
+        Ok(Self { name, title, value })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+
+    pub const fn title(&self) -> &DcsSchemaLocalString {
+        &self.title
+    }
+
+    pub const fn value(&self) -> bool {
+        self.value
+    }
+
+    pub const fn use_restriction(&self) -> bool {
+        false
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaBooleanParameterWire {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    value: bool,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaBooleanParameter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaBooleanParameterWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.title, wire.value).map_err(de::Error::custom)
+    }
+}
+
+/// The `Лимит` scalar decimal parameter authenticated by the dedicated
+/// 2214 parameter-scalar-types cohort. Its `useRestriction` semantic is
+/// fixed to the attested `false`, matching [`DcsSchemaStringParameter`].
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaDecimalParameter {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    value_type: DcsSchemaParameterDecimalType,
+    value: CanonicalText,
+}
+
+impl DcsSchemaDecimalParameter {
+    pub fn new(
+        name: CanonicalText,
+        title: DcsSchemaLocalString,
+        value_type: DcsSchemaParameterDecimalType,
+        value: CanonicalText,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("decimal parameter name", &name)?;
+        require_text("decimal parameter value", &value)?;
+        if value.as_str() != "100.5" {
+            return Err(DcsSchemaBuildError::UnsupportedParameterDecimalValue {
+                value: value.as_str().to_owned(),
+            });
+        }
+        Ok(Self {
+            name,
+            title,
+            value_type,
+            value,
+        })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+
+    pub const fn title(&self) -> &DcsSchemaLocalString {
+        &self.title
+    }
+
+    pub const fn value_type(&self) -> DcsSchemaParameterDecimalType {
+        self.value_type
+    }
+
+    pub const fn value(&self) -> &CanonicalText {
+        &self.value
+    }
+
+    pub const fn use_restriction(&self) -> bool {
+        false
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaDecimalParameterWire {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    value_type: DcsSchemaParameterDecimalType,
+    value: CanonicalText,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaDecimalParameter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaDecimalParameterWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.title, wire.value_type, wire.value).map_err(de::Error::custom)
+    }
+}
+
+/// The `Период` scalar `v8:StandardPeriod` parameter authenticated by the
+/// dedicated 2214 parameter-scalar-types cohort. Its `useRestriction`
+/// semantic is fixed to the attested `false`, matching
+/// [`DcsSchemaStringParameter`].
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaStandardPeriodParameter {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    variant: DcsSchemaStandardPeriodVariant,
+}
+
+impl DcsSchemaStandardPeriodParameter {
+    pub fn new(
+        name: CanonicalText,
+        title: DcsSchemaLocalString,
+        variant: DcsSchemaStandardPeriodVariant,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("StandardPeriod parameter name", &name)?;
+        Ok(Self {
+            name,
+            title,
+            variant,
+        })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+
+    pub const fn title(&self) -> &DcsSchemaLocalString {
+        &self.title
+    }
+
+    pub const fn variant(&self) -> DcsSchemaStandardPeriodVariant {
+        self.variant
+    }
+
+    pub const fn use_restriction(&self) -> bool {
+        false
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaStandardPeriodParameterWire {
+    name: CanonicalText,
+    title: DcsSchemaLocalString,
+    variant: DcsSchemaStandardPeriodVariant,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaStandardPeriodParameter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DcsSchemaStandardPeriodParameterWire::deserialize(deserializer)?;
+        Self::new(wire.name, wire.title, wire.variant).map_err(de::Error::custom)
+    }
+}
+
+/// The three additional scalar-typed parameters (`Флаг`, `Лимит`,
+/// `Период`) authenticated by the dedicated 2214 parameter-scalar-types
+/// cohort. Always present as a group immediately after the base schema's
+/// existing string `Caption` parameter, in this exact order (enforced by
+/// [`DcsSchema::with_scalar_parameters`], not by this type itself).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaParameterScalarTypes {
+    flag: DcsSchemaBooleanParameter,
+    limit: DcsSchemaDecimalParameter,
+    period: DcsSchemaStandardPeriodParameter,
+}
+
+impl DcsSchemaParameterScalarTypes {
+    pub fn new(
+        flag: DcsSchemaBooleanParameter,
+        limit: DcsSchemaDecimalParameter,
+        period: DcsSchemaStandardPeriodParameter,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        Ok(Self {
+            flag,
+            limit,
+            period,
+        })
+    }
+
+    pub const fn flag(&self) -> &DcsSchemaBooleanParameter {
+        &self.flag
+    }
+
+    pub const fn limit(&self) -> &DcsSchemaDecimalParameter {
+        &self.limit
+    }
+
+    pub const fn period(&self) -> &DcsSchemaStandardPeriodParameter {
+        &self.period
+    }
+}
+
 /// Positional metadata shell for one externally delegated Settings document.
 /// The Settings payload itself remains in the common settings/envelope layer.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1228,6 +1551,11 @@ pub struct DcsSchema {
     calculated_field: Option<DcsSchemaCalculatedField>,
     total_fields: Vec<DcsSchemaUngroupedTotalField>,
     parameter: Option<DcsSchemaStringParameter>,
+    /// The three additional scalar-typed parameters authenticated by the
+    /// dedicated 2214 parameter-scalar-types cohort. Requires `parameter`
+    /// (the existing `Caption` parameter) to already be present; see
+    /// `with_scalar_parameters`.
+    scalar_parameters: Option<DcsSchemaParameterScalarTypes>,
     settings_variants: Vec<DcsSchemaSettingsVariantShell>,
     provenance: SourceProvenance,
 }
@@ -1350,11 +1678,28 @@ impl DcsSchema {
             calculated_field,
             total_fields,
             parameter,
+            scalar_parameters: None,
             settings_variants,
             provenance,
         };
         validate_retained_bytes(&schema)?;
         Ok(schema)
+    }
+
+    /// Enables the exact three-parameter `Флаг`/`Лимит`/`Период` group
+    /// authenticated by the dedicated 2214 parameter-scalar-types cohort.
+    /// Requires the existing string `Caption` parameter to already be
+    /// present (the evidenced insertion point is immediately after it).
+    pub fn with_scalar_parameters(
+        mut self,
+        scalar_parameters: DcsSchemaParameterScalarTypes,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        if self.parameter.is_none() {
+            return Err(DcsSchemaBuildError::ScalarParametersRequireStringParameter);
+        }
+        self.scalar_parameters = Some(scalar_parameters);
+        validate_retained_bytes(&self)?;
+        Ok(self)
     }
 
     pub const fn data_source(&self) -> &DcsSchemaLocalDataSource {
@@ -1377,6 +1722,10 @@ impl DcsSchema {
         self.parameter.as_ref()
     }
 
+    pub const fn scalar_parameters(&self) -> Option<&DcsSchemaParameterScalarTypes> {
+        self.scalar_parameters.as_ref()
+    }
+
     pub fn settings_variants(&self) -> &[DcsSchemaSettingsVariantShell] {
         &self.settings_variants
     }
@@ -1394,6 +1743,8 @@ struct DcsSchemaWire {
     calculated_field: Option<DcsSchemaCalculatedField>,
     total_fields: BoundedDcsSchemaVec<DcsSchemaUngroupedTotalField, DCS_SCHEMA_TOTAL_FIELD_COUNT>,
     parameter: Option<DcsSchemaStringParameter>,
+    #[serde(default)]
+    scalar_parameters: Option<DcsSchemaParameterScalarTypes>,
     settings_variants:
         BoundedDcsSchemaVec<DcsSchemaSettingsVariantShell, MAX_DCS_SCHEMA_SETTINGS_VARIANTS>,
     provenance: SourceProvenance,
@@ -1405,7 +1756,7 @@ impl<'de> Deserialize<'de> for DcsSchema {
         D: Deserializer<'de>,
     {
         let wire = DcsSchemaWire::deserialize(deserializer)?;
-        Self::new_parts(
+        let schema = Self::new_parts(
             wire.data_source,
             wire.data_set,
             wire.calculated_field,
@@ -1414,7 +1765,13 @@ impl<'de> Deserialize<'de> for DcsSchema {
             wire.settings_variants.values,
             wire.provenance,
         )
-        .map_err(de::Error::custom)
+        .map_err(de::Error::custom)?;
+        match wire.scalar_parameters {
+            Some(scalar_parameters) => schema
+                .with_scalar_parameters(scalar_parameters)
+                .map_err(de::Error::custom),
+            None => Ok(schema),
+        }
     }
 }
 
@@ -1501,6 +1858,21 @@ fn validate_retained_bytes(schema: &DcsSchema) -> Result<(), DcsSchemaBuildError
         retained = add_retained(retained, parameter.title().language().as_str().len())?;
         retained = add_retained(retained, parameter.title().content().as_str().len())?;
         retained = add_retained(retained, parameter.value().as_str().len())?;
+    }
+    if let Some(scalar_parameters) = &schema.scalar_parameters {
+        let flag = scalar_parameters.flag();
+        retained = add_retained(retained, flag.name().as_str().len())?;
+        retained = add_retained(retained, flag.title().language().as_str().len())?;
+        retained = add_retained(retained, flag.title().content().as_str().len())?;
+        let limit = scalar_parameters.limit();
+        retained = add_retained(retained, limit.name().as_str().len())?;
+        retained = add_retained(retained, limit.title().language().as_str().len())?;
+        retained = add_retained(retained, limit.title().content().as_str().len())?;
+        retained = add_retained(retained, limit.value().as_str().len())?;
+        let period = scalar_parameters.period();
+        retained = add_retained(retained, period.name().as_str().len())?;
+        retained = add_retained(retained, period.title().language().as_str().len())?;
+        retained = add_retained(retained, period.title().content().as_str().len())?;
     }
     for variant in &schema.settings_variants {
         retained = add_retained(retained, variant.name().as_str().len())?;
@@ -1985,6 +2357,113 @@ mod tests {
                 valid.provenance.clone(),
             ),
             Err(DcsSchemaBuildError::DuplicateSettingsVariantName { .. })
+        ));
+    }
+
+    fn scalar_parameters() -> DcsSchemaParameterScalarTypes {
+        DcsSchemaParameterScalarTypes::new(
+            DcsSchemaBooleanParameter::new(
+                text("Флаг"),
+                DcsSchemaLocalString::new(text("ru"), text("Флаг")).unwrap(),
+                true,
+            )
+            .unwrap(),
+            DcsSchemaDecimalParameter::new(
+                text("Лимит"),
+                DcsSchemaLocalString::new(text("ru"), text("Лимит")).unwrap(),
+                DcsSchemaParameterDecimalType::new(10, 2).unwrap(),
+                text("100.5"),
+            )
+            .unwrap(),
+            DcsSchemaStandardPeriodParameter::new(
+                text("Период"),
+                DcsSchemaLocalString::new(text("ru"), text("Период")).unwrap(),
+                DcsSchemaStandardPeriodVariant::LastMonth,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn scalar_parameters_are_bounded_and_serde_stable() {
+        let with_scalars = schema(vec![variant("Main")])
+            .with_scalar_parameters(scalar_parameters())
+            .unwrap();
+        let scalars = with_scalars.scalar_parameters().unwrap();
+        assert!(scalars.flag().value());
+        assert_eq!(scalars.limit().value().as_str(), "100.5");
+        assert_eq!(scalars.limit().value_type().digits(), 10);
+        assert_eq!(scalars.limit().value_type().fraction_digits(), 2);
+        assert_eq!(
+            scalars.period().variant(),
+            DcsSchemaStandardPeriodVariant::LastMonth
+        );
+
+        let json = serde_json::to_string(&with_scalars).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchema>(&json).unwrap(),
+            with_scalars
+        );
+
+        // Without the group, the schema round-trips as before (backward
+        // compatible: `scalar_parameters` defaults to absent on wire).
+        let without_scalars = schema(vec![variant("Main")]);
+        assert!(without_scalars.scalar_parameters().is_none());
+        let json = serde_json::to_string(&without_scalars).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchema>(&json).unwrap(),
+            without_scalars
+        );
+    }
+
+    #[test]
+    fn scalar_parameters_require_existing_string_parameter() {
+        let simple = DcsSchema::new_simple(
+            DcsSchemaLocalDataSource::new(text("ИсточникДанных1")).unwrap(),
+            DcsSchemaDataSetObject::new(
+                text("Rows"),
+                vec![string_field()],
+                text("ИсточникДанных1"),
+                text("Rows"),
+            )
+            .unwrap(),
+            vec![variant("Main")],
+            provenance(),
+        )
+        .unwrap();
+        assert!(matches!(
+            simple.with_scalar_parameters(scalar_parameters()),
+            Err(DcsSchemaBuildError::ScalarParametersRequireStringParameter)
+        ));
+    }
+
+    #[test]
+    fn parameter_decimal_type_rejects_unevidenced_qualifiers() {
+        assert!(matches!(
+            DcsSchemaParameterDecimalType::new(15, 2),
+            Err(DcsSchemaBuildError::UnsupportedParameterDecimalQualifiers { .. })
+        ));
+        assert!(matches!(
+            DcsSchemaParameterDecimalType::new(0, 0),
+            Err(DcsSchemaBuildError::ZeroDecimalDigits)
+        ));
+        assert!(matches!(
+            DcsSchemaParameterDecimalType::new(1, 5),
+            Err(DcsSchemaBuildError::DecimalFractionExceedsDigits { .. })
+        ));
+    }
+
+    #[test]
+    fn decimal_parameter_rejects_unevidenced_value() {
+        assert!(matches!(
+            DcsSchemaDecimalParameter::new(
+                text("Лимит"),
+                DcsSchemaLocalString::new(text("ru"), text("Лимит")).unwrap(),
+                DcsSchemaParameterDecimalType::new(10, 2).unwrap(),
+                text("7"),
+            ),
+            Err(DcsSchemaBuildError::UnsupportedParameterDecimalValue { .. })
         ));
     }
 

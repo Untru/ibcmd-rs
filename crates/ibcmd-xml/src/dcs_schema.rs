@@ -6,19 +6,22 @@ use std::fmt::{self, Display, Formatter};
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::dcs::DcsAppearanceColor;
 use ibcmd_core::dcs_schema::{
-    DcsSchema, DcsSchemaAreaTemplate, DcsSchemaBuildError, DcsSchemaCalculatedField,
-    DcsSchemaDataSetField, DcsSchemaDataSetLink, DcsSchemaDataSetObject, DcsSchemaDecimalType,
-    DcsSchemaFieldType, DcsSchemaLocalDataSource, DcsSchemaLocalString, DcsSchemaQueryDataSet,
-    DcsSchemaQueryField, DcsSchemaQueryUnionLink, DcsSchemaReferenceType,
-    DcsSchemaSettingsVariantShell, DcsSchemaStringParameter, DcsSchemaStringType,
+    DcsSchema, DcsSchemaAreaTemplate, DcsSchemaBooleanParameter, DcsSchemaBuildError,
+    DcsSchemaCalculatedField, DcsSchemaDataSetField, DcsSchemaDataSetLink, DcsSchemaDataSetObject,
+    DcsSchemaDecimalParameter, DcsSchemaDecimalType, DcsSchemaFieldType, DcsSchemaLocalDataSource,
+    DcsSchemaLocalString, DcsSchemaParameterDecimalType, DcsSchemaParameterScalarTypes,
+    DcsSchemaQueryDataSet, DcsSchemaQueryField, DcsSchemaQueryUnionLink, DcsSchemaReferenceType,
+    DcsSchemaSettingsVariantShell, DcsSchemaStandardPeriodParameter,
+    DcsSchemaStandardPeriodVariant, DcsSchemaStringParameter, DcsSchemaStringType,
     DcsSchemaTotalFunction, DcsSchemaUngroupedTotalField, DcsSchemaUnionDataSet,
 };
 use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::CanonicalText;
 use ibcmd_schema::{
-    DcsAreaTemplatePolicy, DcsInnerSchemaPolicy, bundled_dcs_area_template_policy,
-    bundled_dcs_inner_schema_policy, bundled_dcs_query_union_link_policy,
+    DcsAreaTemplatePolicy, DcsInnerSchemaPolicy, DcsParameterScalarTypesPolicy,
+    bundled_dcs_area_template_policy, bundled_dcs_inner_schema_policy,
+    bundled_dcs_parameter_scalar_types_policy, bundled_dcs_query_union_link_policy,
 };
 use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
@@ -197,6 +200,19 @@ pub fn parse_dcs_inner_schema_storage_document_with_references(
     let parameter = rich
         .then(|| parse_parameter(take(&children, &mut cursor, "parameter")?, &policy))
         .transpose()?;
+    let scalar_parameters = if parameter.is_some()
+        && children
+            .get(cursor)
+            .is_some_and(|child| child.local == "parameter")
+    {
+        Some(parse_parameter_scalar_types(
+            &children,
+            &mut cursor,
+            &policy,
+        )?)
+    } else {
+        None
+    };
     let mut variants = Vec::new();
     while cursor < children.len() {
         variants.push(parse_variant(
@@ -215,7 +231,7 @@ pub fn parse_dcs_inner_schema_storage_document_with_references(
     );
     let provenance = SourceProvenance::with_locator(source_profile, anchor, locator)
         .map_err(|error| DcsInnerSchemaError::Malformed(error.to_string()))?;
-    match (calculated, parameter) {
+    let schema = match (calculated, parameter) {
         (Some(calculated), Some(parameter)) => DcsSchema::new(
             data_source,
             data_set,
@@ -225,12 +241,18 @@ pub fn parse_dcs_inner_schema_storage_document_with_references(
             variants,
             provenance,
         ),
-        (None, None) if totals.is_empty() => {
+        (None, None) if totals.is_empty() && scalar_parameters.is_none() => {
             DcsSchema::new_simple(data_source, data_set, variants, provenance)
         }
         _ => return unsupported("inner schema mixes simple and rich cohort members"),
     }
-    .map_err(DcsInnerSchemaError::Build)
+    .map_err(DcsInnerSchemaError::Build)?;
+    match scalar_parameters {
+        Some(scalar_parameters) => schema
+            .with_scalar_parameters(scalar_parameters)
+            .map_err(DcsInnerSchemaError::Build),
+        None => Ok(schema),
+    }
 }
 
 /// Parses the exact one-Query/one-Union/one-link storage cohort.
@@ -920,6 +942,76 @@ pub fn emit_dcs_inner_schema_source_document(
         scalar(&mut out, 2, "useRestriction", "false");
         line(&mut out, 1, "</parameter>");
     }
+    if let Some(scalar_parameters) = schema.scalar_parameters() {
+        let flag = scalar_parameters.flag();
+        line(&mut out, 1, "<parameter>");
+        scalar(&mut out, 2, "name", flag.name().as_str());
+        emit_local_string(&mut out, 2, "title", flag.title(), false);
+        line(&mut out, 2, "<valueType>");
+        scalar(&mut out, 3, "v8:Type", "xs:boolean");
+        line(&mut out, 2, "</valueType>");
+        line(
+            &mut out,
+            2,
+            &format!(
+                "<value xsi:type=\"xs:boolean\">{}</value>",
+                if flag.value() { "true" } else { "false" }
+            ),
+        );
+        scalar(&mut out, 2, "useRestriction", "false");
+        line(&mut out, 1, "</parameter>");
+
+        let limit = scalar_parameters.limit();
+        line(&mut out, 1, "<parameter>");
+        scalar(&mut out, 2, "name", limit.name().as_str());
+        emit_local_string(&mut out, 2, "title", limit.title(), false);
+        line(&mut out, 2, "<valueType>");
+        scalar(&mut out, 3, "v8:Type", "xs:decimal");
+        line(&mut out, 3, "<v8:NumberQualifiers>");
+        scalar(
+            &mut out,
+            4,
+            "v8:Digits",
+            &limit.value_type().digits().to_string(),
+        );
+        scalar(
+            &mut out,
+            4,
+            "v8:FractionDigits",
+            &limit.value_type().fraction_digits().to_string(),
+        );
+        scalar(&mut out, 4, "v8:AllowedSign", "Any");
+        line(&mut out, 3, "</v8:NumberQualifiers>");
+        line(&mut out, 2, "</valueType>");
+        line(
+            &mut out,
+            2,
+            &format!(
+                "<value xsi:type=\"xs:decimal\">{}</value>",
+                escape(limit.value().as_str())
+            ),
+        );
+        scalar(&mut out, 2, "useRestriction", "false");
+        line(&mut out, 1, "</parameter>");
+
+        let period = scalar_parameters.period();
+        line(&mut out, 1, "<parameter>");
+        scalar(&mut out, 2, "name", period.name().as_str());
+        emit_local_string(&mut out, 2, "title", period.title(), false);
+        line(&mut out, 2, "<valueType>");
+        scalar(&mut out, 3, "v8:Type", "v8:StandardPeriod");
+        line(&mut out, 2, "</valueType>");
+        line(&mut out, 2, "<value xsi:type=\"v8:StandardPeriod\">");
+        let DcsSchemaStandardPeriodVariant::LastMonth = period.variant();
+        line(
+            &mut out,
+            3,
+            "<v8:variant xsi:type=\"v8:StandardPeriodVariant\">LastMonth</v8:variant>",
+        );
+        line(&mut out, 2, "</value>");
+        scalar(&mut out, 2, "useRestriction", "false");
+        line(&mut out, 1, "</parameter>");
+    }
     for (variant, settings) in schema.settings_variants().iter().zip(settings_blocks) {
         line(&mut out, 1, "<settingsVariant>");
         scalar(&mut out, 2, "dcsset:name", variant.name().as_str());
@@ -1416,6 +1508,157 @@ fn parse_parameter(
     .map_err(DcsInnerSchemaError::Build)
 }
 
+/// Parses the three additional scalar-typed parameters (`Флаг`, `Лимит`,
+/// `Период`) authenticated by the dedicated 2214 parameter-scalar-types
+/// cohort. Consumes exactly three `parameter` siblings, in this exact
+/// order, starting at `*cursor`.
+fn parse_parameter_scalar_types(
+    children: &[&ParsedElement],
+    cursor: &mut usize,
+    p: &DcsInnerSchemaPolicy,
+) -> Result<DcsSchemaParameterScalarTypes, DcsInnerSchemaError> {
+    let sp = parameter_scalar_types_policy()?;
+    let flag = parse_boolean_parameter(take(children, cursor, "parameter")?, p, &sp)?;
+    let limit = parse_decimal_parameter(take(children, cursor, "parameter")?, p, &sp)?;
+    let period = parse_standard_period_parameter(take(children, cursor, "parameter")?, p, &sp)?;
+    DcsSchemaParameterScalarTypes::new(flag, limit, period).map_err(DcsInnerSchemaError::Build)
+}
+
+fn parse_boolean_parameter(
+    e: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    sp: &DcsParameterScalarTypesPolicy,
+) -> Result<DcsSchemaBooleanParameter, DcsInnerSchemaError> {
+    require_no_attributes(e)?;
+    let c = exact_children(e, p.parameter_child_order(), p.schema_namespace_uri())?;
+    let name = canonical(text(c[0])?)?;
+    if name.as_str() != sp.flag_parameter_name() {
+        return unsupported("scalar-type parameter name is outside the evidenced cohort");
+    }
+    let title = parse_local_string(c[1], p)?;
+    require_name(c[2], Some(p.schema_namespace_uri()), "valueType")?;
+    require_no_attributes(c[2])?;
+    let vt = element_children(c[2])?;
+    if vt.len() != 1 {
+        return unsupported("boolean parameter valueType must contain only Type");
+    }
+    require_name(vt[0], Some(p.data_core_namespace_uri()), "Type")?;
+    require_no_attributes(vt[0])?;
+    if resolve_qname_text(vt[0])? != sp.boolean_value_type_qname() {
+        return unsupported("parameter valueType is not xs:boolean");
+    }
+    require_type(c[3], p, &sp.boolean_value_type_qname())?;
+    let value = match text_allowing_attributes(c[3])?.as_str() {
+        "true" => true,
+        "false" => false,
+        _ => return unsupported("boolean parameter value is not a valid xs:boolean lexical form"),
+    };
+    if text(c[4])? != "false" {
+        return unsupported("parameter useRestriction is not false");
+    }
+    DcsSchemaBooleanParameter::new(name, title, value).map_err(DcsInnerSchemaError::Build)
+}
+
+fn parse_decimal_parameter(
+    e: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    sp: &DcsParameterScalarTypesPolicy,
+) -> Result<DcsSchemaDecimalParameter, DcsInnerSchemaError> {
+    require_no_attributes(e)?;
+    let c = exact_children(e, p.parameter_child_order(), p.schema_namespace_uri())?;
+    let name = canonical(text(c[0])?)?;
+    if name.as_str() != sp.limit_parameter_name() {
+        return unsupported("scalar-type parameter name is outside the evidenced cohort");
+    }
+    let title = parse_local_string(c[1], p)?;
+    require_name(c[2], Some(p.schema_namespace_uri()), "valueType")?;
+    require_no_attributes(c[2])?;
+    let vt = element_children(c[2])?;
+    if vt.len() != 2 {
+        return unsupported("decimal parameter valueType must contain Type and NumberQualifiers");
+    }
+    require_name(vt[0], Some(p.data_core_namespace_uri()), "Type")?;
+    require_no_attributes(vt[0])?;
+    if resolve_qname_text(vt[0])? != p.decimal_value_type_qname() {
+        return unsupported("parameter valueType is not xs:decimal");
+    }
+    require_name(vt[1], Some(p.data_core_namespace_uri()), "NumberQualifiers")?;
+    require_no_attributes(vt[1])?;
+    let q = exact_children(
+        vt[1],
+        p.number_qualifiers_child_order(),
+        p.data_core_namespace_uri(),
+    )?;
+    if text(q[2])? != "Any" {
+        return unsupported("AllowedSign is outside the cohort");
+    }
+    let digits = text(q[0])?
+        .parse()
+        .map_err(|_| DcsInnerSchemaError::Malformed("parameter Digits is not u32".into()))?;
+    let fraction = text(q[1])?.parse().map_err(|_| {
+        DcsInnerSchemaError::Malformed("parameter FractionDigits is not u32".into())
+    })?;
+    let value_type =
+        DcsSchemaParameterDecimalType::new(digits, fraction).map_err(DcsInnerSchemaError::Build)?;
+    require_type(c[3], p, p.decimal_value_type_qname())?;
+    let value = canonical(text_allowing_attributes(c[3])?)?;
+    if text(c[4])? != "false" {
+        return unsupported("parameter useRestriction is not false");
+    }
+    DcsSchemaDecimalParameter::new(name, title, value_type, value)
+        .map_err(DcsInnerSchemaError::Build)
+}
+
+fn parse_standard_period_parameter(
+    e: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    sp: &DcsParameterScalarTypesPolicy,
+) -> Result<DcsSchemaStandardPeriodParameter, DcsInnerSchemaError> {
+    require_no_attributes(e)?;
+    let c = exact_children(e, p.parameter_child_order(), p.schema_namespace_uri())?;
+    let name = canonical(text(c[0])?)?;
+    if name.as_str() != sp.period_parameter_name() {
+        return unsupported("scalar-type parameter name is outside the evidenced cohort");
+    }
+    let title = parse_local_string(c[1], p)?;
+    require_name(c[2], Some(p.schema_namespace_uri()), "valueType")?;
+    require_no_attributes(c[2])?;
+    let vt = element_children(c[2])?;
+    if vt.len() != 1 {
+        return unsupported("StandardPeriod parameter valueType must contain only Type");
+    }
+    require_name(vt[0], Some(p.data_core_namespace_uri()), "Type")?;
+    require_no_attributes(vt[0])?;
+    if resolve_qname_text(vt[0])? != sp.standard_period_value_type_qname() {
+        return unsupported("parameter valueType is not v8:StandardPeriod");
+    }
+    require_name(c[3], Some(p.schema_namespace_uri()), "value")?;
+    require_type(c[3], p, &sp.standard_period_value_type_qname())?;
+    let value_children = element_children(c[3])?;
+    if value_children.len() != 1 {
+        return unsupported("StandardPeriod value must contain exactly one variant");
+    }
+    require_name(
+        value_children[0],
+        Some(p.data_core_namespace_uri()),
+        "variant",
+    )?;
+    require_type(
+        value_children[0],
+        p,
+        &sp.standard_period_variant_type_qname(),
+    )?;
+    let variant_token = text_allowing_attributes(value_children[0])?;
+    if variant_token.trim() != sp.standard_period_variant_token() {
+        return unsupported("StandardPeriodVariant is outside the evidenced cohort");
+    }
+    if text(c[4])? != "false" {
+        return unsupported("parameter useRestriction is not false");
+    }
+    DcsSchemaStandardPeriodParameter::new(name, title, DcsSchemaStandardPeriodVariant::LastMonth)
+        .map_err(DcsInnerSchemaError::Build)
+}
+
 fn parse_variant(
     e: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
@@ -1710,6 +1953,10 @@ fn policy() -> Result<DcsInnerSchemaPolicy, DcsInnerSchemaError> {
 
 fn area_policy() -> Result<DcsAreaTemplatePolicy, DcsInnerSchemaError> {
     bundled_dcs_area_template_policy()
+        .map_err(|error| DcsInnerSchemaError::InvalidEvidence(error.to_string()))
+}
+fn parameter_scalar_types_policy() -> Result<DcsParameterScalarTypesPolicy, DcsInnerSchemaError> {
+    bundled_dcs_parameter_scalar_types_policy()
         .map_err(|error| DcsInnerSchemaError::InvalidEvidence(error.to_string()))
 }
 fn unsupported<T>(reason: impl Into<String>) -> Result<T, DcsInnerSchemaError> {
@@ -2021,6 +2268,28 @@ mod tests {
         body[24..24 + 3029].to_vec()
     }
 
+    /// The parameter-scalar-types cohort's manifest, like several other
+    /// corpora in this batch, retains only the combined `raw-unpacked`
+    /// envelope; slice the primary `SchemaFile` document from its
+    /// length-prefixed header the same way `type_id_documents` does above.
+    fn parameter_scalar_types_primary() -> Vec<u8> {
+        let body = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-parameter-scalar-types/raw-unpacked.bin.b64"
+        )));
+        let count = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
+        assert_eq!(count, 1);
+        let first = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
+        body[24..24 + first].to_vec()
+    }
+
+    fn parameter_scalar_types_native_source() -> Vec<u8> {
+        decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-parameter-scalar-types/native-template.xml.b64"
+        )))
+    }
+
     fn filter_primary() -> Vec<u8> {
         let native = include_str!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
@@ -2199,6 +2468,124 @@ mod tests {
         .unwrap();
         let emitted = String::from_utf8(emitted).unwrap().replace("\r\n", "\n");
         assert_eq!(emitted.trim_end(), source.trim_end());
+    }
+
+    #[test]
+    fn platform_parameter_scalar_types_storage_parses_to_typed_ir_and_emits_exact_source() {
+        let primary = parameter_scalar_types_primary();
+        // document_topology (manifest.json): primary_schema_sha256
+        // 66061d435748072b14f3bbc9a55e54d91b1e016831d574fc2732dd2cd53e99f6
+        // (verified against this exact slice outside this crate, which has
+        // no sha2 dependency; pinned sha256 checks for this corpus live in
+        // src/compiler/bodies/dcs.rs and src/mssql_dump/dcs.rs instead).
+        assert_eq!(primary.len(), 4743);
+
+        let schema = parse_dcs_inner_schema_storage_document(
+            &primary,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-parameter-scalar-types",
+        )
+        .unwrap();
+        assert!(schema.parameter().is_some());
+        let scalars = schema.scalar_parameters().unwrap();
+        assert!(scalars.flag().value());
+        assert_eq!(scalars.limit().value().as_str(), "100.5");
+        assert_eq!(scalars.limit().value_type().digits(), 10);
+        assert_eq!(scalars.limit().value_type().fraction_digits(), 2);
+        assert_eq!(
+            scalars.period().variant(),
+            DcsSchemaStandardPeriodVariant::LastMonth
+        );
+
+        // raw-unpacked (primary slice) -> XML == native-template: the
+        // codec-level equivalent of the manifest's own byte-for-byte
+        // observation (native re-export equals the submitted seed here).
+        // Unlike `core_source()` (a checked-in text file, line-ending
+        // normalized by git), this native source is decoded directly from
+        // the retained base64 fixture and keeps the platform's own CRLF,
+        // matching what the emitter itself produces -- so no `\r\n`->`\n`
+        // normalization is applied on either side.
+        let source = String::from_utf8(parameter_scalar_types_native_source()).unwrap();
+        let emitted = emit_dcs_inner_schema_source_document(
+            &schema,
+            &[inline_settings(source.trim_start_matches('\u{feff}'))],
+        )
+        .unwrap();
+        let emitted = String::from_utf8(emitted).unwrap();
+        assert_eq!(emitted.trim_end(), source.trim_end());
+    }
+
+    #[test]
+    fn parameter_scalar_types_storage_rejects_unsupported_parameter_type() {
+        let primary = parameter_scalar_types_primary();
+        let text = String::from_utf8(primary).unwrap();
+        let mutated = text.replacen(
+            "<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:boolean</Type>",
+            "<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:integer</Type>",
+            1,
+        );
+        assert_ne!(mutated, text, "mutation must actually change the fixture");
+        let error = parse_dcs_inner_schema_storage_document(
+            mutated.as_bytes(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:parameter-scalar-types/unsupported-type",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn parameter_scalar_types_storage_rejects_unknown_period_variant() {
+        let primary = parameter_scalar_types_primary();
+        let text = String::from_utf8(primary).unwrap();
+        let mutated = text.replacen(
+            "<d4p1:variant xsi:type=\"d4p1:StandardPeriodVariant\">LastMonth</d4p1:variant>",
+            "<d4p1:variant xsi:type=\"d4p1:StandardPeriodVariant\">ThisWeek</d4p1:variant>",
+            1,
+        );
+        assert_ne!(mutated, text, "mutation must actually change the fixture");
+        let error = parse_dcs_inner_schema_storage_document(
+            mutated.as_bytes(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:parameter-scalar-types/unknown-variant",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn parameter_scalar_types_storage_rejects_value_not_matching_type() {
+        let primary = parameter_scalar_types_primary();
+        let text = String::from_utf8(primary).unwrap();
+        let mutated = text.replacen(
+            "<value xsi:type=\"xs:boolean\">true</value>",
+            "<value xsi:type=\"xs:boolean\">1</value>",
+            1,
+        );
+        assert_ne!(mutated, text, "mutation must actually change the fixture");
+        let error = parse_dcs_inner_schema_storage_document(
+            mutated.as_bytes(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:parameter-scalar-types/value-type-mismatch",
+        )
+        .unwrap_err();
+        assert!(matches!(error, DcsInnerSchemaError::UnsupportedSource(_)));
+    }
+
+    #[test]
+    fn parameter_scalar_types_storage_rejects_corrupted_bytes() {
+        let primary = parameter_scalar_types_primary();
+        let corrupted = &primary[..primary.len() / 2];
+        let error = parse_dcs_inner_schema_storage_document(
+            corrupted,
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:parameter-scalar-types/corrupted",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            DcsInnerSchemaError::Malformed(_) | DcsInnerSchemaError::UnsupportedSource(_)
+        ));
     }
 
     #[test]

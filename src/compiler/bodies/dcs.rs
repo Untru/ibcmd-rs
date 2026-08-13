@@ -1364,6 +1364,132 @@ mod tests {
     }
 
     #[test]
+    fn platform_parameter_scalar_types_native_packed_body_exports_exact_native_template() {
+        let profile = DcsCodecProfile::fixture();
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-parameter-scalar-types/raw-packed.bin.b64"
+        )));
+        let native_template = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-parameter-scalar-types/native-template.xml.b64"
+        )));
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&packed)),
+            "e787dd364b36c76987e4c9d6640bf0f67f1775228954b9961b04ba1e474325aa"
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&native_template)),
+            "7f4f83f5e8adcb21b0e9e848726c3da19d9cbb94996a08e69a84784fc4c9f1e0"
+        );
+
+        // Decodes the platform's own deflate-compressed bytes directly --
+        // not anything ibcmd-rs compiled -- so the exact re-export match
+        // below is independent of our own compiler direction being
+        // correct.
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &packed)
+            .expect("genuine platform-packed body must decode");
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .expect("genuine platform primary schema must remain exportable");
+        assert_eq!(exported, native_template);
+    }
+
+    #[test]
+    fn platform_parameter_scalar_types_source_compiles_and_round_trips() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-parameter-scalar-types/native-template.xml.b64"
+        )));
+
+        // seed(source) XML -> body: this corpus's own manifest observes the
+        // native re-export is byte-identical to the submitted seed, so the
+        // evidenced source IS native-template.xml here (no separate
+        // "hypothesis vs. platform" gap to bridge).
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+
+        // body -> XML: re-exporting the compiled body must reproduce the
+        // evidenced scalar parameters verbatim. (Byte-exact whole-document
+        // equality against native-template.xml is not asserted here: the
+        // primary schema's compile direction is a pre-existing, unrelated
+        // blind-passthrough -- confirmed by dcs-core's own evidence, which
+        // records its compiled body as "platform-valid... even though its
+        // internal namespace spelling is not byte-identical to the
+        // platform storage body" -- not a typed storage re-emitter like
+        // AreaTemplate's. The genuine-bytes test above proves byte-exact
+        // whole-document equality instead.)
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<name>Флаг</name>"));
+        assert!(exported_text.contains("<v8:Type>xs:boolean</v8:Type>"));
+        assert!(exported_text.contains("<value xsi:type=\"xs:boolean\">true</value>"));
+        assert!(exported_text.contains("<name>Лимит</name>"));
+        assert!(exported_text.contains("<v8:Digits>10</v8:Digits>"));
+        assert!(exported_text.contains("<value xsi:type=\"xs:decimal\">100.5</value>"));
+        assert!(exported_text.contains("<name>Период</name>"));
+        assert!(exported_text.contains("<v8:Type>v8:StandardPeriod</v8:Type>"));
+        assert!(
+            exported_text.contains(
+                "<v8:variant xsi:type=\"v8:StandardPeriodVariant\">LastMonth</v8:variant>"
+            )
+        );
+        // Insertion order: Флаг, Лимит, Период, all after Caption.
+        let caption_at = exported_text.find("<name>Caption</name>").unwrap();
+        let flag_at = exported_text.find("<name>Флаг</name>").unwrap();
+        let limit_at = exported_text.find("<name>Лимит</name>").unwrap();
+        let period_at = exported_text.find("<name>Период</name>").unwrap();
+        assert!(caption_at < flag_at && flag_at < limit_at && limit_at < period_at);
+
+        // body -> XML -> body: recompiling the exported source and
+        // re-decoding must reproduce the same typed scalar-parameter
+        // values. Whole-document byte equality is not asserted here: the
+        // recompile round trip goes through the same pre-existing,
+        // unrelated settings-document reindentation gap documented on the
+        // color and multi-cell-appearance slices' equivalent tests (one
+        // `<dcsset:item xsi:type="dcsset:StructureItemGroup">` line loses
+        // a tab of indentation on the second pass); the scalar-parameter
+        // content itself is unaffected and checked explicitly instead.
+        let recompiled_blob = compile_dcs(&profile, DcsTemplateKind::Schema, &exported).unwrap();
+        let recompiled = decode_dcs(&profile, DcsTemplateKind::Schema, &recompiled_blob).unwrap();
+        let reexported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &recompiled.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let reexported_text = std::str::from_utf8(&reexported).unwrap();
+        assert!(reexported_text.contains("<name>Флаг</name>"));
+        assert!(reexported_text.contains("<value xsi:type=\"xs:boolean\">true</value>"));
+        assert!(reexported_text.contains("<name>Лимит</name>"));
+        assert!(reexported_text.contains("<value xsi:type=\"xs:decimal\">100.5</value>"));
+        assert!(reexported_text.contains("<name>Период</name>"));
+        assert!(
+            reexported_text.contains(
+                "<v8:variant xsi:type=\"v8:StandardPeriodVariant\">LastMonth</v8:variant>"
+            )
+        );
+    }
+
+    #[test]
     fn schema_compiler_rejects_every_unowned_settings_child() {
         for unknown in [
             "<dcsset:outputParameters/>",

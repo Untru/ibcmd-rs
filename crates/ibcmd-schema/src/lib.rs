@@ -2682,6 +2682,16 @@ pub const BUNDLED_DCS_AREA_APPEARANCE_WEB_COLOR_EVIDENCE_JSON: &str = include_st
 pub const BUNDLED_DCS_AREA_MULTI_CELL_APPEARANCE_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-multi-cell-appearance/manifest.json"
 );
+/// Immutable platform-authenticated three-additional-scalar-parameter
+/// coordinate: `Флаг` (xs:boolean), `Лимит` (xs:decimal, 10/2/Any) and
+/// `Период` (v8:StandardPeriod, LastMonth), immediately after the existing
+/// `Caption` string parameter. Native-only round trips (no live
+/// compiler-acceptance verification); see cohort/non_claims in the
+/// manifest. Uniquely among this batch's corpora, the native re-export is
+/// byte-identical to the submitted seed for this coordinate.
+pub const BUNDLED_DCS_PARAMETER_SCALAR_TYPES_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-parameter-scalar-types/manifest.json"
+);
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -10928,6 +10938,248 @@ mod dcs_area_template_policy_tests {
                 .unwrap()
                 .supports_shared_row_appearance()
         );
+    }
+}
+
+/// Exact three-additional-scalar-parameter coordinate authenticated by the
+/// dedicated 2214 parameter-scalar-types cohort (`Флаг`/`Лимит`/`Период`,
+/// immediately after the existing `Caption` string parameter). Names and
+/// positions are bound here; the core IR types stay name-agnostic, matching
+/// how `DcsSchemaStringParameter` never hardcodes `Caption`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsParameterScalarTypesPolicy {
+    flag_parameter_name: String,
+    limit_parameter_name: String,
+    period_parameter_name: String,
+}
+
+impl DcsParameterScalarTypesPolicy {
+    pub fn flag_parameter_name(&self) -> &str {
+        &self.flag_parameter_name
+    }
+    pub fn limit_parameter_name(&self) -> &str {
+        &self.limit_parameter_name
+    }
+    pub fn period_parameter_name(&self) -> &str {
+        &self.period_parameter_name
+    }
+    /// `{http://www.w3.org/2001/XMLSchema}boolean`.
+    pub fn boolean_value_type_qname(&self) -> String {
+        "{http://www.w3.org/2001/XMLSchema}boolean".to_string()
+    }
+    /// `{http://v8.1c.ru/8.1/data/core}StandardPeriod`.
+    pub fn standard_period_value_type_qname(&self) -> String {
+        "{http://v8.1c.ru/8.1/data/core}StandardPeriod".to_string()
+    }
+    /// `{http://v8.1c.ru/8.1/data/core}StandardPeriodVariant`.
+    pub fn standard_period_variant_type_qname(&self) -> String {
+        "{http://v8.1c.ru/8.1/data/core}StandardPeriodVariant".to_string()
+    }
+    /// The only evidenced `v8:StandardPeriodVariant` lexical token.
+    pub fn standard_period_variant_token(&self) -> &str {
+        "LastMonth"
+    }
+    pub fn limit_digits(&self) -> u32 {
+        10
+    }
+    pub fn limit_fraction_digits(&self) -> u32 {
+        2
+    }
+    /// The only evidenced `Лимит` decimal literal.
+    pub fn limit_value(&self) -> &str {
+        "100.5"
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsParameterScalarTypesEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsParameterScalarTypesCohort,
+    negative_observations: Vec<String>,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsParameterScalarTypesCohort {
+    new_parameter_order: Vec<String>,
+    insertion_point: String,
+    flag_param: DcsParameterScalarTypesFlagParam,
+    limit_param: DcsParameterScalarTypesLimitParam,
+    period_param: DcsParameterScalarTypesPeriodParam,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsParameterScalarTypesFlagParam {
+    name: String,
+    #[serde(rename = "valueType")]
+    value_type: String,
+    value: String,
+    #[serde(rename = "useRestriction")]
+    use_restriction: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsParameterScalarTypesLimitParam {
+    name: String,
+    #[serde(rename = "valueType")]
+    value_type: String,
+    digits: u32,
+    #[serde(rename = "fractionDigits")]
+    fraction_digits: u32,
+    #[serde(rename = "allowedSign")]
+    allowed_sign: String,
+    value: String,
+    #[serde(rename = "useRestriction")]
+    use_restriction: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsParameterScalarTypesPeriodParam {
+    name: String,
+    #[serde(rename = "valueType")]
+    value_type: String,
+    variant: String,
+    #[serde(rename = "useRestriction")]
+    use_restriction: bool,
+}
+
+fn parse_dcs_parameter_scalar_types_policy(
+    evidence_json: &str,
+) -> Result<DcsParameterScalarTypesPolicy, SchemaError> {
+    let evidence: DcsParameterScalarTypesEvidence = serde_json::from_str(evidence_json)
+        .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if evidence.schema_version != 1
+        || evidence.fixture_id != "8.3.27.2214-xml-2.20-dcs-parameter-scalar-types"
+        || evidence.cohort.new_parameter_order != ["Флаг", "Лимит", "Период"]
+        || evidence.cohort.insertion_point
+            != "immediately after the existing Caption parameter, before settingsVariant"
+        || evidence.cohort.flag_param.name != "Флаг"
+        || evidence.cohort.flag_param.value_type != "xs:boolean"
+        || evidence.cohort.flag_param.value != "true"
+        || evidence.cohort.flag_param.use_restriction
+        || evidence.cohort.limit_param.name != "Лимит"
+        || evidence.cohort.limit_param.value_type != "xs:decimal"
+        || evidence.cohort.limit_param.digits != 10
+        || evidence.cohort.limit_param.fraction_digits != 2
+        || evidence.cohort.limit_param.allowed_sign != "Any"
+        || evidence.cohort.limit_param.value != "100.5"
+        || evidence.cohort.limit_param.use_restriction
+        || evidence.cohort.period_param.name != "Период"
+        || evidence.cohort.period_param.value_type != "v8:StandardPeriod"
+        || evidence.cohort.period_param.variant != "LastMonth"
+        || evidence.cohort.period_param.use_restriction
+        || evidence.negative_observations.len() != 1
+        || evidence.non_claims.len() != 3
+        || evidence.platform.is_null()
+        || evidence.seed.is_null()
+        || evidence.rounds.is_null()
+        || evidence.retained.is_null()
+        || evidence.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS parameter scalar-types evidence drifted from the exact coordinate".to_string(),
+        ));
+    }
+    Ok(DcsParameterScalarTypesPolicy {
+        flag_parameter_name: evidence.cohort.flag_param.name,
+        limit_parameter_name: evidence.cohort.limit_param.name,
+        period_parameter_name: evidence.cohort.period_param.name,
+    })
+}
+
+/// Returns the exact three-additional-scalar-parameter policy.
+pub fn bundled_dcs_parameter_scalar_types_policy()
+-> Result<DcsParameterScalarTypesPolicy, SchemaError> {
+    parse_dcs_parameter_scalar_types_policy(BUNDLED_DCS_PARAMETER_SCALAR_TYPES_EVIDENCE_JSON)
+}
+
+#[cfg(test)]
+mod dcs_parameter_scalar_types_policy_tests {
+    use super::*;
+
+    #[test]
+    fn bundled_parameter_scalar_types_policy_is_exact_and_bounded() {
+        let policy = bundled_dcs_parameter_scalar_types_policy().unwrap();
+        assert_eq!(policy.flag_parameter_name(), "Флаг");
+        assert_eq!(policy.limit_parameter_name(), "Лимит");
+        assert_eq!(policy.period_parameter_name(), "Период");
+        assert_eq!(
+            policy.boolean_value_type_qname(),
+            "{http://www.w3.org/2001/XMLSchema}boolean"
+        );
+        assert_eq!(
+            policy.standard_period_value_type_qname(),
+            "{http://v8.1c.ru/8.1/data/core}StandardPeriod"
+        );
+        assert_eq!(
+            policy.standard_period_variant_type_qname(),
+            "{http://v8.1c.ru/8.1/data/core}StandardPeriodVariant"
+        );
+        assert_eq!(policy.standard_period_variant_token(), "LastMonth");
+        assert_eq!(policy.limit_digits(), 10);
+        assert_eq!(policy.limit_fraction_digits(), 2);
+        assert_eq!(policy.limit_value(), "100.5");
+    }
+
+    #[test]
+    fn parameter_scalar_types_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_PARAMETER_SCALAR_TYPES_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsParameterScalarTypesEvidence>(value).is_err());
+    }
+
+    #[test]
+    fn parameter_scalar_types_evidence_rejects_drifted_cohort() {
+        let raw: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_PARAMETER_SCALAR_TYPES_EVIDENCE_JSON).unwrap();
+
+        let mut order_drift = raw.clone();
+        order_drift["cohort"]["new_parameter_order"] =
+            serde_json::json!(["Лимит", "Флаг", "Период"]);
+        assert!(
+            parse_dcs_parameter_scalar_types_policy(&serde_json::to_string(&order_drift).unwrap())
+                .is_err()
+        );
+
+        let mut digits_drift = raw.clone();
+        digits_drift["cohort"]["limit_param"]["digits"] = serde_json::json!(15);
+        assert!(
+            parse_dcs_parameter_scalar_types_policy(&serde_json::to_string(&digits_drift).unwrap())
+                .is_err()
+        );
+
+        let mut variant_drift = raw.clone();
+        variant_drift["cohort"]["period_param"]["variant"] = serde_json::json!("ThisWeek");
+        assert!(
+            parse_dcs_parameter_scalar_types_policy(
+                &serde_json::to_string(&variant_drift).unwrap()
+            )
+            .is_err()
+        );
+
+        let mut restriction_drift = raw;
+        restriction_drift["cohort"]["flag_param"]["useRestriction"] = serde_json::json!(true);
+        assert!(
+            parse_dcs_parameter_scalar_types_policy(
+                &serde_json::to_string(&restriction_drift).unwrap()
+            )
+            .is_err()
+        );
+
+        // The pinned bundled evidence itself must still pass every gate.
+        assert!(bundled_dcs_parameter_scalar_types_policy().is_ok());
     }
 }
 
