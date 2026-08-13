@@ -30,6 +30,76 @@ pub const MAX_DCS_SCHEMA_RETAINED_BYTES: usize = 16_777_216;
 /// Exact Query/Union/link cardinality authenticated by the dedicated cohort.
 pub const DCS_SCHEMA_QUERY_UNION_LINK_COUNT: usize = 1;
 
+/// Exact style-free AreaTemplate authenticated by the dedicated 2214 cohort.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DcsSchemaAreaTemplate {
+    name: CanonicalText,
+    parameter_name: CanonicalText,
+    expression: CanonicalText,
+    provenance: SourceProvenance,
+}
+
+impl DcsSchemaAreaTemplate {
+    pub fn new(
+        name: CanonicalText,
+        parameter_name: CanonicalText,
+        expression: CanonicalText,
+        provenance: SourceProvenance,
+    ) -> Result<Self, DcsSchemaBuildError> {
+        require_text("AreaTemplate name", &name)?;
+        require_text("AreaTemplate parameter name", &parameter_name)?;
+        require_text("AreaTemplate expression", &expression)?;
+        if name.as_str() != "AreaProbe"
+            || parameter_name.as_str() != "Probe"
+            || expression.as_str() != "\"Probe\""
+        {
+            return Err(DcsSchemaBuildError::AreaTemplateMismatch);
+        }
+        Ok(Self {
+            name,
+            parameter_name,
+            expression,
+            provenance,
+        })
+    }
+
+    pub const fn name(&self) -> &CanonicalText {
+        &self.name
+    }
+    pub const fn parameter_name(&self) -> &CanonicalText {
+        &self.parameter_name
+    }
+    pub const fn expression(&self) -> &CanonicalText {
+        &self.expression
+    }
+    pub const fn provenance(&self) -> &SourceProvenance {
+        &self.provenance
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsSchemaAreaTemplateWire {
+    name: CanonicalText,
+    parameter_name: CanonicalText,
+    expression: CanonicalText,
+    provenance: SourceProvenance,
+}
+
+impl<'de> Deserialize<'de> for DcsSchemaAreaTemplate {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = DcsSchemaAreaTemplateWire::deserialize(deserializer)?;
+        Self::new(
+            wire.name,
+            wire.parameter_name,
+            wire.expression,
+            wire.provenance,
+        )
+        .map_err(de::Error::custom)
+    }
+}
+
 /// Failure to construct or revalidate the bounded inner DCS schema IR.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DcsSchemaBuildError {
@@ -79,6 +149,8 @@ pub enum DcsSchemaBuildError {
     RetainedByteCountOverflow,
     /// The bounded Query/Union/link graph has inconsistent names or fields.
     QueryUnionLinkMismatch,
+    /// The style-free AreaTemplate differs from the exact admitted coordinate.
+    AreaTemplateMismatch,
 }
 
 impl Display for DcsSchemaBuildError {
@@ -165,6 +237,9 @@ impl Display for DcsSchemaBuildError {
             }
             Self::QueryUnionLinkMismatch => formatter.write_str(
                 "DCS schema Query/Union/link references do not match the attested graph",
+            ),
+            Self::AreaTemplateMismatch => formatter.write_str(
+                "DCS schema AreaTemplate differs from the attested style-free coordinate",
             ),
         }
     }
@@ -1505,6 +1580,25 @@ mod tests {
         let mut drift = serde_json::from_str::<serde_json::Value>(&json).unwrap();
         drift["link"]["destination_expression"] = serde_json::json!("Other");
         assert!(serde_json::from_value::<DcsSchemaQueryUnionLink>(drift).is_err());
+    }
+
+    #[test]
+    fn style_free_area_template_is_bounded_and_serde_stable() {
+        let value = DcsSchemaAreaTemplate::new(
+            text("AreaProbe"),
+            text("Probe"),
+            text("\"Probe\""),
+            provenance(),
+        )
+        .unwrap();
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DcsSchemaAreaTemplate>(&json).unwrap(),
+            value
+        );
+        let mut drift: serde_json::Value = serde_json::from_str(&json).unwrap();
+        drift["expression"] = serde_json::json!("Other");
+        assert!(serde_json::from_value::<DcsSchemaAreaTemplate>(drift).is_err());
     }
 
     fn variant(name: &str) -> DcsSchemaSettingsVariantShell {

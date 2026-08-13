@@ -10,8 +10,10 @@ use ibcmd_core::value::{CanonicalText, EnumToken};
 use ibcmd_xml::{
     DcsChildParseOutcome, DcsInlineSettingsFragment, DcsSettingsChildrenError,
     DcsSettingsChildrenParts, analyze_dcs_schema_template_documents, analyze_dcs_settings_document,
-    emit_dcs_inner_schema_source_document, emit_dcs_query_union_link_source_document,
-    emit_dcs_settings_children_parts, parse_dcs_inner_schema_storage_document_with_references,
+    emit_dcs_area_template_source_fragment, emit_dcs_inner_schema_source_document,
+    emit_dcs_query_union_link_source_document, emit_dcs_settings_children_parts,
+    parse_dcs_area_template_storage_document,
+    parse_dcs_inner_schema_storage_document_with_references,
     parse_dcs_query_union_link_storage_document, rewrite_dcs_settings_children,
 };
 
@@ -262,8 +264,8 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
             .ok()?,
         );
     }
-    match schema {
-        Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings).ok(),
+    let mut source = match schema {
+        Ok(schema) => emit_dcs_inner_schema_source_document(&schema, &settings).ok()?,
         Err(_) if reference_types.is_empty() => {
             let schema = parse_dcs_query_union_link_storage_document(
                 envelope.primary_schema_file(),
@@ -271,10 +273,30 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
                 "mssql:dcs-schema-template/query-union-link",
             )
             .ok()?;
-            emit_dcs_query_union_link_source_document(&schema, &settings).ok()
+            emit_dcs_query_union_link_source_document(&schema, &settings).ok()?
         }
-        Err(_) => None,
+        Err(_) => return None,
+    };
+    let terminal = envelope.terminal_schema_file();
+    if let Ok(area) = parse_dcs_area_template_storage_document(
+        terminal,
+        source_profile.clone(),
+        "mssql:dcs-schema-template/area-template",
+    ) {
+        let fragment = emit_dcs_area_template_source_fragment(&area).ok()?;
+        let variant = b"\r\n\t<settingsVariant>";
+        let offset = source
+            .windows(variant.len())
+            .position(|window| window == variant)?;
+        let mut with_area =
+            Vec::with_capacity(source.len().checked_add(fragment.len())?.checked_add(2)?);
+        with_area.extend_from_slice(&source[..offset]);
+        with_area.extend_from_slice(b"\r\n");
+        with_area.extend_from_slice(&fragment);
+        with_area.extend_from_slice(&source[offset..]);
+        source = with_area;
     }
+    Some(source)
 }
 
 fn rewrite_data_composition_type_ids(xml: &mut String, type_index: &DcsTypeIndex) {
@@ -2958,6 +2980,32 @@ mod tests {
         let expected = decode_base64_fixture(include_str!(concat!(
             "../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-query-union-link/native-template.xml.b64"
+        )));
+        let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
+            crate::compiler::bodies::dcs::DcsTemplateKind::Schema,
+            &packed,
+        )
+        .unwrap();
+        let actual = normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn platform_style_free_area_template_exports_byte_exact_through_common_codec() {
+        let packed = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/raw-packed.bin.b64"
+        )));
+        let expected = decode_base64_fixture(include_str!(concat!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/native-template.xml.b64"
         )));
         let body = crate::compiler::bodies::dcs::decode_compatible_dcs(
             crate::compiler::bodies::dcs::DcsTemplateKind::Schema,

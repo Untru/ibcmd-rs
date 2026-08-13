@@ -2659,6 +2659,10 @@ pub const BUNDLED_DCS_INNER_SCHEMA_EVIDENCE_JSON: &str =
 pub const BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON: &str = include_str!(
     "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-query-union-link/manifest.json"
 );
+/// Immutable platform-authenticated style-free AreaTemplate coordinate.
+pub const BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON: &str = include_str!(
+    "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-area-template/manifest.json"
+);
 
 /// Embedded, exact EDT and live native-export evidence for the bounded
 /// `InputFieldExtInfo.choiceParameters` writer.
@@ -3716,6 +3720,108 @@ impl DcsInnerSchemaPolicy {
     pub const fn wrong_order_is_unsupported(&self) -> bool {
         true
     }
+}
+
+/// Exact QName, order, type and value policy for the first style-free
+/// AreaTemplate coordinate. It deliberately admits no appearance/appIndex.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DcsAreaTemplatePolicy {
+    template_name: String,
+    parameter_name: String,
+    expression: String,
+    root_order: Vec<String>,
+    area_order: Vec<String>,
+    row_order: Vec<String>,
+    cell_order: Vec<String>,
+    field_order: Vec<String>,
+    parameter_order: Vec<String>,
+}
+
+impl DcsAreaTemplatePolicy {
+    pub fn schema_namespace_uri(&self) -> &str {
+        "http://v8.1c.ru/8.1/data-composition-system/schema"
+    }
+    pub fn area_namespace_uri(&self) -> &str {
+        "http://v8.1c.ru/8.1/data-composition-system/area-template"
+    }
+    pub fn core_namespace_uri(&self) -> &str {
+        "http://v8.1c.ru/8.1/data-composition-system/core"
+    }
+    pub fn template_name(&self) -> &str {
+        &self.template_name
+    }
+    pub fn parameter_name(&self) -> &str {
+        &self.parameter_name
+    }
+    pub fn expression(&self) -> &str {
+        &self.expression
+    }
+    pub fn root_order(&self) -> &[String] {
+        &self.root_order
+    }
+    pub fn area_order(&self) -> &[String] {
+        &self.area_order
+    }
+    pub fn row_order(&self) -> &[String] {
+        &self.row_order
+    }
+    pub fn cell_order(&self) -> &[String] {
+        &self.cell_order
+    }
+    pub fn field_order(&self) -> &[String] {
+        &self.field_order
+    }
+    pub fn parameter_order(&self) -> &[String] {
+        &self.parameter_order
+    }
+    pub fn area_template_type_qname(&self) -> String {
+        format!("{{{}}}AreaTemplate", self.area_namespace_uri())
+    }
+    pub fn table_row_type_qname(&self) -> String {
+        format!("{{{}}}TableRow", self.area_namespace_uri())
+    }
+    pub fn field_type_qname(&self) -> String {
+        format!("{{{}}}Field", self.area_namespace_uri())
+    }
+    pub fn expression_parameter_type_qname(&self) -> String {
+        format!(
+            "{{{}}}ExpressionAreaTemplateParameter",
+            self.area_namespace_uri()
+        )
+    }
+    pub fn parameter_value_type_qname(&self) -> String {
+        format!("{{{}}}Parameter", self.core_namespace_uri())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateEvidence {
+    schema_version: u32,
+    fixture_id: String,
+    platform: serde_json::Value,
+    seed: serde_json::Value,
+    rounds: serde_json::Value,
+    retained: serde_json::Value,
+    document_topology: serde_json::Value,
+    cohort: DcsAreaTemplateEvidenceCohort,
+    non_claims: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DcsAreaTemplateEvidenceCohort {
+    template_name: String,
+    root_order: Vec<String>,
+    area_order: Vec<String>,
+    row_order: Vec<String>,
+    cell_order: Vec<String>,
+    field_order: Vec<String>,
+    parameter_order: Vec<String>,
+    parameter_name: String,
+    expression: String,
+    has_root_appearance: bool,
+    has_app_index: bool,
 }
 
 impl DcsSchemaTemplateEnvelopePolicy {
@@ -10309,6 +10415,79 @@ pub fn bundled_dcs_inner_schema_policy() -> Result<DcsInnerSchemaPolicy, SchemaE
 
 pub fn bundled_dcs_query_union_link_policy() -> Result<DcsQueryUnionLinkPolicy, SchemaError> {
     parse_dcs_query_union_link_policy(BUNDLED_DCS_QUERY_UNION_LINK_EVIDENCE_JSON)
+}
+
+/// Returns the exact first style-free AreaTemplate policy.
+pub fn bundled_dcs_area_template_policy() -> Result<DcsAreaTemplatePolicy, SchemaError> {
+    let evidence: DcsAreaTemplateEvidence =
+        serde_json::from_str(BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON)
+            .map_err(|error| SchemaError::InvalidJson(error.to_string()))?;
+    if evidence.schema_version != 1
+        || evidence.fixture_id != "8.3.27.2214-xml-2.20-dcs-area-template-style-free"
+        || evidence.cohort.template_name != "AreaProbe"
+        || evidence.cohort.parameter_name != "Probe"
+        || evidence.cohort.expression != "\"Probe\""
+        || evidence.cohort.has_root_appearance
+        || evidence.cohort.has_app_index
+        || evidence.cohort.root_order
+            != [
+                "name",
+                "template:AreaTemplate",
+                "parameter:ExpressionAreaTemplateParameter",
+            ]
+        || evidence.cohort.area_order != ["item:TableRow"]
+        || evidence.cohort.row_order != ["tableCell"]
+        || evidence.cohort.cell_order != ["item:Field"]
+        || evidence.cohort.field_order != ["value:Parameter"]
+        || evidence.cohort.parameter_order != ["name", "expression"]
+        || evidence.non_claims.len() < 4
+        || evidence.platform.is_null()
+        || evidence.seed.is_null()
+        || evidence.rounds.is_null()
+        || evidence.retained.is_null()
+        || evidence.document_topology.is_null()
+    {
+        return Err(SchemaError::InvalidJson(
+            "DCS AreaTemplate evidence drifted from the exact coordinate".to_string(),
+        ));
+    }
+    Ok(DcsAreaTemplatePolicy {
+        template_name: evidence.cohort.template_name,
+        parameter_name: evidence.cohort.parameter_name,
+        expression: evidence.cohort.expression,
+        root_order: evidence.cohort.root_order,
+        area_order: evidence.cohort.area_order,
+        row_order: evidence.cohort.row_order,
+        cell_order: evidence.cohort.cell_order,
+        field_order: evidence.cohort.field_order,
+        parameter_order: evidence.cohort.parameter_order,
+    })
+}
+
+#[cfg(test)]
+mod dcs_area_template_policy_tests {
+    use super::*;
+
+    #[test]
+    fn bundled_area_template_policy_is_exact_and_bounded() {
+        let policy = bundled_dcs_area_template_policy().unwrap();
+        assert_eq!(policy.template_name(), "AreaProbe");
+        assert_eq!(policy.parameter_name(), "Probe");
+        assert_eq!(policy.expression(), "\"Probe\"");
+        assert_eq!(policy.root_order().len(), 3);
+        assert_eq!(
+            policy.parameter_value_type_qname(),
+            "{http://v8.1c.ru/8.1/data-composition-system/core}Parameter"
+        );
+    }
+
+    #[test]
+    fn area_template_evidence_rejects_unknown_fields() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(BUNDLED_DCS_AREA_TEMPLATE_EVIDENCE_JSON).unwrap();
+        value["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<DcsAreaTemplateEvidence>(value).is_err());
+    }
 }
 
 fn parse_dcs_query_union_link_policy(

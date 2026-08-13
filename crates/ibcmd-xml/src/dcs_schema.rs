@@ -5,18 +5,19 @@ use std::fmt::{self, Display, Formatter};
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::dcs_schema::{
-    DcsSchema, DcsSchemaBuildError, DcsSchemaCalculatedField, DcsSchemaDataSetField,
-    DcsSchemaDataSetLink, DcsSchemaDataSetObject, DcsSchemaDecimalType, DcsSchemaFieldType,
-    DcsSchemaLocalDataSource, DcsSchemaLocalString, DcsSchemaQueryDataSet, DcsSchemaQueryField,
-    DcsSchemaQueryUnionLink, DcsSchemaReferenceType, DcsSchemaSettingsVariantShell,
-    DcsSchemaStringParameter, DcsSchemaStringType, DcsSchemaTotalFunction,
-    DcsSchemaUngroupedTotalField, DcsSchemaUnionDataSet,
+    DcsSchema, DcsSchemaAreaTemplate, DcsSchemaBuildError, DcsSchemaCalculatedField,
+    DcsSchemaDataSetField, DcsSchemaDataSetLink, DcsSchemaDataSetObject, DcsSchemaDecimalType,
+    DcsSchemaFieldType, DcsSchemaLocalDataSource, DcsSchemaLocalString, DcsSchemaQueryDataSet,
+    DcsSchemaQueryField, DcsSchemaQueryUnionLink, DcsSchemaReferenceType,
+    DcsSchemaSettingsVariantShell, DcsSchemaStringParameter, DcsSchemaStringType,
+    DcsSchemaTotalFunction, DcsSchemaUngroupedTotalField, DcsSchemaUnionDataSet,
 };
 use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::value::CanonicalText;
 use ibcmd_schema::{
-    DcsInnerSchemaPolicy, bundled_dcs_inner_schema_policy, bundled_dcs_query_union_link_policy,
+    DcsAreaTemplatePolicy, DcsInnerSchemaPolicy, bundled_dcs_area_template_policy,
+    bundled_dcs_inner_schema_policy, bundled_dcs_query_union_link_policy,
 };
 use quick_xml::NsReader;
 use quick_xml::events::{BytesStart, Event};
@@ -273,6 +274,149 @@ pub fn parse_dcs_query_union_link_storage_document(
         .map_err(DcsInnerSchemaError::Build)
 }
 
+/// Parses the exact style-free trailing AreaTemplate `SchemaFile`.
+pub fn parse_dcs_area_template_storage_document(
+    bytes: &[u8],
+    source_profile: ProfileId,
+    locator: &str,
+) -> Result<DcsSchemaAreaTemplate, DcsInnerSchemaError> {
+    let p = policy()?;
+    let ap = area_policy()?;
+    let document = parse_document(bytes)?;
+    require_name(&document, None, "SchemaFile")?;
+    require_no_attributes(&document)?;
+    let wrapper = elements(&document)?;
+    if wrapper.len() != 1 {
+        return unsupported("AreaTemplate SchemaFile must contain exactly one schema root");
+    }
+    let root = wrapper[0];
+    require_name(
+        root,
+        Some(p.schema_namespace_uri()),
+        "dataCompositionSchema",
+    )?;
+    require_no_attributes(root)?;
+    let top = elements(root)?;
+    if top.len() != 1 {
+        return unsupported("AreaTemplate schema must contain exactly one template");
+    }
+    parse_area_template_element(top[0], source_profile, locator, &ap)
+}
+
+/// Finds and parses the single direct style-free AreaTemplate in a source
+/// DataCompositionSchema document. Other root children remain owned by the
+/// bounded inner-schema codec.
+pub fn parse_dcs_area_template_source_document(
+    bytes: &[u8],
+    source_profile: ProfileId,
+    locator: &str,
+) -> Result<Option<DcsSchemaAreaTemplate>, DcsInnerSchemaError> {
+    let p = policy()?;
+    let ap = area_policy()?;
+    let document = parse_document(bytes)?;
+    require_name(
+        &document,
+        Some(p.schema_namespace_uri()),
+        "DataCompositionSchema",
+    )?;
+    require_no_attributes(&document)?;
+    let templates = elements(&document)?
+        .into_iter()
+        .filter(|child| {
+            child.namespace.as_deref() == Some(p.schema_namespace_uri())
+                && child.local == "template"
+        })
+        .collect::<Vec<_>>();
+    match templates.as_slice() {
+        [] => Ok(None),
+        [template] => parse_area_template_element(template, source_profile, locator, &ap).map(Some),
+        _ => unsupported("source schema contains more than one AreaTemplate"),
+    }
+}
+
+fn parse_area_template_element(
+    area_template: &ParsedElement,
+    source_profile: ProfileId,
+    locator: &str,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<DcsSchemaAreaTemplate, DcsInnerSchemaError> {
+    let p = policy()?;
+    require_name(area_template, Some(p.schema_namespace_uri()), "template")?;
+    require_no_attributes(area_template)?;
+    let template = elements(area_template)?;
+    if template.len() != 3 {
+        return unsupported("AreaTemplate must contain name, template and parameter");
+    }
+    require_name(template[0], Some(p.schema_namespace_uri()), "name")?;
+    require_no_attributes(template[0])?;
+    require_name(template[1], Some(p.schema_namespace_uri()), "template")?;
+    require_type(template[1], &p, &ap.area_template_type_qname())?;
+    require_name(template[2], Some(p.schema_namespace_uri()), "parameter")?;
+    require_type(template[2], &p, &ap.expression_parameter_type_qname())?;
+    parse_exact_area_body(template[1], &p, ap)?;
+    let parameter = elements(template[2])?;
+    if parameter.len() != 2 {
+        return unsupported("AreaTemplate parameter must contain name and expression");
+    }
+    let area_ns = ap.area_namespace_uri();
+    require_name(parameter[0], Some(area_ns), "name")?;
+    require_name(parameter[1], Some(area_ns), "expression")?;
+    require_no_attributes(parameter[0])?;
+    require_no_attributes(parameter[1])?;
+    let anchor = CanonicalAnchor::new(
+        ObjectPath::new(vec![
+            PathSegment::name("dcs_area_template").expect("static"),
+        ])
+        .expect("static"),
+        PropertyPath::root(),
+    );
+    let provenance = SourceProvenance::with_locator(source_profile, anchor, locator)
+        .map_err(|e| DcsInnerSchemaError::Malformed(e.to_string()))?;
+    DcsSchemaAreaTemplate::new(
+        canonical(text(template[0])?)?,
+        canonical(text(parameter[0])?)?,
+        canonical(text(parameter[1])?)?,
+        provenance,
+    )
+    .map_err(DcsInnerSchemaError::Build)
+}
+
+fn parse_exact_area_body(
+    area: &ParsedElement,
+    p: &DcsInnerSchemaPolicy,
+    ap: &DcsAreaTemplatePolicy,
+) -> Result<(), DcsInnerSchemaError> {
+    let area_ns = ap.area_namespace_uri();
+    let rows = elements(area)?;
+    if rows.len() != 1 {
+        return unsupported("AreaTemplate must contain exactly one row");
+    }
+    require_name(rows[0], Some(area_ns), "item")?;
+    require_type(rows[0], p, &ap.table_row_type_qname())?;
+    let row = elements(rows[0])?;
+    if row.len() != 1 {
+        return unsupported("AreaTemplate row must contain exactly one tableCell");
+    }
+    require_name(row[0], Some(area_ns), "tableCell")?;
+    require_no_attributes(row[0])?;
+    let cell = elements(row[0])?;
+    if cell.len() != 1 {
+        return unsupported("AreaTemplate cell must contain exactly one Field item");
+    }
+    require_name(cell[0], Some(area_ns), "item")?;
+    require_type(cell[0], p, &ap.field_type_qname())?;
+    let field = elements(cell[0])?;
+    if field.len() != 1 {
+        return unsupported("AreaTemplate Field must contain exactly one value");
+    }
+    require_name(field[0], Some(area_ns), "value")?;
+    require_type(field[0], p, &ap.parameter_value_type_qname())?;
+    if text_allowing_attributes(field[0])? != ap.parameter_name() {
+        return unsupported("AreaTemplate field value is outside the exact coordinate");
+    }
+    Ok(())
+}
+
 fn parse_query(
     e: &ParsedElement,
     p: &DcsInnerSchemaPolicy,
@@ -503,6 +647,108 @@ pub fn emit_dcs_query_union_link_source_document(
         &settings_blocks[0],
     );
     out.push_str("\r\n</DataCompositionSchema>");
+    Ok(out.into_bytes())
+}
+
+/// Emits the exact source fragment owned by the style-free AreaTemplate
+/// coordinate. The caller owns only its direct root placement.
+pub fn emit_dcs_area_template_source_fragment(
+    area: &DcsSchemaAreaTemplate,
+) -> Result<Vec<u8>, DcsInnerSchemaError> {
+    if area.parameter_name().as_str() != "Probe" || area.expression().as_str() != "\"Probe\"" {
+        return unsupported("AreaTemplate value is outside the exact coordinate");
+    }
+    let mut out = String::from("\t<template>");
+    scalar(&mut out, 2, "name", area.name().as_str());
+    line(
+        &mut out,
+        2,
+        "<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">",
+    );
+    line(&mut out, 3, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+    line(&mut out, 4, "<dcsat:tableCell>");
+    line(&mut out, 5, "<dcsat:item xsi:type=\"dcsat:Field\">");
+    line(
+        &mut out,
+        6,
+        "<dcsat:value xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
+    );
+    line(&mut out, 5, "</dcsat:item>");
+    line(&mut out, 4, "</dcsat:tableCell>");
+    line(&mut out, 3, "</dcsat:item>");
+    line(&mut out, 2, "</template>");
+    line(
+        &mut out,
+        2,
+        "<parameter xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:ExpressionAreaTemplateParameter\">",
+    );
+    scalar(&mut out, 3, "dcsat:name", area.parameter_name().as_str());
+    line(
+        &mut out,
+        3,
+        &format!(
+            "<dcsat:expression>{}</dcsat:expression>",
+            area.expression().as_str()
+        ),
+    );
+    line(&mut out, 2, "</parameter>");
+    line(&mut out, 1, "</template>");
+    Ok(out.into_bytes())
+}
+
+/// Emits the exact platform-authenticated terminal SchemaFile for the first
+/// style-free AreaTemplate coordinate.
+pub fn emit_dcs_area_template_storage_document(
+    area: &DcsSchemaAreaTemplate,
+) -> Result<Vec<u8>, DcsInnerSchemaError> {
+    if area.name().as_str() != "AreaProbe"
+        || area.parameter_name().as_str() != "Probe"
+        || area.expression().as_str() != "\"Probe\""
+    {
+        return unsupported("AreaTemplate value is outside the exact coordinate");
+    }
+    let mut out = String::from(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+    );
+    line(
+        &mut out,
+        1,
+        "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">",
+    );
+    line(&mut out, 2, "<template>");
+    scalar(&mut out, 3, "name", area.name().as_str());
+    line(
+        &mut out,
+        3,
+        "<template xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:AreaTemplate\">",
+    );
+    line(&mut out, 4, "<dcsat:item xsi:type=\"dcsat:TableRow\">");
+    line(&mut out, 5, "<dcsat:tableCell>");
+    line(&mut out, 6, "<dcsat:item xsi:type=\"dcsat:Field\">");
+    line(
+        &mut out,
+        7,
+        "<dcsat:value xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xsi:type=\"dcscor:Parameter\">Probe</dcsat:value>",
+    );
+    line(&mut out, 6, "</dcsat:item>");
+    line(&mut out, 5, "</dcsat:tableCell>");
+    line(&mut out, 4, "</dcsat:item>");
+    line(&mut out, 3, "</template>");
+    line(
+        &mut out,
+        3,
+        "<parameter xmlns:dcsat=\"http://v8.1c.ru/8.1/data-composition-system/area-template\" xsi:type=\"dcsat:ExpressionAreaTemplateParameter\">",
+    );
+    scalar(&mut out, 4, "dcsat:name", area.parameter_name().as_str());
+    line(
+        &mut out,
+        4,
+        "<dcsat:expression>\"Probe\"</dcsat:expression>",
+    );
+    line(&mut out, 3, "</parameter>");
+    line(&mut out, 2, "</template>");
+    line(&mut out, 1, "</dataCompositionSchema>");
+    out.push_str("\r\n</SchemaFile>");
     Ok(out.into_bytes())
 }
 
@@ -973,6 +1219,11 @@ fn policy() -> Result<DcsInnerSchemaPolicy, DcsInnerSchemaError> {
     bundled_dcs_inner_schema_policy()
         .map_err(|e| DcsInnerSchemaError::InvalidEvidence(e.to_string()))
 }
+
+fn area_policy() -> Result<DcsAreaTemplatePolicy, DcsInnerSchemaError> {
+    bundled_dcs_area_template_policy()
+        .map_err(|error| DcsInnerSchemaError::InvalidEvidence(error.to_string()))
+}
 fn unsupported<T>(reason: impl Into<String>) -> Result<T, DcsInnerSchemaError> {
     Err(DcsInnerSchemaError::UnsupportedSource(reason.into()))
 }
@@ -1320,6 +1571,13 @@ mod tests {
         ]
     }
 
+    fn area_template_document() -> Vec<u8> {
+        decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/area-schema-file.xml.b64"
+        )))
+    }
+
     fn inline_settings(source: &str) -> DcsInlineSettingsFragment {
         let start = source.find("<dcsset:settings").unwrap();
         let close = "</dcsset:settings>";
@@ -1452,6 +1710,34 @@ mod tests {
                 Err(DcsInnerSchemaError::UnsupportedSource(_))
             ));
         }
+    }
+
+    #[test]
+    fn platform_style_free_area_template_parses_and_emits_exact_fragment() {
+        let area = parse_dcs_area_template_storage_document(
+            &area_template_document(),
+            ProfileId::parse("provider:mssql-legacy").unwrap(),
+            "fixture:dcs-area-template",
+        )
+        .unwrap();
+        assert_eq!(area.name().as_str(), "AreaProbe");
+        let emitted = emit_dcs_area_template_source_fragment(&area).unwrap();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/native-template.xml.b64"
+        )));
+        let source = std::str::from_utf8(&source).unwrap();
+        let expected_start = source
+            .find("\t<template>\r\n\t\t<name>AreaProbe</name>")
+            .unwrap();
+        let expected_end = source[expected_start..]
+            .find("\r\n\t</template>")
+            .map(|offset| expected_start + offset + "\r\n\t</template>".len())
+            .unwrap();
+        assert_eq!(
+            std::str::from_utf8(&emitted).unwrap(),
+            &source[expected_start..expected_end]
+        );
     }
 
     #[test]

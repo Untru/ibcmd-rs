@@ -39,8 +39,10 @@ pub use dcs::{
     preflight_dcs_settings_serialization, rewrite_dcs_settings_children,
 };
 pub use dcs_schema::{
-    DcsInlineSettingsFragment, DcsInnerSchemaError, emit_dcs_inner_schema_source_document,
-    emit_dcs_query_union_link_source_document, parse_dcs_inner_schema_storage_document,
+    DcsInlineSettingsFragment, DcsInnerSchemaError, emit_dcs_area_template_source_fragment,
+    emit_dcs_area_template_storage_document, emit_dcs_inner_schema_source_document,
+    emit_dcs_query_union_link_source_document, parse_dcs_area_template_source_document,
+    parse_dcs_area_template_storage_document, parse_dcs_inner_schema_storage_document,
     parse_dcs_inner_schema_storage_document_with_references,
     parse_dcs_query_union_link_storage_document,
 };

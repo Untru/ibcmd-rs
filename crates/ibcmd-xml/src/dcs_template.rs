@@ -4,6 +4,7 @@
 //! platform-authenticated document roles and the positional association of
 //! external `Settings` documents with direct root `settingsVariant` nodes.
 
+use ibcmd_core::artifact::ProfileId;
 use ibcmd_schema::{
     DcsSchemaTemplateEnvelopeDocumentRole, bundled_dcs_schema_template_envelope_policy,
 };
@@ -12,7 +13,11 @@ use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 use std::fmt::{self, Display, Formatter};
 
-use crate::{DcsSettingsDocumentAnalysisError, analyze_dcs_settings_document};
+use crate::{
+    DcsSettingsDocumentAnalysisError, analyze_dcs_settings_document,
+    emit_dcs_area_template_storage_document, parse_dcs_area_template_source_document,
+    parse_dcs_area_template_storage_document,
+};
 
 const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
 const XML_DECLARATION: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
@@ -153,7 +158,20 @@ pub fn analyze_dcs_schema_template_documents<'a>(
                 .map_err(map_settings_error)?;
             }
             Some(DcsSchemaTemplateEnvelopeDocumentRole::TerminalSchemaFile) => {
-                inspect_schema_file(document, true, &policy)?;
+                if inspect_schema_file(document, true, &policy).is_err() {
+                    parse_dcs_area_template_storage_document(
+                        document,
+                        ProfileId::parse("provider:mssql-legacy").map_err(|error| {
+                            DcsSchemaTemplateError::InvalidEvidence(error.to_string())
+                        })?,
+                        "dcs-envelope:terminal-area-template",
+                    )
+                    .map_err(|_| {
+                        DcsSchemaTemplateError::UnsupportedSource(
+                            "terminal SchemaFile is neither empty nor the evidenced AreaTemplate",
+                        )
+                    })?;
+                }
             }
             None => {
                 return Err(DcsSchemaTemplateError::UnsupportedSource(
@@ -265,7 +283,24 @@ pub fn compile_dcs_schema_template_source_documents(
             "prefixed or indirect DataCompositionSchema roots are outside the attested compiler cohort",
         ));
     }
-    let detached = detach_dcs_settings_from_source_variants(source_body)?;
+    let source_profile = ProfileId::parse("source:designer-xml-2.20")
+        .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
+    let area = parse_dcs_area_template_source_document(
+        source_body.as_bytes(),
+        source_profile,
+        "dcs-template:source-area-template",
+    )
+    .map_err(|_| {
+        DcsSchemaTemplateError::UnsupportedSource(
+            "source AreaTemplate is outside the evidenced coordinate",
+        )
+    })?;
+    let schema_without_area = if area.is_some() {
+        remove_direct_area_template(source_body, policy.schema_namespace_uri())?
+    } else {
+        source_body.to_string()
+    };
+    let detached = detach_dcs_settings_from_source_variants(&schema_without_area)?;
     let mut native_schema = detached.schema_without_settings;
     rename_attested_source_schema_root(&mut native_schema)?;
 
@@ -278,10 +313,17 @@ pub fn compile_dcs_schema_template_source_documents(
         .iter()
         .map(|document| xml_document(document))
         .collect::<Vec<_>>();
-    let terminal = xml_document(&format!(
-        "{SCHEMA_FILE_OPEN}\r\n\t<dataCompositionSchema xmlns=\"{}\"/>\r\n</SchemaFile>",
-        policy.schema_namespace_uri()
-    ));
+    let terminal = match area {
+        Some(area) => emit_dcs_area_template_storage_document(&area).map_err(|_| {
+            DcsSchemaTemplateError::UnsupportedSource(
+                "source AreaTemplate is outside the evidenced storage coordinate",
+            )
+        })?,
+        None => xml_document(&format!(
+            "{SCHEMA_FILE_OPEN}\r\n\t<dataCompositionSchema xmlns=\"{}\"/>\r\n</SchemaFile>",
+            policy.schema_namespace_uri()
+        )),
+    };
 
     let borrowed = std::iter::once(primary.as_slice())
         .chain(settings.iter().map(Vec::as_slice))
@@ -293,6 +335,94 @@ pub fn compile_dcs_schema_template_source_documents(
         settings,
         terminal_schema_file: terminal,
     })
+}
+
+fn remove_direct_area_template(
+    source: &str,
+    schema_namespace: &str,
+) -> Result<String, DcsSchemaTemplateError> {
+    let mut reader = NsReader::from_str(source);
+    reader.config_mut().trim_text(false);
+    let mut depth = 0usize;
+    let mut active = None::<usize>;
+    let mut capture = None::<(usize, usize)>;
+    loop {
+        let event = reader
+            .read_event()
+            .map_err(|error| DcsSchemaTemplateError::Malformed(error.to_string()))?;
+        let end = usize::try_from(reader.buffer_position())
+            .map_err(|_| DcsSchemaTemplateError::Malformed("XML offset overflow".to_string()))?;
+        match event {
+            Event::Start(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                let namespace = namespace_bytes(&namespace)?;
+                if depth == 1
+                    && namespace == Some(schema_namespace.as_bytes())
+                    && local.as_ref() == b"template"
+                {
+                    if active.is_some() || capture.is_some() {
+                        return Err(DcsSchemaTemplateError::UnsupportedSource(
+                            "more than one direct AreaTemplate is unsupported",
+                        ));
+                    }
+                    active = Some(source_event_start(source, end)?);
+                }
+                depth += 1;
+            }
+            Event::Empty(event) => {
+                let (namespace, local) = reader.resolve_element(event.name());
+                if depth == 1
+                    && namespace_bytes(&namespace)? == Some(schema_namespace.as_bytes())
+                    && local.as_ref() == b"template"
+                {
+                    return Err(DcsSchemaTemplateError::UnsupportedSource(
+                        "empty AreaTemplate is outside the evidenced coordinate",
+                    ));
+                }
+            }
+            Event::End(event) => {
+                depth = depth.checked_sub(1).ok_or_else(|| {
+                    DcsSchemaTemplateError::Malformed("XML depth underflow".to_string())
+                })?;
+                let (namespace, local) = reader.resolve_element(event.name());
+                if depth == 1
+                    && namespace_bytes(&namespace)? == Some(schema_namespace.as_bytes())
+                    && local.as_ref() == b"template"
+                {
+                    let start = active.take().ok_or_else(|| {
+                        DcsSchemaTemplateError::Malformed(
+                            "AreaTemplate closing element has no opener".to_string(),
+                        )
+                    })?;
+                    capture = Some((expand_indented_line_start(source, start), end));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    let (start, end) = capture.ok_or(DcsSchemaTemplateError::UnsupportedSource(
+        "direct AreaTemplate is absent",
+    ))?;
+    let mut output = source.to_string();
+    output.replace_range(start..end, "");
+    Ok(output)
+}
+
+fn expand_indented_line_start(source: &str, start: usize) -> usize {
+    let line_start = source[..start].rfind('\n').map_or(0, |offset| offset + 1);
+    if source[line_start..start]
+        .bytes()
+        .all(|byte| matches!(byte, b' ' | b'\t'))
+    {
+        line_start.saturating_sub(if source[..line_start].ends_with("\r\n") {
+            2
+        } else {
+            1
+        })
+    } else {
+        start
+    }
 }
 
 fn strip_source_document_shell(source: &str) -> Result<&str, DcsSchemaTemplateError> {
@@ -884,6 +1014,26 @@ mod tests {
         }
         assert_eq!(length, 0);
         output
+    }
+
+    #[test]
+    fn platform_area_template_source_compiles_to_exact_native_documents() {
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/native-template.xml.b64"
+        )));
+        let expected_area = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/area-schema-file.xml.b64"
+        )));
+        let documents = compile_dcs_schema_template_source_documents(&source).unwrap();
+        assert_eq!(documents.settings().len(), 1);
+        assert_eq!(documents.terminal_schema_file(), expected_area);
+        assert!(
+            !std::str::from_utf8(documents.primary_schema_file())
+                .unwrap()
+                .contains("AreaProbe")
+        );
     }
 
     #[test]

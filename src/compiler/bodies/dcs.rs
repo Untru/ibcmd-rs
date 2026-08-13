@@ -195,12 +195,7 @@ fn decode_appearance_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
 }
 
 fn compile_schema_plain(xml: &[u8]) -> Result<Vec<u8>, DcsCodecError> {
-    let inspection = validate_xml_document(xml, "DataCompositionSchema", Some(SCHEMA_NS))?;
-    if inspection.has_inline_area_template {
-        return Err(DcsCodecError::UnsupportedSource(
-            "inline AreaTemplate requires the separately indexed native area-template document",
-        ));
-    }
+    validate_xml_document(xml, "DataCompositionSchema", Some(SCHEMA_NS))?;
 
     let documents =
         compile_dcs_schema_template_source_documents(xml).map_err(map_template_error)?;
@@ -1040,6 +1035,39 @@ mod tests {
         assert!(
             settings.contains("<dcscor:value xsi:type=\"xs:string\">Opaque probe</dcscor:value>")
         );
+    }
+
+    #[test]
+    fn platform_style_free_area_template_compiles_to_exact_terminal_document() {
+        let profile = DcsCodecProfile::fixture();
+        let source = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/native-template.xml.b64"
+        )));
+        let expected_area = decode_base64_fixture(include_str!(concat!(
+            "../../../tests/fixtures/native-evidence/8.3.27.2214/",
+            "dcs-area-template/area-schema-file.xml.b64"
+        )));
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
+        assert_eq!(
+            decoded.documents().last().copied(),
+            Some(expected_area.as_slice())
+        );
+        let exported =
+            crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+                &decoded.documents(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &ProfileId::parse("provider:mssql-legacy").unwrap(),
+                &ProfileId::parse("xml-2.20").unwrap(),
+            )
+            .unwrap();
+        let exported_text = std::str::from_utf8(&exported).unwrap();
+        assert!(exported_text.contains("<name>AreaProbe</name>"));
+        assert!(exported_text.contains("xsi:type=\"dcsat:AreaTemplate\""));
+        let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
+        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
     }
 
     #[test]
